@@ -88,7 +88,10 @@ let claude_failure_status = function
   | Subscription_required _ -> "login_required"
   | Timeout _ -> "timeout"
   | Protocol_error _ | Unsupported_control_request _ -> "protocol_error"
-  | Turn_transport_interrupted _ | Turn_failed _ | Quota_blocked _ ->
+  | Turn_transport_interrupted _
+  | Context_window_exceeded _
+  | Turn_failed _
+  | Quota_blocked _ ->
     "probe_contract_error"
 ;;
 

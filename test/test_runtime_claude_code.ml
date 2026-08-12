@@ -315,32 +315,49 @@ let quota_result_with_success_flag =
   {|{"type":"result","subtype":"success","is_error":false,"session_id":"__SESSION__","uuid":"turn-quota-flag-1","result":"must not settle","api_error_status":null}|}
 ;;
 
-let error_400_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-1","result":"prompt is too long: 250000 tokens > 200000 maximum","api_error_status":400}|}
+let prompt_too_long_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
 ;;
 
-(* A live keeper reported "terminal subtype=success api_status=400" eleven times
-   in fifteen minutes with no way to tell a context overflow from anything else
-   that returns 400. The frame carried the reason in [result] and the error path
-   parsed it and dropped it (#28071). The expectation is a substring of the
-   provider's own sentence, not a re-render of the format string, so it fails if
-   the field stops being carried. *)
-let test_terminal_error_carries_the_provider_reason () =
-  with_fixture [ Emit error_400_result ] (fun path ->
+let generic_400_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-generic","result":"request rejected; diagnostic mentioned Prompt is too long without the provider prefix","api_error_status":400}|}
+;;
+
+(* A live keeper reported Claude's explicit "prompt is too long" terminal as a
+   generic 400, so the provider-bound history shrinker never saw the typed
+   ContextOverflow it consumes. The status and provider sentence together are
+   the admission evidence; unrelated 400s stay generic below. *)
+let test_terminal_prompt_too_long_is_typed () =
+  with_fixture [ Emit prompt_too_long_result ] (fun path ->
     match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed detail) ->
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { message; tool_effect_attempted = false; response_started = false }) ->
       check
         bool
         "provider reason survives into the typed failure"
         true
-        (Astring.String.is_infix ~affix:"prompt is too long" detail);
+        (Astring.String.is_infix ~affix:"Prompt is too long" message);
       check
         bool
         "status code is still reported"
         true
-        (Astring.String.is_infix ~affix:"api_status=400" detail)
+        (Astring.String.is_infix ~affix:"api_status=400" message)
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "an is_error terminal was reported as completion")
+;;
+
+let test_unrelated_400_remains_turn_failed () =
+  with_fixture [ Emit generic_400_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed detail) ->
+      check
+        bool
+        "generic rejection reason survives"
+        true
+        (Astring.String.is_infix ~affix:"diagnostic mentioned" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an unrelated 400 terminal was reported as completion")
 ;;
 
 let test_quota_is_structurally_classified () =
@@ -432,6 +449,36 @@ let test_post_effect_response_failure_requires_recovery () =
             }) -> check int "tool effect count" 1 !call_count
       | Error error -> fail (Runtime_claude_code.error_to_string error)
       | Ok _ -> fail "post-effect response failure completed the turn")
+;;
+
+let test_context_overflow_after_tool_records_effect () =
+  let call_count = ref 0 in
+  with_fixture
+    [ Emit_and_read mcp_initialize
+    ; Emit mcp_initialized_notification
+    ; Emit_and_read mcp_list
+    ; Emit_and_read mcp_call
+    ; Emit prompt_too_long_result
+    ]
+    (fun path ->
+      match run_fixture ~dynamic_tools:[ probe_tool call_count ] path with
+      | Error
+          (Runtime_claude_code.Context_window_exceeded
+            { tool_effect_attempted = true; response_started = false; _ }) ->
+        check int "tool effect count" 1 !call_count
+      | Error error -> fail (Runtime_claude_code.error_to_string error)
+      | Ok _ -> fail "post-effect context overflow completed the turn")
+;;
+
+let test_context_overflow_after_response_records_activity () =
+  with_fixture [ Emit assistant; Emit prompt_too_long_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { tool_effect_attempted = false; response_started = true; _ }) ->
+      ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "post-response context overflow completed the turn")
 ;;
 
 let test_dynamic_tool_callback () =
@@ -991,9 +1038,13 @@ let () =
         ] )
     ; ( "terminal"
       , [ test_case
-            "terminal error carries the provider reason"
+            "terminal prompt too long is typed"
             `Quick
-            test_terminal_error_carries_the_provider_reason
+            test_terminal_prompt_too_long_is_typed
+        ; test_case
+            "unrelated 400 remains turn failed"
+            `Quick
+            test_unrelated_400_remains_turn_failed
         ; test_case
             "quota is structurally classified"
             `Quick
@@ -1028,6 +1079,14 @@ let () =
             "post-effect response failure requires recovery"
             `Quick
             test_post_effect_response_failure_requires_recovery
+        ; test_case
+            "context overflow after tool records effect"
+            `Quick
+            test_context_overflow_after_tool_records_effect
+        ; test_case
+            "context overflow after response records activity"
+            `Quick
+            test_context_overflow_after_response_records_activity
         ; test_case
             "shared bridge owns exact dispatch"
             `Quick

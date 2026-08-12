@@ -31,6 +31,10 @@ let quota_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-quota-1","result":"not inspected","api_error_status":429,"terminal_reason":"api_error"}|}
 ;;
 
+let prompt_too_long_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
+;;
+
 let mcp_initialize =
   {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
@@ -110,6 +114,49 @@ let with_fixture ?prompt_marker ?remove_after_auth ?forbid_mcp lines f =
   let path = fixture_script ?prompt_marker ?remove_after_auth ?forbid_mcp lines in
   Fun.protect
     ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () -> f path)
+;;
+
+let with_fixture_sequence
+    ?first_prompt_marker
+    ?second_prompt_marker
+    first_lines
+    second_lines
+    f =
+  let first_path = fixture_script ?prompt_marker:first_prompt_marker first_lines in
+  let second_path = fixture_script ?prompt_marker:second_prompt_marker second_lines in
+  let counter_path = Filename.temp_file "masc-keeper-claude-sequence-" ".txt" in
+  Sys.remove counter_path;
+  let path = Filename.temp_file "masc-keeper-claude-sequence-" ".sh" in
+  let output = open_out_bin path in
+  output_string output "#!/bin/sh\n";
+  output_string output "set -eu\n";
+  output_string output "if [ \"${1-}\" = auth ]; then\n";
+  output_string output ("  printf '%s\\n' " ^ shell_quote auth_subscription ^ "\n");
+  output_string output "  exit 0\n";
+  output_string output "fi\n";
+  output_string output "count=0\n";
+  output_string output
+    ("if [ -f " ^ shell_quote counter_path ^ " ]; then\n"
+     ^ "  IFS= read -r count < " ^ shell_quote counter_path ^ "\n"
+     ^ "fi\n");
+  output_string output "count=$((count + 1))\n";
+  output_string output
+    ("printf '%s\\n' \"$count\" > " ^ shell_quote counter_path ^ "\n");
+  output_string output
+    ("if [ \"$count\" -eq 1 ]; then\n"
+     ^ "  exec " ^ shell_quote first_path ^ " \"$@\"\n"
+     ^ "else\n"
+     ^ "  exec " ^ shell_quote second_path ^ " \"$@\"\n"
+     ^ "fi\n");
+  close_out output;
+  Unix.chmod path 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun candidate ->
+           if Sys.file_exists candidate then Sys.remove candidate)
+        [ path; first_path; second_path; counter_path ])
     (fun () -> f path)
 ;;
 
@@ -680,6 +727,91 @@ let load_state base_path =
   | Ok (Some state) -> state
 ;;
 
+let prompt_history path =
+  let raw =
+    In_channel.with_open_bin path (fun input -> In_channel.input_line input)
+  in
+  match raw with
+  | None -> fail "Claude fixture did not capture a prompt"
+  | Some raw ->
+    raw
+    |> content_of_wire_message
+    |> Yojson.Safe.from_string
+    |> Yojson.Safe.Util.member "history"
+    |> Yojson.Safe.Util.to_list
+;;
+
+let history_uses_current_schema history =
+  List.for_all
+    (fun value ->
+       Yojson.Safe.Util.(value |> member "schema" |> to_string)
+       = Keeper_official_client_context_codec.schema)
+    history
+;;
+
+let test_keeper_shrinks_history_after_typed_context_error () =
+  let base_path = temp_workspace () in
+  let first_prompt_marker = Filename.concat base_path "overflow-full-prompt.json" in
+  let second_prompt_marker = Filename.concat base_path "overflow-shrunk-prompt.json" in
+  let initial_messages =
+    List.init 240 (fun index ->
+      message
+        (if index mod 2 = 0 then User else Assistant)
+        (Printf.sprintf "%03d:%s" index (String.make 1_024 'x')))
+  in
+  let reset_shrink_state () =
+    Eio_main.run (fun _ ->
+      Keeper_context_overflow_shrink_state.For_testing.reset ())
+  in
+  reset_shrink_state ();
+  Fun.protect
+    ~finally:(fun () ->
+      reset_shrink_state ();
+      cleanup_tree base_path)
+    (fun () ->
+       with_fixture_sequence
+         ~first_prompt_marker
+         ~second_prompt_marker
+         [ Emit prompt_too_long_result ]
+         [ Emit (assistant ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
+         ; Emit (result ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~initial_messages
+                ~base_path
+                ~cli_path
+                ~goal:"SHRINK_HISTORY"
+                ()
+            with
+            | Error error -> fail (Agent_core.Error.to_string error)
+            | Ok turn ->
+              check string
+                "Keeper response"
+                "MASC_CLAUDE_SHRUNK"
+                (keeper_response_text turn));
+       let full_history = prompt_history first_prompt_marker in
+       let shrunk_history = prompt_history second_prompt_marker in
+       let full_count = List.length full_history in
+       let shrunk_count = List.length shrunk_history in
+       check int "first attempt keeps full history" 240 full_count;
+       check bool "full history uses current codec" true
+         (history_uses_current_schema full_history);
+       check bool "retry keeps non-empty history" true (shrunk_count > 0);
+       check bool "retry history uses current codec" true
+         (history_uses_current_schema shrunk_history);
+       check bool
+         "retry shrinks provider-bound history"
+         true
+         (shrunk_count < full_count);
+       let state = load_state base_path in
+       check int "fresh retry settles as turn one" 1 state.turn_count;
+       match state.phase with
+       | Settled { turn_id = "turn-shrunk"; _ } -> ()
+       | _ -> fail "shrunk Claude Code retry did not settle")
+;;
+
 let test_post_effect_transport_enters_recovery () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
@@ -741,6 +873,64 @@ let test_post_effect_transport_enters_recovery () =
        match state.phase with
        | Recovery_required { failure = Transport_interrupted; _ } -> ()
        | _ -> fail "post-effect transport failure released the durable claim")
+;;
+
+let test_keeper_does_not_retry_context_error_after_tool_effect () =
+  let base_path = temp_workspace () in
+  let call_count = ref 0 in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Record one deterministic fixture effect"
+      ~parameters:[ marker_param ]
+      (fun _input ->
+        incr call_count;
+        Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; _meta = None })
+  in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit_and_read mcp_call
+         ; Emit prompt_too_long_result
+         ]
+         (fun cli_path ->
+            match
+              run_keeper_turn
+                ~tools:[ tool ]
+                ~base_path
+                ~cli_path
+                ~goal:"USE_TOOL_THEN_OVERFLOW"
+                ()
+            with
+            | Error error ->
+              (match Keeper_internal_error.classify_masc_internal_error error with
+               | Some
+                   (Keeper_internal_error.Provider_attempt_effect_fenced
+                      { effect_disposition; _ }) ->
+                 check
+                   bool
+                   "post-effect overflow is fenced"
+                   false
+                   (Keeper_provider_attempt_effect.allows_same_turn_retry
+                      effect_disposition)
+               | _ -> fail (Agent_core.Error.to_string error))
+            | Ok _ -> fail "post-effect context overflow completed the Keeper turn");
+       check int "tool effect is not replayed" 1 !call_count;
+       let state = load_state base_path in
+       match state.phase with
+       | Recovery_required { failure = Provider_rejected; _ } -> ()
+       | _ -> fail "post-effect context overflow did not retain recovery evidence")
 ;;
 
 let test_keeper_settles_and_resumes () =
@@ -986,6 +1176,10 @@ let () =
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
         ; test_case
+            "shrinks history after typed context error"
+            `Quick
+            test_keeper_shrinks_history_after_typed_context_error
+        ; test_case
             "projects typed tool history and lifecycle"
             `Quick
             test_keeper_projects_typed_tool_history_and_lifecycle
@@ -1002,6 +1196,10 @@ let () =
             "post-effect transport enters recovery"
             `Quick
             test_post_effect_transport_enters_recovery
+        ; test_case
+            "does not retry context error after tool effect"
+            `Quick
+            test_keeper_does_not_retry_context_error_after_tool_effect
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
         ; test_case
             "spawn failure releases claim"

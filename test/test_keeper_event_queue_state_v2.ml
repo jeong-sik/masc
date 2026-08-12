@@ -59,6 +59,16 @@ let test_exact_ack_removes_only_selected_identity () =
     (post_ids (State.pending acked))
 ;;
 
+let test_pending_collapses_duplicate_source_identity () =
+  let source = stimulus "duplicate-source" 1.0 in
+  let duplicate = { source with arrived_at = 2.0 } in
+  let state = State.with_pending (queue [ source; duplicate ]) State.empty in
+  Alcotest.(check (list string))
+    "first durable source owns the duplicate identity"
+    [ "duplicate-source" ]
+    (post_ids (State.pending state))
+;;
+
 let test_failure_without_ack_retains_source () =
   let state = State.with_pending (queue [ stimulus "retry-me" 1.0 ]) State.empty in
   ignore (select state);
@@ -877,6 +887,10 @@ let () =
     [ ( "state"
       , [ Alcotest.test_case "peek keeps pending authoritative" `Quick test_peek_keeps_pending_authoritative
         ; Alcotest.test_case "exact ack preserves distinct source" `Quick test_exact_ack_removes_only_selected_identity
+        ; Alcotest.test_case
+            "pending collapses duplicate source identity"
+            `Quick
+            test_pending_collapses_duplicate_source_identity
         ; Alcotest.test_case "failure retains source" `Quick test_failure_without_ack_retains_source
         ; Alcotest.test_case
             "unrelated enqueue survives exact ack"

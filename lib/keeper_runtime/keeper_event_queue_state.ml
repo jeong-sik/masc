@@ -237,6 +237,7 @@ let with_pending pending state =
   in
   let pending_entries =
     Keeper_event_queue.to_list pending
+    |> Keeper_event_queue.uniq_stimuli
     |> reconcile state.pending_entries []
   in
   { state with pending_entries }

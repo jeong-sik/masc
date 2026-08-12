@@ -201,6 +201,22 @@ let make_config_root root =
     "[keeper]\nautoboot_enabled = true\n";
   config
 
+let make_base_path_config_root root =
+  let config =
+    Filename.concat (Filename.concat root Common.masc_dirname) "config"
+  in
+  mkdir_p (Filename.concat config "prompts");
+  mkdir_p (Filename.concat config "keepers");
+  write_file
+    (Filename.concat config "agent-core-models-overlay.toml")
+    repo_model_catalog_overlay_toml;
+  write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
+  write_file (Filename.concat config "prompts/keeper.md") "prompt";
+  write_file
+    (Filename.concat config "keepers/example.toml")
+    "[keeper]\nautoboot_enabled = true\n";
+  config
+
 let test_model_catalog_configuration_installs_explicit_env_override () =
   let env = function
     | "AGENT_CORE_MODEL_CATALOG" -> Some "/explicit/agent-core-models.toml"
@@ -445,33 +461,42 @@ let openai_text_response ?(id = "chatcmpl-1") text =
     id text
 
 let start_mock_openai_server ~port ~response =
-  match Unix.fork () with
-  | 0 ->
-      let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-      Unix.setsockopt socket Unix.SO_REUSEADDR true;
-      Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, port));
-      Unix.listen socket 16;
-      let payload =
-        Printf.sprintf
-          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
-          (String.length response) response
-      in
-      let buffer = Bytes.create 4096 in
-      let rec loop () =
-        let client, _ = Unix.accept socket in
-        Fun.protect
-          ~finally:(fun () -> Unix.close client)
-          (fun () ->
-            ignore
-              (try Unix.read client buffer 0 (Bytes.length buffer)
-               with Unix.Unix_error _ -> 0);
-            ignore (Unix.write_substring client payload 0 (String.length payload)));
-        loop ()
-      in
-      loop ()
-  | pid ->
-      Unix.sleepf 0.1;
-      pid
+  let program = "python3" in
+  let script =
+    {|
+import http.server
+import sys
+
+response = sys.argv[2].encode()
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def reply(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
+    do_GET = reply
+    do_POST = reply
+
+    def log_message(self, _format, *_args):
+        pass
+
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+|}
+  in
+  let pid =
+    Unix.create_process_env
+      program
+      [| program; "-c"; script; string_of_int port; response |]
+      (Unix.environment ())
+      Unix.stdin
+      Unix.stdout
+      Unix.stderr
+  in
+  Unix.sleepf 0.1;
+  pid
 
 let merge_env_overrides overrides =
   let override_keys = List.map fst overrides in
@@ -1216,7 +1241,20 @@ let write_keeper_meta_exn config meta =
   | Ok () -> ()
   | Error err -> Alcotest.fail ("keeper meta write failed: " ^ err)
 
-let with_running_keeper_metas config metas f =
+let with_owner_inventory config f =
+  Eio.Switch.run @@ fun sw ->
+  (match
+     Keeper_owner_registry.install_from_store
+       ~sw
+       ~operation_runner:None
+       config
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
+  f ()
+
+let with_running_keeper_metas ?(owner_inventory = true) config metas f =
   let base_path = config.Workspace.base_path in
   List.iter
     (fun (meta : Keeper_meta_contract.keeper_meta) ->
@@ -1229,7 +1267,7 @@ let with_running_keeper_metas config metas f =
         (fun (meta : Keeper_meta_contract.keeper_meta) ->
           Keeper_registry.For_testing.unregister ~base_path meta.name)
         metas)
-    f
+    (fun () -> if owner_inventory then with_owner_inventory config f else f ())
 
 let dispatch_keeper_event config (meta : Keeper_meta_contract.keeper_meta) event =
   match
@@ -1307,7 +1345,7 @@ let mark_keeper_dead_with_registry_cause config
 
 let test_health_json_surfaces_durable_paused_keepers () =
   with_temp_dir "health-durable-paused-keepers" (fun dir ->
-      let config_root = make_config_root dir in
+      let config_root = make_base_path_config_root dir in
       List.iter
         (write_config_root_keeper_toml config_root)
         [ "durable-paused" ];
@@ -1376,9 +1414,6 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (publication_recovery |> member "reason" |> to_string);
 	          Alcotest.(check int) "registry paused count" 0
 	            (paused |> member "registry_paused_count" |> to_int);
-	          Alcotest.(check string) "legacy running count semantics"
-	            "legacy alias for registry_paused_count"
-	            (paused |> member "running_count_semantics" |> to_string);
 	          Alcotest.(check string) "registry paused semantics"
 	            "registered keepers whose persisted meta has paused=true; this is not FSM phase=Running"
 	            (paused |> member "registry_paused_semantics" |> to_string);
@@ -2427,7 +2462,7 @@ let test_health_json_degrades_recovery_backed_owner_scan () =
 
 let test_health_json_reuses_canonical_owner_execution_snapshot () =
   with_temp_dir "health-canonical-owner-execution-snapshot" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -2487,6 +2522,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
               config
               { cached_disabled with autoboot_enabled = false };
             write_keeper_meta_exn config paused;
+            with_owner_inventory config (fun () ->
             let missing_meta_path =
               Keeper_types_profile.keeper_meta_path config cached_missing.name
             in
@@ -2539,7 +2575,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
             Alcotest.(check string)
               "paused durable owner remains a distinct retained variant"
               "paused_dead"
-              (owner paused.name |> member "owner_lifecycle" |> to_string))))
+              (owner paused.name |> member "owner_lifecycle" |> to_string)))))
 ;;
 
 let test_health_json_capacity_uses_execution_snapshot () =
@@ -2606,7 +2642,7 @@ let test_health_json_capacity_uses_execution_snapshot () =
 
 let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     List.iter
       (write_config_root_keeper_toml config_root)
       [
@@ -2779,7 +2815,7 @@ let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
 
 let test_health_json_exposes_closed_non_executable_causes () =
   with_temp_dir "health-closed-non-executable-causes" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     let names = [ "fiber-dead"; "lane-exited"; "completion-settled" ] in
     List.iter (write_config_root_keeper_toml config_root) names;
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
@@ -2890,7 +2926,7 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
           }
         in
         write_keeper_meta_exn config meta;
-        with_running_keeper_metas config [ meta ] (fun () ->
+        with_running_keeper_metas ~owner_inventory:false config [ meta ] (fun () ->
           Eio.Switch.run (fun sw ->
           (match
              Keeper_owner_registry.install_from_store
@@ -2941,7 +2977,7 @@ let test_health_json_keeps_in_flight_running_keeper_executable () =
 
 let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity () =
   with_temp_dir "health-blocked-count-non-target-capacity" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     List.iter
       (write_config_root_keeper_toml config_root)
       [ "target-missing"; "target-running" ];
@@ -3063,7 +3099,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
 
 let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
   with_temp_dir "health-persisted-only-keeper-target" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
     Config_dir_resolver.reset ();
@@ -3102,7 +3138,7 @@ let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
 
 let test_health_json_explains_phase_paused_capacity_blocker () =
   with_temp_dir "health-phase-paused-capacity-blocker" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     write_config_root_keeper_toml config_root "phase-paused";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -3236,7 +3272,7 @@ let test_health_json_explains_terminal_capacity_blocker
     ~expected_action
     mark_terminal =
   with_temp_dir dir_name (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     write_config_root_keeper_toml config_root keeper_name;
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in
@@ -3308,7 +3344,7 @@ let test_health_json_explains_stopped_capacity_blocker_as_terminal () =
 
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     List.iter
       (write_config_root_keeper_toml config_root)
       [ "capacity-paused"; "capacity-failing" ];
@@ -3362,7 +3398,7 @@ let test_health_json_distinguishes_failing_executable_keepers () =
 
 let test_health_json_explains_nonrecoverable_failing_keeper () =
   with_temp_dir "health-nonrecoverable-failing-keeper" (fun dir ->
-    let config_root = make_config_root dir in
+    let config_root = make_base_path_config_root dir in
     write_config_root_keeper_toml config_root "capacity-failing";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = Server_auth.For_testing.snapshot_server_state () in

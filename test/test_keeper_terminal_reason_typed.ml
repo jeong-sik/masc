@@ -949,9 +949,26 @@ let () =
       { meta.runtime.proactive_rt with last_outcome; last_reason }
     in
     let prior = { meta with runtime = { meta.runtime with proactive_rt } } in
+    let reactive_event : Masc.Keeper_world_observation.pending_board_event =
+      { event_kind = Masc.Keeper_world_observation.Board_post_created
+      ; post_id = "reactive-success"
+      ; author = "peer"
+      ; title = "Reactive wake"
+      ; preview = "Continue ordinary work."
+      ; hearth = None
+      ; post_kind = Masc.Board.Human_post
+      ; updated_at = 0.0
+      ; explicit_mention = false
+      ; matched_targets = []
+      ; self_commented = false
+      ; new_external_since = 1
+      ; latest_external_author = Some "peer"
+      ; latest_external_preview = Some "Continue ordinary work."
+      }
+    in
     let observation : Masc.Keeper_world_observation.world_observation =
       { pending_messages = []
-      ; pending_board_events = []
+      ; pending_board_events = [ reactive_event ]
       ; idle_seconds = 0
       ; active_goals = []
       ; unclaimed_task_count = 0

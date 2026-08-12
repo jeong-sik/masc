@@ -344,7 +344,7 @@ import type { AgentCoreAgentEvent, AgentCoreHealthSummary } from './types/agent-
 
 import {
   AGENT_CORE_AGENT_EVENT_BUFFER,
-  HEARTBEAT_STALE_MS,
+  keeperHeartbeatStaleMs,
   SHELL_TTL_MS,
 } from './config/constants'
 import { RingBuffer } from './lib/ring-buffer'
@@ -635,7 +635,7 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
   const hb = keeperHeartbeats.value
   for (const k of keepers.value) {
     const lastTs = keeperFreshnessTs(k, hb)
-    if (lastTs != null && (now - lastTs) > HEARTBEAT_STALE_MS) {
+    if (lastTs != null && (now - lastTs) > keeperHeartbeatStaleMs(k.heartbeat_stale_after_s)) {
       stale.add(k.name)
     }
   }

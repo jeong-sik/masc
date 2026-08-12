@@ -230,7 +230,8 @@ let launch_supervised_fiber_body
                     ctx
                     meta
                     reg.fiber_stop
-                    ~wakeup:reg.fiber_wakeup)
+                    ~wakeup:reg.fiber_wakeup
+                    ~cadence_sleeping:reg.cadence_sleeping)
                ~finally:stop_board_worker;
              (* A normal return is an explicit stop/shutdown path. Observed
                 idle/progress ages never rewrite it into a crash. *)

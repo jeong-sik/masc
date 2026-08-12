@@ -1269,6 +1269,7 @@ let run_heartbeat_loop
       (m : keeper_meta)
       (stop : bool Atomic.t)
       ~(wakeup : bool Atomic.t)
+      ~(cadence_sleeping : bool Atomic.t)
   : unit
   =
   let keepalive_started_ts = Time_compat.now () in
@@ -1575,9 +1576,6 @@ let run_heartbeat_loop
                  "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
                  m.name);
         let t_turn_end = Time_compat.now () in
-        let interval =
-          float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())
-        in
         (* Phase 0: push stage timing to ring buffer *)
         record_keepalive_stage_timing
           ~timing_ring
@@ -1597,10 +1595,12 @@ let run_heartbeat_loop
            keeper's configured cadence ([Timeout]). *)
         last_wake_source :=
           Keeper_keepalive_signal.interruptible_sleep
+            ~cadence_sleeping
             ~clock:ctx.clock
             ~stop
             ~wakeup
-            interval;
+            (fun () ->
+              float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ()));
       if Atomic.get stop then () else loop ())
   in
   loop ()

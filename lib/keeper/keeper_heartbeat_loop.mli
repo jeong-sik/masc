@@ -254,7 +254,7 @@ val record_keepalive_stage_timing :
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
-  wakeup:bool Atomic.t -> unit
+  wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 module For_testing : sig
   type failed_continuation_settlement =

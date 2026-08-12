@@ -221,8 +221,18 @@ type sleep_outcome =
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
-let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
+let interruptible_sleep ?cadence_sleeping ~clock ~stop ~wakeup duration
+  : sleep_outcome
+  =
   let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
+  let set_cadence_sleeping value =
+    Option.iter
+      (fun sleeping ->
+         (* tla-lint: allow-mutation: cadence sleep handshake *)
+         Atomic.set sleeping value)
+      cadence_sleeping
+  in
+  set_cadence_sleeping true;
   let rec wait remaining =
     if Atomic.get stop
     then Stopped
@@ -236,14 +246,28 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
          assertion through [wrap_unit ~stage:"guard"] automatically. *)
       post_heartbeat_tick ~wakeup;
       Woken)
+    else if
+      Option.exists (fun sleeping -> not (Atomic.get sleeping)) cadence_sleeping
+    then Woken
     else if remaining <= 0.0
-    then Timeout
+    then (
+      match cadence_sleeping with
+      | Some sleeping ->
+        (* The timeout edge races a cadence update. Only the winner of this
+           CAS may report [Timeout]; a producer that already consumed the
+           sleeper receives [Woken]. *)
+        if Atomic.compare_and_set sleeping true false
+        then Timeout
+        else Woken
+      | None -> Timeout)
     else (
       let chunk = Float.min chunk_sec remaining in
       Eio.Time.sleep clock chunk;
       wait (remaining -. chunk))
   in
-  wait duration
+  Fun.protect
+    ~finally:(fun () -> set_cadence_sleeping false)
+    (fun () -> wait (duration ()))
 ;;
 
 (** Wake up a specific keeper immediately, causing it to skip the rest of

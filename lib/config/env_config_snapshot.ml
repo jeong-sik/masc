@@ -281,6 +281,51 @@ let internal_timer_entries =
       "Stalled session threshold (seconds, 5 min)";
   ]
 
+let keeper_grpc_entries =
+  [
+    entry ~default:"5.0" "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"
+      "Backoff delay between gRPC reconnect attempts (clamped 1-60 seconds)";
+  ]
+
+let keeper_keepalive_entries =
+  [
+    entry ~default:"300" "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
+      "Heartbeat cycle interval (positive integer, no implicit upper bound)";
+    entry ~default:"300.0" "MASC_KEEPER_MAX_SILENCE_SEC"
+      "Max seconds since last heartbeat before presence sync required";
+    entry ~default:"0.5" "MASC_KEEPER_SLEEP_CHUNK_SEC"
+      "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
+    entry ~default:"(none)" "MASC_KEEPER_WORK_AS_HEARTBEAT"
+      "Successful workspace heartbeat after turn counts as presence proof (feature flag)";
+  ]
+
+let keeper_metrics_entries =
+  [
+    entry ~default:"10485760" "MASC_KEEPER_METRICS_MAX_BYTES"
+      "Max metrics file size before rotation (10MB)";
+    entry ~default:"1" "MASC_KEEPER_METRICS_MAX_ROTATED"
+      "Number of rotated files to keep";
+  ]
+
+let keeper_health_entries =
+  [
+    entry ~default:"0.0" "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC"
+      "Durable keeper event-queue backlog age before full-health degrades (seconds)";
+  ]
+
+let keeper_proactive_entries =
+  [
+    entry ~default:"100" "MASC_KEEPER_STAGE_TIMING_RING_SIZE"
+      "Stage timing ring buffer size for profiling (clamped 10-1000)";
+  ]
+
+let keeper_supervisor_entries =
+  [
+    entry ~default:"3600.0" "MASC_KEEPER_DEAD_TTL_SEC"
+      "Dead tombstone TTL before cleanup (seconds, floor 60)";
+    entry ~default:"30.0" "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
+      "Supervisor sweep interval (seconds)";
+  ]
 
 let local_runtime_entries =
   [

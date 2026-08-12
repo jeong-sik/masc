@@ -98,16 +98,25 @@ val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
 type sleep_outcome =
   | Stopped   (** [stop] atomic was observed [true] before the duration
                   elapsed. *)
-  | Woken     (** [wakeup] atomic transitioned [true -> false] via CAS;
-                  the caller should treat this as a [HeartbeatTick]
-                  spec-action and dispatch a turn. *)
+  | Woken     (** [wakeup] transitioned [true -> false], or an active
+                  [cadence_sleeping] handshake was consumed by a cadence
+                  update; the caller should dispatch the next cycle. *)
   | Timeout   (** Full [duration] elapsed without [stop] or [wakeup]. *)
 
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 val interruptible_sleep :
-  clock:'a Eio.Time.clock -> stop:bool Atomic.t -> wakeup:bool Atomic.t ->
-  float -> sleep_outcome
+  ?cadence_sleeping:bool Atomic.t ->
+  clock:'a Eio.Time.clock ->
+  stop:bool Atomic.t ->
+  wakeup:bool Atomic.t ->
+  (unit -> float) ->
+  sleep_outcome
+(** When [cadence_sleeping] is supplied, it is [true] only inside this sleep.
+    A runtime cadence decrease consumes it with CAS, avoiding a queued wake
+    during active cycle setup and closing both the duration-resolution and
+    timeout-edge races. [duration] is resolved only after the handshake is
+    visible. *)
 
 (** Wake up a specific keeper immediately.
 

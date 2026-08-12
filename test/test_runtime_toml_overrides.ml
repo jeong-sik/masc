@@ -364,10 +364,10 @@ let test_provider_call_deadline_invalid_toml_returns_error () =
   | Error failure ->
     check bool "classified as a validate failure" true
       (failure.Keeper_runtime_config.kind = Keeper_runtime_config.Validate);
-    check bool "diagnostic names the TOML key" true
+    check bool "diagnostic names the TOML key and declared range" true
       (String.ends_with
          ~suffix:
-           "turn.provider_call_deadline_sec: expected a finite, positive number of seconds"
+           "turn.provider_call_deadline_sec: value is outside the declared range [30, 3600]"
          (Keeper_runtime_config.load_failure_to_string failure))
 
 let test_resolved_provider_call_deadline_uses_toml () =

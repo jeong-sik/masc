@@ -1179,7 +1179,13 @@ let start_keepalive
           ~stop:board_stop;
         Eio_guard.protect
           (fun () ->
-             run_heartbeat_loop ~proactive_warmup_sec ctx live_meta stop ~wakeup)
+             run_heartbeat_loop
+               ~proactive_warmup_sec
+               ctx
+               live_meta
+               stop
+               ~wakeup
+               ~cadence_sleeping:reg.cadence_sleeping)
           ~finally:(fun () ->
             (* fire-and-forget: the bool says whether this call was the one that
                resolved it. Either way the worker is told to stop, so there is

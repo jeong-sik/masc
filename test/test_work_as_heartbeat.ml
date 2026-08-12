@@ -19,9 +19,9 @@ let test_wah_enabled_default () =
     true Cfg.WorkAsHeartbeat.enabled
 
 let test_wah_max_silence_default () =
-  (* MASC_KEEPER_MAX_SILENCE_SEC not set in test env → default 120.0 *)
+  (* MASC_KEEPER_MAX_SILENCE_SEC not set in test env → default 300.0 *)
   let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  check (float 0.1) "default max silence 120s" 120.0 v
+  check (float 0.1) "default max silence 300s" 300.0 v
 
 let test_wah_max_silence_floor_logic () =
   (* The floor clamp uses keepalive interval dynamically.
@@ -34,11 +34,64 @@ let test_wah_max_silence_floor_logic () =
 (* ── KeeperKeepalive config defaults ───────────────────── *)
 
 let test_keepalive_interval_default () =
-  check int "default interval 30s" 30 Cfg.KeeperKeepalive.interval_sec
+  check int "default interval 300s" 300 Cfg.KeeperKeepalive.interval_sec
 
 let test_keepalive_interval_positive () =
   let v = Cfg.KeeperKeepalive.interval_sec in
   check bool "interval is positive" true (v > 0)
+
+let test_keeper_heartbeat_stale_window_tracks_cadence () =
+  check (float 0.1) "30s cycle respects the 300s snapshot producer" 360.0
+    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
+       ~keepalive_interval_s:30.0
+       ~snapshot_interval_s:300.0);
+  check (float 0.1) "300s cadence receives 60s slack" 360.0
+    (Masc.Keeper_status_runtime.keeper_heartbeat_stale_after_s
+       ~keepalive_interval_s:300.0
+       ~snapshot_interval_s:30.0)
+;;
+
+let test_keeper_turn_record_freshness_tracks_cadence () =
+  check (float 0.1) "short cadence preserves the historical 300s floor" 300.0
+    (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+       ~keepalive_interval_s:30.0);
+  check (float 0.1) "300s cadence receives full-cycle slack" 420.0
+    (Masc.Keeper_status_runtime.keeper_turn_record_freshness_slo_s
+       ~keepalive_interval_s:300.0)
+;;
+
+let test_keeper_metric_freshness_tracks_runtime_cadence () =
+  check (float 0.1) "short cadence preserves telemetry floor" 300.0
+    (Telemetry_unified.source_freshness_slo_s
+       ~keeper_keepalive_interval_s:30.0
+       Telemetry_unified.Keeper_metric);
+  check (float 0.1) "keeper metric receives full-cycle slack" 420.0
+    (Telemetry_unified.source_freshness_slo_s
+       ~keeper_keepalive_interval_s:300.0
+       Telemetry_unified.Keeper_metric)
+;;
+
+let test_live_turn_keeps_turn_record_source_healthy () =
+  let health, stale_reason =
+    Masc.Keeper_status_runtime.keeper_turn_record_source_health
+      ~skipped_rows:0
+      ~live_turn_in_progress:true
+      ~latest_age_s:(Some 900.0)
+      ~freshness_slo_s:420.0
+  in
+  check string "live producer is healthy" "ok" health;
+  check string "live producer has no stale reason" "" stale_reason;
+  let health, stale_reason =
+    Masc.Keeper_status_runtime.keeper_turn_record_source_health
+      ~skipped_rows:0
+      ~live_turn_in_progress:false
+      ~latest_age_s:(Some 900.0)
+      ~freshness_slo_s:420.0
+  in
+  check string "idle old producer is stale" "stale" health;
+  check string "idle old producer explains staleness"
+    "freshness_slo_exceeded" stale_reason
+;;
 
 let test_keepalive_interval_has_one_resolved_ssot () =
   Runtime_settings.ensure_init ();
@@ -50,7 +103,7 @@ let test_keepalive_interval_has_one_resolved_ssot () =
 ;;
 
 let test_keepalive_sleep_chunk_default () =
-  check (float 0.01) "default sleep chunk 2.0s" 2.0
+  check (float 0.01) "default sleep chunk 0.5s" 0.5
     Cfg.KeeperKeepalive.sleep_chunk_sec
 
 (* ── KeeperGrpc config defaults ────────────────────────── *)
@@ -195,6 +248,14 @@ let () =
     "keepalive_config", [
       test_case "interval default" `Quick test_keepalive_interval_default;
       test_case "interval positive" `Quick test_keepalive_interval_positive;
+      test_case "stale window tracks cadence" `Quick
+        test_keeper_heartbeat_stale_window_tracks_cadence;
+      test_case "turn-record freshness tracks cadence" `Quick
+        test_keeper_turn_record_freshness_tracks_cadence;
+      test_case "keeper metric freshness tracks runtime cadence" `Quick
+        test_keeper_metric_freshness_tracks_runtime_cadence;
+      test_case "live turn keeps record source healthy" `Quick
+        test_live_turn_keeps_turn_record_source_healthy;
       test_case "interval has one resolved SSOT" `Quick
         test_keepalive_interval_has_one_resolved_ssot;
       test_case "sleep_chunk default" `Quick test_keepalive_sleep_chunk_default;

@@ -192,7 +192,10 @@ let run_composed ~sw ~net ?max_tokens ?timeout_s ~judge_system_prompt ~judge_mod
   | Ok agent ->
     (match
        Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_judge (fun () ->
-         Ok (Agent_core.Async_agent.all ~sw [ (agent, prompt) ]))
+         Ok
+           (Agent_core.Async_agent.all ~sw
+              ?clock:(Fusion_agent_core.deadline_clock ())
+              [ (agent, prompt) ]))
      with
      | Error e ->
        Error

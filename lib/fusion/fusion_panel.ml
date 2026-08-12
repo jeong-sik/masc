@@ -120,6 +120,7 @@ let run ~base_dir ~sw ~net ~groups ~prompt ()
       Masc_agent_core_bridge.run_safe ~caller:Masc_agent_core_bridge.Fusion_panel (fun () ->
         Ok
           (Agent_core.Async_agent.all ~sw
+             ?clock:(Fusion_agent_core.deadline_clock ())
              (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
     with
     | Ok run_results ->

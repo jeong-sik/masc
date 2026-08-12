@@ -20,6 +20,12 @@
     설정이 필요한 호출자가 resolved provider config를 agent build 전에 보강하는
     hook이다.
     미존재 runtime·빌드 실패는 [panel_failure]로. *)
+(** The Eio clock AGENT_CORE needs to enforce a requested deadline. Supplying
+    [body_timeout_s] without it makes the provider reject the request before
+    dispatch, so every fusion call site that sets a deadline must pass this
+    clock into [Async_agent.all]. [None] when no Eio env is published. *)
+val deadline_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t option
+
 val build_agent
   :  sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t

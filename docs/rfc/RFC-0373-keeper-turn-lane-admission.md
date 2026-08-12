@@ -1,5 +1,5 @@
 ---
-rfc: 373
+rfc: "0373"
 title: Keeper turn-lane admission
 status: Draft
 created: 2026-08-12

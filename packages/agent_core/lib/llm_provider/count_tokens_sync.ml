@@ -73,7 +73,8 @@ let count_anthropic_staged
          | Error transport_error ->
            let stage, error = transport_error_stage transport_error in
            Error (Count_failed (Input_token_count.Transport error, stage))
-         | Ok (response, _) ->
+         | Ok receipt ->
+           let response = receipt.Http_client.response in
            let response_body =
              if response.status >= 200 && response.status < 300
              then Ok response.body

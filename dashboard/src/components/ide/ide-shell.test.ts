@@ -3,19 +3,26 @@ import { h } from 'preact'
 import { render } from 'preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 
+const repositoryRow = {
+  id: 'masc',
+  name: 'masc',
+  url: '',
+  local_path: '/workspace/masc',
+  default_branch: 'main',
+  status: 'active',
+  auto_sync: false,
+  sync_interval: 300,
+  created_at: null,
+  updated_at: null,
+}
+
+// The list carries no git state; the status bar asks for the repository it
+// shows, which is the whole point of the split.
 vi.mock('../../api/repositories', () => ({
   discoverRepositories: vi.fn(() => Promise.resolve([])),
-  fetchRepositoriesList: vi.fn(() => Promise.resolve([{
-    id: 'masc',
-    name: 'masc',
-    url: '',
-    local_path: '/workspace/masc',
-    default_branch: 'main',
-    status: 'active',
-    auto_sync: false,
-    sync_interval: 300,
-    created_at: null,
-    updated_at: null,
+  fetchRepositoriesList: vi.fn(() => Promise.resolve([repositoryRow])),
+  fetchRepositoryObservation: vi.fn(() => Promise.resolve({
+    ...repositoryRow,
     git_status: {
       state: 'available',
       source: 'git-status-porcelain-v1',
@@ -26,7 +33,7 @@ vi.mock('../../api/repositories', () => ({
       untracked_files: 1,
       conflicted_files: 0,
     },
-  }])),
+  })),
 }))
 
 vi.mock('./ide-conversation-rail', () => ({

@@ -177,8 +177,12 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
        | Error transport_error ->
          let receipt, provider_error = transport_error_receipt transport_error in
          error receipt (Provider_error provider_error)
-       | Ok (raw, response_header_evidence) when raw.status < 200 || raw.status >= 300 ->
-         let raw_response = raw_response_evidence raw response_header_evidence in
+       | Ok receipt
+         when receipt.response.status < 200 || receipt.response.status >= 300 ->
+         let raw = receipt.response in
+         let raw_response =
+           raw_response_evidence raw receipt.response_header_evidence
+         in
          error
            ~raw_response
            (response_received_receipt raw.status)
@@ -188,8 +192,11 @@ let execute_once_with_evidence ~net ?clock ?on_phase plan =
                  ; body = raw.body
                  ; retry_after_header = raw.retry_after_header
                  }))
-       | Ok (raw, response_header_evidence) ->
-         let raw_response = raw_response_evidence raw response_header_evidence in
+       | Ok receipt ->
+         let raw = receipt.response in
+         let raw_response =
+           raw_response_evidence raw receipt.response_header_evidence
+         in
          (match
             Complete_sync.parse_sync_response
               ~http_codec:(Exact_output_plan.response_codec plan)

@@ -69,6 +69,54 @@ let test_host_entry_still_names_its_constant () =
   | many -> failf "MASC_HTTP_HOST appears %d times" (List.length many)
 ;;
 
+let test_collector_reads_environment_once () =
+  let reads = ref 0 in
+  let getenv name =
+    incr reads;
+    if String.equal name "MASC_TEST_SNAPSHOT_VALUE" then Some "  resolved  " else None
+  in
+  let collector =
+    Env_config_snapshot_collector.entry
+      ~getenv
+      ~default:"fallback"
+      "MASC_TEST_SNAPSHOT_VALUE"
+      "test value"
+  in
+  let json = Env_config_snapshot_collector.to_json collector in
+  check int "one boundary read" 1 !reads;
+  check
+    string
+    "pure projection receives the trimmed observed value"
+    "resolved"
+    Yojson.Safe.Util.(json |> member "value" |> to_string)
+;;
+
+let test_pure_projection_redacts_explicit_observation () =
+  let spec =
+    Env_config_snapshot_core.make_spec
+      ~sensitive:true
+      ~default:"(none)"
+      "MASC_TEST_SNAPSHOT_TOKEN"
+      "test token"
+  in
+  let json =
+    Env_config_snapshot_core.to_json
+      spec
+      (Env_config_snapshot_core.Applied_value
+         { value = "secret-value"; source = Env_config_snapshot_core.Environment })
+  in
+  check
+    string
+    "core redacts the supplied value"
+    "[REDACTED]"
+    Yojson.Safe.Util.(json |> member "value" |> to_string);
+  check
+    string
+    "core preserves applied provenance"
+    "env"
+    Yojson.Safe.Util.(json |> member "source" |> to_string)
+;;
+
 let () =
   run
     "env snapshot reports the applied default"
@@ -82,6 +130,14 @@ let () =
             "the host precedent still holds"
             `Quick
             test_host_entry_still_names_its_constant
+        ; test_case
+            "collector reads environment once"
+            `Quick
+            test_collector_reads_environment_once
+        ; test_case
+            "pure projection redacts explicit observations"
+            `Quick
+            test_pure_projection_redacts_explicit_observation
         ] )
     ]
 ;;

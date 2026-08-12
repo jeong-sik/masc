@@ -223,7 +223,7 @@ module Transport = struct
   let effective_h2_mode () = (effective_h2_resolution ()).value
 
   let h2_snapshot_entry =
-    Env_config_snapshot_core.effective_entry
+    Env_config_snapshot_collector.effective_entry
       ~default:(h2_mode_to_string h2_default)
       ~read:(fun () ->
         let resolution = effective_h2_resolution () in

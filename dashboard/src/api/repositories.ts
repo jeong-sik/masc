@@ -141,6 +141,18 @@ export async function fetchRepositoriesList(opts: GetOptions = {}): Promise<Repo
   return repositoryRows(raw).map(normalizeRepository).filter((r): r is Repository => r !== null)
 }
 
+// git_status and sync_currency each cost a subprocess against the working
+// tree, so the list no longer carries them; this asks for one repository's
+// observation. The status bar shows one repository, which is why listing five
+// of them used to run ten git processes on every load.
+export async function fetchRepositoryObservation(
+  id: string,
+  opts: GetOptions = {},
+): Promise<Repository | null> {
+  const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}`, opts)
+  return normalizeRepository(raw)
+}
+
 export async function discoverRepositories(): Promise<Repository[]> {
   const raw = await post<unknown>('/api/v1/repositories/discover', {})
   return repositoryRows(raw).map(normalizeRepository).filter((r): r is Repository => r !== null)

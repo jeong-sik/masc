@@ -179,19 +179,19 @@ let merge_state current desired =
     in
     Response_received_state { status; provider_trace }
   | Response_received_state current, Terminal_state desired ->
-    let status, provider_trace =
+    let _, provider_trace =
       merge_response_fields
         (current.status, current.provider_trace)
         (Some desired.status, desired.provider_trace)
     in
-    Terminal_state { status = Option.get status; provider_trace }
+    Terminal_state { status = desired.status; provider_trace }
   | Terminal_state current, Terminal_state desired ->
-    let status, provider_trace =
+    let _, provider_trace =
       merge_response_fields
         (Some current.status, current.provider_trace)
         (Some desired.status, desired.provider_trace)
     in
-    Terminal_state { status = Option.get status; provider_trace }
+    Terminal_state { status = desired.status; provider_trace }
   | _ -> desired
 ;;
 

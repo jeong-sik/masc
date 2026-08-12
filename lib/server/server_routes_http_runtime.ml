@@ -307,9 +307,6 @@ include Server_routes_http_runtime_fleet_scan
    [Server_routes_http_runtime_health_fleet] (godfile decomp). *)
 include Server_routes_http_runtime_health_fleet
 
-let full_health_refresh_timeout_error error =
-  String_util.contains_substring error "refresh_timeout label=full_health_snapshot"
-
 let full_health_component_placeholder ?error ?(component_timed_out = false) ~status
     component =
   let error_fields =
@@ -342,9 +339,11 @@ let compute_section ~name ?section_timings_ref f =
        | Some ref -> ref := (name, elapsed_ms) :: !ref
        | None -> ());
       let error = Printexc.to_string exn in
-      let timed_out = full_health_refresh_timeout_error error in
-      let status = if timed_out then "timeout" else "error" in
-      full_health_component_placeholder ~error ~component_timed_out:true ~status name
+      full_health_component_placeholder
+        ~error
+        ~component_timed_out:false
+        ~status:"error"
+        name
 
 let assoc_member_opt name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -718,7 +717,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
 (* [stale_since_ts] records the wall-clock time of the FIRST refresh
    failure since the last successful refresh.  It is preserved across
    subsequent consecutive failures (never overwritten — see
-   [mark_full_health_snapshot_error]) and cleared on the next
+   [mark_full_health_snapshot_failure]) and cleared on the next
    successful [store_full_health_snapshot].  This lets downstream
    consumers compute "how long has the snapshot been stale?" without
    relying on the per-failure [computed_at] timestamp, which under
@@ -728,7 +727,7 @@ type full_health_snapshot = {
   fields : (string * Yojson.Safe.t) list;
   computed_at : float;
   duration_ms : int;
-  error : string option;
+  failure : Proactive_refresh.failure option;
   stale_since_ts : float option;
   last_good_available : bool;
   section_timings : (string * int) list;
@@ -742,7 +741,7 @@ let full_health_refresh_requested = ref false
 (* Consecutive [/health?full=1] refresh failures (timeouts or
    exceptions).  Reset to 0 on every successful
    [store_full_health_snapshot]; incremented inside
-   [mark_full_health_snapshot_error].  Guarded by
+   [mark_full_health_snapshot_failure].  Guarded by
    [full_health_snapshot_mu] like every other piece of refresh
    bookkeeping. *)
 let full_health_consecutive_failures = ref 0
@@ -993,7 +992,7 @@ let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
       fields;
       computed_at = finished_at;
       duration_ms = duration_ms ~started_at ~finished_at;
-      error = None;
+      failure = None;
       stale_since_ts = None;
       last_good_available = true;
       section_timings = List.rev !section_timings_ref;
@@ -1002,12 +1001,13 @@ let compute_full_health_snapshot ?(listener = "http/1.1") ~request_authority
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       let finished_at = Unix.gettimeofday () in
-      let error = Printexc.to_string exn in
+      let failure = Proactive_refresh.Raised exn in
+      let error = Proactive_refresh.failure_message failure in
       {
         fields = full_health_placeholder_fields ~error ~status:"error" ();
         computed_at = finished_at;
         duration_ms = duration_ms ~started_at ~finished_at;
-        error = Some error;
+        failure = Some failure;
         stale_since_ts = Some finished_at;
         last_good_available = false;
         section_timings = List.rev !section_timings_ref;
@@ -1021,20 +1021,24 @@ let store_full_health_snapshot snapshot =
       full_health_refresh_requested := false;
       (* Successful refresh — clear consecutive-failure counter so the
          critical alarm only re-fires after another N successive
-         failures.  A snapshot is "successful" iff [error] is None;
+         failures.  A snapshot is "successful" iff [failure] is None;
          the inline error path in [compute_full_health_snapshot]
          routes through here too, so guard on the field. *)
-      match snapshot.error with
+      match snapshot.failure with
       | None -> full_health_consecutive_failures := 0
       | Some _ -> ())
 
-let mark_full_health_snapshot_error exn =
+let mark_full_health_snapshot_failure failure =
   let now = Unix.gettimeofday () in
-  let error = Printexc.to_string exn in
-  let timed_out = full_health_refresh_timeout_error error in
+  let error = Proactive_refresh.failure_message failure in
+  let timed_out =
+    match failure with
+    | Proactive_refresh.Timed_out _ -> true
+    | Proactive_refresh.Raised _ -> false
+  in
   with_full_health_snapshot_lock (fun () ->
       (* Partial degradation: preserve the last successful snapshot's
-         per-component [fields] and overwrite only the [error] /
+         per-component [fields] and overwrite only the [failure] /
          [stale_since_ts] / refresh-bookkeeping signals.  If we have
          no prior snapshot (warm path on cold boot), fall back to the
          all-error placeholder so the field set stays well-typed. *)
@@ -1087,7 +1091,7 @@ let mark_full_health_snapshot_error exn =
             fields = preserved_fields;
             computed_at = preserved_computed_at;
             duration_ms = preserved_duration_ms;
-            error = Some error;
+            failure = Some failure;
             stale_since_ts;
             last_good_available;
             section_timings = preserved_section_timings;
@@ -1130,15 +1134,13 @@ let full_health_snapshot_stale_reason ~now snapshot =
   match snapshot with
   | None -> None
   | Some snapshot ->
-      (match snapshot.error with
-       | Some error
-         when snapshot.last_good_available
-              && full_health_refresh_timeout_error error ->
+      (match snapshot.failure with
+       | Some (Proactive_refresh.Timed_out _) when snapshot.last_good_available ->
            Some "last_good_refresh_timeout"
-       | Some _ when snapshot.last_good_available -> Some "last_good_refresh_error"
-       | Some error when full_health_refresh_timeout_error error ->
-           Some "refresh_timeout"
-       | Some _ -> Some "refresh_error"
+       | Some (Proactive_refresh.Raised _) when snapshot.last_good_available ->
+           Some "last_good_refresh_error"
+       | Some (Proactive_refresh.Timed_out _) -> Some "refresh_timeout"
+       | Some (Proactive_refresh.Raised _) -> Some "refresh_error"
        | None when snapshot_is_stale ~now snapshot -> Some "ttl_expired"
        | None -> None)
 
@@ -1166,7 +1168,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         now -. started_at > full_health_refresh_timeout_sec
     | _ ->
         (match snapshot with
-         | Some { error = Some error; _ } -> full_health_refresh_timeout_error error
+         | Some { failure = Some (Proactive_refresh.Timed_out _); _ } -> true
          | _ -> false)
   in
   let snapshot_age_ms, computed_at, duration_ms, error, stale_since_ts, status =
@@ -1174,10 +1176,12 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
     | None -> (`Null, `Null, `Null, `Null, `Null, "warming")
     | Some snapshot ->
         let status =
-          match snapshot.error with
-          | Some _ when snapshot.last_good_available -> "stale"
-          | Some error when full_health_refresh_timeout_error error -> "timeout"
-          | Some _ -> "error"
+          match snapshot.failure with
+          | Some (Proactive_refresh.Timed_out _ | Proactive_refresh.Raised _)
+            when snapshot.last_good_available ->
+            "stale"
+          | Some (Proactive_refresh.Timed_out _) -> "timeout"
+          | Some (Proactive_refresh.Raised _) -> "error"
           | None when snapshot_is_stale ~now snapshot -> "stale"
           | None -> "ready"
         in
@@ -1189,7 +1193,9 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         ( `Int (duration_ms ~started_at:snapshot.computed_at ~finished_at:now),
           `Float snapshot.computed_at,
           `Int snapshot.duration_ms,
-          (Json_util.string_opt_to_json snapshot.error),
+          (match snapshot.failure with
+           | Some failure -> `String (Proactive_refresh.failure_message failure)
+           | None -> `Null),
           stale_since_ts_json,
           status )
   in
@@ -1290,7 +1296,7 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock ~request_authority =
            ~interval_s:full_health_refresh_interval_sec)
         with
         timeout_s = full_health_refresh_timeout_sec;
-        on_error = Some mark_full_health_snapshot_error;
+        on_failure = Some mark_full_health_snapshot_failure;
         warm_delay_s = 0.5;
         warn_first_failure = false;
       }
@@ -1322,7 +1328,7 @@ module For_testing = struct
       ~request_authority request =
     refresh_full_health_snapshot_sync ~listener ~request_authority request
 
-  let mark_full_health_snapshot_error = mark_full_health_snapshot_error
+  let mark_full_health_snapshot_failure = mark_full_health_snapshot_failure
 
   let full_health_refresh_timing () =
     ( full_health_refresh_interval_sec,

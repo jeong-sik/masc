@@ -91,7 +91,12 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
            ~interval_s:Core_operator.operator_refresh_interval_s)
         with
         timeout_s = Core_operator.operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error Core_operator.operator_digest_cache)
+      ; on_failure =
+          Some
+            (fun failure ->
+              mark_cached_surface_error_message
+                Core_operator.operator_digest_cache
+                (Proactive_refresh.failure_message failure))
       ; warm_delay_s = 150.0
       }
     ~compute

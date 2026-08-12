@@ -56,14 +56,18 @@ let mark_cached_surface_success surface json =
     ; last_error_unix = None
     }
 
-let mark_cached_surface_error surface exn =
+let mark_cached_surface_error_message surface message =
   let ts, iso = now_cache_stamp () in
   surface.current <-
     { surface.current with
-      last_error = Some (Printexc.to_string exn)
+      last_error = Some message
     ; last_error_at = Some iso
     ; last_error_unix = Some ts
     }
+
+let mark_cached_surface_error surface exn =
+  mark_cached_surface_error_message surface (Printexc.to_string exn)
+;;
 
 let invalidate_cached_surface surface =
   surface.current <-

@@ -1,5 +1,7 @@
 module Sha256 = Digestif.SHA256
 
+let ( let* ) = Result.bind
+
 type fingerprint = Fingerprint of string
 
 type output_admission_error =
@@ -108,9 +110,16 @@ let contract_is_supported
   | Types.JsonSchema _ -> capabilities.supports_structured_output
 ;;
 
-let timeout_is_valid = function
-  | None -> true
-  | Some seconds -> Float.is_finite seconds && seconds > 0.0
+let validate_timeout ~invalid = function
+  | None -> Ok ()
+  | Some seconds when Float.is_finite seconds && seconds > 0.0 -> Ok ()
+  | Some seconds -> Error (invalid seconds)
+;;
+
+let%test "timeout validation preserves the invalid value" =
+  match validate_timeout ~invalid:Fun.id (Some (-1.5)) with
+  | Error seconds -> Float.equal seconds (-1.5)
+  | Ok () -> false
 ;;
 
 let content_uses_exact_cross_feature = function
@@ -390,11 +399,18 @@ let preflight
     then Error Unsupported_exact_cross_feature
     else if Option.is_some config.max_concurrent_requests
     then Error Global_admission_not_allowed
-    else if not (timeout_is_valid config.connect_timeout_s)
-    then Error (Invalid_connect_timeout (Option.get config.connect_timeout_s))
-    else if not (timeout_is_valid request.body_timeout_s)
-    then Error (Invalid_body_timeout (Option.get request.body_timeout_s))
-    else if not (contract_is_supported config capabilities)
+    else
+      let* () =
+        validate_timeout
+          ~invalid:(fun seconds -> Invalid_connect_timeout seconds)
+          config.connect_timeout_s
+      in
+      let* () =
+        validate_timeout
+          ~invalid:(fun seconds -> Invalid_body_timeout seconds)
+          request.body_timeout_s
+      in
+      if not (contract_is_supported config capabilities)
     then
       Error
         (Unsupported_output_contract

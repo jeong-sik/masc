@@ -49,6 +49,9 @@ function payload(...entries: ReturnType<typeof entry>[]) {
     durable_store: '.masc/keepers/sangsu/turn-records',
     dashboard_surface: '/api/v1/keepers/:name/turn-records',
     freshness_slo_s: 300,
+    live_turn_in_progress: false,
+    live_turn_started_at_unix: null,
+    live_turn_last_progress_at_unix: null,
     latest_ts_unix: 1_700_000_000,
     latest_ts_iso: '2023-11-14T22:13:20Z',
     latest_age_s: 10,
@@ -279,6 +282,66 @@ describe('keeper turn record cache token counts', () => {
 
   it('rejects a turn_ref that disagrees with trace_id and absolute_turn', async () => {
     getMock.mockResolvedValue(payload(entry({ turn_ref: 'trace-1#8' })))
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+})
+
+describe('keeper turn record live-turn envelope', () => {
+  // #28216 made the server emit live_turn_in_progress / started_at /
+  // last_progress_at unconditionally. Until the decoder recognised the
+  // three fields its exact-envelope check rejected the whole response, so
+  // every turn-records load failed with an invalid-payload error.
+  it('decodes a response whose live turn is in progress', async () => {
+    const raw = payload(entry())
+    Object.assign(raw, {
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_020,
+      live_turn_last_progress_at_unix: 1_700_000_028,
+    })
+    getMock.mockResolvedValue(raw)
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response).toMatchObject({
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: 1_700_000_020,
+      live_turn_last_progress_at_unix: 1_700_000_028,
+    })
+  })
+
+  it('keeps the idle envelope (false with both timestamps null)', async () => {
+    getMock.mockResolvedValue(payload(entry()))
+
+    const response = await fetchKeeperTurnRecords('sangsu')
+
+    expect(response).toMatchObject({
+      live_turn_in_progress: false,
+      live_turn_started_at_unix: null,
+      live_turn_last_progress_at_unix: null,
+    })
+  })
+
+  it('rejects a missing live_turn_in_progress field', async () => {
+    const raw = payload(entry())
+    delete (raw as Record<string, unknown>).live_turn_in_progress
+    getMock.mockResolvedValue(raw)
+
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
+  })
+
+  it('rejects a live turn whose timestamps disagree with in_progress', async () => {
+    const raw = payload(entry())
+    Object.assign(raw, {
+      live_turn_in_progress: true,
+      live_turn_started_at_unix: null,
+      live_turn_last_progress_at_unix: null,
+    })
+    getMock.mockResolvedValue(raw)
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

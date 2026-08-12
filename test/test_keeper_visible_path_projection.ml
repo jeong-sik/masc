@@ -398,6 +398,11 @@ let test_cwd_rejection_names_the_materialized_repos () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
+  (* The hint enumerates git checkouts measured under the workspace root, not
+     every directory under a prescribed [repos/]. A fixture without [.git] is a
+     plain directory — still a legal cwd, but not something the system reports
+     as a checkout. *)
+  write_file (Filename.concat playground "repos/masc/.git/HEAD") "ref: refs/heads/main\n";
   write_file (Filename.concat playground "repos/masc/README.md") "readme\n";
   let raw =
     handle_read_file

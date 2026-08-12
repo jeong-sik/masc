@@ -538,6 +538,62 @@ let test_traced_turn_yields_result_level_fields () =
       Alcotest.(check bool) "minimal traced run validates ok" true
         v.Agent_core.Raw_trace.ok
 
+(* The terminal append a failed turn performs is exactly
+   [finish_run ~error:(Some _)] — what
+   [Keeper_official_client_host.finish_raw_error] does. What a failed turn
+   cannot do is carry a reference up through [run_result], because the failure
+   travels as [Error]; its TurnRecord therefore named no trace at all.
+   Retention reaches traces only through TurnRecord references — the orphan
+   case above shows an unnamed file is deleted — so the trace of every failed
+   turn was removed by the next prune, which is the only trace a failure
+   investigation has. The reference has to come from the sink, which holds one
+   run per keeper turn whichever way that turn ended. *)
+let test_failed_turn_keeps_its_trace_through_retention () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
+  let sink =
+    sink_or_fail "keeper_raw_trace_sink"
+      (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta)
+  in
+  let path = Agent_core.Raw_trace.file_path sink in
+  let active =
+    ok_or_fail "start_run"
+      (Agent_core.Raw_trace.start_run sink ~agent_name:meta.name
+         ~prompt:"turn that fails" ())
+  in
+  let (_ref : Agent_core.Raw_trace.run_ref) =
+    ok_or_fail "finish_run"
+      (Agent_core.Raw_trace.finish_run active ~final_text:None
+         ~stop_reason:None
+         ~error:(Some "Antigravity turn timed out after 600.000s"))
+  in
+  (* [turn_trace_ref] is [None] for every failed turn: [run_result] exists
+     only on the success branch. *)
+  (match
+     Keeper_agent_run.For_testing.raw_trace_reference_for_turn
+       ~turn_trace_ref:None ~sink:(Some sink)
+   with
+  | None -> Alcotest.fail "a failed turn must name the run its sink closed"
+  | Some r ->
+      Alcotest.(check string) "reference names this turn's trace file" path
+        r.Agent_core.Raw_trace.path);
+  (* [write_turn_record] records "completed"; retention reads the reference
+     alone, so the finish reason does not change which files survive. *)
+  write_turn_record config ~meta ~turn:1 ~raw_trace_path:path;
+  let summary = prune_or_fail config in
+  Alcotest.(check int) "the failed turn's trace is not a deletion candidate" 0
+    summary.removed;
+  Alcotest.(check bool) "the failed turn's trace survives retention" true
+    (Sys.file_exists path)
+
+(* Without a sink the turn ran untraced and there is no run to name. A
+   reference invented here would point at a file that does not exist. *)
+let test_untraced_turn_names_no_reference () =
+  Alcotest.(check bool) "untraced turn yields no reference" true
+    (Option.is_none
+       (Keeper_agent_run.For_testing.raw_trace_reference_for_turn
+          ~turn_trace_ref:None ~sink:None))
+
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -646,6 +702,10 @@ let () =
             test_post_commit_cleanup_prunes_orphan_and_preserves_reference;
           Alcotest.test_case "traced turn yields result-level fields" `Quick
             test_traced_turn_yields_result_level_fields;
+          Alcotest.test_case "failed turn keeps its trace through retention"
+            `Quick test_failed_turn_keeps_its_trace_through_retention;
+          Alcotest.test_case "untraced turn names no reference" `Quick
+            test_untraced_turn_names_no_reference;
           Alcotest.test_case "dispatch passes ?raw_trace" `Quick
             test_keeper_dispatch_passes_raw_trace;
         ] );

@@ -1225,6 +1225,15 @@ jobs:
           opam exec -- dune build --root . \
             @test/runtest-test_keeper_raw_trace_reader
 
+      - name: Run raw-trace sink retention suite
+        # Retention deletes any trace no TurnRecord names, so the reference a
+        # turn records decides whether its trace still exists when someone
+        # goes looking. @check compiles those cases; only running them shows
+        # whether a failed turn still names the run its sink closed.
+        run: |
+          opam exec -- dune build --root . \
+            @test/runtest-test_keeper_raw_trace_sink
+
       - name: Run env snapshot applied-default suite
         # Asserts through the JSON operators actually receive. The script gate
         # cannot cover this knob any more -- the fix removed the literals it

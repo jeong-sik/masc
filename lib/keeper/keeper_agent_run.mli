@@ -136,6 +136,15 @@ module For_testing : sig
     -> Agent_core.Raw_trace.run_ref
     -> (Turn_record.raw_trace_run_ref, string) result
 
+  val raw_trace_reference_for_turn
+    :  turn_trace_ref:Agent_core.Raw_trace.run_ref option
+    -> sink:Agent_core.Raw_trace.t option
+    -> Agent_core.Raw_trace.run_ref option
+  (** Which run this turn's TurnRecord names for retention. [turn_trace_ref] is
+      what the turn result reported and is absent on every failed turn; the
+      sink's last finished run covers that case, since a keeper sink holds one
+      turn. *)
+
 end
 
 (** {1 Turn execution} *)

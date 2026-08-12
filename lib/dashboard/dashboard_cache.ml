@@ -637,6 +637,49 @@ let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
         record_timeout_circuit key;
         timeout_error_json ~waiting key timeout_sec
 
+(* RFC-0372 Phase 3 — make the timeout the default rather than the opt-in.
+
+   [get_or_compute_with_timeout] has existed for a while, but it requires an
+   Eio clock at the call site, so most callers reach for the plain
+   [get_or_compute]: at the time of writing 9 call sites take the timeout and
+   37 do not. Those 37 compute without any ceiling, which is how one dashboard
+   read can hold a domain indefinitely. Converting them one by one is the
+   N-of-M patch CLAUDE.md rejects; the ceiling belongs in the default.
+
+   The clock is registered once at boot ([set_default_clock] from main_eio),
+   after which every [get_or_compute] runs under a timeout without changing a
+   single call site. Before registration — unit tests, non-Eio contexts — the
+   original unbounded path still runs, so nothing that never had a clock
+   suddenly needs one.
+
+   Individual call sites that need a tighter ceiling keep calling
+   [get_or_compute_with_timeout] explicitly; this only removes "no ceiling at
+   all" as a reachable state in production. *)
+let default_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t =
+  Atomic.make None
+
+let set_default_clock clock =
+  Atomic.set default_clock
+    (Some (clock :> float Eio.Time.clock_ty Eio.Resource.t))
+
+let clear_default_clock_for_tests () = Atomic.set default_clock None
+
+(* Deliberately generous: this is a backstop against unbounded compute, not a
+   latency target. The measured worst case for the widest dashboard read was
+   ~12s before RFC-0372 Phase 1/2; surfaces that want a tighter bound pass
+   their own [timeout_sec]. *)
+let default_compute_timeout_sec = 30.0
+
+let get_or_compute_unbounded = get_or_compute
+
+let get_or_compute key ~ttl compute =
+  match Atomic.get default_clock with
+  | Some clock ->
+    get_or_compute_with_timeout key ~ttl ~clock
+      ~timeout_sec:default_compute_timeout_sec compute
+  | None -> get_or_compute_unbounded key ~ttl compute
+;;
+
 let seed_stale_if_missing key ~stale_for value =
   let ts = now () in
   atomic_update table (fun map ->

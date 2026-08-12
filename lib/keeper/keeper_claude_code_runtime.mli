@@ -16,6 +16,10 @@ module For_testing : sig
     -> Runtime_claude_code.config
   (** Keep an explicit turn bound unchanged and give an unbounded turn config a
       finite login-probe fallback. *)
+
+  val host_stop_turn_identity : session_id:string -> turn_count:int -> string
+  (** Deterministic durable identity used when a dynamic-tool host stop arrives
+      before Claude emits its terminal result-frame turn id. *)
 end
 
 val run :

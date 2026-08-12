@@ -272,6 +272,16 @@ max-concurrent = 1
   | Ok () -> ()
   | Error err -> Alcotest.failf "Runtime.init_default failed: %s" err
 
+let append_heartbeat_snapshot config keeper_name ~timestamp ~timestamp_unix =
+  Dated_jsonl.append
+    (Keeper_types_support.keeper_metrics_store config keeper_name)
+    (`Assoc
+      (Keeper_metrics_record.fields Keeper_metrics_record.Heartbeat
+       @ [ "ts", `String timestamp
+         ; "ts_unix", `Float timestamp_unix
+         ; "name", `String keeper_name
+         ]))
+
 let test_snapshot_keeps_context_unobserved_and_usage_separate () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -340,6 +350,12 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
             };
         }
       in
+      let heartbeat_timestamp = "2026-08-12T01:02:03Z" in
+      append_heartbeat_snapshot
+        config
+        keeper_name
+        ~timestamp:heartbeat_timestamp
+        ~timestamp_unix:1_786_499_323.0;
       (match
          Keeper_owner_registry.commit_turn_runtime
            ~base_path:config.base_path
@@ -373,6 +389,17 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         Yojson.Safe.Util.(keeper |> member "context_max" = `Null);
       Alcotest.(check bool) "unowned source is ignored" true
         Yojson.Safe.Util.(keeper |> member "context_source" = `Null);
+      Alcotest.(check (float 0.1)) "summary keeper cadence is projected" 300.0
+        Yojson.Safe.Util.(
+          keeper |> member "keeper_keepalive_interval_s" |> to_float);
+      Alcotest.(check (float 0.1)) "summary snapshot cadence is projected" 300.0
+        Yojson.Safe.Util.(
+          keeper |> member "keeper_snapshot_interval_s" |> to_float);
+      Alcotest.(check (float 0.1)) "summary stale window is projected" 360.0
+        Yojson.Safe.Util.(keeper |> member "heartbeat_stale_after_s" |> to_float);
+      Alcotest.(check string) "summary heartbeat comes from persisted producer"
+        heartbeat_timestamp
+        Yojson.Safe.Util.(keeper |> member "last_heartbeat" |> to_string);
       Alcotest.(check string) "missing owner remains explicit" "not_observed"
         Yojson.Safe.Util.(
           keeper
@@ -493,6 +520,12 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("error", `Assoc [ ("kind", `String "runtime") ]);
             ("ended_at", `String (Masc_domain.now_iso ()));
           ]);
+      let heartbeat_timestamp = "2026-08-12T02:03:04Z" in
+      append_heartbeat_snapshot
+        config
+        keeper_name
+        ~timestamp:heartbeat_timestamp
+        ~timestamp_unix:1_786_502_584.0;
       Operator_control.invalidate_snapshot_cache ();
       let snapshot =
         Operator_control.snapshot_json ~view:"summary" ~include_messages:false
@@ -512,6 +545,9 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         (keeper |> member "runtime_blocker_class" |> to_string);
       Alcotest.(check bool) "attention surfaced" true
         (keeper |> member "needs_attention" |> to_bool);
+      Alcotest.(check string) "paused lightweight heartbeat is persisted truth"
+        heartbeat_timestamp
+        (keeper |> member "last_heartbeat" |> to_string);
       let trust = keeper |> member "runtime_trust" in
       Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
@@ -542,7 +578,91 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "full pause state" "paused"
         (full_keeper |> member "pause_state" |> to_string);
       Alcotest.(check string) "full paused pipeline" "paused"
-        (full_keeper |> member "pipeline_stage" |> to_string))
+        (full_keeper |> member "pipeline_stage" |> to_string);
+      Alcotest.(check string) "full paused heartbeat is persisted truth"
+        heartbeat_timestamp
+        (full_keeper |> member "last_heartbeat" |> to_string))
+
+let test_diagnostic_uses_persisted_heartbeat_freshness () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let keeper_name = "heartbeat-health" in
+      let now_ts = Unix.gettimeofday () in
+      let heartbeat_ts = now_ts -. 30.0 in
+      let heartbeat_timestamp =
+        Masc_domain.iso8601_of_unix_seconds heartbeat_ts
+      in
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name", `String "keeper-heartbeat-health-agent"
+              ; "trace_id", `String "trace-heartbeat-health"
+              ; "total_turns", `Int 1
+              ])
+        with
+        | Ok meta -> meta
+        | Error error -> Alcotest.fail error
+      in
+      append_heartbeat_snapshot
+        config
+        keeper_name
+        ~timestamp:heartbeat_timestamp
+        ~timestamp_unix:heartbeat_ts;
+      let diagnostic =
+        Keeper_status_runtime.keeper_diagnostic_json
+          ~config
+          ~meta
+          ~agent_status:
+            (`Assoc
+              [ "status", `String "active"
+              ; "last_seen_ago_s", `Float 900.0
+              ])
+          ~keepalive_running:true
+          ~history_items:[]
+          ~now_ts
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "fresh heartbeat overrides stale agent presence"
+        "healthy"
+        (diagnostic |> member "health_state" |> to_string);
+      Alcotest.(check string) "diagnostic exposes persisted heartbeat"
+        heartbeat_timestamp
+        (diagnostic |> member "last_heartbeat" |> to_string);
+      let active_keeper_name = "active-health" in
+      let active_meta =
+        { meta with
+          name = active_keeper_name
+        ; agent_name = "keeper-active-health-agent"
+        }
+      in
+      append_heartbeat_snapshot
+        config
+        active_keeper_name
+        ~timestamp:(Masc_domain.iso8601_of_unix_seconds (now_ts -. 900.0))
+        ~timestamp_unix:(now_ts -. 900.0);
+      let active_diagnostic =
+        Keeper_status_runtime.keeper_diagnostic_json
+          ~config
+          ~meta:active_meta
+          ~agent_status:
+            (`Assoc
+              [ "status", `String "active"
+              ; "last_seen_ago_s", `Float 5.0
+              ])
+          ~keepalive_running:true
+          ~history_items:[]
+          ~now_ts
+      in
+      Alcotest.(check string) "fresh live presence also prevents false stale"
+        "healthy"
+        (active_diagnostic |> member "health_state" |> to_string))
 
 let test_digest_workspace_includes_keeper_runtime_attention () =
   Eio_main.run @@ fun env ->
@@ -1421,6 +1541,10 @@ let () =
             "null runtime signal preserves surface status"
             `Quick
             test_align_keeper_runtime_status_tolerates_null_status_json;
+          Alcotest.test_case
+            "diagnostic uses persisted heartbeat freshness"
+            `Quick
+            test_diagnostic_uses_persisted_heartbeat_freshness;
         ] );
       ( "context metrics ledger"
       , [ Alcotest.test_case

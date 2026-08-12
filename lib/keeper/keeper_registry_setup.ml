@@ -482,6 +482,7 @@ let register_with_state_result
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
+    ; cadence_sleeping = Atomic.make false
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None
@@ -695,6 +696,7 @@ let register_restarting ~base_path name meta
     ; conditions
     ; fiber_stop = Atomic.make false
     ; fiber_wakeup = Atomic.make false
+    ; cadence_sleeping = Atomic.make false
     ; event_queue = Atomic.make initial_event_queue
     ; started_at = Time_compat.now ()
     ; grpc_close = Atomic.make None

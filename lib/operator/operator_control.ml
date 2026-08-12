@@ -35,6 +35,7 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
       let now_ts = Time_compat.now () in
       Ok
         (Keeper_status_runtime.keeper_diagnostic_json
+           ~config:ctx.config
            ~meta
            ~agent_status
            ~keepalive_running

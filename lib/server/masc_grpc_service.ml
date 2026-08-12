@@ -189,7 +189,7 @@ type task_directive_decision =
       }
 
 type heartbeat_workspace_view =
-  { workspace_paused : bool
+  { keeper_paused : bool
   ; active_agent_count : int
   ; pending_task_count : int
   ; task_directive : task_directive_decision
@@ -223,9 +223,9 @@ let decide_task_directive tasks =
   first_todo tasks
 ;;
 
-(** Pure projection from one authoritative Workspace snapshot. *)
-let heartbeat_workspace_view ~workspace_paused ~active_agents ~tasks =
-  { workspace_paused
+(** Pure projection from authoritative Workspace and Keeper snapshots. *)
+let heartbeat_workspace_view ~keeper_paused ~active_agents ~tasks =
+  { keeper_paused
   ; active_agent_count = List.length active_agents
   ; pending_task_count =
       List.fold_left
@@ -234,6 +234,43 @@ let heartbeat_workspace_view ~workspace_paused ~active_agents ~tasks =
         tasks
   ; task_directive = decide_task_directive tasks
   }
+;;
+
+(** Durable Keeper pause for one heartbeat ping, read from the live registry
+    only.
+
+    Scope: this answers "does a Keeper lane in this base_path currently hold a
+    durable pause", so a Keeper that exists only in persisted metadata is
+    [false] — it owns no lane to park. [Keeper_identity_binding.resolve] is the
+    authority for name resolution and does consult persisted metadata, but its
+    fallback lists every persisted Keeper and reads each meta file; the
+    heartbeat runs every 30s per connected agent and most pings come from
+    agents that are not Keepers at all, so that scan does not belong here.
+
+    The multi-entry branch is unreachable defence, not a policy choice.
+    [Keeper_identity.keeper_agent_name] makes agent_name a bijection of the
+    Keeper name ("keeper-<name>-agent"); the parse boundary rejects metadata
+    that breaks it, and [Keeper_registry.all] re-validates every entry on read
+    and drops the ones that fail, so two entries sharing one agent_name cannot
+    reach this scan. It still resolves to no directive rather than picking a
+    lane: a Pause the client accepts commits
+    [Keeper_latched_reason.Operator_paused], which only the receipt-first
+    [Resume_owner] transaction can clear, so a misaddressed pause is durable
+    while a skipped one is retried on the next ping. *)
+let keeper_paused_for_heartbeat ~base_path ~agent_name =
+  match
+    Keeper_registry_lookup.find_all_by_agent_name_in_base_path ~base_path agent_name
+  with
+  | [] -> false
+  | [ entry ] -> entry.meta.paused
+  | entries ->
+    Log.Transport.warn
+      "gRPC heartbeat: ambiguous keeper agent binding for %s (%s); emitting no pause"
+      agent_name
+      (String.concat
+         ", "
+         (List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) entries));
+    false
 ;;
 
 let directives_of_view ~agent_name view =
@@ -249,7 +286,7 @@ let directives_of_view ~agent_name view =
         error;
       []
   in
-  if view.workspace_paused
+  if view.keeper_paused
   then Keeper_directive.Pause :: task_directives
   else task_directives
 ;;
@@ -300,7 +337,10 @@ let handle_heartbeat
               let tasks = Workspace.get_tasks_safe workspace_config in
               let view =
                 heartbeat_workspace_view
-                  ~workspace_paused:(Workspace.is_paused workspace_config)
+                  ~keeper_paused:
+                    (keeper_paused_for_heartbeat
+                       ~base_path:workspace_config.base_path
+                       ~agent_name:ping.agent_name)
                   ~active_agents
                   ~tasks
               in

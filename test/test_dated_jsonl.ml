@@ -100,6 +100,65 @@ let test_read_recent_skips_malformed_lines () =
   let values = Dated_jsonl.read_recent store 10 |> List.map json_i in
   check (list int) "read_recent skips malformed rows" [ 1; 2 ] values
 
+(* ── filter_map_recent ───────────────────────────────────
+   [read_recent] is now [filter_map_recent] with an identity projection, so
+   comparing the two proves nothing. Every expectation below is absolute. *)
+
+let test_filter_map_recent_is_chronological_across_day_files () =
+  let dir = tmpdir "dated_jsonl_filter_map_order" in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|}; {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":3}|}; {|{"i":4}|} ];
+  write_dated_file dir "2026-02" "02" [ {|{"i":5}|}; {|{"i":6}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let values = Dated_jsonl.filter_map_recent store 6 ~f:(fun j -> Some (json_i j)) in
+  check (list int) "oldest first across months" [ 1; 2; 3; 4; 5; 6 ] values
+
+let test_filter_map_recent_limit_counts_rows_read_not_rows_kept () =
+  let dir = tmpdir "dated_jsonl_filter_map_limit" in
+  write_dated_file dir "2026-01" "01"
+    [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|}; {|{"i":4}|}; {|{"i":5}|}; {|{"i":6}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  (* The newest 4 rows are 3..6; the evens among *those* are 4 and 6. A reader
+     that kept scanning until it had 4 selected rows would return [2;4;6]. *)
+  let values =
+    Dated_jsonl.filter_map_recent store 4 ~f:(fun j ->
+      let i = json_i j in
+      if i mod 2 = 0 then Some i else None)
+  in
+  check (list int) "n bounds rows read" [ 4; 6 ] values
+
+let test_filter_map_recent_offset_skips_newest_rows () =
+  let dir = tmpdir "dated_jsonl_filter_map_offset" in
+  write_dated_file dir "2026-01" "01"
+    [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|}; {|{"i":4}|}; {|{"i":5}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let values =
+    Dated_jsonl.filter_map_recent ~offset:2 store 2 ~f:(fun j -> Some (json_i j))
+  in
+  check (list int) "offset drops the two newest" [ 2; 3 ] values
+
+let test_filter_map_recent_skips_malformed_rows () =
+  let dir = tmpdir "dated_jsonl_filter_map_malformed" in
+  write_dated_file dir "2026-01" "01"
+    [ {|{"i":1}|}; "not-json"; {|{"i":2}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let values = Dated_jsonl.filter_map_recent store 10 ~f:(fun j -> Some (json_i j)) in
+  check (list int) "malformed row skipped" [ 1; 2 ] values
+
+let test_filter_map_recent_does_not_swallow_callback_failure () =
+  (* The reader swallows [Yojson.Json_error] to skip malformed rows. A decoder
+     that raises the same exception must still reach the caller, or a broken
+     decoder reads as an empty store. Guards the [try] scope in the reader. *)
+  let dir = tmpdir "dated_jsonl_filter_map_callback_raise" in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  check_raises "decoder failure reaches the caller"
+    (Yojson.Json_error "decoder rejected the row")
+    (fun () ->
+      ignore
+        (Dated_jsonl.filter_map_recent store 10 ~f:(fun _ ->
+           raise (Yojson.Json_error "decoder rejected the row"))))
+
 let test_read_recent_result_counts_malformed_physical_row () =
   let dir = tmpdir "dated_jsonl_recent_result_malformed" in
   write_dated_file
@@ -878,6 +937,19 @@ let () =
             test_load_tail_lines_keeps_first_data_after_blank_prefix;
           test_case "keeps first row when full file spans chunks" `Quick
             test_load_tail_lines_keeps_first_when_full_file_spans_chunks;
+        ] );
+      ( "filter_map_recent",
+        [
+          test_case "chronological across day files" `Quick
+            test_filter_map_recent_is_chronological_across_day_files;
+          test_case "n bounds rows read not rows kept" `Quick
+            test_filter_map_recent_limit_counts_rows_read_not_rows_kept;
+          test_case "offset skips newest rows" `Quick
+            test_filter_map_recent_offset_skips_newest_rows;
+          test_case "skips malformed rows" `Quick
+            test_filter_map_recent_skips_malformed_rows;
+          test_case "callback failure is not swallowed" `Quick
+            test_filter_map_recent_does_not_swallow_callback_failure;
         ] );
       ( "read_recent_lines",
         [

@@ -8,6 +8,11 @@ let source_root () =
 let dune_local_script_path () =
   Filename.concat (Filename.concat (source_root ()) "scripts") "dune-local.sh"
 
+let opam_switch_rw_lock_script_path () =
+  Filename.concat
+    (Filename.concat (source_root ()) "scripts")
+    "opam-switch-rw-lock.sh"
+
 let quote = Filename.quote
 
 let read_file path =
@@ -128,18 +133,24 @@ let setup_fake_repo ?(ocaml_version = "5.5.0") base =
   write_executable
     (Filename.concat scripts_dir "dune-local.sh")
     (read_file (dune_local_script_path ()));
+  write_executable
+    (Filename.concat scripts_dir "opam-switch-rw-lock.sh")
+    (read_file (opam_switch_rw_lock_script_path ()));
   (* Fake opam: present in PATH and echoes back the queried package
      for `opam list --installed --short PKG` so the deps-installed
      guard treats core deps as present. Other
      subcommands return 0 with empty stdout. *)
   write_executable (Filename.concat bin_dir "opam")
-    {|#!/bin/sh
+    (Printf.sprintf
+       {|#!/bin/sh
 if [ "$1" = "list" ] && [ "$2" = "--installed" ] && [ -n "$4" ]; then
-  printf '%s\n' "$4"; exit 0
+  printf '%%s\n' "$4"; exit 0
 fi
 if [ "$1" = "switch" ] && [ "$2" = "show" ]; then printf 'fake-switch\n'; exit 0; fi
+if [ "$1" = "var" ] && [ "$2" = "prefix" ]; then printf '%%s\n' %s; exit 0; fi
 exit 0
-|};
+|}
+       (quote base));
   (* Fake findlib/ocamlobjinfo provider surface. Keep this deterministic so
      tests never inspect the real opam switch. *)
   let fake_llm_provider_dir =
@@ -189,7 +200,7 @@ exit 0
     (Printf.sprintf
        {|#!/bin/sh
 if [ "${1:-}" = "--version" ]; then printf '3.21.0\n'; exit 0; fi
-printf '%%s\n' "${1:-build}" >> %s
+printf '%%s read_lease=%%s\n' "${1:-build}" "${MASC_OPAM_READ_LEASE_HELD:-0}" >> %s
 exit 0
 |}
        (quote dune_log));
@@ -207,16 +218,6 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
   in
   let path = Printf.sprintf "%s:%s" bin_dir system_path in
   let lock_path = Filename.concat base "dune-local.lock" in
-  let opam_lock_path = Filename.concat base "opam-switch.lock" in
-  (* Most tests exercise fake Dune behavior inside an isolated temp repo. The
-     production bare-Dune guard scans the host process table, so unrelated
-     developer Dune processes would otherwise make these hermetic tests flaky.
-     Tests that target the guard pass [~unset_env] for this variable. *)
-  let allow_bare_dune_env =
-    if List.exists (String.equal "MASC_DUNE_ALLOW_BARE_DUNE") unset_env
-    then []
-    else [ ("MASC_DUNE_ALLOW_BARE_DUNE", "1") ]
-  in
   let default_skip_env name =
     if List.exists (String.equal name) unset_env || List.mem_assoc name env
     then []
@@ -228,11 +229,9 @@ let run_dune_local base bin_dir ?(env = []) ?(unset_env = []) subcommand =
       ("GIT_CEILING_DIRECTORIES", base);
       ("DUNE_LOCAL_LOCK", lock_path);
       ("DUNE_BUILD_DIR", Filename.concat base "_build");
-      ("MASC_OPAM_LOCK_PATH", opam_lock_path);
       ("MASC_DUNE_LOCK_HELD", "0");
-      ("MASC_OPAM_LOCK_HELD", "0");
+      ("MASC_OPAM_READ_LEASE_HELD", "0");
     ]
-    @ allow_bare_dune_env
     @ default_skip_env "MASC_SKIP_DEPS_CHECK"
     @ default_skip_env "MASC_SKIP_OCAML_VERSION_CHECK"
     @ List.filter
@@ -279,31 +278,9 @@ printf '%%s\n' "${1:-build}" >> %s
 exit 0
 |}
            (quote dune_log));
-      let opam_lock_path = Filename.concat dir "opam.lock" in
-      let lockf_log = Filename.concat dir "lockf-calls.log" in
-      write_executable
-        (Filename.concat bin_dir "lockf")
-        (Printf.sprintf
-           {|#!/bin/sh
-printf 'argv=%%s\n' "$*" >> %s
-while [ "${1#-}" != "$1" ]; do
-  case "$1" in
-    -t) shift 2 ;;
-    *) shift ;;
-  esac
-done
-lock_path="$1"
-printf 'lock=%%s\n' "$lock_path" >> %s
-if [ "$lock_path" = %s ]; then exit 97; fi
-shift
-exec "$@"
-|}
-           (quote lockf_log) (quote lockf_log) (quote opam_lock_path));
       (* Use a minimal PATH (no opam install directories) so that
          'command -v opam' fails and the guard is skipped.
-         opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin.
-         The bare-Dune guard is not under test here, so keep the isolated fake
-         repo independent of host Dune processes. *)
+         opam is typically in ~/.opam/SWITCH/bin/, not in /usr/bin or /bin. *)
       let minimal_path = Printf.sprintf "%s:/usr/bin:/bin" bin_dir in
       let lock_path = Filename.concat dir "dune-local.lock" in
       let script = Filename.concat scripts_dir "dune-local.sh" in
@@ -314,8 +291,6 @@ exec "$@"
               ("PATH", minimal_path);
               ("GIT_CEILING_DIRECTORIES", dir);
               ("DUNE_LOCAL_LOCK", lock_path);
-              ("MASC_OPAM_LOCK_PATH", opam_lock_path);
-              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
             ]
           ~unset_env:[ "GITHUB_ACTIONS" ]
           [| "/bin/bash"; script; "build" |]
@@ -323,11 +298,6 @@ exec "$@"
       check int "exits non-zero when opam absent" 1 code;
       check_contains "opam requirement is explicit" stderr
         "opam is unavailable; MASC requires an opam-managed OCaml 5.5.0 switch";
-      let lock_log =
-        if Sys.file_exists lockf_log then read_file lockf_log else ""
-      in
-      check bool "opam lockf not invoked" false
-        (String_util.contains_substring lock_log opam_lock_path);
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
 let test_dune_lock_wait_reports_holder () =
@@ -342,6 +312,11 @@ let test_dune_lock_wait_reports_holder () =
         (Printf.sprintf
            {|#!/bin/sh
 printf 'argv=%%s\n' "$*" >> %s
+last=""
+for arg in "$@"; do last="$arg"; done
+case "$*:$last" in
+  *"/readers/reader."*:true) exit 75 ;;
+esac
 while [ "${1#-}" != "$1" ]; do
   case "$1" in
     -t) shift 2 ;;
@@ -424,453 +399,239 @@ exit 1
         (String_util.contains_substring stderr "bare `dune` process");
       check bool "dune was not invoked" false (Sys.file_exists dune_log))
 
-let write_bare_dune_ps bin_dir =
+let test_opam_read_leases_overlap_and_exclude_writer () =
+  with_temp_dir "opam-switch-rw-lock" (fun dir ->
+      let script = opam_switch_rw_lock_script_path () in
+      let lock_base = Filename.concat dir "switch" in
+      let readers_dir = lock_base ^ ".state/readers" in
+      let reader_one_started = Filename.concat dir "reader-one-started" in
+      let reader_two_started = Filename.concat dir "reader-two-started" in
+      let writer_started = Filename.concat dir "writer-started" in
+      let command =
+        Printf.sprintf
+          {|set -eu
+export OPAM_SWITCH_PREFIX=/tmp/masc-test-switch
+export MASC_OPAM_LOCK_PATH=%s
+%s read -- /bin/sh -c %s &
+first_reader=$!
+for _ in $(seq 1 50); do
+  test -f %s && break
+  sleep 0.02
+done
+%s read -- /bin/sh -c %s &
+second_reader=$!
+for _ in $(seq 1 50); do
+  test -f %s && break
+  sleep 0.02
+done
+test -f %s
+test -f %s
+set +e
+%s write -- true
+writer_while_readers=$?
+set -e
+wait "$first_reader"
+wait "$second_reader"
+test "$writer_while_readers" -eq 75
+%s write -- /bin/sh -c %s &
+writer=$!
+for _ in $(seq 1 50); do
+  test -f %s && break
+  sleep 0.02
+done
+set +e
+%s read -- true
+reader_while_writer=$?
+set -e
+wait "$writer"
+test "$reader_while_writer" -eq 75
+%s write -- true
+printf 'stale-reader-lock\n' > %s/$$
+%s write -- true
+test ! -e %s/$$
+|}
+          (quote lock_base)
+          (quote script)
+          (quote (Printf.sprintf "touch %s; sleep 1" (quote reader_one_started)))
+          (quote reader_one_started)
+          (quote script)
+          (quote (Printf.sprintf "touch %s; sleep 1" (quote reader_two_started)))
+          (quote reader_two_started)
+          (quote reader_one_started)
+          (quote reader_two_started)
+          (quote script)
+          (quote script)
+          (quote (Printf.sprintf "touch %s; sleep 1" (quote writer_started)))
+          (quote writer_started)
+          (quote script)
+          (quote script)
+          (quote readers_dir)
+          (quote script)
+          (quote readers_dir)
+      in
+      let code, _stdout, stderr =
+        run_process ~cwd:dir "/bin/bash" [| "/bin/bash"; "-c"; command |]
+      in
+      check int "reader overlap and writer exclusion" 0 code;
+      check bool "writer rejection is explicit" true
+        (String_util.contains_substring stderr "switch readers are active");
+      check bool "reader rejection is explicit" true
+        (String_util.contains_substring stderr "switch mutation is active"))
+
+let test_opam_reader_admission_requires_held_inode_and_keeps_writer_file () =
+  with_temp_dir "opam-switch-rw-lock-inode" (fun dir ->
+      let script = opam_switch_rw_lock_script_path () in
+      let lock_base = Filename.concat dir "switch" in
+      let writer_path = lock_base ^ ".state/writer" in
+      let reader_path = lock_base ^ ".state/readers/unheld" in
+      let command =
+        Printf.sprintf
+          {|set -eu
+export OPAM_SWITCH_PREFIX=/tmp/masc-test-switch
+export MASC_OPAM_LOCK_PATH=%s
+%s write -- true
+test -f %s
+printf 'not-held\n' > %s
+if stat -f '%%d:%%i' %s >/dev/null 2>&1; then
+  identity=$(stat -f '%%d:%%i' %s)
+else
+  identity=$(stat -c '%%d:%%i' %s)
+fi
+set +e
+%s __admit_read %s "$identity"
+status=$?
+set -e
+test "$status" -eq 75
+|}
+          (quote lock_base)
+          (quote script)
+          (quote writer_path)
+          (quote reader_path)
+          (quote reader_path)
+          (quote reader_path)
+          (quote reader_path)
+          (quote script)
+          (quote reader_path)
+      in
+      let code, _stdout, stderr =
+        run_process ~cwd:dir "/bin/bash" [| "/bin/bash"; "-c"; command |]
+      in
+      check int "unheld reader is rejected" 0 code;
+      check bool "writer inode remains addressable" true
+        (Sys.file_exists writer_path);
+      check bool "reader rejection identifies the inode race" true
+        (String_util.contains_substring
+           stderr
+           "no longer names its locked inode"))
+
+let minimal_lock_script_path dir =
+  let bin_dir = Filename.concat dir "minimal-bin" in
+  mkdir_p bin_dir;
+  List.iter
+    (fun (name, target) ->
+       write_executable
+         (Filename.concat bin_dir name)
+         (Printf.sprintf "#!/bin/sh\nexec %s \"$@\"\n" target))
+    [ "awk", "/usr/bin/awk"
+    ; "basename", "/usr/bin/basename"
+    ; "bash", "/bin/bash"
+    ; "chmod", "/bin/chmod"
+    ; "dirname", "/usr/bin/dirname"
+    ; "mkdir", "/bin/mkdir"
+    ];
   write_executable
-    (Filename.concat bin_dir "ps")
-    {|#!/bin/sh
-if [ "${1:-}" = "ax" ]; then
-  cat <<'PS'
- 111 1 dune exec --root . test/test_config_dir_resolver.exe
- 112 1 dune --root . build
- 113 1 opam exec -- dune --build-dir _build test
- 114 1 dune clean --root .
- 222 333 dune build --root wrapped-worktree
- 333 1 lockf -k /tmp/me-dune-local.lock /usr/bin/env MASC_DUNE_LOCK_HELD=1 scripts/dune-local.sh build
-PS
-  exit 0
-fi
-exit 1
-|}
+    (Filename.concat bin_dir "cksum")
+    "#!/bin/sh\nprintf '1 1\\n'\n";
+  bin_dir
+;;
 
-let test_bare_dune_bypass_aborts_before_dune () =
-  with_temp_dir "dune-local-bare-dune-bypass" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      write_bare_dune_ps bin_dir;
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_DUNE_ALLOW_BARE_DUNE" ]
-          "build"
-      in
-      check int "exits tempfail on bare dune bypass" 75 code;
-      check bool "reports unwrapped Dune" true
-        (String_util.contains_substring stderr "outside scripts/dune-local.sh");
-      check bool "reports bare dune command" true
-        (String_util.contains_substring stderr
-           "dune exec --root . test/test_config_dir_resolver.exe");
-      check bool "reports dune with leading global option" true
-        (String_util.contains_substring stderr "dune --root . build");
-      check bool "reports opam exec dune with leading global option" true
-        (String_util.contains_substring stderr "opam exec -- dune --build-dir _build test");
-      check bool "reports bare dune clean" true
-        (String_util.contains_substring stderr "dune clean --root .");
-      check bool "does not report wrapped child" false
-        (String_util.contains_substring stderr "wrapped-worktree");
-      check bool "dune was not invoked" false (Sys.file_exists dune_log))
+let run_lock_script ~dir ~bin_dir ~lock_base ~marker =
+  run_process
+    ~cwd:dir
+    "/bin/bash"
+    ~env:
+      [ "PATH", bin_dir
+      ; "OPAM_SWITCH_PREFIX", "/tmp/masc-test-switch"
+      ; "MASC_OPAM_LOCK_PATH", lock_base
+      ]
+    [| "/bin/bash"
+     ; opam_switch_rw_lock_script_path ()
+     ; "write"
+     ; "--"
+     ; "/bin/sh"
+     ; "-c"
+     ; "touch " ^ quote marker
+    |]
+;;
 
-let test_bare_dune_bypass_can_be_overridden () =
-  with_temp_dir "dune-local-bare-dune-override" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      write_bare_dune_ps bin_dir;
-      let code, _stdout, _stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("MASC_DUNE_ALLOW_BARE_DUNE", "1") ]
-          ~unset_env:[ "GITHUB_ACTIONS" ] "build"
-      in
-      check int "exits zero when bare dune guard is overridden" 0 code;
-      check bool "dune was invoked" true (Sys.file_exists dune_log))
+let test_opam_lock_backend_absence_fails_closed () =
+  with_temp_dir "opam-switch-rw-lock-no-backend" (fun dir ->
+    let bin_dir = minimal_lock_script_path dir in
+    let marker = Filename.concat dir "wrapped-command-ran" in
+    let code, _stdout, stderr =
+      run_lock_script
+        ~dir
+        ~bin_dir
+        ~lock_base:(Filename.concat dir "switch")
+        ~marker
+    in
+    check int "missing lock tools fail closed" 69 code;
+    check bool "wrapped command did not run" false (Sys.file_exists marker);
+    check bool
+      "missing backend is explicit"
+      true
+      (String_util.contains_substring
+         stderr
+         "neither lockf nor flock is available"))
+;;
 
-let test_opam_lockf_reexec_env_passthrough () =
-  with_temp_dir "dune-local-opam-lockf" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      let lockf_log = Filename.concat dir "lockf-calls.log" in
-      write_executable
-        (Filename.concat bin_dir "lockf")
-        (Printf.sprintf
-           {|#!/bin/sh
-printf 'held=%%s argv=%%s\n' "${MASC_OPAM_LOCK_HELD:-unset}" "$*" >> %s
-while [ "${1#-}" != "$1" ]; do
+let test_opam_gate_timeout_has_admission_diagnostic () =
+  with_temp_dir "opam-switch-rw-lock-gate-timeout" (fun dir ->
+    let bin_dir = minimal_lock_script_path dir in
+    write_executable
+      (Filename.concat bin_dir "lockf")
+      {|#!/bin/sh
+while [ "$#" -gt 0 ]; do
   case "$1" in
+    -k) shift ;;
     -t) shift 2 ;;
-    *) shift ;;
-  esac
-done
-shift
-exec "$@"
-|}
-           (quote lockf_log));
-      let opam_lock_path = Filename.concat dir "opam.lock" in
-      let code, _stdout, _stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("MASC_OPAM_LOCK_PATH", opam_lock_path) ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          "build"
-      in
-      check int "exits zero through lockf reexec" 0 code;
-      check bool "lockf invoked" true (Sys.file_exists lockf_log);
-      let lock_log = read_file lockf_log in
-      let dune_lock_path = Filename.concat dir "dune-local.lock" in
-      check bool "lock path passed to lockf" true
-        (String_util.contains_substring lock_log opam_lock_path);
-      check bool "dune lock acquired before opam lock" true
-        (match
-           ( substring_index lock_log dune_lock_path,
-             substring_index lock_log opam_lock_path )
-         with
-        | Some dune_pos, Some opam_pos -> dune_pos < opam_pos
-        | _ -> false);
-      check bool "held env passed through argv" true
-        (String_util.contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
-      check bool "dune held env passed through argv" true
-        (String_util.contains_substring lock_log "MASC_DUNE_LOCK_HELD=1");
-      check bool "dune was invoked after reexec" true
-        (Sys.file_exists dune_log))
-
-let test_opam_lock_timeout_releases_dune_lock () =
-  with_temp_dir "dune-local-opam-lock-timeout" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      let lockf_log = Filename.concat dir "lockf-calls.log" in
-      let opam_lock_path = Filename.concat dir "opam.lock" in
-      write_executable
-        (Filename.concat bin_dir "lockf")
-        (Printf.sprintf
-           {|#!/bin/sh
-printf 'argv=%%s\n' "$*" >> %s
-while [ "${1#-}" != "$1" ]; do
-  case "$1" in
-    -t) shift 2 ;;
-    *) shift ;;
+    *) break ;;
   esac
 done
 lock_path="$1"
-printf 'lock=%%s\n' "$lock_path" >> %s
-if [ "$lock_path" = %s ]; then exit 75; fi
 shift
-exec "$@"
-|}
-           (quote lockf_log) (quote lockf_log) (quote opam_lock_path));
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~env:
-            [
-              ("MASC_OPAM_LOCK_PATH", opam_lock_path);
-              ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "1");
-            ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          "build"
-      in
-      check int "opam lock timeout exits with lockf status" 75 code;
-      check bool "timeout explains Dune lock release" true
-        (String_util.contains_substring stderr "releasing Dune lock");
-      check bool "dune was not invoked after opam timeout" false
-        (Sys.file_exists dune_log))
-
-let test_unset_opam_lock_timeout_waits_forever () =
-  with_temp_dir "dune-local-opam-lock-timeout-unset" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      let lockf_log = Filename.concat dir "lockf-calls.log" in
-      write_executable
-        (Filename.concat bin_dir "lockf")
-        (Printf.sprintf
-           {|#!/bin/sh
-printf 'argv=%%s\n' "$*" >> %s
-while [ "${1#-}" != "$1" ]; do
-  case "$1" in
-    -t) printf 'timeout=%%s\n' "$2" >> %s; exit 98 ;;
-    *) shift ;;
-  esac
-done
-shift
-exec "$@"
-|}
-           (quote lockf_log) (quote lockf_log));
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~unset_env:
-            [
-              "GITHUB_ACTIONS";
-              "MASC_OPAM_LOCK_HELD";
-              "MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT";
-            ]
-          "build"
-      in
-      check int "unset timeout keeps historical wait-forever path" 0 code;
-      let lock_log = read_file lockf_log in
-      check bool "lockf timeout flag not used by default" false
-        (String_util.contains_substring lock_log "timeout=");
-      check bool "timeout message not emitted" false
-        (String_util.contains_substring stderr "releasing Dune lock");
-      check bool "dune was invoked" true (Sys.file_exists dune_log))
-
-let test_zero_like_opam_lock_timeout_waits_forever () =
-  with_temp_dir "dune-local-opam-lock-timeout-zero-like" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      let lockf_log = Filename.concat dir "lockf-calls.log" in
-      write_executable
-        (Filename.concat bin_dir "lockf")
-        (Printf.sprintf
-           {|#!/bin/sh
-printf 'argv=%%s\n' "$*" >> %s
-while [ "${1#-}" != "$1" ]; do
-  case "$1" in
-    -t) printf 'timeout=%%s\n' "$2" >> %s; exit 98 ;;
-    *) shift ;;
-  esac
-done
-shift
-exec "$@"
-|}
-           (quote lockf_log) (quote lockf_log));
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "00") ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          "build"
-      in
-      check int "zero-like timeout waits forever" 0 code;
-      let lock_log = read_file lockf_log in
-      check bool "lockf timeout flag not used for zero-like value" false
-        (String_util.contains_substring lock_log "timeout=");
-      check bool "timeout message not emitted for zero-like value" false
-        (String_util.contains_substring stderr "releasing Dune lock");
-      check bool "dune was invoked" true (Sys.file_exists dune_log))
-
-let test_opam_lock_timeout_env_must_be_numeric () =
-  with_temp_dir "dune-local-opam-timeout-invalid" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      write_executable (Filename.concat bin_dir "lockf")
-        {|#!/bin/sh
-while [ "${1#-}" != "$1" ]; do
-  case "$1" in
-    -t) shift 2 ;;
-    *) shift ;;
-  esac
-done
-shift
-exec "$@"
-|};
-      let code, _stdout, stderr =
-        run_dune_local dir bin_dir
-          ~env:[ ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "abc") ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          "build"
-      in
-      check int "invalid timeout exits usage error" 2 code;
-      check bool "invalid timeout named" true
-        (String_util.contains_substring stderr "invalid MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT");
-      check bool "dune was not invoked" false (Sys.file_exists dune_log))
-
-let test_missing_lock_tools_warn_once () =
-  with_temp_dir "dune-local-no-lock-tools" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      write_executable (Filename.concat bin_dir "dirname")
-        {|#!/bin/sh
-case "$1" in
-  */*) printf '%s\n' "${1%/*}" ;;
-  *) printf '.\n' ;;
+case "$lock_path" in
+  *.gate) exit 75 ;;
+  *) exec "$@" ;;
 esac
 |};
-      write_executable (Filename.concat bin_dir "basename")
-        {|#!/bin/sh
-base="${1##*/}"
-printf '%s\n' "$base"
-|};
-      write_executable (Filename.concat bin_dir "awk")
-        {|#!/bin/sh
-while read -r first second rest; do
-  if [ "$second" = "Llm_provider__Provider_config" ]; then
-    printf '%s\n' "$first"
-    exit 0
-  fi
-done
-exit 1
-|};
-      let build_dir = Filename.concat dir "_build" in
-      mkdir_p build_dir;
-      let opam_path = Filename.concat bin_dir "opam" in
-      let script =
-        Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
-      in
-      let code, _stdout, stderr =
-        run_process ~cwd:dir "/bin/bash"
-          ~env:
-            [
-              ("PATH", bin_dir);
-              ("GIT_CEILING_DIRECTORIES", dir);
-              ("DUNE_LOCAL_LOCK", Filename.concat dir "dune-local.lock");
-              ("DUNE_BUILD_DIR", build_dir);
-              ("MASC_SKIP_DEPS_CHECK", "1");
-              ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
-              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
-            ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_DUNE_LOCK_HELD" ]
-          [| "/bin/bash"; script; "build" |]
-      in
-      let needle = "neither lockf nor flock found; running unlocked" in
-      let only_once =
-        match substring_index stderr needle with
-        | None -> false
-        | Some idx ->
-            let start = idx + String.length needle in
-            let tail = String.sub stderr start (String.length stderr - start) in
-            substring_index tail needle = None
-      in
-      check int "no-lock-tools run exits zero" 0 code;
-      check bool "fake opam kept in PATH" true (Sys.file_exists opam_path);
-      check bool "warning emitted exactly once" true only_once;
-      check bool "opam lock warning suppressed" false
-        (String_util.contains_substring stderr
-           "neither lockf nor flock found; opam switch checks are unlocked");
-      check bool "dune was invoked" true (Sys.file_exists dune_log))
+    let marker = Filename.concat dir "wrapped-command-ran" in
+    let code, _stdout, stderr =
+      run_lock_script
+        ~dir
+        ~bin_dir
+        ~lock_base:(Filename.concat dir "switch")
+        ~marker
+    in
+    check int "gate timeout is admission rejection" 75 code;
+    check bool "wrapped command did not run" false (Sys.file_exists marker);
+    check bool
+      "gate timeout is explicit"
+      true
+      (String_util.contains_substring
+         stderr
+         "gate acquisition or lease admission rejected within 5s"))
+;;
 
-let test_opam_flock_reexec_env_passthrough () =
-  with_temp_dir "dune-local-opam-flock" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      write_executable (Filename.concat bin_dir "dirname")
-        {|#!/bin/sh
-case "$1" in
-  */*) printf '%s\n' "${1%/*}" ;;
-  *) printf '.\n' ;;
-esac
-|};
-      write_executable (Filename.concat bin_dir "basename")
-        {|#!/bin/sh
-base="${1##*/}"
-printf '%s\n' "$base"
-|};
-      let flock_log = Filename.concat dir "flock-calls.log" in
-      write_executable
-        (Filename.concat bin_dir "flock")
-        (Printf.sprintf
-           {|#!/bin/sh
-printf 'held=%%s argv=%%s\n' "${MASC_OPAM_LOCK_HELD:-unset}" "$*" >> %s
-shift
-if [ "${1:-}" = "env" ]; then
-  shift
-  export "$1"
-  shift
-fi
-exec "$@"
-|}
-           (quote flock_log));
-      let opam_lock_path = Filename.concat dir "opam.lock" in
-      let dune_lock_path = Filename.concat dir "dune-local.lock" in
-      let script =
-        Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
-      in
+let test_dune_runs_under_opam_read_lease () =
+  with_temp_dir "dune-local-opam-read-lease" (fun dir ->
+      let bin_dir, dune_log = setup_fake_repo dir in
       let code, _stdout, _stderr =
-        run_process ~cwd:dir "/bin/bash"
-          ~env:
-            [
-              ("PATH", Printf.sprintf "%s:/bin" bin_dir);
-              ("GIT_CEILING_DIRECTORIES", dir);
-              ("DUNE_LOCAL_LOCK", dune_lock_path);
-              ("MASC_OPAM_LOCK_PATH", opam_lock_path);
-              ("MASC_SKIP_DEPS_CHECK", "1");
-              ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
-              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
-            ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          [| "/bin/bash"; script; "build" |]
+        run_dune_local dir bin_dir ~unset_env:[ "GITHUB_ACTIONS" ] "build"
       in
-      check int "exits zero through flock reexec" 0 code;
-      check bool "flock invoked" true (Sys.file_exists flock_log);
-      let lock_log = read_file flock_log in
-      check bool "lock path passed to flock" true
-        (String_util.contains_substring lock_log opam_lock_path);
-      check bool "held env passed through argv" true
-        (String_util.contains_substring lock_log "MASC_OPAM_LOCK_HELD=1");
-      check bool "dune was invoked after flock reexec" true
-        (Sys.file_exists dune_log))
-
-let test_opam_flock_timeout_releases_dune_lock () =
-  with_temp_dir "dune-local-opam-flock-timeout" (fun dir ->
-      let bin_dir, dune_log =
-        setup_fake_repo dir
-      in
-      write_executable (Filename.concat bin_dir "dirname")
-        {|#!/bin/sh
-case "$1" in
-  */*) printf '%s\n' "${1%/*}" ;;
-  *) printf '.\n' ;;
-esac
-|};
-      write_executable (Filename.concat bin_dir "basename")
-        {|#!/bin/sh
-base="${1##*/}"
-printf '%s\n' "$base"
-|};
-      let flock_log = Filename.concat dir "flock-calls.log" in
-      let opam_lock_path = Filename.concat dir "opam.lock" in
-      let dune_lock_path = Filename.concat dir "dune-local.lock" in
-      write_executable
-        (Filename.concat bin_dir "flock")
-        (Printf.sprintf
-           {|#!/bin/sh
-printf 'argv=%%s\n' "$*" >> %s
-timeout=""
-while [ "${1#-}" != "$1" ]; do
-  case "$1" in
-    -w) timeout="$2"; shift 2 ;;
-    *) shift ;;
-  esac
-done
-lock_path="$1"
-printf 'lock=%%s timeout=%%s\n' "$lock_path" "$timeout" >> %s
-if [ "$lock_path" = %s ] && [ -n "$timeout" ]; then exit 1; fi
-shift
-if [ "${1:-}" = "env" ]; then
-  shift
-  export "$1"
-  shift
-fi
-exec "$@"
-|}
-           (quote flock_log) (quote flock_log) (quote opam_lock_path));
-      let script =
-        Filename.concat (Filename.concat dir "scripts") "dune-local.sh"
-      in
-      let code, _stdout, stderr =
-        run_process ~cwd:dir "/bin/bash"
-          ~env:
-            [
-              ("PATH", Printf.sprintf "%s:/bin" bin_dir);
-              ("GIT_CEILING_DIRECTORIES", dir);
-              ("DUNE_LOCAL_LOCK", dune_lock_path);
-              ("MASC_OPAM_LOCK_PATH", opam_lock_path);
-              ("MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT", "2");
-              ("MASC_SKIP_DEPS_CHECK", "1");
-              ("MASC_SKIP_OCAML_VERSION_CHECK", "1");
-              ("MASC_DUNE_ALLOW_BARE_DUNE", "1");
-            ]
-          ~unset_env:[ "GITHUB_ACTIONS"; "MASC_OPAM_LOCK_HELD" ]
-          [| "/bin/bash"; script; "build" |]
-      in
-      check int "opam flock timeout exits with flock status" 1 code;
-      let lock_log = read_file flock_log in
-      check bool "flock timeout flag used" true
-        (String_util.contains_substring lock_log "timeout=2");
-      check bool "timeout explains Dune lock release" true
-        (String_util.contains_substring stderr "releasing Dune lock");
-      check bool "dune was not invoked after opam timeout" false
-        (Sys.file_exists dune_log))
+      check int "wrapper succeeds" 0 code;
+      check bool "Dune inherits the admitted read lease" true
+        (String_util.contains_substring (read_file dune_log) "read_lease=1"))
 
 let test_clean_subcommand_reaches_dune () =
   with_temp_dir "dune-local-clean" (fun dir ->
@@ -1172,26 +933,16 @@ let () =
             test_dune_lock_wait_reports_holder;
           test_case "live build-dir lock aborts before Dune" `Quick
             test_live_build_lock_aborts_before_dune;
-          test_case "bare Dune bypass aborts before Dune" `Quick
-            test_bare_dune_bypass_aborts_before_dune;
-          test_case "MASC_DUNE_ALLOW_BARE_DUNE=1 bypasses bare Dune guard"
-            `Quick test_bare_dune_bypass_can_be_overridden;
-          test_case "opam lockf reexec propagates env" `Quick
-            test_opam_lockf_reexec_env_passthrough;
-          test_case "opam lock timeout releases Dune lock" `Quick
-            test_opam_lock_timeout_releases_dune_lock;
-          test_case "unset opam lock timeout waits forever" `Quick
-            test_unset_opam_lock_timeout_waits_forever;
-          test_case "zero-like opam lock timeout waits forever" `Quick
-            test_zero_like_opam_lock_timeout_waits_forever;
-          test_case "opam lock timeout env must be numeric" `Quick
-            test_opam_lock_timeout_env_must_be_numeric;
-          test_case "missing lock tools warn once" `Quick
-            test_missing_lock_tools_warn_once;
-          test_case "opam flock reexec propagates env" `Quick
-            test_opam_flock_reexec_env_passthrough;
-          test_case "opam flock timeout releases Dune lock" `Quick
-            test_opam_flock_timeout_releases_dune_lock;
+          test_case "opam read leases overlap and exclude mutation" `Quick
+            test_opam_read_leases_overlap_and_exclude_writer;
+          test_case "opam reader admission requires its held inode" `Quick
+            test_opam_reader_admission_requires_held_inode_and_keeps_writer_file;
+          test_case "missing opam lock tools fail closed" `Quick
+            test_opam_lock_backend_absence_fails_closed;
+          test_case "opam gate timeout emits admission diagnostic" `Quick
+            test_opam_gate_timeout_has_admission_diagnostic;
+          test_case "Dune executes under an opam read lease" `Quick
+            test_dune_runs_under_opam_read_lease;
           test_case "clean subcommand reaches Dune" `Quick
             test_clean_subcommand_reaches_dune;
           test_case

@@ -28,25 +28,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-opam_lock_path="${MASC_OPAM_LOCK_PATH:-/tmp/me-opam-switch.lock}"
 
-if [[ "${MASC_OPAM_LOCK:-1}" == "0" ]]; then
-  # Retired alias (masc#25123 Wave 2): MASC_SKIP_OPAM_LOCK=1 is the single
-  # opt-out.
-  echo "[opam-pin] MASC_OPAM_LOCK is retired and ignored; use MASC_SKIP_OPAM_LOCK=1" >&2
-fi
-if [[ "${MASC_SKIP_OPAM_LOCK:-0}" != "1" \
-      && "${MASC_OPAM_LOCK_HELD:-0}" != "1" ]]; then
+if [[ "${MASC_OPAM_WRITE_LEASE_HELD:-0}" != "1" ]]; then
   script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-  env_cmd="${ENV_CMD:-/usr/bin/env}"
-  echo "[opam-pin] waiting for opam switch lock ${opam_lock_path}" >&2
-  if command -v lockf >/dev/null 2>&1; then
-    exec lockf -k "$opam_lock_path" "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-  elif command -v flock >/dev/null 2>&1; then
-    exec flock "$opam_lock_path" "$env_cmd" MASC_OPAM_LOCK_HELD=1 "$script_path" "$@"
-  else
-    echo "[opam-pin] WARN: neither lockf nor flock found; mutating opam switch unlocked" >&2
-  fi
+  exec "${SCRIPT_DIR}/opam-switch-rw-lock.sh" \
+    write -- "${ENV_CMD:-/usr/bin/env}" MASC_OPAM_WRITE_LEASE_HELD=1 \
+    "${script_path}" "$@"
 fi
 
 # Refuse to mutate a different or unsupported switch.  This script is the

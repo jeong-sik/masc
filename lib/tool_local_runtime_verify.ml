@@ -262,6 +262,9 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
       ("source", `String "agent_core_discovery");
+      ("verification_scope", `String "local_openai_compatible_runtime_pool");
+      ("blocks_keeper_turns", `Bool false);
+      ("fleet_provider_health", `String "not_assessed");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
       ("provider_base_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
       ("slot_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
@@ -291,6 +294,9 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("checked_at", `String (Masc_domain.now_iso ()));
       ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
       ("source", `String "agent_core_discovery");
+      ("verification_scope", `String "local_openai_compatible_runtime_pool");
+      ("blocks_keeper_turns", `Bool false);
+      ("fleet_provider_health", `String "not_assessed");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
       ("provider_base_url", `Null);
       ("slot_url", `Null);
@@ -308,7 +314,9 @@ let runtime_verify_json_missing_discovery ?runtime_pool ?expected_slots
       ("configured_capacity", `Int 0);
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
       ("runtime_blocker", `String "agent_core_discovery_unavailable");
-      ("detail", `String "runtime verification requires AGENT_CORE discovery endpoints");
+      ( "detail",
+        `String
+          "No typed local OpenAI-compatible discovery endpoint is registered. This diagnostic does not assess or block official-client, CLI, or remote Keeper provider lanes." );
       ("pass", `Bool false);
       ("runtimes", `List []);
     ]

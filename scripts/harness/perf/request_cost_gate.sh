@@ -50,7 +50,13 @@ PROBE_MAX_SEC="${PROBE_MAX_SEC:-20}"             # per-probe ceiling; a timeout 
 COST_MAX_SEC="${COST_MAX_SEC:-120}"              # ceiling for the heavy request itself
 CANCEL_AFTER_SEC="${CANCEL_AFTER_SEC:-3}"        # abort the heavy client after this long
 CANCEL_WATCH_SEC="${CANCEL_WATCH_SEC:-60}"       # how long to wait for post-abort recovery
-SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-0.5}"
+# 0.5s was too coarse: once a fix brought the heavy request under a second, the
+# sampler took one or two samples and reported delta 0.0MB -- indistinguishable
+# from a request that allocated nothing. A missed peak and an absent peak must
+# not produce the same number, so sample fast enough that a sub-second request
+# still yields a usable series, and fail the run if it does not (MIN_RSS_SAMPLES).
+SAMPLE_INTERVAL_SEC="${SAMPLE_INTERVAL_SEC:-0.05}"
+MIN_RSS_SAMPLES="${MIN_RSS_SAMPLES:-5}"
 
 # Gate thresholds.
 THRESHOLD_MS="${THRESHOLD_MS:-250}"              # probe p95 under one heavy request
@@ -320,6 +326,18 @@ filter_phase loaded "$RSS_CSV" "$RUN_DIR/_loaded_rss.csv"
 RSS_PEAK_KB="$(percentile "$RUN_DIR/_loaded_rss.csv" 3 100)"
 RSS_PEAK="$(kb_to_mb "$RSS_PEAK_KB")"
 RSS_DELTA="$(python3 -c "import sys; print(round(float(sys.argv[1])-float(sys.argv[2]),1))" "$RSS_PEAK" "$RSS_BASELINE")"
+RSS_SAMPLES="$(awk -F, 'NR>1 && $1=="loaded"' "$RSS_CSV" | wc -l | tr -d ' ')"
+if [[ "$RSS_SAMPLES" -lt "$MIN_RSS_SAMPLES" ]]; then
+  echo "ERROR: only $RSS_SAMPLES RSS samples while the request was in flight" >&2
+  echo "       (need >= $MIN_RSS_SAMPLES). The peak was probably missed, and a" >&2
+  echo "       missed peak reads exactly like an absent one. Lower" >&2
+  echo "       SAMPLE_INTERVAL_SEC or measure a longer request." >&2
+  jq -n --arg run_id "$RUN_ID" --argjson samples "$RSS_SAMPLES" \
+        --argjson needed "$MIN_RSS_SAMPLES" \
+    '{run_id:$run_id, verdict:"ERROR", reason:"insufficient rss samples",
+      rss_samples:$samples, required:$needed}' > "$SUMMARY_FILE"
+  exit 1
+fi
 echo "         heavy request took ${COST_DURATION}s; probe p95=${LOAD_P95}ms max=${LOAD_MAX}ms"
 echo "         rss ${RSS_BASELINE}MB -> peak ${RSS_PEAK}MB (delta ${RSS_DELTA}MB)"
 

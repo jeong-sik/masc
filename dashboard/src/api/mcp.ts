@@ -281,14 +281,27 @@ async function callMcpToolInternal(
 ): Promise<string> {
   const requestId = randomUuid()
   synchronizeMcpAuthRevision()
-  const explicitActor = explicitToolActor(args)
+  // A bearer credential is the identity authority. Never let a caller-supplied
+  // transport hint override it: besides sending a contradictory X-MASC-Agent
+  // header, the old path also preserved the foreign _agent_name in tool args.
+  // For managed dev credentials we can mirror their known actor; for every
+  // other bearer the server injects the canonical owner after authentication.
+  const hasBearer = getStoredToken() !== null
+  const explicitActor = hasBearer ? null : explicitToolActor(args)
   try {
     const binding = await ensureBinding()
     const actor = explicitActor ?? implicitToolActor()
-    const toolArgs =
-      explicitActor == null && actor
+    const toolArgs = (() => {
+      if (hasBearer) {
+        const { _agent_name: _untrustedActor, ...credentialBoundArgs } = args
+        return actor
+          ? { ...credentialBoundArgs, _agent_name: actor }
+          : credentialBoundArgs
+      }
+      return explicitActor == null && actor
         ? { ...args, _agent_name: actor }
         : args
+    })()
     const text = await mcpPost({
       jsonrpc: '2.0',
       method: 'tools/call',

@@ -274,6 +274,103 @@ let test_empty_store_is_an_empty_page base_path =
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
 
+let test_nullable_string_projection_is_literal base_path =
+  let approve_ts = now -. minutes 2 in
+  let reject_ts = now -. minutes 1 in
+  append_row
+    ~base_path
+    ~ts:approve_ts
+    (`Assoc
+        [ "event", `String "resolved"
+        ; "id", `String "approve-nullable"
+        ; "ts", `Float approve_ts
+        ; "keeper", `String "rondo"
+        ; "tool", `String "tool_execute"
+        ; "decision", `String "approve"
+        ; "turn_id", `Null
+        ; "task_id", `Null
+        ; "goal_id", `Null
+        ; "goal_ids", `List []
+        ; "actor", `Null
+        ; "decision_source", `String "auto_judge"
+        ; "authorization_source", `Null
+        ; "rule_match", `Null
+        ; "source_approval_id", `Null
+        ; "decision_kind", `String "approve"
+        ; "decision_reason", `Null
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ; "summary_attempt_disposition", `Null
+        ]);
+  append_row
+    ~base_path
+    ~ts:reject_ts
+    (`Assoc
+        [ "event", `String "resolved"
+        ; "id", `String "reject-present"
+        ; "ts", `Float reject_ts
+        ; "keeper", `String "rondo"
+        ; "tool", `String "tool_execute"
+        ; "decision", `String "reject"
+        ; "turn_id", `Null
+        ; "task_id", `String "task-7"
+        ; "goal_id", `String "goal-9"
+        ; "goal_ids", `List [ `String "goal-9" ]
+        ; "actor", `String "operator"
+        ; "decision_source", `String "manual"
+        ; "authorization_source", `Null
+        ; "rule_match", `Null
+        ; "source_approval_id", `Null
+        ; "decision_kind", `String "reject"
+        ; "decision_reason", `String "unsafe arguments"
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ; "summary_attempt_disposition", `Null
+        ]);
+  let history = AQ.list_recent_resolved ~base_path ~now_ts:now ~window_minutes:60 () in
+  check
+    (list yojson)
+    "nullable strings project to the literal resolved contract"
+    [ `Assoc
+        [ "id", `String "reject-present"
+        ; "event", `String "resolved"
+        ; "keeper_name", `String "rondo"
+        ; "tool_name", `String "tool_execute"
+        ; "decision", `String "reject"
+        ; "decision_kind", `String "reject"
+        ; "decision_reason", `String "unsafe arguments"
+        ; "resolved_at", `Float reject_ts
+        ; "turn_id", `Null
+        ; "task_id", `String "task-7"
+        ; "goal_id", `String "goal-9"
+        ; "goal_ids", `List [ `String "goal-9" ]
+        ; "actor", `String "operator"
+        ; "decision_source", `String "manual"
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ]
+    ; `Assoc
+        [ "id", `String "approve-nullable"
+        ; "event", `String "resolved"
+        ; "keeper_name", `String "rondo"
+        ; "tool_name", `String "tool_execute"
+        ; "decision", `String "approve"
+        ; "decision_kind", `String "approve"
+        ; "decision_reason", `Null
+        ; "resolved_at", `Float approve_ts
+        ; "turn_id", `Null
+        ; "task_id", `Null
+        ; "goal_id", `Null
+        ; "goal_ids", `List []
+        ; "actor", `Null
+        ; "decision_source", `String "auto_judge"
+        ; "summary_status", `String "not_requested"
+        ; "exact_attempt", `Assoc [ "state", `String "unbound" ]
+        ]
+    ]
+    history.resolved_rows
+;;
+
 let test_judge_evidence_passes_through base_path =
   let summary_status : Yojson.Safe.t =
     `Assoc [ "status", `String "failed"; "reason", `String "quarantined" ]
@@ -364,6 +461,10 @@ let () =
             (with_store test_malformed_jsonl_is_unavailable)
         ; test_case "empty store is an empty page" `Quick
             (with_store test_empty_store_is_an_empty_page)
+        ] )
+    ; ( "projection"
+      , [ test_case "nullable strings keep the literal resolved shape" `Quick
+            (with_store test_nullable_string_projection_is_literal)
         ] )
     ; ( "judge evidence"
       , [ test_case "judge evidence passes through" `Quick

@@ -46,6 +46,8 @@ type metric_evaluation =
 
 let task_is_linked_to_goal ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
   let task_goal_ids =
+    (* DET-OK: an absent bucket means no recorded links; this is the same []
+       returned by the replaced [Not_found] handler. *)
     Option.value (Hashtbl.find_opt goal_task_index task.id) ~default:[]
   in
   List.mem goal_id task_goal_ids

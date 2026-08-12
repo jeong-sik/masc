@@ -30,6 +30,8 @@ let normalize_link_set links =
     (fun (goal_id, task_ids) ->
        let goal_id = String.trim goal_id in
        if not (String.equal goal_id "") then (
+         (* DET-OK: an absent bucket means no accumulated links; this is the
+            same [] returned by the replaced [Not_found] handler. *)
          let existing = Option.value (Hashtbl.find_opt tbl goal_id) ~default:[] in
          let merged =
            List.fold_left
@@ -423,6 +425,8 @@ let build_goal_task_index
 (** Find all tasks linked to a specific goal.
     Returns [[]] when no tasks are linked to the given [goal_id]. *)
 let tasks_for_goal (index : (string, task list) Hashtbl.t) ~goal_id : task list =
+  (* DET-OK: an absent bucket is the documented no-linked-tasks result; this
+     is the same [] returned by the replaced [Not_found] handler. *)
   Option.value (Hashtbl.find_opt index goal_id) ~default:[]
 ;;
 
@@ -457,6 +461,7 @@ let build_task_goal_index
     (fun (goal_id, task_ids) ->
        List.iter
          (fun task_id ->
+            (* DET-OK: absent means no accumulated goal ids, the prior [] result. *)
             let existing = Option.value (Hashtbl.find_opt tbl task_id) ~default:[] in
             (* Preserve registry order for consumers that need a canonical
                first-linked goal for a task. Multi-goal task links are legacy

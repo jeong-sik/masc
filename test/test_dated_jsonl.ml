@@ -145,6 +145,27 @@ let test_filter_map_recent_skips_malformed_rows () =
   let values = Dated_jsonl.filter_map_recent store 10 ~f:(fun j -> Some (json_i j)) in
   check (list int) "malformed row skipped" [ 1; 2 ] values
 
+let test_filter_map_recent_calls_the_projection_newest_first () =
+  (* The result is chronological, but the scan runs newest-first and prepends.
+     A projection whose side effects depend on call order is therefore *not*
+     interchangeable with [read_recent |> List.filter_map f]. Pinned because
+     the remaining migration targets (rate-limited decode-error logging, drop
+     reporting) are exactly that kind of projection. *)
+  let dir = tmpdir "dated_jsonl_filter_map_visit_order" in
+  write_dated_file dir "2026-01" "01" [ {|{"i":1}|}; {|{"i":2}|} ];
+  write_dated_file dir "2026-01" "02" [ {|{"i":3}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let visited = ref [] in
+  let values =
+    Dated_jsonl.filter_map_recent store 3 ~f:(fun j ->
+      let i = json_i j in
+      visited := i :: !visited;
+      Some i)
+  in
+  check (list int) "result is chronological" [ 1; 2; 3 ] values;
+  check (list int) "projection saw rows newest first" [ 3; 2; 1 ]
+    (List.rev !visited)
+
 let test_filter_map_recent_does_not_swallow_callback_failure () =
   (* The reader swallows [Yojson.Json_error] to skip malformed rows. A decoder
      that raises the same exception must still reach the caller, or a broken
@@ -948,6 +969,8 @@ let () =
             test_filter_map_recent_offset_skips_newest_rows;
           test_case "skips malformed rows" `Quick
             test_filter_map_recent_skips_malformed_rows;
+          test_case "projection is called newest first" `Quick
+            test_filter_map_recent_calls_the_projection_newest_first;
           test_case "callback failure is not swallowed" `Quick
             test_filter_map_recent_does_not_swallow_callback_failure;
         ] );

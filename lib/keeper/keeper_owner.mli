@@ -32,6 +32,27 @@ type turn_in_flight =
   { lane : turn_lane
   ; started_at : float
   }
+(** At most one turn runs per Keeper, across all three lanes. The Owner holds
+    that slot; {!Keeper_turn_dispatch_authority} states the same boundary from
+    the other side ("Keeper Owner owns scheduling and single-running
+    admission") and carries no per-Keeper mutex of its own.
+
+    What the slot protects is a single-writer invariant. A turn drives the
+    per-Keeper turn FSM through [Keeper_registry.set_turn_phase], which
+    resolves every transition against the current phase and raises
+    [Turn_phase_transition_violation] for a forbidden one. Two turns on one
+    Keeper would each transition from whatever the other left behind, so
+    concurrency here does not corrupt state quietly — it raises, and the
+    violation counter [masc_fsm_guard_violation_total] records it. Measured
+    over 2026-08-10..12 on the live fleet: 162,813 turn-phase transitions and
+    0 violations.
+
+    The exclusion is an invariant; the *order* in which contending lanes get
+    the freed slot is not specified here and is not fair today — a queued chat
+    operation is offered the slot synchronously when a turn ends, while the
+    autonomous lane discovers it only on its next keepalive poll. RFC-0373
+    measures the resulting starvation and is where an admission policy belongs.
+    Any such policy must keep the invariant above, not merely the counter. *)
 
 type autonomous_block =
   | Turn_busy of turn_in_flight option

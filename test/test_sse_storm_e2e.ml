@@ -684,6 +684,53 @@ let test_dashboard_dev_token_cannot_call_admin_route () =
   in
   check_status "dashboard Worker token denied CanAdmin route" 403 result
 
+let check_operation_error label expected_code result =
+  match Yojson.Safe.from_string result.body with
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String code) -> check string label expected_code code
+     | _ -> fail (label ^ ": missing typed operation error: " ^ result.body))
+  | _ -> fail (label ^ ": non-object operation error: " ^ result.body)
+  | exception Yojson.Json_error detail ->
+    fail (label ^ ": invalid JSON operation error: " ^ detail)
+;;
+
+let test_dashboard_dev_token_can_use_keeper_operation_routes () =
+  with_server @@ fun ~port ~auth_token ~base_path:_ ->
+  let headers =
+    [ "Accept", "application/json"
+    ; "Authorization", "Bearer " ^ auth_token
+    ; "Content-Type", "application/json"
+    ]
+  in
+  let operation_path =
+    "/api/v1/keepers/absent-keeper/chat/operations/kmsg-worker-auth"
+  in
+  let get_result =
+    run_curl ~headers ~max_time:2.0 ~port ~path:operation_path ()
+  in
+  check_status "dashboard Worker operation lookup reaches handler" 404 get_result;
+  check_operation_error
+    "dashboard Worker operation lookup typed error"
+    "unknown_operation"
+    get_result;
+  let cancel_result =
+    run_curl
+      ~headers
+      ~method_:"POST"
+      ~body:"{}"
+      ~max_time:2.0
+      ~port
+      ~path:(operation_path ^ "/cancel")
+      ()
+  in
+  check_status "dashboard Worker operation cancel reaches handler" 404 cancel_result;
+  check_operation_error
+    "dashboard Worker operation cancel typed error"
+    "unknown_operation"
+    cancel_result
+;;
+
 let test_official_client_recovery_uses_real_admin_route () =
   with_server @@ fun ~port ~auth_token ~base_path ->
   let keeper_name = "official-client-http-fixture" in
@@ -873,6 +920,10 @@ let () =
             "dev-token cannot call admin route"
             `Slow
             test_dashboard_dev_token_cannot_call_admin_route
+        ; test_case
+            "dev-token can use Keeper operation routes"
+            `Slow
+            test_dashboard_dev_token_can_use_keeper_operation_routes
         ; test_case
             "official-client recovery uses real CanAdmin route"
             `Slow

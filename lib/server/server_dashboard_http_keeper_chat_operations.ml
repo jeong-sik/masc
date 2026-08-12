@@ -4,6 +4,9 @@ module Operation_id = Operation.Operation_id
 module Owner = Keeper_owner
 module Registry = Keeper_owner_registry
 
+let read_permission = Masc_domain.CanReadState
+let mutation_permission = Masc_domain.CanBroadcast
+
 type get_route =
   | Operation_list of { keeper_name : string }
   | Operation_exact of

@@ -109,12 +109,66 @@ const DEFAULT_PROJECT_FILES = [
   'design-system/headless-preact/use-tabs.test.ts',
 ]
 
+// Shrink-only migration allowlist. Every other dashboard TypeScript file is
+// forbidden from importing Valibot; remove a path in the same PR that moves
+// that boundary to Effect Schema.
+const LEGACY_VALIBOT_FILES = [
+  'src/api/schemas/agent-relations.ts',
+  'src/api/schemas/agent-timeline.ts',
+  'src/api/schemas/dashboard-config.ts',
+  'src/api/schemas/drift-error.test.ts',
+  'src/api/schemas/drift-error.ts',
+  'src/api/schemas/gate-connectors.ts',
+  'src/api/schemas/gate-keepers.ts',
+  'src/api/schemas/gate-status.ts',
+  'src/api/schemas/keeper-catchup-digest.ts',
+  'src/api/schemas/keeper-chat-history.ts',
+  'src/api/schemas/keeper-composite.ts',
+  'src/api/schemas/keeper-transitions.ts',
+  'src/api/schemas/link-previews.ts',
+  'src/api/schemas/logs.ts',
+  'src/api/schemas/operator-action.ts',
+  'src/api/schemas/provider-logs.ts',
+  'src/api/schemas/runtime-defaults.ts',
+  'src/api/schemas/runtime-resolved.ts',
+]
+
 export default tseslint.config(
   {
     ignores: ['dist/**', 'coverage/**'],
   },
   {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: LEGACY_VALIBOT_FILES,
+    linterOptions: {
+      // This policy-only pass reaches files outside the typed lint target.
+      // Their unrelated inline directives remain owned by their normal lint
+      // migration; typed target files restore unused-directive reporting.
+      reportUnusedDisableDirectives: false,
+    },
+    languageOptions: {
+      parser: tseslint.parser,
+    },
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [
+          {
+            name: 'valibot',
+            message: 'New and migrated boundaries use Effect Schema only.',
+          },
+        ],
+      }],
+    },
+  },
+  {
     files: TARGET_FILES,
+    linterOptions: {
+      reportUnusedDisableDirectives: true,
+    },
     languageOptions: {
       parser: tseslint.parser,
       globals: {
@@ -148,27 +202,10 @@ export default tseslint.config(
     },
   },
   {
-    files: [
-      'src/api/effect-http.ts',
-      'src/api/schemas/transport-health.ts',
-      'src/api/transport-health.ts',
-      'src/components/transport-health.ts',
-      'src/lib/effect-resource.ts',
-      'src/lib/remote-data.ts',
-    ],
-    rules: {
-      'no-restricted-imports': ['error', {
-        paths: [
-          {
-            name: 'valibot',
-            message: 'Migrated boundaries use Effect Schema only.',
-          },
-        ],
-      }],
-    },
-  },
-  {
     files: TEST_FILES,
+    linterOptions: {
+      reportUnusedDisableDirectives: true,
+    },
     languageOptions: {
       parser: tseslint.parser,
       globals: {

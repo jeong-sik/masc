@@ -52,6 +52,9 @@ schemas describe the exact producer currently shipped by this repository.
 
 - Do not accept legacy aliases or repair old payloads in the frontend.
 - Do not collapse unknown enum values to a plausible default.
+- An additive producer field is a contract change because excess properties
+  are rejected. The producer, schema fixture, and consumer must land together;
+  a server-only additive response change is not compatible with this client.
 - If backend and dashboard must change together, update the producer fixture,
   schema, and consumer in the same PR.
 - If an independently deployed producer is incompatible, fail visibly and
@@ -72,6 +75,9 @@ Components must not maintain parallel `data`, `loading`, `error`, or inflight
 Promise state for the same resource.
 
 ## Incremental conversion
+
+Campaign progress and the shrinking legacy allowlists are tracked in #28260;
+each migration PR links that issue and marks only its completed slice.
 
 Each PR converts a complete endpoint or tightly related endpoint group:
 

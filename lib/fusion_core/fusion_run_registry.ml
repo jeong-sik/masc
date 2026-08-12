@@ -13,14 +13,19 @@ type run =
   { run_id : string
   ; keeper : string
   ; preset : string
+  ; topology : Fusion_types.fusion_topology
   ; started_at : float
   ; status : run_status
   }
 
 module Payload = struct
+  (* [topology] 는 요청이 고른 심의 위상이다. registry 가 보관하는 이유는 이것이
+     완료 후에도 필요한 유일한 자리이기 때문이다 — obligation payload 에도 있지만
+     그 레코드는 배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 곳이 없어진다. *)
   type registration =
     { keeper : string
     ; preset : string
+    ; topology : Fusion_types.fusion_topology
     }
 
   type completion = outcome
@@ -34,18 +39,29 @@ module Payload = struct
     `Assoc
       [ "keeper", `String registration.keeper
       ; "preset", `String registration.preset
+      ; ( "topology"
+        , `String (Fusion_types.fusion_topology_to_string registration.topology) )
       ]
   ;;
 
   let registration_of_yojson json =
     let ( let* ) = Result.bind in
     let* fields = Run_registry_core.Json.object_fields json in
+    (* [exact_fields] 라 topology 없는 예전 레코드는 여기서 Error 가 되고 replay 가
+       그 줄만 스킵한다(경고 1줄). 레거시 폴백을 두지 않는 이유는 registry 가 캐시성
+       데이터이기 때문이다 — running 은 재시작으로 이미 무효고 완료분은 Latest 64
+       보존이다. 폴백을 두면 "위상 미상" 이라는 새 상태를 UI 까지 끌고 가야 한다. *)
     let* () =
-      Run_registry_core.Json.exact_fields ~required:[ "keeper"; "preset" ] fields
+      Run_registry_core.Json.exact_fields
+        ~required:[ "keeper"; "preset"; "topology" ]
+        fields
     in
     let* keeper = Run_registry_core.Json.string_field "keeper" fields in
     let* preset = Run_registry_core.Json.string_field "preset" fields in
-    Ok { keeper; preset }
+    let* topology_wire = Run_registry_core.Json.string_field "topology" fields in
+    match Fusion_types.fusion_topology_of_string topology_wire with
+    | None -> Error (Printf.sprintf "unknown fusion topology %S" topology_wire)
+    | Some topology -> Ok { keeper; preset; topology }
   ;;
 
   let completion_to_yojson = function
@@ -89,8 +105,9 @@ let create = Store.create
 let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
 
-let register_running t ~run_id ~keeper ~preset ~started_at =
-  Store.register t ~id:run_id ~started_at ~registration:{ Payload.keeper; preset }
+let register_running t ~run_id ~keeper ~preset ~topology ~started_at =
+  Store.register t ~id:run_id ~started_at
+    ~registration:{ Payload.keeper; preset; topology }
 ;;
 
 let mark_completed t ~run_id ~outcome =
@@ -109,6 +126,7 @@ let run_of_entry (entry : Store.entry) =
   { run_id = entry.id
   ; keeper = entry.registration.keeper
   ; preset = entry.registration.preset
+  ; topology = entry.registration.topology
   ; started_at = entry.started_at
   ; status
   }
@@ -128,6 +146,7 @@ let run_to_yojson run =
     [ "run_id", `String run.run_id
     ; "keeper", `String run.keeper
     ; "preset", `String run.preset
+    ; "topology", `String (Fusion_types.fusion_topology_to_string run.topology)
     ; "started_at", `Float run.started_at
     ; "status", `String (status_label run.status)
     ]

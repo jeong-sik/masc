@@ -51,7 +51,7 @@ let float_ j k =
 let test_persist_register_complete () =
   let path = fresh_path ".jsonl" in
   let t = R.create ~path () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~started_at:1.0;
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   let content = Fs_compat.load_file path in
   let lines = String.split_on_char '\n' content in
@@ -72,7 +72,7 @@ let test_persist_register_complete () =
 let test_persist_failure_detail () =
   let path = fresh_path "-failure.jsonl" in
   let t = R.create ~path () in
-  R.register_running t ~run_id:"r-fail" ~keeper:"k" ~preset:"p" ~started_at:1.0;
+  R.register_running t ~run_id:"r-fail" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r-fail"
     ~outcome:(R.Failed { reason = "judge failed: bad json"; code = "parse_error" });
   let content = Fs_compat.load_file path in
@@ -100,13 +100,13 @@ let test_replay_prunes_completed () =
       t
       ~run_id:("r" ^ string_of_int i)
       ~keeper:"k"
-      ~preset:"p"
+      ~preset:"p" ~topology:Fusion_types.Simple
       ~started_at:(float_of_int i);
     R.mark_completed t ~run_id:("r" ^ string_of_int i) ~outcome:R.Succeeded
   done;
   (* Leave one run in [Running] state; replay must drop it because the worker
      fiber died with the old process. *)
-  R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~started_at:71.0;
+  R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:71.0;
   let t2 = R.replay path in
   let runs = R.list_runs t2 in
   check int "pruned completed only" R.max_completed_retained (List.length runs);
@@ -123,7 +123,7 @@ let test_replay_prunes_completed () =
 let test_no_path_is_in_memory_only () =
   let path = fresh_path "-no-path.jsonl" in
   let t = R.create () in
-  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~started_at:1.0;
+  R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~outcome:R.Succeeded;
   check bool "no file created" false (Sys.file_exists path)
 ;;
@@ -135,9 +135,9 @@ let test_replay_skips_malformed_lines () =
     path
     (String.concat
        "\n"
-       [ {|{"event":"register","id":"r1","started_at":1.0,"registration":{"keeper":"k","preset":"p"}}|}
+       [ {|{"event":"register","id":"r1","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
        ; {|not-json|}
-       ; {|{"event":"register","id":42,"started_at":2.0,"registration":{"keeper":"k","preset":"p"}}|}
+       ; {|{"event":"register","id":42,"started_at":2.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
        ; {|{"event":"complete","id":"r1","completion":{"outcome":"failed"}}|}
        ; {|{"event":"complete","id":"r1","completion":{"outcome":"failed","reason":"bad result","code":"bad_result"}}|}
        ; ""
@@ -155,7 +155,7 @@ let test_replay_skips_malformed_lines () =
 let test_replay_streams_and_compacts () =
   let path = fresh_path "-stream.jsonl" in
   let before =
-    {|{"event":"register","id":"r-stream","started_at":1.0,"registration":{"keeper":"k","preset":"p"}}|}
+    {|{"event":"register","id":"r-stream","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
   in
   let after =
     {|{"event":"complete","id":"r-stream","completion":{"outcome":"succeeded"}}|}
@@ -181,10 +181,10 @@ let test_replay_streams_and_compacts () =
 let test_append_after_replay_compaction_targets_live_path () =
   let path = fresh_path "-append-after-replay.jsonl" in
   let original = R.create ~path () in
-  R.register_running original ~run_id:"before" ~keeper:"k" ~preset:"p" ~started_at:1.0;
+  R.register_running original ~run_id:"before" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:1.0;
   R.mark_completed original ~run_id:"before" ~outcome:R.Succeeded;
   let replayed = R.replay path in
-  R.register_running replayed ~run_id:"after" ~keeper:"k" ~preset:"p" ~started_at:2.0;
+  R.register_running replayed ~run_id:"after" ~keeper:"k" ~preset:"p" ~topology:Fusion_types.Simple ~started_at:2.0;
   R.mark_completed replayed ~run_id:"after" ~outcome:R.Succeeded;
   let replayed_again = R.replay path in
   check
@@ -203,7 +203,7 @@ let test_append_after_replay_compaction_targets_live_path () =
 let test_replay_preserves_unterminated_tail () =
   let path = fresh_path "-partial-tail.jsonl" in
   let complete =
-    {|{"event":"register","id":"r-partial","started_at":1.0,"registration":{"keeper":"k","preset":"p"}}|}
+    {|{"event":"register","id":"r-partial","started_at":1.0,"registration":{"keeper":"k","preset":"p","topology":"simple"}}|}
   in
   let partial =
     {|{"event":"complete","id":"r-partial","completion":{"outcome":"succeeded"}}|}

@@ -79,7 +79,7 @@ let ensure_registry_entry ~registry obligation =
   | None ->
     Fusion_run_registry.register_running registry ~run_id
       ~keeper:obligation.payload.keeper_name ~preset:obligation.payload.preset
-      ~started_at:obligation.accepted_at;
+      ~topology:obligation.payload.topology ~started_at:obligation.accepted_at;
     Fusion_sink.broadcast_run_status ~registry ~run_id
 ;;
 

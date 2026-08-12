@@ -431,7 +431,7 @@ let test_emit_success_projects_board_chat_and_registry () =
           { role = Fusion_types.Single; synthesis; usage = judge_usage }
       ]
     in
-    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test"
+    Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"unit-test" ~topology:Fusion_types.Simple
       ~started_at:2.0;
     let result =
       Fusion_sink.emit ~registry ~base_dir ~keeper ~run_id ~channel:discord_channel

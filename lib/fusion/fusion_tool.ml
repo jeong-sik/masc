@@ -108,7 +108,7 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
                 Keeper_chat_delivery_identity.Request_id.to_string obligation.request_id
               in
               Fusion_run_registry.register_running registry ~run_id ~keeper ~preset
-                ~started_at:obligation.accepted_at;
+                ~topology ~started_at:obligation.accepted_at;
               Fusion_sink.broadcast_run_status ~registry ~run_id;
               Ok ())
        in

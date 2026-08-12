@@ -422,6 +422,41 @@ describe('MCP 2026-07-28 dashboard client', () => {
       .toEqual(['/api/v1/dashboard/dev-token', '/mcp'])
   })
 
+  it('binds identity to a bearer bootstrapped during the call', async () => {
+    let token: string | null = null
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = null
+    let revision = 0
+    getStoredToken.mockImplementation(() => token)
+    getStoredTokenMeta.mockImplementation(() => meta)
+    currentStoredTokenRevision.mockImplementation(() => revision)
+    setStoredToken.mockImplementationOnce((nextToken, nextMeta) => {
+      token = nextToken
+      meta = nextMeta
+      revision += 1
+    })
+    fetchWithTimeout
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        token: 'loopback-dev-token', actor: 'dashboard', role: 'worker',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(okToolResponse())
+
+    const { callMcpTool } = await import('./mcp')
+    await callMcpTool('masc_transition', {
+      task_id: 'task-223',
+      agent_name: 'target-keeper',
+      _agent_name: 'foreign-caller',
+    })
+
+    const [, init] = callsByMethod('tools/call')[0]!
+    const body = JSON.parse(init.body as string)
+    expect(body.params.arguments).toEqual({
+      task_id: 'task-223',
+      agent_name: 'target-keeper',
+      _agent_name: 'dashboard',
+    })
+    expect(authHeaders).toHaveBeenLastCalledWith({ actorName: 'dashboard' })
+  })
+
   it('uses distinct platform UUIDs for consecutive tool request identities', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(okToolResponse('first'))

@@ -196,7 +196,54 @@ let test_schedule_delivery_requirement_is_persisted_policy () =
        false)
 ;;
 
+(* PR #28225 (comment 3760417416): a completed connector-attention turn maps its
+   continuation delivery to an attention-ledger terminal. A sent-but-unsettled
+   delivery must not be terminalized as Ignored. *)
+let test_connector_attention_outcome_of_delivery () =
+  let module H = Masc.Keeper_heartbeat_loop in
+  let module U = Masc.Keeper_unified_turn in
+  let committed delivery_state =
+    let intent_id =
+      (* kdelivery- prefix + 64 lowercase-hex digest. *)
+      Keeper_continuation_delivery_intent.Intent_id.of_string
+        ("kdelivery-" ^ String.make 64 'a')
+      |> Result.get_ok
+    in
+    U.Continuation_delivery_committed { intent_id; delivery_state }
+  in
+  (* Delivered replies resolve the attention item. *)
+  assert (
+    H.connector_attention_outcome_of_delivery
+      U.Continuation_delivery_settled_by_terminal_surface_post
+    = H.Attention_resolved);
+  assert (
+    H.connector_attention_outcome_of_delivery (committed U.Delivery_delivered)
+    = H.Attention_resolved);
+  (* Sent-but-unsettled or recovery-pending is neither resolved nor ignored:
+     leave the item open so recovery can settle it. *)
+  assert (
+    H.connector_attention_outcome_of_delivery (committed U.Delivery_ambiguous)
+    = H.Attention_left_open);
+  assert (
+    H.connector_attention_outcome_of_delivery
+      (committed U.Delivery_recovery_pending)
+    = H.Attention_left_open);
+  (* A failed, absent, or quarantined delivery ignores the item. *)
+  assert (
+    H.connector_attention_outcome_of_delivery (committed U.Delivery_failed)
+    = H.Attention_ignored);
+  assert (
+    H.connector_attention_outcome_of_delivery
+      U.Continuation_delivery_not_required
+    = H.Attention_ignored);
+  assert (
+    H.connector_attention_outcome_of_delivery
+      (U.Continuation_delivery_quarantined { detail = "outbox unavailable" })
+    = H.Attention_ignored)
+;;
+
 let () =
   test_wake_origin_requires_exact_route_and_source ();
   test_schedule_delivery_requirement_is_persisted_policy ();
+  test_connector_attention_outcome_of_delivery ();
   print_endline "keeper_continuation_delivery_origin: ok"

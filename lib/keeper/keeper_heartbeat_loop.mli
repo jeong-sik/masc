@@ -191,6 +191,22 @@ val continuation_delivery_authorizes_source_ack :
   bool
 (** Boolean compatibility projection of {!continuation_source_disposition}. *)
 
+type connector_attention_outcome =
+  | Attention_resolved
+  | Attention_ignored
+  | Attention_left_open
+
+val connector_attention_outcome_of_delivery :
+  Keeper_unified_turn.continuation_delivery_completion ->
+  connector_attention_outcome
+(** Attention-ledger terminal for a completed connector-attention turn. A
+    delivered reply resolves the item; a failed/absent/quarantined delivery
+    ignores it; a sent-but-unsettled delivery ([Delivery_ambiguous]) or one
+    pending recovery is left open, since it is neither proven delivered nor
+    ignored. The connector-attention stimulus is edge-triggered, so an open
+    item does not re-drive a turn — it surfaces as pending until recovery
+    settles it. *)
+
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
     [0] maps to [Turn_succeeded]. *)

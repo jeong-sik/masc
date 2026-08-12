@@ -229,6 +229,40 @@ let mark_connector_attention_resolved_after_delivery ~base_path ~keeper_name eve
          err)
 ;;
 
+(* PR #28225 (comment 3760417416): a sent-but-unsettled connector delivery
+   ([Delivery_ambiguous]) or one still pending recovery is neither resolved — we
+   hold no durable receipt — nor ignored — the reply was dispatched.
+   Terminalizing it as [Ignored] mislabels a handled conversation in the
+   attention projection. Leaving the attention item open records the honest
+   pending state and lets the recovery path settle it. The connector-attention
+   stimulus is edge-triggered (dequeued once), so an open ledger item does not
+   re-drive a turn; it only surfaces as pending in the operator digest. *)
+type connector_attention_outcome =
+  | Attention_resolved
+  | Attention_ignored
+  | Attention_left_open
+
+let connector_attention_outcome_of_delivery
+    (delivery : Keeper_unified_turn.continuation_delivery_completion) =
+  match delivery with
+  | Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post
+  | Keeper_unified_turn.Continuation_delivery_committed
+      { delivery_state = Keeper_unified_turn.Delivery_delivered; _ } ->
+    Attention_resolved
+  | Keeper_unified_turn.Continuation_delivery_committed
+      { delivery_state =
+          ( Keeper_unified_turn.Delivery_ambiguous
+          | Keeper_unified_turn.Delivery_recovery_pending )
+      ; _
+      } ->
+    Attention_left_open
+  | Keeper_unified_turn.Continuation_delivery_committed
+      { delivery_state = Keeper_unified_turn.Delivery_failed; _ }
+  | Keeper_unified_turn.Continuation_delivery_not_required
+  | Keeper_unified_turn.Continuation_delivery_quarantined _ ->
+    Attention_ignored
+;;
+
 (* T6 audit: record a swallowed cycle exception as a turn failure.
 
    Catch-and-survive is intentional (the fiber must outlive the
@@ -997,23 +1031,24 @@ let run_keepalive_unified_turn
       (match !pending_selection with
        | None -> ()
        | Some selection ->
-           let remove_completed_selection ~connector_reply_delivered =
+           let remove_completed_selection ~connector_attention_outcome =
              if terminalize_completed_selection ~selection
-             then
+             then (
                let event_ids =
                  connector_attention_event_ids_of_stimuli !consumed_stimuli
                in
-               if connector_reply_delivered
-               then
+               match connector_attention_outcome with
+               | Attention_resolved ->
                  mark_connector_attention_resolved_after_delivery
                    ~base_path:ctx.config.base_path
                    ~keeper_name:meta_after_triage.name
                    event_ids
-               else
+               | Attention_ignored ->
                  mark_connector_attention_ignored_after_turn
                    ~base_path:ctx.config.base_path
                    ~keeper_name:meta_after_triage.name
                    event_ids
+               | Attention_left_open -> ())
            in
            match !cycle_outcome_ref with
            | Some (Cycle.Completed completion) ->
@@ -1026,25 +1061,10 @@ let run_keepalive_unified_turn
                   completion.continuation_delivery
               with
               | Acknowledge_source ->
-                let connector_reply_delivered =
-                  match completion.continuation_delivery with
-                  | Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post ->
-                    true
-                  | Keeper_unified_turn.Continuation_delivery_committed
-                      { delivery_state = Keeper_unified_turn.Delivery_delivered; _ } ->
-                    true
-                  | Keeper_unified_turn.Continuation_delivery_not_required
-                  | Keeper_unified_turn.Continuation_delivery_quarantined _
-                  | Keeper_unified_turn.Continuation_delivery_committed
-                      { delivery_state =
-                          ( Keeper_unified_turn.Delivery_failed
-                          | Keeper_unified_turn.Delivery_ambiguous
-                          | Keeper_unified_turn.Delivery_recovery_pending )
-                      ; _
-                      } ->
-                    false
-                in
-                remove_completed_selection ~connector_reply_delivered
+                remove_completed_selection
+                  ~connector_attention_outcome:
+                    (connector_attention_outcome_of_delivery
+                       completion.continuation_delivery)
               | Defer_continuation_source ->
                 (* The source is now a durable recovery token, not fresh model
                    input. Moving it behind peer work preserves fleet liveness;
@@ -1057,7 +1077,8 @@ let run_keepalive_unified_turn
               | Quarantine_continuation_source { detail } ->
                 terminalize_failed_selection ~selection ~detail)
            | Some (Cycle.Manual_compaction_applied _) ->
-             remove_completed_selection ~connector_reply_delivered:false
+             remove_completed_selection
+               ~connector_attention_outcome:Attention_ignored
            | Some (Cycle.Failed { failure; _ }) ->
              let source_requires =
                source_requires_continuation_delivery !consumed_stimuli
@@ -1086,22 +1107,9 @@ let run_keepalive_unified_turn
                            completion
                        with
                        | Acknowledge_source ->
-                         let connector_reply_delivered =
-                           match completion with
-                           | Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post ->
-                             true
-                           | Keeper_unified_turn.Continuation_delivery_committed
-                               { delivery_state =
-                                   Keeper_unified_turn.Delivery_delivered
-                               ; _
-                               } ->
-                             true
-                           | Keeper_unified_turn.Continuation_delivery_not_required
-                           | Keeper_unified_turn.Continuation_delivery_quarantined _
-                           | Keeper_unified_turn.Continuation_delivery_committed _ ->
-                             false
-                         in
-                         remove_completed_selection ~connector_reply_delivered
+                         remove_completed_selection
+                           ~connector_attention_outcome:
+                             (connector_attention_outcome_of_delivery completion)
                        | Defer_continuation_source ->
                          defer_selection_to_queue_tail
                            ~selection

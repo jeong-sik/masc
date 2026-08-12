@@ -11,7 +11,10 @@ import {
   fetchJsonWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
 } from './core'
-import { refreshDevTokenAfterAuthError } from './dev-token'
+import {
+  ensureDevToken,
+  refreshDevTokenAfterAuthError,
+} from './dev-token'
 import type { KeeperChatStreamEvent } from '../lib/keeper-chat-stream-contract'
 import type {
   KeeperCompositeSnapshot,
@@ -287,6 +290,14 @@ export async function streamKeeperMessage(
     surfaceContext,
   }: StreamKeeperMessageOptions,
 ): Promise<KeeperStreamOutcome> {
+  // Direct keeper chat is a mutation path just like MCP tools.  Bootstrap the
+  // loopback dashboard credential before constructing the request so a freshly
+  // loaded dashboard never emits a misleading 401 "Token required" toast.
+  // Existing credentials are left to the typed 401 recovery below; only a
+  // missing credential needs the preflight bootstrap. This avoids an extra
+  // network round-trip for every message while still preventing the common
+  // freshly-loaded-dashboard failure.
+  if (!jsonHeaders().Authorization) await ensureDevToken()
   const operationId = requestId?.trim() || `kmsg-${crypto.randomUUID()}`
   const body: Record<string, unknown> = {
     request_id: operationId,

@@ -1946,7 +1946,13 @@ let post_sync_once_after_validation
         status := Some response_status;
         Http_client_phase_observer.observe
           (Http_client_phase_observer.Response_received response_status);
-        Ok (conn, response, response_body, response_header_evidence, retry_after_header))
+        Ok
+          ( conn
+          , response
+          , response_body
+          , response_status
+          , response_header_evidence
+          , retry_after_header ))
     with
     | Eio.Time.Timeout as exn ->
       release_connection ();
@@ -1957,7 +1963,13 @@ let post_sync_once_after_validation
   | Error error ->
     release_connection ();
     fail error
-  | Ok (conn, response, response_body, response_header_evidence, retry_after_header) ->
+  | Ok
+      ( conn
+      , response
+      , response_body
+      , response_status
+      , response_header_evidence
+      , retry_after_header ) ->
     let body_result =
       try
         match body_deadline, total_started_at with
@@ -2008,7 +2020,7 @@ let post_sync_once_after_validation
           fail error
         | Ok () ->
           Ok
-            ( { status = Option.get !status; body = response_body; retry_after_header }
+            ( { status = response_status; body = response_body; retry_after_header }
             , response_header_evidence )))
 ;;
 

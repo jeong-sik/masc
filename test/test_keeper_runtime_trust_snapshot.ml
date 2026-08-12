@@ -313,6 +313,49 @@ let test_observation_not_dispatched_receipt_remains_non_blocking () =
          (snapshot |> member "operator_disposition_reason" |> to_string))
 ;;
 
+let test_summary_and_snapshot_share_trust_projection () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-shared-projection" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "success"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let summary = K.summary_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       List.iter
+         (fun field ->
+            Alcotest.(check bool)
+              (field ^ " uses the shared trust projection")
+              true
+              (snapshot |> member field = (summary |> member field)))
+         [ "disposition"
+         ; "disposition_reason"
+         ; "operator_disposition"
+         ; "operator_disposition_reason"
+         ; "needs_attention"
+         ; "attention_reason"
+         ; "next_human_action"
+         ])
+;;
+
 let test_unknown_completion_contract_result_stays_visible () =
   Eio_main.run
   @@ fun env ->
@@ -967,6 +1010,10 @@ let () =
             "not-dispatched observation remains non-blocking"
             `Quick
             test_observation_not_dispatched_receipt_remains_non_blocking
+        ; Alcotest.test_case
+            "summary and snapshot share one trust projection"
+            `Quick
+            test_summary_and_snapshot_share_trust_projection
         ; Alcotest.test_case
             "unknown completion-contract result remains visible"
             `Quick

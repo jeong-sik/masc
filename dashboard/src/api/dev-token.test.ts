@@ -71,7 +71,7 @@ describe('ensureDevToken', () => {
       .mockResolvedValueOnce(jsonResponse({
         token: 'ready-dev-token',
         actor: 'dashboard',
-        role: 'worker',
+        role: 'admin',
       }))
 
     const bootstrap = ensureDevToken()
@@ -82,7 +82,7 @@ describe('ensureDevToken', () => {
     expect(setStoredToken).toHaveBeenCalledWith('ready-dev-token', {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
@@ -114,7 +114,7 @@ describe('ensureDevToken', () => {
       .mockResolvedValueOnce(jsonResponse({
         token: 'fresh-dev-token',
         actor: 'dashboard',
-        role: 'worker',
+        role: 'admin',
       }))
 
     await ensureDevToken()
@@ -128,7 +128,7 @@ describe('ensureDevToken', () => {
     expect(setStoredToken).toHaveBeenCalledWith('fresh-dev-token', {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     })
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
@@ -137,7 +137,7 @@ describe('ensureDevToken', () => {
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
       token: 'loopback-dev-token',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     }))
 
     await ensureDevToken()
@@ -159,11 +159,11 @@ describe('ensureDevToken', () => {
     expect(devTokenBootstrapStatus.value).toBe('no_endpoint')
   })
 
-  it('rejects a bootstrap response without the exact worker identity contract', async () => {
+  it('rejects a bootstrap response without the exact admin identity contract', async () => {
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
-      token: 'overprivileged-token',
+      token: 'stale-worker-token',
       actor: 'dashboard',
-      role: 'admin',
+      role: 'worker',
     }))
 
     await ensureDevToken()
@@ -174,10 +174,10 @@ describe('ensureDevToken', () => {
 
   it('refreshes a managed loopback token only for a typed refreshable auth code', async () => {
     let token: string | null = 'stale-token'
-    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     }
     getStoredToken.mockImplementation(() => token)
     getStoredTokenMeta.mockImplementation(() => meta)
@@ -192,7 +192,7 @@ describe('ensureDevToken', () => {
     fetchWithTimeout.mockResolvedValueOnce(jsonResponse({
       token: 'fresh-token',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     }))
 
     await expect(refreshDevTokenAfterAuthError('invalid_token')).resolves.toBe(true)
@@ -206,10 +206,10 @@ describe('ensureDevToken', () => {
 
   it('coalesces concurrent stale-token recovery onto one refresh', async () => {
     let token: string | null = 'stale-token'
-    let meta: { source: 'dev'; actor: 'dashboard'; role: 'worker' } | null = {
+    let meta: { source: 'dev'; actor: 'dashboard'; role: 'admin' } | null = {
       source: 'dev',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     }
     let resolveFetch!: (response: Response) => void
     const pendingFetch = new Promise<Response>((resolve) => {
@@ -235,7 +235,7 @@ describe('ensureDevToken', () => {
     resolveFetch(jsonResponse({
       token: 'fresh-token',
       actor: 'dashboard',
-      role: 'worker',
+      role: 'admin',
     }))
 
     await expect(Promise.all([first, second])).resolves.toEqual([true, true])

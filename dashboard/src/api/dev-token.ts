@@ -119,7 +119,7 @@ export async function ensureDevToken(): Promise<void> {
           continue
         }
         const token = typeof payload.token === 'string' ? payload.token.trim() : ''
-        if (!token || payload.actor !== 'dashboard' || payload.role !== 'worker') {
+        if (!token || payload.actor !== 'dashboard' || payload.role !== 'admin') {
           ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'invalid_response'
           devTokenBootstrapPromise = null
           return
@@ -140,7 +140,7 @@ export async function ensureDevToken(): Promise<void> {
           setStoredToken(token, {
             source: 'dev',
             actor: 'dashboard',
-            role: 'worker',
+            role: 'admin',
           })
         }
         ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'ok'

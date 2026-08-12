@@ -16,8 +16,8 @@ type config =
   ; model : string option
   ; system_prompt : string option
   ; admission_timeout_s : float
-    (** Finite bound for process setup and the initialize exchange before the
-        user turn is written. *)
+    (** Finite bound for the post-spawn initialize exchange and callbacks
+        before the user turn is written. *)
   ; timeout_s : float option
     (** [None] removes the deadline after the user message is written: the
         spawned client decides when its own turn ends. Initialization remains
@@ -131,6 +131,13 @@ val validate_turn :
   config ->
   prompt:string ->
   (unit, error) result
+
+val bounded_subscription_probe_config
+  :  fallback_timeout_s:float
+  -> config
+  -> config
+(** Preserve an existing finite bound, or give an unbounded model turn a
+    finite authentication-preflight fallback. *)
 
 val probe_subscription :
   mgr:_ Eio.Process.mgr ->

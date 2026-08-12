@@ -304,6 +304,31 @@ let test_conversation_callback_failure_is_typed () =
     | Ok _ -> fail "callback exception was admitted as a successful turn")
 ;;
 
+let test_callback_timeout_origin_is_preserved_without_deadline () =
+  with_fixture [ init (); result () ] (fun path ->
+    check_raises
+      "callback-origin timeout escapes unchanged"
+      Eio.Time.Timeout
+      (fun () ->
+         Eio_main.run (fun env ->
+           let config =
+             { (Runtime_antigravity.default_config
+                  ~cwd:"/tmp"
+                  ~model:"gemini-fixture") with
+               cli_path = path
+             ; timeout_s = None
+             }
+           in
+           Runtime_antigravity.run_turn
+             ~mgr:(Eio.Stdenv.process_mgr env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+             ~on_conversation_ready:(fun ~conversation_id:_ -> raise Eio.Time.Timeout)
+             config
+             ~prompt:"fixture"
+           |> ignore)))
+;;
+
 let test_tool_steps_and_errors_are_measured () =
   with_fixture
     [ init ()
@@ -590,6 +615,10 @@ let () =
             "conversation callback failure"
             `Quick
             test_conversation_callback_failure_is_typed
+        ; test_case
+            "callback timeout origin is preserved without deadline"
+            `Quick
+            test_callback_timeout_origin_is_preserved_without_deadline
         ; test_case "tool measurements" `Quick test_tool_steps_and_errors_are_measured
         ; test_case "error result" `Quick test_result_error_is_not_success
         ; test_case

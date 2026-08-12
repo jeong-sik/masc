@@ -368,21 +368,18 @@ let test_startup_recovery_remediates_missing_evidence () =
 ;;
 
 let test_evidence_unavailable_typed_failure_code () =
-  (* The sink failure code is derived from the typed variant — the live path
-     must never bypass it with a raw string. *)
+  (* The registry wire code is derived from the typed failure, never chosen by
+     a caller passing a raw string. The failure now lives in the sink because
+     that is where the terminal it maps to is decided. *)
   check string "failure code derives from typed variant" "evidence_unavailable"
-    (Fusion_delivery_projector.projection_error_failure_code
-       Fusion_delivery_projector.Evidence_unavailable);
+    (Fusion_sink.delivery_failure_code Fusion_sink.Evidence_unavailable);
   check string "detail derives from typed variant"
     "Fusion computation completed successfully without deliberation evidence"
-    (Fusion_delivery_projector.projection_error_to_string
-       Fusion_delivery_projector.Evidence_unavailable);
-  match
-    Fusion_delivery_projector.projection_error_failure_code
-      (Fusion_delivery_projector.Projection_failed "boom")
-  with
-  | _ -> fail "non-sink projection error must not have a failure code"
-  | exception Invalid_argument _ -> ()
+    (Fusion_sink.delivery_failure_detail Fusion_sink.Evidence_unavailable);
+  check string "cancellation keeps its provenance in the detail"
+    "operator stop (cancelled_by=vincent)"
+    (Fusion_sink.delivery_failure_detail
+       (Fusion_sink.Cancelled { reason = "operator stop"; cancelled_by = "vincent" }))
 ;;
 
 let () =

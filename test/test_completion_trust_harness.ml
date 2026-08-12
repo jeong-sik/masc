@@ -45,22 +45,6 @@ let cleanup_dir path =
   in
   try rm path with _ -> ()
 
-let rec mkdir_p path =
-  if Sys.file_exists path then ()
-  else begin
-    let parent = Filename.dirname path in
-    if not (String.equal parent path) then mkdir_p parent;
-    try Unix.mkdir path 0o755 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-  end
-
-let write_file path contents =
-  mkdir_p (Filename.dirname path);
-  let output = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr output)
-    (fun () -> output_string output contents)
-
 let make_meta ?(name = "keeper-completion-trust") () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -144,7 +128,7 @@ let assignee_of config task_id =
   | _ -> None
 
 let attempt_done
-      ?(evidence_refs = [ "trace:completion-trust-harness" ])
+      ?(evidence_refs = [ "note:completion-trust-harness" ])
       ~config
       ~meta
       ~publication_recovery
@@ -167,17 +151,6 @@ let attempt_done
           , `List (List.map (fun ref_ -> `String ref_) evidence_refs) )
         ])
     ()
-
-let seed_trace_evidence ~config trace_id =
-  let path =
-    Filename.concat
-      (Filename.concat
-         (Filename.concat config.Workspace.base_path ".masc")
-         "trajectories/keeper-completion-trust")
-      (trace_id ^ ".jsonl")
-  in
-  write_file path
-    {|{"type":"completion_trust_evidence","turn":0,"trace_id":"test"}|}
 
 let claim_via_dispatch
       ~config
@@ -325,7 +298,6 @@ let test_completion_with_evidence_refs_succeeds () =
     in
     check string "self-claim precondition succeeds" "success"
       (outcome_label claim.KTE.disposition);
-    seed_trace_evidence ~config "completion-trust-harness";
     let result =
       attempt_done
         ~config
@@ -333,8 +305,8 @@ let test_completion_with_evidence_refs_succeeds () =
         ~publication_recovery
         ~ctx_work
         ~task_id:"task-001"
-        ~result:"Implemented the deliverable and saved trace:completion-trust-harness evidence."
-        ~evidence_refs:[ "trace:completion-trust-harness" ]
+        ~result:"Implemented the deliverable and recorded completion evidence."
+        ~evidence_refs:[ "note:completion-trust-harness" ]
         ()
     in
     check string "completion outcome" "success"
@@ -350,7 +322,7 @@ let test_completion_with_evidence_refs_succeeds () =
         ; _
         } ->
       check string "done assignee" meta.agent_name assignee;
-      check (list string) "handoff evidence_refs" [ "trace:completion-trust-harness" ] handoff.evidence_refs
+      check (list string) "handoff evidence_refs" [ "note:completion-trust-harness" ] handoff.evidence_refs
     | Some task ->
       fail
         ("expected task-001 Done with handoff evidence refs, got "
@@ -381,7 +353,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
         ~ctx_work
         ~task_id:"task-001"
         ~result:"Completed the deliverable."
-        ~evidence_refs:[ "arbitrary-unresolved-reference" ]
+        ~evidence_refs:[ "note:first completion review" ]
         ()
     in
     check string "LLM reject controls outcome" "failure"
@@ -402,7 +374,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
         ~ctx_work
         ~task_id:"task-001"
         ~result:"Completed the deliverable."
-        ~evidence_refs:[ "arbitrary-unresolved-reference" ]
+        ~evidence_refs:[ "note:first completion review" ]
         ()
     in
     check string "later LLM approval completes" "success"

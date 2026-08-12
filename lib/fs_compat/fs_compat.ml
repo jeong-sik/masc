@@ -606,7 +606,8 @@ let exact_path_kind ?(follow = true) (path : string) : exact_path_kind =
         let stats = if follow then Unix.stat path else Unix.lstat path in
         Exact_kind stats.Unix.st_kind
       with
-      | Unix.Unix_error (Unix.ENOENT, _, _) -> Exact_missing)
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Exact_missing
+      | Unix.Unix_error (Unix.ENOTDIR, _, _) -> Exact_unknown)
     (fun fs ->
        match Eio.Path.kind ~follow Eio.Path.(fs / path) with
        | `Not_found -> Exact_missing

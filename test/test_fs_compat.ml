@@ -303,6 +303,12 @@ let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
       (Fs_compat.read_dir directory)
   in
   Fs_compat.clear_fs ();
+  check bool "fallback blocked descendant kind stays typed" true
+    (Fs_compat.exact_path_kind (Filename.concat regular "blocked-child")
+     = Fs_compat.Exact_unknown);
+  check bool "fallback blocked descendant is not missing" true
+    (Fs_compat.path_kind (Filename.concat regular "blocked-child")
+     = Fs_compat.Other);
   check_inventory "fallback";
   Fs_compat.set_fs fs;
   check_inventory "Eio"

@@ -2,6 +2,7 @@ import {
   formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
+  normalizeKeeperExternalEffectTarget,
 } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
@@ -886,15 +887,20 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_EXTERNAL_EFFECT_COMPLETED') {
-        // The reply went out through an external connector (Slack/Discord), so
+        // The reply was already delivered by a terminal surface post, so
         // there is no assistant text — finalize as a terminal control status
-        // instead of leaving the entry streaming.
+        // instead of leaving the entry streaming. The event value names the
+        // real delivery target (null on legacy events).
+        const externalEffectTarget = normalizeKeeperExternalEffectTarget(
+          isRecord(event.value) ? event.value.target : null,
+        )
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
           details: {
             ...(entry.details ?? {}),
             turnOutcome: 'external_effect_completed',
+            externalEffectTarget,
           },
           text: '',
           delivery: 'delivered',

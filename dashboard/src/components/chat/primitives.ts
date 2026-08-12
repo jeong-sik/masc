@@ -2470,12 +2470,46 @@ function ChatControlStatusCard({
   }
 
   if (status === 'external_effect_completed') {
+    // The delivery target names where the terminal surface post actually
+    // landed; legacy events without it keep the generic connector copy.
+    const target = entry.details?.externalEffectTarget ?? null
+    const copy = (() => {
+      if (target?.kind === 'dashboard') {
+        return {
+          title: '대시보드에 게시 완료',
+          body: 'Keeper의 답변이 이 대시보드 채팅에 게시되었습니다.',
+          hint: '위 대화에서 확인할 수 있습니다.',
+        }
+      }
+      if (target?.kind === 'slack') {
+        return {
+          title: 'Slack으로 답변 완료',
+          body: target.threadTs
+            ? `Keeper의 답변이 Slack 채널 ${target.channelId}의 스레드로 전송되었습니다.`
+            : `Keeper의 답변이 Slack 채널 ${target.channelId}로 전송되었습니다.`,
+          hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+        }
+      }
+      if (target?.kind === 'discord') {
+        return {
+          title: 'Discord로 답변 완료',
+          body: `Keeper의 답변이 Discord 채널 ${target.channelId}로 전송되었습니다.`,
+          hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+        }
+      }
+      return {
+        title: '커넥터로 답변 완료',
+        body: 'Keeper의 답변이 외부 커넥터(Slack/Discord)로 전송되었습니다.',
+        hint: '답변 내용은 해당 채널에서 확인할 수 있습니다.',
+      }
+    })()
     return html`
       <article
         class="w-full rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-subtle)] px-4 py-3.5"
         role="status"
         aria-live="polite"
         data-chat-control-status="external_effect_completed"
+        data-chat-effect-target=${target?.kind ?? undefined}
         data-chat-entry-id=${entry.id}
         data-chat-turn-ref=${entry.turnRef ?? undefined}
       >
@@ -2488,16 +2522,16 @@ function ChatControlStatusCard({
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">커넥터로 답변 완료</strong>
+              <strong class="text-sm font-semibold text-[var(--color-fg-primary)]">${copy.title}</strong>
               ${timestamp
                 ? html`<span class="text-2xs tabular-nums text-[var(--color-fg-muted)]">${timestamp}</span>`
                 : null}
             </div>
             <p class="mt-1 text-sm leading-paragraph text-[var(--color-fg-secondary)]">
-              Keeper의 답변이 외부 커넥터(Slack/Discord)로 전송되었습니다.
+              ${copy.body}
             </p>
             <p class="mt-0.5 text-xs leading-paragraph text-[var(--color-fg-muted)]">
-              답변 내용은 해당 채널에서 확인할 수 있습니다.
+              ${copy.hint}
             </p>
           </div>
         </div>

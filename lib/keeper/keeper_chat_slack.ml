@@ -575,7 +575,7 @@ let adapter_loop_with_transport
         end;
         clear_activity ();
         ()
-    | External_effect_completed ->
+    | External_effect_completed _ ->
         external_effect_completed := true;
         (match streaming_transport, message_id with
          | Some (_, _, _, delete), Some message_id ->

@@ -218,11 +218,13 @@ type canonical_reply_payload_error =
   | Invalid_payload_field_type of string
   | Unknown_turn_outcome
   | Invalid_turn_ref
+  | Invalid_external_effect_target of string
 
 type canonical_reply_payload =
   { payload_json : Yojson.Safe.t
   ; turn_outcome : Keeper_turn_outcome.t
   ; turn_ref : Ids.Turn_ref.t
+  ; external_effect_target : Keeper_surface_post.delivery_target option
   ; visible_reply : string
   ; poll_body : string
   }

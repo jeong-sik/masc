@@ -5,6 +5,64 @@
     injecting a clock. *)
 
 let candidates = [ "alpha"; "beta"; "gamma" ]
+module State = Runtime_lane_preference_state
+
+let test_state_active_preference_reorders () =
+  let state =
+    State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:10.0 State.empty
+  in
+  let _, observation = State.observe ~now:12.0 ~ttl_s:5.0 ~lane_id:"lane-1" state in
+  Alcotest.(check (list string))
+    "active candidate leads"
+    [ "beta"; "alpha"; "gamma" ]
+    (State.reorder observation candidates);
+  Alcotest.(check (option (pair string (float 0.001))))
+    "active diagnostics retain timestamp"
+    (Some ("beta", 10.0))
+    (State.preferred observation)
+;;
+
+let test_state_expiry_is_explicit_and_pruned () =
+  let state =
+    State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:10.0 State.empty
+  in
+  let pruned, first = State.observe ~now:15.0 ~ttl_s:5.0 ~lane_id:"lane-1" state in
+  (match first with
+   | State.Expired_preference -> ()
+   | State.No_preference | State.Active_preference _ ->
+     Alcotest.fail "expiry was not represented explicitly");
+  let _, second =
+    State.observe ~now:15.0 ~ttl_s:5.0 ~lane_id:"lane-1" pruned
+  in
+  match second with
+  | State.No_preference -> ()
+  | State.Expired_preference | State.Active_preference _ ->
+    Alcotest.fail "expired preference was not pruned"
+;;
+
+let test_state_zero_ttl_disables_stickiness () =
+  let state =
+    State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:11.0 State.empty
+  in
+  let _, observation = State.observe ~now:10.0 ~ttl_s:0.0 ~lane_id:"lane-1" state in
+  match observation with
+  | State.Expired_preference -> ()
+  | State.No_preference | State.Active_preference _ ->
+    Alcotest.fail "zero TTL retained an active preference"
+;;
+
+let test_state_delayed_older_success_cannot_replace_latest () =
+  let state =
+    State.empty
+    |> State.remember ~lane_id:"lane-1" ~candidate:"beta" ~noted_at:11.0
+    |> State.remember ~lane_id:"lane-1" ~candidate:"alpha" ~noted_at:10.0
+  in
+  let _, observation = State.observe ~now:12.0 ~ttl_s:5.0 ~lane_id:"lane-1" state in
+  Alcotest.(check (option (pair string (float 0.001))))
+    "newer success remains authoritative"
+    (Some ("beta", 11.0))
+    (State.preferred observation)
+;;
 
 let test_identity_without_state () =
   Runtime_lane_preference.reset_for_testing ();
@@ -97,8 +155,25 @@ let test_preferred_of_lane_expires () =
 
 let () =
   Alcotest.run "runtime_lane_preference"
-    [
-      ( "prefer_order"
+    [ ( "state"
+      , [ Alcotest.test_case
+            "active preference reorders"
+            `Quick
+            test_state_active_preference_reorders
+        ; Alcotest.test_case
+            "expiry is explicit and pruned"
+            `Quick
+            test_state_expiry_is_explicit_and_pruned
+        ; Alcotest.test_case
+            "zero TTL disables stickiness"
+            `Quick
+            test_state_zero_ttl_disables_stickiness
+        ; Alcotest.test_case
+            "delayed older success cannot replace latest"
+            `Quick
+            test_state_delayed_older_success_cannot_replace_latest
+        ] )
+    ; ( "prefer_order"
       , [ Alcotest.test_case "identity without state" `Quick
             test_identity_without_state
         ; Alcotest.test_case "remembered candidate first" `Quick

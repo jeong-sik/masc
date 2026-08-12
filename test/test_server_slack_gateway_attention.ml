@@ -99,6 +99,49 @@ let test_sent_reply_retires_attention () =
     check int "pending after reply" 0
       (List.length (pending ~base_path ~keeper_name:"sangsu"))
 
+(* Inbound identity rendering (issue #28376): the lane-shared mapping
+   resolves the author label and rewrites mention escapes, and never touches
+   [user_id] or [ts] (identity keys). *)
+let test_resolve_event_identity_maps_names_and_mentions () =
+  let directory =
+    Slack_user_directory.create
+      ~fetch:(fun ~user_id ->
+        if String.equal user_id "U09L0RHPW7P" then
+          Ok
+            { Slack_rest_client.user_id
+            ; name = Some "vincent"
+            ; real_name = None
+            ; display_name = Some "Vincent"
+            }
+        else Error (Slack_rest_client.Slack_api { error = "user_not_found" }))
+      ~now:(fun () -> 0.0)
+      ()
+  in
+  let event =
+    Slack_gateway_state.Message_create
+      { channel_id = "C1"
+      ; thread_ts = None
+      ; user_id = "U09L0RHPW7P"
+      ; user_name = None
+      ; text = "<@U09L0RHPW7P> 확인"
+      ; ts = "1786524720.554309"
+      ; mentions_bot = true
+      ; bot_id = None
+      }
+  in
+  (match G.For_testing.resolve_event_identity ~user_directory:directory event with
+   | Slack_gateway_state.Message_create { user_id; user_name; text; ts; _ } ->
+     check string "identity key untouched" "U09L0RHPW7P" user_id;
+     check string "dedup key untouched" "1786524720.554309" ts;
+     check (option string) "author label resolved" (Some "Vincent") user_name;
+     check string "mention rewritten" "@Vincent 확인" text
+   | _ -> fail "message event mapped to another variant");
+  match G.For_testing.resolve_event_identity event with
+  | Slack_gateway_state.Message_create { user_name; text; _ } ->
+    check (option string) "no directory keeps the raw absence" None user_name;
+    check string "no directory keeps the wire text" "<@U09L0RHPW7P> 확인" text
+  | _ -> fail "message event mapped to another variant"
+
 let () =
   run "Server_slack_gateway_attention"
     [ "attention"
@@ -110,5 +153,7 @@ let () =
             test_duplicate_wire_delivery_keeps_one_pending
         ; test_case "sent reply retires attention" `Quick
             test_sent_reply_retires_attention
+        ; test_case "inbound identity mapping" `Quick
+            test_resolve_event_identity_maps_names_and_mentions
         ]
     ]

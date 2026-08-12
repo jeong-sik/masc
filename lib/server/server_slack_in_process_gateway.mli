@@ -63,6 +63,7 @@ module For_testing : sig
   val submit_event :
     ?deliver:(unit -> unit) ->
     ?team_id:string ->
+    ?user_directory:Slack_user_directory.t ->
     Connector_ingress_lane.t ->
     dispatch_for_delivery:
       (Gate_keeper_backend.connector_delivery -> Channel_gate.dispatch_fn) ->
@@ -73,10 +74,19 @@ module For_testing : sig
 
   val submit_ambient_event :
     ?team_id:string ->
+    ?user_directory:Slack_user_directory.t ->
     Connector_ingress_lane.t ->
     base_dir:string ->
     Slack_socket_client.slack_event ->
     unit
+
+  val resolve_event_identity :
+    ?user_directory:Slack_user_directory.t ->
+    Slack_socket_client.slack_event ->
+    Slack_socket_client.slack_event
+  (** Inbound identity rendering (issue #28376): author display label plus
+      [<@U…>] mention rewriting, applied by both submit lanes. Exposed so
+      tests can pin the mapping without a live socket. *)
 
   val record_external_attention :
     base_dir:string ->

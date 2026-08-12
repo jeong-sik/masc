@@ -23,6 +23,13 @@ let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 let exact_lane_run_permission = Masc_domain.CanAdmin
 
+(* The panel draws a table; a page an operator can actually scan is ~50 rows.
+   The ceiling exists so a caller cannot ask for the whole store back and
+   reinstate the 246 MB response this paging replaced. *)
+let exact_lane_run_page_default = 50
+let exact_lane_run_page_max = 200
+let exact_lane_run_detail_prefix = "/api/v1/dashboard/exact-lane-runs/"
+
 let dashboard_actor_cache_segment state req =
   dashboard_actor_for_request
     ~base_path:(Mcp_server.workspace_config state).base_path
@@ -758,20 +765,87 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  (* Paged, and without either exact payload. Serving every retained run with
+     its payloads made this one response 246 MB for 5,908 runs — the whole
+     rendered prompt of every lane run, to draw a table of timestamps — and the
+     panel re-fetched it on every internal_agent_runs_changed event. A page
+     carries identity and outcome; [exact-lane-runs/<run_id>] carries the
+     payloads for the one run an operator opened. *)
   |> Http.Router.get "/api/v1/dashboard/exact-lane-runs" (fun request reqd ->
        with_token_permission_auth ~permission:exact_lane_run_permission
          (fun _state _agent_name req reqd ->
-         let runs =
-           Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
+         let limit =
+           Server_utils.int_query_param req "limit" ~default:exact_lane_run_page_default
+           |> Server_utils.clamp ~min_v:1 ~max_v:exact_lane_run_page_max
          in
-         let json =
-           `Assoc
-             [ ("generated_at", `String (Masc_domain.now_iso ()))
-             ; ("count", `Int (List.length runs))
-             ; ("runs", `List (List.map Exact_lane_run_registry.run_to_yojson runs))
-             ]
+         (* Both halves of the cursor or neither: a started_at without its
+            run_id cannot break a tie, and silently paging from a half-given
+            boundary would skip runs recorded in the same float second. *)
+         let before =
+           match
+             ( Option.bind (Server_utils.query_param req "before_started_at") float_of_string_opt
+             , Server_utils.query_param req "before_run_id" )
+           with
+           | Some started_at, Some run_id when not (String.equal (String.trim run_id) "") ->
+             Ok (Some (started_at, run_id))
+           | None, None -> Ok None
+           | _ -> Error "before_started_at and before_run_id must be given together"
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         match before with
+         | Error message -> respond_dashboard_error ~request:req reqd message
+         | Ok before ->
+           let page =
+             Exact_lane_run_registry.recent_runs
+               (Exact_lane_run_registry.global ())
+               ~limit
+               ~before
+           in
+           let json =
+             `Assoc
+               [ ("generated_at", `String (Masc_domain.now_iso ()))
+               ; ("count", `Int (List.length page.runs))
+               ; ("total", `Int page.total)
+               ; ("has_more", `Bool page.has_more)
+               ; ( "runs"
+                 , `List
+                     (List.map Exact_lane_run_registry.run_summary_to_yojson page.runs) )
+               ]
+           in
+           Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
+  |> Http.Router.prefix_get "/api/v1/dashboard/exact-lane-runs/" (fun request reqd ->
+       with_token_permission_auth ~permission:exact_lane_run_permission
+         (fun _state _agent_name req reqd ->
+         let run_id =
+           String.length exact_lane_run_detail_prefix
+           |> fun offset ->
+           let target = Uri.path (Uri.of_string req.Httpun.Request.target) in
+           if String.length target <= offset
+           then ""
+           else String.sub target offset (String.length target - offset)
+         in
+         let run_id = Uri.pct_decode run_id in
+         if String.equal (String.trim run_id) ""
+         then respond_dashboard_error ~request:req reqd "run_id is required"
+         else (
+           match
+             Exact_lane_run_registry.get (Exact_lane_run_registry.global ()) ~run_id
+           with
+           | None ->
+             respond_dashboard_error
+               ~status:`Not_found
+               ~request:req
+               reqd
+               ("no retained exact-lane run named " ^ run_id)
+           | Some run ->
+             Http.Response.json_value
+               ~compress:true
+               ~request:req
+               (`Assoc
+                  [ ("generated_at", `String (Masc_domain.now_iso ()))
+                  ; ("run", Exact_lane_run_registry.run_to_yojson run)
+                  ])
+               reqd)
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)

@@ -40,7 +40,7 @@
   ; Standard dependencies
   (re (>= 1.10))
   (ptime (>= 1.2))
-  (yojson (>= 2.0))
+  (yojson (>= 3.0))
   (otoml (>= 1.0))
   (graphql (>= 0.14.0))
   (graphql_parser (>= 0.14.0))

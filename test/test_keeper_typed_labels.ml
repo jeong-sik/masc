@@ -97,7 +97,7 @@ let test_pp_failure_reason_includes_payload () =
      with Not_found -> false)
 
 let test_pp_failure_reason_preserves_exact_text () =
-  let cases =
+  let cases : (Keeper_turn_fsm.failure_reason * string) list =
     [ ( Failure_runtime_unavailable
           { base = "claude_api"; resolved = Some "claude_code" }
       , "runtime_unavailable(base=claude_api,resolved=claude_code)" )

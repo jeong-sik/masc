@@ -148,8 +148,6 @@ let short_json_repr = function
   | `Assoc _ -> "<object>"
   | `List _ -> "<array>"
   | `Intlit s -> s
-  | `Tuple _ -> "<tuple>"
-  | `Variant _ -> "<variant>"
 
 let agent_of_yojson json =
   match agent_of_yojson_generated json with

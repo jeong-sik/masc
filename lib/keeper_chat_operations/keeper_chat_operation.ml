@@ -197,7 +197,6 @@ let canonical_json_string value =
       Error "JSON contains a non-finite float"
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
       Ok value
-    | `Tuple _ | `Variant _ -> Error "value is not standard JSON"
   in
   normalize value |> Result.map Yojson.Safe.to_string
 ;;

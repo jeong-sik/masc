@@ -105,9 +105,7 @@ let toggle_request_of_json = function
   | `Intlit _
   | `Float _
   | `String _
-  | `List _
-  | `Tuple _
-  | `Variant _ ->
+  | `List _ ->
     Error
       (make_error
          ~code:Invalid_json

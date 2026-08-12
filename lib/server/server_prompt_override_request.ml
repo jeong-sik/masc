@@ -83,9 +83,7 @@ let decode_json = function
   | `Intlit _
   | `Float _
   | `String _
-  | `List _
-  | `Tuple _
-  | `Variant _ -> Error Expected_object
+  | `List _ -> Error Expected_object
 ;;
 
 let decode body =

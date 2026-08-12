@@ -34,7 +34,10 @@ let effective_entry ?(sensitive = false) ~default ~read env_name description =
   }
 ;;
 
-let collect collector =
+(* [t] and [observed] both carry a [spec], and [observed] is declared second,
+   so an unannotated [collector.spec] resolves against [observed] and the next
+   field access has nowhere to go. The annotation names which record this is. *)
+let collect (collector : t) : observed =
   { spec = collector.spec; observation = collector.collect () }
 
 let project observed =

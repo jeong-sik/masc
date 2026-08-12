@@ -384,9 +384,9 @@ let redact_block redaction = function
     Keeper_chat_blocks.Fusion { board_post_id; run_id }
   | Keeper_chat_blocks.Status { kind } ->
     Keeper_chat_blocks.Status { kind }
-  | Keeper_chat_blocks.Trace { trace } ->
+  | Keeper_chat_blocks.Trace { trace; omitted } ->
     Keeper_chat_blocks.Trace
-      { trace = List.map (redact_trace_step redaction) trace }
+      { trace = List.map (redact_trace_step redaction) trace; omitted }
   | Keeper_chat_blocks.Thinking { content; redacted } ->
     Keeper_chat_blocks.Thinking
       { content = redact_string redaction content; redacted }

@@ -256,26 +256,30 @@ let purge_messages ~config messages =
                cycle is grouped here, never in [Ordinary_message], so before
                this branch existed R2 could not reach it at all — the single
                largest reason unsigned reasoning survived a full purge.
-               A cycle message is never dropped even if stripping empties it:
-               that would break the ToolUse/ToolResult pairing the cycle is
-               indivisible for, and [Keeper_compaction_unit.validate] would
-               reject the output. In practice the opening message always keeps
-               its ToolUse block, so the empty case is defensive only. *)
+               The opening ToolUse and matching ToolResult anchors always
+               survive. An interstitial assistant message containing only
+               unsigned reasoning has no anchor, so it can be removed without
+               breaking the indivisible ToolUse/ToolResult pair. *)
             let cycle_messages =
               if config.strip_thinking
               then
-                List.map
+                List.filter_map
                   (fun message ->
                      if not (is_assistant message)
-                     then message
+                     then Some message
                      else (
                        let stripped, count = strip_reasoning_blocks message in
                        match stripped.Agent_core.Types.content with
-                       | [] -> message
+                       | [] when count > 0 ->
+                         reasoning_blocks_stripped
+                         := !reasoning_blocks_stripped + count;
+                         incr reasoning_messages_dropped;
+                         None
+                       | [] -> Some stripped
                        | _ :: _ ->
                          reasoning_blocks_stripped
                          := !reasoning_blocks_stripped + count;
-                         stripped))
+                         Some stripped))
                   cycle_messages
               else cycle_messages
             in

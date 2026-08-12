@@ -563,14 +563,17 @@ type resolved_config_state =
 
 let resolved_config = Atomic.make Unconfigured
 
-let configure config =
+let rec configure config =
   let current = Atomic.get resolved_config in
   match current with
-  | Configured _ -> Error Already_configured
+  | Configured installed ->
+    if Server_auth_config.equal installed config
+    then Ok ()
+    else Error Already_configured
   | Unconfigured ->
     if Atomic.compare_and_set resolved_config current (Configured config)
     then Ok ()
-    else Error Already_configured
+    else configure config
 ;;
 
 let configure_error_to_string = function

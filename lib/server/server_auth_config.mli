@@ -25,8 +25,8 @@ val read_env : unit -> raw
 (** Read the two HTTP authorization environment inputs once. *)
 
 val resolve : raw -> (t, resolve_error) result
-(** Parse the complete policy. Missing values use the current defaults;
-    present malformed values are errors rather than implicit defaults. *)
+(** Parse the complete policy. Missing and blank boolean values use the current
+    defaults; other present malformed values are errors. *)
 
 val fail_closed : t
 (** Policy used before the composition root installs configuration: anonymous
@@ -34,4 +34,5 @@ val fail_closed : t
 
 val allow_anonymous_mutations : t -> bool
 val loopback_dev_mutation_origins : t -> Server_request_authority.serialized_origin list
+val equal : t -> t -> bool
 val resolve_error_to_string : resolve_error -> string

@@ -10,8 +10,6 @@
     @since 0.5.0
 *)
 
-module StringMap = Set_util.StringMap
-
 (** Typed classification of a session_key's display prefix.
 
     Replaces the previous string-collapsing helpers that mapped
@@ -216,103 +214,6 @@ let anonymous () =
     last_seen = now;
     metadata = [];
   }
-
-(** {1 Identity Registry} *)
-
-module Registry = struct
-  type registry = {
-    identities : t StringMap.t ref;  (** session_key -> identity *)
-    by_agent_name : string StringMap.t ref;  (** agent_name -> session_key *)
-    lock : Eio.Mutex.t;
-  }
-
-  let create () = {
-    identities = ref StringMap.empty;
-    by_agent_name = ref StringMap.empty;
-    lock = Eio.Mutex.create ();
-  }
-
-  let with_lock reg f =
-    Eio_guard.with_mutex reg.lock f
-
-  (** Register or update identity *)
-  let register reg identity =
-    with_lock reg (fun () ->
-      reg.identities := StringMap.add identity.session_key identity !(reg.identities);
-      reg.by_agent_name := StringMap.add identity.agent_name identity.session_key !(reg.by_agent_name);
-      identity
-    )
-
-  (** Find by session key *)
-  let find_by_session reg session_key =
-    with_lock reg (fun () ->
-      StringMap.find_opt session_key !(reg.identities)
-    )
-
-  (** Find by agent name *)
-  let find_by_name reg agent_name =
-    with_lock reg (fun () ->
-      match StringMap.find_opt agent_name !(reg.by_agent_name) with
-      | Some session_key -> StringMap.find_opt session_key !(reg.identities)
-      | None -> None
-    )
-
-  (** Update last_seen *)
-  let touch reg session_key () =
-    with_lock reg (fun () ->
-      match StringMap.find_opt session_key !(reg.identities) with
-      | Some identity ->
-          (* The map owns the identity, so a touch rebinds the entry. Only
-             [identities] holds the record — [by_agent_name] maps a name to a
-             session key — so one rebind is the whole update. *)
-          reg.identities :=
-            StringMap.add session_key
-              { identity with last_seen = Time_compat.now () }
-              !(reg.identities)
-      | None -> ()
-    )
-
-  (** Remove identity *)
-  let unregister reg session_key =
-    with_lock reg (fun () ->
-      match StringMap.find_opt session_key !(reg.identities) with
-      | Some identity ->
-          reg.identities := StringMap.remove session_key !(reg.identities);
-          let by_agent_name = StringMap.remove identity.agent_name !(reg.by_agent_name) in
-          let replacement =
-            StringMap.fold
-              (fun replacement_session candidate found ->
-                 match found with
-                 | Some _ -> found
-                 | None when String.equal candidate.agent_name identity.agent_name ->
-                   Some replacement_session
-                 | None -> None)
-              !(reg.identities)
-              None
-          in
-          reg.by_agent_name :=
-            (match replacement with
-             | None -> by_agent_name
-             | Some replacement_session ->
-               StringMap.add identity.agent_name replacement_session by_agent_name)
-      | None -> ()
-    )
-
-  (** List all registered identities. Lifecycle authority belongs to explicit
-      registration/unregistration, not an elapsed-time cutoff. *)
-  let list_all reg =
-    with_lock reg (fun () ->
-      !(reg.identities)
-      |> StringMap.bindings
-      |> List.map snd
-    )
-
-  (** Get identity count *)
-  let count reg =
-    with_lock reg (fun () ->
-      StringMap.cardinal !(reg.identities)
-    )
-end
 
 (** {1 Utilities} *)
 

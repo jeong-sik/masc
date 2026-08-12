@@ -314,6 +314,25 @@ let turn_record_raw_trace_run_ref
       }
 ;;
 
+(* Retention (RFC-0358) deletes every trace no TurnRecord names, so this
+   reference is what keeps a turn's trace on disk. [run_result] carries one
+   only when the turn succeeded: a failed turn still writes and closes its run
+   — [finish_raw_error] calls [Raw_trace.finish_run] — but the failure travels
+   up as [Error] with no result to read the reference from, so the record
+   named nothing and the next prune removed the one trace a failure
+   investigation needs.
+
+   The sink answers the same question for either outcome. A keeper sink is one
+   file per turn, so [Raw_trace.last_run] can only be the run this turn just
+   finished. It stays [None] when the turn failed before [start_run]; that
+   file holds no run and deleting it is correct. The turn's own reference
+   still wins when present, which leaves the succeeding path unchanged. *)
+let raw_trace_reference_for_turn ~turn_trace_ref ~sink =
+  match turn_trace_ref with
+  | Some _ as reference -> reference
+  | None -> Option.bind sink Agent_core.Raw_trace.last_run
+;;
+
 let terminal_effect_boundary_decision = Keeper_tool_terminal_boundary.decision
 
 module For_testing = struct
@@ -333,6 +352,7 @@ module For_testing = struct
   let dispatch_after_provider_transcript_admission =
     dispatch_after_provider_transcript_admission
   let turn_record_raw_trace_run_ref = turn_record_raw_trace_run_ref
+  let raw_trace_reference_for_turn = raw_trace_reference_for_turn
 end
 
 (** Run a single keeper turn via Agent_core.Agent.run().
@@ -1299,8 +1319,16 @@ let run_turn
           | None -> acc.prompt_blocks
         in
         let raw_trace_run_ref =
-          match turn_result with
-          | Ok { trace_ref = Some run_ref; _ } ->
+          let turn_trace_ref =
+            match turn_result with
+            | Ok { trace_ref; _ } -> trace_ref
+            | Error _ -> None
+          in
+          match
+            raw_trace_reference_for_turn ~turn_trace_ref ~sink:raw_trace
+          with
+          | None -> None
+          | Some run_ref ->
             (match
                turn_record_raw_trace_run_ref ~expected_session_id:trace_id run_ref
              with
@@ -1310,7 +1338,6 @@ let run_turn
                  "raw-trace run reference omitted from turn record: worker_run_id=%s: %s"
                  run_ref.worker_run_id detail;
                None)
-          | Ok { trace_ref = None; _ } | Error _ -> None
         in
         Keeper_turn_record_writer.write
           ~config

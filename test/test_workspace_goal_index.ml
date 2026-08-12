@@ -124,6 +124,18 @@ let make_goal_task_links_recovery_path_unwritable config =
   make_path_unwritable (Workspace_goal_index.goal_task_links_path config ^ ".last-good")
 ;;
 
+(* [make_path_unwritable] swaps the file for a directory, which fails the read
+   before the write is ever reached. The two rollback cases below are about the
+   write, so they leave the backlog file readable and take the write bit off its
+   directory instead: the atomic publish cannot create the temporary it renames
+   from. Restored before the body returns so [with_test_env] can still clean up. *)
+let with_backlog_write_blocked config f =
+  let dir = Filename.dirname (Workspace_backlog.backlog_path config) in
+  let previous = (Unix.stat dir).Unix.st_perm in
+  Unix.chmod dir 0o555;
+  Fun.protect ~finally:(fun () -> Unix.chmod dir previous) f
+;;
+
 let make_backlog_path_unwritable config =
   make_path_unwritable (Workspace_backlog.backlog_path config)
 ;;
@@ -475,12 +487,15 @@ let test_batch_add_task_backlog_write_failure_rolls_back_goal_links () =
           mutation_count)))
 ;;
 
-let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
+let test_add_task_goal_link_write_failure_surfaces_rollback_failure () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
-        make_backlog_path_unwritable config;
         let message_count_before = message_count config in
+        (* Placed before the directory is sealed: the hook below re-runs this
+           and [make_path_unwritable] is a no-op once the directory exists. *)
+        make_goal_task_links_recovery_path_unwritable config;
+        with_backlog_write_blocked config @@ fun () ->
         Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
           (fun hook_config ~goal_id:_ ~task_id:_ ->
              make_goal_task_links_recovery_path_unwritable hook_config)
@@ -493,14 +508,14 @@ let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
                  ~priority:1
                  ~description:""
              with
-             | Error (Workspace.Backlog_read_failed msg) ->
+             | Error (Workspace.Goal_link_write_failed msg) ->
                check_bool
                  "rollback failure is surfaced"
                  true
                  (string_contains ~needle:"goal link rollback failed" msg)
              | Error err ->
                Alcotest.failf
-                 "expected Backlog_read_failed, got %s"
+                 "expected Goal_link_write_failed, got %s"
                  (Workspace.add_task_error_to_string err)
              | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         (* Rollback failure is surfaced above; unlike the successful rollback
@@ -512,12 +527,13 @@ let test_add_task_backlog_write_failure_surfaces_rollback_failure () =
           mutation_count)))
 ;;
 
-let test_batch_add_task_backlog_write_failure_surfaces_rollback_failure () =
+let test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure () =
   with_test_env (fun config ->
     with_activity_counter (fun activity_count ->
       with_mutation_counter (fun mutation_count ->
-        make_backlog_path_unwritable config;
         let message_count_before = message_count config in
+        make_goal_task_links_recovery_path_unwritable config;
+        with_backlog_write_blocked config @@ fun () ->
         Workspace_goal_index.For_testing.with_before_unlink_task_from_goal
           (fun hook_config ~goal_id:_ ~task_id:_ ->
              make_goal_task_links_recovery_path_unwritable hook_config)
@@ -529,7 +545,7 @@ let test_batch_add_task_backlog_write_failure_surfaces_rollback_failure () =
                  ; "rollback failure batch b", 2, "", None, Some "goal-b"
                  ]
              with
-             | Error (Workspace.Batch_backlog_read_failed msg) ->
+             | Error (Workspace.Batch_goal_link_write_failed msg) ->
                check_bool
                  "rollback failure is surfaced"
                  true
@@ -598,11 +614,11 @@ let () =
           ; test_case
               "single create surfaces rollback failure when backlog write fails"
               `Quick
-              test_add_task_backlog_write_failure_surfaces_rollback_failure
+              test_add_task_goal_link_write_failure_surfaces_rollback_failure
           ; test_case
               "batch create surfaces rollback failure when backlog write fails"
               `Quick
-              test_batch_add_task_backlog_write_failure_surfaces_rollback_failure
+              test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure
           ] )
     ]
 ;;

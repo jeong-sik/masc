@@ -13,8 +13,9 @@ val empty : t
 
 val reuse_session :
   now:float -> mcp_session_id:string -> t -> (t * Client_identity.t) option
-(** Return and touch the identity already owned by [mcp_session_id]. A stale
-    session mapping whose identity is absent is treated as a miss. *)
+(** Return and touch the identity already owned by [mcp_session_id]. A delayed
+    caller cannot move [last_seen] behind a newer committed observation. A
+    stale session mapping whose identity is absent is treated as a miss. *)
 
 val install_session :
   now:float ->

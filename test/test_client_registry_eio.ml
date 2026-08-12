@@ -50,7 +50,14 @@ let test_pure_state_reuses_winner_after_race () =
      check string "race keeps installed identity" "first-key" identity.session_key;
      check (float 0.0) "race touches winner" 9.0 identity.last_seen
    | State.Registered _ -> fail "race replaced the installed identity");
-  check int "race leaves one identity" 1 (State.count state)
+  check int "race leaves one identity" 1 (State.count state);
+  let _, delayed_touch =
+    match State.reuse_session ~now:8.0 ~mcp_session_id:"shared-mcp" state with
+    | Some reused -> reused
+    | None -> fail "installed session disappeared before delayed touch"
+  in
+  check (float 0.0) "delayed touch cannot move last_seen backwards" 9.0
+    delayed_touch.last_seen
 ;;
 
 let test_pure_state_unregisters_last_owner () =

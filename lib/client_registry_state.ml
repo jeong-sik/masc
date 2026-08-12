@@ -27,7 +27,8 @@ let reuse_session ~now ~mcp_session_id state =
   match identity_for_mcp_session state mcp_session_id with
   | None -> None
   | Some identity ->
-    let identity : Client_identity.t = { identity with last_seen = now } in
+    let last_seen = Float.max identity.last_seen now in
+    let identity : Client_identity.t = { identity with last_seen } in
     let identities =
       String_map.add identity.Client_identity.session_key identity state.identities
     in

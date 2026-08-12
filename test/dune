@@ -1216,7 +1216,10 @@
   masc_test_deps
   masc_test_runtime
   masc.embedded_config
-  bigstringaf)
+  bigstringaf
+  ; test_compression decodes its own gzip output with the library's reader
+  decompress.de
+  decompress.gz)
  (deps ../bin/main_eio.exe))
 
 (test

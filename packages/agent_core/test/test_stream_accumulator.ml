@@ -37,6 +37,16 @@ let stream_error_to_string = function
   | Stream_unsupported_response { response; _ } -> "unsupported_response:" ^ response
 ;;
 
+let finalize_with_end_turn acc =
+  Streaming.accumulate_event
+    acc
+    (MessageDelta { stop_reason = Some EndTurn; usage = None });
+  match Streaming.finalize_stream_acc acc with
+  | Ok response -> response
+  | Error err ->
+    Alcotest.fail ("unexpected finalize error: " ^ stream_error_to_string err)
+;;
+
 let fail_unexpected_stream_error err =
   Alcotest.fail ("unexpected error: " ^ stream_error_to_string err)
 ;;
@@ -54,12 +64,10 @@ let check_zero_usage = function
 
 let test_create_initial_state () =
   let acc = Streaming.create_stream_acc () in
-  Alcotest.(check string) "msg_id empty" "" !(acc.id);
-  Alcotest.(check string) "msg_model empty" "" !(acc.model);
-  Alcotest.(check int) "input_tokens 0" 0 !(acc.input_tokens);
-  Alcotest.(check int) "output_tokens 0" 0 !(acc.output_tokens);
-  Alcotest.(check int) "cache_creation 0" 0 !(acc.cache_creation);
-  Alcotest.(check int) "cache_read 0" 0 !(acc.cache_read)
+  let response = finalize_with_end_turn acc in
+  Alcotest.(check string) "msg_id empty" "" response.id;
+  Alcotest.(check string) "msg_model empty" "" response.model;
+  check_zero_usage response.usage
 ;;
 
 (* ── accumulate: MessageStart ─────────────────────────────── *)
@@ -71,9 +79,12 @@ let test_accumulate_message_start () =
       { id = "msg_123"; model = "claude-sonnet-4"; usage = Some (make_usage 100 0) }
   in
   Streaming.accumulate_event acc evt;
-  Alcotest.(check string) "id set" "msg_123" !(acc.id);
-  Alcotest.(check string) "model set" "claude-sonnet-4" !(acc.model);
-  Alcotest.(check int) "input_tokens" 100 !(acc.input_tokens)
+  let response = finalize_with_end_turn acc in
+  Alcotest.(check string) "id set" "msg_123" response.id;
+  Alcotest.(check string) "model set" "claude-sonnet-4" response.model;
+  match response.usage with
+  | Some usage -> Alcotest.(check int) "input_tokens" 100 usage.input_tokens
+  | None -> Alcotest.fail "expected usage"
 ;;
 
 let test_accumulate_message_start_no_usage () =
@@ -81,8 +92,9 @@ let test_accumulate_message_start_no_usage () =
   Streaming.accumulate_event
     acc
     (MessageStart { id = "m1"; model = "test"; usage = None });
-  Alcotest.(check string) "id" "m1" !(acc.id);
-  Alcotest.(check int) "input stays 0" 0 !(acc.input_tokens)
+  let response = finalize_with_end_turn acc in
+  Alcotest.(check string) "id" "m1" response.id;
+  check_zero_usage response.usage
 ;;
 
 let test_accumulate_message_start_with_cache () =
@@ -94,8 +106,12 @@ let test_accumulate_message_start_with_cache () =
        ; model = "test"
        ; usage = Some (make_usage ~cache_create:50 ~cache_read:30 200 0)
        });
-  Alcotest.(check int) "cache_creation" 50 !(acc.cache_creation);
-  Alcotest.(check int) "cache_read" 30 !(acc.cache_read)
+  let response = finalize_with_end_turn acc in
+  match response.usage with
+  | Some usage ->
+    Alcotest.(check int) "cache_creation" 50 usage.cache_creation_input_tokens;
+    Alcotest.(check int) "cache_read" 30 usage.cache_read_input_tokens
+  | None -> Alcotest.fail "expected usage"
 ;;
 
 (* ── accumulate: ContentBlockStart ────────────────────────── *)
@@ -106,8 +122,10 @@ let test_accumulate_content_block_start_text () =
     acc
     (ContentBlockStart
        { index = 0; content_type = "text"; tool_id = None; tool_name = None });
-  Alcotest.(check int) "block_types has entry" 1 (Hashtbl.length acc.block_types);
-  Alcotest.(check string) "type is text" "text" (Hashtbl.find acc.block_types 0)
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ Text "" ] -> ()
+  | _ -> Alcotest.fail "expected an announced empty text block"
 ;;
 
 let test_accumulate_content_block_start_tool () =
@@ -120,8 +138,12 @@ let test_accumulate_content_block_start_tool () =
        ; tool_id = Some "tu_1"
        ; tool_name = Some "calculator"
        });
-  Alcotest.(check string) "tool_id" "tu_1" (Hashtbl.find acc.block_tool_ids 1);
-  Alcotest.(check string) "tool_name" "calculator" (Hashtbl.find acc.block_tool_names 1)
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ ToolUse { id; name; input = `Assoc [] } ] ->
+    Alcotest.(check string) "tool_id" "tu_1" id;
+    Alcotest.(check string) "tool_name" "calculator" name
+  | _ -> Alcotest.fail "expected typed tool block"
 ;;
 
 (* ── accumulate: ContentBlockDelta ────────────────────────── *)
@@ -138,8 +160,10 @@ let test_accumulate_text_deltas () =
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 0; delta = TextDelta "world" });
-  let buf = Hashtbl.find acc.block_texts 0 in
-  Alcotest.(check string) "concatenated" "hello world" (Buffer.contents buf)
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ Text text ] -> Alcotest.(check string) "concatenated" "hello world" text
+  | _ -> Alcotest.fail "expected text block"
 ;;
 
 let test_accumulate_delta_without_start () =
@@ -147,8 +171,8 @@ let test_accumulate_delta_without_start () =
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 5; delta = TextDelta "orphan" });
-  let buf = Hashtbl.find acc.block_texts 5 in
-  Alcotest.(check string) "buffer created on-demand" "orphan" (Buffer.contents buf)
+  let response = finalize_with_end_turn acc in
+  Alcotest.(check int) "unannounced delta is not projected" 0 (List.length response.content)
 ;;
 
 let test_accumulate_thinking_delta () =
@@ -160,8 +184,11 @@ let test_accumulate_thinking_delta () =
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 0; delta = ThinkingDelta "I think" });
-  let buf = Hashtbl.find acc.block_texts 0 in
-  Alcotest.(check string) "thinking text" "I think" (Buffer.contents buf)
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ Thinking { content; _ } ] ->
+    Alcotest.(check string) "thinking text" "I think" content
+  | _ -> Alcotest.fail "expected thinking block"
 ;;
 
 let test_accumulate_thinking_signature_delta () =
@@ -173,8 +200,11 @@ let test_accumulate_thinking_signature_delta () =
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 0; delta = ThinkingSignatureDelta "sig_opaque" });
-  let buf = Hashtbl.find acc.block_thinking_signatures 0 in
-  Alcotest.(check string) "signature" "sig_opaque" (Buffer.contents buf)
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ Thinking { signature = Some signature; _ } ] ->
+    Alcotest.(check string) "signature" "sig_opaque" signature
+  | _ -> Alcotest.fail "expected signed thinking block"
 ;;
 
 let test_accumulate_input_json_delta () =
@@ -193,8 +223,11 @@ let test_accumulate_input_json_delta () =
   Streaming.accumulate_event
     acc
     (ContentBlockDelta { index = 0; delta = InputJsonDelta "42}" });
-  let buf = Hashtbl.find acc.block_texts 0 in
-  Alcotest.(check string) "json assembled" "{\"x\":42}" (Buffer.contents buf)
+  let response = finalize_with_end_turn acc in
+  match response.content with
+  | [ ToolUse { input; _ } ] ->
+    Alcotest.(check string) "json assembled" "{\"x\":42}" (Yojson.Safe.to_string input)
+  | _ -> Alcotest.fail "expected tool block"
 ;;
 
 (* ── accumulate: MessageDelta ─────────────────────────────── *)
@@ -204,18 +237,21 @@ let test_accumulate_message_delta () =
   Streaming.accumulate_event
     acc
     (MessageDelta { stop_reason = Some EndTurn; usage = Some (make_usage 0 75) });
-  Alcotest.(check int) "output_tokens" 75 !(acc.output_tokens);
-  match !(acc.stop_reason) with
-  | EndTurn -> ()
-  | _ -> Alcotest.fail "expected EndTurn"
+  match Streaming.finalize_stream_acc acc with
+  | Ok { stop_reason = EndTurn; usage = Some usage; _ } ->
+    Alcotest.(check int) "output_tokens" 75 usage.output_tokens
+  | Ok _ -> Alcotest.fail "expected EndTurn with usage"
+  | Error err ->
+    Alcotest.fail ("unexpected finalize error: " ^ stream_error_to_string err)
 ;;
 
 let test_accumulate_message_delta_no_stop () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event acc (MessageDelta { stop_reason = None; usage = None });
-  match !(acc.stop_reason) with
-  | EndTurn -> ()
-  | _ -> Alcotest.fail "default should be EndTurn"
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_incomplete { reason = "stream_terminated_without_stop_reason" }) -> ()
+  | Error _ -> Alcotest.fail "expected typed missing stop reason"
+  | Ok _ -> Alcotest.fail "missing stop reason must not default to EndTurn"
 ;;
 
 let test_accumulate_message_delta_cache_update () =
@@ -233,8 +269,13 @@ let test_accumulate_message_delta_cache_update () =
              ; cost_usd = None
              }
        });
-  Alcotest.(check int) "cache_creation updated" 25 !(acc.cache_creation);
-  Alcotest.(check int) "cache_read updated" 10 !(acc.cache_read)
+  match Streaming.finalize_stream_acc acc with
+  | Ok { usage = Some usage; _ } ->
+    Alcotest.(check int) "cache_creation updated" 25 usage.cache_creation_input_tokens;
+    Alcotest.(check int) "cache_read updated" 10 usage.cache_read_input_tokens
+  | Ok _ -> Alcotest.fail "expected usage"
+  | Error err ->
+    Alcotest.fail ("unexpected finalize error: " ^ stream_error_to_string err)
 ;;
 
 (* ── accumulate: ignored events ───────────────────────────── *)
@@ -248,11 +289,14 @@ let test_accumulate_ignores_ping () =
   Streaming.accumulate_event
     acc
     (SSEError { message = "oops"; error_type = None; raw = "oops" });
-  Alcotest.(check string) "state unchanged" "" !(acc.id);
   Alcotest.(check bool)
     "typed stream failure is terminal"
     true
-    (Streaming.stream_failed acc)
+    (Streaming.stream_failed acc);
+  match Streaming.finalize_stream_acc acc with
+  | Error (Stream_provider_error { message = "oops"; _ }) -> ()
+  | Error _ -> Alcotest.fail "expected provider error"
+  | Ok _ -> Alcotest.fail "failed stream must not finalize successfully"
 ;;
 
 (* ── finalize_stream_acc ──────────────────────────────────── *)

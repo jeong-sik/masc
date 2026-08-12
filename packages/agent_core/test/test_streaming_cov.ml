@@ -43,13 +43,20 @@ let check_zero_usage = function
 
 (** Unwrap finalize result or fail the test. *)
 let finalize_ok acc =
-  if not !(acc.Streaming.stop_reason_received)
-  then
+  match Streaming.finalize_stream_acc acc with
+  | Ok resp -> resp
+  | Error
+      (Types.Stream_incomplete
+        { reason =
+            ("stream_terminated_without_stop_reason"
+            | "stream_terminal_without_stop_reason")
+        }) ->
     Streaming.accumulate_event
       acc
       (Types.MessageDelta { stop_reason = Some Types.EndTurn; usage = None });
-  match Streaming.finalize_stream_acc acc with
-  | Ok resp -> resp
+    (match Streaming.finalize_stream_acc acc with
+     | Ok resp -> resp
+     | Error err -> fail_unexpected_stream_error err)
   | Error err -> fail_unexpected_stream_error err
 ;;
 
@@ -57,10 +64,10 @@ let finalize_ok acc =
 
 let test_create_stream_acc () =
   let acc = Streaming.create_stream_acc () in
-  Alcotest.(check string) "empty id" "" !(acc.id);
-  Alcotest.(check string) "empty model" "" !(acc.model);
-  Alcotest.(check int) "zero input" 0 !(acc.input_tokens);
-  Alcotest.(check int) "zero output" 0 !(acc.output_tokens)
+  let response = finalize_ok acc in
+  Alcotest.(check string) "empty id" "" response.id;
+  Alcotest.(check string) "empty model" "" response.model;
+  check_zero_usage response.usage
 ;;
 
 (* ── accumulate_event tests ───────────────────────────────── *)
@@ -78,11 +85,15 @@ let test_accumulate_message_start () =
   Streaming.accumulate_event
     acc
     (Types.MessageStart { id = "msg_1"; model = "claude-3"; usage = Some usage });
-  Alcotest.(check string) "id" "msg_1" !(acc.id);
-  Alcotest.(check string) "model" "claude-3" !(acc.model);
-  Alcotest.(check int) "input tokens" 10 !(acc.input_tokens);
-  Alcotest.(check int) "cache creation" 2 !(acc.cache_creation);
-  Alcotest.(check int) "cache read" 3 !(acc.cache_read)
+  let response = finalize_ok acc in
+  Alcotest.(check string) "id" "msg_1" response.id;
+  Alcotest.(check string) "model" "claude-3" response.model;
+  match response.usage with
+  | Some usage ->
+    Alcotest.(check int) "input tokens" 10 usage.input_tokens;
+    Alcotest.(check int) "cache creation" 2 usage.cache_creation_input_tokens;
+    Alcotest.(check int) "cache read" 3 usage.cache_read_input_tokens
+  | None -> Alcotest.fail "expected usage"
 ;;
 
 let test_accumulate_message_start_no_usage () =
@@ -90,8 +101,9 @@ let test_accumulate_message_start_no_usage () =
   Streaming.accumulate_event
     acc
     (Types.MessageStart { id = "msg_2"; model = "gpt-4"; usage = None });
-  Alcotest.(check string) "id" "msg_2" !(acc.id);
-  Alcotest.(check int) "input still 0" 0 !(acc.input_tokens)
+  let response = finalize_ok acc in
+  Alcotest.(check string) "id" "msg_2" response.id;
+  check_zero_usage response.usage
 ;;
 
 let test_accumulate_content_block_start () =
@@ -100,8 +112,10 @@ let test_accumulate_content_block_start () =
     acc
     (Types.ContentBlockStart
        { index = 0; content_type = "text"; tool_id = None; tool_name = None });
-  Alcotest.(check bool) "type registered" true (Hashtbl.mem acc.block_types 0);
-  Alcotest.(check bool) "text buf exists" true (Hashtbl.mem acc.block_texts 0)
+  let response = finalize_ok acc in
+  match response.content with
+  | [ Types.Text "" ] -> ()
+  | _ -> Alcotest.fail "expected announced empty text block"
 ;;
 
 let test_accumulate_content_block_start_tool () =
@@ -114,8 +128,10 @@ let test_accumulate_content_block_start_tool () =
        ; tool_id = Some "tu_1"
        ; tool_name = Some "read_file"
        });
-  Alcotest.(check bool) "tool_id registered" true (Hashtbl.mem acc.block_tool_ids 1);
-  Alcotest.(check bool) "tool_name registered" true (Hashtbl.mem acc.block_tool_names 1)
+  let response = finalize_ok acc in
+  match response.content with
+  | [ Types.ToolUse { id = "tu_1"; name = "read_file"; input = `Assoc [] } ] -> ()
+  | _ -> Alcotest.fail "expected typed tool block"
 ;;
 
 let test_accumulate_content_block_delta_text () =
@@ -130,9 +146,10 @@ let test_accumulate_content_block_delta_text () =
   Streaming.accumulate_event
     acc
     (Types.ContentBlockDelta { index = 0; delta = Types.TextDelta "world" });
-  match Hashtbl.find_opt acc.block_texts 0 with
-  | Some buf -> Alcotest.(check string) "text" "hello world" (Buffer.contents buf)
-  | None -> Alcotest.fail "expected text buffer"
+  let response = finalize_ok acc in
+  match response.content with
+  | [ Types.Text text ] -> Alcotest.(check string) "text" "hello world" text
+  | _ -> Alcotest.fail "expected text block"
 ;;
 
 let test_accumulate_content_block_delta_thinking () =
@@ -144,9 +161,11 @@ let test_accumulate_content_block_delta_thinking () =
   Streaming.accumulate_event
     acc
     (Types.ContentBlockDelta { index = 0; delta = Types.ThinkingDelta "reasoning..." });
-  match Hashtbl.find_opt acc.block_texts 0 with
-  | Some buf -> Alcotest.(check string) "thinking" "reasoning..." (Buffer.contents buf)
-  | None -> Alcotest.fail "expected thinking buffer"
+  let response = finalize_ok acc in
+  match response.content with
+  | [ Types.Thinking { content; _ } ] ->
+    Alcotest.(check string) "thinking" "reasoning..." content
+  | _ -> Alcotest.fail "expected thinking block"
 ;;
 
 let test_accumulate_content_block_delta_json () =
@@ -165,9 +184,11 @@ let test_accumulate_content_block_delta_json () =
   Streaming.accumulate_event
     acc
     (Types.ContentBlockDelta { index = 0; delta = Types.InputJsonDelta {|val"}|} });
-  match Hashtbl.find_opt acc.block_texts 0 with
-  | Some buf -> Alcotest.(check string) "json" {|{"key":"val"}|} (Buffer.contents buf)
-  | None -> Alcotest.fail "expected json buffer"
+  let response = finalize_ok acc in
+  match response.content with
+  | [ Types.ToolUse { input; _ } ] ->
+    Alcotest.(check string) "json" {|{"key":"val"}|} (Yojson.Safe.to_string input)
+  | _ -> Alcotest.fail "expected tool block"
 ;;
 
 let test_accumulate_content_block_delta_new_index () =
@@ -176,9 +197,8 @@ let test_accumulate_content_block_delta_new_index () =
   Streaming.accumulate_event
     acc
     (Types.ContentBlockDelta { index = 5; delta = Types.TextDelta "orphan" });
-  match Hashtbl.find_opt acc.block_texts 5 with
-  | Some buf -> Alcotest.(check string) "orphan text" "orphan" (Buffer.contents buf)
-  | None -> Alcotest.fail "expected buffer for new index"
+  let response = finalize_ok acc in
+  Alcotest.(check int) "unannounced delta omitted" 0 (List.length response.content)
 ;;
 
 let test_accumulate_message_delta () =
@@ -194,15 +214,20 @@ let test_accumulate_message_delta () =
   Streaming.accumulate_event
     acc
     (Types.MessageDelta { stop_reason = Some Types.EndTurn; usage = Some usage });
-  Alcotest.(check int) "output tokens" 50 !(acc.output_tokens);
-  Alcotest.(check int) "cache creation" 1 !(acc.cache_creation);
-  Alcotest.(check int) "cache read" 2 !(acc.cache_read)
+  let response = finalize_ok acc in
+  match response.usage with
+  | Some usage ->
+    Alcotest.(check int) "output tokens" 50 usage.output_tokens;
+    Alcotest.(check int) "cache creation" 1 usage.cache_creation_input_tokens;
+    Alcotest.(check int) "cache read" 2 usage.cache_read_input_tokens
+  | None -> Alcotest.fail "expected usage"
 ;;
 
 let test_accumulate_message_delta_no_usage () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event acc (Types.MessageDelta { stop_reason = None; usage = None });
-  Alcotest.(check int) "output still 0" 0 !(acc.output_tokens)
+  let response = finalize_ok acc in
+  check_zero_usage response.usage
 ;;
 
 let test_accumulate_other_events () =
@@ -214,7 +239,10 @@ let test_accumulate_other_events () =
   Streaming.accumulate_event
     acc
     (Types.SSEError { message = "test error"; error_type = None; raw = "test error" });
-  Alcotest.(check string) "id unchanged" "" !(acc.id)
+  match Streaming.finalize_stream_acc acc with
+  | Error (Types.Stream_provider_error { message = "test error"; _ }) -> ()
+  | Error _ -> Alcotest.fail "expected provider error"
+  | Ok _ -> Alcotest.fail "failed stream must not finalize successfully"
 ;;
 
 (* ── finalize_stream_acc ──────────────────────────────────── *)

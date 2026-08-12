@@ -1459,7 +1459,10 @@ jobs:
         always() &&
         !cancelled() &&
         (
-          github.event_name == 'workflow_dispatch' ||
+          (
+            github.event_name == 'workflow_dispatch' &&
+            github.ref == 'refs/heads/main'
+          ) ||
           (
             github.event_name == 'pull_request' &&
             github.event.pull_request.head.repo.full_name == github.repository
@@ -1539,6 +1542,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -1551,6 +1555,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$EVENT_REF" != "refs/heads/main" ]; then
+              echo "STOP Keeper Real-World Gate: trusted dispatch requires refs/heads/main, got $EVENT_REF" >&2
+              exit 1
+            fi
             if [ "$CHANGES_RESULT" != "success" ]; then
               echo "STOP Keeper Real-World Gate: changed-surface detection did not complete" >&2
               exit 1

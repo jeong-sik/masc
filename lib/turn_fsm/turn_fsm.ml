@@ -120,10 +120,11 @@ let pp_cancel_reason fmt r =
 
 let pp_failure_reason fmt = function
   | Failure_runtime_unavailable { base; resolved } ->
+      let resolved = match resolved with Some value -> value | None -> "-" in
       Format.pp_print_string fmt
         (Printf.sprintf "runtime_unavailable(base=%s,resolved=%s)"
            base
-           (Option.value resolved ~default:"-"))
+           resolved)
   | Failure_no_capable_provider { runtime_id; detail } ->
       Format.pp_print_string fmt
         (Printf.sprintf "no_capable_provider(runtime=%s,detail=%s)"
@@ -132,10 +133,13 @@ let pp_failure_reason fmt = function
       Format.pp_print_string fmt
         (Printf.sprintf "provider_error(kind=%s,detail=%s)" kind detail)
   | Failure_receipt_lost { primary_error; fallback_path } ->
+      let fallback_path =
+        match fallback_path with Some value -> value | None -> "-"
+      in
       Format.pp_print_string fmt
         (Printf.sprintf "receipt_lost(err=%s,fallback=%s)"
            primary_error
-           (Option.value fallback_path ~default:"-"))
+           fallback_path)
   | Failure_runtime_error msg ->
       Format.pp_print_string fmt (Printf.sprintf "runtime_error(%s)" msg)
   | Failure_unexpected_exception { exn; _ } ->

@@ -338,15 +338,20 @@ describe('Keeper Event Queue API', () => {
 })
 
 describe('streamKeeperMessage', () => {
+  const devTokenResponse = () => new Response(
+    JSON.stringify({ token: 'test-dev-token', actor: 'dashboard', role: 'admin' }),
+    { status: 200, headers: { 'Content-Type': 'application/json' } },
+  )
+
   it('posts direct reply mode to the keeper chat stream endpoint', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta%E3%85%8A')
 
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+    const fetchMock = vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
+      ? Promise.resolve(devTokenResponse())
+      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
-      }),
-    )
+      })))
     vi.stubGlobal('fetch', fetchMock)
 
     const events: string[] = []
@@ -357,8 +362,8 @@ describe('streamKeeperMessage', () => {
       },
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(JSON.parse(String(init.body))).toEqual({
       request_id: 'kmsg-stream-direct',
@@ -366,18 +371,18 @@ describe('streamKeeperMessage', () => {
       message: 'ping',
     })
     const actorHeader = headers['X-MASC-Agent'] ?? headers['x-masc-agent']
-    expect(actorHeader).toBe('dashboard-eager-manta')
+    expect(actorHeader).toBe('dashboard')
     expect(actorHeader).not.toContain('%')
     expect(events).toEqual(['RUN_FINISHED'])
   })
 
   it('forwards copilot context fields to the stream endpoint', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+    const fetchMock = vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
+      ? Promise.resolve(devTokenResponse())
+      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
-      }),
-    )
+      })))
     vi.stubGlobal('fetch', fetchMock)
 
     const events: string[] = []
@@ -397,8 +402,8 @@ describe('streamKeeperMessage', () => {
       },
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toEqual({
       request_id: 'kmsg-stream-copilot',
       name: 'sangsu',
@@ -417,12 +422,12 @@ describe('streamKeeperMessage', () => {
   })
 
   it('forwards semantic user blocks separately from attachment payloads', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('data: {"type":"RUN_FINISHED"}\n\n', {
+    const fetchMock = vi.fn((url: string) => url === '/api/v1/dashboard/dev-token'
+      ? Promise.resolve(devTokenResponse())
+      : Promise.resolve(new Response('data: {"type":"RUN_FINISHED"}\n\n', {
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
-      }),
-    )
+      })))
     vi.stubGlobal('fetch', fetchMock)
 
     await streamKeeperMessage('sangsu', 'describe this', {
@@ -449,7 +454,7 @@ describe('streamKeeperMessage', () => {
       ],
     })
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toMatchObject({
       name: 'sangsu',
       message: 'describe this',
@@ -502,7 +507,7 @@ describe('streamKeeperMessage', () => {
       }
       if (url === '/api/v1/dashboard/dev-token') {
         return Promise.resolve(new Response(
-          JSON.stringify({ token: 'fresh-token', actor: 'dashboard', role: 'worker' }),
+          JSON.stringify({ token: 'fresh-token', actor: 'dashboard', role: 'admin' }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         ))
       }

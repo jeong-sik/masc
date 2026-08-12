@@ -223,6 +223,7 @@ let test_dashboard_rich_blocks_roundtrip () =
         };
       B.Trace
         {
+          omitted = 0;
           trace =
             [
               B.Trace_think
@@ -286,7 +287,8 @@ let test_trace_decoder_accepts_dashboard_fallbacks () =
   match B.blocks_of_yojson json with
   | Some
       [ B.Trace
-          { trace =
+          { omitted = 0
+          ; trace =
               [ B.Trace_think { agent_core_block_index = Some 7; _ }
               ; B.Trace_tool { status = None; agent_core_block_index = Some 8; _ }
               ]
@@ -503,7 +505,7 @@ let test_thinking_block_requires_content () =
        (`List [ `Assoc [ ("t", `String "thinking"); ("redacted", `Bool true) ] ])
      = None)
 
-let withheld_think_trace steps = [ B.Trace { trace = steps } ]
+let withheld_think_trace steps = [ B.Trace { trace = steps; omitted = 0 } ]
 
 let test_withheld_think_step_roundtrip () =
   (* The public autonomous projection admits the step and its timestamp with no
@@ -612,6 +614,43 @@ let test_withheld_think_step_still_requires_text_field () =
           ])
      = None)
 
+(* A trace block that was abridged has to say so. A shorter [trace] with no
+   count reads as a shorter turn, which is a different fact from a turn whose
+   trace did not fit this surface. Zero stays off the wire so an ordinary
+   turn's shape is unchanged. *)
+let test_omitted_step_count_survives_the_wire () =
+  let step =
+    B.Trace_think
+      { text = "checking"
+      ; content_withheld = false
+      ; ts = Some "2026-07-01T00:00:00Z"
+      ; agent_core_block_index = None
+      }
+  in
+  let json_of omitted =
+    B.blocks_to_yojson [ B.Trace { trace = [ step ]; omitted } ]
+  in
+  let has_omitted json =
+    match json with
+    | `List [ `Assoc fields ] -> List.assoc_opt "omitted" fields
+    | _ -> None
+  in
+  Alcotest.(check bool)
+    "a whole trace does not carry the field"
+    true
+    (Option.is_none (has_omitted (json_of 0)));
+  Alcotest.(check (option int))
+    "an abridged trace reports how many steps it dropped"
+    (Some 16682)
+    (match has_omitted (json_of 16682) with
+     | Some (`Int n) -> Some n
+     | _ -> None);
+  match B.blocks_of_yojson (json_of 16682) with
+  | Some [ B.Trace { omitted; _ } ] ->
+    Alcotest.(check int) "round trip keeps the count" 16682 omitted
+  | _ -> Alcotest.fail "abridged trace block did not round trip"
+;;
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -692,6 +731,8 @@ let () =
             test_withheld_think_step_encoder_scrubs_smuggled_text;
           Alcotest.test_case "withheld think decoder scrubs smuggled text" `Quick
             test_withheld_think_step_decoder_scrubs_smuggled_text;
+          Alcotest.test_case "abridged trace reports its omitted step count" `Quick
+            test_omitted_step_count_survives_the_wire;
           Alcotest.test_case "withheld think step still requires text field" `Quick
             test_withheld_think_step_still_requires_text_field;
         ] );

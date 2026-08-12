@@ -1290,7 +1290,7 @@ let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
     | trace ->
       [ ( "blocks"
         , Keeper_chat_blocks.blocks_to_yojson
-            [ Keeper_chat_blocks.Trace { trace } ] ) ]
+            [ Keeper_chat_blocks.Trace { trace; omitted = 0 } ] ) ]
   in
   `Assoc
     ([ "role", `String "assistant"

@@ -1712,7 +1712,7 @@ function ChatTraceStep({
   `
 }
 
-function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
+function ChatTraceBlock({ trace, omitted = 0 }: { trace: ChatTraceStep[]; omitted?: number }) {
   const [open, setOpen] = useState(true)
   const toolN = trace.filter((s) => s.kind === 'tool').length
   const dur = traceDur(trace)
@@ -1729,6 +1729,13 @@ function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
         <span>◈</span>
         <span class="chat-block-trace-label">작업 과정</span>
         <span class="chat-block-trace-count">${trace.length}단계</span>
+        <!-- A nested template literal inside an htm template corrupts its
+             parse and breaks unrelated components in the same module, so the
+             two counts are separate spans rather than one interpolated
+             string. -->
+        ${omitted > 0
+          ? html`<span class="chat-block-trace-count" data-chat-trace-omitted=${omitted}>앞 ${omitted}단계 생략</span>`
+          : null}
         <span class="chat-block-trace-meta">
           ${toolN > 0 ? html`<span>도구 ${toolN}</span>` : null}
           ${dur ? html`<span class="tnum">${dur}</span>` : null}
@@ -1738,6 +1745,12 @@ function ChatTraceBlock({ trace }: { trace: ChatTraceStep[] }) {
         ? html`
             <div class="chat-block-trace-steps">
               <span class="chat-block-trace-rail"></span>
+              ${omitted > 0
+                ? html`<div class="chat-block-tstep-text" data-chat-trace-omitted=${omitted}>
+                    이 턴의 앞 ${omitted}단계는 대화 화면에 싣지 않았습니다 — 전체는 Turn
+                    Inspector의 raw trace에서 확인합니다.
+                  </div>`
+                : null}
               ${trace.map((s, i) => html`<${ChatTraceStep} key=${i} step=${s} />`)}
             </div>
           `
@@ -2097,7 +2110,7 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'image': return html`<${ChatImageBlock} src=${block.src} ph=${block.ph} cap=${block.cap} />`
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
     case 'mermaid': return html`<${ChatMermaidBlock} source=${block.source} caption=${block.caption} />`
-    case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
+    case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} omitted=${block.omitted} />`
     case 'thinking': return html`<${ChatPersistedThinkingBlock} content=${block.content} redacted=${block.redacted} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`

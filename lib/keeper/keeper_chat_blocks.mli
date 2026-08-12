@@ -163,7 +163,18 @@ type trace_step =
       agent_core_block_index : int option;
     }
 
-type trace_block = { trace : trace_step list }
+type trace_block =
+  { trace : trace_step list
+  ; omitted : int
+      (** Steps this surface did not carry, 0 when the trace is whole. A
+          truncated [trace] with no count reads as a shorter turn, which is a
+          different fact from a turn whose trace was abridged for transport.
+
+          The chat transcript sets it: a trace block is one turn's steps, and
+          one runaway turn on the author's host held 16,882 of the 22,296 steps
+          in a keeper's whole transcript (1.65 MB of 2.29 MB) while the median
+          block held 17. The turn's steps stay available in full from the
+          raw-trace surface. *) }
 
 (** A block of keeper/assistant reasoning persisted so the dashboard can
     replay assistant thinking on reload (RFC-0302). [content] is the

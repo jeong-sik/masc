@@ -12,4 +12,4 @@
 (test
  (name test_ocaml_boundary_audit)
  (modules test_ocaml_boundary_audit)
- (libraries alcotest ocaml_boundary_audit_lib))
+ (libraries alcotest ocaml_boundary_audit_lib unix))

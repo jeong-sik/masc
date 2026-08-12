@@ -1166,9 +1166,13 @@ export async function sendKeeperThreadMessage(
         reason: errorMessage,
       }),
     })
+    // The assistant placeholder is the single transcript owner of a stream
+    // failure. Keep the optimistic user message as a delivered input row;
+    // marking both rows as errors produced two identical red error cards for
+    // one failed HTTP request.
     finalizeAssistantEntry(keeperName, localId, {
-      delivery: 'error' as KeeperConversationDelivery,
-      error: errorMessage,
+      delivery: 'delivered',
+      error: null,
       streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
         requestId: requestId ?? undefined,
         reason: errorMessage,

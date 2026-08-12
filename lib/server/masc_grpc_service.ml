@@ -236,6 +236,27 @@ let heartbeat_workspace_view ~keeper_paused ~active_agents ~tasks =
   }
 ;;
 
+(** Durable Keeper pause for one heartbeat ping, read from the live registry
+    only.
+
+    Scope: this answers "does a Keeper lane in this base_path currently hold a
+    durable pause", so a Keeper that exists only in persisted metadata is
+    [false] — it owns no lane to park. [Keeper_identity_binding.resolve] is the
+    authority for name resolution and does consult persisted metadata, but its
+    fallback lists every persisted Keeper and reads each meta file; the
+    heartbeat runs every 30s per connected agent and most pings come from
+    agents that are not Keepers at all, so that scan does not belong here.
+
+    The multi-entry branch is unreachable defence, not a policy choice.
+    [Keeper_identity.keeper_agent_name] makes agent_name a bijection of the
+    Keeper name ("keeper-<name>-agent"); the parse boundary rejects metadata
+    that breaks it, and [Keeper_registry.all] re-validates every entry on read
+    and drops the ones that fail, so two entries sharing one agent_name cannot
+    reach this scan. It still resolves to no directive rather than picking a
+    lane: a Pause the client accepts commits
+    [Keeper_latched_reason.Operator_paused], which only the receipt-first
+    [Resume_owner] transaction can clear, so a misaddressed pause is durable
+    while a skipped one is retried on the next ping. *)
 let keeper_paused_for_heartbeat ~base_path ~agent_name =
   match
     Keeper_registry_lookup.find_all_by_agent_name_in_base_path ~base_path agent_name
@@ -244,9 +265,11 @@ let keeper_paused_for_heartbeat ~base_path ~agent_name =
   | [ entry ] -> entry.meta.paused
   | entries ->
     Log.Transport.warn
-      "gRPC heartbeat: ambiguous keeper agent binding for %s (%d entries)"
+      "gRPC heartbeat: ambiguous keeper agent binding for %s (%s); emitting no pause"
       agent_name
-      (List.length entries);
+      (String.concat
+         ", "
+         (List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name) entries));
     false
 ;;
 

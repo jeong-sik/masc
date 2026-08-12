@@ -230,11 +230,7 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   canonical `#settings` route.
 - Logs was audited as a current-dashboard live surface rather than a standalone
   fixture import. The route keeps `/api/v1/dashboard/logs` as the primary event
-  stream, exposes stable row/filter selectors for verification, and moves
-  provider-log tail output behind an explicit collapsed `Provider diagnostics`
-  disclosure whenever `/api/v1/dashboard/provider-logs` has configured
-  providers, so operational support logs do not sit above the primary stream by
-  default.
+  stream and exposes stable row/filter selectors for verification.
 - Keepers/Fleet was audited route-by-route against the standalone `FleetSurface`
   rhythm. The current backed route already renders the live fleet summary band,
   compact roster, selected conversation, lifecycle/utility command bar, context
@@ -333,9 +329,8 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   repository metadata, workspace diff rows, activity/bridge-event APIs, cursor
   stream state, and Execute output stream rather than importing fixture globals.
 - Logs now has a first-pass audit. Remaining Logs work should stay constrained
-  to live `/api/v1/dashboard/logs` and `/api/v1/dashboard/provider-logs`
-  contracts; do not add synthetic provider tails, static log fixtures, or
-  local-only remediation controls above the primary event stream.
+  to the live `/api/v1/dashboard/logs` contract; do not add static log fixtures
+  or local-only remediation controls above the primary event stream.
 - The standalone memory inspector still has prototype-only pinned facts, store
   composition, scope toggles, and recall timeline controls. Current coverage is
   intentionally limited to the backed Memory OS projections
@@ -1251,40 +1246,32 @@ and gzip/base64 resource manifest expose prototype modules including `WorkSurfac
   `/tmp/masc-fusion-empty-mobile-20260621.png`. Browser page errors were empty;
   console noise was limited to Vite debug and one slow-frame warning per
   viewport.
-- Logs Vitest after the provider-diagnostics audit:
-  `src/components/logs.test.ts` passes (9 tests), including stable
+- Logs Vitest after the live-stream audit:
+  `src/components/logs.test.ts` passes, including stable
   `logs-row`/category-filter selectors, Code route links from structured log
-  evidence, unsafe absolute-path rejection, provider-log tail rendering from a
-  configured provider path, and the new default-collapsed
-  `logs-provider-diagnostics` disclosure.
-- Dashboard TypeScript after the Logs provider-diagnostics audit:
+  evidence, and unsafe absolute-path rejection.
+- Dashboard TypeScript after the Logs live-stream audit:
   `pnpm exec tsc --noEmit --pretty false` passes.
-- Dashboard lint after the Logs provider-diagnostics audit: `pnpm lint`
+- Dashboard lint after the Logs live-stream audit: `pnpm lint`
   passes.
-- Dashboard production build after the Logs provider-diagnostics audit:
+- Dashboard production build after the Logs live-stream audit:
   `pnpm build` passes with the same existing Vite warnings: unresolved
   dashboard font assets, dynamic/static import chunk warnings, large chunks,
   and the Node `module.register()` deprecation warning.
 - Logs live rendered smoke: `curl -fsS 'http://127.0.0.1:8935/health?full=1'`
   returned status `ok`, `curl -fsS
   'http://127.0.0.1:8935/api/v1/dashboard/logs?limit=20&level=INFO'`
-  returned live `masc_log_ring` rows, and `curl -fsS
-  'http://127.0.0.1:8935/api/v1/dashboard/provider-logs'` returned
-  `providers: []`. `agent-browser` loaded the worktree Vite server with
+  returned live `masc_log_ring` rows. `agent-browser` loaded the worktree Vite server with
   `MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935` at
   `http://127.0.0.1:5192/dashboard/#logs`. Desktop `1440x1000` and mobile
   `390x844` both verified title `MASC · Logs`, canonical hash `#logs`, h1
   `이벤트 로그`, 200 live rows, provenance including `masc_log_ring` and
-  `dashboard_logs`, no provider diagnostics panel for the empty live provider
-  catalog, Tool category filter changing the stream from `200` to `0`, All
-  restoring `200`, no framework overlay, and no horizontal overflow.
+  `dashboard_logs`, Tool category filter changing the stream from `200` to `0`,
+  All restoring `200`, no framework overlay, and no horizontal overflow.
 - Logs rendered screenshots: `/tmp/masc-logs-live-stream-desktop-20260621.png`
   and `/tmp/masc-logs-live-stream-mobile-20260621.png`. Browser page errors
   were empty; console noise was Vite debug plus existing PerformanceMonitor
-  slow-frame warnings. Browser network stubbing was attempted for provider-log
-  catalog/tail but did not affect the same-origin fetch in `agent-browser`, so
-  the configured-provider collapsed state is covered by Vitest rather than the
-  live rendered smoke.
+  slow-frame warnings.
 - Board mobile-clearance Vitest after the master-detail audit:
   `src/styles/board-v2.test.ts` and
   `src/components/board/board-surface.test.ts` pass together with

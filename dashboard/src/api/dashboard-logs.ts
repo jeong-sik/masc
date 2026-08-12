@@ -1,4 +1,4 @@
-// MASC Dashboard — System logs / provider logs / dashboard config fetchers.
+// MASC Dashboard — System logs / dashboard config fetchers.
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
@@ -6,10 +6,6 @@ import { get } from './core'
 import { ensureDevToken } from './dev-token'
 import type { DashboardConfigResponse } from './schemas/dashboard-config'
 import type { LogsResponse } from './schemas/logs'
-import type {
-  ProviderLogsCatalogResponse,
-  ProviderLogTailResponse,
-} from './schemas/provider-logs'
 
 export async function fetchLogs(opts?: {
   limit?: number
@@ -36,24 +32,6 @@ export async function fetchLogs(opts?: {
   const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
   const { parseLogsResponse } = await import('./schemas/logs')
   return parseLogsResponse(raw)
-}
-
-export async function fetchProviderLogsCatalog(): Promise<ProviderLogsCatalogResponse> {
-  const raw = await get<unknown>('/api/v1/dashboard/provider-logs')
-  const { parseProviderLogsCatalogResponse } = await import('./schemas/provider-logs')
-  return parseProviderLogsCatalogResponse(raw)
-}
-
-export async function fetchProviderLogTail(
-  provider: string,
-  opts?: { lines?: number },
-): Promise<ProviderLogTailResponse> {
-  const params = new URLSearchParams()
-  params.set('provider', provider)
-  if (opts?.lines) params.set('lines', String(opts.lines))
-  const raw = await get<unknown>(`/api/v1/dashboard/provider-logs/tail?${params.toString()}`)
-  const { parseProviderLogTailResponse } = await import('./schemas/provider-logs')
-  return parseProviderLogTailResponse(raw)
 }
 
 export async function fetchDashboardConfig(): Promise<DashboardConfigResponse> {

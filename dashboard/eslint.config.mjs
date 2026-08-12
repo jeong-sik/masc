@@ -14,7 +14,6 @@ const TARGET_FILES = [
   'src/api/schemas/runtime.ts',
   'src/api/schemas/dashboard-config.ts',
   'src/api/schemas/feature-health.ts',
-  'src/api/schemas/provider-logs.ts',
   'src/api/schemas/transport-health.ts',
   'src/api/transport-health.ts',
   'src/components/common/async-container.ts',
@@ -134,7 +133,6 @@ const LEGACY_VALIBOT_FILES = [
   'src/api/schemas/link-previews.ts',
   'src/api/schemas/logs.ts',
   'src/api/schemas/operator-action.ts',
-  'src/api/schemas/provider-logs.ts',
   'src/api/schemas/runtime-defaults.ts',
   'src/api/schemas/runtime-resolved.ts',
 ]

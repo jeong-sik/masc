@@ -253,13 +253,11 @@
   }
 }
 
-.v2-logs-toolbar .logs-refresh-btn,
-.v2-logs-provider-panel .logs-refresh-btn {
+.v2-logs-toolbar .logs-refresh-btn {
   transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
 }
 
-.v2-logs-toolbar .logs-refresh-btn:not(:disabled):hover,
-.v2-logs-provider-panel .logs-refresh-btn:not(:disabled):hover {
+.v2-logs-toolbar .logs-refresh-btn:not(:disabled):hover {
   border-color: var(--color-accent-fg);
   background: var(--color-brass-soft);
 }
@@ -607,11 +605,6 @@
 
 .v2-logs-diagnostics-body {
   padding: 10px;
-}
-
-.v2-logs-provider-panel {
-  background: var(--color-bg-elevated);
-  border-color: var(--color-border-default);
 }
 
 @media (max-width: 900px) {

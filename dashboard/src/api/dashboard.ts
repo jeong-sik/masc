@@ -18,12 +18,6 @@ import {
   type ResolvedAssignmentTarget,
   type RuntimeAssignment,
 } from './schemas/runtime-resolved'
-import {
-  type ProviderLogCatalogEntry,
-  type ProviderLogsCatalogResponse,
-  type ProviderLogTailLine,
-  type ProviderLogTailResponse,
-} from './schemas/provider-logs'
 export type {
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
@@ -91,17 +85,8 @@ export type {
   ResolvedAssignmentTarget,
   RuntimeAssignment,
 }
-export type {
-  ProviderLogCatalogEntry,
-  ProviderLogsCatalogResponse,
-  ProviderLogTailLine,
-  ProviderLogTailResponse,
-}
-
 export {
   fetchLogs,
-  fetchProviderLogsCatalog,
-  fetchProviderLogTail,
   fetchDashboardConfig,
   parseContextThresholds,
 } from './dashboard-logs'

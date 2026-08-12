@@ -21,20 +21,40 @@ if [[ -z "$req_ver" ]]; then
   exit 1
 fi
 
-# --- Extract installed dune version from Dockerfile.keeper-sandbox -----------
-# Looks for an opam install line containing dune.X.Y.Z
+# --- Extract installed dune version -----------------------------------------
+# Two ways the image can end up with dune, checked in that order:
+#
+#   1. an explicit `opam install dune.X.Y.Z` line in the Dockerfile
+#   2. `opam install --deps-only` against masc.opam, which resolves dune from
+#      masc.opam.locked — the Dockerfile copies that lock in and installs from
+#      it, so the lock's pin is the version the image gets
+#
+# `|| true` is required: these greps run under `set -euo pipefail`, and a
+# no-match grep exits 1, which would kill the script before it could print
+# the diagnostic below.
 sandbox_ver="$(grep -oE 'dune\.[0-9]+\.[0-9]+(\.[0-9]+)?' \
-               "$repo_root/Dockerfile.keeper-sandbox" \
-               | head -1 | sed 's/^dune\.//')"
+               "$repo_root/Dockerfile.keeper-sandbox" 2>/dev/null \
+               | head -1 | sed 's/^dune\.//' || true)"
+sandbox_source="Dockerfile.keeper-sandbox (explicit install)"
+
+if [[ -z "$sandbox_ver" ]] \
+   && grep -qE '^[[:space:]]*(RUN|&&)?[^#]*--deps-only' \
+        "$repo_root/Dockerfile.keeper-sandbox"; then
+  sandbox_ver="$(grep -oE '"dune" \{= "[0-9]+\.[0-9]+(\.[0-9]+)?"\}' \
+                 "$repo_root/masc.opam.locked" 2>/dev/null \
+                 | head -1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' || true)"
+  sandbox_source="masc.opam.locked (via --deps-only)"
+fi
 
 if [[ -z "$sandbox_ver" ]]; then
-  printf 'ERROR: could not extract dune version from Dockerfile.keeper-sandbox\n' >&2
-  printf '  Expected an opam install line containing: dune.X.Y.Z\n' >&2
+  printf 'ERROR: could not determine the dune version the sandbox image installs\n' >&2
+  printf '  Looked for: an `opam install dune.X.Y.Z` line in Dockerfile.keeper-sandbox,\n' >&2
+  printf '  then, if it installs with --deps-only, `"dune" {= "X.Y.Z"}` in masc.opam.locked\n' >&2
   exit 1
 fi
 
 printf 'dune-project requires  : %s\n' "$req_ver"
-printf 'Dockerfile installs    : %s\n' "$sandbox_ver"
+printf 'sandbox image installs : %s  (from %s)\n' "$sandbox_ver" "$sandbox_source"
 
 # --- Version comparison: sandbox_ver >= req_ver (using sort -V) ---------------
 # printf puts req_ver first; sort -V -C returns 0 only when the two lines are

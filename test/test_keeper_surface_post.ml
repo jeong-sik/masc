@@ -261,10 +261,36 @@ let test_terminal_receipt_requires_exact_supported_route () =
     (SP.matches_continuation_route
        (SP.To_discord { channel_id = "D2" })
        (discord "D1"));
-  check bool "Discord post does not satisfy exact reply" false
+  (* PR #28225 review (comment 3761300281): Discord channel_id is the innermost
+     conversation locus, so a same-channel post delivers a reply-scoped
+     continuation. reply_to_message_id names the trigger, not a destination. *)
+  check bool "Discord post to the channel delivers a reply-scoped continuation"
+    true
     (SP.matches_continuation_route
        (SP.To_discord { channel_id = "D1" })
        (discord ~reply_to_message_id:"message-1" "D1"));
+  let slack ?thread_ts channel_id =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team")
+        ~channel_id
+        ~thread_ts
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check bool "Slack post to the channel delivers an unthreaded continuation" true
+    (SP.matches_continuation_route
+       (SP.To_slack { channel_id = "C1"; blocks = None })
+       (slack "C1"));
+  (* Slack thread_ts is a destination distinct from the channel root and the
+     tool does not thread its post, so a channel post does not prove delivery of
+     a threaded Slack continuation; recovery settles it. *)
+  check bool "Slack channel post does not satisfy a threaded continuation" false
+    (SP.matches_continuation_route
+       (SP.To_slack { channel_id = "C1"; blocks = None })
+       (slack ~thread_ts:"1700000000.000100" "C1"));
   check bool "keeper-global dashboard post has no exact thread receipt" false
     (SP.matches_continuation_route
        SP.To_dashboard

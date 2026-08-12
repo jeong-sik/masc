@@ -160,6 +160,3 @@ val dashboard_shell_payload_json :
   ?timing:Server_timing.t ->
   ?light:bool ->
   Workspace.config -> Yojson.Safe.t
-
-val is_dashboard_cache_timeout_json :
-  Yojson.Safe.t -> bool

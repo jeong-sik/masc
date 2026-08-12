@@ -47,7 +47,7 @@ let warm_shell_cache (state : Mcp_server.server_state) =
        in
        (try
           let light_result = cache_shell_payload ~light:true in
-          if is_dashboard_cache_timeout_json light_result
+          if Dashboard_cache.is_timeout_envelope light_result
           then
             Log.Dashboard.warn
               "light shell cache pre-warm timed out during compute (%.0fs)"
@@ -65,7 +65,7 @@ let warm_shell_cache (state : Mcp_server.server_state) =
             (Printexc.to_string exn));
        try
          let result = cache_shell_payload ~light:false in
-         if is_dashboard_cache_timeout_json result
+         if Dashboard_cache.is_timeout_envelope result
          then
            Log.Dashboard.warn
              "shell cache pre-warm timed out during compute (%.0fs)"

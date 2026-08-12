@@ -424,14 +424,7 @@ let test_stale_preserved_on_timeout ~clock ~sw () =
     Dashboard_cache.get_or_compute "stale_timeout" ~ttl:0.1 (fun () ->
       `String "fresh_recompute")
   in
-  let is_timeout_error =
-    match after with
-    | `Assoc pairs ->
-      (match List.assoc_opt "error" pairs with
-       | Some (`String "computation_timeout") -> true
-       | _ -> false)
-    | _ -> false
-  in
+  let is_timeout_error = Dashboard_cache.is_timeout_envelope after in
   Alcotest.(check bool) "no timeout error cached" false is_timeout_error
 
 (* -- 10. Expired stale falls back to last-good on timeout ------------------- *)
@@ -456,14 +449,7 @@ let test_expired_stale_restored_on_timeout ~clock () =
     Dashboard_cache.get_or_compute "expired_stale_timeout" ~ttl:0.05 (fun () ->
       `String "fresh_after_restore")
   in
-  let is_timeout_error =
-    match after with
-    | `Assoc pairs ->
-      (match List.assoc_opt "error" pairs with
-       | Some (`String "computation_timeout") -> true
-       | _ -> false)
-    | _ -> false
-  in
+  let is_timeout_error = Dashboard_cache.is_timeout_envelope after in
   Alcotest.(check bool) "expired stale restore avoids timeout poison" false
     is_timeout_error
 
@@ -481,14 +467,7 @@ let test_timeout_no_stale_returns_error ~clock () =
         `String "never_reached")
   in
   (* Should get timeout error JSON *)
-  let is_timeout_error =
-    match result with
-    | `Assoc pairs ->
-      (match List.assoc_opt "error" pairs with
-       | Some (`String "computation_timeout") -> true
-       | _ -> false)
-    | _ -> false
-  in
+  let is_timeout_error = Dashboard_cache.is_timeout_envelope result in
   Alcotest.(check bool) "timeout error returned" true is_timeout_error;
   (* Next call should recompute, not return cached error *)
   let v2 =
@@ -741,6 +720,51 @@ let test_compute_leaves_caller_domain ~clock ~sw ~dm () =
         true
         (d <> caller_domain))
 
+(* -- The timeout envelope has one producer and one recognizer -------------- *)
+
+(** Every timeout path returns the same envelope and the recognizer that sits
+    beside the producer accepts all of them, so no reader has to match the
+    [error] string itself.
+
+    The literal pins the value clients route on
+    ([dashboard/src/api/core.ts:725] branches on
+    [errorCode = "computation_timeout"]), so changing
+    {!Dashboard_cache.timeout_error_code} fails here rather than at a client
+    that quietly stops recognizing timeouts.
+
+    The control is a computed payload that carries its own [error] field: it
+    must stay unrecognized, or the check would swallow real data. *)
+let test_timeout_envelope_recognizer ~clock () =
+  Alcotest.(check string) "wire value clients route on" "computation_timeout"
+    Dashboard_cache.timeout_error_code;
+  Dashboard_cache.invalidate_all ();
+  let slow () =
+    Eio.Time.sleep clock 1.0;
+    `String "never_reached"
+  in
+  let timed_out () =
+    Dashboard_cache.get_or_compute_with_timeout "envelope_paths" ~ttl:1.0
+      ~clock ~timeout_sec:0.05 slow
+  in
+  let owner = timed_out () in
+  Alcotest.(check string) "owner kind" "owner" (timeout_kind owner);
+  Alcotest.(check bool) "owner envelope recognized" true
+    (Dashboard_cache.is_timeout_envelope owner);
+  for _ = 1 to 2 do
+    ignore (timed_out () : Yojson.Safe.t)
+  done;
+  let circuit = timed_out () in
+  Alcotest.(check string) "circuit kind" "circuit_open" (timeout_kind circuit);
+  Alcotest.(check bool) "circuit envelope recognized" true
+    (Dashboard_cache.is_timeout_envelope circuit);
+  Dashboard_cache.invalidate_all ();
+  let computed =
+    Dashboard_cache.get_or_compute "envelope_control" ~ttl:1.0 (fun () ->
+      `Assoc [ ("error", `String "not_a_timeout"); ("rows", `List []) ])
+  in
+  Alcotest.(check bool) "computed payload is not an envelope" false
+    (Dashboard_cache.is_timeout_envelope computed)
+
 (* -- Harness ---------------------------------------------------------------- *)
 
 let () =
@@ -818,5 +842,7 @@ let () =
             (test_repeated_no_stale_timeout_opens_circuit ~clock);
           test_case "waiter timeout returns error, not cached" `Quick
             (test_waiter_timeout_returns_error_not_cached ~clock);
+          test_case "timeout envelope producer and recognizer agree" `Quick
+            (test_timeout_envelope_recognizer ~clock);
         ] );
     ]

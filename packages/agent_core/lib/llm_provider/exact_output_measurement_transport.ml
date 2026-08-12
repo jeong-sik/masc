@@ -15,6 +15,11 @@ type 'callback_error error =
 
 type connection = [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
 
+type validated_origin =
+  { uri : Uri.t
+  ; host : string
+  }
+
 let create_dispatch_intent ~commit_fence ~mark_dispatch_started =
   { committed = Atomic.make false
   ; dispatch_started = Atomic.make false
@@ -88,7 +93,7 @@ let validate_uri url =
   try
     let uri = Uri.of_string url in
     match Uri.host uri with
-    | Some host when String.trim host <> "" -> Ok uri
+    | Some host when String.trim host <> "" -> Ok { uri; host }
     | Some _ | None ->
       Error
         (NetworkError
@@ -135,9 +140,8 @@ let https_init_error_network_kind = function
   | Api_common.Ca_certs_unavailable _ | Api_common.Tls_config_unavailable _ -> Tls_error
 ;;
 
-let resolve_origin net uri =
+let resolve_origin net ({ uri; host } : validated_origin) =
   let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
-  let host = Option.get (Uri.host uri) in
   let service =
     match Uri.port uri with
     | Some port -> Int.to_string port
@@ -181,13 +185,13 @@ let resolve_origin net uri =
   Ok (net, addr, tls_wrap)
 ;;
 
-let make_connection ~sw ~net ~uri =
-  let* net, address, tls_wrap = resolve_origin net uri in
+let make_connection ~sw ~net ~origin =
+  let* net, address, tls_wrap = resolve_origin net origin in
   try
     let socket = Eio.Net.connect ~sw net address in
     let connection : connection =
       match tls_wrap with
-      | Some wrap -> (wrap uri socket :> connection)
+      | Some wrap -> (wrap origin.uri socket :> connection)
       | None -> (socket :> connection)
     in
     Ok connection
@@ -236,7 +240,7 @@ let post_sync_once_after_commit
       ~connect_deadline
       ~body_deadline
       ~net
-      ~uri
+      ~origin
       ~header
       ~body
       ~dispatch_intent
@@ -319,7 +323,7 @@ let post_sync_once_after_commit
   let post_result =
     try
       with_headers_deadline (fun () ->
-        let* current = make_connection ~sw ~net ~uri in
+        let* current = make_connection ~sw ~net ~origin in
         connection := Some current;
         let client =
           Cohttp_eio.Client.make_generic (fun ~sw:_ _uri ->
@@ -331,14 +335,19 @@ let post_sync_once_after_commit
         then invalid_arg "exact-output measurement dispatch was already started";
         dispatch_intent.mark_dispatch_started ();
         let response, response_body =
-          Cohttp_eio.Client.post ~sw client ~headers:header ~body:request_body uri
+          Cohttp_eio.Client.post
+            ~sw
+            client
+            ~headers:header
+            ~body:request_body
+            origin.uri
         in
         let response_status =
           Cohttp.Response.status response |> Cohttp.Code.code_of_status
         in
         phase := Response_received;
         status := Some response_status;
-        Ok (response, response_body))
+        Ok (response, response_body, response_status))
     with
     | Eio.Time.Timeout as exn ->
       release_connection ();
@@ -349,7 +358,7 @@ let post_sync_once_after_commit
   | Error error ->
     release_connection ();
     Error (staged_error error)
-  | Ok (response, response_body) ->
+  | Ok (response, response_body, response_status) ->
     let body_result =
       try
         match body_deadline, total_started_at with
@@ -378,7 +387,6 @@ let post_sync_once_after_commit
        release_connection ();
        Error (staged_error error)
      | Ok response_body ->
-       let response_status = Option.get !status in
        let retry_after_header = retry_after_header response in
        release_connection ();
        Ok
@@ -418,7 +426,7 @@ let post_sync_once
      | Ok body_deadline ->
        (match validate_uri url with
         | Error error -> before_dispatch error
-        | Ok uri ->
+        | Ok origin ->
           (match validate_headers_and_body headers body with
            | Error error -> before_dispatch error
            | Ok header ->
@@ -432,7 +440,7 @@ let post_sync_once
                   ~connect_deadline
                   ~body_deadline
                   ~net
-                  ~uri
+                  ~origin
                   ~header
                   ~body
                   ~dispatch_intent

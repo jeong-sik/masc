@@ -1368,67 +1368,61 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"masc_set_param"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
+           match Server_runtime_param_request.decode_set body_str with
+           | Error error ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [ ("ok", `Bool false)
+                  ; ( "error"
+                    , `String
+                        (Server_runtime_param_request.error_message error) )
+                  ])
+           | Ok runtime_param_request ->
              let base_path = (Mcp_server.workspace_config state).base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"
              in
-             let param_key = Json_util.get_string args "param_key"
-               |> Option.value ~default:"" |> String.trim in
-             let value_json = Json_util.assoc_member_opt "value" args in
-            if param_key = "" then
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("ok", `Bool false); ("error", `String "param_key is required") ])
-             else match value_json with
-             | None ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("ok", `Bool false); ("error", `String "value is required") ])
-             | Some value ->
-               (match
-                  mutate_runtime_param_with_effects
-                    ~base_path
-                    ~param_key
-                    (fun () ->
-                      Runtime_params.set_by_key_with_change
-                        param_key
-                        value
-                        ~actor)
-                with
-                | Error msg ->
-                  respond_json_value_with_cors ~status:`Bad_request request reqd
-                    (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok (change, effect_fields) ->
-                  Sse.broadcast
-                    (`Assoc
-                       ([ "type", `String "runtime_param_changed"
-                        ; "param_key", `String param_key
-                        ; "old_value", change.old_value
-                        ; "new_value", change.new_value
-                        ; "actor", `String actor
-                        ]
-                        @ effect_fields));
-                  respond_json_value_with_cors request reqd
-                    (`Assoc
-                       ([ "ok", `Bool true
-                        ; ( "message"
-                          , `String
-                              (Printf.sprintf
-                                 "Set %s = %s"
-                                 param_key
-                                 (Yojson.Safe.to_string change.new_value)) )
-                        ]
-                        @ effect_fields)))
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("error", `String (Printexc.to_string exn));
-                  ])
+             let param_key =
+               Server_runtime_param_request.set_param_key runtime_param_request
+             in
+             let value =
+               Server_runtime_param_request.set_value runtime_param_request
+             in
+             (match
+                mutate_runtime_param_with_effects
+                  ~base_path
+                  ~param_key
+                  (fun () ->
+                    Runtime_params.set_by_key_with_change
+                      param_key
+                      value
+                      ~actor)
+              with
+              | Error msg ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ "ok", `Bool false; "error", `String msg ])
+              | Ok (change, effect_fields) ->
+                Sse.broadcast
+                  (`Assoc
+                     ([ "type", `String "runtime_param_changed"
+                      ; "param_key", `String param_key
+                      ; "old_value", change.old_value
+                      ; "new_value", change.new_value
+                      ; "actor", `String actor
+                      ]
+                      @ effect_fields));
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     ([ "ok", `Bool true
+                      ; ( "message"
+                        , `String
+                            (Printf.sprintf
+                               "Set %s = %s"
+                               param_key
+                               (Yojson.Safe.to_string change.new_value)) )
+                      ]
+                      @ effect_fields)))
          )
        ) request reqd)
 
@@ -1436,53 +1430,51 @@ let add_routes ~sw ~clock router =
        with_tool_auth ~tool_name:"masc_set_param"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let args = Yojson.Safe.from_string body_str in
-             let param_key = Json_util.get_string args "param_key"
-               |> Option.value ~default:"" in
+           match Server_runtime_param_request.decode_clear body_str with
+           | Error error ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [ ("ok", `Bool false)
+                  ; ( "error"
+                    , `String
+                        (Server_runtime_param_request.error_message error) )
+                  ])
+           | Ok runtime_param_request ->
+             let param_key =
+               Server_runtime_param_request.clear_param_key runtime_param_request
+             in
              let base_path = (Mcp_server.workspace_config state).base_path in
              let actor =
                sanitized_dashboard_actor_for_request ~base_path request
                |> Option.value ~default:"dashboard"
              in
-            if param_key = "" then
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("ok", `Bool false); ("error", `String "param_key is required") ])
-             else
-               (match
-                  mutate_runtime_param_with_effects
-                    ~base_path
-                    ~param_key
-                    (fun () ->
-                      Runtime_params.clear_by_key_with_change param_key ~actor)
-                with
-                | Error msg ->
-                  respond_json_value_with_cors ~status:`Bad_request request reqd
-                    (`Assoc [ "ok", `Bool false; "error", `String msg ])
-                | Ok (change, effect_fields) ->
-                  Sse.broadcast
-                    (`Assoc
-                       ([ "type", `String "runtime_param_changed"
-                        ; "param_key", `String param_key
-                        ; "old_value", change.old_value
-                        ; "new_value", change.new_value
-                        ; "actor", `String actor
-                        ]
-                        @ effect_fields));
-                  respond_json_value_with_cors request reqd
-                    (`Assoc
-                       ([ "ok", `Bool true
-                        ; ( "message"
-                          , `String (Printf.sprintf "Cleared %s to default" param_key) )
-                        ]
-                        @ effect_fields)))
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (`Assoc
-                  [
-                    ("ok", `Bool false);
-                    ("error", `String (Printexc.to_string exn));
-                  ])
+             (match
+                mutate_runtime_param_with_effects
+                  ~base_path
+                  ~param_key
+                  (fun () ->
+                    Runtime_params.clear_by_key_with_change param_key ~actor)
+              with
+              | Error msg ->
+                respond_json_value_with_cors ~status:`Bad_request request reqd
+                  (`Assoc [ "ok", `Bool false; "error", `String msg ])
+              | Ok (change, effect_fields) ->
+                Sse.broadcast
+                  (`Assoc
+                     ([ "type", `String "runtime_param_changed"
+                      ; "param_key", `String param_key
+                      ; "old_value", change.old_value
+                      ; "new_value", change.new_value
+                      ; "actor", `String actor
+                      ]
+                      @ effect_fields));
+                respond_json_value_with_cors request reqd
+                  (`Assoc
+                     ([ "ok", `Bool true
+                      ; ( "message"
+                        , `String
+                            (Printf.sprintf "Cleared %s to default" param_key) )
+                      ]
+                      @ effect_fields)))
          )
        ) request reqd)

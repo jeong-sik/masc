@@ -153,6 +153,86 @@ let test_target_resolution_implicit_unregistered_author () =
          "error message"
          "target_keeper is required because board post author \"operator\" is not a registered keeper")
 
+let expect_runtime_param_request_error ~label decode body expected =
+  match decode body with
+  | Error error ->
+    check string label expected
+      (Server_runtime_param_request.error_message error)
+  | Ok _ -> fail (Printf.sprintf "accepted invalid runtime-param request: %s" body)
+
+let test_runtime_param_request_admission () =
+  (match
+     Server_runtime_param_request.decode_set
+       {|{"param_key":"keeper.max_turns","value":12}|}
+   with
+   | Ok request ->
+     check string "set key" "keeper.max_turns"
+       (Server_runtime_param_request.set_param_key request);
+     check bool "set value" true
+       (Yojson.Safe.equal (`Int 12)
+          (Server_runtime_param_request.set_value request))
+   | Error error -> fail (Server_runtime_param_request.error_message error));
+  (match
+     Server_runtime_param_request.decode_clear
+       {|{"param_key":"keeper.max_turns"}|}
+   with
+   | Ok request ->
+     check string "clear key" "keeper.max_turns"
+       (Server_runtime_param_request.clear_param_key request)
+   | Error error -> fail (Server_runtime_param_request.error_message error));
+  (match
+     Server_runtime_param_request.decode_set
+       {|{"param_key":"feature.flag","value":null}|}
+   with
+   | Ok request ->
+     check bool "explicit null remains a present value" true
+       (Yojson.Safe.equal `Null
+          (Server_runtime_param_request.set_value request))
+   | Error error -> fail (Server_runtime_param_request.error_message error));
+  List.iter
+    (fun (label, decode, body, expected) ->
+       expect_runtime_param_request_error ~label decode body expected)
+    [ ( "object required"
+      , Server_runtime_param_request.decode_set
+      , "[]"
+      , "request body must be an object" )
+    ; ( "key required"
+      , Server_runtime_param_request.decode_set
+      , {|{"value":1}|}
+      , "param_key is required" )
+    ; ( "key type"
+      , Server_runtime_param_request.decode_set
+      , {|{"param_key":1,"value":1}|}
+      , "param_key must be a string" )
+    ; ( "blank key"
+      , Server_runtime_param_request.decode_set
+      , {|{"param_key":"  ","value":1}|}
+      , "param_key is required" )
+    ; ( "duplicate key"
+      , Server_runtime_param_request.decode_set
+      , {|{"param_key":"a","param_key":"b","value":1}|}
+      , "duplicate param_key field" )
+    ; ( "value required"
+      , Server_runtime_param_request.decode_set
+      , {|{"param_key":"keeper.max_turns"}|}
+      , "value is required" )
+    ; ( "duplicate value"
+      , Server_runtime_param_request.decode_set
+      , {|{"param_key":"keeper.max_turns","value":1,"value":2}|}
+      , "duplicate value field" )
+    ];
+  expect_runtime_param_request_error
+    ~label:"canonical clear key"
+    Server_runtime_param_request.decode_clear
+    {|{"param_key":" keeper.max_turns "}|}
+    "param_key must not contain surrounding whitespace";
+  match Server_runtime_param_request.decode_clear "{" with
+  | Error error ->
+    let message = Server_runtime_param_request.error_message error in
+    check bool "malformed JSON is classified" true
+      (String.starts_with ~prefix:"Invalid JSON:" message)
+  | Ok _ -> fail "accepted malformed runtime-param request"
+
 let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
   let base_path = "/tmp/test_runtime_param_keeper_wakeup" in
   Keeper_registry.For_testing.clear ();
@@ -355,7 +435,9 @@ let () =
         ; test_case "implicit unregistered author" `Quick test_target_resolution_implicit_unregistered_author
         ] )
     ; ( "runtime_params",
-        [ test_case "cadence decrease wakes only live sleepers" `Quick
+        [ test_case "request admission is typed and strict" `Quick
+            test_runtime_param_request_admission
+        ; test_case "cadence decrease wakes only live sleepers" `Quick
             test_cadence_change_wakes_only_live_sleepers_when_shortened
         ; test_case "cadence mutation and wake are serialized" `Quick
             test_cadence_mutation_and_wake_are_serialized

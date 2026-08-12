@@ -887,6 +887,18 @@ let initialize_owner_state_blocking
      raise
        (Owner_initialization_failed
           (Runtime_default_initialization_failed error)));
+  (* masc#28404. Boot refuses only over runtimes something actually routes to,
+     which is right — an unassigned runtime is not a reason to stay down. But
+     the blocked ones then started silently, and the answer to "why can I not
+     assign this runtime" lived nowhere. One line per blocked runtime at boot is
+     that answer; empty is the healthy state and logs nothing. *)
+  List.iter
+    (fun ((runtime : Runtime.t), reason) ->
+      Log.Server.warn
+        "Runtime %s is not keeper-dispatchable: %s"
+        runtime.id
+        reason)
+    (Runtime.keeper_dispatch_blocked (Runtime.get_runtimes ()));
   configure_exact_output_registry
     ~config_root:(Filename.dirname runtime_config_path)
     ();

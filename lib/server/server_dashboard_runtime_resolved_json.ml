@@ -26,6 +26,9 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
            "runtime resolved projection invariant violated: runtime %S has no max-context resolution"
            rt.id)
   in
+  let dispatch_blocker =
+    Runtime.keeper_dispatch_blocker (Runtime.keeper_dispatch_readiness rt)
+  in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
@@ -35,6 +38,15 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
     ; "max_output_tokens", int_opt_json (Runtime.max_output_tokens_of_runtime_id rt.id)
     ; "is_local", `Bool (Runtime.is_local_runtime rt)
     ; "is_default", `Bool rt.binding.is_default
+      (* masc#28404: a runtime can be declared, materialized, and listed here
+         while being impossible to assign to a keeper. Boot validation judges
+         only reachable ids, so that state used to have no observer — the
+         operator saw a runtime in this list, tried to assign it, and only then
+         learned it was blocked. Reported per runtime rather than as a separate
+         endpoint so "what is applied" and "what could be applied" are read from
+         one document. *)
+    ; "keeper_dispatchable", `Bool (Option.is_none dispatch_blocker)
+    ; "keeper_dispatch_blocked_reason", string_opt_json dispatch_blocker
     ]
 ;;
 

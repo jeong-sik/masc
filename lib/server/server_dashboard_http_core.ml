@@ -305,14 +305,6 @@ let remember_dashboard_shell_last_good ~light json =
   else Atomic.set last_good_shell json
 ;;
 
-let is_dashboard_cache_timeout_json = function
-  | `Assoc fields ->
-    (match List.assoc_opt "error" fields with
-     | Some (`String ("Compute timeout" | "computation_timeout")) -> true
-     | _ -> false)
-  | _ -> false
-;;
-
 module Shell_projection_trace = Server_dashboard_shell_projection_trace
 
 type shell_projection_trace_status =
@@ -742,7 +734,7 @@ let dashboard_shell_http_json
         | None -> cache_load ()
         | Some t -> Server_timing.measure t Cache_lookup cache_load
       in
-      if is_dashboard_cache_timeout_json computed
+      if Dashboard_cache.is_timeout_envelope computed
       then timeout_fallback_payload (dashboard_shell_timeout_for ~light)
       else (
         remember_dashboard_shell_last_good ~light computed;

@@ -179,14 +179,61 @@ let should_restore_stale_after_failure exn =
   | Eio.Cancel.Cancelled _ -> true
   | _ -> false
 
-let timeout_json ~key ~timeout_sec ~timeout_kind =
+(* The one shape a timed-out compute takes on the wire.
+
+   Every timeout path in this module goes through [timeout_error_json], and the
+   only sanctioned reader is [is_timeout_envelope] beside it. Both read
+   [timeout_error_code], so changing the wire value cannot leave a reader
+   behind — a recognizer that lives in another module and matches the string
+   itself drifts silently the moment a producer changes.
+
+   The envelope still travels in-band, as a value indistinguishable from a
+   computed payload until a reader checks; #28400 tracks moving it out of band
+   and giving it its own HTTP status. *)
+let timeout_error_code = "computation_timeout"
+
+type timeout_envelope = {
+  key : string;
+  timeout_sec : float;
+  timeout_kind : string;
+  waiting : bool;
+}
+
+let timeout_envelope_message { key; timeout_sec; timeout_kind; waiting } =
+  match timeout_kind with
+  | "circuit_open" ->
+    Printf.sprintf "Dashboard %s is failing fast after repeated cache timeouts" key
+  | _ when waiting ->
+    Printf.sprintf
+      "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
+      key timeout_sec
+  | _ -> Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
+
+let timeout_envelope_json envelope =
   `Assoc
     [
-      ("error", `String "computation_timeout");
-      ("timeout_sec", `Float timeout_sec);
-      ("key", `String key);
-      ("timeout_kind", `String timeout_kind);
+      ("error", `String timeout_error_code);
+      ("message", `String (timeout_envelope_message envelope));
+      ("generated_at", `String (Masc_domain.now_iso ()));
+      ("timeout_kind", `String envelope.timeout_kind);
+      ("timeout_sec", `Float envelope.timeout_sec);
+      ("key", `String envelope.key);
     ]
+
+let is_timeout_envelope = function
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String code) -> String.equal code timeout_error_code
+     | _ -> false)
+  | _ -> false
+
+let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
+  let timeout_kind =
+    match timeout_kind with
+    | Some timeout_kind -> timeout_kind
+    | None -> if waiting then "waiter" else "owner"
+  in
+  timeout_envelope_json { key; timeout_sec; timeout_kind; waiting }
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
@@ -498,8 +545,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
                       ((), SMap.add key (Ready cooldown) map)
                   | None ->
                       let err_json =
-                        timeout_json ~key ~timeout_sec:(max_wait_sec ())
-                          ~timeout_kind:"compute"
+                        timeout_error_json ~timeout_kind:"compute" key
+                          (max_wait_sec ())
                       in
                       fallback_val := Some err_json;
                       let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
@@ -508,7 +555,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            );
            (match !fallback_val with
             | Some v -> v
-            | None -> `Assoc [("error", `String "Compute timeout")]))
+            | None ->
+                timeout_error_json ~timeout_kind:"compute" key (max_wait_sec ())))
     | `Retry_stuck (elapsed, _ceiling) ->
       (* Pair the watchdog with an SLO-actionable signal: if this counter
          climbs sustainedly, [release_on_cancel] is not firing and the
@@ -574,34 +622,6 @@ let peek key =
   | Some (Ready entry) when entry.stale_until > ts -> Some entry.value
   | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
   | _ -> None
-
-let timeout_error_json ?timeout_kind ?(waiting = false) key timeout_sec =
-  let timeout_kind =
-    match timeout_kind with
-    | Some timeout_kind -> timeout_kind
-    | None -> if waiting then "waiter" else "owner"
-  in
-  let message =
-    match timeout_kind with
-    | "circuit_open" ->
-      Printf.sprintf
-        "Dashboard %s is failing fast after repeated cache timeouts" key
-    | _ when waiting ->
-      Printf.sprintf
-        "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
-        key timeout_sec
-    | _ ->
-      Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
-  in
-  `Assoc
-    [
-      ("error", `String "computation_timeout");
-      ("message", `String message);
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ("timeout_kind", `String timeout_kind);
-      ("timeout_sec", `Float timeout_sec);
-      ("key", `String key);
-    ]
 
 (* RFC-0372 Phase 5 — a bounded compute is still not a yielding compute.
 

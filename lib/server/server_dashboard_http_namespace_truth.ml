@@ -85,7 +85,7 @@ let schedule_namespace_truth_shell_refresh ~sw ~clock config =
                      Env_config_runtime.Dashboard.shell_timeout_sec;
                    `Assoc []
                in
-               if result <> `Assoc [] && not (is_dashboard_cache_timeout_json result)
+               if result <> `Assoc [] && not (Dashboard_cache.is_timeout_envelope result)
                then (
                  Atomic.set last_good_shell result;
                  Atomic.set shell_warmed true;

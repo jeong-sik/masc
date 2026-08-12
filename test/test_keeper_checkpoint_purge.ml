@@ -175,18 +175,25 @@ let test_signed_reasoning_inside_tool_cycle_is_kept () =
       "signed thinking must replay byte-exact, got %s"
       (Types.show_message other)
 
-(* A cycle message is never dropped, even when stripping would empty it:
-   dropping it would orphan the paired ToolResult and fail structural
-   validation. *)
-let test_thinking_only_cycle_message_is_not_dropped () =
+(* An assistant progress frame can sit inside an already-open tool cycle
+   without carrying either anchor. Once its unsigned reasoning is stripped,
+   dropping that empty interstitial frame leaves the ToolUse/ToolResult pair
+   intact. *)
+let test_thinking_only_interstitial_cycle_message_is_dropped () =
   let messages =
-    [ block_message Types.Assistant [ unsigned_thinking "only-thinking"; tool_use "a" ]
+    [ block_message Types.Assistant [ tool_use "a" ]
+    ; block_message Types.Assistant [ unsigned_thinking "only-thinking" ]
     ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
     ; text_message Types.User "after"
     ]
   in
-  let purged, _report = run messages in
-  Alcotest.(check int) "pairing intact" 3 (List.length purged)
+  let purged, report = run messages in
+  Alcotest.(check int) "unsigned reasoning stripped" 1 report.reasoning_blocks_stripped;
+  Alcotest.(check int) "empty interstitial dropped" 1 report.reasoning_messages_dropped;
+  Alcotest.(check int) "pairing intact" 3 (List.length purged);
+  match Masc.Keeper_compaction_unit.validate purged with
+  | Ok () -> ()
+  | Error _ -> Alcotest.fail "dropping the interstitial broke tool pairing"
 
 let test_tool_result_clear_preserves_pairing () =
   let messages = cycle "a" @ [ text_message Types.User "after" ] in
@@ -404,9 +411,9 @@ let () =
             `Quick
             test_signed_reasoning_inside_tool_cycle_is_kept
         ; Alcotest.test_case
-            "a thinking-only cycle message is not dropped"
+            "a thinking-only interstitial cycle message is dropped"
             `Quick
-            test_thinking_only_cycle_message_is_not_dropped
+            test_thinking_only_interstitial_cycle_message_is_dropped
         ; Alcotest.test_case
             "tool result clear preserves pairing"
             `Quick

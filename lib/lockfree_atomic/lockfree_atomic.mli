@@ -1,7 +1,7 @@
 (** Lock-free atomic update helpers built on [Atomic.compare_and_set].
 
-    Consolidates the CAS-loop pattern that has been duplicated across
-    lock-free registry refactors (agent_registry_eio, sse, tool_registry...).
+    Consolidates the CAS-loop pattern shared by current lock-free state owners
+    such as [Sse], [Subscriptions], and [Cache_eio].
 
     @since 0.11.x *)
 

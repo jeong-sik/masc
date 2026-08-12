@@ -3,7 +3,6 @@ import { post } from './core'
 export type ToolHostFailureCauseCode =
   | 'tool_host_timeout'
   | 'tool_host_transport_unavailable'
-  | 'tool_host_failure'
 
 interface ToolHostFailureReport {
   agent_name?: string

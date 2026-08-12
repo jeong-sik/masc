@@ -175,31 +175,6 @@ let test_record_writes_audit_ring_and_telemetry () =
       in
       check bool "telemetry error recorded" true has_client_error)
 
-let test_generic_failure_envelope_is_retryable_without_operator_action () =
-  let details =
-    Dashboard_tool_host_events.details_json
-      {
-        agent_name = "codex";
-        client_name = "codex";
-        tool_name = "masc_keeper_msg";
-        transport = "mcp_http";
-        phase = Some "tools/call";
-        cause = Failure_envelope.Tool_host_failure;
-        message = "upstream returned malformed payload";
-        request_id = Some "generic-1";
-        session_id = None;
-        trace_id = None;
-        timeout_ms = None;
-      }
-  in
-  let failure_envelope = Yojson.Safe.Util.member "failure_envelope" details in
-  check string "generic cause code" "tool_host_failure"
-    Yojson.Safe.Util.(failure_envelope |> member "cause_code" |> to_string);
-  check string "generic recoverability" "retryable"
-    Yojson.Safe.Util.(failure_envelope |> member "recoverability" |> to_string);
-  check bool "generic operator action omitted" true
-    Yojson.Safe.Util.(failure_envelope |> member "operator_action" = `Null)
-
 let test_explicit_cause_is_not_reparsed_from_message () =
   let payload =
     `Assoc
@@ -235,7 +210,7 @@ let test_blank_entity_id_is_normalized_out () =
         tool_name = "masc_keeper_msg";
         transport = "mcp_http";
         phase = Some "tools/call";
-        cause = Failure_envelope.Tool_host_failure;
+        cause = Failure_envelope.Tool_host_transport_unavailable;
         message = "upstream returned malformed payload";
         request_id = Some "   ";
         session_id = Some "";
@@ -265,8 +240,6 @@ let () =
             test_report_rejects_missing_or_unknown_cause;
           test_case "record writes audit ring and telemetry" `Quick
             test_record_writes_audit_ring_and_telemetry;
-          test_case "generic failure envelope stays retryable" `Quick
-            test_generic_failure_envelope_is_retryable_without_operator_action;
           test_case "message does not override typed cause" `Quick
             test_explicit_cause_is_not_reparsed_from_message;
           test_case "blank entity_id is normalized out" `Quick

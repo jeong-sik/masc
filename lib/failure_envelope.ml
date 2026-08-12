@@ -11,7 +11,6 @@ type recoverability =
 type tool_host_cause =
   | Tool_host_timeout
   | Tool_host_transport_unavailable
-  | Tool_host_failure
 
 type t = {
   surface : string;
@@ -52,12 +51,10 @@ let recoverability_of_string = function
 let tool_host_cause_code = function
   | Tool_host_timeout -> "tool_host_timeout"
   | Tool_host_transport_unavailable -> "tool_host_transport_unavailable"
-  | Tool_host_failure -> "tool_host_failure"
 
 let tool_host_cause_of_code = function
   | "tool_host_timeout" -> Ok Tool_host_timeout
   | "tool_host_transport_unavailable" -> Ok Tool_host_transport_unavailable
-  | "tool_host_failure" -> Ok Tool_host_failure
   | other -> Error (Printf.sprintf "unknown tool host cause_code: %S" other)
 
 (** Coerce to canonical [Severity.t] for cross-module communication. *)
@@ -72,7 +69,6 @@ let first_non_empty values =
 let operator_action_for_tool_host_cause = function
   | Tool_host_timeout | Tool_host_transport_unavailable ->
     Some "masc_operator_digest"
-  | Tool_host_failure -> None
 
 let summary_for_tool_host ~client_name ~tool_name ~transport = function
   | Some phase when String.trim phase <> "" ->
@@ -92,8 +88,7 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
     recoverability =
       (match cause with
        | Tool_host_timeout | Tool_host_transport_unavailable ->
-           Operator_action_required
-       | Tool_host_failure -> Retryable);
+           Operator_action_required);
     operator_action = operator_action_for_tool_host_cause cause;
     evidence_ref =
       `Assoc

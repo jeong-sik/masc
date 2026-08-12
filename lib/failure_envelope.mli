@@ -11,7 +11,6 @@ type recoverability =
 type tool_host_cause =
   | Tool_host_timeout
   | Tool_host_transport_unavailable
-  | Tool_host_failure
 
 type t = {
   surface : string;

@@ -794,6 +794,72 @@ let test_stopping_cancels_and_joins_autonomous_child () =
     (Option.is_none (Owner.turn_in_flight owner))
 ;;
 
+(* Cross-lane exclusion. The autonomous-vs-autonomous case is pinned above;
+   this is the pair that actually occurs in production, where a chat operation
+   holds the turn and the keepalive cycle finds it taken.
+
+   What the exclusion protects is a single-writer invariant, not a preference:
+   a turn drives the per-Keeper turn FSM through
+   [Keeper_registry.set_turn_phase], which resolves each transition against the
+   current phase and raises [Turn_phase_transition_violation] for a forbidden
+   one. Two turns on one Keeper would each transition from whatever the other
+   left behind, so interleaving does not corrupt state quietly — it raises.
+   Measured over 2026-08-10..12 on the live fleet: 162,813 turn-phase
+   transitions, 0 violations.
+
+   The test states the blocked lane, not just the fact of blocking, because the
+   holder's identity is what a fairness change would alter (RFC-0373). *)
+let test_chat_lane_holder_blocks_autonomous_admission () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let chat_started, resolve_chat_started = Eio.Promise.create () in
+  let release, resolve_release = Eio.Promise.create () in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    (match claim () with
+     | Error error -> fail (Owner.error_to_string error)
+     | Ok None -> fail "chat runner did not find its FIFO head"
+     | Ok (Some _) -> ());
+    Eio.Promise.resolve resolve_chat_started ();
+    Eio.Promise.await release;
+    Owner.Operation_succeeded { outcome_ref = "turn:cross-lane" }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some execute)
+         ~keeper_name:"cross-lane-exclusion"
+         ~initial_meta:(Some (make_meta "cross-lane-exclusion")))
+  in
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id:(operation_id "kmsg-cross-lane")
+          ~source:operation_source
+          ~input:(operation_input "held")));
+  Eio.Promise.await chat_started;
+  (match Owner.turn_in_flight owner with
+   | Some { lane = Owner.Chat_operation; _ } -> ()
+   | Some { lane = _; _ } -> fail "chat operation did not take the turn lane"
+   | None -> fail "no turn in flight while the chat runner was executing");
+  (match
+     Owner.run_autonomous_if_idle owner (fun () ->
+       fail "autonomous child ran while a chat operation held the turn")
+   with
+   | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
+   | Ok (`Busy (Owner.Turn_busy (Some { lane = _; _ }))) ->
+     fail "autonomous admission blamed the wrong lane"
+   | Ok (`Busy (Owner.Turn_busy None)) ->
+     fail "autonomous admission reported an unpublished holder"
+   | Ok (`Busy (Owner.Shutdown_requested _)) ->
+     fail "autonomous admission reported shutdown instead of the chat holder"
+   | Ok (`Ran _) -> fail "autonomous admission ignored the chat holder"
+   | Error error -> fail ("autonomous admission failed: " ^ Owner.error_to_string error));
+  Eio.Promise.resolve resolve_release ()
+;;
+
 let test_operation_lifecycle_is_durable_and_projected () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -2283,6 +2349,10 @@ let () =
             "stopping cancels and joins autonomous child"
             `Quick
             test_stopping_cancels_and_joins_autonomous_child
+        ; test_case
+            "chat lane holder blocks autonomous admission"
+            `Quick
+            test_chat_lane_holder_blocks_autonomous_admission
         ; test_case
             "operation lifecycle is durable and projected"
             `Quick

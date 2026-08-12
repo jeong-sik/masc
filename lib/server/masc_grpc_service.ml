@@ -189,7 +189,8 @@ type task_directive_decision =
       }
 
 type heartbeat_workspace_view =
-  { active_agent_count : int
+  { workspace_paused : bool
+  ; active_agent_count : int
   ; pending_task_count : int
   ; task_directive : task_directive_decision
   }
@@ -223,8 +224,9 @@ let decide_task_directive tasks =
 ;;
 
 (** Pure projection from one authoritative Workspace snapshot. *)
-let heartbeat_workspace_view ~active_agents ~tasks =
-  { active_agent_count = List.length active_agents
+let heartbeat_workspace_view ~workspace_paused ~active_agents ~tasks =
+  { workspace_paused
+  ; active_agent_count = List.length active_agents
   ; pending_task_count =
       List.fold_left
         (fun count task -> if task_is_pending task then count + 1 else count)
@@ -234,16 +236,22 @@ let heartbeat_workspace_view ~active_agents ~tasks =
   }
 ;;
 
-let directives_of_decision ~agent_name = function
-  | No_task_directive -> []
-  | Assign_task task_id -> [ Keeper_directive.Assign_task task_id ]
-  | Invalid_task_id { task_id; error } ->
-    Log.Transport.error
-      "gRPC heartbeat: invalid task id %S for keeper %s: %s"
-      task_id
-      agent_name
-      error;
-    []
+let directives_of_view ~agent_name view =
+  let task_directives =
+    match view.task_directive with
+    | No_task_directive -> []
+    | Assign_task task_id -> [ Keeper_directive.Assign_task task_id ]
+    | Invalid_task_id { task_id; error } ->
+      Log.Transport.error
+        "gRPC heartbeat: invalid task id %S for keeper %s: %s"
+        task_id
+        agent_name
+        error;
+      []
+  in
+  if view.workspace_paused
+  then Keeper_directive.Pause :: task_directives
+  else task_directives
 ;;
 
 (** Heartbeat bidi handler: receive pings, respond with acks. *)
@@ -290,10 +298,13 @@ let handle_heartbeat
                     actual_name);
               let active_agents = Workspace.get_active_agents workspace_config in
               let tasks = Workspace.get_tasks_safe workspace_config in
-              let view = heartbeat_workspace_view ~active_agents ~tasks in
-              let directives =
-                directives_of_decision ~agent_name:ping.agent_name view.task_directive
+              let view =
+                heartbeat_workspace_view
+                  ~workspace_paused:(Workspace.is_paused workspace_config)
+                  ~active_agents
+                  ~tasks
               in
+              let directives = directives_of_view ~agent_name:ping.agent_name view in
               let ack =
                 T.HeartbeatAck.
                   { timestamp_ms = now_ms ()

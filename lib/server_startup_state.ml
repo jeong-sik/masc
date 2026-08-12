@@ -101,12 +101,6 @@ let elapsed_since_start () =
 
 let watchdog_timeout_sec () = Env_config.Transport.startup_watchdog_sec ()
 
-let remaining_watchdog_budget_sec ~reserve_sec =
-  Float.max
-    0.0
-    (watchdog_timeout_sec () -. elapsed_since_start () -. reserve_sec)
-;;
-
 let pending_lazy_tasks () =
   (snapshot ()).pending_lazy_tasks
 

@@ -96,6 +96,31 @@ let test_pp_failure_reason_includes_payload () =
        true
      with Not_found -> false)
 
+let test_pp_failure_reason_preserves_exact_text () =
+  let cases =
+    [ ( Failure_runtime_unavailable
+          { base = "claude_api"; resolved = Some "claude_code" }
+      , "runtime_unavailable(base=claude_api,resolved=claude_code)" )
+    ; ( Failure_no_capable_provider { runtime_id = "runtime-1"; detail = "none" }
+      , "no_capable_provider(runtime=runtime-1,detail=none)" )
+    ; ( Failure_provider_error { kind = "quota"; detail = "blocked" }
+      , "provider_error(kind=quota,detail=blocked)" )
+    ; ( Failure_receipt_lost
+          { primary_error = "write failed"; fallback_path = Some "/tmp/fallback" }
+      , "receipt_lost(err=write failed,fallback=/tmp/fallback)" )
+    ; Failure_runtime_error "bad frame", "runtime_error(bad frame)"
+    ; ( Failure_unexpected_exception { exn = "Failure(boom)"; backtrace = None }
+      , "unexpected_exception(Failure(boom))" )
+    ]
+  in
+  List.iter
+    (fun (reason, expected) ->
+      Alcotest.(check string)
+        expected
+        expected
+        (format_to_string Keeper_turn_fsm.pp_failure_reason reason))
+    cases
+
 (* ── Keeper_turn_fsm.turn_state ──────────────────────────────── *)
 
 let all_turn_states : Keeper_turn_fsm.any_state list =
@@ -256,6 +281,8 @@ let () =
             test_failure_reason_labels_unique;
           Alcotest.test_case "pp surfaces payload" `Quick
             test_pp_failure_reason_includes_payload;
+          Alcotest.test_case "pp preserves exact text" `Quick
+            test_pp_failure_reason_preserves_exact_text;
         ] );
       ( "turn_state",
         [

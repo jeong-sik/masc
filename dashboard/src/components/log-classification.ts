@@ -1,4 +1,4 @@
-import type { LogEntry } from '../api/dashboard.js'
+import type { LogEntry } from '../api/dashboard-logs'
 
 export type LogDisplayKind =
   | 'tool'
@@ -11,9 +11,7 @@ export type LogDisplayKind =
   | 'log'
 
 export function entryDetails(entry: LogEntry): Record<string, unknown> | null {
-  const details = entry.details
-  if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  return details
+  return entry.details
 }
 
 export function detailLabel(details: Record<string, unknown> | null, key: string): string | null {
@@ -45,8 +43,8 @@ export function logDisplayKind(entry: LogEntry): LogDisplayKind {
     case 'memory':
       return 'telemetry'
     case 'routine':
-      return entry.turn_id ? 'turn' : 'log'
+      return entry.hasTurn ? 'turn' : 'log'
     default:
-      return entry.turn_id ? 'turn' : 'log'
+      return entry.hasTurn ? 'turn' : 'log'
   }
 }

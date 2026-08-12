@@ -2,8 +2,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
+import { Effect } from 'effect'
 
-vi.mock('../api/dashboard-logs', () => ({
+vi.mock('../api/dashboard-config', () => ({
   fetchDashboardConfig: vi.fn(),
 }))
 
@@ -17,17 +18,15 @@ vi.mock('../store', async (importOriginal) => {
   }
 })
 
-import { fetchDashboardConfig } from '../api/dashboard-logs'
+import { fetchDashboardConfig } from '../api/dashboard-config'
 import { refreshShell } from '../store'
 import { refreshServerConfig, ServerConfig } from './server-config'
 
 const dashboardConfigFixture = {
-  generated_at: '2026-04-10T00:00:00Z',
   server: {
     version: '1.0.0',
-    git_commit: null,
-    uptime_seconds: 0,
-    ocaml_version: '5.2.0',
+    uptimeSeconds: 0,
+    ocamlVersion: '5.2.0',
     pid: 1,
   },
   categories: {},
@@ -36,7 +35,9 @@ const dashboardConfigFixture = {
 describe('refreshServerConfig', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(fetchDashboardConfig).mockResolvedValue(dashboardConfigFixture)
+    vi.mocked(fetchDashboardConfig).mockReturnValue(
+      Effect.succeed(dashboardConfigFixture),
+    )
   })
 
   it('refreshes shell truth before loading config data', async () => {
@@ -53,7 +54,9 @@ describe('ServerConfig rendering', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(fetchDashboardConfig).mockResolvedValue(dashboardConfigFixture)
+    vi.mocked(fetchDashboardConfig).mockReturnValue(
+      Effect.succeed(dashboardConfigFixture),
+    )
     container = document.createElement('div')
     document.body.appendChild(container)
   })

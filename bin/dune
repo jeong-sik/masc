@@ -187,6 +187,7 @@
   masc.host_config
   masc.keeper_runtime
   masc.masc_schedule
+  masc.masc_tool_blob_store
   cmdliner
   unix
   yojson))

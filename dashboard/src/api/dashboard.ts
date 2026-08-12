@@ -4,7 +4,6 @@ import {
   type AgentTimelineEvent,
   type AgentTimelineResponse,
 } from './schemas/agent-timeline'
-import { type LogEntry, type LogsResponse } from './schemas/logs'
 import {
   type RuntimeDefaultsResponse,
   type RuntimeEntry,
@@ -35,12 +34,6 @@ export type {
   GoalTreeTask,
 } from '../types'
 export { fetchDashboardGoalsTree, fetchDashboardGoalDetail } from './dashboard-goals'
-export type {
-  ConfigEntry,
-  ConfigEntryProvenance,
-  ConfigEntrySource,
-  DashboardConfigResponse,
-} from './schemas/dashboard-config'
 export { reportToolHostFailure } from './tool-host-failure'
 export { fetchDashboardBootstrap, fetchDashboardShell } from './dashboard-hot'
 export type { FusionRunStatusLabel, FusionRunRecord, DashboardFusionRunsResponse } from './dashboard-fusion'
@@ -73,9 +66,6 @@ export {
 export type { DashboardFeedRetention, DashboardFeedMetadata } from './dashboard-shared'
 export { decodeDashboardFeedMetadata } from './dashboard-shared'
 
-// --- System logs ---
-
-export type { LogEntry, LogsResponse }
 export type { RuntimeDefaultsResponse, RuntimeEntry, ModelRouting }
 export type {
   RuntimeResolvedResponse,
@@ -85,12 +75,6 @@ export type {
   ResolvedAssignmentTarget,
   RuntimeAssignment,
 }
-export {
-  fetchLogs,
-  fetchDashboardConfig,
-  parseContextThresholds,
-} from './dashboard-logs'
-
 export type { AgentTimelineEvent, AgentTimelineResponse }
 
 export { fetchAgentTimeline } from './dashboard-agent'

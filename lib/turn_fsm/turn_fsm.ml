@@ -118,27 +118,32 @@ let turn_state_label : type a. a turn_state -> string = function
 let pp_cancel_reason fmt r =
   Format.pp_print_string fmt (cancel_reason_label r)
 
-let failure_reason_to_string = function
+let pp_failure_reason fmt = function
   | Failure_runtime_unavailable { base; resolved } ->
-      Printf.sprintf "runtime_unavailable(base=%s,resolved=%s)"
-        base
-        (Option.value resolved ~default:"-")
+      let resolved = match resolved with Some value -> value | None -> "-" in
+      Format.pp_print_string fmt
+        (Printf.sprintf "runtime_unavailable(base=%s,resolved=%s)"
+           base
+           resolved)
   | Failure_no_capable_provider { runtime_id; detail } ->
-      Printf.sprintf "no_capable_provider(runtime=%s,detail=%s)"
-        runtime_id detail
+      Format.pp_print_string fmt
+        (Printf.sprintf "no_capable_provider(runtime=%s,detail=%s)"
+           runtime_id detail)
   | Failure_provider_error { kind; detail } ->
-      Printf.sprintf "provider_error(kind=%s,detail=%s)" kind detail
+      Format.pp_print_string fmt
+        (Printf.sprintf "provider_error(kind=%s,detail=%s)" kind detail)
   | Failure_receipt_lost { primary_error; fallback_path } ->
-      Printf.sprintf "receipt_lost(err=%s,fallback=%s)"
-        primary_error
-        (Option.value fallback_path ~default:"-")
+      let fallback_path =
+        match fallback_path with Some value -> value | None -> "-"
+      in
+      Format.pp_print_string fmt
+        (Printf.sprintf "receipt_lost(err=%s,fallback=%s)"
+           primary_error
+           fallback_path)
   | Failure_runtime_error msg ->
-      Printf.sprintf "runtime_error(%s)" msg
+      Format.pp_print_string fmt (Printf.sprintf "runtime_error(%s)" msg)
   | Failure_unexpected_exception { exn; _ } ->
-      Printf.sprintf "unexpected_exception(%s)" exn
-
-let pp_failure_reason fmt reason =
-  Format.pp_print_string fmt (failure_reason_to_string reason)
+      Format.pp_print_string fmt (Printf.sprintf "unexpected_exception(%s)" exn)
 
 let pp_turn_state fmt (s : _ turn_state) =
   Format.pp_print_string fmt (turn_state_label s)

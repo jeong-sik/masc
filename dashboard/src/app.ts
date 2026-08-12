@@ -22,7 +22,6 @@ import { initNotificationDelivery } from './notifications'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/dev-token'
-import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard-logs'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
@@ -174,9 +173,17 @@ export function App() {
         void refreshShell({ light: true })
         requestNamespaceTruthNow()
 
-        void fetchDashboardConfig()
-          .then(data => {
-            const thresholds = parseContextThresholds(data, {
+        void Promise.all([
+          import('./api/dashboard-config'),
+          import('./api/effect-http'),
+        ])
+          .then(([configApi, effectHttp]) =>
+            effectHttp.dashboardRuntime
+              .runPromise(configApi.fetchDashboardConfig())
+              .then(data => ({ configApi, data })),
+          )
+          .then(({ configApi, data }) => {
+            const thresholds = configApi.parseContextThresholds(data, {
               critical: CONTEXT_RATIO_CRITICAL,
               warn: CONTEXT_RATIO_WARN,
               compacting: CONTEXT_RATIO_COMPACTING,

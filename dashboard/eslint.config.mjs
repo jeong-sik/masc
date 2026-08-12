@@ -120,7 +120,6 @@ const DEFAULT_PROJECT_FILES = [
 const LEGACY_VALIBOT_FILES = [
   'src/api/schemas/agent-relations.ts',
   'src/api/schemas/agent-timeline.ts',
-  'src/api/schemas/dashboard-config.ts',
   'src/api/schemas/drift-error.test.ts',
   'src/api/schemas/drift-error.ts',
   'src/api/schemas/gate-connectors.ts',
@@ -131,7 +130,6 @@ const LEGACY_VALIBOT_FILES = [
   'src/api/schemas/keeper-composite.ts',
   'src/api/schemas/keeper-transitions.ts',
   'src/api/schemas/link-previews.ts',
-  'src/api/schemas/logs.ts',
   'src/api/schemas/operator-action.ts',
   'src/api/schemas/runtime-defaults.ts',
   'src/api/schemas/runtime-resolved.ts',

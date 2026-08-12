@@ -343,6 +343,63 @@ let run_under_base_path_lease base_path command =
        Stdlib.exit (child_exit_code status))
 ;;
 
+let run_tool_blob_maintenance base_path delete_previous_candidates =
+  let run_dir = (Host_config.host ()).run_dir in
+  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+  | Server_startup_takeover.Base_path_already_owned { pid } ->
+    errorf
+      "workspace writer lease is already owned base_path=%s pid=%s"
+      base_path
+      (match pid with
+       | Some value -> string_of_int value
+       | None -> "unknown")
+  | Server_startup_takeover.Base_path_rejected rejection ->
+    errorf
+      "workspace writer lease rejected base_path=%s: %s"
+      base_path
+      (Server_startup_takeover.base_path_lock_rejection_to_string rejection)
+  | Server_startup_takeover.Base_path_acquired lease ->
+    Fun.protect
+      ~finally:(fun () ->
+        Server_startup_takeover.release_base_path_lease lease)
+      (fun () ->
+         match Unix.realpath base_path with
+         | exception exn ->
+           errorf
+             "workspace BasePath canonicalization failed base_path=%s: %s"
+             base_path
+             (Printexc.to_string exn)
+         | canonical_base_path ->
+           let mode =
+             if delete_previous_candidates
+             then Tool_blob_maintenance.Delete_previous_candidates
+             else Tool_blob_maintenance.Observe_only
+           in
+           (match
+              Tool_blob_maintenance.run
+                ~base_path:canonical_base_path
+                ~mode
+            with
+            | Error error ->
+              errorf
+                "tool blob maintenance failed base_path=%s: %s"
+                canonical_base_path
+                (Tool_blob_maintenance.error_to_string error)
+            | Ok report ->
+              Yojson.Safe.to_channel
+                stdout
+                (`Assoc
+                  [ "base_path", `String canonical_base_path
+                  ; "live_references", `Int report.live_references
+                  ; "blobs_observed", `Int report.blobs_observed
+                  ; "candidates_recorded", `Int report.candidates_recorded
+                  ; "deleted", `Int report.deleted
+                  ]);
+              output_char stdout '\n';
+              flush stdout;
+              Ok ()))
+;;
+
 let handoff_base_path_lease
       base_path
       next_executable
@@ -497,6 +554,31 @@ let lease_run_cmd =
          $ command))
 ;;
 
+let delete_previous_candidates =
+  let doc =
+    "Delete blobs present in both the previous and current complete candidate snapshots."
+  in
+  Arg.(value & flag & info [ "delete-previous-candidates" ] ~doc)
+;;
+
+let tool_blob_maintenance_cmd =
+  let doc =
+    "scan tool-blob ownership under the exclusive BasePath lease; record candidates by default"
+  in
+  Cmd.v
+    (Cmd.info "tool-blob-maintenance" ~doc)
+    Term.(
+      ret
+        (const
+           (fun base_path delete_previous_candidates ->
+              cmdliner_result
+                (run_tool_blob_maintenance
+                   base_path
+                   delete_previous_candidates))
+         $ base_path
+         $ delete_previous_candidates))
+;;
+
 let owner_pid =
   let doc = "Expected process ID of the current BasePath lease owner." in
   Arg.(required & opt (some int) None & info [ "owner-pid" ] ~docv:"PID" ~doc)
@@ -560,6 +642,7 @@ let () =
           (Cmd.info "masc-deployment-preflight-helper" ~doc)
           [ lease_run_cmd
           ; lease_handoff_cmd
+          ; tool_blob_maintenance_cmd
           ; verify_lease_owner_cmd
           ; validate_current_queue_cmd
           ; validate_current_wal_cmd

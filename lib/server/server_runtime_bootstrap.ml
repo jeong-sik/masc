@@ -21,8 +21,6 @@ let agent_core_models_overlay_toml_filename = "agent-core-models-overlay.toml"
    reserve carries them at the ~10x slowdown observed when a concurrent build
    saturates the disk, which is the condition under which maintenance
    overran its host's watchdog. *)
-let blob_maintenance_boot_reserve_sec = 60.0
-
 let nonempty_env env name =
   match env name with
   | Some value ->
@@ -930,21 +928,6 @@ let initialize_owner_state_blocking
         (Owner_initialization_failed
            (Keeper_persistence_preparation_failed error))
   in
-  (* Preparation above has converged recovery writes, while Keeper
-     persistence owners have not started yet, so startup is the sole
-     quiescent scan/deletion boundary. A blob must remain unreferenced across
-     two complete startup scans before deletion. A failed scan retains every
-     blob.
-
-     The scan reads every durable consumer file, so its cost grows with
-     workspace size while the startup watchdog's budget does not: an
-     unbounded scan let the watchdog exit a server that was otherwise ready
-     to serve, which is the zombie-listener failure #3107 introduced the
-     watchdog to prevent, arriving through a different door. The scan
-     therefore gets an explicit deadline derived from the watchdog's
-     remaining time. Exhausting it aborts before the candidate snapshot is
-     written, so every blob is retained -- the same outcome as any other
-     scan failure. *)
   (match
      Eio_unix.run_in_systhread (fun () ->
        Keeper_wire_capture.prune_expired
@@ -952,51 +935,14 @@ let initialize_owner_state_blocking
    with
    | Error error ->
      Log.Server.warn
-       "startup tool blob maintenance stopped; wire-capture retention prune failed: %s"
+       "startup wire-capture retention prune failed: %s"
        (Keeper_wire_capture.prune_error_to_string error)
    | Ok wire_capture_pruned ->
      if wire_capture_pruned > 0
      then
        Log.Server.info
          "startup wire-capture retention: pruned %d expired day-file(s)"
-         wire_capture_pruned;
-     let maintenance_budget_sec =
-       Server_startup_state.remaining_watchdog_budget_sec
-         ~reserve_sec:blob_maintenance_boot_reserve_sec
-     in
-     if maintenance_budget_sec <= 0.0
-     then
-       Log.Server.warn
-         "startup tool blob maintenance skipped; the startup watchdog budget \
-          is already spent (reserve=%.0fs). Every blob is retained."
-         blob_maintenance_boot_reserve_sec
-     else (
-       let deadline_epoch_seconds =
-         Unix.gettimeofday () +. maintenance_budget_sec
-       in
-       match
-         Eio_unix.run_in_systhread (fun () ->
-           Tool_blob_maintenance.run
-             ~base_path
-             ~mode:Tool_blob_maintenance.Delete_previous_candidates
-             ~budget:(Tool_blob_maintenance.Bounded_by { deadline_epoch_seconds }))
-       with
-       | Ok report ->
-         if report.candidates_recorded > 0 || report.deleted > 0
-         then
-           Log.Server.info
-             "startup tool blob maintenance: live=%d blobs=%d candidates=%d \
-              deleted=%d"
-             report.live_references
-             report.blobs_observed
-             report.candidates_recorded
-             report.deleted
-       | Error error ->
-         Log.Server.warn
-           "startup tool blob maintenance stopped; no further blobs were \
-            deleted (budget=%.0fs): %s"
-           maintenance_budget_sec
-           (Tool_blob_maintenance.error_to_string error)));
+         wire_capture_pruned);
   Runtime_settings.ensure_init ();
   Runtime_params.restore ~base_path;
   Log.Server.info "Runtime_params restored from %s" base_path;

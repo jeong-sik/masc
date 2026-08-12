@@ -1,30 +1,40 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
+import { Option } from 'effect'
 import { SectionCard } from './common/card'
 import { TextInput } from './common/input'
 import { TransportHealthPanel } from './transport-health'
 import { ConfigResolutionPanel } from './tools/config-resolution-panel'
-import { fetchDashboardConfig } from '../api/dashboard-logs'
-import type { ConfigEntry, DashboardConfigResponse } from '../api/schemas/dashboard-config'
-import { createAsyncResource } from '../lib/async-state'
+import {
+  fetchDashboardConfig,
+  type DashboardConfig,
+  type DashboardConfigError,
+  type ConfigEntry,
+} from '../api/dashboard-config'
+import { dashboardRuntime, type DashboardHttp } from '../api/effect-http'
+import { createEffectResource } from '../lib/effect-resource'
+import { remotePrevious } from '../lib/remote-data'
 import { formatElapsedCompact } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
 import { Eyebrow } from './common/eyebrow'
 import { refreshShell, shellConfigResolution, shellRuntimeResolution } from '../store'
 
-const configResource = createAsyncResource<DashboardConfigResponse>()
+const configResource = createEffectResource<
+  DashboardHttp,
+  DashboardConfigError,
+  DashboardConfig
+>(dashboardRuntime)
 const searchQuery = signal('')
 const expandedCategories = signal<Set<string>>(new Set())
 
 export function refreshServerConfig(): Promise<void> {
-  configResource.reset()
   void refreshShell({ force: true })
-  return configResource.load(async () => {
-    const data = await fetchDashboardConfig()
-    if (expandedCategories.value.size === 0) {
+  return configResource.load(fetchDashboardConfig()).then(() => {
+    const data = Option.getOrUndefined(remotePrevious(configResource.state.value))
+    if (data !== undefined && expandedCategories.value.size === 0) {
       expandedCategories.value = new Set(Object.keys(data.categories))
     }
-    return data
   })
 }
 
@@ -45,8 +55,8 @@ function matchesSearch(entry: ConfigEntry, query: string): boolean {
     entry.env.toLowerCase().includes(lower) ||
     entry.description.toLowerCase().includes(lower) ||
     entry.source.toLowerCase().includes(lower) ||
-    (entry.source_detail ?? '').toLowerCase().includes(lower) ||
-    (entry.value ?? '').toLowerCase().includes(lower)
+    entry.sourceDetail.toLowerCase().includes(lower) ||
+    entry.displayValue.toLowerCase().includes(lower)
   )
 }
 
@@ -75,17 +85,15 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
           ` : null}
         </div>
         <div class="text-xs text-[var(--color-fg-muted)] mt-0.5">${entry.description}</div>
-        ${entry.source_detail ? html`
-          <div class="text-3xs text-[var(--color-fg-muted)] mt-0.5">source: ${entry.source_detail}</div>
-        ` : null}
+        <div class="text-3xs text-[var(--color-fg-muted)] mt-0.5">source: ${entry.sourceDetail}</div>
       </div>
       <div class="text-right shrink-0">
         <div class=${`text-xs font-mono ${valueClass}`}>
-          ${entry.value ?? entry.default}
+          ${entry.displayValue}
         </div>
-        ${isEnv && entry.default ? html`
+        ${isEnv && entry.defaultValue ? html`
           <div class="text-3xs text-[var(--color-fg-muted)] mt-0.5">
-            default: ${entry.default}
+            default: ${entry.defaultValue}
           </div>
         ` : null}
       </div>
@@ -93,7 +101,7 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
   `
 }
 
-function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[] }) {
+function CategoryPanel({ name, entries }: { name: string; entries: readonly ConfigEntry[] }) {
   const query = searchQuery.value
   const filtered = entries.filter(e => matchesSearch(e, query))
   const isExpanded = expandedCategories.value.has(name)
@@ -128,12 +136,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
   `
 }
 
-function ServerMeta() {
-  const sm = configResource.state.value
-  const data = sm.status === 'loaded' ? sm.data : undefined
-  if (!data) return null
-  const { server } = data
-
+function ServerMeta({ server }: { server: DashboardConfig['server'] }) {
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
@@ -142,11 +145,11 @@ function ServerMeta() {
       </div>
       <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>가동시간</${Eyebrow}>
-        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${formatUptime(server.uptime_seconds)}</div>
+        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${formatUptime(server.uptimeSeconds)}</div>
       </div>
       <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>OCaml</${Eyebrow}>
-        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.ocaml_version}</div>
+        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.ocamlVersion}</div>
       </div>
       <div class="v2-connector-card px-3 py-2 rounded-[var(--r-1)] bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <${Eyebrow}>PID</${Eyebrow}>
@@ -157,16 +160,19 @@ function ServerMeta() {
 }
 
 export function ServerConfig() {
+  useEffect(() => {
+    if (configResource.state.value._tag === 'Initial') {
+      void refreshServerConfig()
+    }
+    return () => configResource.cancel()
+  }, [])
+
   const s = configResource.state.value
-  const data = s.status === 'loaded' ? s.data : undefined
-  const loading = s.status === 'loading'
-  const error = s.status === 'error' ? s.message : null
+  const data = Option.getOrUndefined(remotePrevious(s))
+  const loading = s._tag === 'Initial' || s._tag === 'Loading'
+  const error = s._tag === 'Failure' ? s.error.message : null
   const configResolution = shellConfigResolution.value
   const runtimeResolution = shellRuntimeResolution.value
-
-  if (s.status === 'idle') {
-    void refreshServerConfig()
-  }
 
   return html`
     <div class="v2-connector-surface">
@@ -201,7 +207,7 @@ export function ServerConfig() {
         />
 
         ${data ? html`
-          <${ServerMeta} />
+          <${ServerMeta} server=${data.server} />
           ${Object.entries(data.categories).map(([name, entries]) =>
             html`<${CategoryPanel} name=${name} entries=${entries} />`
           )}

@@ -524,6 +524,105 @@ test "$status" -eq 75
            stderr
            "no longer names its locked inode"))
 
+let minimal_lock_script_path dir =
+  let bin_dir = Filename.concat dir "minimal-bin" in
+  mkdir_p bin_dir;
+  List.iter
+    (fun (name, target) ->
+       write_executable
+         (Filename.concat bin_dir name)
+         (Printf.sprintf "#!/bin/sh\nexec %s \"$@\"\n" target))
+    [ "awk", "/usr/bin/awk"
+    ; "basename", "/usr/bin/basename"
+    ; "bash", "/bin/bash"
+    ; "chmod", "/bin/chmod"
+    ; "dirname", "/usr/bin/dirname"
+    ; "mkdir", "/bin/mkdir"
+    ];
+  write_executable
+    (Filename.concat bin_dir "cksum")
+    "#!/bin/sh\nprintf '1 1\\n'\n";
+  bin_dir
+;;
+
+let run_lock_script ~dir ~bin_dir ~lock_base ~marker =
+  run_process
+    ~cwd:dir
+    "/bin/bash"
+    ~env:
+      [ "PATH", bin_dir
+      ; "OPAM_SWITCH_PREFIX", "/tmp/masc-test-switch"
+      ; "MASC_OPAM_LOCK_PATH", lock_base
+      ]
+    [| "/bin/bash"
+     ; opam_switch_rw_lock_script_path ()
+     ; "write"
+     ; "--"
+     ; "/bin/sh"
+     ; "-c"
+     ; "touch " ^ quote marker
+    |]
+;;
+
+let test_opam_lock_backend_absence_fails_closed () =
+  with_temp_dir "opam-switch-rw-lock-no-backend" (fun dir ->
+    let bin_dir = minimal_lock_script_path dir in
+    let marker = Filename.concat dir "wrapped-command-ran" in
+    let code, _stdout, stderr =
+      run_lock_script
+        ~dir
+        ~bin_dir
+        ~lock_base:(Filename.concat dir "switch")
+        ~marker
+    in
+    check int "missing lock tools fail closed" 69 code;
+    check bool "wrapped command did not run" false (Sys.file_exists marker);
+    check bool
+      "missing backend is explicit"
+      true
+      (String_util.contains_substring
+         stderr
+         "neither lockf nor flock is available"))
+;;
+
+let test_opam_gate_timeout_has_admission_diagnostic () =
+  with_temp_dir "opam-switch-rw-lock-gate-timeout" (fun dir ->
+    let bin_dir = minimal_lock_script_path dir in
+    write_executable
+      (Filename.concat bin_dir "lockf")
+      {|#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -k) shift ;;
+    -t) shift 2 ;;
+    *) break ;;
+  esac
+done
+lock_path="$1"
+shift
+case "$lock_path" in
+  *.gate) exit 75 ;;
+  *) exec "$@" ;;
+esac
+|};
+    let marker = Filename.concat dir "wrapped-command-ran" in
+    let code, _stdout, stderr =
+      run_lock_script
+        ~dir
+        ~bin_dir
+        ~lock_base:(Filename.concat dir "switch")
+        ~marker
+    in
+    check int "gate timeout is admission rejection" 75 code;
+    check bool "wrapped command did not run" false (Sys.file_exists marker);
+    check bool
+      "gate timeout is explicit"
+      true
+      (String_util.contains_substring
+         stderr
+         "gate acquisition or lease admission rejected within 5s"))
+;;
+
 let test_dune_runs_under_opam_read_lease () =
   with_temp_dir "dune-local-opam-read-lease" (fun dir ->
       let bin_dir, dune_log = setup_fake_repo dir in
@@ -838,6 +937,10 @@ let () =
             test_opam_read_leases_overlap_and_exclude_writer;
           test_case "opam reader admission requires its held inode" `Quick
             test_opam_reader_admission_requires_held_inode_and_keeps_writer_file;
+          test_case "missing opam lock tools fail closed" `Quick
+            test_opam_lock_backend_absence_fails_closed;
+          test_case "opam gate timeout emits admission diagnostic" `Quick
+            test_opam_gate_timeout_has_admission_diagnostic;
           test_case "Dune executes under an opam read lease" `Quick
             test_dune_runs_under_opam_read_lease;
           test_case "clean subcommand reaches Dune" `Quick

@@ -59,6 +59,7 @@ state_dir="${lock_base}.state"
 readers_dir="${state_dir}/readers"
 writer_path="${state_dir}/writer"
 script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+readonly gate_timeout_seconds=5
 
 prepare_state_dir() {
   mkdir -p "${readers_dir}"
@@ -77,39 +78,68 @@ lock_backend() {
 }
 
 with_gate() {
-  case "$(lock_backend)" in
-    lockf) lockf -k -t 5 "${gate_path}" "$@" ;;
-    flock) flock -w 5 -E 75 "${gate_path}" "$@" ;;
+  local backend=""
+  local status=0
+  backend="$(lock_backend)" || return $?
+  set +e
+  case "${backend}" in
+    lockf)
+      lockf -k -t "${gate_timeout_seconds}" "${gate_path}" "$@"
+      status=$?
+      ;;
+    flock)
+      flock -w "${gate_timeout_seconds}" -E 75 "${gate_path}" "$@"
+      status=$?
+      ;;
+    *)
+      echo "[opam-rw-lock] unknown lock backend ${backend}" >&2
+      status=69
+      ;;
   esac
+  set -e
+  if [[ "${status}" -eq 75 ]]; then
+    echo "[opam-rw-lock] gate acquisition or lease admission rejected within ${gate_timeout_seconds}s" >&2
+  fi
+  return "${status}"
 }
 
 exec_holder() {
   local holder_mode="$1"
   local holder_path="$2"
+  local backend=""
   shift 2
-  case "$(lock_backend)" in
+  backend="$(lock_backend)" || return $?
+  case "${backend}" in
     lockf)
-      if [[ "${holder_mode}" = "write" ]]; then
-        exec lockf -k -t 0 "${holder_path}" "$@"
-      else
-        exec lockf -k "${holder_path}" "$@"
-      fi
+      exec lockf -k -t 0 "${holder_path}" "$@"
       ;;
     flock)
       exec flock -n -E 75 "${holder_path}" "$@"
+      ;;
+    *)
+      echo "[opam-rw-lock] unknown lock backend ${backend}" >&2
+      return 69
       ;;
   esac
 }
 
 probe_lock_state() {
   local path="$1"
+  local backend=""
   local status=0
+  backend="$(lock_backend)" || return $?
   set +e
-  case "$(lock_backend)" in
-    lockf) lockf -k -t 0 "${path}" true >/dev/null 2>&1 ;;
-    flock) flock -n -E 75 "${path}" true >/dev/null 2>&1 ;;
+  case "${backend}" in
+    lockf)
+      lockf -k -t 0 "${path}" true >/dev/null 2>&1
+      status=$?
+      ;;
+    flock)
+      flock -n -E 75 "${path}" true >/dev/null 2>&1
+      status=$?
+      ;;
+    *) status=69 ;;
   esac
-  status=$?
   set -e
   case "${status}" in
     0) printf 'free\n' ;;

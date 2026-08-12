@@ -224,7 +224,11 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
     let tool, terminal_error =
       one_dynamic_tool ~active (fun _input ->
         incr executions;
-        Error "same deterministic failure")
+        Error
+          { Agent_core.Types.message = "same deterministic failure"
+          ; recoverable = false
+          ; error_class = Some Agent_core.Types.Deterministic
+          })
     in
     let call index =
       let input =

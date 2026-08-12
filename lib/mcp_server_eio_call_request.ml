@@ -51,9 +51,7 @@ let decode = function
              | `Intlit _
              | `Float _
              | `String _
-             | `List _
-             | `Tuple _
-             | `Variant _)
+             | `List _)
            ->
            Error (Arguments_must_be_object requested_name))
      | Present
@@ -63,9 +61,7 @@ let decode = function
          | `Intlit _
          | `Float _
          | `Assoc _
-         | `List _
-         | `Tuple _
-         | `Variant _)
+         | `List _)
        -> Error Name_must_be_string)
   | Some
       (`Null
@@ -74,9 +70,7 @@ let decode = function
       | `Intlit _
       | `Float _
       | `String _
-      | `List _
-      | `Tuple _
-      | `Variant _) ->
+      | `List _) ->
     Error Expected_object
 ;;
 

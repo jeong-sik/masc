@@ -5,6 +5,7 @@ lib/keeper/keeper_runtime_trust_snapshot_core.ml
 lib/keeper_runtime/keeper_event_queue_state.ml
 lib/config/env_config_snapshot_core.ml
 packages/agent_core/lib/llm_provider/provider_registry_state.ml
+packages/agent_core/lib/llm_provider/provider_admission_state.ml
 packages/agent_core/lib/llm_provider/complete_stream_state.ml
 lib/server/server_runtime_param_request.ml
 lib/server/server_prompt_override_request.ml

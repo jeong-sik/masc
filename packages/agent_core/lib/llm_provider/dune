@@ -17,6 +17,7 @@
   exact_output_measurement_transport
   prepared_completion_request
   http_client_phase_observer
+  provider_admission_state
   provider_registry_state
   exact_output_catalog_binding
   exact_output_resolver

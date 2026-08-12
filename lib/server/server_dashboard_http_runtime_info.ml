@@ -2445,7 +2445,6 @@ let dashboard_tools_warming_json ~actor =
           ; "distinct_tools_called", `Int 0
           ; "top_20", `List []
           ; "never_called_count", `Int 0
-          ; "dispatch_v2_enabled", `Bool false
           ; "registered_count", `Int 0
           ; "source", `String "dashboard_cache_warming"
           ; "health", `String "warming"

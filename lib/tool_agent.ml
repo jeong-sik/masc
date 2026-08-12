@@ -334,24 +334,6 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
             match target_agent with
             | Some agent -> Masc_domain.agent_to_yojson agent
             | None -> `Null );
-          ( "capabilities",
-            `Assoc [
-              ("workspace", `Bool true);
-              ("task_backlog", `Bool true);
-              ("keeper_runtime", `Bool true);
-              ("dashboard", `Bool true);
-            ] );
-          ( "tools",
-            `List
-              (List.map
-                 (fun name -> `String name)
-                 [
-                   "masc_status";
-                   "masc_tasks";
-                   "masc_transition";
-                   "masc_dashboard";
-                   "masc_tool_help";
-                 ]) );
         ]
       in
       json_ok ~tool_name ~start_time json

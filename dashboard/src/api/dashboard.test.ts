@@ -1067,7 +1067,7 @@ describe('fetchDashboardTools', () => {
           { name: 'tool_c', tier: 'essential' },
         ],
       },
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 3 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 3 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1101,7 +1101,7 @@ describe('fetchDashboardTools', () => {
           { name: 'tool_with_surfaces', surfaces: ['public_mcp'] },
         ],
       },
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 2 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 2 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1123,7 +1123,7 @@ describe('fetchDashboardTools', () => {
     const tools = [{ name: 'tool_x' }]
     const rawResponse = {
       tool_inventory: { tools },
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 1 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 1 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1146,7 +1146,7 @@ describe('fetchDashboardTools', () => {
   it('handles missing tool_inventory gracefully', async () => {
     const rawResponse = {
       tool_inventory: {},
-      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, dispatch_v2_enabled: false, registered_count: 0 },
+      tool_usage: { total_calls: 0, distinct_tools_called: 0, top_20: [], never_called_count: 0, registered_count: 0 },
     }
 
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1169,7 +1169,6 @@ describe('fetchDashboardTools', () => {
         distinct_tools_called: 0,
         top_20: [],
         never_called_count: 0,
-        dispatch_v2_enabled: false,
         registered_count: 0,
         source: 'tool_usage',
         health: 'coverage_gap',

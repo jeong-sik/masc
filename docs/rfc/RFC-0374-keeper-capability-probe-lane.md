@@ -104,9 +104,24 @@ val run :
 probe passes a synthetic message list and a distinct identity; nothing else in
 the runners has to change.
 
-Persistence is already a separate concern — `Keeper_chat_store.append_*` and
-`Keeper_checkpoint_store.save_agent_core_*` are called by the turn
-orchestration, not by the runners. The probe lane simply does not call them.
+Persistence is already a separate concern, and the runners do not participate
+in it. Measured on `origin/main`:
+
+```
+                                  Keeper_chat_store.  Keeper_checkpoint_store.
+keeper_antigravity_runtime.ml              0                    0
+keeper_claude_code_runtime.ml              0                    0
+keeper_codex_app_server_runtime.ml         0                    0
+```
+
+Control: both symbols do resolve elsewhere — `Keeper_checkpoint_store.save*`
+in `keeper_agent_run.ml`, `keeper_agent_run_finalize_response.ml`,
+`keeper_context_core.ml`; `Keeper_chat_store.` across the tool and delivery
+modules — so the zeros above are absence, not a mistyped pattern.
+
+Checkpoint persistence is owned by `Keeper_agent_run` and its finalizer. A
+probe that calls a runner directly and stops there writes nothing, without
+needing a flag anywhere in the persistence layer.
 
 ### Probe identity
 

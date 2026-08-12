@@ -37,20 +37,10 @@ function deferred<T>() {
 
 async function loadLogs(
   fetchLogs: ReturnType<typeof vi.fn>,
-  providerMocks?: {
-    fetchProviderLogsCatalog?: ReturnType<typeof vi.fn>
-    fetchProviderLogTail?: ReturnType<typeof vi.fn>
-  },
 ) {
-  const fetchProviderLogsCatalog = providerMocks?.fetchProviderLogsCatalog
-    ?? vi.fn().mockResolvedValue({ providers: [] })
-  const fetchProviderLogTail = providerMocks?.fetchProviderLogTail
-    ?? vi.fn().mockResolvedValue({ provider: { id: 'none', display_name: 'none', protocol: 'none' }, entries: [] })
   vi.resetModules()
   vi.doMock('../api/dashboard.js', () => ({
     fetchLogs,
-    fetchProviderLogsCatalog,
-    fetchProviderLogTail,
   }))
   return import('./logs')
 }
@@ -309,45 +299,6 @@ describe('LogViewer Code links', () => {
     )
   })
 
-  it('renders enabled provider log tail from the configured provider path', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({ total: 0, entries: [] })
-    const fetchProviderLogsCatalog = vi.fn().mockResolvedValue({
-      providers: [{
-        id: 'ollama',
-        display_name: 'Ollama Local',
-        protocol: 'ollama-http',
-        enabled: true,
-        path: '~/.ollama/logs/server.log',
-        resolved_path: '/Users/dancer/.ollama/logs/server.log',
-        default_lines: 200,
-        max_bytes: 1048576,
-      }],
-    })
-    const fetchProviderLogTail = vi.fn().mockResolvedValue({
-      provider: {
-        id: 'ollama',
-        display_name: 'Ollama Local',
-        protocol: 'ollama-http',
-      },
-      entries: [
-        { line: 1, text: 'aborting completion request due to client closing the connection' },
-      ],
-    })
-
-    const { LogViewer } = await loadLogs(fetchLogs, {
-      fetchProviderLogsCatalog,
-      fetchProviderLogTail,
-    })
-    const { container } = render(h(LogViewer, {}))
-
-    await waitFor(() =>
-      expect(container.querySelector('[data-testid="provider-log-tail"]')?.textContent)
-        .toContain('client closing the connection'),
-    )
-    expect(fetchProviderLogTail).toHaveBeenCalledWith('ollama', { lines: 200 })
-    expect(container.textContent).toContain('server.log')
-  })
-
   // RFC-0079 removed the dropped-rows surface. parseLogsResponse now
   // throws LogsSchemaDriftError instead of silently dropping bad rows,
   // so there is no "parser dropped N rows" state to render here.
@@ -365,23 +316,7 @@ describe('LogViewer Code links', () => {
         details: { file_path: 'lib/runtime.ml', line: 12 },
       }],
     })
-    const fetchProviderLogsCatalog = vi.fn().mockResolvedValue({
-      providers: [{
-        id: 'ollama',
-        display_name: 'Ollama Local',
-        protocol: 'ollama-http',
-        enabled: true,
-        path: '~/.ollama/logs/server.log',
-        resolved_path: '/Users/dancer/.ollama/logs/server.log',
-        default_lines: 200,
-        max_bytes: 1048576,
-      }],
-    })
-    const fetchProviderLogTail = vi.fn().mockResolvedValue({
-      provider: { id: 'ollama', display_name: 'Ollama Local', protocol: 'ollama-http' },
-      entries: [{ line: 1, text: 'tail line' }],
-    })
-    const { LogViewer } = await loadLogs(fetchLogs, { fetchProviderLogsCatalog, fetchProviderLogTail })
+    const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
     await waitFor(() => expect(container.querySelector('.v2-logs-surface')).not.toBeNull())
@@ -392,11 +327,6 @@ describe('LogViewer Code links', () => {
     expect(container.querySelector('.v2-logs-row')).not.toBeNull()
     expect(container.querySelector('[data-testid="logs-row"]')?.getAttribute('data-log-seq')).toBe('1')
     expect(container.querySelector('.v2-logs-summary')).not.toBeNull()
-    expect(container.querySelector('.v2-logs-provider-panel')).not.toBeNull()
-    const diagnostics = container.querySelector('[data-testid="logs-provider-diagnostics"]') as HTMLDetailsElement
-    expect(diagnostics).not.toBeNull()
-    expect(diagnostics.open).toBe(false)
-    expect(diagnostics.querySelector('summary')?.textContent).toContain('Provider diagnostics')
   })
 
   it('does not render Code links for unsafe absolute log file paths', async () => {

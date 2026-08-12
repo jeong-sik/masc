@@ -830,7 +830,14 @@ let append_if_current_file_fits t ~max_current_file_bytes json =
 
 let set_append_guard guard = Atomic.set append_guard guard
 
-let read_recent ?(offset=0) t n =
+(* The only traversal for recent-row reads. [f] is applied per row so the
+   caller's projection is the only thing that accumulates; [read_recent] gets
+   its old behaviour back by projecting each row to itself.
+
+   [f] runs outside the parse [try] on purpose: the reader swallows
+   [Yojson.Json_error] to skip malformed rows, and a caller's decoder must not
+   inherit that swallow. *)
+let filter_map_recent ?(offset=0) t n ~f =
   if n <= 0 then []
   else begin
     let skip = ref offset in
@@ -850,21 +857,30 @@ let read_recent ?(offset=0) t n =
            let rev_lines = List.rev lines in
            List.iter (fun line ->
              if !count >= n then raise_notrace Done;
-             (try
-                let json = Yojson.Safe.from_string line in
-                if !skip > 0 then
-                  decr skip
-                else begin
-                  collected := json :: !collected;
-                  incr count
-                end
-              with Yojson.Json_error _ -> ())
+             let parsed =
+               try Some (Yojson.Safe.from_string line)
+               with Yojson.Json_error _ -> None
+             in
+             match parsed with
+             | None -> ()
+             | Some json ->
+               if !skip > 0 then
+                 decr skip
+               else begin
+                 (match f json with
+                  | Some value -> collected := value :: !collected
+                  | None -> ());
+                 incr count
+               end
            ) rev_lines
          ) days
        ) months
      with Done -> ());
     !collected
   end
+
+let read_recent ?offset t n =
+  filter_map_recent ?offset t n ~f:(fun json -> Some json)
 
 let read_recent_result ?(offset=0) t n =
   if offset < 0

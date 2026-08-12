@@ -99,10 +99,31 @@ val set_append_guard : ((unit -> unit) -> unit) -> unit
     runtimes can install resource accounting/backpressure without making this
     low-level storage library depend on those policy modules. *)
 
+val filter_map_recent :
+  ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
+(** [filter_map_recent ?offset t n ~f] is [List.filter_map f (read_recent
+    ?offset t n)] without ever holding the intermediate [Yojson.Safe.t list].
+    [f] is applied to each parsed row as it is read, so a row's tree is
+    unreachable before the next row is parsed; the result list is the only
+    thing that accumulates.
+
+    [n] and [offset] count parsed rows, not selected ones: [f] returning [None]
+    does not make the reader consume an extra row. Order, offset semantics, and
+    malformed-row skipping match {!read_recent} exactly.
+
+    Callers that decode rows into their own record type should prefer this over
+    [read_recent |> List.filter_map]: a [`Assoc] holds one cons cell, one tuple,
+    and one boxed value per field, so the tree is roughly 25x the source bytes
+    and a 100k-row window materialises gigabytes that the decoder immediately
+    discards. *)
+
 val read_recent : ?offset:int -> t -> int -> Yojson.Safe.t list
 (** [read_recent ?offset t n] returns the newest [n] entries in chronological
     order (oldest first), skipping the first [offset] newest entries.
-    Scans day-files from newest to oldest, stops early. *)
+    Scans day-files from newest to oldest, stops early.
+
+    Holds every row's parsed tree at once. Use {!filter_map_recent} when the
+    rows are being decoded into something smaller. *)
 
 val read_recent_result :
   ?offset:int -> t -> int -> (recent_entry list, read_error) result

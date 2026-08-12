@@ -671,21 +671,24 @@ type stats = {
 
 let get_stats (config : config) =
   let store = get_audit_store config in
-  (* Read a large window to compute stats *)
-  let entries = Dated_jsonl.read_recent store 100_000 in
-  let count = List.length entries in
-  let oldest = ref None in
-  let newest = ref None in
-  List.iter (fun json ->
-    (match Safe_ops.json_float_opt "timestamp" json with
-     | Some ts ->
-       if !oldest = None then oldest := Some ts;
-       newest := Some ts
-     | None -> ())
-  ) entries;
+  (* Read a large window to compute stats. Project each row to its timestamp
+     during the read: this window is 100k rows and the three values below are
+     all that survives, so materialising the parsed trees costs gigabytes that
+     are discarded immediately. [Some] wraps every row so [total_entries] still
+     counts rows that carry no timestamp. *)
+  let timestamps =
+    Dated_jsonl.filter_map_recent store 100_000 ~f:(fun json ->
+      Some (Safe_ops.json_float_opt "timestamp" json))
+  in
   {
-    total_entries = count;
+    total_entries = List.length timestamps;
     file_size_bytes = 0; (* no longer a single file *)
-    oldest_timestamp = !oldest;
-    newest_timestamp = !newest;
+    (* Chronological order, so the first timestamp present is the oldest and
+       the last one present is the newest. *)
+    oldest_timestamp = List.find_map Fun.id timestamps;
+    newest_timestamp =
+      List.fold_left
+        (fun newest ts -> match ts with Some _ -> ts | None -> newest)
+        None
+        timestamps;
   }

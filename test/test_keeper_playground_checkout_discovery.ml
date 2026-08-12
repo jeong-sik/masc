@@ -255,6 +255,24 @@ let test_unreadable_subdirectory_is_partial_not_fatal () =
            ^ String.concat "," (paths_of other)))
 ;;
 
+(* Truncation must be visible. A caller that cannot tell a capped listing from
+   a complete one will present the cap as the whole answer. *)
+let test_checkout_budget_truncates_visibly () =
+  with_temp_root (fun root ->
+    for i = 0 to C.max_reported_checkouts do
+      make_checkout root (Printf.sprintf "repos/r%03d" i)
+    done;
+    match C.discover ~root with
+    | Ok (C.Partial { found; limit = C.Checkout_budget_exhausted _ }) ->
+      check int "listing is capped at the budget" C.max_reported_checkouts
+        (List.length found)
+    | Ok (C.Complete cs) ->
+      failf "expected Partial, got Complete with %d checkouts" (List.length cs)
+    | Ok (C.Partial { limit; _ }) ->
+      fail ("expected Checkout_budget_exhausted, got " ^ C.limit_to_string limit)
+    | Error e -> fail (C.scan_error_to_string e))
+;;
+
 (* ------------------------------------------------------------------ *)
 (* Name resolution and path joining                                    *)
 (* ------------------------------------------------------------------ *)
@@ -368,6 +386,8 @@ let () =
         ; test_case "root that is a file" `Quick test_root_that_is_a_file
         ; test_case "unreadable subdirectory is partial" `Quick
             test_unreadable_subdirectory_is_partial_not_fatal
+        ; test_case "checkout budget truncates visibly" `Quick
+            test_checkout_budget_truncates_visibly
         ] )
     ; ( "resolution and joining"
       , [ test_case "duplicate basename is ambiguous" `Quick

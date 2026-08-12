@@ -73,16 +73,13 @@ type discovery =
       ; limit : limit
       }
 
-val max_scanned_entries : int
-(** Safety stop, not a design parameter. Measured across the live playground
-    (12 keepers, 2026-08-13): worst case 495 entries, median 34. A normal
-    playground cannot reach this ceiling, so reaching it is itself the signal
-    that something unexpected sits under the root. *)
-
 val max_reported_checkouts : int
 (** Bounded by downstream cost rather than by the scan: each reported checkout
     costs six bounded git subprocesses in
-    {!Keeper_sandbox_control.checkout_json}. Live maximum is 12. *)
+    {!Keeper_sandbox_control.checkout_json}. Live maximum is 12.
+
+    Exposed because a test builds one checkout past it; the entry budget is a
+    pure safety stop with no such handle and stays internal. *)
 
 val discover : root:string -> (discovery, scan_error) result
 (** [discover ~root] walks [root] and reports the git checkouts under it,

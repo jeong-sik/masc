@@ -24,6 +24,26 @@ val minted_name_is_transient : minted_name -> bool
     This is origin-based, not shape-based: [Stable -> false],
     [Ephemeral -> true], [Resolved_external _ -> false]. *)
 
+val alias_may_rewrite_identity :
+  credential_owner:string option -> agent_name:string -> bool
+(** Whether the workspace display alias ([Workspace.resolve_agent_name], a
+    prefix scan over [agents_dir]) may replace this caller name.
+
+    The resolved name becomes the subject of [Auth.authorize_tool_v2], which
+    checks the presented token against that subject's credential. A prefix
+    match onto an unrelated record therefore turns a valid credential into
+    [InvalidToken "Token mismatch"]. Answers [false] exactly when the
+    presented credential already owns [agent_name]. *)
+
+val resolve_identity_alias :
+  credential_owner:string option ->
+  resolve_alias:(string -> string) ->
+  string ->
+  string
+(** The authorization subject: the caller name put through [resolve_alias]
+    (the workspace display lookup) only where
+    {!alias_may_rewrite_identity} allows it. *)
+
 type t = {
   agent_name : string;
   agent_name_is_ephemeral : bool;

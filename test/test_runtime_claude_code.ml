@@ -567,12 +567,23 @@ let test_context_overflow_after_response_records_activity () =
 ;;
 
 let test_context_overflow_after_empty_assistant_remains_retry_safe () =
+  let events = ref [] in
   with_fixture [ Emit empty_assistant; Emit prompt_too_long_result ] (fun path ->
-    match run_fixture path with
+    match
+      run_fixture
+        ~on_stream_event:(fun event -> events := event :: !events)
+        path
+    with
     | Error
         (Runtime_claude_code.Context_window_exceeded
           { tool_effect_attempted = false; response_emitted = false; _ }) ->
-      ()
+      (match List.rev !events with
+       | [ Turn_started
+             { turn_id = "assistant-empty-1"; model = "claude-fixture" }
+         ; Turn_finished { text = "" }
+         ] ->
+         ()
+       | _ -> fail "retry-safe overflow left the first stream unbalanced")
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "empty assistant frame made context overflow complete")
 ;;

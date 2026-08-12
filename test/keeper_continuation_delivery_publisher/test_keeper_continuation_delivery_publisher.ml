@@ -62,7 +62,7 @@ let dashboard_intent () =
   |> expect_intent
 ;;
 
-let discord_intent () =
+let discord_intent ?(response_text = "discord final answer") () =
   let channel =
     Keeper_continuation_channel.discord
       ~guild_id:(Some "guild-1")
@@ -82,8 +82,31 @@ let discord_intent () =
     ~keeper_name:"keeper-publisher"
     ~keeper_turn_id:10
     ~origin
-    ~response_text:"discord final answer"
+    ~response_text
   |> expect_intent
+;;
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path)
+  then (
+    mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o700 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
+(* Seed a keeper-scoped env secret so [Keeper_secret_redaction.snapshot] has an
+   exact value to mask, using the same projected root the snapshot reads. *)
+let write_keeper_env_secret ~config ~keeper_name ~name value =
+  let env_root =
+    Filename.concat
+      (Keeper_secret_projection.secret_root
+         ~base_path:config.Workspace.base_path
+         ~keeper_name)
+      "env"
+  in
+  mkdir_p env_root;
+  let oc = open_out (Filename.concat env_root name) in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc value)
 ;;
 
 let adapter ?(append = fun _ -> Ok (Publisher.Appended { row_id = "row-1" }))
@@ -285,6 +308,49 @@ let test_sent_then_transcript_failure_is_ambiguous () =
       fail "post-send transcript failure lost ambiguity")
 ;;
 
+let test_external_send_redacts_keeper_secret () =
+  with_temp_config (fun config ->
+    let secret = "MANGO-WORKSPACE-SECRET-42" in
+    write_keeper_env_secret
+      ~config
+      ~keeper_name:"keeper-publisher"
+      ~name:"WORKSPACE_SECRET"
+      secret;
+    let intent =
+      discord_intent
+        ~response_text:(Printf.sprintf "the answer quotes %s in full" secret)
+        ()
+    in
+    let observed = ref None in
+    ignore
+      (Publisher.For_testing.publish_with_adapter
+         ~adapter:
+           (adapter
+              ~send:(function
+                | Publisher.Discord { content; _ } ->
+                  observed := Some content;
+                  Publisher.Sent { message_id = "redacted-send-1" }
+                | Publisher.Slack _ -> fail "expected Discord request")
+              ())
+         ~config
+         intent
+       |> expect_publish
+       : Publisher.outcome);
+    match !observed with
+    | None -> fail "connector send was never invoked"
+    | Some content ->
+      check
+        bool
+        "raw keeper secret never reaches the connector"
+        false
+        (String_util.contains_substring content secret);
+      check
+        bool
+        "secret was replaced with the redaction marker"
+        true
+        (String_util.contains_substring content "[REDACTED]"))
+;;
+
 let () =
   run
     "keeper continuation delivery publisher"
@@ -293,6 +359,10 @@ let () =
             "dashboard pending delivers"
             `Quick
             test_dashboard_pending_delivers_once
+        ; test_case
+            "external send redacts keeper secret"
+            `Quick
+            test_external_send_redacts_keeper_secret
         ; test_case
             "Discord reply preserves origin message"
             `Quick

@@ -177,11 +177,21 @@ let publish_pending ~adapter ~config intent =
     append_dashboard ~adapter ~config attempting
   | (Keeper_continuation_channel.Discord _ | Keeper_continuation_channel.Slack _)
     as channel ->
-    (match
-       connector_request_of_channel
-         channel
-         ~content:attempting.Intent.response.text
-     with
+    (* RFC-0132: connector egress must be redacted with the same keeper secret
+       snapshot the model-tool surface-post path uses
+       (keeper_tool_in_process_runtime), so a continuation response that echoes
+       a workspace/Keeper secret never reaches Discord/Slack in the clear. *)
+    let redaction =
+      Keeper_secret_redaction.snapshot
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:attempting.Intent.keeper_name
+    in
+    let safe_content =
+      Keeper_secret_redaction.redact_text
+        redaction
+        attempting.Intent.response.text
+    in
+    (match connector_request_of_channel channel ~content:safe_content with
      | Some request -> publish_external ~adapter ~config attempting request
      | None ->
        mark_failed

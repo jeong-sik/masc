@@ -8,6 +8,7 @@
   masc
   masc.fs_compat
   masc.keeper_runtime
+  masc.string_util
   unix
   yojson))
 

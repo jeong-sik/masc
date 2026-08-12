@@ -380,6 +380,64 @@ let test_load_tail_lines_drops_partial_chunk_prefix () =
   let lines = Dated_jsonl.load_tail_lines path ~max_lines:5 in
   check (list string) "drops partial chunk prefix" expected lines
 
+(* Differential test for the single-pass rewrite of the tail cutter.
+
+   [load_tail_lines] used to build its result as
+   [Bytes.to_string |> String.split_on_char |> List.filter |> List.filteri].
+   That reference is reproduced here and compared against the live
+   implementation over generated inputs, so the rewrite is held to producing the
+   same list rather than to a handful of hand-picked cases. The generator mixes
+   blank lines, whitespace-only lines, a missing trailing newline, and contents
+   that straddle the 8KB chunk boundary, because those are where the two shapes
+   could diverge.
+
+   Seeded so a failure reproduces. *)
+let reference_tail_lines content ~max_lines =
+  if max_lines <= 0 then []
+  else
+    let is_blank character =
+      match character with ' ' | '\012' | '\n' | '\r' | '\t' -> true | _ -> false
+    in
+    let lines =
+      content
+      |> String.split_on_char '\n'
+      |> List.filter (fun line ->
+           String.exists (fun character -> not (is_blank character)) line)
+    in
+    let count = List.length lines in
+    if count <= max_lines then lines
+    else List.filteri (fun index _ -> index >= count - max_lines) lines
+
+let test_load_tail_lines_matches_reference () =
+  let dir = tmpdir "dated_jsonl_tail_differential" in
+  let state = Random.State.make [| 0x7A11 |] in
+  for case = 0 to 199 do
+    let row_count = Random.State.int state 40 in
+    let rows =
+      List.init row_count (fun index ->
+        match Random.State.int state 6 with
+        | 0 -> ""
+        | 1 -> "   "
+        | 2 -> "\t \r"
+        | 3 ->
+          (* straddle the 8KB chunk boundary *)
+          Printf.sprintf {|{"i":%d,"pad":"%s"}|} index
+            (String.make (Random.State.int state 3000) 'x')
+        | _ -> Printf.sprintf {|{"i":%d}|} index)
+    in
+    let content =
+      String.concat "\n" rows
+      ^ if Random.State.bool state then "\n" else ""
+    in
+    let path = Filename.concat dir (Printf.sprintf "case%d.jsonl" case) in
+    Fs_compat.append_file path content;
+    let max_lines = 1 + Random.State.int state 12 in
+    check (list string)
+      (Printf.sprintf "case %d (rows=%d, max_lines=%d)" case row_count max_lines)
+      (reference_tail_lines content ~max_lines)
+      (Dated_jsonl.load_tail_lines path ~max_lines)
+  done
+
 let test_load_tail_lines_missing_file_is_empty () =
   let path = Filename.concat (tmpdir "dated_jsonl_missing_tail") "missing.jsonl" in
   check
@@ -808,6 +866,8 @@ let () =
           test_case "strict latest scan crosses chunks" `Quick
             test_find_latest_entry_result_scans_backwards_across_chunks;
           test_case "drops partial chunk prefix" `Quick test_load_tail_lines_drops_partial_chunk_prefix;
+          test_case "matches the pre-rewrite reference" `Quick
+            test_load_tail_lines_matches_reference;
           test_case "missing tail is empty" `Quick
             test_load_tail_lines_missing_file_is_empty;
           test_case "counts nonempty tail rows exactly" `Quick

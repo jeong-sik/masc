@@ -506,6 +506,57 @@ let open_regular_input_result path =
     at most once while walking backwards. The loop stops after the chunk that
     contains the [n]th physical non-empty line, so it overscans by at most one
     8 KB chunk. Chunks are concatenated exactly once. *)
+(* Segment [buffer] on ['\n'] exactly as [String.split_on_char] does — the final
+   segment is always emitted, empty or not — without allocating anything. *)
+let fold_newline_segments buffer f init =
+  let len = Bytes.length buffer in
+  let rec loop start index acc =
+    if index >= len then f acc start len
+    else if Bytes.get buffer index = '\n' then
+      loop (index + 1) (index + 1) (f acc start index)
+    else loop start (index + 1) acc
+  in
+  loop 0 0 init
+
+let rec segment_has_content buffer index stop =
+  index < stop
+  && (not (trim_whitespace (Bytes.get buffer index))
+      || segment_has_content buffer (index + 1) stop)
+
+(* Cut the last [max_lines] non-empty segments out of [buffer].
+
+   The previous shape was [Bytes.to_string |> String.split_on_char |>
+   List.filter |> List.length |> List.filteri]. That copies the whole tail into
+   a string, then allocates a string for every segment including the ones about
+   to be dropped, then builds three lists over them. One dashboard read tails 36
+   stores at up to 2000 lines of ~520B each, so those copies are tens of MB of
+   short-lived allocation per request.
+
+   That matters beyond this reader: profiling one wide read showed the CPU
+   dominated by [caml_stw_empty_minor_heap] and the surrounding barrier frames,
+   and OCaml 5 stops *every* domain for each minor collection. Allocation here
+   is paid by every fiber in the process, not just this one.
+
+   Two scans over the buffer allocate nothing; only surviving lines become
+   strings. *)
+let last_non_empty_lines buffer ~max_lines =
+  let count =
+    fold_newline_segments buffer
+      (fun total start stop ->
+         if segment_has_content buffer start stop then total + 1 else total)
+      0
+  in
+  let skip = max 0 (count - max_lines) in
+  let _, reversed =
+    fold_newline_segments buffer
+      (fun (seen, acc) start stop ->
+         if not (segment_has_content buffer start stop) then (seen, acc)
+         else if seen < skip then (seen + 1, acc)
+         else (seen + 1, Bytes.sub_string buffer start (stop - start) :: acc))
+      (0, [])
+  in
+  List.rev reversed
+
 let load_tail_lines_from_channel input ~max_lines =
   if max_lines <= 0
   then []
@@ -550,16 +601,7 @@ let load_tail_lines_from_channel input ~max_lines =
           0
           !chunks
       in
-      let lines =
-        combined
-        |> Bytes.to_string
-        |> String.split_on_char '\n'
-        |> List.filter line_is_non_empty
-      in
-      let line_count = List.length lines in
-      if line_count <= max_lines
-      then lines
-      else List.filteri (fun index _ -> index >= line_count - max_lines) lines
+      last_non_empty_lines combined ~max_lines
     end
 ;;
 

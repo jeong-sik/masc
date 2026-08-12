@@ -162,7 +162,7 @@ let all =
       ~env_name:"MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"
       ~exposure:(Toml_and_env "heartbeat.interval_sec")
       ~value_kind:Integer
-      ~default:"30"
+      ~default:"300"
       ~consumers:[ "Env_config_keeper.KeeperKeepalive"; "Keeper_heartbeat_loop" ]
       ~category:"heartbeat"
       "Keeper heartbeat cycle interval in seconds"
@@ -171,7 +171,7 @@ let all =
       ~env_name:"MASC_KEEPER_MAX_SILENCE_SEC"
       ~exposure:(Toml_and_env "heartbeat.max_silence_sec")
       ~value_kind:Float
-      ~default:"120.0"
+      ~default:"300.0"
       ~consumers:[ "Env_config_keeper.WorkAsHeartbeat"; "Keeper_heartbeat_loop" ]
       ~category:"heartbeat"
       "Maximum age of workspace presence proof"

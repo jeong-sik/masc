@@ -31,6 +31,28 @@ let test_wah_max_silence_floor_logic () =
   check bool "max_silence >= keepalive interval"
     true (v >= interval)
 
+let keeper_setting env_name =
+  match
+    List.find_opt
+      (fun (setting : Keeper_runtime_setting_registry.setting) ->
+        String.equal setting.env_name env_name)
+      Keeper_runtime_setting_registry.active
+  with
+  | Some setting -> setting
+  | None -> failf "missing Keeper runtime registry row for %s" env_name
+;;
+
+let test_keepalive_registry_defaults_match_runtime () =
+  let interval = keeper_setting "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
+  check string "interval registry default matches runtime"
+    (string_of_int Cfg.KeeperKeepalive.interval_sec)
+    interval.default_display;
+  let max_silence = keeper_setting "MASC_KEEPER_MAX_SILENCE_SEC" in
+  check (float 0.1) "max-silence registry default matches runtime"
+    Cfg.WorkAsHeartbeat.max_silence_sec
+    (float_of_string max_silence.default_display)
+;;
+
 (* ── KeeperKeepalive config defaults ───────────────────── *)
 
 let test_keepalive_interval_default () =
@@ -244,6 +266,8 @@ let () =
       test_case "enabled default" `Quick test_wah_enabled_default;
       test_case "max_silence default" `Quick test_wah_max_silence_default;
       test_case "max_silence floor invariant" `Quick test_wah_max_silence_floor_logic;
+      test_case "registry defaults match runtime" `Quick
+        test_keepalive_registry_defaults_match_runtime;
     ];
     "keepalive_config", [
       test_case "interval default" `Quick test_keepalive_interval_default;

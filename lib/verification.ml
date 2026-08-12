@@ -24,6 +24,18 @@ let criterion_of_yojson = function
   | `String _ -> Error "criterion must be a non-empty string"
   | _ -> Error "criterion must be a string"
 
+(** A stored file the current schema cannot read.
+
+    Kept as a value rather than collapsed into a failure. A request that cannot
+    be parsed says nothing about the requests beside it, so it must not decide
+    their fate: [list_requests] returns these alongside the ones it did read,
+    and the caller reports both. Nothing here is shaped to accept a superseded
+    schema — an unreadable file stays unreadable, it just stops being fatal. *)
+type unreadable_request = {
+  unreadable_path: string;
+  unreadable_detail: string;
+}
+
 (** Verification request *)
 type verification_request = {
   id: string;
@@ -32,6 +44,17 @@ type verification_request = {
   criteria: criterion list;
   worker: string;           (** Agent who produced the output *)
   created_at: float;
+}
+
+(** What one pass over the request directory found.
+
+    Both fields are reported. Returning only [readable] would drop the rest
+    silently; returning an error for the whole scan lets one file decide for
+    every other. The directory being unenumerable is still an error, because
+    then neither list is known. *)
+type request_scan = {
+  readable: verification_request list;
+  unreadable: unreadable_request list;
 }
 
 (** Serialization *)
@@ -176,6 +199,12 @@ let load_request base_path req_id =
   else
     Error (Printf.sprintf "Verification %s not found" req_id)
 
+let unreadable_to_yojson { unreadable_path; unreadable_detail } =
+  `Assoc
+    [ ("path", `String unreadable_path);
+      ("detail", `String unreadable_detail);
+    ]
+
 let list_requests_uncached base_path =
   let surface = "verification" in
   let observe_drop ~reason =
@@ -197,21 +226,26 @@ let list_requests_uncached base_path =
     Error (Printf.sprintf "verification request directory unreadable: %s" detail)
   | Ok files ->
     let files = List.filter (fun f -> Filename.check_suffix f ".json") files in
-    let rec load acc = function
-      | [] -> Ok (List.rev acc)
+    let rec load readable unreadable = function
+      | [] -> Ok { readable = List.rev readable; unreadable = List.rev unreadable }
       | file :: rest ->
         let id = Filename.chop_suffix file ".json" in
         (match load_request base_path id with
-         | Ok request -> load (request :: acc) rest
+         | Ok request -> load (request :: readable) unreadable rest
          | Error detail ->
            let path = Filename.concat dir file in
            report_drop
              ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
              ~path
              ~detail;
-           Error (Printf.sprintf "verification request unreadable at %s: %s" path detail))
+           load
+             readable
+             ({ unreadable_path = path; unreadable_detail = detail } :: unreadable)
+             rest)
     in
-    load [] files
+    load [] [] files
+
+let empty_scan = { readable = []; unreadable = [] }
 
 (* Public entry: read the current directory and every current-schema request.
    Content identity is not inferred from filesystem timestamps. *)
@@ -219,7 +253,7 @@ let list_requests base_path =
   let dir = verifications_dir base_path in
   match verification_directory dir with
   | Error detail -> Error detail
-  | Ok Missing_directory -> Ok []
+  | Ok Missing_directory -> Ok empty_scan
   | Ok Present_directory -> list_requests_uncached base_path
 
 (** High-level API *)

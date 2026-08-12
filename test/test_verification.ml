@@ -50,10 +50,20 @@ let with_eio_temp_dir_and_clock f =
     ~finally:Fs_compat.clear_fs
     (fun () -> with_temp_dir (f ~clock:(Eio.Stdenv.clock env)))
 
-let list_requests_exn base_path =
+let scan_exn base_path =
   match V.list_requests base_path with
-  | Ok requests -> requests
+  | Ok scan -> scan
   | Error detail -> Alcotest.fail detail
+;;
+
+(* Most cases here care only about the requests that read. Asserting the scan
+   found nothing unreadable keeps them honest: without it a case could pass
+   while quietly rejecting the record it meant to be reading. *)
+let list_requests_exn base_path =
+  let scan = scan_exn base_path in
+  Alcotest.(check int)
+    "no unreadable requests" 0 (List.length scan.V.unreadable);
+  scan.V.readable
 ;;
 
 let ensure_keeper_meta config name =
@@ -1335,7 +1345,14 @@ let test_request_path_uses_current_store () =
       (Filename.concat (active_verifications_dir base_path) (req_id ^ ".json"))
       (VS.request_path base_path req_id))
 
-let test_list_requests_rejects_bad_entry_with_metric () =
+(* A file the schema cannot read is reported, not silently skipped, and it does
+   not take the readable requests down with it.
+
+   The earlier contract failed the whole scan here. That kept the failure loud
+   but made it total: 171 records written by a producer removed on 2026-08-07
+   were enough to answer /api/v1/dashboard/proof with 500 for five days, naming
+   one path while saying nothing about the other 170 or the 122 that read fine. *)
+let test_list_requests_isolates_bad_entry_with_metric () =
   with_temp_dir (fun base_path ->
     let _ = V.create_request ~base_path ~task_id:"t1"
         ~output:`Null ~criteria:[] ~worker:"a" () in
@@ -1345,15 +1362,54 @@ let test_list_requests_rejects_bad_entry_with_metric () =
       persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
     in
     (match V.list_requests base_path with
-     | Ok _ -> Alcotest.fail "malformed request yielded a partial list"
-     | Error detail ->
-       Alcotest.(check bool)
-         "malformed path is named"
-         true
-         (Astring.String.is_infix ~affix:"broken.json" detail));
+     | Error detail -> Alcotest.fail detail
+     | Ok scan ->
+       Alcotest.(check int)
+         "the readable request survives its broken neighbour"
+         1
+         (List.length scan.V.readable);
+       Alcotest.(check int)
+         "the broken file is reported, not dropped"
+         1
+         (List.length scan.V.unreadable);
+       (match scan.V.unreadable with
+        | [ entry ] ->
+          Alcotest.(check bool)
+            "malformed path is named"
+            true
+            (Astring.String.is_infix ~affix:"broken.json" entry.V.unreadable_path);
+          Alcotest.(check bool)
+            "the parse detail is carried, not discarded"
+            false
+            (String.equal (String.trim entry.V.unreadable_detail) "")
+        | entries ->
+          Alcotest.failf "expected exactly one unreadable entry, got %d"
+            (List.length entries)));
     Alcotest.(check (float 0.1)) "broken file increments metric" 1.0
       (persistence_counter Safe_ops.persistence_read_drop_reason_entry_load_error
        -. before))
+
+(* The scan reports every unreadable file, not just the one it stopped at. The
+   old contract could only ever name one, which is what made a 171-record
+   problem look like a 1-record problem. *)
+let test_list_requests_reports_every_unreadable_entry () =
+  with_temp_dir (fun base_path ->
+    let _ = V.create_request ~base_path ~task_id:"t1"
+        ~output:`Null ~criteria:[] ~worker:"a" () in
+    let dir = active_verifications_dir base_path in
+    Fs_compat.save_file (Filename.concat dir "broken-a.json") "{not-json";
+    Fs_compat.save_file (Filename.concat dir "broken-b.json") "{also-not-json";
+    (* Well-formed JSON that the request schema still rejects — the shape that
+       actually accumulated on disk, as opposed to a truncated write. *)
+    Fs_compat.save_file (Filename.concat dir "broken-c.json")
+      {|{"id":"x","task_id":"t","output":null,"criteria":[{"type":"custom","description":"d"}],"worker":"w","created_at":1.0}|};
+    match V.list_requests base_path with
+    | Error detail -> Alcotest.fail detail
+    | Ok scan ->
+      Alcotest.(check int)
+        "readable request still returned" 1 (List.length scan.V.readable);
+      Alcotest.(check int)
+        "all three unreadable files reported" 3 (List.length scan.V.unreadable))
 
 let test_list_requests_rereads_current_request_content () =
   with_temp_dir (fun base_path ->
@@ -1375,9 +1431,22 @@ let test_list_requests_rereads_current_request_content () =
       1
       (List.length (list_requests_exn base_path));
     Fs_compat.save_file (VS.request_path base_path request.id) "{not-json";
+    (* The point of the case is that the second scan reads the file again
+       instead of reusing the first result. It used to observe that through the
+       scan failing; now the same re-read shows as the record moving out of
+       [readable] and into [unreadable], which says where it went as well as
+       that it moved. *)
     match V.list_requests base_path with
-    | Ok _ -> Alcotest.fail "changed malformed request reused an earlier list"
-    | Error _ -> ())
+    | Error detail -> Alcotest.fail detail
+    | Ok scan ->
+      Alcotest.(check int)
+        "changed malformed request reused an earlier list"
+        0
+        (List.length scan.V.readable);
+      Alcotest.(check int)
+        "the rewritten file is accounted for"
+        1
+        (List.length scan.V.unreadable))
 
 let create_evidence_request ~base_path ~request_id ~artifact_path =
   let profile_path =
@@ -2253,8 +2322,10 @@ let () =
         test_verifications_dir_resolves_active_store;
       Alcotest.test_case "request path uses current store" `Quick
         test_request_path_uses_current_store;
-      Alcotest.test_case "list requests rejects bad entry with metric" `Quick
-        test_list_requests_rejects_bad_entry_with_metric;
+      Alcotest.test_case "list requests isolates bad entry with metric" `Quick
+        test_list_requests_isolates_bad_entry_with_metric;
+      Alcotest.test_case "list requests reports every unreadable entry" `Quick
+        test_list_requests_reports_every_unreadable_entry;
       Alcotest.test_case "list requests rereads current content" `Quick
         test_list_requests_rereads_current_request_content;
       Alcotest.test_case "submitted evidence authority-scoped and contained" `Quick

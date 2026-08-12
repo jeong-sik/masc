@@ -684,6 +684,48 @@ let test_heartbeat_projects_workspace_view () =
     | _ -> Alcotest.fail "Heartbeat bidi handler missing")
 ;;
 
+let test_heartbeat_projects_workspace_pause_directive () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-heartbeat-workspace-pause" (fun dir ->
+    let workspace_config = Workspace_utils.default_config dir in
+    ignore (Masc.Workspace.init workspace_config ~agent_name:(Some "alpha"));
+    Masc.Workspace.pause workspace_config ~by:"operator" ~reason:"maintenance";
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Error "test stub")
+    in
+    match Grpc_eio.Service.get_method service "Heartbeat" with
+    | Some { handler = `Bidi handler; _ } ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let request_stream = Grpc_eio.Stream.create 16 in
+      let response_stream = handler ~sw request_stream in
+      Grpc_eio.Stream.add
+        request_stream
+        (T.HeartbeatPing.to_bytes
+           { agent_name = "alpha"
+           ; session_id = "sess-workspace-pause"
+           ; timestamp_ms = 1700000000000L
+           ; current_task_id = ""
+           });
+      let ack =
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+          Grpc_eio.Stream.take response_stream)
+        |> T.HeartbeatAck.of_bytes
+      in
+      Alcotest.(check (list string))
+        "workspace pause reaches keeper control stream"
+        [ "pause" ]
+        (List.map T.HeartbeatAck.directive_to_wire ack.directives);
+      Grpc_eio.Stream.close request_stream
+    | _ -> Alcotest.fail "Heartbeat bidi handler missing")
+;;
+
 (* ====== Test suite ====== *)
 
 let () =
@@ -752,6 +794,10 @@ let () =
             "heartbeat projects workspace view"
             `Quick
             test_heartbeat_projects_workspace_view
+        ; Alcotest.test_case
+            "heartbeat projects workspace pause directive"
+            `Quick
+            test_heartbeat_projects_workspace_pause_directive
         ] )
     ; ( "server_config"
       , [ Alcotest.test_case "default_port" `Quick test_grpc_default_port

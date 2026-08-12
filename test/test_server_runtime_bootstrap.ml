@@ -4411,6 +4411,52 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let expected_config = Filename.concat dir ".masc/config" in
+      let workspace_config = Workspace.default_config dir in
+      ignore (Workspace.init workspace_config ~agent_name:(Some "startup-test"));
+      let fenced_keeper =
+        make_keeper_meta
+          ~name:"restart-fenced-keeper"
+          ~trace_id:"trace-restart-fenced-keeper"
+          ()
+      in
+      write_keeper_meta_exn workspace_config fenced_keeper;
+      let expected_backlog_version =
+        match Workspace_backlog.read_backlog_r workspace_config with
+        | Ok backlog -> backlog.version
+        | Error detail -> Alcotest.fail detail
+      in
+      let operation_id =
+        Keeper_shutdown_types.Operation_id.of_string
+          "shutdown-00000000-0000-4000-8000-000000000001"
+        |> Result.get_ok
+      in
+      let now = Masc_domain.now_iso () in
+      let fenced_operation : Keeper_shutdown_types.t =
+        { schema_version = Keeper_shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id
+        ; keeper_name = fenced_keeper.name
+        ; lane_ownership = Keeper_shutdown_types.Dormant_meta
+        ; trace_id = fenced_keeper.runtime.trace_id
+        ; generation = fenced_keeper.runtime.nonce
+        ; actor = "startup-test"
+        ; cleanup_intent =
+            { reason = Keeper_shutdown_types.Operator_stop_retain_meta
+            ; remove_session = false
+            }
+        ; turn_disposition = Keeper_shutdown_types.No_inflight_turn
+        ; expected_backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase = Keeper_shutdown_types.Prepared
+        ; created_at = now
+        ; updated_at = now
+        }
+      in
+      (match Keeper_shutdown_store.persist_new ~config:workspace_config fenced_operation with
+       | Ok () -> ()
+       | Error error ->
+         Alcotest.fail (Keeper_shutdown_store.error_to_string error));
       let env =
         main_eio_env_overrides
           [
@@ -4442,11 +4488,9 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
         ~finally:(fun () -> stop_process pid)
         (fun () ->
           if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
-            prerr_endline
-              (Printf.sprintf
-                 "main_eio fresh boot did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
-                 (read_file log_file));
-            Alcotest.skip ()
+            Alcotest.failf
+              "main_eio fresh boot did not reach startup.phase=ready within timeout.\nlog:\n%s"
+              (read_file log_file)
           end;
           let health_headers, health_body =
             curl_request_capture ~output_dir:dir ~name:"health" ~method_:"GET"
@@ -4473,6 +4517,12 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           in
           Alcotest.(check string) "startup phase ready" "ready"
             Yojson.Safe.Util.(startup |> member "phase" |> to_string);
+          Alcotest.(check bool)
+            "durable shutdown admission restores after Owner inventory install"
+            false
+            (String_util.contains_substring
+               (read_file log_file)
+               "Keeper owner inventory is not installed");
           Alcotest.(check string) "effective base path matches fresh dir"
             (canonical_path dir) (canonical_path effective_base_path);
           Alcotest.(check string) "config root matches fresh dir"

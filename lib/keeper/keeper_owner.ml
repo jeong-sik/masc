@@ -933,6 +933,7 @@ let run_if_idle t lane run =
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
+  | Ok (Autonomous_raised (Stop_active_child, _)) -> Error Owner_stopping
   | Ok (Autonomous_raised (exn, backtrace)) ->
     Printexc.raise_with_backtrace exn backtrace
 ;;

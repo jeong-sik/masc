@@ -168,6 +168,15 @@ module KeeperAutonomous = struct
     else Ok trimmed
   ;;
 
+  (** The wording used when neither the fleet nor a keeper configures one.
+
+      This is the single definition; [Keeper_unified_prompt.autonomous_wake_marker]
+      is an alias of it. Keeping the literal here rather than in the prompt
+      module lets the operator settings projection report the same effective
+      value the prompt builder would use, without the projection reaching up a
+      layer to ask. *)
+  let default_wake_prompt = "Continue."
+
   (** Fleet-wide wake prompt, or [None] when unset. Read as a function: the
       value is steerable through the boot override store, and a keeper process
       outlives module-load time. *)
@@ -182,6 +191,11 @@ module KeeperAutonomous = struct
            (Env_config_core.Config_error
               (Printf.sprintf "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT: %s" reason)))
   ;;
+
+  (** Fleet value else the literal default. This is what a keeper that states
+      no override of its own is woken with, and what the operator settings
+      projection reports. *)
+  let wake_prompt () = Option.value (wake_prompt_opt ()) ~default:default_wake_prompt
 end
 
 (** {1 Keeper Runtime Configuration} *)

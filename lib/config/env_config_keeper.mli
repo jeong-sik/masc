@@ -59,11 +59,20 @@ module KeeperAutonomous : sig
       [autonomous_wake_prompt], so the two authoring surfaces cannot accept
       different values. *)
 
+  val default_wake_prompt : string
+  (** Wording used when neither fleet nor keeper configures one. Single
+      definition; {!Keeper_unified_prompt.autonomous_wake_marker} aliases it. *)
+
   val wake_prompt_opt : unit -> string option
   (** Fleet wake prompt, [None] when unset. Raises
       {!Env_config_core.Config_error} on a set-but-invalid value rather than
       falling back, so a typo surfaces at read time instead of silently
       restoring the default. *)
+
+  val wake_prompt : unit -> string
+  (** Fleet value else {!default_wake_prompt} -- what a keeper with no override
+      of its own is woken with, and what the operator settings projection
+      reports. *)
 end
 
 (** {1 Keeper runtime} *)

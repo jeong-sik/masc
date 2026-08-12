@@ -184,80 +184,8 @@ module Make (Config : Config) = struct
         ("recent_audit", `List recent_audit);
       ]
 
-  let list_assoc_field key = function
-    | `Assoc fields -> List.assoc_opt key fields
-    | _ -> None
-
-  let find_assoc_by_string_field ~field ~value = function
-    | `List rows ->
-        List.find_map
-          (function
-            | (`Assoc _ as row) -> (
-                match list_assoc_field field row with
-                | Some (`String candidate) when String.equal candidate value -> Some row
-                | _ -> None)
-            | _ -> None)
-          rows
-    | _ -> None
-
-  let connector_json ?gate_status_json ?(audit_limit = 10) () =
+  let connector_json ?(audit_limit = 10) () =
     let status = status_json ~audit_limit () in
-    let observed_channel =
-      match gate_status_json with
-      | None -> `Null
-      | Some json -> (
-          match list_assoc_field "channels" json with
-          | Some channels -> (
-              match find_assoc_by_string_field ~field:"channel" ~value:channel channels with
-              | Some row -> row
-              | None -> `Null)
-          | None -> `Null)
-    in
-    let storage_paths =
-      `Assoc
-        [
-          ("status_path", `String (string_member status "status_path"));
-          ( "binding_store_path",
-            `String (string_member status "binding_store_path") );
-          ("audit_path", `String (string_member status "audit_path"));
-          ("names_path", `String "");
-        ]
-    in
-    let runtime_summary =
-      `Assoc
-        [
-          ("available", `Bool (bool_member status "available"));
-          ("connected", `Bool (bool_member status "connected"));
-          ("stale", `Bool (bool_member status "stale"));
-          ("stale_after_sec", `Int (int_member status "stale_after_sec"));
-          ("status", `String (string_member status "status"));
-          ("error", `String (string_member status "error"));
-          ("updated_at", `String (string_member status "updated_at"));
-          ("last_message_at", `String (string_member status "last_message_at"));
-          ("gate_base_url", `String (string_member status "gate_base_url"));
-          ( "gate_healthy",
-            Option.value ~default:`Null
-              (Option.map (fun value -> `Bool value)
-                 (bool_option_member status "gate_healthy")) );
-          ( "gate_health_checked_at",
-            `String (string_member status "gate_health_checked_at") );
-          ("pid", `Int (int_member status "pid"));
-        ]
-    in
-    let configured_bindings =
-      match status |> U.member "configured_bindings" with
-      | `List rows -> rows
-      | _ -> []
-    in
-    let binding_summary =
-      `Assoc
-        [
-          ("binding_source", `String (string_member status "binding_source"));
-          ( "runtime_bindings_count",
-            `Int (int_member status "runtime_bindings_count") );
-          ("configured_bindings_count", `Int (List.length configured_bindings));
-        ]
-    in
     `Assoc
       [
         ("connector_id", `String connector_id);
@@ -292,18 +220,6 @@ module Make (Config : Config) = struct
         ("pid", `Int (int_member status "pid"));
         ("configured_bindings", status |> U.member "configured_bindings");
         ("recent_audit", status |> U.member "recent_audit");
-        ("storage_paths", storage_paths);
-        ("runtime_summary", runtime_summary);
-        ("binding_summary", binding_summary);
-        ("observed_channel", observed_channel);
-        ( "names",
-          `Assoc
-            [
-              ("guild_names", `Assoc []);
-              ("channel_names", `Assoc []);
-              ("channel_to_guild", `Assoc []);
-              ("updated_at", `String "");
-            ] );
       ]
 
   let bind ~channel_id ~keeper_name ~actor_name =

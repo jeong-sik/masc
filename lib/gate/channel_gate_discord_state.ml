@@ -269,74 +269,8 @@ let status_json ?(audit_limit = 10) () =
       ("recent_audit", `List recent_audit);
     ]
 
-let list_assoc_field key = function
-  | `Assoc fields -> List.assoc_opt key fields
-  | _ -> None
-
-let connector_json ?gate_status_json ?(audit_limit = 10) () =
+let connector_json ?(audit_limit = 10) () =
   let status = status_json ~audit_limit () in
-  let observed_channel =
-    match gate_status_json with
-    | None -> `Null
-    | Some json -> (
-        match list_assoc_field "channels" json with
-        | Some channels -> (
-            match
-              Json_util.find_assoc_row_by_string_field ~field:"channel"
-                ~value:channel channels
-            with
-            | Some row -> row
-            | None -> `Null)
-        | None -> `Null)
-  in
-  let storage_paths =
-    `Assoc
-      [
-        ("status_path", `String (string_member status "status_path"));
-        ( "binding_store_path",
-          `String (string_member status "binding_store_path") );
-        ("audit_path", `String (string_member status "audit_path"));
-        ("names_path", `String (string_member status "names_path"));
-      ]
-  in
-  let runtime_summary =
-    `Assoc
-      [
-        ("available", `Bool (bool_member status "available"));
-        ("connected", `Bool (bool_member status "connected"));
-        ("stale", `Bool (bool_member status "stale"));
-        ("stale_after_sec", `Int (int_member status "stale_after_sec"));
-        ("status", `String (string_member status "status"));
-        ("error", `String (string_member status "error"));
-        ("updated_at", `String (string_member status "updated_at"));
-        ("last_ready_at", `String (string_member status "last_ready_at"));
-        ("bot_user_name", `String (string_member status "bot_user_name"));
-        ("bot_user_id", `String (string_member status "bot_user_id"));
-        ("guild_count", `Int (int_member status "guild_count"));
-        ("gate_base_url", `String (string_member status "gate_base_url"));
-        ( "gate_healthy",
-          Option.value ~default:`Null
-            (Option.map (fun value -> `Bool value)
-               (bool_option_member status "gate_healthy")) );
-        ( "gate_health_checked_at",
-          `String (string_member status "gate_health_checked_at") );
-        ("pid", `Int (int_member status "pid"));
-      ]
-  in
-  let binding_summary =
-    `Assoc
-      [
-        ("binding_source", `String (string_member status "binding_source"));
-        ( "runtime_bindings_count",
-          `Int (int_member status "runtime_bindings_count") );
-        ( "configured_bindings_count",
-          `Int
-            (Json_util.get_array status "configured_bindings"
-             |> Option.map (function `List l -> List.length l | _ -> 0)
-             |> Option.value ~default:0)
-        );
-      ]
-  in
   `Assoc
     [
       ("connector_id", `String connector_id);
@@ -349,9 +283,13 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("connected", `Bool (bool_member status "connected"));
       ("stale", `Bool (bool_member status "stale"));
       ("stale_after_sec", `Int (int_member status "stale_after_sec"));
+      ("status_source", status |> U.member "status_source");
+      ("gateway_state", status |> U.member "gateway_state");
       ("error", `String (string_member status "error"));
       ("status_path", `String (string_member status "status_path"));
       ("binding_store_path", `String (string_member status "binding_store_path"));
+      ("binding_store_read_ok", status |> U.member "binding_store_read_ok");
+      ("binding_store_error", status |> U.member "binding_store_error");
       ("audit_path", `String (string_member status "audit_path"));
       ("names_path", `String (string_member status "names_path"));
       ("names", status |> U.member "names");
@@ -372,10 +310,6 @@ let connector_json ?gate_status_json ?(audit_limit = 10) () =
       ("pid", `Int (int_member status "pid"));
       ("configured_bindings", status |> U.member "configured_bindings");
       ("recent_audit", status |> U.member "recent_audit");
-      ("storage_paths", storage_paths);
-      ("runtime_summary", runtime_summary);
-      ("binding_summary", binding_summary);
-      ("observed_channel", observed_channel);
     ]
 
 let bind ~channel_id ~keeper_name ~actor_name =

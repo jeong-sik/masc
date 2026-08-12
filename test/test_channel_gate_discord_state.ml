@@ -8,8 +8,7 @@ module Registry_test_connector_a = struct
   let display_name = "Registry Test A"
   let channel = "registry-test"
   let status_json ?(audit_limit = 10) () = ignore audit_limit; `Assoc []
-  let connector_json ?gate_status_json ?(audit_limit = 10) () =
-    ignore gate_status_json;
+  let connector_json ?(audit_limit = 10) () =
     ignore audit_limit;
     `Assoc
       [ "connector_id", `String connector_id
@@ -26,8 +25,7 @@ module Registry_test_connector_b = struct
   include Registry_test_connector_a
 
   let display_name = "Registry Test B"
-  let connector_json ?gate_status_json ?(audit_limit = 10) () =
-    ignore gate_status_json;
+  let connector_json ?(audit_limit = 10) () =
     ignore audit_limit;
     `Assoc
       [ "connector_id", `String connector_id
@@ -243,23 +241,8 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
           ("runtime_bindings_count", `Int 1);
           ("pid", `Int 4242);
         ]);
-    let gate_status_json =
-      `Assoc
-        [
-          ( "channels",
-            `List
-              [
-                `Assoc
-                  [
-                    ("channel", `String "discord");
-                    ("message_count", `Int 3);
-                    ("success_rate_pct", `Int 100);
-                  ];
-              ] );
-        ]
-    in
     Channel_gate_connector.register (module Discord_state);
-    let json = Channel_gate_connector.connectors_json ~gate_status_json () in
+    let json = Channel_gate_connector.connectors_json () in
     let connectors = json |> U.member "connectors" |> U.to_list in
     check int "one connector" 1 (List.length connectors);
     let connector = List.hd connectors in
@@ -279,9 +262,11 @@ let test_connectors_json_advertises_gate_connector_descriptor () =
        |> List.exists (function
             | `String "bindings" -> true
             | _ -> false));
-    check string "observed channel surfaced" "discord"
-      (connector |> U.member "observed_channel" |> U.member "channel"
-       |> U.to_string))
+    check string "status source surfaced" "in_process_gateway"
+      (connector |> U.member "status_source" |> U.to_string);
+    check bool "gateway state surfaced" true
+      (connector |> U.member "gateway_state" |> U.to_string
+       |> String.trim |> String.length > 0))
 
 let test_registry_register_replaces_and_all_snapshots () =
   Channel_gate_connector.register (module Registry_test_connector_a);

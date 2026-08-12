@@ -238,17 +238,11 @@ let test_slack_connector_json_carries_identity () =
       "connector capabilities use the canonical projection"
       Channel_gate_connector_capability.all_json
       (json |> U.member "capabilities");
-    (* The endpoint passes [~gate_status_json]; identity must survive the
-       merge, since it is the tile-matching key. *)
-    let merged =
-      Channel_gate_slack_state.connector_json
-        ~gate_status_json:(`Assoc [ ("channels", `List []) ])
-        ()
-    in
-    check string "connector id survives gate_status merge" "slack"
-      (merged |> U.member "connector_id" |> U.to_string);
-    check string "display name survives gate_status merge" "Slack"
-      (merged |> U.member "display_name" |> U.to_string))
+    check string "status source" "in_process_gateway"
+      (json |> U.member "status_source" |> U.to_string);
+    check bool "gateway state surfaced" true
+      (json |> U.member "gateway_state" |> U.to_string
+       |> String.trim |> String.length > 0))
 
 let () =
   run "channel_gate_connector_routes"

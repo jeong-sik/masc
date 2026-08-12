@@ -34,12 +34,10 @@ val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
     audit-history slice (default [10]). *)
 
 val connector_json :
-  ?gate_status_json:Yojson.Safe.t ->
   ?audit_limit:int ->
   unit ->
   Yojson.Safe.t
-(** Full connector descriptor for the dashboard, layering
-    [gate_status_json] (if provided) on top of {!status_json}. *)
+(** Full connector descriptor for the dashboard. *)
 
 (** {1 Binding lifecycle} *)
 

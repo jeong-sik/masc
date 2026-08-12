@@ -306,15 +306,35 @@ describe('CopilotDock', () => {
     )
   }
 
+  const DEV_TOKEN_PATH = '/api/v1/dashboard/dev-token'
+
+  /* `streamKeeperMessage` bootstraps the loopback dashboard credential before
+     it builds the request (#28371), so the dock now issues a dev-token GET
+     ahead of the keeper POST. A bare `mockResolvedValue(sseResponse(...))`
+     breaks on both counts: the GET becomes call[0], and the single Response's
+     body stream is consumed by whichever call reads it first, leaving the POST
+     with nothing to parse. Route by URL and build a fresh Response per call. */
+  function dockFetchMock(events: unknown[]) {
+    return vi.fn(async (url: string, _init?: RequestInit) =>
+      String(url).includes(DEV_TOKEN_PATH)
+        ? new Response(
+            JSON.stringify({ token: 'dock-dev-token', actor: 'dashboard', role: 'admin' }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
+        : sseResponse(events))
+  }
+
+  function keeperStreamCalls(mock: ReturnType<typeof dockFetchMock>) {
+    return mock.mock.calls.filter(([url]) => !String(url).includes(DEV_TOKEN_PATH))
+  }
+
   it('sends a message and shows a streaming reply', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      sseResponse([
-        { type: 'TEXT_MESSAGE_START', role: 'Assistant', messageId: 'm1' },
-        { type: 'TEXT_MESSAGE_CONTENT', delta: '안녕하세요' },
-        { type: 'TEXT_MESSAGE_END' },
-        { type: 'RUN_FINISHED' },
-      ]),
-    )
+    const fetchMock = dockFetchMock([
+      { type: 'TEXT_MESSAGE_START', role: 'Assistant', messageId: 'm1' },
+      { type: 'TEXT_MESSAGE_CONTENT', delta: '안녕하세요' },
+      { type: 'TEXT_MESSAGE_END' },
+      { type: 'RUN_FINISHED' },
+    ])
     vi.stubGlobal('fetch', fetchMock)
 
     const dock = renderDock()
@@ -329,17 +349,21 @@ describe('CopilotDock', () => {
     sendBtn.click()
 
     await waitFor(() => expect(container.querySelectorAll('[data-dock-message="user"]').length).toBe(1))
-    await waitFor(() => expect(container.querySelectorAll('[data-dock-message="assistant"]').length).toBe(1), { timeout: 3000 })
 
-    const assistant = container.querySelector('[data-dock-message="assistant"]')
-    expect(assistant?.textContent).toContain('안녕하세요')
+    /* The streaming placeholder also carries `data-dock-message="assistant"`,
+       so waiting for the element alone resolves on "작성 중…" — the settled
+       reply only lands in the `.then` of `streamKeeperMessage`. Wait on the
+       text the test is actually about. */
+    await waitFor(
+      () => expect(container.querySelector('[data-dock-message="assistant"]')?.textContent)
+        .toContain('안녕하세요'),
+      { timeout: 3000 },
+    )
   })
 
   it('posts copilot channel and surface context to the keeper stream', async () => {
     window.history.replaceState({}, '', '/?agent=dashboard-eager-manta')
-    const fetchMock = vi.fn().mockResolvedValue(
-      sseResponse([{ type: 'RUN_FINISHED' }]),
-    )
+    const fetchMock = dockFetchMock([{ type: 'RUN_FINISHED' }])
     vi.stubGlobal('fetch', fetchMock)
 
     const dock = renderDock()
@@ -352,11 +376,17 @@ describe('CopilotDock', () => {
     const sendBtn = container.querySelector('[aria-label="메시지 전송"]') as HTMLButtonElement
     sendBtn.click()
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    await waitFor(() => expect(keeperStreamCalls(fetchMock)).toHaveLength(1))
+    const [, init] = keeperStreamCalls(fetchMock)[0] as [string, RequestInit]
     const body = JSON.parse(String(init.body))
     expect(body.channel).toBe('copilot')
-    expect(body.channel_workspace_id).toBe('dashboard-eager-manta')
+    /* The `?agent=` query is a hint, and a managed dev-token credential
+       outranks it (#28334). `currentDashboardActor` returns the stored dev
+       token's actor whenever one exists and only falls back to the URL name
+       otherwise, so once the dock bootstraps a credential (#28371) the hint
+       must not reach the wire. Keeping the query in the URL pins that
+       precedence rather than asserting a value the hint no longer decides. */
+    expect(body.channel_workspace_id).toBe('dashboard')
     expect(body.surface_context).toMatchObject({
       label: expect.any(String),
       route: '/overview',

@@ -399,8 +399,23 @@ let unbounded_window_scan_cap = 50_000
 
    [read_limit] is abstract in the mli so "unbounded" cannot be constructed.
    Phase 1 of RFC-0372 caps what a caller may ask for; Phase 2 makes the
-   allowance span stores instead of applying to each. *)
-let max_read_entries = 10_000
+   allowance span stores instead of applying to each.
+
+   The ceiling is measured, not chosen. Phase 1 picked 10_000 provisionally;
+   request_cost_gate (Mode C, 8 keepers x 20k entries) then measured peak RSS
+   against it on this same reader:
+
+     n =  2_000 ->  80.2 MB, 0.49 s
+     n =  5_000 -> 129.4 MB, 1.03 s
+     n = 10_000 -> 185.1 MB, 2.29 s
+
+   That is roughly 13 KB of heap per entry (a ~25x expansion over the 521-byte
+   JSON rows) on top of a ~54 MB fixed cost. 10_000 buys a 5 MB response for
+   185 MB of heap; 2_000 keeps the response near 1 MB and the heap near 80 MB,
+   and it matches [default_windowed_telemetry_limit] so the widest default
+   request is also the widest possible one. Callers needing more paginate via
+   [offset]. *)
+let max_read_entries = 2_000
 
 let default_read_entries = 100
 
@@ -432,6 +447,36 @@ let bounded_entries_for_window store ~n ?since_ts ?until_ts () =
   in
   List.filter (within_requested_window ?since_ts ?until_ts) entries
 
+(* RFC-0372 Phase 2 — merge per-store slices while holding only the newest
+   [target] entries.
+
+   [List.concat_map] materialises every store's slice before anything is
+   trimmed, so the working set scales with store count: at 8 keepers the
+   per-keeper sources alone hold 8x what the caller asked for, and each added
+   keeper adds another multiple. Folding with a trim after each store keeps the
+   working set at O(target + one store's slice).
+
+   The merged result is unchanged. Each store is already newest-first, so an
+   entry beyond a store's own newest [target] is older than that store's newest
+   [target] and cannot reach the merged head. Trimming per store therefore
+   discards only entries that the final [take_first target] would have dropped
+   anyway.
+
+   [target <= 0] keeps the old concat behaviour; callers inside this module
+   always pass a positive limit since Phase 1, but the guard keeps the helper
+   total. *)
+let merge_newest_bounded ~target ~read items =
+  if target <= 0 then List.concat_map read items
+  else
+    List.fold_left
+      (fun acc item ->
+         match read item with
+         | [] -> acc
+         | slice -> sort_newest_first (slice @ acc) |> take_first target)
+      []
+      items
+;;
+
 let read_fixed_source dir source ~n ?since_ts ?until_ts () : Yojson.Safe.t list =
   match classify_store_dir source ~site:"read_fixed_source_dir" dir with
   | Store_missing | Store_invalid -> []
@@ -454,9 +499,8 @@ let read_keeper_metrics ~masc_root ?keeper_name ?since_ts ?until_ts ~n () :
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
-  List.concat_map (fun (_name, dir) ->
-    read_fixed_source dir Keeper_metric ~n ?since_ts ?until_ts ()
-  ) dirs
+  merge_newest_bounded ~target:n dirs ~read:(fun (_name, dir) ->
+    read_fixed_source dir Keeper_metric ~n ?since_ts ?until_ts ())
 
 let read_keeper_metrics_fast_top ~masc_root ~n () : Yojson.Safe.t list =
   let target = n + 1 in
@@ -506,8 +550,8 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
     | None -> dirs
     | Some name -> List.filter (fun (k, _) -> String.equal k name) dirs
   in
-  List.concat_map
-    (fun (_name, dir) ->
+  merge_newest_bounded ~target:n dirs
+    ~read:(fun (_name, dir) ->
       try
         let store = Dated_jsonl.create ~base_dir:dir () in
         dated_jsonl_entries store ~n ?since_ts ?until_ts ()
@@ -520,7 +564,6 @@ let read_execution_receipts ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
         Log.Telemetry.warn
           "read_execution_receipts: store open failed for %s" dir;
         [])
-    dirs
 
 let read_trajectory_file path ~max_lines ?since_ts ?until_ts () =
   if
@@ -594,8 +637,8 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
      from being unbounded (the freeze cause). *)
   let max_lines = if n <= 0 then unbounded_window_scan_cap else n in
   let entries =
-    List.concat_map
-      (fun (_name, dir) ->
+    merge_newest_bounded ~target:max_lines dirs
+      ~read:(fun (_name, dir) ->
         protect_source_read Trajectory_tool_call
           ~site:"read_trajectory_tool_calls_readdir" ~default:[] (fun () ->
           Sys.readdir dir
@@ -607,7 +650,6 @@ let read_trajectory_tool_calls ~masc_root ?keeper_name ?since_ts ?until_ts ~n ()
                read_trajectory_file
                  (Filename.concat dir name)
                  ~max_lines ?since_ts ?until_ts ())))
-      dirs
   in
   let entries = sort_newest_first entries in
   let entries = if n <= 0 then entries else take_first n entries in
@@ -659,9 +701,27 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
     if has_filter then max (n + offset) ((n + offset) * 2)
     else n + offset + 1
   in
+  (* Applied per source, before merging, so the bounded merge below keeps the
+     newest [per_source] entries that SURVIVE filtering. Filtering after the
+     merge (as this did previously) would let a trimmed merge drop entries the
+     filter would have kept, so the predicate has to travel with the read. *)
+  let keep json =
+    let keeper_ok =
+      match keeper_name with
+      | None -> true
+      | Some name ->
+        (match json with
+         | `Assoc fields ->
+           (match List.assoc_opt "source" fields with
+            | Some (`String "keeper_metric") -> true (* already filtered by dir *)
+            | _ -> matches_keeper name json)
+         | _ -> true)
+    in
+    keeper_ok && matches_scope ?session_id ?operation_id ?worker_run_id json
+  in
   let all_entries =
-    List.concat_map (fun source ->
-      match source with
+    merge_newest_bounded ~target:per_source sources ~read:(fun source ->
+      (match source with
       | Keeper_metric ->
         if Option.is_none keeper_name && not has_filter then
           read_keeper_metrics_fast_top ~masc_root ~n ()
@@ -682,27 +742,12 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
         match fixed_store_dir ~masc_root ~base_path source with
         | Some dir ->
           read_fixed_source dir source ~n:per_source ?since_ts ?until_ts ()
-        | None -> []
-    ) sources
+        | None -> [])
+      |> List.filter keep)
   in
   (* Filter by keeper_name for non-keeper-metric sources *)
-  let filtered = match keeper_name with
-    | None -> all_entries
-    | Some name ->
-      List.filter (fun json ->
-        match json with
-        | `Assoc fields ->
-          (match List.assoc_opt "source" fields with
-           | Some (`String "keeper_metric") -> true  (* already filtered *)
-           | _ -> matches_keeper name json)
-        | _ -> true
-      ) all_entries
-  in
-  let filtered =
-    List.filter
-      (fun json -> matches_scope ?session_id ?operation_id ?worker_run_id json)
-      filtered
-  in
+  (* [keep] already ran per source inside the merge above. *)
+  let filtered = all_entries in
   let filtered =
     if List.mem Agent_event sources && List.mem Tool_call_io sources then
       suppress_shadow_keeper_tool_events filtered

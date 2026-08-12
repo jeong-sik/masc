@@ -309,8 +309,13 @@ let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe =
     | Some read -> read ()
     | None -> None
   in
+  (* [Time_compat.now], not [Eio.Time.now clock]: the value this is subtracted
+     from ([turn_observation.last_progress_at]) is stamped by
+     [Keeper_registry_setup.stamp_turn_progress] with [Time_compat.now], and a
+     difference between two clocks is only meaningful when both readings come
+     from the same one. [clock] is used for sleeping, not for dating. *)
   if attempt_stalled
-       ~now:(Eio.Time.now clock)
+       ~now:(Time_compat.now ())
        ~threshold_sec
        ~attempt_started_at
        ~sample
@@ -753,7 +758,10 @@ let run_try_provider
     let result =
       match ctx.provider_call_deadline_sec, Eio_context.get_clock_opt () with
       | Some threshold_sec, Some clock ->
-        let attempt_started_at = Eio.Time.now clock in
+        (* Same clock as [last_progress_at] (see [await_attempt_stall]): the
+           elapsed fallback and the progress comparison must not read two
+           different clocks. *)
+        let attempt_started_at = Time_compat.now () in
         (match
            Eio.Fiber.first
              (fun () -> `Attempt_finished (run_attempt_switch ()))

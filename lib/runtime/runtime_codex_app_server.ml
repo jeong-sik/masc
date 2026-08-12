@@ -505,7 +505,7 @@ let turn_error_detail ~message error_fields =
       | `Intlit value -> Some (name ^ "=" ^ value)
       | `Bool value -> Some (name ^ "=" ^ string_of_bool value)
       | `Float value -> Some (name ^ "=" ^ Printf.sprintf "%g" value)
-      | `String _ | `Null | `Assoc _ | `List _ | `Tuple _ | `Variant _ -> None)
+      | `String _ | `Null | `Assoc _ | `List _ -> None)
   in
   match List.filter_map annotation error_fields with
   | [] -> message

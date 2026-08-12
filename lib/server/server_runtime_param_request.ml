@@ -58,9 +58,7 @@ let decode_json decode_fields = function
   | `Intlit _
   | `Float _
   | `String _
-  | `List _
-  | `Tuple _
-  | `Variant _ -> Error Expected_object
+  | `List _ -> Error Expected_object
 ;;
 
 let decode_body decode_fields body =

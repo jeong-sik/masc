@@ -505,12 +505,6 @@ let rec const_value_of_yojson = function
       `Assoc (List.map (fun (k, v) -> (k, const_value_of_yojson v)) fields)
   | `List items ->
       `List (List.map const_value_of_yojson items)
-  | `Tuple items ->
-      `List (List.map const_value_of_yojson items)
-  | `Variant (name, None) ->
-      `Enum name
-  | `Variant (name, Some value) ->
-      `Assoc [("type", `Enum name); ("value", const_value_of_yojson value)]
 
 let variables_of_yojson = function
   | None -> []

@@ -143,6 +143,12 @@ val handle_keeper_bulk_directive_post :
 
 module For_testing : sig
   val github_login_stream_headers : string -> Httpun.Headers.t
+  val github_login_stream_send_with :
+    write:(string -> unit) ->
+    flush:(unit -> unit) ->
+    string ->
+    Yojson.Safe.t ->
+    unit
 
   val parse_resume_request :
     Yojson.Safe.t -> (int * string, string) result

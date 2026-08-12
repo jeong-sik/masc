@@ -3003,6 +3003,18 @@ let test_keeper_github_login_stream_headers_include_cors () =
     (Httpun.Headers.get headers "access-control-allow-credentials")
 ;;
 
+let test_keeper_github_login_stream_flushes_each_event () =
+  let actions = ref [] in
+  Keeper_config_post.For_testing.github_login_stream_send_with
+    ~write:(fun frame -> actions := !actions @ [ "write:" ^ frame ])
+    ~flush:(fun () -> actions := !actions @ [ "flush" ])
+    "device_code"
+    (`Assoc [ "code", `String "ABCD-EFGH" ]);
+  Alcotest.(check (list string)) "frame is written before it is flushed"
+    [ "write:event: device_code\ndata: {\"code\":\"ABCD-EFGH\"}\n\n"; "flush" ]
+    !actions
+;;
+
 let shrink_base_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -3501,6 +3513,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "GitHub login stream includes CORS" `Quick
             test_keeper_github_login_stream_headers_include_cors;
+          test_case "GitHub login stream flushes each event" `Quick
+            test_keeper_github_login_stream_flushes_each_event;
           test_case "operator snapshot rejects stale publication races" `Quick
             test_operator_snapshot_publication_rejects_stale_races;
           test_case "operator snapshot error clears previous success" `Quick

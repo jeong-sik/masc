@@ -110,6 +110,11 @@ let mount_source_for_destination line destination =
   in
   loop (String.split_on_char ' ' line)
 
+let mount_sources_for_destination log destination =
+  String.split_on_char '\n' log
+  |> List.filter_map (fun line -> mount_source_for_destination line destination)
+;;
+
 let rec ensure_dir path =
   if path = "" || path = "." || path = "/" then ()
   else if Sys.file_exists path then ()
@@ -900,7 +905,10 @@ if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then\n\
   exit 0\n\
 fi\n\
 if [ \"$1\" = \"inspect\" ]; then\n\
-  printf 'fake-container-id\\n'\n\
+  case \"$3\" in\n\
+    *State.Running*) printf 'true\\n' ;;\n\
+    *) printf 'fake-container-id\\n' ;;\n\
+  esac\n\
   exit 0\n\
 fi\n\
 if [ \"$1\" = \"ps\" ]; then\n\
@@ -1842,6 +1850,7 @@ let test_turn_runtime_redacts_the_mounted_github_snapshot () =
   @@ fun ~config ~meta ~playground ->
   let snapshot_token = "snapshot-token-before-central-rotation" in
   let rotated_token = "central-token-after-container-start" in
+  let relogin_token = "central-token-after-relogin" in
   let github_config_dir =
     match
       Keeper_github_identity.ensure_config_dir
@@ -1852,12 +1861,15 @@ let test_turn_runtime_redacts_the_mounted_github_snapshot () =
     | Error message -> Alcotest.fail message
   in
   let hosts_path = Filename.concat github_config_dir "hosts.yml" in
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
   write_file
     hosts_path
     ("github.com:\n  user: keeper-user\n  oauth_token: " ^ snapshot_token ^ "\n");
   Unix.chmod hosts_path 0o600;
   with_env "MASC_STREAM_EXECUTE_OUTPUT" "false" @@ fun () ->
-  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  let snapshots = ref [] in
+  with_turn_sandbox_factory ~config ~meta (fun factory ->
   let execute value =
     Keeper_tool_execute_runtime.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
@@ -1872,10 +1884,50 @@ let test_turn_runtime_redacts_the_mounted_github_snapshot () =
     ("github.com:\n  user: keeper-user\n  oauth_token: " ^ rotated_token ^ "\n");
   Unix.chmod hosts_path 0o600;
   let raw = execute snapshot_token in
-  Alcotest.(check bool) "mounted snapshot token never reaches response" false
+  Alcotest.(check bool) "superseded snapshot token never reaches response" false
     (String_util.contains_substring raw snapshot_token);
   if not (String_util.contains_substring raw "[REDACTED]")
-  then Alcotest.failf "exact snapshot token was not redacted: %s" raw
+  then Alcotest.failf "superseded snapshot token was not redacted: %s" raw;
+  let rotated_raw = execute rotated_token in
+  Alcotest.(check bool) "current snapshot token never reaches response" false
+    (String_util.contains_substring rotated_raw rotated_token);
+  write_file hosts_path "{}\n";
+  Unix.chmod hosts_path 0o600;
+  let logout_raw = execute rotated_token in
+  Alcotest.(check bool) "logout retains previous token redaction" false
+    (String_util.contains_substring logout_raw rotated_token);
+  write_file
+    hosts_path
+    ("github.com:\n  user: keeper-user\n  oauth_token: " ^ relogin_token ^ "\n");
+  Unix.chmod hosts_path 0o600;
+  let relogin_raw = execute relogin_token in
+  Alcotest.(check bool) "re-login snapshot token never reaches response" false
+    (String_util.contains_substring relogin_raw relogin_token);
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let container_masc_dir =
+    Keeper_sandbox_runtime.container_masc_config_dir ~container_root
+    |> Filename.dirname
+  in
+  let github_container_dir =
+    Keeper_github_identity.container_config_dir
+      ~container_masc_dir
+      ~keeper_name:meta.name
+  in
+  snapshots :=
+    mount_sources_for_destination (read_file log_path) github_container_dir
+    |> List.sort_uniq String.compare;
+  Alcotest.(check int) "rotation logout and re-login each mount a fresh snapshot" 4
+    (List.length !snapshots);
+  List.iter
+    (fun snapshot ->
+       Alcotest.(check bool) "turn retains snapshot for redaction" true
+         (Sys.file_exists snapshot))
+    !snapshots);
+  List.iter
+    (fun snapshot ->
+       Alcotest.(check bool) "turn cleanup removes every identity snapshot" false
+         (Sys.file_exists snapshot))
+    !snapshots
 
 let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->

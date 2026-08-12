@@ -181,8 +181,10 @@ type configure_error = Already_configured
 
 val configure : Server_auth_config.t -> (unit, configure_error) result
 (** Install the boot-resolved authorization policy before request handlers are
-    constructed. The policy is single-assignment for the process lifetime;
-    request handlers cannot turn it into a runtime control channel. *)
+    constructed. Reinstalling the identical policy is an idempotent no-op so a
+    transient socket-bind retry can repeat bootstrap; a different policy is
+    rejected for the process lifetime. Request handlers cannot turn it into a
+    runtime control channel. *)
 
 val configure_error_to_string : configure_error -> string
 

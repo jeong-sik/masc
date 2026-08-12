@@ -118,6 +118,32 @@ let test_auth_config_resolves_typed_policy () =
     (List.length (Server_auth_config.loopback_dev_mutation_origins config))
 ;;
 
+let test_auth_config_blank_anonymous_mutations_defaults_false () =
+  List.iter
+    (fun raw ->
+       let config =
+         resolve_auth_config
+           { allow_anonymous_mutations = Some raw
+           ; loopback_dev_mutation_origins = None
+           }
+       in
+       check
+         bool
+         (Printf.sprintf "blank %S is false" raw)
+         false
+         (Server_auth_config.allow_anonymous_mutations config))
+    [ ""; " \t " ]
+;;
+
+let test_auth_config_identical_reinstall_is_idempotent () =
+  match Server_auth.configure default_auth_config with
+  | Ok () -> ()
+  | Error error ->
+    failf
+      "identical policy reinstall failed: %s"
+      (Server_auth.configure_error_to_string error)
+;;
+
 let test_http1_closed_classification () =
   check_classification
     `Missing
@@ -709,6 +735,14 @@ let () =
             "policy is typed"
             `Quick
             test_auth_config_resolves_typed_policy
+        ; test_case
+            "blank anonymous mutations default false"
+            `Quick
+            test_auth_config_blank_anonymous_mutations_defaults_false
+        ; test_case
+            "identical policy reinstall is idempotent"
+            `Quick
+            test_auth_config_identical_reinstall_is_idempotent
         ; test_case
             "policy is resolved before admission"
             `Quick

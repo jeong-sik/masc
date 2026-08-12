@@ -3,7 +3,8 @@ import { resolve } from 'node:path'
 import { h } from 'preact'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { LogEntry } from '../api/dashboard'
+import { Effect } from 'effect'
+import type { LogEntry, LogsData } from '../api/dashboard-logs'
 import {
   deltaMergeCap,
   logDiagnosticCause,
@@ -14,15 +15,33 @@ import {
 function entry(overrides: Partial<LogEntry>): LogEntry {
   return {
     seq: 1,
-    ts: '2026-05-14T00:00:00Z',
+    timestamp: '2026-05-14T00:00:00Z',
     level: 'INFO',
     source: 'structured',
     module: 'Keeper',
     message: 'ok',
-    keeper_name: null,
-    turn_id: null,
-    details: null,
-    category: null,
+    keeperName: 'system',
+    hasTurn: false,
+    details: {},
+    category: 'uncategorized',
+    hasExplicitCategory: false,
+    ...overrides,
+  }
+}
+
+function logData(
+  entries: readonly LogEntry[],
+  overrides: Partial<LogsData> = {},
+): LogsData {
+  return {
+    generatedAt: '2026-05-15T01:00:00Z',
+    source: 'masc_log_ring',
+    retention: {
+      scope: 'dashboard_logs',
+      durableStore: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
+    },
+    total: entries.length,
+    entries,
     ...overrides,
   }
 }
@@ -39,8 +58,14 @@ async function loadLogs(
   fetchLogs: ReturnType<typeof vi.fn>,
 ) {
   vi.resetModules()
-  vi.doMock('../api/dashboard.js', () => ({
-    fetchLogs,
+  vi.doMock('../api/dashboard-logs', () => ({
+    fetchLogs: (request: unknown) => Effect.promise(async () => {
+      const callFetchLogs = fetchLogs as (request: unknown) => unknown
+      const response = await callFetchLogs(request) as Partial<LogsData> & {
+        readonly entries: readonly LogEntry[]
+      }
+      return logData(response.entries, response)
+    }),
   }))
   return import('./logs')
 }
@@ -195,18 +220,18 @@ describe('LogViewer Code links', () => {
     vi.useRealTimers()
     vi.clearAllMocks()
     vi.resetModules()
-    vi.doUnmock('../api/dashboard.js')
+    vi.doUnmock('../api/dashboard-logs')
     window.location.hash = ''
   })
 
-  it('preserves delta rows when an older page resolves after auto-refresh', async () => {
+  it('serializes older paging before the next delta refresh', async () => {
     vi.useFakeTimers()
     const olderPage = deferred<{ total: number; entries: LogEntry[] }>()
-    const fetchLogs = vi.fn((opts?: { since_seq?: number; before_seq?: number }) => {
-      if (typeof opts?.before_seq === 'number') {
+    const fetchLogs = vi.fn((opts?: { sinceSeq?: number; beforeSeq?: number }) => {
+      if (typeof opts?.beforeSeq === 'number') {
         return olderPage.promise
       }
-      if (typeof opts?.since_seq === 'number') {
+      if (typeof opts?.sinceSeq === 'number') {
         return Promise.resolve({
           total: 3,
           entries: [entry({ seq: 11, module: 'Keeper', message: 'delta fresh' })],
@@ -233,13 +258,13 @@ describe('LogViewer Code links', () => {
       fireEvent.click(loadOlderButton!)
     })
     await waitFor(() =>
-      expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ before_seq: 9 })),
+      expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ beforeSeq: 9 })),
     )
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3000)
     })
-    await waitFor(() => expect(container.textContent).toContain('delta fresh'))
+    expect(container.textContent).not.toContain('delta fresh')
 
     await act(async () => {
       olderPage.resolve({
@@ -249,36 +274,30 @@ describe('LogViewer Code links', () => {
       await olderPage.promise
     })
 
+    await waitFor(() => expect(container.textContent).toContain('older page'))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000)
+    })
+
     await waitFor(() => {
       expect(container.textContent).toContain('delta fresh')
       expect(container.textContent).toContain('newest visible')
       expect(container.textContent).toContain('oldest visible')
       expect(container.textContent).toContain('older page')
     })
-    expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ since_seq: 10 }))
+    expect(fetchLogs).toHaveBeenCalledWith(expect.objectContaining({ sinceSeq: 10 }))
   })
 
   it('links safe structured log file details back to the Code IDE route', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      generated_at_iso: '2026-05-15T01:00:00Z',
-      dashboard_surface: '/api/v1/dashboard/logs',
-      source: 'masc_log_ring',
-      retention: {
-        scope: 'dashboard_logs',
-        durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
-      },
-      latest_seq: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 1,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'INFO',
         source: 'structured',
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: 'lib/runtime.ml', line: 12 },
-      }],
-    })
+      })]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
@@ -299,49 +318,43 @@ describe('LogViewer Code links', () => {
     )
   })
 
-  // RFC-0079 removed the dropped-rows surface. parseLogsResponse now
+  // RFC-0079 removed the dropped-rows surface. decodeLogsData now
   // throws LogsSchemaDriftError instead of silently dropping bad rows,
   // so there is no "parser dropped N rows" state to render here.
 
   it('renders v2 surface marker classes for CSS scoping', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 1,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'INFO',
         source: 'structured',
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: 'lib/runtime.ml', line: 12 },
-      }],
-    })
+      })]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
-    await waitFor(() => expect(container.querySelector('.v2-logs-surface')).not.toBeNull())
+    await waitFor(() => expect(container.querySelector('.v2-logs-row')).not.toBeNull())
+    expect(container.querySelector('.v2-logs-surface')).not.toBeNull()
     expect(container.querySelector('.v2-logs-panel')).not.toBeNull()
     expect(container.querySelector('.v2-logs-toolbar')).not.toBeNull()
     expect(container.querySelector('[data-testid="logs-filter-tool"]')).not.toBeNull()
     expect(container.querySelector('.v2-logs-table-header')).not.toBeNull()
-    expect(container.querySelector('.v2-logs-row')).not.toBeNull()
     expect(container.querySelector('[data-testid="logs-row"]')?.getAttribute('data-log-seq')).toBe('1')
     expect(container.querySelector('.v2-logs-summary')).not.toBeNull()
   })
 
   it('does not render Code links for unsafe absolute log file paths', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 2,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'INFO',
         source: 'structured',
         module: 'keeper_tool',
         message: 'read file',
         details: { file_path: '/tmp/runtime.ml', line: 12 },
-      }],
-    })
+      })]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
@@ -350,11 +363,9 @@ describe('LogViewer Code links', () => {
   })
 
   it('links nested log evidence into operational IDE routes', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [{
+    const fetchLogs = vi.fn().mockResolvedValue(logData([entry({
         seq: 3,
-        ts: '2026-05-14T00:00:00Z',
+        timestamp: '2026-05-14T00:00:00Z',
         level: 'WARN',
         source: 'structured',
         module: 'keeper_tool',
@@ -379,8 +390,7 @@ describe('LogViewer Code links', () => {
             },
           },
         },
-      }],
-    })
+      })]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 
@@ -405,23 +415,14 @@ describe('LogViewer Code links', () => {
     expect(window.location.hash).toBe('#monitoring?section=fleet-health&view=event-log&session_id=sess-nested&operation_id=op-nested&worker_run_id=wr-nested&q=turn-8')
   })
   it('filters rows by kind chips and keeps kind-aware details for toolbar view', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 3,
-      generated_at_iso: '2026-05-15T01:00:00Z',
-      dashboard_surface: '/api/v1/dashboard/logs',
-      source: 'masc_log_ring',
-      retention: {
-        scope: 'dashboard_logs',
-        durable_store: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
-      },
-      latest_seq: 3,
-      entries: [
+    const fetchLogs = vi.fn().mockResolvedValue(logData([
         entry({
           seq: 1,
-          ts: '2026-05-14T00:00:00Z',
+          timestamp: '2026-05-14T00:00:00Z',
           level: 'INFO',
           module: 'keeper_tool',
           category: 'tool',
+          hasExplicitCategory: true,
           message: 'tool event',
           details: {
             tool_name: 'fs.ls',
@@ -432,11 +433,12 @@ describe('LogViewer Code links', () => {
         }),
         entry({
           seq: 2,
-          ts: '2026-05-14T00:00:01Z',
+          timestamp: '2026-05-14T00:00:01Z',
           level: 'INFO',
           module: 'keeper_turn',
           category: 'routine',
-          turn_id: 2,
+          hasExplicitCategory: true,
+          hasTurn: true,
           message: 'turn event',
           details: {
             model: 'gpt-4o-mini',
@@ -447,10 +449,11 @@ describe('LogViewer Code links', () => {
         }),
         entry({
           seq: 3,
-          ts: '2026-05-14T00:00:02Z',
+          timestamp: '2026-05-14T00:00:02Z',
           level: 'WARN',
           module: 'keeper_fsm',
           category: 'fsm',
+          hasExplicitCategory: true,
           message: 'lifecycle event',
           details: {
             from: 'idle',
@@ -458,8 +461,7 @@ describe('LogViewer Code links', () => {
             trigger: 'wake',
           },
         }),
-      ],
-    })
+      ]))
 
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
@@ -522,14 +524,12 @@ describe('LogViewer kind column', () => {
     vi.useRealTimers()
     vi.clearAllMocks()
     vi.resetModules()
-    vi.doUnmock('../api/dashboard.js')
+    vi.doUnmock('../api/dashboard-logs')
     window.location.hash = ''
   })
 
   it('renders the logs surface with the kind column header and a kind cell per row', async () => {
-    const fetchLogs = vi.fn().mockResolvedValue({
-      total: 1,
-      entries: [
+    const fetchLogs = vi.fn().mockResolvedValue(logData([
         entry({
           seq: 42,
           level: 'INFO',
@@ -537,10 +537,10 @@ describe('LogViewer kind column', () => {
           module: 'keeper_tool',
           message: 'read file',
           category: 'tool',
+          hasExplicitCategory: true,
           details: { tool_name: 'tool_read_file', file_path: 'lib/runtime.ml' },
         }),
-      ],
-    })
+      ]))
     const { LogViewer } = await loadLogs(fetchLogs)
     const { container } = render(h(LogViewer, {}))
 

@@ -31,7 +31,7 @@ type turn_prompt_parts = {
    [effective_autonomous_wake_prompt]. Nothing classifies a turn by matching
    this string -- autonomy is a typed property of the turn -- and nothing may
    start, because the operator can change it. *)
-let autonomous_wake_marker = "Continue."
+let autonomous_wake_marker = Env_config_keeper.KeeperAutonomous.default_wake_prompt
 
 (* keeper profile, else fleet setting, else the literal above.
 
@@ -46,11 +46,7 @@ let effective_autonomous_wake_prompt
       ()
   =
   (* DET-OK: total resolution over two known sources, then a literal. *)
-  let fleet_or_literal () =
-    Option.value
-      (Env_config_keeper.KeeperAutonomous.wake_prompt_opt ())
-      ~default:autonomous_wake_marker
-  in
+  let fleet_or_literal () = Env_config_keeper.KeeperAutonomous.wake_prompt () in
   match profile_defaults with
   | Some d ->
     (match d.autonomous_wake_prompt with

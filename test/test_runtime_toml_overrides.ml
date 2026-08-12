@@ -559,6 +559,48 @@ let test_settings_projection_uses_typed_effective_values () =
     (deadline |> member "effective_value" |> to_string)
 ;;
 
+(* #28413. Adding a registry row gets a setting listed, but the effective-value
+   projector is a separate match on env_name whose fallthrough raises
+   "no typed effective-value projector for ...". A row without one still appears
+   in the operator panel -- with a null value and an error string -- which reads
+   as a broken setting rather than a missing projector. This asserts the row is
+   both present and readable, and that the panel reports the same string the
+   prompt builder resolves. *)
+let test_wake_prompt_is_readable_in_the_settings_projection () =
+  let open Yojson.Safe.Util in
+  let rows =
+    Keeper_runtime_config.settings_projection_to_yojson
+      (parse_or_fail "[autonomous]\nwake_prompt = \"what changed since your last turn?\"\n")
+    |> to_list
+  in
+  match
+    List.find_opt
+      (fun row ->
+         String.equal
+           (row |> member "env" |> to_string)
+           "MASC_KEEPER_AUTONOMOUS_WAKE_PROMPT")
+      rows
+  with
+  | None -> fail "the wake prompt is absent from the operator settings projection"
+  | Some row ->
+    check string "the panel exposes the TOML key operators edit"
+      "autonomous.wake_prompt"
+      (row |> member "key" |> to_string);
+    check bool "the projection carries no error" true
+      (row |> member "effective_error" = `Null);
+    check string "the configured value is echoed back"
+      "what changed since your last turn?"
+      (row |> member "configured_value" |> to_string);
+    check string "the effective value is the one the prompt builder resolves"
+      (Keeper_unified_prompt.effective_autonomous_wake_prompt ())
+      (row |> member "effective_value" |> to_string);
+    check bool "the consumer is named" true
+      (row
+       |> member "consumers"
+       |> to_list
+       |> List.exists (fun c -> to_string c = "Keeper_unified_prompt"))
+;;
+
 (* PR #28225 review (comment 3761300276): the raw-config preview computed
    can_save from the keeper schema alone, but the raw-save path also runs the
    runtime parser (Runtime.save_config_text). A config that parses and passes
@@ -651,5 +693,7 @@ let () =
         ; test_case "whitespace stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_whitespace_env_fails_loud
         ; test_case "preview precondition matches save (#28225)" `Quick
             test_preview_precondition_matches_save
+        ; test_case "wake prompt is readable in the settings panel (#28413)" `Quick
+            test_wake_prompt_is_readable_in_the_settings_projection
         ] )
     ]

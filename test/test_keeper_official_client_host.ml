@@ -227,9 +227,14 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
         Error "same deterministic failure")
     in
     let call index =
+      let input =
+        if index mod 2 = 0
+        then `Assoc [ "second", `Int 2; "first", `Int 1 ]
+        else `Assoc [ "first", `Int 1; "second", `Int 2 ]
+      in
       tool.call
         ~call_id:(Printf.sprintf "repeat-%d" index)
-        (`Assoc [ "same", `String "input" ])
+        input
     in
     let first = call 1 in
     let second = call 2 in
@@ -237,7 +242,8 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
     check int "three calls executed" 3 !executions;
     check (option string) "first call continues" None first.abort_turn;
     check (option string) "second call continues" None second.abort_turn;
-    check bool "third call aborts" true (Option.is_some third.abort_turn);
+    check bool "reordered object still aborts third call" true
+      (Option.is_some third.abort_turn);
     check bool "terminal cause is retained" true (Option.is_some !terminal_error))
 ;;
 

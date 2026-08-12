@@ -308,12 +308,14 @@ type repeated_call_state =
   ; count : int
   }
 
+(* One exact retry may be deliberate; the third identical outcome proves two
+   consecutive transitions made no progress, matching the Agent Core guard. *)
 let repeated_call_abort_threshold = 3
 
 let dynamic_tool_fingerprint ~tool_name ~input result =
   let open Digestif.SHA256 in
   let context = feed_string empty tool_name in
-  let context = feed_string context (Yojson.Safe.to_string input) in
+  let context = feed_string context (input |> Yojson.Safe.sort |> Yojson.Safe.to_string) in
   let context = feed_string context (if result.success then "success" else "failure") in
   let context = feed_string context result.content in
   get context |> to_hex

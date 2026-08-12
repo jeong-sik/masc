@@ -67,6 +67,7 @@ let measure_model_input_message_bytes message =
 let model_input_projection_for_capacity
     ~capacity_bytes
     ~observed_next_shrink_capacity_bytes
+    ~observed_floor_capacity_bytes
     source_projection
     messages =
   let windowed =
@@ -76,6 +77,7 @@ let model_input_projection_for_capacity
       Domain_pool_ref.submit_cpu_or_inline (fun () ->
         match
           Runtime_model_input_tail_window.project
+            ~allow_empty_history:true
             ~measure_message_bytes:measure_model_input_message_bytes
             ~capacity_bytes
             ~reserved_bytes:0
@@ -107,8 +109,13 @@ let model_input_projection_for_capacity
       in
       observed_next_shrink_capacity_bytes :=
         Runtime_model_input_tail_window.next_shrink_capacity_bytes
+          ~allow_empty_history:true
           ~measure_message_bytes:measure_model_input_message_bytes
           ~target_capacity_bytes
+          windowed;
+      observed_floor_capacity_bytes :=
+        Runtime_model_input_tail_window.minimum_capacity_bytes
+          ~measure_message_bytes:measure_model_input_message_bytes
           windowed)
   in
   match source_projection with
@@ -806,6 +813,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in
   let observed_next_shrink_capacity_bytes = ref None in
+  let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   let starting_capacity_bytes =
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
@@ -824,6 +832,8 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
           Option.value
             !observed_next_shrink_capacity_bytes
             ~default:(max 1 default_capacity_bytes))
+        ~final_shrink_capacity:(fun ~capacity_bytes:_ ->
+          !observed_floor_capacity_bytes)
         ~record_success:(fun ~capacity_bytes ->
           if capacity_bytes <> unbounded_model_input_capacity_bytes
           then
@@ -854,6 +864,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
                  (model_input_projection_for_capacity
                     ~capacity_bytes
                     ~observed_next_shrink_capacity_bytes
+                    ~observed_floor_capacity_bytes
                     model_input_projection))
             ~hooks
             ~context_injector

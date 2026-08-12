@@ -77,13 +77,17 @@ val annotate
     where an atom begins. *)
 
 val next_shrink_capacity_bytes
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  :  ?allow_empty_history:bool
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> target_capacity_bytes:int
   -> Agent_core.Types.message list
   -> int option
 (** Choose a smaller projection capacity at an atom boundary after a provider
-    has rejected [messages]. [None] means there is no older atom that can be
-    removed while preserving the newest atom.
+    has rejected [messages]. [None] means there is no smaller structural view.
+
+    [allow_empty_history=false] preserves the newest atom. When explicitly
+    [true], a caller that carries the current goal outside [messages] may use a
+    zero-prior-history floor after every atom boundary has been exhausted.
 
     The returned capacity is never below the bytes required by pinned
     messages, the synthetic preamble, and the newest atom. It is also strictly
@@ -92,6 +96,16 @@ val next_shrink_capacity_bytes
     replace a size-driven refusal with an equal or larger request.
     [target_capacity_bytes] is used when it lies inside those structural
     bounds (for example, the ordinary halving policy). *)
+
+val minimum_capacity_bytes
+  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  -> Agent_core.Types.message list
+  -> int option
+(** Return the exact measured capacity of the zero-prior-history view: pinned
+    messages plus the omission preamble. [None] means [messages] has no
+    shrinkable atom or the framed floor is not strictly smaller than the
+    rejected view. Callers must pass [allow_empty_history=true] to {!project}
+    when applying this capacity. *)
 
 type budget_error =
   | Reservation_exceeds_capacity of
@@ -125,7 +139,8 @@ val budget_error_to_string : budget_error -> string
     aborts the turn before request measurement or dispatch. *)
 
 val project_with_drop
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  :  ?allow_empty_history:bool
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int
   -> Agent_core.Types.message list
@@ -135,7 +150,8 @@ val project_with_drop
     [dropped_atoms = 0]. *)
 
 val project
-  :  measure_message_bytes:(Agent_core.Types.message -> int)
+  :  ?allow_empty_history:bool
+  -> measure_message_bytes:(Agent_core.Types.message -> int)
   -> capacity_bytes:int
   -> reserved_bytes:int
   -> Agent_core.Types.message list
@@ -157,6 +173,11 @@ val project
     encoder for every message of one call; exact agreement with the
     provider's own serializer is not required, since [reserved_bytes] carries
     that allowance.
+
+    By default the newest atom is mandatory. [allow_empty_history=true] is for
+    bootstrap callers whose current goal is carried outside [messages]; when
+    no prior atom fits, the projection may retain only pinned messages and the
+    omission preamble.
 
     Never raises. Returns the input list physically unchanged when the whole
     history fits (including the empty list), so a request that needs no cut

@@ -764,6 +764,7 @@ let default_context_overflow_shrink_capacity ~capacity_bytes =
 let context_overflow_shrink_sequence
       ?(shrink_capacity = fun ~capacity_bytes:_ ~default_capacity_bytes ->
         default_capacity_bytes)
+      ?(final_shrink_capacity = fun ~capacity_bytes:_ -> None)
       ~starting_capacity_bytes
       ~same_run_retry_authorized
       ~record_success
@@ -785,8 +786,16 @@ let context_overflow_shrink_sequence
         let default_capacity_bytes =
           default_context_overflow_shrink_capacity ~capacity_bytes
         in
-        let shrunk_capacity_bytes =
+        let ordinary_capacity_bytes =
           shrink_capacity ~capacity_bytes ~default_capacity_bytes
+        in
+        let shrunk_capacity_bytes =
+          if shrink_attempt + 1 = context_overflow_shrink_max_attempts
+          then
+            Option.value
+              (final_shrink_capacity ~capacity_bytes)
+              ~default:ordinary_capacity_bytes
+          else ordinary_capacity_bytes
         in
         if shrunk_capacity_bytes >= capacity_bytes
         then failed

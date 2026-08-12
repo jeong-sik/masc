@@ -75,6 +75,7 @@ val default_context_overflow_shrink_capacity : capacity_bytes:int -> int
 val context_overflow_shrink_sequence :
   ?shrink_capacity:
     (capacity_bytes:int -> default_capacity_bytes:int -> int) ->
+  ?final_shrink_capacity:(capacity_bytes:int -> int option) ->
   starting_capacity_bytes:int ->
   same_run_retry_authorized:(unit -> bool) ->
   record_success:(capacity_bytes:int -> unit) ->
@@ -89,9 +90,10 @@ val context_overflow_shrink_sequence :
 (** Provider-oracle retry policy shared by AGENT_CORE and official-client
     runtimes. [default_capacity_bytes] is the policy's ordinary halved value;
     a custom [shrink_capacity] can replace only exceptional starting values
-    without copying the shared divisor. A custom value that does not strictly
-    decrease [capacity_bytes] terminates the sequence without another provider
-    attempt. *)
+    without copying the shared divisor. On the last permitted retry,
+    [final_shrink_capacity] may replace that ordinary target with a measured
+    structural floor. A custom value that does not strictly decrease
+    [capacity_bytes] terminates the sequence without another provider attempt. *)
 
 val run_try_provider :
   try_provider_ctx ->

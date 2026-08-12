@@ -2498,6 +2498,8 @@
 (include stanzas/test_dashboard_continuity_briefs.inc)
 
 (include stanzas/test_verification_run_registry.inc)
+
+(include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)
 
 ; The tool-call quality benchmark reads its case set and evidence fixture from

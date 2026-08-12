@@ -1052,6 +1052,7 @@ jobs:
             @test/runtest-test_clean_only_bug_mirrors \
             @test/runtest-test_contract_harness_auth_script \
             @test/runtest-test_eio_guard_yield_meter \
+            @test/runtest-test_run_registry_concurrent_mutation \
             @test/runtest-test_event_bus_subscription_contract \
             @test/runtest-test_fs_compat_home_guard \
             @test/runtest-test_guarded_dispatch_telemetry \

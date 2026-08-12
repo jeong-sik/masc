@@ -21,6 +21,20 @@ module For_testing : sig
   (** The failure detail for an unresolvable Eio context, or [None] when both
       handles are present. Exposed because {!Eio_context} has no reset, so a
       test driving the real globals could reach these arms in only one order. *)
+
+  val resolved_timeout_s
+    :  runtime_id:string
+    -> default_timeout_s:float
+    -> float option
+  (** Resolve the same declared turn timeout used by each official-client
+      panel adapter. [turn-timeout-s = 0] produces [None]. *)
+
+  val bounded_claude_probe_config
+    :  fallback_timeout_s:float
+    -> Runtime_claude_code.config
+    -> Runtime_claude_code.config
+  (** Keep Claude's login-only process bounded when its following model turn
+      explicitly declares no deadline. *)
 end
 
 val run_panelist
@@ -40,4 +54,5 @@ val run_panelist
     them, so no fusion signature has to thread them through.
 
     Timeouts stay owned by each adapter's own configuration; this module adds no
-    second deadline, so a panel-level timeout still bounds the whole fan-out. *)
+    second turn deadline. Claude's login-only preflight remains bounded even
+    when the following model turn explicitly has no deadline. *)

@@ -9,6 +9,15 @@ type attempt_outcome =
     [No_effect_observed]; once the model turn is dispatched, the adapter fails
     closed with [Observation_unavailable]. *)
 
+module For_testing : sig
+  val bounded_probe_config
+    :  fallback_timeout_s:float
+    -> Runtime_claude_code.config
+    -> Runtime_claude_code.config
+  (** Keep an explicit turn bound unchanged and give an unbounded turn config a
+      finite login-probe fallback. *)
+end
+
 val run :
   runtime_id:string ->
   keeper_name:string ->

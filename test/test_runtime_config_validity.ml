@@ -831,9 +831,11 @@ let test_model_without_reasoning_effort_leaves_it_unset () =
    analyst on claude_code.claude-opus-5-max failed every turn with "timed out
    after 300.000s" at 5,884 bytes of system+user input.
 
-   The rejection case is the load-bearing one: a timeout that silently became
-   zero or infinity would either kill every turn or hang the keeper, and both
-   read as a provider fault rather than a config typo. *)
+   The rejection case is the load-bearing one, but only for values that state
+   no intent: a negative or non-finite bound would read as a provider fault
+   rather than a config typo. [0] is not in that set — it declares that no
+   deadline is installed, which is a posture an operator may want and which
+   the sibling case below pins. *)
 let test_model_turn_timeout_parses_as_a_positive_float () =
   let config = "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = 900.0\n" in
   match Runtime_toml.parse_string config with
@@ -848,10 +850,30 @@ let test_model_turn_timeout_parses_as_a_positive_float () =
          (model.Runtime_schema.turn_timeout_s = Some 900.0)
      | _ -> fail "exactly one model must parse")
 
-let test_model_turn_timeout_rejects_a_non_positive_value_at_load () =
-  let config = "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = 0.0\n" in
-  match Runtime_toml.parse_string config with
-  | Ok _ -> fail "a non-positive turn-timeout-s must be rejected at load"
+(* [0] is a declaration, not a typo: it says no deadline is installed, so the
+   spawned client decides when its own turn ends. Absent stays distinct from
+   it — absent keeps the adapter default — which is what the sibling case
+   below pins. Negative and non-finite remain rejected, because neither states
+   an intent the adapter can act on. *)
+let test_model_turn_timeout_admits_zero_and_rejects_negative () =
+  let parse value =
+    Runtime_toml.parse_string
+      (Printf.sprintf "[models.probe]\napi-name = \"probe\"\nturn-timeout-s = %s\n" value)
+  in
+  (match parse "0" with
+   | Error _ -> fail "turn-timeout-s = 0 must parse: it declares no deadline"
+   | Ok parsed ->
+     (match parsed.Runtime_schema.models with
+      | [ model ] ->
+        check
+          bool
+          "zero reaches the model spec as a declared value"
+          true
+          (model.Runtime_schema.turn_timeout_s = Some 0.0)
+      | _ -> fail "exactly one model must parse"));
+  (* Control. Without this, removing the validator entirely would also pass. *)
+  match parse "-1.0" with
+  | Ok _ -> fail "a negative turn-timeout-s must be rejected at load"
   | Error errors ->
     check
       bool
@@ -3954,8 +3976,8 @@ let () =
             "turn-timeout-s parses as a positive float"
             `Quick test_model_turn_timeout_parses_as_a_positive_float
         ; test_case
-            "turn-timeout-s rejects a non-positive value at load"
-            `Quick test_model_turn_timeout_rejects_a_non_positive_value_at_load
+            "turn-timeout-s admits zero and rejects negative"
+            `Quick test_model_turn_timeout_admits_zero_and_rejects_negative
         ; test_case
             "a model without turn-timeout-s leaves it unset"
             `Quick test_model_without_turn_timeout_leaves_it_unset

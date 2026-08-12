@@ -22,7 +22,13 @@ type config =
   ; execution_mode : execution_mode
   ; sandbox : bool
   ; disable_slash_commands : bool
-  ; timeout_s : float
+  ; admission_timeout_s : float
+    (** Finite bound for process startup and the first [init] event. *)
+  ; timeout_s : float option
+    (** [None] removes the deadline after the first [init] event: the spawned
+        client decides when its own turn ends. Startup remains bounded by
+        [admission_timeout_s]. Declared as [turn-timeout-s] in runtime config,
+        where [0] selects [None]. *)
     (** Maximum silence between valid stream-json messages. It is not a total
         turn-duration bound. *)
   }

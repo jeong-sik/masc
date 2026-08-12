@@ -119,13 +119,15 @@ let with_fixture ?auth_json ?before_initialize_response steps f =
 ;;
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
-    ?on_session_ready_delay_s ?on_stream_event path =
+    ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
+    ?on_stream_event path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
-      ; timeout_s
+      ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
+      ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
     in
     let on_session_ready =
@@ -204,6 +206,37 @@ let test_stream_idle_timeout_is_typed () =
       check (float 0.001) "exact idle timeout" 0.05 seconds
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "silent Claude stream ignored its idle timeout")
+;;
+
+let test_no_deadline_keeps_initialize_bounded () =
+  with_fixture
+    ~before_initialize_response:[ Pause 0.2 ]
+    [ Emit assistant; Emit result ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Error (Runtime_claude_code.Timeout seconds) ->
+         check (float 0.001) "admission timeout" 0.05 seconds
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "an unbounded turn disabled Claude initialization bounds")
+;;
+
+let test_no_deadline_starts_after_user_message () =
+  with_fixture
+    [ Pause 0.2; Emit assistant; Emit result ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Ok turn -> check string "unbounded result" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error))
 ;;
 
 let test_state_callback_timeout_is_typed () =
@@ -992,7 +1025,7 @@ let test_live_subscription () =
     let outcome =
       Eio_main.run (fun env ->
         let config =
-          { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = 60.0 }
+          { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = Some 60.0 }
         in
         Runtime_claude_code.run_turn
           ~mgr:(Eio.Stdenv.process_mgr env)
@@ -1023,6 +1056,14 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "no deadline keeps initialize bounded"
+            `Quick
+            test_no_deadline_keeps_initialize_bounded
+        ; test_case
+            "no deadline starts after user message"
+            `Quick
+            test_no_deadline_starts_after_user_message
         ; test_case
             "state callback timeout is typed"
             `Quick

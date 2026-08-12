@@ -54,7 +54,7 @@ let rec drop count values =
     | _ :: rest -> drop (count - 1) rest
 ;;
 
-let fixture_script ?capture_path ?terminal_line_delay_s
+let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
@@ -75,6 +75,9 @@ let fixture_script ?capture_path ?terminal_line_delay_s
   in
   output_string output "#!/bin/sh\n";
   read_request ~expect_version:true ();
+  Option.iter
+    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+    initial_line_delay_s;
   output_string output ("printf '%s\\n' " ^ shell_quote (List.nth lines 0) ^ "\n");
   read_request ();
   read_request ();
@@ -98,11 +101,12 @@ let fixture_script ?capture_path ?terminal_line_delay_s
   path
 ;;
 
-let with_fixture ?capture_path ?terminal_line_delay_s
+let with_fixture ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?terminal_line_delay_start_index lines f =
   let path =
     fixture_script
       ?capture_path
+      ?initial_line_delay_s
       ?terminal_line_delay_s
       ?terminal_line_delay_start_index
       lines
@@ -144,13 +148,15 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 ;;
 
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
-    ?(timeout_s = 2.0) ?on_thread_ready_delay_s ?on_stream_event path =
+    ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
+    ?on_thread_ready_delay_s ?on_stream_event path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
-      ; timeout_s
+      ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
+      ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
     in
     let on_thread_ready =
@@ -338,7 +344,7 @@ let test_subscription_probe_stops_before_thread () =
           let config =
             { (Runtime_codex_app_server.default_config ()) with
               cli_path = path
-            ; timeout_s = 2.0
+            ; timeout_s = Some 2.0
             }
           in
           Runtime_codex_app_server.probe_subscription
@@ -771,6 +777,47 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
          fail "turn/start acceptance was lost before the idle timeout"
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "accepted turn ignored its idle timeout")
+;;
+
+let test_no_deadline_keeps_handshake_bounded () =
+  with_fixture
+    ~initial_line_delay_s:0.2
+    [ init_result; account_chatgpt; thread_result; turn_result; turn_completed ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = false }) ->
+         check (float 0.001) "admission timeout" 0.05 seconds
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "an unbounded turn disabled the app-server handshake bound")
+;;
+
+let test_no_deadline_starts_after_turn_acceptance () =
+  with_fixture
+    ~terminal_line_delay_s:0.2
+    ~terminal_line_delay_start_index:1
+    [ init_result
+    ; account_chatgpt
+    ; thread_result
+    ; turn_result
+    ; item_completed
+    ; turn_completed
+    ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Ok turn -> check string "unbounded result" "MASC_SUBSCRIPTION_OK" turn.text
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error))
 ;;
 
 let test_state_callback_timeout_is_typed () =
@@ -2702,7 +2749,7 @@ let test_live_chatgpt_subscription () =
       Eio_main.run (fun env ->
         let config =
           { (Runtime_codex_app_server.default_config ()) with
-            timeout_s = 60.0
+            timeout_s = Some 60.0
           }
         in
         Runtime_codex_app_server.run_turn
@@ -2740,7 +2787,7 @@ let test_live_dynamic_tool_subscription () =
       Eio_main.run (fun env ->
         let config =
           { (Runtime_codex_app_server.default_config ()) with
-            timeout_s = 60.0
+            timeout_s = Some 60.0
           }
         in
         Runtime_codex_app_server.run_turn
@@ -2768,7 +2815,7 @@ let test_live_history_injection_subscription () =
       Eio_main.run (fun env ->
         let config =
           { (Runtime_codex_app_server.default_config ()) with
-            timeout_s = 60.0
+            timeout_s = Some 60.0
           }
         in
         Runtime_codex_app_server.run_turn
@@ -3049,6 +3096,14 @@ let () =
             "stream idle timeout preserves turn acceptance"
             `Quick
             test_stream_idle_timeout_after_turn_acceptance_is_typed
+        ; test_case
+            "no deadline keeps handshake bounded"
+            `Quick
+            test_no_deadline_keeps_handshake_bounded
+        ; test_case
+            "no deadline starts after turn acceptance"
+            `Quick
+            test_no_deadline_starts_after_turn_acceptance
         ; test_case
             "state callback timeout is typed"
             `Quick

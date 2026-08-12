@@ -88,6 +88,12 @@ module Make (E : Error) = struct
     | Eio.Time.Timeout as exn -> raise exn
     | exn -> protocol_error stage (Printexc.to_string exn)
   ;;
+
+  let no_turn_deadline_defect =
+    E.protocol
+      ~stage:"turn deadline"
+      ~detail:"Eio timeout raised while no turn deadline was installed"
+  ;;
 end
 
 let bounded_tail ~limit current addition =

@@ -22,11 +22,21 @@ type config =
   ; execution_mode : execution_mode
   ; sandbox : bool
   ; disable_slash_commands : bool
-  ; timeout_s : float
+  ; admission_timeout_s : float
+  ; timeout_s : float option
   }
 
 let default_timeout_s = 300.0
 let process_termination_grace_s = 2.0
+
+(* [None] installs no deadline. The vendor client owns when its own turn ends;
+   a declared bound is the operator's optional liveness guard over a silent
+   client, not a limit on how long legitimate work may take. *)
+let with_optional_timeout clock timeout_s f =
+  match timeout_s with
+  | None -> f ()
+  | Some seconds -> Eio.Time.with_timeout_exn clock seconds f
+;;
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
@@ -49,8 +59,15 @@ let default_config ~cwd ~model =
   ; execution_mode = Plan
   ; sandbox = false
   ; disable_slash_commands = true
-  ; timeout_s = default_timeout_s
+  ; admission_timeout_s = default_timeout_s
+  ; timeout_s = Some default_timeout_s
   }
+;;
+
+let timeout_s_for_phase config ~turn_admitted =
+  if turn_admitted
+  then config.timeout_s
+  else Some config.admission_timeout_s
 ;;
 
 type conversation_mode =
@@ -150,6 +167,15 @@ end)
 open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
+
+(* See {!Runtime_official_client_json.Make.no_turn_deadline_defect} for why the
+   [None] arm is unreachable and why it must not be dressed as a turn limit. *)
+let timeout_or_defect = function
+  | Some seconds -> Timeout seconds
+  | None -> Shared_json.no_turn_deadline_defect
+;;
+
+let timeout_error timeout_s = Error (timeout_or_defect timeout_s)
 
 let required_string ?(nonempty = true) stage name fields =
   match List.assoc_opt name fields with
@@ -371,8 +397,15 @@ let validate_config config ~conversation_mode ~prompt =
   then Error (Invalid_config "cwd must be an absolute path")
   else if String.trim config.model = ""
   then Error (Invalid_config "model must not be empty")
-  else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
-  then Error (Invalid_config "timeout_s must be positive and finite")
+  else if
+    not (Float.is_finite config.admission_timeout_s)
+    || config.admission_timeout_s <= 0.0
+  then Error (Invalid_config "admission_timeout_s must be positive and finite")
+  else if
+    (match config.timeout_s with
+     | None -> false
+     | Some seconds -> not (Float.is_finite seconds) || seconds <= 0.0)
+  then Error (Invalid_config "a declared timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
@@ -670,21 +703,33 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
     let state = ref initial_protocol_state in
     (try
        while true do
+         let timeout_s =
+           timeout_s_for_phase config ~turn_admitted:(Option.is_some !state.init)
+         in
          let line =
-           Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
-             Eio.Buf_read.line reader)
+           try
+             with_optional_timeout clock timeout_s (fun () ->
+               Eio.Buf_read.line reader)
+           with
+           | Eio.Time.Timeout ->
+             abort_with_runtime_error (timeout_or_defect timeout_s)
          in
          match parse_wire_line line with
          | Error error -> abort_with_runtime_error error
          | Ok event ->
            (match
-              apply_event
-                config
-                ~conversation_mode
-                ~on_conversation_ready
-                ~on_stream_event
-                !state
-                event
+              try
+                with_optional_timeout clock timeout_s (fun () ->
+                  apply_event
+                    config
+                    ~conversation_mode
+                    ~on_conversation_ready
+                    ~on_stream_event
+                    !state
+                    event)
+              with
+              | Eio.Time.Timeout ->
+                abort_with_runtime_error (timeout_or_defect timeout_s)
             with
             | Error error -> abort_with_runtime_error error
             | Ok next -> state := next)
@@ -695,7 +740,6 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
        signal_spawned_process proc stdin_w;
        process_settled := true;
        raise exn
-     | Eio.Time.Timeout -> abort_with_runtime_error (Timeout config.timeout_s)
      | Runtime_error _ as exn -> raise exn
      | exn ->
        abort_with_runtime_error
@@ -733,7 +777,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
            ~on_conversation_ready
            ~on_stream_event)
     with
-    | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+    | Eio.Time.Timeout -> timeout_error config.timeout_s
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
     | exn ->

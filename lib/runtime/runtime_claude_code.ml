@@ -9,11 +9,21 @@ type config =
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
-  ; timeout_s : float
+  ; admission_timeout_s : float
+  ; timeout_s : float option
   }
 
 let default_timeout_s = 300.0
 let process_termination_grace_s = 2.0
+
+(* [None] installs no deadline. The vendor client owns when its own turn ends;
+   a declared bound is the operator's optional liveness guard over a silent
+   client, not a limit on how long legitimate work may take. *)
+let with_optional_timeout clock timeout_s f =
+  match timeout_s with
+  | None -> f ()
+  | Some seconds -> Eio.Time.with_timeout_exn clock seconds f
+;;
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
@@ -24,8 +34,15 @@ let default_config ~cwd =
   ; cwd
   ; model = None
   ; system_prompt = None
-  ; timeout_s = default_timeout_s
+  ; admission_timeout_s = default_timeout_s
+  ; timeout_s = Some default_timeout_s
   }
+;;
+
+let timeout_s_for_phase config ~turn_admitted =
+  if turn_admitted
+  then config.timeout_s
+  else Some config.admission_timeout_s
 ;;
 
 type session_mode =
@@ -210,6 +227,13 @@ end)
 open Shared_json
 
 let bounded_tail = Runtime_official_client_json.bounded_tail
+
+(* See {!Runtime_official_client_json.Make.no_turn_deadline_defect} for why the
+   [None] arm is unreachable and why it must not be dressed as a turn limit. *)
+let timeout_error = function
+  | Some seconds -> Error (Timeout seconds)
+  | None -> Error Shared_json.no_turn_deadline_defect
+;;
 
 let parse_json ~stage text =
   let parsed =
@@ -947,7 +971,7 @@ let terminate_spawned_process ~clock proc stdin_w =
 
 let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
     ~prompt ~on_session_ready ~on_turn_starting ~on_turn_started
-    ~on_stream_event =
+    ~on_stream_event ~turn_admitted =
   let tool_call_count = ref 0 in
   let mcp_session = Runtime_official_client_mcp.create_session () in
   let initialize_id = Random_id.prefixed ~prefix:"masc-init-" ~bytes:12 in
@@ -973,6 +997,7 @@ let run_protocol io ~dynamic_tools ~subscription ~session_mode ~session_id
   let* () =
     try
       io.send (user_message prompt);
+      turn_admitted := true;
       Ok ()
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1011,7 +1036,9 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
   let* argv =
     command config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id
   in
-  Eio.Switch.run (fun sw ->
+  let turn_admitted = ref false in
+  try
+    Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
     let stderr_r, stderr_w = Eio.Process.pipe ~sw mgr in
@@ -1037,21 +1064,25 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
+    let current_timeout_s () =
+      timeout_s_for_phase config ~turn_admitted:!turn_admitted
+    in
     let send json =
-      Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+      with_optional_timeout clock (current_timeout_s ()) (fun () ->
         Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
+      let timeout_s = current_timeout_s () in
       try
-        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+        with_optional_timeout clock timeout_s (fun () ->
           Eio.Buf_read.line reader)
         |> parse_wire_line
       with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
-      | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+      | Eio.Time.Timeout -> timeout_error timeout_s
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
@@ -1059,7 +1090,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
         let with_timeout callback =
-          Eio.Time.with_timeout_exn clock config.timeout_s callback
+          with_optional_timeout clock (current_timeout_s ()) callback
         in
         run_protocol
           { send; receive }
@@ -1074,7 +1105,11 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
             with_timeout (fun () -> on_turn_starting ~session_id))
           ~on_turn_started:(fun ~session_id ~turn_id ->
             with_timeout (fun () -> on_turn_started ~session_id ~turn_id))
-          ~on_stream_event))
+          ~on_stream_event
+          ~turn_admitted))
+  with
+  | Eio.Time.Timeout ->
+    timeout_error (timeout_s_for_phase config ~turn_admitted:!turn_admitted)
 ;;
 
 let validate_process_config config =
@@ -1082,8 +1117,15 @@ let validate_process_config config =
   then Error (Invalid_config "cli_path must not be empty")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
-  else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
-  then Error (Invalid_config "timeout_s must be positive and finite")
+  else if
+    not (Float.is_finite config.admission_timeout_s)
+    || config.admission_timeout_s <= 0.0
+  then Error (Invalid_config "admission_timeout_s must be positive and finite")
+  else if
+    (match config.timeout_s with
+     | None -> false
+     | Some seconds -> not (Float.is_finite seconds) || seconds <= 0.0)
+  then Error (Invalid_config "a declared timeout_s must be positive and finite")
   else Ok ()
 ;;
 
@@ -1132,12 +1174,13 @@ let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt =
 
 let probe_subscription ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
+  let timeout_s = Some config.admission_timeout_s in
   try
-    Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+    with_optional_timeout clock timeout_s (fun () ->
       read_subscription ~mgr ~cwd config)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+  | Eio.Time.Timeout -> timeout_error timeout_s
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
@@ -1181,7 +1224,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_stream_event
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+    | Eio.Time.Timeout -> timeout_error config.timeout_s
     | Runtime_error error -> Error error
     | exn ->
       Error

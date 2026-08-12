@@ -838,13 +838,26 @@ let reasoning_effort_opt_field ~(path : string) (tbl : Otoml.t)
    antigravity provider key [timeout-s] because the two sit at different layers
    and the model value wins: an operator reading a config with both should be
    able to tell which one bounds the turn without consulting the resolver. *)
+(* Unlike the other float fields, [0] is meaningful here rather than invalid:
+   it declares that no deadline is installed, so the spawned client decides
+   when its own turn ends. Absent stays distinct from [0] — absent keeps the
+   adapter default, [0] removes the bound — so the two cannot be confused
+   downstream. Negative and non-finite remain rejected. *)
 let turn_timeout_opt_field ~(path : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
-  positive_finite_float_opt_field
-    ~path
-    ~key:"turn-timeout-s"
-    (strict_float_find path tbl "turn-timeout-s")
+  match number_opt_field ~path ~key:"turn-timeout-s" tbl with
+  | Error _ as error -> error
+  | Ok None -> Ok None
+  | Ok (Some value) when value >= 0.0 && Float.is_finite value -> Ok (Some value)
+  | Ok (Some value) ->
+    Error
+      (error
+         (path ^ ".turn-timeout-s")
+         (Printf.sprintf
+            "turn-timeout-s must be a non-negative finite number (0 removes \
+             the deadline), got %g"
+            value))
 ;;
 
 (* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)

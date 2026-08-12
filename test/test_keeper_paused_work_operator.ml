@@ -120,6 +120,7 @@ let with_source_terminal_lane f =
           Keeper_owner_registry.install_from_store
             ~sw:(current_switch ())
             ~operation_runner:None
+           ~on_turn_slot_released:None
             config
         with
         | Ok count -> Alcotest.(check int) "installed owner count" 1 count

@@ -136,9 +136,27 @@ val start
   -> operation_store_path:string
   -> now:(unit -> float)
   -> operation_runner:operation_runner option
+  -> on_turn_slot_released:(unit -> unit) option
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
+(** [on_turn_slot_released] fires when a turn ends and the slot is still
+    unclaimed after the queued chat operation, if any, has been offered it. The
+    signal therefore means "a turn can start now", not "a turn ended".
+
+    It exists because the two lanes learn about a free slot by opposite means.
+    A chat producer notifies the Owner through {!wake_operation_drain} — "the
+    Owner never polls", as the {!operation_runner} contract says — while the
+    autonomous lane has no such channel and rediscovers the slot only on its
+    next keepalive cadence. RFC-0373 measured what that costs: over 2026-08-12
+    all 50 autonomous deferrals named a chat holder, one held the slot 16.3
+    minutes across 5 consecutive cycles, and the keeper carrying the most chat
+    traffic lost 18.6% of its autonomous cycles.
+
+    The callback runs on the Owner fiber. It must not block, and an exception
+    it raises is contained rather than propagated — a lost wake degrades to the
+    listener's own cadence. This does not change admission order: the chat lane
+    still receives the freed slot first. *)
 
 val projection : t -> Keeper_owner_reducer.projection
 (** Lock-free immutable snapshot. *)

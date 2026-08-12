@@ -233,6 +233,7 @@ normal_targets=(
   @test/runtest-test_keeper_sandbox_docker_route
   @test/runtest-test_dashboard_dev_token_host_gate
   @test/runtest-test_dashboard_harness_health
+  @test/runtest-test_eval_calibration
   @test/runtest-test_telemetry_unified_keeper_fan_in
   @test/runtest-test_dated_jsonl
   @test/runtest-test_audit_log

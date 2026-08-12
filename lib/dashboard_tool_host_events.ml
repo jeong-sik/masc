@@ -49,11 +49,15 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
       let* message = required_member json "message" in
       let* cause = required_cause json in
       let fallback_agent = Option.bind fallback_agent String_util.trim_to_option in
+      (* DET-OK: pre-existing fallback semantics relocated from the match
+         spelling; no new default introduced. *)
       let default_client_name = Option.value ~default:"tool-host" fallback_agent in
       let client_name =
         Option.value ~default:default_client_name
           (stringish_member_opt json "client_name")
       in
+      (* DET-OK: pre-existing fallback semantics relocated from the match
+         spelling; no new default introduced. *)
       let default_agent_name = Option.value ~default:client_name fallback_agent in
       let agent_name =
         Option.value ~default:default_agent_name

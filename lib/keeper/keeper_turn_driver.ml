@@ -1130,6 +1130,36 @@ let run_named
             ; body_timeout_s
             ; provider_call_deadline_sec =
                 Keeper_runtime_resolved.provider_call_deadline_sec ()
+            ; (* #28417: the deadline is measured against the keeper's live
+                 progress signal, and this closure is the only thing that
+                 reads it. Injected here rather than imported inside
+                 [Keeper_turn_driver_try_provider] so the stall decision over
+                 there stays pure and unit-testable.
+
+                 Contract: never raises. A failed registry read yields [None],
+                 which degrades the deadline to its pre-#28417 elapsed
+                 ceiling instead of cancelling the attempt being watched. *)
+              provider_progress_probe =
+                Some
+                  (fun () ->
+                    try
+                      match Keeper_registry.get ~base_path keeper_name with
+                      | Some { current_turn_observation = Some obs; _ } ->
+                        Some
+                          { Keeper_turn_driver_try_provider.last_progress_at =
+                              obs.last_progress_at
+                          ; active_tool_count = obs.active_tool_count
+                          }
+                      | Some _ | None -> None
+                    with
+                    | Eio.Cancel.Cancelled _ as e -> raise e
+                    | exn ->
+                      Log.Keeper.warn
+                        "progress probe read failed for %s: %s (deadline \
+                         falls back to elapsed)"
+                        keeper_name
+                        (Printexc.to_string exn);
+                      None)
             ; temperature
             ; accept
             ; hooks

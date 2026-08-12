@@ -10,6 +10,25 @@
 
 open Result.Syntax
 
+(** A reading of the keeper's live in-turn progress signal (#28417).
+
+    Mirrors the two fields of [Keeper_registry_types.turn_observation] the
+    stall decision needs. Kept as its own record so this module does not
+    depend on [Keeper_registry]: the caller supplies the reading, this module
+    decides. *)
+type provider_progress_sample =
+  { last_progress_at : float
+        (** Unix timestamp of the most recent in-turn progress signal
+            (registry transitions, Agent Core streaming events, completed
+            tool calls). *)
+  ; active_tool_count : int
+        (** Tools issued but not yet completed. A tool that runs for minutes
+            refreshes no progress signal while it runs, so a non-zero count
+            means "working", not "stalled" -- the exclusion
+            [Keeper_registry_types]' [active_tool_count] doc comment has
+            described since RFC-0197 without any code ever reading it. *)
+  }
+
 (** Explicit context record for the extracted [try_provider] function.
 
     Each field corresponds to a variable captured by the original closure.
@@ -44,14 +63,38 @@ type try_provider_ctx =
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option
   ; body_timeout_s : float option
-  ; (* #27349: total wall-clock ceiling for THIS provider call attempt,
-       independent of streaming progress -- distinct from
-       [stream_idle_timeout_s] (inter-line gap) and [body_timeout_s]
-       (non-streaming body read only). [None] (the operator has not set
-       [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC]) means no MASC-side
-       enforcement; the call runs exactly as it did before this field
-       existed. See [run_try_provider]'s use of [Eio.Time.with_timeout_exn]. *)
+  ; (* #27349, axis changed by #28417: the ceiling for THIS provider call
+       attempt. Distinct from [stream_idle_timeout_s] (streaming inter-line
+       gap) and [body_timeout_s] (non-streaming body read only): both of
+       those are AGENT_CORE-internal and observe the transport only, which is
+       why they left the non-streaming and pre-first-token (Admission/Queue)
+       stalls of #27355 unprotected.
+
+       #27349 measured this against total elapsed wall-clock. Elapsed cannot
+       separate "a turn that stopped" from "a turn that is taking a while",
+       and on 2026-08-12 the same 900s value did both at once: it correctly
+       rotated 4 wedged sangsu attempts (65 minutes with zero trajectory
+       events) and killed a healthy rondo attempt 6 seconds after a
+       successful tool call (30+ tool calls inside the window, longest
+       progress gap 120s). #28417 moves the measurement onto the progress
+       signal, which is the distinction #27355's own observation side always
+       documented -- see the OTel help text emitted for
+       [InFlightElapsedSeconds]: "a supervising consumer judges staleness
+       against progress, not against this value alone."
+
+       [None] (the operator has not set
+       [MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC] or
+       [turn.provider_call_deadline_sec]) means no MASC-side enforcement. *)
     provider_call_deadline_sec : float option
+  ; (* #28417: reads the keeper's live turn progress signal. Injected as a
+       callback instead of calling [Keeper_registry] from here so the stall
+       decision stays a pure function of its inputs (unit-testable with no
+       registry on disk) and this module keeps its current dependency set.
+
+       [None] disables progress-awareness and the deadline degrades to the
+       pre-#28417 elapsed ceiling. That is the conservative direction: it can
+       fire early on a healthy turn, never late on a wedged one. *)
+    provider_progress_probe : (unit -> provider_progress_sample option) option
   ; temperature : float option
   ; accept : Agent_core.Types.api_response -> bool
   ; hooks : Agent_core.Hooks.hooks option
@@ -231,6 +274,49 @@ let observe_checkpoint_stage observed (_ : Agent_core.Agent.checkpoint_stage) =
 ;;
 
 let same_run_retry_allowed observed = not (Atomic.get observed)
+
+(* #28417: how often the stall watchdog samples the progress signal while a
+   provider attempt runs. Small enough that the reported stall time stays
+   close to the configured threshold, large enough that a fleet of keepers
+   does not poll the registry continuously. Detection therefore lands in
+   [threshold_sec, threshold_sec + progress_poll_interval_sec). *)
+let progress_poll_interval_sec = 15.0
+
+let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
+  match sample with
+  | Some { last_progress_at; active_tool_count } ->
+    (* A tool call that runs for minutes refreshes no progress signal while
+       it runs, so tools in flight are work, not a stall. The 2026-08-12
+       rondo attempt spent 120s inside one [Execute] and was healthy. *)
+    active_tool_count = 0 && now -. last_progress_at > threshold_sec
+  | None ->
+    (* Probe absent, or the keeper has no live turn observation to read.
+       Falling back to elapsed time reproduces the pre-#28417 ceiling: losing
+       the progress signal must not silently disable enforcement and leave a
+       wedged attempt running unbounded. *)
+    now -. attempt_started_at > threshold_sec
+;;
+
+(* #28417: blocks until the attempt has gone [threshold_sec] without a
+   progress signal, then returns. [probe] is contracted not to raise (the
+   injection site converts a failed registry read into [None]), so a
+   transient read failure degrades this fiber to the elapsed fallback instead
+   of cancelling the attempt it is watching. *)
+let rec await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe =
+  Eio.Time.sleep clock progress_poll_interval_sec;
+  let sample =
+    match probe with
+    | Some read -> read ()
+    | None -> None
+  in
+  if attempt_stalled
+       ~now:(Eio.Time.now clock)
+       ~threshold_sec
+       ~attempt_started_at
+       ~sample
+  then ()
+  else await_attempt_stall ~clock ~threshold_sec ~attempt_started_at ~probe
+;;
 
 let rejected_body_bytes = function
   | Agent_core.Error.Api
@@ -650,33 +736,54 @@ let run_try_provider
         in
         run_fn ())
     in
-    (* #27349: [Eio.Time.with_timeout]'s own signature requires a
-       polymorphic-variant error row ([> `Timeout]), which
-       [run_attempt_switch]'s concrete [Agent_core.Error.t] result
-       cannot unify with, so [with_timeout_exn] (raises the [Timeout]
-       exception) is the primitive that fits here — the established
-       pattern in this repo for wrapping a concretely-typed result
-       (graphql_client.ml, server_ide_lsp_proxy.ml). Catches ONLY
-       [Eio.Time.Timeout]: [Eio.Cancel.Cancelled] is never caught here, so
-       an outer cancellation (switch shutdown, etc.) propagates unmodified.
-       AGENT_CORE's own internal [stream_idle_timeout_s]/[body_timeout_s] firing
-       is a typed RETURN VALUE inside [Runtime_agent.run]'s result, not a
-       raised exception, so it can never reach this handler and be
-       misclassified as this deadline firing. *)
+    (* #28417: the attempt races a stall watchdog through [Eio.Fiber.first],
+       which cancels whichever fiber loses. This replaces #27349's
+       [Eio.Time.with_timeout_exn] wrap because that primitive can only count
+       elapsed time, while the verdict now depends on the keeper's progress
+       signal — something only a polling fiber can observe.
+
+       Cancellation semantics are unchanged: the attempt's own
+       [Eio.Switch.run] still unwinds when it loses the race, and
+       [Eio.Cancel.Cancelled] raised by an OUTER cancellation (switch
+       shutdown, etc.) still propagates unmodified because neither branch
+       catches it. AGENT_CORE's internal
+       [stream_idle_timeout_s]/[body_timeout_s] firing remains a typed RETURN
+       VALUE inside [Runtime_agent.run]'s result rather than an exception, so
+       it still cannot be misclassified as this deadline firing. *)
     let result =
       match ctx.provider_call_deadline_sec, Eio_context.get_clock_opt () with
-      | Some deadline_sec, Some clock ->
-        (try Eio.Time.with_timeout_exn clock deadline_sec run_attempt_switch with
-         | Eio.Time.Timeout ->
+      | Some threshold_sec, Some clock ->
+        let attempt_started_at = Eio.Time.now clock in
+        (match
+           Eio.Fiber.first
+             (fun () -> `Attempt_finished (run_attempt_switch ()))
+             (fun () ->
+               await_attempt_stall
+                 ~clock
+                 ~threshold_sec
+                 ~attempt_started_at
+                 ~probe:ctx.provider_progress_probe;
+               `Attempt_stalled)
+         with
+         | `Attempt_finished attempt_result -> attempt_result
+         | `Attempt_stalled ->
            Error
              (Agent_core.Error.Api
                 (Llm_provider.Retry.Timeout
                    { message =
                        Printf.sprintf
-                         "provider call exceeded the configured wall-clock \
-                          deadline (%.0fs, runtime_id=%s)"
-                         deadline_sec
+                         "provider call made no progress for %.0fs \
+                          (runtime_id=%s)"
+                         threshold_sec
                          ctx.runtime_id
+                       (* [Wall_clock] is kept deliberately: the existing
+                          classifiers
+                          ([Runtime_attempt_fsm.should_try_next],
+                          [Keeper_provider_runtime_boundary.is_provider_timeout_error])
+                          already route this phase to declared-lane candidate
+                          rotation, and this is still a wall-clock-derived
+                          verdict. Introducing a new phase would change retry
+                          policy, which #28417 does not intend to touch. *)
                    ; phase = Some Llm_provider.Http_client.Wall_clock
                    })))
       | None, _ | _, None -> run_attempt_switch ()

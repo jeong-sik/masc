@@ -1162,6 +1162,30 @@ let test_stdio_entrypoint_uses_shared_base_path_guard () =
   check bool "HTTP runtime uses common owner activation" true
     (String_util.contains_substring http_runtime_source "activate_owner_state")
 
+let test_keeper_owner_inventory_precedes_persistence_recovery () =
+  let source = read_file (source_file "lib/server/server_runtime_bootstrap.ml") in
+  let find needle =
+    let nlen = String.length needle in
+    let rec loop index =
+      if index + nlen > String.length source then None
+      else if String.sub source index nlen = needle then Some index
+      else loop (index + 1)
+    in
+    loop 0
+  in
+  let owner_install =
+    find "Keeper_owner_registry.install_from_store"
+    |> Option.get
+  in
+  let persistence_prepare =
+    find "Server_bootstrap_loops.prepare_keeper_persistence"
+    |> Option.get
+  in
+  check bool
+    "Owner inventory is installed before shutdown persistence restore"
+    true
+    (owner_install < persistence_prepare)
+
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->
       let script = Filename.concat dir "start-masc.sh" in
@@ -1734,6 +1758,10 @@ let () =
 	            test_default_build_lock_is_worktree_local;
 	          test_case "stdio entrypoint uses shared base path guard" `Quick
 	            test_stdio_entrypoint_uses_shared_base_path_guard;
+	          test_case
+	            "Keeper Owner inventory precedes persistence recovery"
+	            `Quick
+	            test_keeper_owner_inventory_precedes_persistence_recovery;
 	          test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
           test_case

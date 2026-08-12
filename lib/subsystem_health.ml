@@ -1,40 +1,40 @@
 (** Subsystem health registry.
     Tracks which forked subsystems are alive or have crashed.
-    Module-level Hashtbl: available from process start, no init timing dependency.
+    Module-level immutable state: available from process start, no init timing dependency.
     Called by fork_subsystem in server_runtime_bootstrap, queried by /health.
 
     [register] runs when a subsystem fiber is forked, [mark_dead] when a
     supervisor fiber observes the crash, and [to_yojson] from the HTTP
-    /health handler — three different fibers.  Without a mutex the
-    Hashtbl writes race and [to_yojson]'s fold can observe a half-written
-    state.  [Stdlib.Mutex] because the registry is read from the /health
-    handler which may run on a different domain than the fork callers. *)
+    /health handler — three different fibers. [Stdlib.Mutex] protects only
+    the state swap/snapshot because the registry may cross domains; clock
+    observation and JSON rendering stay outside the critical section. *)
 
-let registry : (string, bool * float option) Hashtbl.t = Hashtbl.create 8
+module State = Subsystem_health_state
+
+let state = ref State.empty
 let registry_mu = Stdlib.Mutex.create ()
 
-let with_lock f = Stdlib.Mutex.protect registry_mu f
+let apply event =
+  Stdlib.Mutex.protect registry_mu (fun () ->
+    state := State.apply !state event)
+;;
 
-let register name =
-  with_lock (fun () ->
-    Hashtbl.replace registry name (true, None))
+let register name = apply (State.Registered { name })
 
 let mark_dead name =
-  with_lock (fun () ->
-    Hashtbl.replace registry name (false, Some (Time_compat.now ())))
+  let crashed_at = Time_compat.now () in
+  apply (State.Crashed { name; crashed_at })
+;;
 
 let to_yojson () : Yojson.Safe.t =
-  let entries =
-    with_lock (fun () ->
-      Hashtbl.fold (fun name (alive, crash_time) acc ->
-        let status = if alive then "alive" else "dead" in
-        let fields = [
-          ("status", `String status);
-        ] @ (match crash_time with
-          | Some t -> [("crashed_at", `Float t)]
-          | None -> [])
-        in
-        (name, `Assoc fields) :: acc
-      ) registry [])
+  let snapshot = Stdlib.Mutex.protect registry_mu (fun () -> !state) in
+  let entry_to_json (name, health) =
+    let fields =
+      match health with
+      | State.Alive -> [ "status", `String "alive" ]
+      | State.Dead { crashed_at } ->
+        [ "status", `String "dead"; "crashed_at", `Float crashed_at ]
+    in
+    name, `Assoc fields
   in
-  `Assoc (List.sort (fun (a, _) (b, _) -> String.compare a b) entries)
+  `Assoc (List.map entry_to_json (State.entries snapshot))

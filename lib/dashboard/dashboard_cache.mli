@@ -48,17 +48,11 @@ val get_or_compute_with_timeout :
     cache entries are still served normally. *)
 
 val set_default_clock : _ Eio.Time.clock -> unit
-(** Register the process clock so every {!get_or_compute} runs under
-    {!default_compute_timeout_sec}. Called once at boot. Until it is called,
+(** Register the process clock so every {!get_or_compute} runs under the
+    default backstop timeout. Called once at boot. Until it is called,
     [get_or_compute] keeps its original unbounded behaviour, which is what unit
-    tests and non-Eio contexts rely on. *)
-
-val clear_default_clock_for_tests : unit -> unit
-
-val default_compute_timeout_sec : float
-(** Backstop ceiling applied by {!get_or_compute} once the clock is
-    registered. A surface needing a tighter bound calls
-    {!get_or_compute_with_timeout} with its own value. *)
+    tests and non-Eio contexts rely on. A surface needing a tighter bound
+    calls {!get_or_compute_with_timeout} with its own value. *)
 
 val seed_stale_if_missing :
   string -> stale_for:float -> Yojson.Safe.t -> unit

@@ -662,8 +662,6 @@ let set_default_clock clock =
   Atomic.set default_clock
     (Some (clock :> float Eio.Time.clock_ty Eio.Resource.t))
 
-let clear_default_clock_for_tests () = Atomic.set default_clock None
-
 (* Deliberately generous: this is a backstop against unbounded compute, not a
    latency target. The measured worst case for the widest dashboard read was
    ~12s before RFC-0372 Phase 1/2; surfaces that want a tighter bound pass

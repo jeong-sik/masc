@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { Effect, Option } from 'effect'
 import {
+  decodeTransportHealthData,
   isTransportHealthReady,
-  parseTransportHealthData,
   type TransportHealthData,
   TransportHealthSchemaDriftError,
 } from './transport-health'
@@ -96,21 +97,21 @@ const currentWire = {
 }
 
 function expectDrift(value: unknown): void {
-  expect(() => parseTransportHealthData(value)).toThrow(
-    TransportHealthSchemaDriftError,
-  )
+  const error = Effect.runSync(Effect.flip(decodeTransportHealthData(value)))
+  expect(error).toBeInstanceOf(TransportHealthSchemaDriftError)
+  expect(error.message).toContain('transport-health schema drift')
 }
 
 function parseReady(value: unknown): TransportHealthData {
-  const snapshot = parseTransportHealthData(value)
+  const snapshot = Effect.runSync(decodeTransportHealthData(value))
   if (!isTransportHealthReady(snapshot)) {
     throw new Error('expected ready transport-health snapshot')
   }
   return snapshot
 }
 
-describe('parseTransportHealthData', () => {
-  it('parses the complete current wire contract', () => {
+describe('decodeTransportHealthData', () => {
+  it('decodes the complete current wire contract', () => {
     const result = parseReady(currentWire)
     expect(result.summary.primary_path).toBe('streamable_http')
     expect(result.sse.hot_sessions).toEqual([])
@@ -121,8 +122,8 @@ describe('parseTransportHealthData', () => {
     expect(result.projection_diagnostics.source).toBe('cached_surface')
   })
 
-  it('parses the exact initializing cache envelope', () => {
-    const result = parseTransportHealthData({
+  it('decodes the exact initializing cache envelope', () => {
+    const result = Effect.runSync(decodeTransportHealthData({
       status: 'initializing',
       generated_at: '2024-01-01T00:00:00Z',
       message: 'Transport health data is warming up.',
@@ -135,9 +136,20 @@ describe('parseTransportHealthData', () => {
         stale_reason: null,
         stale_age_ms: null,
       },
-    })
+    }))
     expect(isTransportHealthReady(result)).toBe(false)
     expect('status' in result && result.status).toBe('initializing')
+  })
+
+  it('converts wire nulls to Option once at the schema boundary', () => {
+    const result = parseReady(currentWire)
+    expect(Option.isSome(result.projection_diagnostics.last_success_at)).toBe(
+      true,
+    )
+    expect(Option.isNone(result.projection_diagnostics.last_attempt_at)).toBe(
+      true,
+    )
+    expect(Option.isNone(result.projection_diagnostics.stale_age_ms)).toBe(true)
   })
 
   it.each([
@@ -155,6 +167,20 @@ describe('parseTransportHealthData', () => {
     [
       'negative grpc counter',
       { ...currentWire, grpc: { ...currentWire.grpc, subscribers: -1 } },
+    ],
+    [
+      'infinite duration',
+      {
+        ...currentWire,
+        sse: { ...currentWire.sse, broadcast_avg_seconds: Number.POSITIVE_INFINITY },
+      },
+    ],
+    [
+      'NaN duration',
+      {
+        ...currentWire,
+        sse: { ...currentWire.sse, broadcast_avg_seconds: Number.NaN },
+      },
     ],
     [
       'unknown grpc field',

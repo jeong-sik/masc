@@ -7,11 +7,13 @@ const TARGET_FILES = [
   'design-system/headless-preact/use-collaboration.ts',
   'src/api/dashboard-runtime.ts',
   'src/api/dashboard.ts',
+  'src/api/effect-http.ts',
   'src/api/gate.ts',
   'src/api/goal-loop.ts',
   'src/api/schemas/runtime.ts',
   'src/api/schemas/dashboard-config.ts',
   'src/api/schemas/provider-logs.ts',
+  'src/api/schemas/transport-health.ts',
   'src/api/transport-health.ts',
   'src/components/common/async-container.ts',
   'src/components/common/empty-state.ts',
@@ -42,6 +44,8 @@ const TARGET_FILES = [
   'src/keeper-chat-pending.ts',
   'src/keeper-runtime.ts',
   'src/lib/async-state.ts',
+  'src/lib/effect-resource.ts',
+  'src/lib/remote-data.ts',
   'src/components/common/normalize.ts',
   'src/runtime-counts.ts',
   'src/schemas/sse-event-payload.ts',
@@ -59,6 +63,8 @@ const TEST_FILES = [
   'design-system/headless-preact/use-tabs.test.ts',
   'src/api/schemas/runtime.test.ts',
   'src/api/schemas/dashboard-config.test.ts',
+  'src/api/schemas/transport-health.test.ts',
+  'src/api/transport-health.test.ts',
   'src/cb-shared-telemetry-source.test.ts',
   'src/components/common/markdown.test.ts',
   'src/components/common/rich-content.test.ts',
@@ -77,11 +83,13 @@ const TEST_FILES = [
   'src/components/logs.test.ts',
   'src/components/session-trace/session-trace-state.test.ts',
   'src/components/transport-health.test.ts',
+  'src/dashboard-bundle-preload.test.ts',
   'src/dashboard-ws.test.ts',
   'src/goal-loop-status.test.ts',
   'src/keeper-actions.test.ts',
   'src/keeper-chat-store.test.ts',
   'src/lib/async-state.test.ts',
+  'src/lib/effect-resource.test.ts',
   'src/runtime-counts.test.ts',
   'src/schemas/sse-event-payload.test.ts',
   'src/schemas/sse.test.ts',
@@ -101,12 +109,66 @@ const DEFAULT_PROJECT_FILES = [
   'design-system/headless-preact/use-tabs.test.ts',
 ]
 
+// Shrink-only migration allowlist. Every other dashboard TypeScript file is
+// forbidden from importing Valibot; remove a path in the same PR that moves
+// that boundary to Effect Schema.
+const LEGACY_VALIBOT_FILES = [
+  'src/api/schemas/agent-relations.ts',
+  'src/api/schemas/agent-timeline.ts',
+  'src/api/schemas/dashboard-config.ts',
+  'src/api/schemas/drift-error.test.ts',
+  'src/api/schemas/drift-error.ts',
+  'src/api/schemas/gate-connectors.ts',
+  'src/api/schemas/gate-keepers.ts',
+  'src/api/schemas/gate-status.ts',
+  'src/api/schemas/keeper-catchup-digest.ts',
+  'src/api/schemas/keeper-chat-history.ts',
+  'src/api/schemas/keeper-composite.ts',
+  'src/api/schemas/keeper-transitions.ts',
+  'src/api/schemas/link-previews.ts',
+  'src/api/schemas/logs.ts',
+  'src/api/schemas/operator-action.ts',
+  'src/api/schemas/provider-logs.ts',
+  'src/api/schemas/runtime-defaults.ts',
+  'src/api/schemas/runtime-resolved.ts',
+]
+
 export default tseslint.config(
   {
     ignores: ['dist/**', 'coverage/**'],
   },
   {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: LEGACY_VALIBOT_FILES,
+    linterOptions: {
+      // This policy-only pass reaches files outside the typed lint target.
+      // Their unrelated inline directives remain owned by their normal lint
+      // migration; typed target files restore unused-directive reporting.
+      reportUnusedDisableDirectives: false,
+    },
+    languageOptions: {
+      parser: tseslint.parser,
+    },
+    plugins: {
+      '@typescript-eslint': tseslint.plugin,
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [
+          {
+            name: 'valibot',
+            message: 'New and migrated boundaries use Effect Schema only.',
+          },
+        ],
+      }],
+    },
+  },
+  {
     files: TARGET_FILES,
+    linterOptions: {
+      reportUnusedDisableDirectives: true,
+    },
     languageOptions: {
       parser: tseslint.parser,
       globals: {
@@ -141,6 +203,9 @@ export default tseslint.config(
   },
   {
     files: TEST_FILES,
+    linterOptions: {
+      reportUnusedDisableDirectives: true,
+    },
     languageOptions: {
       parser: tseslint.parser,
       globals: {

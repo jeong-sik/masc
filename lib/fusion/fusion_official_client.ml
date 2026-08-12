@@ -75,28 +75,38 @@ let eio_context ~runtime_id =
    panelist runs the same client the keeper would, minus the parts a panelist
    has no business using. *)
 
-let claude_config ~base_dir ~system_prompt (execution : Runtime_execution.claude_code)
+let resolved_timeout_s ~runtime_id ~default_timeout_s =
+  match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+  | None -> Some default_timeout_s
+  | Some seconds when seconds <= 0.0 -> None
+  | Some seconds -> Some seconds
+;;
+
+let claude_config ~base_dir ~runtime_id ~system_prompt
+  (execution : Runtime_execution.claude_code)
   : Runtime_claude_code.config
   =
   { cli_path = execution.cli_path
   ; cwd = base_dir
   ; model = execution.model
   ; system_prompt
-  ; timeout_s = Some execution.timeout_s
+  ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
   }
 ;;
 
-let codex_config ~system_prompt (execution : Runtime_execution.codex_app_server)
+let codex_config ~runtime_id ~system_prompt
+  (execution : Runtime_execution.codex_app_server)
   : Runtime_codex_app_server.config
   =
   { cli_path = execution.cli_path
   ; model = execution.model
   ; developer_instructions = system_prompt
-  ; timeout_s = Some execution.timeout_s
+  ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
   }
 ;;
 
-let antigravity_config ~base_dir (execution : Runtime_execution.antigravity_cli)
+let antigravity_config ~base_dir ~runtime_id
+  (execution : Runtime_execution.antigravity_cli)
   : Runtime_antigravity.config
   =
   { cli_path = execution.cli_path
@@ -111,7 +121,7 @@ let antigravity_config ~base_dir (execution : Runtime_execution.antigravity_cli)
     execution_mode = Runtime_antigravity.Plan
   ; sandbox = true
   ; disable_slash_commands = true
-  ; timeout_s = Some execution.timeout_s
+  ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
   }
 ;;
 
@@ -141,20 +151,20 @@ let run_panelist ~base_dir ~runtime_id ~system_prompt ~prompt =
          ~runtime_id
          "runtime is Agent_core-owned; it belongs on the Async_agent path")
   | Runtime_execution.Claude_code execution ->
-    let config = claude_config ~base_dir ~system_prompt execution in
+    let config = claude_config ~base_dir ~runtime_id ~system_prompt execution in
     (match Runtime_claude_code.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_claude_code.turn_result) -> Ok result.text
      | Error error ->
        Error (provider_error ~runtime_id (Runtime_claude_code.error_to_string error)))
   | Runtime_execution.Codex_app_server execution ->
-    let config = codex_config ~system_prompt execution in
+    let config = codex_config ~runtime_id ~system_prompt execution in
     (match Runtime_codex_app_server.run_turn ~mgr ~clock ~cwd config ~prompt with
      | Ok (result : Runtime_codex_app_server.turn_result) -> Ok result.text
      | Error error ->
        Error
          (provider_error ~runtime_id (Runtime_codex_app_server.error_to_string error)))
   | Runtime_execution.Antigravity_cli execution ->
-    let config = antigravity_config ~base_dir execution in
+    let config = antigravity_config ~base_dir ~runtime_id execution in
     (* [home_dir] is left unset so the client uses the inherited HOME, which is
        where its OAuth token already lives. The keeper path overrides it for
        per-keeper isolation; a panelist has no durable state to isolate. *)
@@ -169,4 +179,5 @@ module For_testing = struct
      process-global Eio context, which has no reset. *)
   (* TEL-OK: alias of a pure function; no behaviour of its own. *)
   let missing_handle_detail = missing_handle_detail
+  let resolved_timeout_s = resolved_timeout_s
 end

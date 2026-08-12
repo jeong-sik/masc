@@ -21,6 +21,13 @@ module For_testing : sig
   (** The failure detail for an unresolvable Eio context, or [None] when both
       handles are present. Exposed because {!Eio_context} has no reset, so a
       test driving the real globals could reach these arms in only one order. *)
+
+  val resolved_timeout_s
+    :  runtime_id:string
+    -> default_timeout_s:float
+    -> float option
+  (** Resolve the same declared turn timeout used by each official-client
+      panel adapter. [turn-timeout-s = 0] produces [None]. *)
 end
 
 val run_panelist

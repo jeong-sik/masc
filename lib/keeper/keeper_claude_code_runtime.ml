@@ -13,6 +13,18 @@ type attempt_outcome =
 
 let runtime_label = "Claude Code"
 
+let bounded_probe_config ~fallback_timeout_s
+  (config : Runtime_claude_code.config)
+  =
+  match config.timeout_s with
+  | Some _ -> config
+  | None -> { config with timeout_s = Some fallback_timeout_s }
+;;
+
+module For_testing = struct
+  let bounded_probe_config = bounded_probe_config
+end
+
 let project_messages messages =
   let rec loop system history = function
     | [] -> Ok (List.rev system, List.rev history)
@@ -387,13 +399,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     in
     let process_mgr = Eio.Stdenv.process_mgr env in
     let process_cwd = Eio.Path.(Eio.Stdenv.fs env / base_path) in
+    let probe_config =
+      bounded_probe_config ~fallback_timeout_s:config.timeout_s client_config
+    in
     let* admitted_subscription =
       match
         Runtime_claude_code.probe_subscription
           ~mgr:process_mgr
           ~clock
           ~cwd:process_cwd
-          client_config
+          probe_config
       with
       | Ok subscription -> Ok subscription
       | Error error -> Error (claude_error_to_core_error error)

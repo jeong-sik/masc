@@ -1166,6 +1166,20 @@ let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
          |> check_pre_dispatch_attempt "turn process spawn failure"))
 ;;
 
+let test_unbounded_turn_keeps_subscription_probe_bounded () =
+  let turn_config =
+    { (Runtime_claude_code.default_config ~cwd:"/tmp") with timeout_s = None }
+  in
+  let probe_config =
+    Keeper_claude_code_runtime.For_testing.bounded_probe_config
+      ~fallback_timeout_s:17.0
+      turn_config
+  in
+  match probe_config.timeout_s with
+  | Some seconds -> check (float 0.0) "probe fallback" 17.0 seconds
+  | None -> fail "unbounded turn config leaked into the subscription probe"
+;;
+
 let () =
   run
     "keeper_claude_code_runtime"
@@ -1213,6 +1227,10 @@ let () =
             "turn spawn failure is pre-dispatch with tools"
             `Quick
             test_turn_spawn_failure_is_pre_dispatch_with_tools
+        ; test_case
+            "unbounded turn keeps subscription probe bounded"
+            `Quick
+            test_unbounded_turn_keeps_subscription_probe_bounded
         ] )
     ]
 ;;

@@ -98,6 +98,7 @@ let claude_config ~base_dir ~runtime_id ~system_prompt
   ; cwd = base_dir
   ; model = execution.model
   ; system_prompt
+  ; admission_timeout_s = execution.timeout_s
   ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
   }
 ;;
@@ -109,6 +110,7 @@ let codex_config ~runtime_id ~system_prompt
   { cli_path = execution.cli_path
   ; model = execution.model
   ; developer_instructions = system_prompt
+  ; admission_timeout_s = execution.timeout_s
   ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
   }
 ;;
@@ -129,6 +131,7 @@ let antigravity_config ~base_dir ~runtime_id
     execution_mode = Runtime_antigravity.Plan
   ; sandbox = true
   ; disable_slash_commands = true
+  ; admission_timeout_s = execution.timeout_s
   ; timeout_s = resolved_timeout_s ~runtime_id ~default_timeout_s:execution.timeout_s
   }
 ;;

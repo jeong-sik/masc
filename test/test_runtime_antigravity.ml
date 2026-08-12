@@ -60,6 +60,7 @@ let fixture_script
     ?required_home
     ?(sleep_s = 0.0)
     ?line_delay_s
+    ?after_first_line_delay_s
     ?(exit_code = 0)
     lines
   =
@@ -92,12 +93,18 @@ let fixture_script
     required_home;
   output_string output "cat >/dev/null\n";
   if sleep_s > 0.0 then output_string output (Printf.sprintf "sleep %.3f\n" sleep_s);
-  List.iter
-    (fun line ->
+  List.iteri
+    (fun index line ->
        Option.iter
          (fun seconds ->
             output_string output (Printf.sprintf "sleep %.3f\n" seconds))
          line_delay_s;
+       if index = 1
+       then
+         Option.iter
+           (fun seconds ->
+              output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+           after_first_line_delay_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     lines;
   output_string output (Printf.sprintf "exit %d\n" exit_code);
@@ -106,13 +113,15 @@ let fixture_script
   path
 ;;
 
-let with_fixture ?require_resume ?required_home ?sleep_s ?line_delay_s ?exit_code lines f =
+let with_fixture ?require_resume ?required_home ?sleep_s ?line_delay_s
+    ?after_first_line_delay_s ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
       ?required_home
       ?sleep_s
       ?line_delay_s
+      ?after_first_line_delay_s
       ?exit_code
       lines
   in
@@ -125,6 +134,8 @@ let run_fixture
     ?on_conversation_ready
     ?on_stream_event
     ?(timeout_s = 2.0)
+    ?admission_timeout_s
+    ?(no_turn_deadline = false)
     ?(prompt = "Return the fixture marker")
     path
   =
@@ -132,7 +143,8 @@ let run_fixture
     let config =
       { (Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture") with
         cli_path = path
-      ; timeout_s = Some timeout_s
+      ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
+      ; timeout_s = if no_turn_deadline then None else Some timeout_s
       }
     in
     Runtime_antigravity.run_turn
@@ -444,6 +456,39 @@ let test_stream_idle_timeout_is_typed () =
        | Ok _ -> fail "silent Antigravity stream ignored its idle timeout")
 ;;
 
+let test_no_deadline_keeps_init_bounded () =
+  with_fixture
+    ~sleep_s:0.2
+    [ init (); result () ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Error (Runtime_antigravity.Timeout seconds) ->
+         check (float 0.001) "admission timeout" 0.05 seconds
+       | Error error -> fail (Runtime_antigravity.error_to_string error)
+       | Ok _ -> fail "an unbounded turn disabled the Antigravity init bound")
+;;
+
+let test_no_deadline_starts_after_init () =
+  with_fixture
+    ~after_first_line_delay_s:0.2
+    [ init (); result () ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Ok turn ->
+         check string "unbounded result" "MASC_ANTIGRAVITY_OK\n" turn.text
+       | Error error -> fail (Runtime_antigravity.error_to_string error))
+;;
+
 let test_admission_is_process_free () =
   let config =
     { (Runtime_antigravity.default_config ~cwd:"relative" ~model:"gemini-fixture") with
@@ -572,6 +617,14 @@ let () =
             "stream idle timeout is typed"
             `Quick
             test_stream_idle_timeout_is_typed
+        ; test_case
+            "no deadline keeps init bounded"
+            `Quick
+            test_no_deadline_keeps_init_bounded
+        ; test_case
+            "no deadline starts after init"
+            `Quick
+            test_no_deadline_starts_after_init
         ; test_case "process-free admission" `Quick test_admission_is_process_free
         ] )
     ; "live official client", [ test_case "official agy start and resume" `Slow test_live_start_and_resume ]

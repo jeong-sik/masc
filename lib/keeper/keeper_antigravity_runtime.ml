@@ -328,6 +328,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       ; execution_mode = Plan
       ; sandbox = true
       ; disable_slash_commands = true
+      ; admission_timeout_s = config.timeout_s
       ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
            [0] removes it: the deadline exists to notice a client that has gone
            silent, not to cap how long legitimate work may take, so a

@@ -15,10 +15,14 @@ type config =
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
+  ; admission_timeout_s : float
+    (** Finite bound for process setup and the initialize exchange before the
+        user turn is written. *)
   ; timeout_s : float option
-    (** [None] installs no deadline: the spawned client decides when its own
-        turn ends, the posture of running the CLI directly. Declared as
-        [turn-timeout-s] in runtime config, where [0] selects [None]. *)
+    (** [None] removes the deadline after the user message is written: the
+        spawned client decides when its own turn ends. Initialization remains
+        bounded by [admission_timeout_s]. Declared as [turn-timeout-s] in
+        runtime config, where [0] selects [None]. *)
     (** Maximum silence between CLI stream messages. Each received message
         resets the deadline; a progressing turn has no wall limit. *)
   }

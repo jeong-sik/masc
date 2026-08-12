@@ -101,6 +101,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model
     { cli_path = config.cli_path
     ; model = config.model
     ; developer_instructions = None
+    ; admission_timeout_s = Float.min max_probe_timeout_s config.timeout_s
     ; (* A probe stays bounded even where the turn is not: it answers "can this
          client log in", and an unbounded answer to that is no answer. An
          undeclared turn bound therefore falls back to the probe ceiling rather
@@ -152,6 +153,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
     ; cwd
     ; model = config.model
     ; system_prompt = None
+    ; admission_timeout_s = Float.min max_probe_timeout_s config.timeout_s
     ; (* A probe stays bounded even where the turn is not: it answers "can this
          client log in", and an unbounded answer to that is no answer. An
          undeclared turn bound therefore falls back to the probe ceiling rather

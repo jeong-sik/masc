@@ -436,6 +436,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
       { Runtime_codex_app_server.cli_path = config.cli_path
       ; model = config.model
       ; developer_instructions
+      ; admission_timeout_s = config.timeout_s
       ; (* A per-model [turn-timeout-s] overrides the stream-idle bound, and
            [0] removes it: the deadline exists to notice a client that has gone
            silent, not to cap how long legitimate work may take, so a

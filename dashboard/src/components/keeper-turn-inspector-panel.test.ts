@@ -28,7 +28,13 @@ function noTurns() {
 describe('KeeperTurnInspectorPanel', () => {
   it('lists a keeper\'s turn files and opens the one that is clicked', async () => {
     api.fetchKeeperRawTraces.mockResolvedValue([
-      { file: 'turn-0007.jsonl', traceId: 'trace-0007', bytes: 2048, records: 4, modifiedAt: 1786000000 },
+      {
+        file: 'turn-0007.jsonl',
+        traceId: 'trace-0007',
+        bytes: 2048,
+        census: { state: 'whole_file', records: 4 },
+        modifiedAt: 1786000000,
+      },
     ])
     const raw = '{"kind":"request","model":"qwen3-6-35b"}'
     api.fetchKeeperRawTrace.mockResolvedValue({
@@ -57,7 +63,13 @@ describe('KeeperTurnInspectorPanel', () => {
   // decode holds its position and says why, rather than being dropped.
   it('keeps an undecodable record in place with its reason', async () => {
     api.fetchKeeperRawTraces.mockResolvedValue([
-      { file: 'turn-0008.jsonl', traceId: 'trace-0008', bytes: 10, records: 2, modifiedAt: 1786000000 },
+      {
+        file: 'turn-0008.jsonl',
+        traceId: 'trace-0008',
+        bytes: 10,
+        census: { state: 'whole_file', records: 2 },
+        modifiedAt: 1786000000,
+      },
     ])
     api.fetchKeeperRawTrace.mockResolvedValue({
       file: 'turn-0008.jsonl',

@@ -11,7 +11,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import type { GateKeeperInfo } from '../api/gate'
+import type { GateKeeper } from '../api/gate-keepers'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
@@ -26,7 +26,7 @@ interface FormEntry {
 
 const formState = signal<Record<string, FormEntry>>({})
 
-function getEntry(connectorId: string, keepers: GateKeeperInfo[]): FormEntry {
+function getEntry(connectorId: string, keepers: readonly GateKeeper[]): FormEntry {
   const existing = formState.value[connectorId]
   if (existing) return existing
   const firstKeeper = keepers[0]?.name ?? ''
@@ -87,7 +87,7 @@ async function submit(connectorId: string, entry: FormEntry) {
 
 export function QuickBindForm({ connectorId, keepers }: {
   connectorId: string
-  keepers: GateKeeperInfo[]
+  keepers: readonly GateKeeper[]
 }) {
   if (keepers.length === 0) return null
   const entry = getEntry(connectorId, keepers)

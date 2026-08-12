@@ -11,7 +11,8 @@ import {
   type KeeperCompositeSnapshot,
   type KeeperRuntimeTraceResponse,
 } from '../api/keeper'
-import { fetchGateKeepers } from '../api/gate'
+import { fetchGateKeepers } from '../api/gate-keepers'
+import { dashboardRuntime } from '../api/effect-http'
 import { executionLoaded, keepers, refreshExecution } from '../store'
 import { compositeTick } from '../composite-signals'
 import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
@@ -545,23 +546,22 @@ export function FsmHub(props: FsmHubProps = {}) {
   )
   useEffect(() => {
     if (!shouldUseGateKeeperFallback(executionLoadedValue, storeNames)) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const data = await fetchGateKeepers()
-        if (cancelled) return
+    const controller = new AbortController()
+    void dashboardRuntime
+      .runPromise(fetchGateKeepers(), { signal: controller.signal })
+      .then(data => {
         const next = data.keepers.map(k => k.name).sort()
         setGateKeeperNames(prev =>
           prev.length === next.length && prev.every((v, i) => v === next[i])
             ? prev
             : next,
         )
-      } catch {
+      })
+      .catch(() => {
         // Gate endpoint auth failure or network error — keep the last
         // successful fallback snapshot until the primary store path lands.
-      }
-    })()
-    return () => { cancelled = true }
+      })
+    return () => { controller.abort() }
   }, [executionLoadedValue, storeNames, pollTick])
 
   const keeperNames = shouldUseGateKeeperFallback(executionLoadedValue, storeNames)

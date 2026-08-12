@@ -580,7 +580,11 @@ let dashboard_config_string_list_fields =
 let confirm_context_shrink_field = "confirm_context_shrink"
 
 let dashboard_config_patch_allowed_fields =
-  [ "name"; "max_context_override"; confirm_context_shrink_field ]
+  [ "name"
+  ; "max_context_override"
+  ; "autonomous_wake_prompt"
+  ; confirm_context_shrink_field
+  ]
   @
   dashboard_config_string_fields
   @ dashboard_config_bool_fields
@@ -709,6 +713,20 @@ let validate_dashboard_max_context_override = function
       Keeper_config.validate_max_context_override_value value |> Result.map ignore
   | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
 
+(* Same shared contract as every other authoring surface for this value
+   (fleet env, keeper TOML, keeper_up args): blank rejected, 2048-byte
+   bound. Null clears the keeper override and falls back to the fleet
+   setting. *)
+let validate_dashboard_autonomous_wake_prompt = function
+  | `Null -> Ok ()
+  | `String raw ->
+      (match Env_config_keeper.KeeperAutonomous.validate_wake_prompt raw with
+       | Ok (_ : string) -> Ok ()
+       | Error reason ->
+           Error (Printf.sprintf "autonomous_wake_prompt: %s" reason))
+  | other ->
+      dashboard_field_type_error "autonomous_wake_prompt" "a string or null" other
+
 let validate_dashboard_config_field key value =
   if key = "name" then
     match value with
@@ -716,6 +734,8 @@ let validate_dashboard_config_field key value =
     | other -> dashboard_field_type_error key "a string" other
   else if key = "max_context_override" then
     validate_dashboard_max_context_override value
+  else if key = "autonomous_wake_prompt" then
+    validate_dashboard_autonomous_wake_prompt value
   else if key = confirm_context_shrink_field then
     (match value with
      | `Bool _ -> Ok ()

@@ -154,6 +154,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     active_goal_ids: normalizeStringList(data.active_goal_ids),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
     max_context_override: decodeMaxContextOverride(data.max_context_override),
+    autonomous_wake_prompt: asNullableString(data.autonomous_wake_prompt),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
@@ -255,6 +256,8 @@ export type KeeperConfigUpdatePayload = {
   mention_targets?: string[]
   autoboot_enabled?: boolean
   max_context_override?: number | null
+  // null clears the keeper override (falls back to fleet autonomous.wake_prompt)
+  autonomous_wake_prompt?: string | null
   allowed_paths?: string[]
   // Sandbox
   sandbox_profile?: SandboxProfile

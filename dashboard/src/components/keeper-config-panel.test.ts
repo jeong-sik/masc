@@ -3,6 +3,7 @@ import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig, KeeperHookSlot } from '../types'
 import {
+  AUTONOMOUS_WAKE_PROMPT_MAX_BYTES,
   buildRuntimePayload,
   coerceNetworkMode,
   coerceSandboxProfile,
@@ -14,6 +15,7 @@ import {
   keeperConfigControlInventory,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
+  parseAutonomousWakePromptDraft,
   parseMaxContextOverrideDraft,
   type HookSlotEntry,
   type RuntimeDraft,
@@ -35,6 +37,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     active_goal_ids: ['goal-runtime'],
     autoboot_enabled: true,
     max_context_override: null,
+    autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
@@ -412,6 +415,7 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     active_goal_ids: [],
     autoboot_enabled: true,
     max_context_override: null,
+    autonomous_wake_prompt: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     allowed_paths: [],
@@ -634,6 +638,51 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(parseMaxContextOverrideDraft('9007199254740993')).toMatchObject({ ok: false })
     expect(parseMaxContextOverrideDraft('128001')).toEqual({ ok: true, value: 128_001 })
     expect(parseMaxContextOverrideDraft('0')).toEqual({ ok: true, value: null })
+  })
+})
+
+describe('autonomous wake prompt draft', () => {
+  function draftFrom(config: KeeperConfig, overrides: Partial<RuntimeDraft> = {}): RuntimeDraft {
+    return { ...initRuntimeDraftFromConfig(config), ...overrides }
+  }
+
+  it('treats a blank draft as inherit (null) and trims whitespace', () => {
+    expect(parseAutonomousWakePromptDraft('')).toEqual({ ok: true, value: null })
+    expect(parseAutonomousWakePromptDraft('   \n ')).toEqual({ ok: true, value: null })
+    expect(parseAutonomousWakePromptDraft('  진행 상황 요약부터.  '))
+      .toEqual({ ok: true, value: '진행 상황 요약부터.' })
+  })
+
+  it('rejects a draft over the byte bound (bytes, not code points)', () => {
+    const atBound = 'a'.repeat(AUTONOMOUS_WAKE_PROMPT_MAX_BYTES)
+    expect(parseAutonomousWakePromptDraft(atBound)).toEqual({ ok: true, value: atBound })
+    expect(parseAutonomousWakePromptDraft(atBound + 'b')).toMatchObject({ ok: false })
+    // 한글 3B/char: 683 chars = 2049 bytes — over the bound while
+    // string length (683) stays far under it.
+    expect(parseAutonomousWakePromptDraft('가'.repeat(683))).toMatchObject({ ok: false })
+  })
+
+  it('omits the field when unchanged, sends the trimmed value when set', () => {
+    const c = makeKeeperConfigForSandbox({ autonomous_wake_prompt: null })
+    expect(buildRuntimePayload(draftFrom(c), c).autonomous_wake_prompt).toBeUndefined()
+    const payload = buildRuntimePayload(
+      draftFrom(c, { autonomous_wake_prompt: ' 백로그를 확인하고 하나 진행해. ' }),
+      c,
+    )
+    expect(payload.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
+  })
+
+  it('sends null to clear an existing keeper override', () => {
+    const c = makeKeeperConfigForSandbox({ autonomous_wake_prompt: '기존 오버라이드' })
+    const payload = buildRuntimePayload(draftFrom(c, { autonomous_wake_prompt: '' }), c)
+    expect(payload.autonomous_wake_prompt).toBeNull()
+  })
+
+  it('round-trips the config value into the draft', () => {
+    const set = makeKeeperConfigForSandbox({ autonomous_wake_prompt: '오버라이드' })
+    expect(initRuntimeDraftFromConfig(set).autonomous_wake_prompt).toBe('오버라이드')
+    const unset = makeKeeperConfigForSandbox({ autonomous_wake_prompt: null })
+    expect(initRuntimeDraftFromConfig(unset).autonomous_wake_prompt).toBe('')
   })
 })
 

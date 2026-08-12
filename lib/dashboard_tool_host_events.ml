@@ -53,6 +53,7 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
          spelling; no new default introduced. *)
       let default_client_name = Option.value ~default:"tool-host" fallback_agent in
       let client_name =
+        (* DET-OK: this is the pre-existing client fallback, not a new default. *)
         Option.value ~default:default_client_name
           (stringish_member_opt json "client_name")
       in
@@ -60,6 +61,7 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
          spelling; no new default introduced. *)
       let default_agent_name = Option.value ~default:client_name fallback_agent in
       let agent_name =
+        (* DET-OK: this is the pre-existing agent fallback, not a new default. *)
         Option.value ~default:default_agent_name
           (stringish_member_opt json "agent_name")
       in

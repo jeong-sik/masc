@@ -465,7 +465,26 @@ let heartbeat_event_intake
      checkpoints while that exact source stays pending for continuation. *)
   let base_path = ctx.config.base_path in
   let keeper_name = meta_after_triage.name in
+  (* A stimulus whose intake fails transiently keeps its pending entry — it is
+     never acked and never dropped — but it must not hold the selection for the
+     rest of this cycle, or one unreadable entry stops every entry behind it.
+     [select_when] already scans with [first_ready_entry], so withdrawing the
+     observed failure from [ready] hands the turn to the next entry instead.
+
+     The withdrawal set grows by one entry per iteration over a finite pending
+     list, so the walk terminates on the list itself. That is why this is not a
+     retry count, a cooldown, or a cap: nothing here suppresses the failure or
+     defers it on a clock. The entry is reconsidered on the next cycle exactly
+     as before. *)
+  let withdrawn_this_cycle = ref [] in
   let select_pending_matching ready =
+    let ready (stimulus : Keeper_event_queue.stimulus) =
+      (not
+         (List.exists
+            (Keeper_event_queue.stimulus_identity_equal stimulus)
+            !withdrawn_this_cycle))
+      && ready stimulus
+    in
     Keeper_registry_event_queue.select_when_result
       ~base_path
       keeper_name
@@ -514,16 +533,22 @@ let heartbeat_event_intake
            keeper_name;
          select_pending_after_spent_reconciliation ())
   in
-  let pending_selection = select_pending_after_spent_reconciliation () in
-  let queued_observations, consumed_stimuli, pending_selection, event_queue_intake_error =
-    match pending_selection with
+  (* [first_withdrawn] keeps the first transient failure of the cycle so the
+     reported error still names the entry that was actually unavailable, even
+     when a later entry supplies the turn. *)
+  let rec intake_selection first_withdrawn =
+    match select_pending_after_spent_reconciliation () with
     | Error message ->
       Log.Keeper.error
         "turn entry: event queue selection failed keeper=%s: %s"
         keeper_name
         message;
       [], [], None, Some (Pending_selection_failed message)
-    | Ok None -> [], [], None, None
+    | Ok None ->
+      (match first_withdrawn with
+       | None -> [], [], None, None
+       | Some (selection, unavailable) ->
+         [], [], Some selection, Some (Transient_board_read unavailable))
     | Ok (Some selection) ->
       (match
          consume_single_heartbeat_stimulus
@@ -534,7 +559,22 @@ let heartbeat_event_intake
        | Stimulus_consumed observations ->
          observations, [ selection.source ], Some selection, None
        | Stimulus_retry_later unavailable ->
-         [], [], Some selection, Some (Transient_board_read unavailable))
+         withdrawn_this_cycle := selection.source :: !withdrawn_this_cycle;
+         Log.Keeper.info
+           "turn entry: withdrew transiently unavailable stimulus from this \
+            cycle keeper=%s: %s"
+           keeper_name
+           (Keeper_world_observation_board_signal.unavailable_to_string
+              unavailable);
+         let first_withdrawn =
+           match first_withdrawn with
+           | None -> Some (selection, unavailable)
+           | Some _ as kept -> kept
+         in
+         intake_selection first_withdrawn)
+  in
+  let queued_observations, consumed_stimuli, pending_selection, event_queue_intake_error =
+    intake_selection None
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
   let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in

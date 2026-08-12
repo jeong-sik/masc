@@ -1825,7 +1825,7 @@ let add_routes ~sw ~clock router =
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth
-           ~permission:Masc_domain.CanAdmin
+           ~permission:Keeper_chat_operations.read_permission
            (fun state _agent_name req reqd ->
              Keeper_chat_operations.handle_get state req reqd route)
            request
@@ -1866,7 +1866,7 @@ let add_routes ~sw ~clock router =
        match Keeper_chat_operations.mutation_route (Http.Request.path request) with
        | Some route ->
          with_token_permission_auth
-           ~permission:Masc_domain.CanAdmin
+           ~permission:Keeper_chat_operations.mutation_permission
            (fun state _agent_name req reqd ->
              Http.Request.read_body_async reqd (fun body_str ->
                Keeper_chat_operations.handle_mutation

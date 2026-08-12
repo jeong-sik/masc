@@ -423,6 +423,10 @@ let test_get_status_projects_backlog_tasks () =
     match Grpc_eio.Service.get_method service "GetStatus" with
     | Some { handler = `Unary handler; _ } ->
       let resp = T.StatusResponse.of_bytes (handler "") in
+      Alcotest.(check int) "agents count" 1 (List.length resp.agents);
+      let agent = List.hd resp.agents in
+      Alcotest.(check string) "agent name" "alpha" agent.T.name;
+      Alcotest.(check string) "agent status" "active" agent.T.status;
       Alcotest.(check int) "tasks count" 1 (List.length resp.tasks);
       let task = List.hd resp.tasks in
       Alcotest.(check string) "task id" "task-001" task.T.id;
@@ -630,6 +634,56 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
     | _ -> Alcotest.fail "Heartbeat bidi handler missing")
 ;;
 
+let test_heartbeat_projects_workspace_view () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_temp_dir "masc-grpc-heartbeat-workspace-view" (fun dir ->
+    let workspace_config = Workspace_utils.default_config dir in
+    ignore (Masc.Workspace.init workspace_config ~agent_name:(Some "alpha"));
+    ignore
+      (Masc.Workspace.add_task
+         workspace_config
+         ~title:"Keep claimed work pending"
+         ~priority:1
+         ~description:"Project the Workspace task snapshot");
+    ignore (Masc.Workspace.claim_next_r workspace_config ~agent_name:"alpha" ());
+    let service =
+      Masc_grpc_service.create_service
+        ~workspace_config
+        ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
+        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
+          Error "test stub")
+    in
+    match Grpc_eio.Service.get_method service "Heartbeat" with
+    | Some { handler = `Bidi handler; _ } ->
+      Eio.Switch.run
+      @@ fun sw ->
+      let request_stream = Grpc_eio.Stream.create 16 in
+      let response_stream = handler ~sw request_stream in
+      Grpc_eio.Stream.add
+        request_stream
+        (T.HeartbeatPing.to_bytes
+           { agent_name = "alpha"
+           ; session_id = "sess-workspace-view"
+           ; timestamp_ms = 1700000000000L
+           ; current_task_id = ""
+           });
+      let ack =
+        Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 1.0 (fun () ->
+          Grpc_eio.Stream.take response_stream)
+        |> T.HeartbeatAck.of_bytes
+      in
+      Alcotest.(check (list string))
+        "claimed task emits no assignment directive"
+        []
+        (List.map T.HeartbeatAck.directive_to_wire ack.directives);
+      Alcotest.(check int) "active agents" 1 ack.active_agent_count;
+      Alcotest.(check int) "pending tasks" 1 ack.pending_task_count;
+      Grpc_eio.Stream.close request_stream
+    | _ -> Alcotest.fail "Heartbeat bidi handler missing")
+;;
+
 (* ====== Test suite ====== *)
 
 let () =
@@ -694,6 +748,10 @@ let () =
             "heartbeat invalid bytes warn and continue"
             `Quick
             test_heartbeat_handler_invalid_bytes_warns_and_continues
+        ; Alcotest.test_case
+            "heartbeat projects workspace view"
+            `Quick
+            test_heartbeat_projects_workspace_view
         ] )
     ; ( "server_config"
       , [ Alcotest.test_case "default_port" `Quick test_grpc_default_port

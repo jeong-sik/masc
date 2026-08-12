@@ -122,7 +122,7 @@ By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retr
 
 ### Base timing
 
-- Keepalive loop base interval: `30s`
+- Keepalive loop base interval: `300s`
 - Keepalive sleep: exact resolved `keeper.keepalive_interval_sec`
 - Snapshot write interval: runtime param `keeper.snapshot_sec`
 - Current default `keeper.snapshot_sec`: `300s`

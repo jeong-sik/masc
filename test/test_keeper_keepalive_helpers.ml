@@ -211,7 +211,7 @@ let test_directed_wake_cuts_configured_sleep () =
         ~clock:(Eio.Stdenv.clock env)
         ~stop
         ~wakeup
-        30.0
+        (fun () -> 30.0)
     in
     check bool "directed wake returns Woken" true
       (match outcome with
@@ -229,12 +229,67 @@ let test_explicit_stop_cuts_configured_sleep () =
         ~clock:(Eio.Stdenv.clock env)
         ~stop
         ~wakeup
-        30.0
+        (fun () -> 30.0)
     in
     check bool "explicit stop returns Stopped" true
       (match outcome with
        | KKS.Stopped -> true
        | KKS.Woken | KKS.Timeout -> false))
+;;
+
+let test_cadence_wake_consumes_only_active_sleep () =
+  Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make false in
+    let cadence_sleeping = Atomic.make false in
+    let outcome = ref None in
+    Eio.Fiber.both
+      (fun () ->
+         outcome :=
+           Some
+             (KKS.interruptible_sleep
+                ~cadence_sleeping
+                ~clock
+                ~stop
+                ~wakeup
+                (fun () -> 30.0)))
+      (fun () ->
+         while not (Atomic.get cadence_sleeping) do
+           Eio.Time.sleep clock 0.001
+         done;
+         check bool "active sleeper CAS succeeds" true
+           (Atomic.compare_and_set cadence_sleeping true false));
+    check bool "cadence wake returns Woken" true
+      (match !outcome with
+       | Some KKS.Woken -> true
+       | Some (KKS.Stopped | KKS.Timeout) | None -> false);
+    check bool "sleep handshake is cleared" false
+      (Atomic.get cadence_sleeping))
+;;
+
+let test_cadence_handshake_precedes_duration_resolution () =
+  Eio_main.run (fun env ->
+    let stop = Atomic.make false in
+    let wakeup = Atomic.make false in
+    let cadence_sleeping = Atomic.make false in
+    let handshake_was_visible = ref false in
+    let outcome =
+      KKS.interruptible_sleep
+        ~cadence_sleeping
+        ~clock:(Eio.Stdenv.clock env)
+        ~stop
+        ~wakeup
+        (fun () ->
+          handshake_was_visible := Atomic.get cadence_sleeping;
+          ignore (Atomic.compare_and_set cadence_sleeping true false : bool);
+          0.0)
+    in
+    check bool "duration resolves after handshake" true !handshake_was_visible;
+    check bool "cadence change during resolution is observed" true
+      (match outcome with
+       | KKS.Woken -> true
+       | KKS.Stopped | KKS.Timeout -> false))
 ;;
 
 let test_board_goal_keyword_overlap_is_not_wake_reason () =
@@ -886,6 +941,10 @@ let () =
             test_directed_wake_cuts_configured_sleep
         ; test_case "explicit stop cuts configured sleep" `Quick
             test_explicit_stop_cuts_configured_sleep
+        ; test_case "cadence wake consumes only active sleep" `Quick
+            test_cadence_wake_consumes_only_active_sleep
+        ; test_case "cadence handshake precedes duration resolution" `Quick
+            test_cadence_handshake_precedes_duration_resolution
         ] )
     ]
 ;;

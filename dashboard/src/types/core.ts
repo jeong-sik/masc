@@ -1125,6 +1125,8 @@ export interface Keeper {
   selected_runtime_canonical?: string | null
   status: string
   keepalive_running?: boolean
+  keeper_keepalive_interval_s?: number | null
+  heartbeat_stale_after_s?: number | null
   diagnostic?: KeeperDiagnostic | null
   registry_state?: string | null
   proactive_enabled?: boolean

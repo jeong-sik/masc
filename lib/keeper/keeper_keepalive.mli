@@ -90,7 +90,7 @@ val fork_board_attention_worker :
     Runs synchronously in the calling fiber until [stop] becomes true. *)
 val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
-  wakeup:bool Atomic.t -> unit
+  wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
 (** Compute the p-th percentile of a float array.
     Returns 0.0 for empty arrays. Used by per-stage profiling. *)

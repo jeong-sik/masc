@@ -392,7 +392,7 @@ end
     @category Thresholds
     @ops_class operator *)
 let keepalive_interval_sec_ =
-  let interval_sec = get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
+  let interval_sec = get_int ~default:300 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
   if interval_sec > 0
   then interval_sec
   else
@@ -413,7 +413,7 @@ module WorkAsHeartbeat = struct
       sync is required again. Floor = keepalive interval (dynamic). *)
   let max_silence_sec =
     let floor = Float.of_int keepalive_interval_sec_ in
-    Float.max floor (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
+    Float.max floor (get_float ~default:300.0 "MASC_KEEPER_MAX_SILENCE_SEC")
   ;;
 end
 

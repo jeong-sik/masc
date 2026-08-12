@@ -153,6 +153,197 @@ let test_target_resolution_implicit_unregistered_author () =
          "error message"
          "target_keeper is required because board post author \"operator\" is not a registered keeper")
 
+let test_cadence_change_wakes_only_live_sleepers_when_shortened () =
+  let base_path = "/tmp/test_runtime_param_keeper_wakeup" in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+      let first =
+        Keeper_registry.For_testing.register ~base_path "first" (make_meta "first")
+      in
+      let second =
+        Keeper_registry.For_testing.register ~base_path "second" (make_meta "second")
+      in
+      let second = { second with phase = Keeper_state_machine.Failing } in
+      Keeper_registry.For_testing.unsafe_put_entry ~base_path "second" second;
+      let in_flight =
+        Keeper_registry.For_testing.register
+          ~base_path
+          "in-flight"
+          (make_meta "in-flight")
+      in
+      let awake =
+        Keeper_registry.For_testing.register
+          ~base_path
+          "awake-pre-turn"
+          (make_meta "awake-pre-turn")
+      in
+      Keeper_registry.mark_turn_started
+        ~base_path
+        ~wake:Keeper_registry.Proactive_tick
+        "in-flight";
+      Atomic.set first.cadence_sleeping true;
+      Atomic.set second.cadence_sleeping true;
+      let unrelated =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path
+          ~param_key:"keeper.max_turns"
+          ~previous_interval_s:300
+          ~new_interval_s:30
+      in
+      check bool "unrelated param has no wake effect" true
+        (Option.is_none unrelated);
+      check bool "unrelated param keeps first asleep" true
+        (Atomic.get first.cadence_sleeping);
+      check bool "unrelated param keeps second asleep" true
+        (Atomic.get second.cadence_sleeping);
+      let summary =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path
+          ~param_key:
+            (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+          ~previous_interval_s:300
+          ~new_interval_s:30
+        |> Option.value ~default:`Null
+      in
+      let open Yojson.Safe.Util in
+      check bool "cadence change consumes first sleeper" false
+        (Atomic.get first.cadence_sleeping);
+      check bool "cadence decrease consumes failing sleeper" false
+        (Atomic.get second.cadence_sleeping);
+      check bool "cadence decrease does not mark an active turn sleeping" false
+        (Atomic.get in_flight.cadence_sleeping);
+      check bool "cadence decrease does not queue during pre-turn work" false
+        (Atomic.get awake.cadence_sleeping);
+      check int "summary requested all live lanes" 4
+        (summary |> member "requested" |> to_int);
+      check int "summary signaled both sleepers" 2
+        (summary |> member "signaled" |> to_int);
+      check int "summary exposes in-flight deferral" 1
+        (summary |> member "deferred_in_flight" |> to_int);
+      check int "summary exposes awake pre-turn deferral" 1
+        (summary |> member "deferred_awake" |> to_int);
+      check bool "summary does not claim full delivery" false
+        (summary |> member "fully_signaled" |> to_bool);
+      Atomic.set first.cadence_sleeping true;
+      Atomic.set second.cadence_sleeping true;
+      let lengthened =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path
+          ~param_key:
+            (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+          ~previous_interval_s:30
+          ~new_interval_s:300
+        |> Option.value ~default:`Null
+      in
+      check bool "cadence increase keeps running sleeper asleep" true
+        (Atomic.get first.cadence_sleeping);
+      check bool "cadence increase keeps failing sleeper asleep" true
+        (Atomic.get second.cadence_sleeping);
+      check int "lengthening requests no wakes" 0
+        (lengthened |> member "requested" |> to_int);
+      check string "lengthening is explicit" "lengthened"
+        (lengthened |> member "change" |> to_string);
+      let unchanged =
+        Server_routes_http_routes_activity.wake_keepers_after_runtime_param_change
+          ~base_path
+          ~param_key:
+            (Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec)
+          ~previous_interval_s:300
+          ~new_interval_s:300
+        |> Option.value ~default:`Null
+      in
+      check int "unchanged cadence requests no wakes" 0
+        (unchanged |> member "requested" |> to_int);
+      check string "unchanged cadence is explicit" "unchanged"
+        (unchanged |> member "change" |> to_string))
+
+let test_keeper_metric_producer_tracks_turn_and_failed_sleep () =
+  let base_path = "/tmp/test_keeper_metric_producer_active" in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+    (fun () ->
+      let entry =
+        Keeper_registry.For_testing.register
+          ~base_path
+          "producer"
+          (make_meta "producer")
+      in
+      check bool "idle running lane is not an active producer" false
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path);
+      Keeper_registry.mark_turn_started
+        ~base_path
+        ~wake:Keeper_registry.Proactive_tick
+        entry.name;
+      check bool "live turn is an active producer" true
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path);
+      Keeper_registry.mark_turn_finished ~base_path entry.name;
+      let failed =
+        Keeper_registry.get ~base_path entry.name
+        |> Option.value ~default:entry
+      in
+      let failed = { failed with phase = Keeper_state_machine.Failing } in
+      Keeper_registry.For_testing.unsafe_put_entry ~base_path entry.name failed;
+      Atomic.set failed.cadence_sleeping true;
+      check bool "failed inter-cycle sleep is still producing" true
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path);
+      Atomic.set failed.cadence_sleeping false;
+      check bool "failed awake lane does not mask stale telemetry" false
+        (Keeper_status_runtime.keeper_metric_producer_active ~base_path))
+
+let test_cadence_mutation_and_wake_are_serialized () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let param_key =
+    Runtime_params.key Runtime_settings.keeper_keepalive_interval_sec
+  in
+  let first_entered, resolve_first_entered = Eio.Promise.create () in
+  let release_first, resolve_release_first = Eio.Promise.create () in
+  let second_attempting, resolve_second_attempting = Eio.Promise.create () in
+  let second_entered = Atomic.make false in
+  let first_done, resolve_first_done = Eio.Promise.create () in
+  let second_done, resolve_second_done = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    let result =
+      Server_routes_http_routes_activity.mutate_runtime_param_with_effects
+        ~base_path:"/tmp/test_cadence_effect_serialization"
+        ~param_key
+        (fun () ->
+          Eio.Promise.resolve resolve_first_entered ();
+          Eio.Promise.await release_first;
+          Ok
+            { Runtime_params.old_value = `Int 300
+            ; new_value = `Int 30
+            })
+    in
+    Eio.Promise.resolve resolve_first_done result);
+  Eio.Promise.await first_entered;
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Promise.resolve resolve_second_attempting ();
+    let result =
+      Server_routes_http_routes_activity.mutate_runtime_param_with_effects
+        ~base_path:"/tmp/test_cadence_effect_serialization"
+        ~param_key
+        (fun () ->
+          Atomic.set second_entered true;
+          Ok
+            { Runtime_params.old_value = `Int 30
+            ; new_value = `Int 600
+            })
+    in
+    Eio.Promise.resolve resolve_second_done result);
+  Eio.Promise.await second_attempting;
+  Eio.Fiber.yield ();
+  check bool "later cadence mutation waits through the earlier wake" false
+    (Atomic.get second_entered);
+  Eio.Promise.resolve resolve_release_first ();
+  ignore (Eio.Promise.await first_done);
+  ignore (Eio.Promise.await second_done);
+  check bool "later cadence mutation enters after wake completion" true
+    (Atomic.get second_entered)
+
 let () =
   run "Server board context inference resolution"
     [ ( "parse_request",
@@ -162,5 +353,13 @@ let () =
         ; test_case "explicit unregistered target" `Quick test_target_resolution_explicit_unregistered
         ; test_case "implicit registered author" `Quick test_target_resolution_implicit_registered_author
         ; test_case "implicit unregistered author" `Quick test_target_resolution_implicit_unregistered_author
+        ] )
+    ; ( "runtime_params",
+        [ test_case "cadence decrease wakes only live sleepers" `Quick
+            test_cadence_change_wakes_only_live_sleepers_when_shortened
+        ; test_case "cadence mutation and wake are serialized" `Quick
+            test_cadence_mutation_and_wake_are_serialized
+        ; test_case "Keeper metric producer tracks live work" `Quick
+            test_keeper_metric_producer_tracks_turn_and_failed_sleep
         ] )
     ]

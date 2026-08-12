@@ -41,6 +41,7 @@ normal_targets=(
   @test/runtest-test_keeper_autoboot_single_owner
   @test/runtest-test_keeper_meta_current_schema
   @test/runtest-dashboard-http-behavior-contracts
+  @test/runtest-test_dashboard_composite_claim_window
   @test/runtest-test_model_inference_metrics
   @test/runtest-test_channel_gate_content_length_knob
   @test/runtest-test_keeper_decision_audit_dated_store

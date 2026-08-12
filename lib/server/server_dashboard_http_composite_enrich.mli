@@ -16,7 +16,18 @@ val composite_claim_scope_absent :
        (string *
         [> `Bool of bool | `List of 'a list | `Null | `String of string ])
        list ]
+val claim_rows_per_keeper : int
+val claim_window_rows : int
+
+type claim_window = Server_dashboard_http_composite_claims.claim_window
+
+val read_claim_window : unit -> claim_window
+
+val latest_task_claim_row :
+  claim_window -> keeper_name:string -> Yojson.Safe.t option
+
 val composite_claim_scope_json :
+  claim_window:claim_window ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val find_override_field_source :
   string -> Yojson.Safe.t -> Yojson.Safe.t option
@@ -25,6 +36,7 @@ val composite_config_drift_json :
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val composite_execution_receipt_json :
   config:Workspace.config ->
+  claim_window:claim_window ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val lower_string_opt : string option -> string option
 val string_opt_is_any : string option -> string list -> bool
@@ -85,6 +97,7 @@ val composite_recommended_actions_json :
   attention:composite_runtime_attention -> [> `List of Yojson.Safe.t list ]
 val enrich_composite_snapshot_json :
   config:Workspace.config ->
+  claim_window:claim_window ->
   Keeper_registry.registry_entry -> Yojson.Safe.t -> Yojson.Safe.t
 val dashboard_keeper_composite_json :
   config:Workspace.config ->

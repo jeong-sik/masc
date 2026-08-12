@@ -65,14 +65,80 @@ let composite_claim_scope_absent =
     ]
 ;;
 
-let composite_claim_scope_json ~keeper_name =
-  let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:100 () in
-  match
-    entries
-    |> List.find_opt (fun json ->
-      String.equal (Option.value ~default:"" (json_string "tool" json))
-        "keeper_task_claim")
-  with
+(* Rows one keeper's claim lookup considers, and the fleet-wide window that
+   covers it. [read_recent ~keeper_name ~n] over-scans by
+   [read_over_scan_factor] before its keeper filter, so a shared read of
+   [claim_window_rows] covers exactly what a per-keeper [read_recent ~n:100]
+   would have read. *)
+let claim_rows_per_keeper = 100
+
+let claim_window_rows =
+  claim_rows_per_keeper * Keeper_tool_call_log.read_over_scan_factor
+;;
+
+(* One fleet-wide tail of tool-call rows, read once and shared by every keeper
+   in the same composite envelope.
+
+   [composite_claim_scope_json] used to read its own window per keeper. Every
+   such read pulls [claim_window_rows] rows from the single shared tool-call
+   store, so the fleet envelope — which calls this once per keeper — read and
+   parsed the same rows once per keeper: identical bytes, identical parse
+   trees, N times, to answer N questions one read answers for all of them. On
+   the store this was measured against, rows average 6.8 KB.
+
+   Constructed only by [read_claim_window] so a caller cannot pass a list that
+   was filtered, reordered, or read with a different window. *)
+type claim_window = Claim_window of Yojson.Safe.t list
+
+let read_claim_window () =
+  Claim_window (Keeper_tool_call_log.read_recent_rows ~n:claim_window_rows ())
+;;
+
+let row_is_task_claim json =
+  (* The tool name is a string on the wire; [Keeper_tooling.Name] is the typed
+     vocabulary that owns it, so the comparison goes through the variant rather
+     than a literal. A renamed or removed constructor then fails to compile
+     instead of silently matching nothing. *)
+  match Option.bind (json_string "tool" json) Keeper_tooling.Name.of_string with
+  | Some Keeper_tooling.Name.Task_claim -> true
+  | Some
+      ( Keeper_tooling.Name.Broadcast
+      | Keeper_tooling.Name.Task_create
+      | Keeper_tooling.Name.Task_done
+      | Keeper_tooling.Name.Tasks_audit
+      | Keeper_tooling.Name.Tasks_list )
+  | None -> false
+;;
+
+(* The latest claim, not the first one a scan meets.
+
+   [Keeper_tool_call_log.read_recent] and [read_recent_rows] both return rows
+   oldest-first (dated_jsonl.mli: "the newest [n] entries in chronological
+   order (oldest first)"), so the [List.find_opt] this replaces returned the
+   *oldest* claim in the window. It went unnoticed because
+   [filter_rows_for_keeper] rings a busy keeper down to its last
+   [claim_rows_per_keeper] rows, which usually trims the older claim away and
+   leaves the newer one to be found by accident; a quiet keeper keeps both and
+   reports the superseded task. Measured live: keeper [analyst] (46 rows in
+   window, nothing trimmed) reported task-305 while it had claimed task-306.
+   See #28437.
+
+   Ordering is row order, which is what the store documents and what the
+   previous code relied on. The row's own [ts] is deliberately not consulted:
+   that would make append order and timestamp order two competing authorities
+   for "latest". *)
+let latest_task_claim_row (Claim_window rows) ~keeper_name =
+  Keeper_tool_call_log.filter_rows_for_keeper
+    ~keeper_name
+    ~n:claim_rows_per_keeper
+    rows
+  |> List.fold_left
+       (fun latest json -> if row_is_task_claim json then Some json else latest)
+       None
+;;
+
+let composite_claim_scope_json ~claim_window ~keeper_name =
+  match latest_task_claim_row claim_window ~keeper_name with
   | None -> composite_claim_scope_absent
   | Some call ->
     let output =
@@ -170,8 +236,8 @@ let composite_config_drift_json ~config ~keeper_name =
       ]
 ;;
 
-let composite_execution_receipt_json ~(config : Workspace.config) ~keeper_name =
-  let claim_scope = composite_claim_scope_json ~keeper_name in
+let composite_execution_receipt_json ~(config : Workspace.config) ~claim_window ~keeper_name =
+  let claim_scope = composite_claim_scope_json ~claim_window ~keeper_name in
   let config_drift = composite_config_drift_json ~config ~keeper_name in
   match Keeper_execution_receipt.latest_json config keeper_name with
   | None ->

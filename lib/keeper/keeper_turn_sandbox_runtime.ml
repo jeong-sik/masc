@@ -37,6 +37,13 @@ type t =
 let get_state t = Atomic.get t.state
 let set_state t state = Atomic.set t.state state
 
+let rec update_github_identity_snapshots t update =
+  let current = Atomic.get t.github_identity_snapshots in
+  let updated = update current in
+  if not (Atomic.compare_and_set t.github_identity_snapshots current updated)
+  then update_github_identity_snapshots t update
+;;
+
 let release_github_identity_snapshot t =
   let snapshots = Atomic.exchange t.github_identity_snapshots no_github_identity_snapshots in
   Option.iter (fun snapshot -> snapshot.cleanup ()) snapshots.current;
@@ -499,10 +506,8 @@ let start_container ?timeout_sec (t : t) =
              with
              | Ok () ->
                if github_identity_is_new
-               then (
-                 let snapshots = Atomic.get t.github_identity_snapshots in
-                 Atomic.set
-                   t.github_identity_snapshots
+               then
+                 update_github_identity_snapshots t (fun snapshots ->
                    { snapshots with current = Some github_identity });
                keep_github_identity_snapshot := true;
                set_state t (Running { container_name });
@@ -568,13 +573,11 @@ let ensure_started ?(validate_running = false) ?timeout_sec (t : t) =
 ;;
 
 let retire_current_github_identity_snapshot t =
-  let snapshots = Atomic.get t.github_identity_snapshots in
-  match snapshots.current with
-  | None -> ()
-  | Some current ->
-    Atomic.set
-      t.github_identity_snapshots
-      { current = None; retired = current :: snapshots.retired }
+  update_github_identity_snapshots t (fun snapshots ->
+    match snapshots.current with
+    | None -> snapshots
+    | Some current ->
+      { current = None; retired = current :: snapshots.retired })
 ;;
 
 let stop_container_for_github_identity_refresh ?timeout_sec t =

@@ -1715,9 +1715,8 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/scheduled-automation" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
-           Domain_pool_ref.submit_io_or_inline (fun () ->
-             Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
-               (Mcp_server.workspace_config state))
+           Server_dashboard_http.dashboard_scheduled_automation_http_json
+             ~config:(Mcp_server.workspace_config state)
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

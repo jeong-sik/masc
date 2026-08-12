@@ -1413,6 +1413,71 @@ let test_dashboard_shell_timeout_fallback_reports_timing_context () =
       check int "timing top is empty without an active trace" 0
         (diagnostics |> member "projection_timing_top" |> to_list |> List.length))
 
+(* Both routes below scan a store. Seeding a sentinel under the key the
+   projection is supposed to consult, then asserting the projection returns it,
+   pins that the cache is actually in the path: without it the call recomputes
+   and answers with real data instead of the sentinel.
+
+   Measured before this: scheduled-automation 272 ms cold / 204 ms warm for
+   96 KB, agent-activity 105 ms cold / 75 ms warm for 2.2 KB. Neither second
+   pass was cheaper than its first, which is what an absent cache looks like
+   from outside. *)
+let cache_sentinel key = `Assoc [ ("sentinel", `String key) ]
+
+let seed_cache key =
+  ignore (Dashboard_cache.get_or_compute key ~ttl:60.0 (fun () -> cache_sentinel key))
+
+let test_scheduled_automation_reads_its_cache_key () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let cache_key =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key
+          config
+          "scheduled_automation"
+          []
+      in
+      seed_cache cache_key;
+      check
+        (of_pp Yojson.Safe.pp)
+        "scheduled-automation is served from its cache key"
+        (cache_sentinel cache_key)
+        (Server_dashboard_http.dashboard_scheduled_automation_http_json ~config))
+
+(* The window selects which rows the scan covers, so two windows must not share
+   an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)
+let test_agent_activity_keys_on_its_window () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let key_for hours =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key
+          config
+          "agent_activity"
+          [ ("hours", Some (string_of_float hours)) ]
+      in
+      let default_key = key_for 24.0 in
+      seed_cache default_key;
+      check
+        (of_pp Yojson.Safe.pp)
+        "the default window is served from its cache key"
+        (cache_sentinel default_key)
+        (Server_dashboard_http_agent_api.agent_activity_http_json
+           ~config ~hours:24.0);
+      let other =
+        Server_dashboard_http_agent_api.agent_activity_http_json
+          ~config ~hours:1.0
+      in
+      check bool "a different window does not reuse the 24h entry" false
+        (Yojson.Safe.equal other (cache_sentinel default_key));
+      let open Yojson.Safe.Util in
+      check (float 0.001) "the computed window is the one asked for" 1.0
+        (other |> member "hours" |> to_float))
+
 let test_dashboard_proof_http_json_surfaces_submission_index () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let module V = Lib.Verification in
@@ -3546,6 +3611,10 @@ let () =
             test_catchup_judge_prompt_failure_is_server_error;
           test_case "proof payload exposes submission index" `Quick
             test_dashboard_proof_http_json_surfaces_submission_index;
+          test_case "scheduled-automation reads its cache key" `Quick
+            test_scheduled_automation_reads_its_cache_key;
+          test_case "agent-activity keys on its window" `Quick
+            test_agent_activity_keys_on_its_window;
           test_case "execution trust uses narrow Keeper projection" `Quick
             test_execution_trust_uses_narrow_keeper_projection;
           test_case "execution trust cannot call full Keeper projection" `Quick

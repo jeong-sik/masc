@@ -311,6 +311,40 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
     ]
 ;;
 
+(* Both the HTTP/1 router and the H2 gateway serve this projection, and the H2
+   registration carries a comment requiring the two to stay identical. Caching
+   at each call site would have been two copies of the policy and the first
+   chance for them to drift, so the cache lives with the projection and both
+   routes call this.
+
+   The route was offloaded but uncached, so a polling dashboard re-ran the
+   schedule scan every time: measured 272 ms cold and 204 ms warm for a 96 KB
+   response, the second pass no cheaper than the first. Its siblings
+   (briefing/sections, tool-quality) already pair the offload with the cache;
+   this one only ever had half the pair.
+
+   [live_cache_ttl_s] is the 30 s tier documented for "frequently-changing data
+   such as active keeper state" — schedule state belongs there rather than in
+   the 120 s projection tier. The response takes no query parameters, so
+   base_path is the whole key. *)
+let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
+  Yojson.Safe.t
+  =
+  let cache_key =
+    Server_dashboard_http_core_cache.dashboard_query_cache_key
+      config
+      "scheduled_automation"
+      []
+  in
+  Dashboard_cache.get_or_compute
+    cache_key
+    ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
+    (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+          config))
+;;
+
 let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:100 in
   let key =

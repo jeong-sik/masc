@@ -64,6 +64,54 @@ let positive_int_param ~name ~default = function
      | Some _ | None -> Error (name ^ " must be a positive integer"))
 ;;
 
+(* Per-agent tool-call rollup for [GET /api/v1/agent-activity].
+
+   The route carried neither of the two protections the dashboard applies to a
+   store scan, so [summarize_agent_activity] ran on the HTTP domain on every
+   request and nothing was reused between them: measured 105 ms cold and 75 ms
+   warm to produce 2.2 KB.
+
+   [hours] is part of the cache key because it selects the window the scan
+   covers — two windows are two answers, not one answer served twice. [since]
+   is derived inside the compute rather than keyed on: it moves with wall-clock,
+   so keying on it would make every request a miss. A cached window is therefore
+   anchored up to one TTL in the past, which is what the 30 s tier means for a
+   rollup whose default window is 24 h.
+
+   Named rather than inlined in the route so the cache policy has one home and
+   a test can reach it without an HTTP round trip. *)
+let agent_activity_http_json ~(config : Workspace.config) ~hours : Yojson.Safe.t =
+  let cache_key =
+    Server_dashboard_http_core_cache.dashboard_query_cache_key
+      config
+      "agent_activity"
+      [ ("hours", Some (string_of_float hours)) ]
+  in
+  Dashboard_cache.get_or_compute
+    cache_key
+    ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
+    (fun () ->
+      Domain_pool_ref.submit_io_or_inline (fun () ->
+        let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
+        let activities = Telemetry_eio.summarize_agent_activity config ~since in
+        `Assoc
+          [ ("hours", `Float hours);
+            ("agents",
+             `List
+               (List.map
+                  (fun (a : Telemetry_eio.agent_activity) ->
+                     `Assoc
+                       [ ("agent_id", `String a.agent_id);
+                         ("tool_calls", `Int a.tool_calls);
+                         ("success_count", `Int a.success_count);
+                         ("failure_count", `Int a.failure_count);
+                         ("first_seen", `Float a.first_seen);
+                         ("last_seen", `Float a.last_seen);
+                       ])
+                  activities));
+          ]))
+;;
+
 let add_agent_api_routes router =
   router
   (* Agent activity -- per-agent tool call stats from telemetry *)
@@ -79,22 +127,11 @@ let add_agent_api_routes router =
              (`Assoc [ "error", `String detail ])
              reqd
          | Ok hours ->
-         let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
-         let activities =
-           Telemetry_eio.summarize_agent_activity (Mcp_server.workspace_config state) ~since
+         let json =
+           agent_activity_http_json
+             ~config:(Mcp_server.workspace_config state)
+             ~hours
          in
-         let json = `Assoc [
-           ("hours", `Float hours);
-           ("agents", `List (List.map (fun (a : Telemetry_eio.agent_activity) ->
-             `Assoc [
-               ("agent_id", `String a.agent_id);
-               ("tool_calls", `Int a.tool_calls);
-               ("success_count", `Int a.success_count);
-               ("failure_count", `Int a.failure_count);
-               ("first_seen", `Float a.first_seen);
-               ("last_seen", `Float a.last_seen);
-             ]) activities));
-         ] in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
 

@@ -121,7 +121,9 @@ let string_starts_with ~prefix s =
   slen >= plen && String.sub s 0 plen = prefix
 
 let contains_any haystack needles =
-  List.exists (fun needle -> String_util.contains_substring haystack needle) needles
+  List.exists
+    (fun needle -> String_util.contains_substring_ci haystack needle)
+    needles
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
@@ -308,7 +310,7 @@ let ensure_bound fixture =
   if (Tool_result.is_success result) then ()
   else begin
     let body = (Tool_result.message result) in
-    if String_util.contains_substring body "already joined" then ()
+    if String_util.contains_substring_ci body "already joined" then ()
     else failwith ("masc_start failed: " ^ body)
   end
 

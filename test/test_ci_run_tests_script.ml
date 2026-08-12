@@ -162,9 +162,9 @@ let test_deadline_terminates_command_once () =
       check bool "timed-out command did not complete" false (Sys.file_exists done_log);
       let observed = String.concat "\n" [ read_file ci_log; stdout; stderr ] in
       check bool "active process diagnostics" true
-        (contains_substring observed "[ci-diag] reason=timeout_1s");
+        (String_util.contains_substring observed "[ci-diag] reason=timeout_1s");
       check bool "timeout reported" true
-        (contains_substring observed "test command timed out after 1s"))
+        (String_util.contains_substring observed "test command timed out after 1s"))
 
 let test_deadline_kills_reparented_term_ignoring_child () =
   with_temp_dir "ci-run-tests-descendant" (fun dir ->

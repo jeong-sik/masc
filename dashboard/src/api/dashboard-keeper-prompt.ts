@@ -93,12 +93,36 @@ export async function fetchKeeperLastPrompt(
   })
 }
 
+// The listing reads a bounded prefix of each turn file, so a turn larger than
+// that budget arrives without a record count. That is a distinct state, not a
+// zero and not a missing field: a union here makes the panel decide what it
+// shows instead of letting a default stand in for a count nobody took.
+export type RawTraceCensus =
+  | { readonly state: 'whole_file'; readonly records: number }
+  | { readonly state: 'prefix_only'; readonly budgetBytes: number }
+
 export type RawTraceTurn = {
   readonly file: string
   readonly traceId: string | null
   readonly bytes: number
-  readonly records: number
+  readonly census: RawTraceCensus
   readonly modifiedAt: number
+}
+
+function decodeCensus(raw: unknown): RawTraceCensus | null {
+  if (!isRecord(raw)) return null
+  const state = asString(raw.state)
+  if (state === 'whole_file') {
+    const records = asNumber(raw.records)
+    if (records == null || !Number.isSafeInteger(records)) return null
+    return { state, records }
+  }
+  if (state === 'prefix_only') {
+    const budgetBytes = asNumber(raw.budget_bytes)
+    if (budgetBytes == null || !Number.isSafeInteger(budgetBytes)) return null
+    return { state, budgetBytes }
+  }
+  return null
 }
 
 function decodeTurnSummary(raw: unknown): RawTraceTurn | null {
@@ -113,11 +137,11 @@ function decodeTurnSummary(raw: unknown): RawTraceTurn | null {
     traceId = decoded
   }
   const bytes = asNumber(raw.bytes)
-  const records = asNumber(raw.records)
+  const census = decodeCensus(raw.census)
   const modifiedAt = asNumber(raw.modified_at)
-  if (file == null || bytes == null || records == null || modifiedAt == null) return null
-  if (!Number.isSafeInteger(bytes) || !Number.isSafeInteger(records)) return null
-  return { file, traceId, bytes, records, modifiedAt }
+  if (file == null || bytes == null || census == null || modifiedAt == null) return null
+  if (!Number.isSafeInteger(bytes)) return null
+  return { file, traceId, bytes, census, modifiedAt }
 }
 
 export async function fetchKeeperRawTraces(

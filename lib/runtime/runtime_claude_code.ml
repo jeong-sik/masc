@@ -122,6 +122,11 @@ type error =
       ; tool_effect_attempted : bool
       ; detail : string
       }
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_started : bool
+      }
   | Turn_failed of string
   | Quota_blocked of
       { api_error_status : int option
@@ -147,6 +152,13 @@ let error_to_string = function
       stage
       tool_effect_attempted
       detail
+  | Context_window_exceeded
+      { message; tool_effect_attempted; response_started } ->
+    Printf.sprintf
+      "Claude Code context window exceeded (tool_effect_attempted=%b response_started=%b): %s"
+      tool_effect_attempted
+      response_started
+      message
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
   | Quota_blocked { api_error_status; rate_limit } ->
     let status =
@@ -175,6 +187,7 @@ let error_kind = function
   | Subscription_required _ -> "subscription_required"
   | Unsupported_control_request _ -> "unsupported_control_request"
   | Turn_transport_interrupted _ -> "turn_transport_interrupted"
+  | Context_window_exceeded _ -> "context_window_exceeded"
   | Turn_failed _ -> "turn_failed"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
@@ -619,7 +632,8 @@ let parse_assistant ~expected_session_id fields =
     Ok (uuid, model, texts)
 ;;
 
-let parse_result ~expected_session_id ~rate_limit fields =
+let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
+    ~response_started fields =
   let stage = "result message" in
   let* subtype = required_string stage "subtype" fields in
   let* is_error = required_bool stage "is_error" fields in
@@ -666,30 +680,45 @@ let parse_result ~expected_session_id ~rate_limit fields =
            (fun (limit : rate_limit) -> limit.status = Rejected)
            rate_limit
     in
+    let terminal_failure_detail () =
+      Printf.sprintf
+        "terminal subtype=%s api_status=%s%s"
+        subtype
+        (Option.fold
+           ~none:"unknown"
+           ~some:string_of_int
+           api_error_status)
+        (match result with
+         | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
+         | Some _ | None -> "")
+    in
+    let provider_reported_context_window_exceeded =
+      Option.equal Int.equal api_error_status (Some 400)
+      && Option.exists
+           (fun detail ->
+              String.starts_with
+                ~prefix:"Prompt is too long"
+                (String.trim detail))
+           result
+    in
     if structurally_quota_blocked
     then Error (Quota_blocked { api_error_status; rate_limit })
+    else if is_error && provider_reported_context_window_exceeded
+    then
+      Error
+        (Context_window_exceeded
+           { message = terminal_failure_detail ()
+           ; tool_effect_attempted
+           ; response_started
+           })
     else if is_error
     then
-      (* [result] is the one field on this frame that says why the turn failed,
-         and it was parsed and dropped: a live keeper reported
-         "terminal subtype=success api_status=400" eleven times with no way to
-         tell a context overflow from anything else that returns 400 (#28071).
-         The 429 branch above already proves a status code can carry a typed
-         decision; until 400 gets the same treatment, the operator needs the
-         provider's own sentence. *)
-      Error
-        (Turn_failed
-           (Printf.sprintf
-              "terminal subtype=%s api_status=%s%s"
-              subtype
-              (Option.fold
-                 ~none:"unknown"
-                 ~some:string_of_int
-                 api_error_status)
-              (match result with
-               | Some detail when String.trim detail <> "" ->
-                 ": " ^ String.trim detail
-               | Some _ | None -> "")))
+      (* [result] is the one field on this frame that says why the turn failed.
+         The exact prompt-too-long 400 prefix above has its own typed path;
+         unrelated 400s and every other terminal rejection still retain the
+         provider's sentence instead of collapsing to the status code
+         (#28071). *)
+      Error (Turn_failed (terminal_failure_detail ()))
     else if subtype <> "success"
     then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
     else Ok (turn_id, result, usage)
@@ -742,7 +771,12 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~expected_session
       ~on_turn_started ~on_stream_event ~stream_started ~ignored
   | "result" ->
     let* turn_id, result, usage =
-      parse_result ~expected_session_id ~rate_limit fields
+      parse_result
+        ~expected_session_id
+        ~rate_limit
+        ~tool_effect_attempted:(!tool_call_count > 0)
+        ~response_started:!stream_started
+        fields
     in
     let* () =
       invoke_state_callback ~stage:"turn started callback" (fun () ->

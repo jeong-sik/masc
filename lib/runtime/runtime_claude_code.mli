@@ -103,6 +103,11 @@ type error =
       ; tool_effect_attempted : bool
       ; detail : string
       }
+  | Context_window_exceeded of
+      { message : string
+      ; tool_effect_attempted : bool
+      ; response_started : bool
+      }
   | Turn_failed of string
   | Quota_blocked of
       { api_error_status : int option

@@ -42,6 +42,68 @@ let initial_turn_prompt ~history ~goal =
     |> Yojson.Safe.to_string
 ;;
 
+let unbounded_model_input_capacity_bytes = max_int
+
+let measure_model_input_message_bytes message =
+  String.length (Host.encode_history_message message)
+;;
+
+(* Keep the durable conversation intact and narrow only the provider-bound
+   start seed after Claude has explicitly rejected the prior view as too
+   large. The next structural boundary is computed before source projections
+   append synthetic evidence, matching the Codex official-client path. *)
+let model_input_projection_for_capacity
+    ~capacity_bytes
+    ~observed_next_shrink_capacity_bytes
+    source_projection
+    messages =
+  let windowed =
+    if capacity_bytes = unbounded_model_input_capacity_bytes
+    then Ok messages
+    else
+      Domain_pool_ref.submit_cpu_or_inline (fun () ->
+        match
+          Runtime_model_input_tail_window.project
+            ~measure_message_bytes:measure_model_input_message_bytes
+            ~capacity_bytes
+            ~reserved_bytes:0
+            messages
+        with
+        | Ok projected -> Ok projected
+        | Error error ->
+          Error
+            (Runtime_model_input_tail_window.budget_error_to_string error))
+  in
+  let* windowed = windowed in
+  let () =
+    Domain_pool_ref.submit_cpu_or_inline (fun () ->
+      let full_bytes =
+        List.fold_left
+          (fun total message ->
+             total + measure_model_input_message_bytes message)
+          0
+          windowed
+      in
+      let target_capacity_bytes =
+        if capacity_bytes = unbounded_model_input_capacity_bytes
+        then
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity_bytes:full_bytes
+        else
+          Keeper_turn_driver_try_provider.default_context_overflow_shrink_capacity
+            ~capacity_bytes
+      in
+      observed_next_shrink_capacity_bytes :=
+        Runtime_model_input_tail_window.next_shrink_capacity_bytes
+          ~measure_message_bytes:measure_model_input_message_bytes
+          ~target_capacity_bytes
+          windowed)
+  in
+  match source_projection with
+  | None -> Ok windowed
+  | Some project -> project windowed
+;;
+
 let claude_stream_callback on_event =
   match on_event with
   | None -> None
@@ -142,6 +204,17 @@ let claude_error_to_core_error = function
          { provider = "claude_code"
          ; detail = Runtime_claude_code.error_to_string error
          })
+  | Runtime_claude_code.Context_window_exceeded
+      { message; tool_effect_attempted = false; response_started = false } ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.ContextOverflow { message; limit = None })
+  | Runtime_claude_code.Context_window_exceeded _ as error ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "claude_code"
+         ; error_type = Some "context_window_exceeded_after_observed_activity"
+         ; detail = Runtime_claude_code.error_to_string error
+         })
   | Runtime_claude_code.Protocol_error { stage; detail } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
@@ -163,6 +236,7 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Unsupported_control_request _ ->
     Session_store.Protocol_failed
   | Runtime_claude_code.Subscription_required _
+  | Runtime_claude_code.Context_window_exceeded _
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Quota_blocked _ ->
     Session_store.Provider_rejected
@@ -171,7 +245,9 @@ let recovery_failure_of_client_error = function
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context ~event_bus ~raw_trace ~on_event ~effect_disposition
+    ~context_overflow_retry_safe
     ~(config : Runtime_execution.claude_code) =
+  context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
     Error
@@ -486,6 +562,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         in
         (match client_result with
          | Error error ->
+           context_overflow_retry_safe :=
+             (match error with
+              | Runtime_claude_code.Context_window_exceeded
+                  { tool_effect_attempted = false; response_started = false; _ } ->
+                true
+              | _ -> false);
            if not !state_persistence_failed
            then recovery_failure := recovery_failure_of_client_error error;
            Error (claude_error_to_core_error error)
@@ -703,26 +785,66 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in
+  let observed_next_shrink_capacity_bytes = ref None in
+  let context_overflow_retry_safe = ref false in
+  let starting_capacity_bytes =
+    Keeper_context_overflow_shrink_state.starting_capacity_bytes
+      ~keeper_name
+      ~runtime_id
+      ~max_capacity_bytes:unbounded_model_input_capacity_bytes
+  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
-      run_without_lifecycle
-        ~runtime_id
-        ~keeper_name
-        ~base_path
-        ~goal
-        ~goal_blocks
-        ~system_prompt
-        ~tools
-        ~initial_messages
-        ~model_input_projection
-        ~hooks
-        ~context_injector
-        ~context
-        ~event_bus
-        ~raw_trace
-        ~on_event
-        ~effect_disposition
-        ~config)
+      Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
+        ~starting_capacity_bytes
+        ~same_run_retry_authorized:(fun () ->
+          !context_overflow_retry_safe
+          && Option.is_some !observed_next_shrink_capacity_bytes)
+        ~shrink_capacity:(fun ~capacity_bytes:_ ~default_capacity_bytes ->
+          Option.value
+            !observed_next_shrink_capacity_bytes
+            ~default:(max 1 default_capacity_bytes))
+        ~record_success:(fun ~capacity_bytes ->
+          if capacity_bytes <> unbounded_model_input_capacity_bytes
+          then
+            Keeper_context_overflow_shrink_state.record_success
+              ~keeper_name
+              ~runtime_id
+              ~capacity_bytes)
+        ~on_shrink_retry:
+          (fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
+            Log.Keeper.warn
+              ~keeper_name
+              "Claude typed context overflow; shrinking provider-bound history: attempt=%d previous_capacity_bytes=%d capacity_bytes=%d"
+              shrink_attempt
+              previous_capacity_bytes
+              capacity_bytes)
+        ~attempt:(fun ~capacity_bytes ->
+          run_without_lifecycle
+            ~runtime_id
+            ~keeper_name
+            ~base_path
+            ~goal
+            ~goal_blocks
+            ~system_prompt
+            ~tools
+            ~initial_messages
+            ~model_input_projection:
+              (Some
+                 (model_input_projection_for_capacity
+                    ~capacity_bytes
+                    ~observed_next_shrink_capacity_bytes
+                    model_input_projection))
+            ~hooks
+            ~context_injector
+            ~context
+            ~event_bus
+            ~raw_trace
+            ~on_event
+            ~effect_disposition
+            ~context_overflow_retry_safe
+            ~config)
+        ())
   in
   { result; effect_disposition = Atomic.get effect_disposition }
 ;;

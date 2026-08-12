@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+MODE="${1:-run}"
+if [[ "$#" -gt 1 ]] || [[ "$MODE" != "run" && "$MODE" != "--verify-provenance-only" ]]; then
+  echo "usage: $0 [--verify-provenance-only]" >&2
+  exit 64
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BINARY="${KEEPER_ACCEPTANCE_BINARY:?KEEPER_ACCEPTANCE_BINARY is required}"
 MANIFEST="${KEEPER_ACCEPTANCE_MANIFEST:?KEEPER_ACCEPTANCE_MANIFEST is required}"
 OUTPUT_DIR="${KEEPER_ACCEPTANCE_OUTPUT_DIR:?KEEPER_ACCEPTANCE_OUTPUT_DIR is required}"
 EXPECTED_SHA="${KEEPER_ACCEPTANCE_EXPECTED_SHA:?KEEPER_ACCEPTANCE_EXPECTED_SHA is required}"
+EXPECTED_REF="${KEEPER_ACCEPTANCE_EXPECTED_REF:?KEEPER_ACCEPTANCE_EXPECTED_REF is required}"
+EXPECTED_REF_PROTECTED="${KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED:?KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED is required}"
+EXPECTED_WORKFLOW_REF="${KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_REF:?KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_REF is required}"
+EXPECTED_WORKFLOW_SHA="${KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_SHA:?KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_SHA is required}"
 RUNTIME_ID="${KEEPER_ACCEPTANCE_RUNTIME_ID:-glm-coding.glm-4-7-coding}"
 TURN_TIMEOUT_SEC="${KEEPER_ACCEPTANCE_TURN_TIMEOUT_SEC:-300}"
 RUNNER_TEMP_ROOT="${RUNNER_TEMP:?RUNNER_TEMP is required}"
@@ -25,18 +35,49 @@ done
 [[ -f "$MANIFEST" ]] || fail "manifest not found: $MANIFEST"
 [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] \
   || fail "expected source SHA must be a full 40-character lowercase SHA"
+[[ "$EXPECTED_REF" == "refs/heads/main" ]] \
+  || fail "expected source ref must be refs/heads/main: $EXPECTED_REF"
+[[ "$EXPECTED_REF_PROTECTED" == "true" ]] \
+  || fail "expected source ref must be protected"
+[[ "$EXPECTED_WORKFLOW_REF" == "$GITHUB_REPOSITORY/.github/workflows/ci.yml@refs/heads/main" ]] \
+  || fail "expected workflow ref is not the trusted main workflow: $EXPECTED_WORKFLOW_REF"
+[[ "$EXPECTED_WORKFLOW_SHA" == "$EXPECTED_SHA" ]] \
+  || fail "expected workflow/source mismatch: workflow=$EXPECTED_WORKFLOW_SHA source=$EXPECTED_SHA"
 
 runner_sha="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 [[ "$runner_sha" == "$EXPECTED_SHA" ]] \
   || fail "runner checkout mismatch: expected=$EXPECTED_SHA actual=$runner_sha"
 
+manifest_schema="$(jq -er '.schema' "$MANIFEST")"
+manifest_event="$(jq -er '.event_name' "$MANIFEST")"
 manifest_sha="$(jq -er '.source_sha' "$MANIFEST")"
+manifest_ref="$(jq -er '.source_ref' "$MANIFEST")"
+manifest_ref_protected="$(jq -er '.source_ref_protected' "$MANIFEST")"
+manifest_workflow_ref="$(jq -er '.workflow_ref' "$MANIFEST")"
+manifest_workflow_sha="$(jq -er '.workflow_sha' "$MANIFEST")"
 manifest_binary_sha="$(jq -er '.binary_sha256' "$MANIFEST")"
 actual_binary_sha="$(sha256sum "$BINARY" | awk '{print $1}')"
+[[ "$manifest_schema" == "masc.keeper_acceptance_runtime.v2" ]] \
+  || fail "manifest schema mismatch: $manifest_schema"
+[[ "$manifest_event" == "workflow_dispatch" ]] \
+  || fail "manifest event mismatch: $manifest_event"
 [[ "$manifest_sha" == "$EXPECTED_SHA" ]] \
   || fail "manifest source mismatch: expected=$EXPECTED_SHA actual=$manifest_sha"
+[[ "$manifest_ref" == "$EXPECTED_REF" ]] \
+  || fail "manifest ref mismatch: expected=$EXPECTED_REF actual=$manifest_ref"
+[[ "$manifest_ref_protected" == "$EXPECTED_REF_PROTECTED" ]] \
+  || fail "manifest protected-ref mismatch: expected=$EXPECTED_REF_PROTECTED actual=$manifest_ref_protected"
+[[ "$manifest_workflow_ref" == "$EXPECTED_WORKFLOW_REF" ]] \
+  || fail "manifest workflow ref mismatch: expected=$EXPECTED_WORKFLOW_REF actual=$manifest_workflow_ref"
+[[ "$manifest_workflow_sha" == "$EXPECTED_WORKFLOW_SHA" ]] \
+  || fail "manifest workflow SHA mismatch: expected=$EXPECTED_WORKFLOW_SHA actual=$manifest_workflow_sha"
 [[ "$actual_binary_sha" == "$manifest_binary_sha" ]] \
   || fail "binary digest mismatch: expected=$manifest_binary_sha actual=$actual_binary_sha"
+
+if [[ "$MODE" == "--verify-provenance-only" ]]; then
+  echo "keeper-realworld-acceptance: provenance PASS source=$EXPECTED_SHA ref=$EXPECTED_REF"
+  exit 0
+fi
 
 base_path="$(mktemp -d "$RUNNER_TEMP_ROOT/keeper-realworld-base.XXXXXX")"
 case "$base_path" in
@@ -156,6 +197,9 @@ jq -n \
   --arg schema "masc.keeper_realworld_gate.v1" \
   --arg status "passed" \
   --arg source_sha "$EXPECTED_SHA" \
+  --arg source_ref "$EXPECTED_REF" \
+  --arg workflow_ref "$EXPECTED_WORKFLOW_REF" \
+  --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
   --arg binary_sha256 "$actual_binary_sha" \
   --arg effective_base_path "$base_path" \
   --arg runtime_id "$RUNTIME_ID" \
@@ -165,6 +209,10 @@ jq -n \
     schema: $schema,
     status: $status,
     source_sha: $source_sha,
+    source_ref: $source_ref,
+    source_ref_protected: true,
+    workflow_ref: $workflow_ref,
+    workflow_sha: $workflow_sha,
     binary_sha256: $binary_sha256,
     effective_base_path: $effective_base_path,
     runtime_id: $runtime_id,

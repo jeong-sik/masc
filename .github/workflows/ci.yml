@@ -77,9 +77,34 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          EVENT_REF_PROTECTED: ${{ github.ref_protected }}
+          SOURCE_SHA: ${{ github.sha }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
+            if [ "$EVENT_REF" != "refs/heads/main" ]; then
+              echo "::error::Trusted dispatch requires refs/heads/main, got $EVENT_REF"
+              exit 1
+            fi
+            if [ "$EVENT_REF_PROTECTED" != "true" ]; then
+              echo "::error::Trusted dispatch requires a protected main ref"
+              exit 1
+            fi
+            if [ "$WORKFLOW_REF" != "$expected_workflow_ref" ]; then
+              echo "::error::Trusted dispatch workflow mismatch: expected=$expected_workflow_ref actual=$WORKFLOW_REF"
+              exit 1
+            fi
+            if [ "$WORKFLOW_SHA" != "$SOURCE_SHA" ]; then
+              echo "::error::Trusted dispatch workflow/source mismatch: workflow=$WORKFLOW_SHA source=$SOURCE_SHA"
+              exit 1
+            fi
+          fi
 
           if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
             # This workflow only listens to branch pushes for main/develop
@@ -472,6 +497,11 @@ jobs:
       # the code they pin. Seconds, and the deleting PR sees it.
       - name: Check CI test targets
         run: bash scripts/audit-ci-test-targets.sh
+
+      - name: Check Keeper real-world secret boundary
+        run: |
+          python3 scripts/ci/check-keeper-realworld-secret-boundary.py
+          bash test/test_keeper_realworld_secret_boundary.sh
 
       # Eleven repo-scanning audits that existed and never ran. scripts/ holds
       # 182 scripts and ci.yml called 63 of them; these are the audit/check
@@ -1342,7 +1372,10 @@ jobs:
             .release-evidence/main-release-evidence.md
 
       - name: Generate trusted-dispatch release evidence bundle
-        if: github.event_name == 'workflow_dispatch'
+        if: >-
+          github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          github.ref_protected == true
         run: |
           chmod +x scripts/release-evidence.sh
           mkdir -p .release-evidence
@@ -1354,7 +1387,11 @@ jobs:
         if: >-
           (github.event_name == 'pull_request') ||
           (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
-          (github.event_name == 'workflow_dispatch')
+          (
+            github.event_name == 'workflow_dispatch' &&
+            github.ref == 'refs/heads/main' &&
+            github.ref_protected == true
+          )
         run: |
           python3 scripts/keeper-full-lifecycle-evidence.py \
             --verify \
@@ -1363,18 +1400,43 @@ jobs:
       - name: Package exact-revision Keeper acceptance runtime
         if: >-
           needs.changes.outputs.keeper_realworld == 'true' &&
-          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          github.ref_protected == true
         env:
           EXPECTED_SOURCE_SHA: ${{ github.sha }}
-          PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          PR_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
-          PR_NUMBER: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'workflow-dispatch' }}
+          EXPECTED_SOURCE_REF: ${{ github.ref }}
+          EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
+          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EVENT_NAME: ${{ github.event_name }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}
           WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           runtime_dir=keeper-realworld-runtime
           mkdir -p "$runtime_dir"
+          expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "trusted runtime packaging requires workflow_dispatch, got $EVENT_NAME" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_SOURCE_REF" != "refs/heads/main" ]; then
+            echo "trusted runtime packaging requires refs/heads/main, got $EXPECTED_SOURCE_REF" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_REF_PROTECTED" != "true" ]; then
+            echo "trusted runtime packaging requires protected main" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_WORKFLOW_REF" != "$expected_workflow_ref" ]; then
+            echo "workflow ref mismatch: expected=$expected_workflow_ref actual=$EXPECTED_WORKFLOW_REF" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_WORKFLOW_SHA" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "workflow/source mismatch: workflow=$EXPECTED_WORKFLOW_SHA source=$EXPECTED_SOURCE_SHA" >&2
+            exit 1
+          fi
           actual_source_sha="$(git rev-parse HEAD)"
           if [ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]; then
             echo "checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual_source_sha" >&2
@@ -1384,20 +1446,24 @@ jobs:
           chmod +x "$runtime_dir/masc"
           binary_sha256="$(sha256sum "$runtime_dir/masc" | awk '{print $1}')"
           jq -n \
-            --arg schema "masc.keeper_acceptance_runtime.v1" \
+            --arg schema "masc.keeper_acceptance_runtime.v2" \
+            --arg event_name "$EVENT_NAME" \
             --arg source_sha "$actual_source_sha" \
-            --arg pr_head_sha "$PR_HEAD_SHA" \
-            --arg pr_base_sha "$PR_BASE_SHA" \
-            --arg pr_number "$PR_NUMBER" \
+            --arg source_ref "$EXPECTED_SOURCE_REF" \
+            --argjson source_ref_protected "$EXPECTED_REF_PROTECTED" \
+            --arg workflow_ref "$EXPECTED_WORKFLOW_REF" \
+            --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
             --arg workflow_run_id "$WORKFLOW_RUN_ID" \
             --arg workflow_run_attempt "$WORKFLOW_RUN_ATTEMPT" \
             --arg binary_sha256 "$binary_sha256" \
             '{
               schema: $schema,
+              event_name: $event_name,
               source_sha: $source_sha,
-              pr_head_sha: $pr_head_sha,
-              pr_base_sha: $pr_base_sha,
-              pr_number: $pr_number,
+              source_ref: $source_ref,
+              source_ref_protected: $source_ref_protected,
+              workflow_ref: $workflow_ref,
+              workflow_sha: $workflow_sha,
               workflow_run_id: $workflow_run_id,
               workflow_run_attempt: $workflow_run_attempt,
               binary_sha256: $binary_sha256
@@ -1406,7 +1472,9 @@ jobs:
       - name: Upload exact-revision Keeper acceptance runtime
         if: >-
           needs.changes.outputs.keeper_realworld == 'true' &&
-          (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+          github.event_name == 'workflow_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          github.ref_protected == true
         uses: actions/upload-artifact@v7
         with:
           name: keeper-realworld-runtime-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1431,7 +1499,14 @@ jobs:
           include-hidden-files: true
 
       - name: Upload trusted-dispatch release evidence
-        if: ${{ always() && github.event_name == 'workflow_dispatch' && steps.build_step.outcome == 'success' }}
+        if: >-
+          ${{
+            always() &&
+            github.event_name == 'workflow_dispatch' &&
+            github.ref == 'refs/heads/main' &&
+            github.ref_protected == true &&
+            steps.build_step.outcome == 'success'
+          }}
         uses: actions/upload-artifact@v7
         with:
           name: release-evidence-dispatch-${{ github.run_id }}-${{ github.run_attempt }}
@@ -1458,16 +1533,9 @@ jobs:
       ${{
         always() &&
         !cancelled() &&
-        (
-          (
-            github.event_name == 'workflow_dispatch' &&
-            github.ref == 'refs/heads/main'
-          ) ||
-          (
-            github.event_name == 'pull_request' &&
-            github.event.pull_request.head.repo.full_name == github.repository
-          )
-        ) &&
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main' &&
+        github.ref_protected == true &&
         needs.pr-live-gate.outputs.run_heavy == 'true' &&
         needs.changes.result == 'success' &&
         needs.changes.outputs.keeper_realworld == 'true' &&
@@ -1512,6 +1580,10 @@ jobs:
           KEEPER_ACCEPTANCE_MANIFEST: ${{ github.workspace }}/keeper-realworld-runtime/manifest.json
           KEEPER_ACCEPTANCE_OUTPUT_DIR: ${{ runner.temp }}/keeper-realworld-evidence
           KEEPER_ACCEPTANCE_EXPECTED_SHA: ${{ github.sha }}
+          KEEPER_ACCEPTANCE_EXPECTED_REF: ${{ github.ref }}
+          KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
+          KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
           KEEPER_ACCEPTANCE_RUNTIME_ID: glm-coding.glm-4-7-coding
           KEEPER_ACCEPTANCE_TURN_TIMEOUT_SEC: 300
           ZAI_API_KEY_SB: ${{ secrets.ZAI_API_KEY_SB }}
@@ -1543,6 +1615,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_REF: ${{ github.ref }}
+          EVENT_REF_PROTECTED: ${{ github.ref_protected }}
+          EVENT_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EVENT_WORKFLOW_SHA: ${{ github.workflow_sha }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -1557,6 +1632,19 @@ jobs:
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             if [ "$EVENT_REF" != "refs/heads/main" ]; then
               echo "STOP Keeper Real-World Gate: trusted dispatch requires refs/heads/main, got $EVENT_REF" >&2
+              exit 1
+            fi
+            if [ "$EVENT_REF_PROTECTED" != "true" ]; then
+              echo "STOP Keeper Real-World Gate: trusted dispatch requires protected main" >&2
+              exit 1
+            fi
+            expected_workflow_ref="$REPOSITORY/.github/workflows/ci.yml@refs/heads/main"
+            if [ "$EVENT_WORKFLOW_REF" != "$expected_workflow_ref" ]; then
+              echo "STOP Keeper Real-World Gate: workflow ref mismatch expected=$expected_workflow_ref actual=$EVENT_WORKFLOW_REF" >&2
+              exit 1
+            fi
+            if [ "$EVENT_WORKFLOW_SHA" != "$TESTED_SOURCE_SHA" ]; then
+              echo "STOP Keeper Real-World Gate: workflow/source mismatch workflow=$EVENT_WORKFLOW_SHA source=$TESTED_SOURCE_SHA" >&2
               exit 1
             fi
             if [ "$CHANGES_RESULT" != "success" ]; then
@@ -1575,7 +1663,7 @@ jobs:
               echo "FAIL Keeper Real-World Gate: acceptance result=$ACCEPTANCE_RESULT" >&2
               exit 1
             fi
-            echo "PASS Keeper Real-World Gate: trusted dispatch candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
+            echo "PASS Keeper Real-World Gate: trusted ref=$EVENT_REF workflow=$EVENT_WORKFLOW_REF candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
             exit 0
           fi
           if [ "$EVENT_NAME" != "pull_request" ]; then
@@ -1590,16 +1678,8 @@ jobs:
             echo "PASS Keeper Real-World Gate: product-critical Keeper surfaces unchanged"
             exit 0
           fi
-          if [ "$HEAD_REPOSITORY" != "$REPOSITORY" ]; then
-            echo "STOP Keeper Real-World Gate: secrets are unavailable to fork PRs; replay from a trusted branch" >&2
-            exit 1
-          fi
           if [ "$BUILD_RESULT" != "success" ]; then
             echo "STOP Keeper Real-World Gate: exact-revision runtime was not built successfully" >&2
-            exit 1
-          fi
-          if [ "$ACCEPTANCE_RESULT" != "success" ]; then
-            echo "FAIL Keeper Real-World Gate: acceptance result=$ACCEPTANCE_RESULT" >&2
             exit 1
           fi
           live_head_sha="$(gh api "repos/$REPOSITORY/pulls/$PR_NUMBER" --jq '.head.sha')"
@@ -1607,7 +1687,8 @@ jobs:
             echo "STOP Keeper Real-World Gate: PR head moved expected=$EXPECTED_HEAD_SHA actual=$live_head_sha" >&2
             exit 1
           fi
-          echo "PASS Keeper Real-World Gate: stable head=$live_head_sha candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
+          echo "::warning::Secret-bearing RW01-RW16 is deferred to a protected main workflow_dispatch after merge"
+          echo "PASS Keeper Real-World Gate: stable PR head=$live_head_sha passed source gates; protected-main product acceptance required after merge"
 
   lint:
     name: Lint

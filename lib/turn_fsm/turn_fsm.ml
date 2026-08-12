@@ -118,24 +118,27 @@ let turn_state_label : type a. a turn_state -> string = function
 let pp_cancel_reason fmt r =
   Format.pp_print_string fmt (cancel_reason_label r)
 
-let pp_failure_reason fmt = function
+let failure_reason_to_string = function
   | Failure_runtime_unavailable { base; resolved } ->
-      Format.fprintf fmt "runtime_unavailable(base=%s,resolved=%s)"
+      Printf.sprintf "runtime_unavailable(base=%s,resolved=%s)"
         base
         (Option.value resolved ~default:"-")
   | Failure_no_capable_provider { runtime_id; detail } ->
-      Format.fprintf fmt "no_capable_provider(runtime=%s,detail=%s)"
+      Printf.sprintf "no_capable_provider(runtime=%s,detail=%s)"
         runtime_id detail
   | Failure_provider_error { kind; detail } ->
-      Format.fprintf fmt "provider_error(kind=%s,detail=%s)" kind detail
+      Printf.sprintf "provider_error(kind=%s,detail=%s)" kind detail
   | Failure_receipt_lost { primary_error; fallback_path } ->
-      Format.fprintf fmt "receipt_lost(err=%s,fallback=%s)"
+      Printf.sprintf "receipt_lost(err=%s,fallback=%s)"
         primary_error
         (Option.value fallback_path ~default:"-")
   | Failure_runtime_error msg ->
-      Format.fprintf fmt "runtime_error(%s)" msg
+      Printf.sprintf "runtime_error(%s)" msg
   | Failure_unexpected_exception { exn; _ } ->
-      Format.fprintf fmt "unexpected_exception(%s)" exn
+      Printf.sprintf "unexpected_exception(%s)" exn
+
+let pp_failure_reason fmt reason =
+  Format.pp_print_string fmt (failure_reason_to_string reason)
 
 let pp_turn_state fmt (s : _ turn_state) =
   Format.pp_print_string fmt (turn_state_label s)

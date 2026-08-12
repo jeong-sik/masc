@@ -138,6 +138,20 @@ let web_tool_bundle () : Agent_core.Tool.t list =
   |> List.concat
   |> List.filter_map agent_core_tool_of_descriptor
 
+(* AGENT_CORE 는 데드라인을 요청받으면 그것을 강제할 clock 도 함께 요구한다:
+   [body_timeout_s] 만 주고 clock 을 빼면 요청이 dispatch 전에
+   "body_timeout_s was supplied without the clock required to enforce it" 로
+   거부된다(http_client.ml). 즉 preset 데드라인을 켜는 순간 clock 전달은 선택이
+   아니라 같은 계약의 반쪽이다 — 이 함수가 그 반쪽을 한 곳에서 공급한다.
+
+   clock 이 없으면 [None] 을 돌려주고 호출자는 데드라인 없이 진행한다. Eio 런타임
+   위에서 도는 정상 경로에는 항상 clock 이 있고, 없다면 그건 데드라인을 못 지키는
+   상황이지 패널을 전멸시킬 이유는 아니다(그 경우 provider 기본 데드라인이 남는다). *)
+let deadline_clock () =
+  match Masc_eio_env.get_opt () with
+  | Some { Masc_eio_env.clock; _ } -> Some clock
+  | None -> None
+
 let build_agent
     ~sw
     ~net

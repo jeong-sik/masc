@@ -817,11 +817,15 @@ jobs:
 
       - name: Run typed functional-core boundary audit
         env:
-          OCAML_BOUNDARY_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          OCAML_BOUNDARY_BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && 'origin/main' || '' }}
         run: |
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            bash scripts/ci/git-fetch-retry.sh \
+              origin \
+              "+refs/heads/main:refs/remotes/origin/main"
           fi
           opam exec -- dune build --root . @tools/ocaml_boundary_audit/runtest
           bash scripts/ocaml-boundary-ratchet.sh

@@ -133,13 +133,6 @@ val validate_turn :
   prompt:string ->
   (unit, error) result
 
-val bounded_subscription_probe_config
-  :  fallback_timeout_s:float
-  -> config
-  -> config
-(** Preserve an existing finite bound, or give an unbounded model turn a
-    finite authentication-preflight fallback. *)
-
 val probe_subscription :
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->

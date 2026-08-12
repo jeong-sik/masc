@@ -78,8 +78,11 @@ let codex_failure_status = function
   | Timeout _ -> "timeout"
   | Protocol_error _ | Rpc_error _ | Unsupported_server_request _ ->
     "protocol_error"
-  | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted ->
-    "probe_contract_error"
+  | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
+  (* A host stop ends the probe turn without a provider verdict, so it says
+     nothing about login or transport — same bucket as the other
+     turn-did-not-complete outcomes. *)
+  | Stopped_by_host _ -> "probe_contract_error"
 ;;
 
 let claude_failure_status = function
@@ -91,8 +94,10 @@ let claude_failure_status = function
   | Turn_transport_interrupted _
   | Context_window_exceeded _
   | Turn_failed _
-  | Quota_blocked _ ->
-    "probe_contract_error"
+  | Quota_blocked _
+  (* See [codex_failure_status]: a host stop is a turn outcome, not a
+     connectivity or auth signal. *)
+  | Stopped_by_host _ -> "probe_contract_error"
 ;;
 
 let probe_codex ~mgr ~clock ~process_cwd ~runtime_id ~model

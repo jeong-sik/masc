@@ -75,7 +75,7 @@ let token_error_to_string = function
     Printf.sprintf "revoke dashboard credential %S: %s" agent_name detail
   | Credential_rotation_failed error ->
     Printf.sprintf
-      "persist dashboard Worker credential: %s"
+      "persist dashboard credential: %s"
       (Masc_domain.masc_error_to_string error)
   | Token_file_write_failed { path; detail } ->
     Printf.sprintf "persist dashboard dev-token %s: %s" path detail

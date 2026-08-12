@@ -198,6 +198,7 @@ jobs:
         id: scope
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REF: ${{ github.ref }}
           GITHUB_BASE_REF: ${{ github.base_ref }}
           GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GITHUB_BEFORE: ${{ github.event.before }}
@@ -393,6 +394,15 @@ jobs:
             # workflow/action edits should still validate the core OCaml/repo
             # guard lanes and Health, but they should not fan out into every
             # feature surface.
+          fi
+
+          # Push CI is latest-state authority: a newer main push cancels the
+          # prior run, so every surviving protected-main run must carry the
+          # real-world obligation even when its own diff is Keeper-neutral.
+          # Otherwise a docs-only follow-up can cancel the Keeper acceptance
+          # for the commit immediately before it and then skip RW01-RW16.
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            keeper_realworld=true
           fi
 
           echo "build=${build}" >> "$GITHUB_OUTPUT"
@@ -1400,7 +1410,10 @@ jobs:
       - name: Package exact-revision Keeper acceptance runtime
         if: >-
           needs.changes.outputs.keeper_realworld == 'true' &&
-          github.event_name == 'workflow_dispatch' &&
+          (
+            github.event_name == 'push' ||
+            github.event_name == 'workflow_dispatch'
+          ) &&
           github.ref == 'refs/heads/main' &&
           github.ref_protected == true
         env:
@@ -1417,10 +1430,13 @@ jobs:
           runtime_dir=keeper-realworld-runtime
           mkdir -p "$runtime_dir"
           expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
-          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
-            echo "trusted runtime packaging requires workflow_dispatch, got $EVENT_NAME" >&2
-            exit 1
-          fi
+          case "$EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *)
+              echo "trusted runtime packaging requires push or workflow_dispatch, got $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
           if [ "$EXPECTED_SOURCE_REF" != "refs/heads/main" ]; then
             echo "trusted runtime packaging requires refs/heads/main, got $EXPECTED_SOURCE_REF" >&2
             exit 1
@@ -1472,7 +1488,10 @@ jobs:
       - name: Upload exact-revision Keeper acceptance runtime
         if: >-
           needs.changes.outputs.keeper_realworld == 'true' &&
-          github.event_name == 'workflow_dispatch' &&
+          (
+            github.event_name == 'push' ||
+            github.event_name == 'workflow_dispatch'
+          ) &&
           github.ref == 'refs/heads/main' &&
           github.ref_protected == true
         uses: actions/upload-artifact@v7
@@ -1533,7 +1552,10 @@ jobs:
       ${{
         always() &&
         !cancelled() &&
-        github.event_name == 'workflow_dispatch' &&
+        (
+          github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch'
+        ) &&
         github.ref == 'refs/heads/main' &&
         github.ref_protected == true &&
         needs.pr-live-gate.outputs.run_heavy == 'true' &&
@@ -1579,6 +1601,7 @@ jobs:
           KEEPER_ACCEPTANCE_BINARY: ${{ github.workspace }}/keeper-realworld-runtime/masc
           KEEPER_ACCEPTANCE_MANIFEST: ${{ github.workspace }}/keeper-realworld-runtime/manifest.json
           KEEPER_ACCEPTANCE_OUTPUT_DIR: ${{ runner.temp }}/keeper-realworld-evidence
+          KEEPER_ACCEPTANCE_EXPECTED_EVENT: ${{ github.event_name }}
           KEEPER_ACCEPTANCE_EXPECTED_SHA: ${{ github.sha }}
           KEEPER_ACCEPTANCE_EXPECTED_REF: ${{ github.ref }}
           KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
@@ -1629,13 +1652,15 @@ jobs:
           ACCEPTANCE_RESULT: ${{ needs.keeper-realworld-acceptance.result }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || {
+            [ "$EVENT_NAME" = "push" ] && [ "$EVENT_REF" = "refs/heads/main" ];
+          }; then
             if [ "$EVENT_REF" != "refs/heads/main" ]; then
-              echo "STOP Keeper Real-World Gate: trusted dispatch requires refs/heads/main, got $EVENT_REF" >&2
+              echo "STOP Keeper Real-World Gate: trusted acceptance requires refs/heads/main, got $EVENT_REF" >&2
               exit 1
             fi
             if [ "$EVENT_REF_PROTECTED" != "true" ]; then
-              echo "STOP Keeper Real-World Gate: trusted dispatch requires protected main" >&2
+              echo "STOP Keeper Real-World Gate: trusted acceptance requires protected main" >&2
               exit 1
             fi
             expected_workflow_ref="$REPOSITORY/.github/workflows/ci.yml@refs/heads/main"
@@ -1652,8 +1677,12 @@ jobs:
               exit 1
             fi
             if [ "$REALWORLD_REQUIRED" != "true" ]; then
-              echo "STOP Keeper Real-World Gate: workflow_dispatch did not select product acceptance" >&2
-              exit 1
+              if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+                echo "STOP Keeper Real-World Gate: workflow_dispatch did not select product acceptance" >&2
+                exit 1
+              fi
+              echo "PASS Keeper Real-World Gate: product-critical Keeper surfaces unchanged on protected main"
+              exit 0
             fi
             if [ "$BUILD_RESULT" != "success" ]; then
               echo "STOP Keeper Real-World Gate: exact-revision runtime was not built successfully" >&2
@@ -1663,7 +1692,7 @@ jobs:
               echo "FAIL Keeper Real-World Gate: acceptance result=$ACCEPTANCE_RESULT" >&2
               exit 1
             fi
-            echo "PASS Keeper Real-World Gate: trusted ref=$EVENT_REF workflow=$EVENT_WORKFLOW_REF candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
+            echo "PASS Keeper Real-World Gate: trusted event=$EVENT_NAME ref=$EVENT_REF workflow=$EVENT_WORKFLOW_REF candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
             exit 0
           fi
           if [ "$EVENT_NAME" != "pull_request" ]; then
@@ -1687,8 +1716,8 @@ jobs:
             echo "STOP Keeper Real-World Gate: PR head moved expected=$EXPECTED_HEAD_SHA actual=$live_head_sha" >&2
             exit 1
           fi
-          echo "::warning::Secret-bearing RW01-RW16 is deferred to a protected main workflow_dispatch after merge"
-          echo "PASS Keeper Real-World Gate: stable PR head=$live_head_sha passed source gates; protected-main product acceptance required after merge"
+          echo "::warning::Secret-bearing RW01-RW16 is deferred to the automatic protected-main CI after merge"
+          echo "PASS Keeper Real-World Gate: stable PR head=$live_head_sha passed source gates; protected-main product acceptance is automatically enforced after merge"
 
   lint:
     name: Lint

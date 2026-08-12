@@ -52,6 +52,55 @@ describe('Keeper operation stream projection', () => {
     expect(entry?.delivery).toBe('streaming')
   })
 
+  const streamMessageOnce = (): void => {
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-1' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-1', delta: '네.' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-1', delta: ' 현재 상태:' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END', messageId: 'm-1' })
+  }
+
+  it('applies a full message sequence delivered twice exactly once', () => {
+    assistantEntry()
+    streamMessageOnce()
+    streamMessageOnce()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.rawText).toBe('네. 현재 상태:')
+  })
+
+  it('drops content re-delivered after the message ended', () => {
+    assistantEntry()
+    streamMessageOnce()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-1', delta: ' 현재 상태:' })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.rawText).toBe('네. 현재 상태:')
+  })
+
+  it('restarts the buffer when the in-flight message re-STARTs', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-1' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-1', delta: '네.' })
+    // The observer socket replays START+CONTENT for the same in-flight message.
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-1' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-1', delta: '네.' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_END', messageId: 'm-1' })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.rawText).toBe('네.')
+  })
+
+  it('keeps two distinct messages in one entry (no false dedup)', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-1' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-1', delta: '첫째' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START', messageId: 'm-2' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', messageId: 'm-2', delta: '둘째' })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.rawText).toBe('첫째둘째')
+  })
+
   it('projects queued acceptance without a receipt or queue revision', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

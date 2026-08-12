@@ -54,8 +54,41 @@ interface PendingThinkingState {
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
 
+// AG-UI text messages are delivered at-least-once: a WS/SSE reconnect can
+// replay a message's START/CONTENT/END, and an overlapping observer socket can
+// re-deliver the same operation event. TEXT_MESSAGE_CONTENT carries a messageId
+// but no per-chunk sequence, so the reducer keys idempotency on messageId — a
+// completed message is never re-applied, and a re-START of the in-flight message
+// restarts its buffer instead of appending on top. The terminal reply is an
+// absolute snapshot (already idempotent), which is why only streaming text
+// doubled before this guard.
+interface TextMessageStreamState {
+  activeMessageId: string | null
+  endedMessageIds: Set<string>
+}
+
+const textMessageStreamStates = new Map<string, TextMessageStreamState>()
+
 function streamEntryKey(keeperName: string, assistantEntryId: string): string {
   return `${keeperName}\u0000${assistantEntryId}`
+}
+
+function textMessageStreamState(keeperName: string, assistantEntryId: string): TextMessageStreamState {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  let state = textMessageStreamStates.get(key)
+  if (!state) {
+    state = { activeMessageId: null, endedMessageIds: new Set() }
+    textMessageStreamStates.set(key, state)
+  }
+  return state
+}
+
+function textStreamMessageId(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null
+}
+
+function clearTextMessageStreamState(keeperName: string, assistantEntryId: string): void {
+  textMessageStreamStates.delete(streamEntryKey(keeperName, assistantEntryId))
 }
 
 function scheduleThinkingFlush(callback: () => void): ScheduledFlushHandle {
@@ -174,6 +207,7 @@ export function _resetKeeperStreamBuffersForTests(): void {
   pendingThinkingDeltas.clear()
   pendingAgentCoreToolBlockIndexes.clear()
   pendingAgentCoreTextBlockIndexes.clear()
+  textMessageStreamStates.clear()
 }
 
 export interface KeeperThreadAbortResult {
@@ -481,7 +515,24 @@ export function applyKeeperStreamEvent(
         keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
       )
       return null
-    case 'TEXT_MESSAGE_START':
+    case 'TEXT_MESSAGE_START': {
+      const messageId = textStreamMessageId(event.messageId)
+      const streamState = textMessageStreamState(keeperName, assistantEntryId)
+      if (messageId !== null && streamState.endedMessageIds.has(messageId)) {
+        // Replay of a completed message: the transcript already holds its text.
+        return null
+      }
+      if (messageId !== null && messageId === streamState.activeMessageId) {
+        // Duplicate in-flight START (reconnect/observer replay): restart this
+        // message's buffer so re-sent content re-accumulates identically instead
+        // of appending on top of the partial text already shown.
+        updateThreadEntry(keeperName, assistantEntryId, entry => ({
+          ...entry,
+          text: '',
+          rawText: '',
+        }))
+      }
+      streamState.activeMessageId = messageId
       // Flush any buffered thinking deltas before entering the text phase so a
       // pending scheduled flush cannot run later and revert streamState to
       // 'thinking' after text streaming has begun. Mirrors TEXT_MESSAGE_END and
@@ -495,15 +546,37 @@ export function applyKeeperStreamEvent(
         keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TEXT_MESSAGE_START' }),
       )
       return null
+    }
     case 'TEXT_MESSAGE_CONTENT': {
+      const messageId = textStreamMessageId(event.messageId)
+      if (messageId !== null) {
+        const streamState = textMessageStreamState(keeperName, assistantEntryId)
+        if (streamState.endedMessageIds.has(messageId)) {
+          // Content re-delivered after the message ended: already rendered.
+          return null
+        }
+        if (streamState.activeMessageId !== null && streamState.activeMessageId !== messageId) {
+          // Content for a different message than the one in flight: stale copy.
+          return null
+        }
+        // Adopt the id when START was coalesced away by the guards above.
+        streamState.activeMessageId = messageId
+      }
       applyTextDelta(event.delta)
       return null
     }
-    case 'TEXT_MESSAGE_END':
+    case 'TEXT_MESSAGE_END': {
+      const messageId = textStreamMessageId(event.messageId)
+      if (messageId !== null) {
+        const streamState = textMessageStreamState(keeperName, assistantEntryId)
+        streamState.endedMessageIds.add(messageId)
+        if (streamState.activeMessageId === messageId) streamState.activeMessageId = null
+      }
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       markFinalizingIfLive('TEXT_MESSAGE_END')
       return null
+    }
     case 'TOOL_CALL_START': {
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = nonBlankToolCallId(event.toolCallId)
@@ -886,6 +959,7 @@ export function applyKeeperStreamEvent(
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
+      clearTextMessageStreamState(keeperName, assistantEntryId)
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
         if (entry.requestId !== source.operationId) return entry
@@ -912,6 +986,7 @@ export function applyKeeperStreamEvent(
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingAgentCoreToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingAgentCoreTextBlockIndex(keeperName, assistantEntryId)
+      clearTextMessageStreamState(keeperName, assistantEntryId)
       return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return 'Unsupported Keeper stream event'

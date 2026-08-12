@@ -26,7 +26,7 @@ cd "$(git rev-parse --show-toplevel)"
 # and did not match lint-* names, so three self-declared gates
 # (check-logging-consistency, lint-cancel-guard, tla-mutation-lint-ratchet)
 # were invisible to it. See #27626.
-UNWIRED_BASELINE=14
+UNWIRED_BASELINE=13
 
 all="$(mktemp)"
 called="$(mktemp)"

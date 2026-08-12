@@ -314,10 +314,16 @@ let dispatch_message
           ~next:{ expected with phase = Ready }
       in
       Ok { response = None; tool_called = false }
-    | _, None ->
-      error
-        "MCP message"
-        (Printf.sprintf "MCP notification %S is not supported" message.method_name)
+    (* A notification carries no id, so there is nothing to answer and JSON-RPC
+       forbids answering it. Returning a transport error here ended the session
+       instead: agy sends [notifications/roots/list_changed] immediately after
+       [notifications/initialized], got HTTP 400, and dropped the connection 32ms
+       into every antigravity turn, taking all advertised tools with it before
+       the model's first message (masc#28431). MCP 2025-06-18, Base Protocol /
+       Notifications: "The receiver MUST NOT send a response." Unrecognized
+       notifications are ignored; unrecognized *requests* still answer -32601
+       below, because those do carry an id and do expect a reply. *)
+    | _, None -> Ok { response = None; tool_called = false }
     | _, Some request_id ->
       let id = Mcp_transport_protocol.request_id_to_yojson request_id in
       Ok

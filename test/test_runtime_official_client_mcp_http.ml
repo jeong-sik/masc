@@ -449,6 +449,76 @@ let test_callback_failures_do_not_poison_protocol_state () =
   check int "callback failures are observable rejections" 2 snapshot.rejected_requests
 ;;
 
+(* An unrecognized notification used to answer HTTP 400, which agy read as a
+   dead connection: it sends [notifications/roots/list_changed] right after
+   [notifications/initialized] and dropped the session 32ms into every turn,
+   removing all advertised tools before the model spoke (masc#28431). The
+   session must survive it and keep serving tools. *)
+let test_unknown_notification_is_ignored_and_session_survives () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let tool_specs () = [ `Assoc [ "name", `String "masc_probe" ] ] in
+  (* This test never reaches tools/call; the callback exists to satisfy [start]. *)
+  let call_tool ~name:_ ~call_id:_ ~arguments:_ = None in
+  let bridge =
+    Runtime_official_client_mcp_http.start
+      ~sw
+      ~net:env#net
+      ~secure_random:env#secure_random
+      ~server_name:"masc"
+      ~tool_specs
+      ~call_tool
+      ()
+  in
+  let endpoint, authorization = config_fields bridge in
+  let protocol_version =
+    initialize_session ~sw ~net:env#net ~endpoint ~authorization
+  in
+  let roots_changed =
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      {|{"jsonrpc":"2.0","method":"notifications/roots/list_changed"}|}
+  in
+  check int "unknown notification is accepted" 202 roots_changed.status;
+  check string "notification draws no body" "" (String.trim roots_changed.body);
+  let listed =
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      (json_request 4 "tools/list" (`Assoc []))
+  in
+  check int "session survives the notification" 200 listed.status;
+  let snapshot = Runtime_official_client_mcp_http.For_testing.snapshot bridge in
+  check bool "phase is still ready" true (snapshot.phase = Ready);
+  (* An unrecognized *request* carries an id and still owes a JSON-RPC error. *)
+  let unknown_request =
+    request
+      ~protocol_version
+      ~sw
+      ~net:env#net
+      ~endpoint
+      ~authorization
+      (json_request 5 "resources/list" (`Assoc []))
+  in
+  check int "unknown request still answers" 200 unknown_request.status;
+  check int
+    "unknown request answers method-not-found"
+    (-32601)
+    (Yojson.Safe.from_string unknown_request.body
+     |> member "error"
+     |> member "code"
+     |> Yojson.Safe.Util.to_int)
+;;
+
 let () =
   run
     "runtime_official_client_mcp_http"
@@ -463,6 +533,12 @@ let () =
             "callback failures remain typed and do not poison lifecycle"
             `Quick
             test_callback_failures_do_not_poison_protocol_state
+        ] )
+    ; ( "notifications"
+      , [ test_case
+            "unknown notification is ignored and the session survives"
+            `Quick
+            test_unknown_notification_is_ignored_and_session_survives
         ] )
     ]
 ;;

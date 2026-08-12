@@ -290,8 +290,13 @@ type docker_tool_projection =
   { args : string list
   ; identity_state : tool_identity_state
   ; host_snapshot_dir : string
+  ; revision : string
   ; cleanup : unit -> unit
   }
+
+let unconfigured_tool_identity_revision =
+  Digestif.SHA256.(digest_string "masc.github-tool-identity.unconfigured.v1" |> to_hex)
+;;
 
 let yaml_scalar_has_value value =
   let value = String.trim value in
@@ -436,13 +441,74 @@ let existing_config_dir ~config ~keeper_name =
   end
 ;;
 
+let load_optional_config_file config_dir filename =
+  let path = Filename.concat config_dir filename in
+  match Fs_compat.load_owned_regular_file ~ownership_root:config_dir path with
+  | Error error -> Error (Fs_compat.owned_regular_file_read_error_to_string error)
+  | Ok content -> Ok content
+;;
+
+let configured_tool_identity_revision config_dir =
+  match load_optional_config_file config_dir "hosts.yml" with
+  | Error _ as error -> error
+  | Ok None -> Error "configured GitHub CLI identity has no hosts.yml"
+  | Ok (Some hosts) ->
+    (match load_optional_config_file config_dir "config.yml" with
+     | Error _ as error -> error
+     | Ok config ->
+       let material =
+         Yojson.Safe.to_string
+           (`Assoc
+              [ "schema", `String "masc.github-tool-identity-revision.v1"
+              ; "hosts.yml", `String hosts
+              ; ( "config.yml"
+                , match config with
+                  | None -> `Null
+                  | Some value -> `String value )
+              ])
+       in
+       Ok Digestif.SHA256.(digest_string material |> to_hex))
+;;
+
+let current_tool_identity_revision ~config ~keeper_name =
+  match existing_config_dir ~config ~keeper_name with
+  | Error _ as error -> error
+  | Ok None -> Ok unconfigured_tool_identity_revision
+  | Ok (Some config_dir) -> configured_tool_identity_revision config_dir
+;;
+
+let snapshot_cleanup snapshot =
+  let descriptor = Unix.openfile snapshot [ Unix.O_RDONLY ] 0 in
+  Unix.set_close_on_exec descriptor;
+  let created = Unix.fstat descriptor in
+  let claimed = Atomic.make false in
+  fun () ->
+    if Atomic.compare_and_set claimed false true
+    then
+      Fun.protect
+        ~finally:(fun () -> Unix.close descriptor)
+        (fun () ->
+           match lstat_opt snapshot with
+           | Ok None -> ()
+           | Ok (Some current)
+             when current.Unix.st_kind = Unix.S_DIR
+                  && current.Unix.st_dev = created.Unix.st_dev
+                  && current.Unix.st_ino = created.Unix.st_ino ->
+             (* Change permissions through the descriptor captured before the
+                child ran. A pathname chmod could follow a replacement
+                symlink between validation and cleanup. *)
+             Unix.fchmod descriptor 0o700;
+             Fs_compat.remove_tree snapshot
+           | Ok (Some _) | Error _ ->
+             (* The non-following tree remover unlinks a replacement entry
+                directly and never traverses a replacement symlink. *)
+             Fs_compat.remove_tree snapshot)
+;;
+
 let copy_local_tool_config_snapshot existing =
   let snapshot = Filename.temp_dir "masc-gh-tool-" "" in
   Unix.chmod snapshot 0o700;
-  let cleanup () =
-    if Sys.file_exists snapshot then Unix.chmod snapshot 0o700;
-    Fs_compat.remove_tree snapshot
-  in
+  let cleanup = snapshot_cleanup snapshot in
   let copy_file filename =
     let source = Filename.concat existing filename in
     let target = Filename.concat snapshot filename in
@@ -473,11 +539,9 @@ let copy_local_tool_config_snapshot existing =
 
 let empty_local_tool_config_snapshot () =
   let snapshot = Filename.temp_dir "masc-gh-tool-empty-" "" in
+  let cleanup = snapshot_cleanup snapshot in
   Unix.chmod snapshot 0o500;
-  ( snapshot
-  , fun () ->
-      if Sys.file_exists snapshot then Unix.chmod snapshot 0o700;
-      Fs_compat.remove_tree snapshot )
+  snapshot, cleanup
 ;;
 
 let runtime_env_for_tool ~config ~keeper_name env =
@@ -521,24 +585,31 @@ let docker_args_for_tool ~config ~keeper_name ~container_masc_dir =
           ]
       ; identity_state = Unconfigured
       ; host_snapshot_dir = snapshot
+      ; revision = unconfigured_tool_identity_revision
       ; cleanup
       }
   | Ok (Some host_dir) ->
     (match copy_local_tool_config_snapshot host_dir with
      | Error _ as error -> error
      | Ok (snapshot, cleanup) ->
-       let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
-       Ok
-         { args =
-             [ "--env"
-             ; "GH_CONFIG_DIR=" ^ container_dir
-             ; "-v"
-             ; snapshot ^ ":" ^ container_dir ^ ":ro"
-             ]
-         ; identity_state = Configured host_dir
-         ; host_snapshot_dir = snapshot
-         ; cleanup
-         })
+       (match configured_tool_identity_revision snapshot with
+        | Error error ->
+          cleanup ();
+          Error error
+        | Ok revision ->
+          let container_dir = container_config_dir ~container_masc_dir ~keeper_name in
+          Ok
+            { args =
+                [ "--env"
+                ; "GH_CONFIG_DIR=" ^ container_dir
+                ; "-v"
+                ; snapshot ^ ":" ^ container_dir ^ ":ro"
+                ]
+            ; identity_state = Configured host_dir
+            ; host_snapshot_dir = snapshot
+            ; revision
+            ; cleanup
+            }))
 ;;
 
 let login_argv ~hostname =

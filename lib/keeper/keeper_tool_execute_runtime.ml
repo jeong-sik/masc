@@ -165,7 +165,7 @@ type dispatch_bundle =
   { sandbox : Masc_exec.Sandbox_target.t
   ; fields : (string * Yojson.Safe.t) list
   ; base_host_env : string array option
-  ; github_config_dir : unit -> (string, string) result
+  ; github_secret_files : unit -> (string list, string) result
   ; cleanup : unit -> unit
   }
 
@@ -307,7 +307,9 @@ let handle_tool_execute_typed
                           ; fields =
                               ("github_identity", `String identity_field) :: extra_fields
                           ; base_host_env = Some env
-                          ; github_config_dir = (fun () -> Ok github_config_dir)
+                          ; github_secret_files =
+                              (fun () ->
+                                 Ok [ Filename.concat github_config_dir "hosts.yml" ])
                           ; cleanup
                           }))))
         in
@@ -348,9 +350,9 @@ let handle_tool_execute_typed
                       ; "sandbox_profile", `String "docker"
                       ]
                   ; base_host_env = None
-                  ; github_config_dir =
+                  ; github_secret_files =
                       (fun () ->
-                         Keeper_turn_sandbox_runtime.prepare_github_identity_snapshot
+                         Keeper_turn_sandbox_runtime.prepare_github_identity_secret_files
                            ?timeout_sec
                            dispatch.runtime)
                   ; cleanup = Fun.id
@@ -480,17 +482,16 @@ let handle_tool_execute_typed
           let authorized result =
             Keeper_tool_execution.with_gate_authorization authorization result
           in
-          (match dispatch_bundle.github_config_dir () with
+          (match dispatch_bundle.github_secret_files () with
            | Error err ->
              authorized
                (typed_error_json
                   ~extra_fields:[ "error", `String "github_identity_snapshot_unavailable" ]
                   ("GitHub identity snapshot unavailable: " ^ err))
-           | Ok github_config_dir ->
+           | Ok github_secret_files ->
           let output_redaction =
             execute_secret_redaction
-              ~additional_secret_files:
-                [ Filename.concat github_config_dir "hosts.yml" ]
+              ~additional_secret_files:github_secret_files
               ~base_path:config.base_path
               ~keeper_name:meta.name
           in

@@ -55,7 +55,7 @@ let rec drop count values =
 ;;
 
 let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
-    ?(terminal_line_delay_start_index = 0) lines =
+    ?(terminal_line_delay_start_index = 0) ?before_final_stdin_drain_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -95,6 +95,9 @@ let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
            terminal_line_delay_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     (drop 3 lines);
+  Option.iter
+    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+    before_final_stdin_drain_s;
   output_string output "while IFS= read -r ignored; do :; done\n";
   close_out output;
   Unix.chmod path 0o700;
@@ -102,13 +105,14 @@ let fixture_script ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
 ;;
 
 let with_fixture ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
-    ?terminal_line_delay_start_index lines f =
+    ?terminal_line_delay_start_index ?before_final_stdin_drain_s lines f =
   let path =
     fixture_script
       ?capture_path
       ?initial_line_delay_s
       ?terminal_line_delay_s
       ?terminal_line_delay_start_index
+      ?before_final_stdin_drain_s
       lines
   in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
@@ -149,7 +153,7 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
 
 let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp")
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
-    ?on_thread_ready_delay_s ?on_stream_event path =
+    ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event path =
   Eio_main.run (fun env ->
     let clock = Eio.Stdenv.clock env in
     let config =
@@ -166,6 +170,13 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
            Ok ())
         on_thread_ready_delay_s
     in
+    let on_turn_started =
+      Option.map
+        (fun delay_s ~thread_id:_ ~turn_id:_ ->
+           Eio.Time.sleep clock delay_s;
+           Ok ())
+        on_turn_started_delay_s
+    in
     Runtime_codex_app_server.run_turn
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock
@@ -174,6 +185,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
       ?thread_mode
       ~history
       ?on_thread_ready
+      ?on_turn_started
       ?on_stream_event
       config
       ~prompt:"Return the fixture marker")
@@ -889,6 +901,90 @@ let test_no_deadline_begins_after_turn_dispatch () =
        match outcome with
        | Ok turn -> check string "turn completes" "MASC_SUBSCRIPTION_OK" turn.text
        | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+;;
+
+let test_no_deadline_keeps_turn_started_callback_bounded () =
+  with_fixture
+    [ init_result; account_chatgpt; thread_result; turn_result ]
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           ~on_turn_started_delay_s:0.2
+           path
+       with
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = true }) ->
+         check (float 0.001) "host callback timeout" 0.05 seconds
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { turn_accepted = false; _ }) ->
+         fail "accepted turn callback timeout lost dispatch ambiguity"
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "no-deadline turn made the host state callback unbounded")
+;;
+
+let test_no_deadline_keeps_post_accept_writes_bounded () =
+  let tool : Runtime_codex_app_server.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "Return enough data to fill an unread transport pipe"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; call =
+        (fun ~call_id:_ _ ->
+          { success = true; content = String.make (1024 * 1024) 'x' })
+    }
+  in
+  with_fixture
+    ~before_final_stdin_drain_s:0.2
+    [ init_result; account_chatgpt; thread_result; turn_result; tool_call_request ]
+    (fun path ->
+       match
+         run_fixture
+           ~dynamic_tools:[ tool ]
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = true }) ->
+         check (float 0.001) "post-accept write timeout" 0.05 seconds
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { turn_accepted = false; _ }) ->
+         fail "post-accept write timeout lost dispatch ambiguity"
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "no-deadline turn made a post-accept tool write unbounded")
+;;
+
+let test_dispatch_ambiguity_precedes_turn_start_ack () =
+  let request index =
+    Printf.sprintf
+      {|{"id":"unsupported-%d","method":"item/commandExecution/requestApproval","params":{}}|}
+      index
+  in
+  let requests = List.init 2048 request in
+  with_fixture
+    ([ init_result; account_chatgpt; thread_result ] @ requests)
+    (fun path ->
+       match
+         run_fixture
+           ~admission_timeout_s:0.05
+           ~no_turn_deadline:true
+           path
+       with
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { seconds; turn_accepted = true }) ->
+         check (float 0.001) "pre-ack response write timeout" 0.05 seconds
+       | Error
+           (Runtime_codex_app_server.Timeout
+              { turn_accepted = false; _ }) ->
+         fail "complete turn dispatch was classified as safe to retry"
+       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
+       | Ok _ -> fail "unread pre-ack server responses did not hit the write bound")
 ;;
 
 let test_callback_timeout_origin_is_preserved_without_deadline () =
@@ -3196,6 +3292,18 @@ let () =
             "no deadline begins after turn dispatch"
             `Quick
             test_no_deadline_begins_after_turn_dispatch
+        ; test_case
+            "no deadline keeps turn-started callback bounded"
+            `Quick
+            test_no_deadline_keeps_turn_started_callback_bounded
+        ; test_case
+            "no deadline keeps post-accept writes bounded"
+            `Quick
+            test_no_deadline_keeps_post_accept_writes_bounded
+        ; test_case
+            "dispatch ambiguity precedes turn-start acknowledgement"
+            `Quick
+            test_dispatch_ambiguity_precedes_turn_start_ack
         ; test_case
             "callback timeout origin is preserved without deadline"
             `Quick

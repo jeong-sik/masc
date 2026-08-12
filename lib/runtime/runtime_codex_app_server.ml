@@ -275,7 +275,7 @@ let parse_wire_line line =
 type io =
   { send : Yojson.Safe.t -> unit
   ; receive : unit -> (wire_message, error) result
-  ; set_timeout_s : float option -> unit
+  ; set_receive_timeout_s : float option -> unit
   }
 
 let send_request io ~id ~method_ ~params =
@@ -742,8 +742,8 @@ let history_item (message : history_message) =
 ;;
 
 let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_effort
-    ~thread_mode ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_started
-    ~on_stream_event =
+    ~thread_mode ~history ~prompt ~on_thread_ready ~on_turn_starting ~on_turn_dispatched
+    ~on_turn_started ~on_stream_event =
   send_request io ~id:1 ~method_:"initialize"
     ~params:
       (`Assoc
@@ -840,10 +840,11 @@ let run_protocol io (config : config) ~protocol_cwd ~dynamic_tools ~reasoning_ef
           @ optional_field
               "effort"
               (Option.map Llm_provider.Reasoning_effort.to_string reasoning_effort)));
+  on_turn_dispatched ();
   (* The complete request is now outside this process. Admission stays finite
      through dispatch; only the subsequent model turn adopts its declared
      idle policy, including [None]. *)
-  io.set_timeout_s config.timeout_s;
+  io.set_receive_timeout_s config.timeout_s;
   let* turn =
     match await_response io ~id:turn_request_id ~method_:"turn/start" with
     | Error (Timeout { seconds; turn_accepted = _ }) ->
@@ -983,15 +984,15 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
     Eio.Flow.close stderr_w;
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
-    let active_timeout_s = ref initial_timeout_s in
+    let active_receive_timeout_s = ref initial_timeout_s in
     let send json =
-      with_optional_timeout clock !active_timeout_s (fun () ->
+      with_optional_timeout clock (Some config.admission_timeout_s) (fun () ->
         Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
       try
-        with_optional_timeout clock !active_timeout_s (fun () ->
+        with_optional_timeout clock !active_receive_timeout_s (fun () ->
           Eio.Buf_read.line reader)
         |> parse_wire_line
       with
@@ -1016,13 +1017,14 @@ let with_spawned_client ~mgr ~clock ~cwd ~initial_timeout_s config run =
          run
            { send
            ; receive
-           ; set_timeout_s = (fun timeout_s -> active_timeout_s := timeout_s)
+           ; set_receive_timeout_s =
+               (fun timeout_s -> active_receive_timeout_s := timeout_s)
            }))
 ;;
 
 let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     ~reasoning_effort ~thread_mode ~history ~prompt ~on_thread_ready
-    ~on_turn_starting ~on_turn_started ~on_stream_event =
+    ~on_turn_starting ~on_turn_dispatched ~on_turn_started ~on_stream_event =
   with_spawned_client
     ~mgr
     ~clock
@@ -1032,9 +1034,6 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
     (fun io ->
     let with_admission_timeout callback =
       with_optional_timeout clock (Some config.admission_timeout_s) callback
-    in
-    let with_turn_timeout callback =
-      with_optional_timeout clock config.timeout_s callback
     in
     run_protocol
       io
@@ -1049,8 +1048,9 @@ let run_spawned ~mgr ~clock ~cwd ~protocol_cwd config ~dynamic_tools
         with_admission_timeout (fun () -> on_thread_ready ~thread_id))
       ~on_turn_starting:(fun ~thread_id ->
         with_admission_timeout (fun () -> on_turn_starting ~thread_id))
+      ~on_turn_dispatched
       ~on_turn_started:(fun ~thread_id ~turn_id ->
-        with_turn_timeout (fun () -> on_turn_started ~thread_id ~turn_id))
+        with_admission_timeout (fun () -> on_turn_started ~thread_id ~turn_id))
       ~on_stream_event)
 ;;
 
@@ -1187,6 +1187,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(thread_mode = Start) ~mgr
               ~prompt
               ~on_thread_ready
               ~on_turn_starting
+              ~on_turn_dispatched:(fun () -> turn_accepted := true)
               ~on_turn_started
               ~on_stream_event
           with

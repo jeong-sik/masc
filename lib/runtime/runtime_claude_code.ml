@@ -1081,8 +1081,8 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     Fun.protect
       ~finally:(fun () -> terminate_spawned_process ~clock proc stdin_w)
       (fun () ->
-        let with_timeout callback =
-          with_optional_timeout clock (current_timeout_s ()) callback
+        let with_admission_timeout callback =
+          with_optional_timeout clock (Some config.admission_timeout_s) callback
         in
         run_protocol
           { send; receive }
@@ -1092,11 +1092,11 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
           ~session_id
           ~prompt
           ~on_session_ready:(fun ~session_id ->
-            with_timeout (fun () -> on_session_ready ~session_id))
+            with_admission_timeout (fun () -> on_session_ready ~session_id))
           ~on_turn_starting:(fun ~session_id ->
-            with_timeout (fun () -> on_turn_starting ~session_id))
+            with_admission_timeout (fun () -> on_turn_starting ~session_id))
           ~on_turn_started:(fun ~session_id ~turn_id ->
-            with_timeout (fun () -> on_turn_started ~session_id ~turn_id))
+            with_admission_timeout (fun () -> on_turn_started ~session_id ~turn_id))
           ~on_stream_event
           ~turn_admitted))
   with

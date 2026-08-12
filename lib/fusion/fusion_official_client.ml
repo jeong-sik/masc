@@ -82,7 +82,7 @@ let claude_config ~base_dir ~system_prompt (execution : Runtime_execution.claude
   ; cwd = base_dir
   ; model = execution.model
   ; system_prompt
-  ; timeout_s = execution.timeout_s
+  ; timeout_s = Some execution.timeout_s
   }
 ;;
 
@@ -92,7 +92,7 @@ let codex_config ~system_prompt (execution : Runtime_execution.codex_app_server)
   { cli_path = execution.cli_path
   ; model = execution.model
   ; developer_instructions = system_prompt
-  ; timeout_s = execution.timeout_s
+  ; timeout_s = Some execution.timeout_s
   }
 ;;
 
@@ -111,7 +111,7 @@ let antigravity_config ~base_dir (execution : Runtime_execution.antigravity_cli)
     execution_mode = Runtime_antigravity.Plan
   ; sandbox = true
   ; disable_slash_commands = true
-  ; timeout_s = execution.timeout_s
+  ; timeout_s = Some execution.timeout_s
   }
 ;;
 

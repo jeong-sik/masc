@@ -22,11 +22,20 @@ type config =
   ; execution_mode : execution_mode
   ; sandbox : bool
   ; disable_slash_commands : bool
-  ; timeout_s : float
+  ; timeout_s : float option
   }
 
 let default_timeout_s = 300.0
 let process_termination_grace_s = 2.0
+
+(* [None] installs no deadline. The vendor client owns when its own turn ends;
+   a declared bound is the operator's optional liveness guard over a silent
+   client, not a limit on how long legitimate work may take. *)
+let with_optional_timeout clock timeout_s f =
+  match timeout_s with
+  | None -> f ()
+  | Some seconds -> Eio.Time.with_timeout_exn clock seconds f
+;;
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 8192
 let max_wire_line_bytes = 8 * 1024 * 1024
@@ -49,7 +58,7 @@ let default_config ~cwd ~model =
   ; execution_mode = Plan
   ; sandbox = false
   ; disable_slash_commands = true
-  ; timeout_s = default_timeout_s
+  ; timeout_s = Some default_timeout_s
   }
 ;;
 
@@ -132,6 +141,17 @@ let error_to_string = function
   | Turn_failed detail -> "Antigravity turn failed: " ^ detail
   | Process_exited detail -> "Antigravity CLI exited before completion: " ^ detail
   | Timeout seconds -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
+;;
+
+(* An [Eio.Time.Timeout] can still arrive with no turn bound installed: the
+   process-termination grace window is its own deadline. Reporting that as a
+   turn timeout would name a limit the operator never set. *)
+let timeout_error = function
+  | Some seconds -> Error (Timeout seconds)
+  | None ->
+    Error
+      (Process_exited
+         "client did not settle within the process-termination grace window")
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -371,8 +391,11 @@ let validate_config config ~conversation_mode ~prompt =
   then Error (Invalid_config "cwd must be an absolute path")
   else if String.trim config.model = ""
   then Error (Invalid_config "model must not be empty")
-  else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
-  then Error (Invalid_config "timeout_s must be positive and finite")
+  else if
+    (match config.timeout_s with
+     | None -> false
+     | Some seconds -> not (Float.is_finite seconds) || seconds <= 0.0)
+  then Error (Invalid_config "a declared timeout_s must be positive and finite")
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
@@ -671,7 +694,7 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
     (try
        while true do
          let line =
-           Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+           with_optional_timeout clock config.timeout_s (fun () ->
              Eio.Buf_read.line reader)
          in
          match parse_wire_line line with
@@ -733,7 +756,7 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
            ~on_conversation_ready
            ~on_stream_event)
     with
-    | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+    | Eio.Time.Timeout -> timeout_error config.timeout_s
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Runtime_error error -> Error error
     | exn ->

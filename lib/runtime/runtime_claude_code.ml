@@ -9,11 +9,20 @@ type config =
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
-  ; timeout_s : float
+  ; timeout_s : float option
   }
 
 let default_timeout_s = 300.0
 let process_termination_grace_s = 2.0
+
+(* [None] installs no deadline. The vendor client owns when its own turn ends;
+   a declared bound is the operator's optional liveness guard over a silent
+   client, not a limit on how long legitimate work may take. *)
+let with_optional_timeout clock timeout_s f =
+  match timeout_s with
+  | None -> f ()
+  | Some seconds -> Eio.Time.with_timeout_exn clock seconds f
+;;
 let stderr_chunk_bytes = 4096
 let stderr_tail_bytes = 4096
 let max_wire_line_bytes = 8 * 1024 * 1024
@@ -24,7 +33,7 @@ let default_config ~cwd =
   ; cwd
   ; model = None
   ; system_prompt = None
-  ; timeout_s = default_timeout_s
+  ; timeout_s = Some default_timeout_s
   }
 ;;
 
@@ -192,6 +201,17 @@ let error_kind = function
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
   | Timeout _ -> "timeout"
+;;
+
+(* An [Eio.Time.Timeout] can still arrive with no turn bound installed: the
+   process-termination grace window is its own deadline. Reporting that as a
+   turn timeout would name a limit the operator never set. *)
+let timeout_error = function
+  | Some seconds -> Error (Timeout seconds)
+  | None ->
+    Error
+      (Process_exited
+         "client did not settle within the process-termination grace window")
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -1038,20 +1058,20 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     Eio.Fiber.fork ~sw (fun () -> drain_stderr stderr_r stderr_tail);
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let send json =
-      Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+      with_optional_timeout clock config.timeout_s (fun () ->
         Eio.Flow.copy_string (Yojson.Safe.to_string json) stdin_w;
         Eio.Flow.copy_string "\n" stdin_w)
     in
     let receive () =
       try
-        Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+        with_optional_timeout clock config.timeout_s (fun () ->
           Eio.Buf_read.line reader)
         |> parse_wire_line
       with
       | End_of_file ->
         let detail = String.trim !stderr_tail in
         Error (Process_exited (if detail = "" then "stdout closed" else detail))
-      | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+      | Eio.Time.Timeout -> timeout_error config.timeout_s
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> protocol_error "stdout read" (Printexc.to_string exn)
     in
@@ -1082,8 +1102,11 @@ let validate_process_config config =
   then Error (Invalid_config "cli_path must not be empty")
   else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
-  else if not (Float.is_finite config.timeout_s) || config.timeout_s <= 0.0
-  then Error (Invalid_config "timeout_s must be positive and finite")
+  else if
+    (match config.timeout_s with
+     | None -> false
+     | Some seconds -> not (Float.is_finite seconds) || seconds <= 0.0)
+  then Error (Invalid_config "a declared timeout_s must be positive and finite")
   else Ok ()
 ;;
 
@@ -1133,11 +1156,11 @@ let validate_turn ?(dynamic_tools = []) ?(session_mode = Start) config ~prompt =
 let probe_subscription ~mgr ~clock ~cwd config =
   let* () = validate_process_config config in
   try
-    Eio.Time.with_timeout_exn clock config.timeout_s (fun () ->
+    with_optional_timeout clock config.timeout_s (fun () ->
       read_subscription ~mgr ~cwd config)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+  | Eio.Time.Timeout -> timeout_error config.timeout_s
 ;;
 
 let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
@@ -1181,7 +1204,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~on_stream_event
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | Eio.Time.Timeout -> Error (Timeout config.timeout_s)
+    | Eio.Time.Timeout -> timeout_error config.timeout_s
     | Runtime_error error -> Error error
     | exn ->
       Error

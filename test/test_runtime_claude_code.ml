@@ -125,7 +125,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     let config =
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
-      ; timeout_s
+      ; timeout_s = Some timeout_s
       }
     in
     let on_session_ready =

@@ -22,7 +22,10 @@ type config =
   ; execution_mode : execution_mode
   ; sandbox : bool
   ; disable_slash_commands : bool
-  ; timeout_s : float
+  ; timeout_s : float option
+    (** [None] installs no deadline: the spawned client decides when its own
+        turn ends, the posture of running the CLI directly. Declared as
+        [turn-timeout-s] in runtime config, where [0] selects [None]. *)
     (** Maximum silence between valid stream-json messages. It is not a total
         turn-duration bound. *)
   }

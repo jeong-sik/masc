@@ -150,7 +150,7 @@ let run_fixture ?(dynamic_tools = []) ?thread_mode ?(history = []) ?(cwd = "/tmp
     let config =
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
-      ; timeout_s
+      ; timeout_s = Some timeout_s
       }
     in
     let on_thread_ready =

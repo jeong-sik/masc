@@ -132,7 +132,7 @@ let run_fixture
     let config =
       { (Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture") with
         cli_path = path
-      ; timeout_s
+      ; timeout_s = Some timeout_s
       }
     in
     Runtime_antigravity.run_turn

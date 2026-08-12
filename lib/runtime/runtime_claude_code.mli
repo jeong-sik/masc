@@ -15,7 +15,10 @@ type config =
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
-  ; timeout_s : float
+  ; timeout_s : float option
+    (** [None] installs no deadline: the spawned client decides when its own
+        turn ends, the posture of running the CLI directly. Declared as
+        [turn-timeout-s] in runtime config, where [0] selects [None]. *)
     (** Maximum silence between CLI stream messages. Each received message
         resets the deadline; a progressing turn has no wall limit. *)
   }

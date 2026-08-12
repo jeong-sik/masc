@@ -18,9 +18,13 @@ type config =
   { cli_path : string
   ; model : string option
   ; developer_instructions : string option
-  ; timeout_s : float
+  ; timeout_s : float option
     (** Maximum silence between app-server protocol messages. Each received
-        message resets the deadline; a progressing turn has no wall limit. *)
+        message resets the deadline; a progressing turn has no wall limit.
+        [None] installs no deadline at all — the spawned client decides when
+        its own turn ends, which is the posture of running the CLI directly.
+        Declared as [turn-timeout-s] in runtime config, where [0] selects
+        [None]. *)
   }
 
 val default_timeout_s : float

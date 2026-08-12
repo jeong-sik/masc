@@ -51,23 +51,6 @@ val generate_session_key : unit -> string
 val from_mcp_params : Yojson.Safe.t -> t
 val anonymous : unit -> t
 
-(** {1 Identity Registry} *)
-
-module Registry : sig
-  type registry
-
-  val create : unit -> registry
-  val register : registry -> t -> t
-  val find_by_session : registry -> string -> t option
-  val find_by_name : registry -> string -> t option
-  val touch : registry -> string -> unit -> unit
-  val unregister : registry -> string -> unit
-  val list_all : registry -> t list
-  (** All explicitly registered identities. [last_seen] remains observation
-      data and is not used as lifecycle authority. *)
-  val count : registry -> int
-end
-
 (** {1 Utilities} *)
 
 val has_capability : t -> string -> bool
@@ -79,4 +62,3 @@ val same_agent : t -> t -> bool
 val channel_to_yojson : channel -> Yojson.Safe.t
 val channel_of_yojson : Yojson.Safe.t -> (channel, string) Result.t
 val to_yojson : t -> Yojson.Safe.t
-

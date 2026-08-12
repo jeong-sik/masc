@@ -205,82 +205,6 @@ let test_to_display_string_empty_session_key () =
   check bool "empty session key display uses unknown prefix" true
     (str_contains display "(unknown)")
 
-(** Registry tests *)
-module RegistryTests = struct
-  (* Note: These tests require Eio runtime, run with test_integration *)
-  
-  let test_register_and_find () =
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let reg = Client_identity.Registry.create () in
-    let identity = identity_for "test-agent" in
-    let _ = Client_identity.Registry.register reg identity in
-    
-    let found_by_session = Client_identity.Registry.find_by_session reg identity.session_key in
-    check bool "found by session" true (Option.is_some found_by_session);
-    
-    let found_by_name = Client_identity.Registry.find_by_name reg "test-agent" in
-    check bool "found by name" true (Option.is_some found_by_name)
-
-  let test_unregister () =
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let reg = Client_identity.Registry.create () in
-    let identity = identity_for "test-agent" in
-    let registered = Client_identity.Registry.register reg identity in
-    
-    check int "count after register" 1 (Client_identity.Registry.count reg);
-    Client_identity.Registry.unregister reg registered.session_key;
-    check int "count after unregister" 0 (Client_identity.Registry.count reg)
-
-  let test_touch () =
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let reg = Client_identity.Registry.create () in
-    (* Create identity with old timestamp *)
-    let old_time = Unix.gettimeofday () -. 10.0 in
-    let identity = Client_identity.({
-      (identity_for "test-agent") with
-      last_seen = old_time;
-      registered_at = old_time;
-    }) in
-    let _ = Client_identity.Registry.register reg identity in
-    
-    Client_identity.Registry.touch reg identity.session_key ();
-    
-    match Client_identity.Registry.find_by_session reg identity.session_key with
-    | Some updated ->
-        check bool "last_seen updated" true (updated.last_seen > old_time)
-    | None -> fail "identity not found after touch"
-
-  let test_list_all () =
-    Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let reg = Client_identity.Registry.create () in
-    let id1 = identity_for "active-agent" in
-    let id2 = Client_identity.({
-      (identity_for "stale-agent") with
-      last_seen = Unix.gettimeofday () -. 1000.0;
-      registered_at = Unix.gettimeofday () -. 1000.0;
-    }) in
-    
-    let _ = Client_identity.Registry.register reg id1 in
-    let _ = Client_identity.Registry.register reg id2 in
-    
-    let registered = Client_identity.Registry.list_all reg in
-    check int "all registered agents" 2 (List.length registered);
-    check bool "contains active agent" true
-      (List.exists
-         (fun (identity : Client_identity.t) ->
-            String.equal identity.agent_name "active-agent")
-         registered);
-    check bool "contains stale observation" true
-      (List.exists
-         (fun (identity : Client_identity.t) ->
-            String.equal identity.agent_name "stale-agent")
-         registered)
-end
-
 let () =
   run "Client_identity" [
     "basics", [
@@ -302,11 +226,5 @@ let () =
       test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
       test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;
-    ];
-    "registry", [
-      test_case "register_and_find" `Quick RegistryTests.test_register_and_find;
-      test_case "unregister" `Quick RegistryTests.test_unregister;
-      test_case "touch" `Quick RegistryTests.test_touch;
-      test_case "list_all" `Quick RegistryTests.test_list_all;
     ];
   ]

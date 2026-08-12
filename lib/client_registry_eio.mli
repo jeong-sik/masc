@@ -1,8 +1,8 @@
 (** Agent Registry Eio - Global agent identity tracking
 
-    Actor model: all mutable state (identity registry, session→key map,
-    resolved-name cache) is held in a single Mutex-protected record, removing
-    the TOCTOU race in the previous three-Atomic-store design.
+    Actor model: one immutable identity/session/cache snapshot is swapped
+    behind a single mutex. Identity materialization and logging stay outside
+    the critical section; pure transitions close creation races.
 
     @since 0.5.0
 *)

@@ -1,4 +1,4 @@
-open Masc.Subsystem_health
+module State = Masc.Subsystem_health_state
 
 let apply event state = State.apply state event
 

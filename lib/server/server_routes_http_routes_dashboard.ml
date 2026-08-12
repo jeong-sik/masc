@@ -1028,13 +1028,35 @@ let add_routes ~sw ~clock router =
                     reqd
                     ("runtime config parse failed: " ^ msg)
                 | Ok report ->
+                  let schema_ok =
+                    Keeper_runtime_config.validation_report_is_valid report
+                  in
+                  (* The raw-save path (Runtime.save_config_text) rejects text
+                     that parses and passes the keeper schema but fails the
+                     runtime parser. Run that same precondition here so can_save
+                     cannot advertise a save guaranteed to fail. Mirror the save
+                     order: the runtime check only runs once the schema is
+                     valid. *)
+                  let runtime_error =
+                    if schema_ok
+                    then (
+                      match Runtime.validate_config_text source_text with
+                      | Ok () -> None
+                      | Error msg -> Some msg)
+                    else None
+                  in
+                  let can_save = schema_ok && Option.is_none runtime_error in
                   Http.Response.json_value
                     ~compress:true
                     ~request:req
                     (`Assoc
                       [ "ok", `Bool true
-                      ; "can_save", `Bool (Keeper_runtime_config.validation_report_is_valid report)
+                      ; "can_save", `Bool can_save
                       ; "validation", Keeper_runtime_config.validation_report_to_yojson report
+                      ; ( "runtime_validation"
+                        , match runtime_error with
+                          | None -> `Null
+                          | Some msg -> `String msg )
                       ; "keeper_setting_schema", Keeper_runtime_config.setting_schema_to_yojson ()
                       ])
                     reqd)))

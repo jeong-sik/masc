@@ -559,6 +559,47 @@ let test_settings_projection_uses_typed_effective_values () =
     (deadline |> member "effective_value" |> to_string)
 ;;
 
+(* PR #28225 review (comment 3761300276): the raw-config preview computed
+   can_save from the keeper schema alone, but the raw-save path also runs the
+   runtime parser (Runtime.save_config_text). A config that parses and passes
+   the keeper schema but names an unknown [runtime] default therefore advertised
+   can_save=true while save was guaranteed to reject it. Runtime.validate_config_text
+   now runs that runtime precondition and shares it with the writer, so preview
+   and save cannot disagree. *)
+let test_preview_precondition_matches_save () =
+  let schema_ok_runtime_bad = "[runtime]\ndefault = \"ghost-runtime\"\n" in
+  (match Keeper_runtime_config.validate_source_text schema_ok_runtime_bad with
+   | Error msg -> failf "keeper schema unexpectedly rejected the text: %s" msg
+   | Ok report ->
+     check
+       bool
+       "keeper schema alone reports the text as valid (the old can_save source)"
+       true
+       (Keeper_runtime_config.validation_report_is_valid report));
+  with_base_path (fun base_path ->
+    let runtime_config_path =
+      Filename.concat
+        (Filename.concat base_path ".masc/config")
+        Config_dir_resolver.runtime_toml_filename
+    in
+    let validate =
+      Runtime.validate_config_text ~runtime_config_path schema_ok_runtime_bad
+    in
+    let save =
+      Runtime.save_config_text ~runtime_config_path schema_ok_runtime_bad
+    in
+    check
+      bool
+      "runtime precondition rejects the unknown [runtime] default"
+      true
+      (Result.is_error validate);
+    check
+      bool
+      "preview validation and save agree on the same input"
+      true
+      (Result.is_error validate = Result.is_error save))
+;;
+
 let () =
   run "runtime_toml_overrides"
     [ ( "resolve_overrides"
@@ -608,5 +649,7 @@ let () =
         ; test_case "invalid stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_invalid_env_fails_loud
         ; test_case "empty stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_empty_env_fails_loud
         ; test_case "whitespace stream idle env fails loud" `Quick test_resolved_stream_idle_timeout_whitespace_env_fails_loud
+        ; test_case "preview precondition matches save (#28225)" `Quick
+            test_preview_precondition_matches_save
         ] )
     ]

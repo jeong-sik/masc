@@ -445,6 +445,15 @@ val save_config_text :
     the same write-stage rules apply to the runtime cache while the registry
     remains unpublished. *)
 
+val validate_config_text :
+  ?runtime_config_path:string -> string -> (unit, string) result
+(** Run the raw runtime.toml save precondition — TOML parse, config
+    materialization, and dispatch-cap validation — without writing or mutating
+    the active registry. Preview endpoints call this so [can_save] reflects the
+    same runtime-parser rejection {!save_config_text} enforces, not only the
+    keeper-schema report. Returns [Ok ()] when the text would be accepted for
+    save; [Error msg] with the runtime-parser reason otherwise. *)
+
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->
   keeper_name:string ->

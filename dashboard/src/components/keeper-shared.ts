@@ -527,7 +527,6 @@ function KeeperQueueControlPanel({
       <div class="flex items-center justify-between gap-2">
         <div>
           <div class="text-sm font-semibold text-[var(--color-fg-primary)]">Keeper 작업 제어</div>
-          <div class="text-2xs text-[var(--color-fg-muted)]">durable operation과 Event Queue를 각각의 SSOT에서 제어합니다.</div>
         </div>
         <${GhostButton} onClick=${onClose}>닫기<//>
       </div>
@@ -571,7 +570,7 @@ function KeeperQueueControlPanel({
 
       <div class="grid gap-2">
         <div class="text-xs font-semibold text-[var(--color-fg-secondary)]">
-          Queued chat operations ${operations.length}
+          채팅 대기열 ${operations.length}
         </div>
         ${operations.map((operation, index) => {
           const busy = pendingAction === operation.operationId
@@ -628,7 +627,7 @@ function KeeperQueueControlPanel({
           `
         })}
         ${operations.length === 0
-          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">Queued operation이 없습니다.</div>`
+          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">—</div>`
           : null}
       </div>
 
@@ -721,7 +720,7 @@ function KeeperQueueControlPanel({
           `
         })}
         ${eventRows.length === 0
-          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">대기 중인 자율 이벤트가 없습니다.</div>`
+          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">—</div>`
           : null}
       </div>
     </section>

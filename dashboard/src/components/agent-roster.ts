@@ -978,18 +978,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     keeperFilter === 'agent-only' || keeperStateHints.length === 0
       ? null
       : `키퍼 ${keeperStateHints.join(' · ')}`
-  const fallbackStateTitle =
-    executionError.value
-      ? '상태 불러오기 실패'
-      : executionLoaded.value
-        ? '일부만 불러옴'
-        : '불러오는 중'
+  // The banner renders only for error / not-yet-loaded states
+  // (shouldShowExecutionFallbackState): a loaded-but-partial roster speaks
+  // through its own rows and health counts.
+  const fallbackStateTitle = executionError.value ? '상태 불러오기 실패' : '불러오는 중'
   const fallbackStateMessage =
     executionError.value
       ? `${scopeLabel}. 상태 정보를 아직 불러오지 못했습니다.`
-      : executionLoaded.value
-        ? `${scopeLabel}. 일부만 불러왔습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
-        : `${scopeLabel}.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상태 정보가 올라오면 목록이 채워집니다.`
+      : `${scopeLabel}.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상태 정보가 올라오면 목록이 채워집니다.`
 
   const rosterRows = useMemo(() => filtered.map((agent: Agent) => {
     const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)

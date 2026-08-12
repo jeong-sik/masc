@@ -509,13 +509,15 @@ interface ExecutionFallbackStateOptions {
 
 export function shouldShowExecutionFallbackState({
   executionLoaded,
-  executionLoading,
   executionError,
-  loadedCount,
   expectedCount,
 }: ExecutionFallbackStateOptions): boolean {
   if (expectedCount <= 0) return false
   if (executionError) return true
-  if (loadedCount >= expectedCount && executionLoaded) return false
-  return executionLoading || !executionLoaded || loadedCount < expectedCount
+  // Once execution state has loaded, the roster rows and health counts are
+  // the surface of truth — a loaded-but-partial diff banner ("일부만
+  // 불러왔습니다 / 키퍼 미기동 N개") repeated what the counts already show
+  // and sat permanently on screen whenever any configured keeper was not
+  // running. Only error and not-yet-loaded states warrant the banner.
+  return !executionLoaded
 }

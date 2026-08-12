@@ -33,17 +33,16 @@ import {
 import { formatDateTimeKo, formatTimeUntil, relativeTime } from '../../lib/format-time'
 import { CountBadge } from '../v2/primitives-v2'
 import { JsonViewerCard } from '../common/json-viewer'
-import { dashboardWsReady } from '../../dashboard-ws-state'
 import {
   keeperWaitingInventoryState,
   subscribeKeeperWaitingInventory,
 } from '../../keeper-waiting-inventory-store'
 
 const LANE_STATE_LABELS: Record<string, string> = {
-  idle: '대기열 비어 있음',
-  busy: '현재 작업 처리 중',
-  waiting: '처리 대기 중',
-  deferred: '외부 완료 대기 중',
+  idle: '비어 있음',
+  busy: '처리 중',
+  waiting: '대기 중',
+  deferred: '외부 응답 대기',
 }
 
 const LANE_SOURCE_LABELS: Record<string, string> = {
@@ -225,7 +224,6 @@ export function KeeperLaneStrip({
   ready,
   loading,
   error,
-  pushReady = false,
 }: {
   keeper: Keeper
   inventory: DashboardKeeperWaitingInventory | null | undefined
@@ -234,8 +232,6 @@ export function KeeperLaneStrip({
   ready: boolean
   loading: boolean
   error: string | null
-  /** Whether the authenticated dashboard WS handshake completed. */
-  pushReady?: boolean
 }): VNode {
   const entry = inventoryEntry(inventory, keeper)
   const rows = waitingRowsNewestFirst(entry?.waiting_on ?? [])
@@ -263,8 +259,7 @@ export function KeeperLaneStrip({
                     <div class="grid gap-1">
                       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-muted)]">
                         <span class="font-semibold uppercase tracking-wide text-[var(--color-fg-secondary)]">HEAD</span>
-                        <span>시간축 · 최신 관측 → 오래된 관측</span>
-                        <span>source별 독립 대기열이며 처리 우선순위를 뜻하지 않습니다.</span>
+                        <span>최신 → 오래된</span>
                       </div>
                     <div class="max-h-[30rem] overflow-y-auto pr-1" data-testid="keeper-lane-graph" aria-label="대기 시작 시각순 작업 흐름">
                       ${rows.map((row, index) => html`
@@ -278,9 +273,6 @@ export function KeeperLaneStrip({
                     </div>
                     </div>
                   `
-                : null}
-              ${rows.length === 0
-                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${entry.state === 'busy' ? '새 작업은 현재 턴 뒤에 처리됩니다.' : '지금 기다리는 작업이 없습니다.'}</div>`
                 : null}
               ${countTruncated
                 ? html`<div class="text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-truncation">
@@ -297,9 +289,6 @@ export function KeeperLaneStrip({
                       >${item.label} <span class="font-mono text-[var(--color-fg-primary)]">${item.count}</span></span>
                     `)}
                   </div>`
-                : null}
-              ${inventory?.generated_at
-                ? html`<div class="text-2xs text-[var(--color-fg-muted)]">서버 기준 ${formatDateTimeKo(inventory.generated_at)}${pushReady ? ' · WS 즉시 반영' : ''}</div>`
                 : null}
             </div>
           `
@@ -329,7 +318,6 @@ export function KeeperLaneSection({ keeper }: { keeper: Keeper }): VNode {
       ready=${current.ready}
       loading=${current.loading}
       error=${current.error}
-      pushReady=${dashboardWsReady.value}
     />
   `
 }

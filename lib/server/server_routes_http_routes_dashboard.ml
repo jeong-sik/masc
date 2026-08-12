@@ -929,11 +929,12 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/workspace" (fun request reqd ->
        with_public_read handle_dashboard_workspace request reqd)
-  (* Dev-only Worker bearer for the dashboard UI. Served exclusively when the
-     server binds to loopback and strict-auth env overrides are disabled, so
-     that a LAN deployment never hands out a credential over the wire. The
-     token is canonicalized to the [dashboard] actor and persisted at
-     [.masc/auth/dashboard.token]. *)
+  (* Dev-only bearer for the dashboard UI, minted at the role named by
+     [Server_routes_http_dashboard_dev_token.dashboard_dev_role]. Served
+     exclusively when the server binds to loopback and strict-auth env
+     overrides are disabled, so that a LAN deployment never hands out a
+     credential over the wire. The token is canonicalized to the [dashboard]
+     actor and persisted at [.masc/auth/dashboard.token]. *)
   |> Http.Router.get "/api/v1/dashboard/dev-token" (fun request reqd ->
        if (not (http_auth_bind_is_loopback ()))
           || http_auth_strict_enabled () then

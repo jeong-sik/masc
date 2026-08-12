@@ -15,6 +15,10 @@ type run =
   { run_id : string
   ; keeper : string
   ; preset : string
+  ; topology : Fusion_types.fusion_topology
+      (** 이 run 이 실행한 심의 위상. obligation payload 에도 있지만 그 레코드는
+          배달 직후 제거되므로, 완료된 run 의 위상을 되읽을 수 있는 자리는 여기뿐이다.
+          topology 를 담지 않은 예전 replay 레코드는 스킵된다(레거시 폴백 없음). *)
   ; started_at : float
   ; status : run_status
   }
@@ -29,6 +33,7 @@ val register_running
   -> run_id:string
   -> keeper:string
   -> preset:string
+  -> topology:Fusion_types.fusion_topology
   -> started_at:float
   -> unit
 

@@ -27,6 +27,16 @@ val respond_error :
 val handle_keeper_catchup_judge_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 
+(** Operator-initiated deliberation on behalf of [keeper]. Same execution path
+    as the catch-up judge (the run is owned by the keeper named in the route, so
+    its wake, board post and chat delivery are indistinguishable from a
+    self-initiated run), but the prompt, preset and topology come from the
+    request body. Omitted preset/topology fall back to the tool's own defaults;
+    validation stays in the tool so this endpoint cannot drift from what a
+    keeper-side call would accept. *)
+val handle_keeper_fusion_post :
+  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+
 val handle_keeper_operator_note_post :
   Mcp_server.server_state ->
   string ->

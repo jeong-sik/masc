@@ -17,8 +17,13 @@ describe('parseFusionRunsResponse', () => {
       runId: 'r-1',
       keeper: 'k1',
       preset: 'balanced',
+      // A row from before the registry tracked topology decodes to null rather
+      // than to a guessed shape.
+      topology: null,
       startedAt: 100,
       status: 'running',
+      error: undefined,
+      failureCode: undefined,
     })
   })
 

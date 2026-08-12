@@ -150,6 +150,89 @@ let print_judge_arm ~(tag : string)
       , u.Fusion_types.input_tokens
       , u.Fusion_types.output_tokens )
 
+
+(* judge_role 렌더는 CLI 로컬이다. sink 의 (kind, identity) 쌍은 wire 계약이라
+   재사용하면 표시 편의가 그 계약을 끌고 다니게 된다. *)
+let judge_role_label : Fusion_types.judge_role -> string = function
+  | Fusion_types.Single -> "single"
+  | Fusion_types.Refine_pass -> "refine"
+  | Fusion_types.First id -> "first:" ^ id
+  | Fusion_types.Meta -> "meta"
+  | Fusion_types.Stage_meta n -> Printf.sprintf "stage_meta:%d" n
+  | Fusion_types.Final_meta -> "final_meta"
+;;
+
+(* [--topology] 심의 모드. [run_harness] 는 arm 비교 도구라 topology 분기를 타지
+   않는다: single/self-consistency/Self-MoA/fusion 을 같은 plumbing 으로 돌려 비교할
+   뿐이다. 그래서 judge_of_judges / staged_judge_of_judges 는 이 바이너리로도,
+   HTTP 로도 실행할 수 없었고(운영 표면은 catchup-judge 가 simple 고정), 오직 키퍼가
+   스스로 호출할 때만 실행됐다. 이 모드는 [Fusion_orchestrator.compute] 를 그대로
+   호출해 실제 분기를 태우고 증거를 덤프한다. sink/wake 는 타지 않는다 — 그 구간은
+   도구 경로가 소유하며, 여기서 흉내내면 durable 상태에 쓰는 측정 하네스가 된다. *)
+let run_deliberation ~sw ~net ~base_path ~policy ~topology ~preset_name ~prompt ~web_tools =
+  let request : Fusion_types.fusion_request =
+    { run_id = "fusion-run-cli"
+    ; keeper = "cli"
+    ; prompt
+    ; preset = preset_name
+    ; web_tools
+    ; depth = Fusion_types.Fusion_depth.Top
+    ; trigger = Fusion_types.Explicit_tool_call
+    }
+  in
+  let t0 = Unix.gettimeofday () in
+  match
+    Masc.Fusion_orchestrator.compute ~base_dir:base_path ~sw ~net ~policy ~topology
+      ~request ()
+  with
+  | Masc.Fusion_orchestrator.Compute_denied reason ->
+    Printf.printf "DENIED: %s\n" (Fusion_types.deny_reason_label reason);
+    exit 1
+  | Masc.Fusion_orchestrator.Computed evidence ->
+    let elapsed = Unix.gettimeofday () -. t0 in
+    Printf.printf "%s\ntopology: %s | preset: %s | elapsed: %.1fs\n%s\n"
+      bar
+      (Fusion_types.fusion_topology_to_string topology)
+      preset_name elapsed bar;
+    let answered = Fusion_types.answered_of evidence.panel in
+    Printf.printf "panel: %d/%d answered\n"
+      (List.length answered)
+      (List.length evidence.panel);
+    List.iter
+      (fun (o : Fusion_types.panel_outcome) ->
+         match o with
+         | Fusion_types.Answered a ->
+           Printf.printf "  [ok]   %-52s %d chars, %d out-tokens\n" a.model
+             (String.length a.answer) a.usage.output_tokens
+         | Fusion_types.Failed f ->
+           Printf.printf "  [FAIL] %-52s %s\n" f.failed_model
+             (Masc.Fusion_agent_core.panel_failure_text f.reason))
+      evidence.panel;
+    Printf.printf "judge nodes: %d\n" (List.length evidence.judges);
+    List.iter
+      (fun (node : Fusion_types.judge_outcome) ->
+         match node with
+         | Fusion_types.Synthesized s ->
+           Printf.printf "  [ok]   role=%-28s out-tokens=%d\n"
+             (judge_role_label s.role) s.usage.output_tokens
+         | Fusion_types.Judge_failed f ->
+           Printf.printf "  [FAIL] role=%-28s %s%s\n"
+             (judge_role_label f.failed_role)
+             (Fusion_types.judge_failure_text f.failure)
+             (match f.elapsed_s with
+              | Some e -> Printf.sprintf " (after %.1fs)" e
+              | None -> ""))
+      evidence.judges;
+    (match evidence.judge with
+     | Ok synthesis ->
+       Printf.printf "\nRESOLVED: %s\n"
+         (String.sub synthesis.resolved_answer 0
+            (min 400 (String.length synthesis.resolved_answer)))
+     | Error failure ->
+       Printf.printf "\nJUDGE FAILED: %s\n" (Fusion_types.judge_failure_text failure));
+    Printf.printf "judge usage: in=%d out=%d\n"
+      evidence.judge_usage.input_tokens evidence.judge_usage.output_tokens
+
 let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
     ~(preset : Fusion_policy.preset) ~(prompt : string) ~(config_path : string)
   : unit
@@ -333,6 +416,8 @@ let run_harness ~sw ~net ~(base_path : string) ~(policy : Fusion_policy.t)
 let () =
   let base = ref None in
   let preset_override = ref None in
+  let topology_override = ref None in
+  let web_tools = ref false in
   let prompt_parts = ref [] in
   let rec parse = function
     | [] -> Ok ()
@@ -344,6 +429,19 @@ let () =
       preset_override := Some v;
       parse rest
     | [ "--preset" ] -> Error "missing value for --preset"
+    | "--topology" :: v :: rest ->
+      (match Fusion_types.fusion_topology_of_string v with
+       | None ->
+         Error
+           (Printf.sprintf "topology must be one of: %s"
+              (String.concat ", " Fusion_types.all_fusion_topology_strings))
+       | Some t ->
+         topology_override := Some t;
+         parse rest)
+    | [ "--topology" ] -> Error "missing value for --topology"
+    | "--web-tools" :: rest ->
+      web_tools := true;
+      parse rest
     | "--" :: rest ->
       prompt_parts := List.rev_append rest !prompt_parts;
       Ok ()
@@ -357,11 +455,13 @@ let () =
    | Ok () -> ()
    | Error msg ->
      Printf.eprintf "fusion_run: %s\n" msg;
-     prerr_endline "usage: fusion_run [--base PATH] [--preset NAME] [--] <prompt...>";
+     prerr_endline
+       "usage: fusion_run [--base PATH] [--preset NAME] [--topology TOPO] [--web-tools] [--] <prompt...>";
      exit 2);
   let prompt = String.concat " " (List.rev !prompt_parts) in
   if String.trim prompt = "" then (
-    prerr_endline "usage: fusion_run [--base PATH] [--preset NAME] [--] <prompt...>";
+    prerr_endline
+       "usage: fusion_run [--base PATH] [--preset NAME] [--topology TOPO] [--web-tools] [--] <prompt...>";
     exit 2);
   (* Base path: explicit --base wins; else the workspace base the server uses
      (MASC_BASE_PATH via Host_config, surfaced by Config_dir_resolver). We do
@@ -402,6 +502,15 @@ let () =
   Eio_context.set_env env;
   Eio_context.set_clock (Eio.Stdenv.clock env);
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
+  (* 배포 capability overlay 를 embedded 카탈로그 위에 설치한다. 서버는 부팅에서
+     이걸 하고 CLI 는 하지 않아, 같은 runtime.toml 이 서버에서는 뜨는데 이 하네스에서는
+     "absent from the AGENT_CORE capability catalog" 로 죽었다 — overlay 에 행이
+     있는 런타임인데도. Eio_context 를 서버와 맞춘 것과 같은 이유로 여기서도 맞춘다. *)
+  ignore
+    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+       ~config_root:(Filename.dirname config_path)
+       ()
+     : string option);
   (match Runtime.init_default_strict ~config_path with
    | Error msg ->
      Printf.eprintf "runtime init failed (%s): %s\n" config_path msg;
@@ -430,4 +539,8 @@ let () =
        (* RFC-0280: find_preset가 검증된 preset을 돌려준다. 하네스는 raw preset으로
           coerce해 arm을 구성한다(read-only). *)
        let preset = Fusion_policy.Validated_preset.preset vp in
-       run_harness ~sw ~net ~base_path ~policy ~preset ~prompt ~config_path)
+       (match !topology_override with
+        | Some topology ->
+          run_deliberation ~sw ~net ~base_path ~policy ~topology
+            ~preset_name:preset.Fusion_policy.name ~prompt ~web_tools:!web_tools
+        | None -> run_harness ~sw ~net ~base_path ~policy ~preset ~prompt ~config_path))

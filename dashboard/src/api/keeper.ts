@@ -1217,3 +1217,48 @@ export async function fetchKeeperEval(name: string, limit = 10): Promise<KeeperE
   if (!resp.ok) throw new Error(`eval fetch failed: ${resp.status}`)
   return resp.json() as Promise<KeeperEvalResponse>
 }
+
+/** Result of starting an operator-initiated deliberation. Mirrors the
+    catch-up judge envelope minus the digest (there is none: the prompt came
+    from the operator, not from a computed catch-up). */
+export interface KeeperFusionRunResponse {
+  ok: true
+  status: 'fusion_started'
+  runId: string
+  ownerKeeper: string
+  fusionRoute: string
+}
+
+/** Start a deliberation owned by [keeperName]. This is the surface that makes
+    the judge-of-judges topologies reachable: `POST /catchup-judge` fixes both
+    the prompt and `topology = "simple"`, so before this endpoint the only way
+    to run them was a keeper deciding to call masc_fusion on its own.
+
+    `preset` / `topology` are omitted from the body when empty so the tool's own
+    defaults apply — the client does not get a second opinion about what the
+    default is. Rejections (unknown preset, preset without enough judges) come
+    back as the tool's message, surfaced verbatim. */
+export async function runKeeperFusion(
+  keeperName: string,
+  input: { prompt: string; preset?: string; topology?: string; webTools?: boolean },
+): Promise<KeeperFusionRunResponse> {
+  const body: Record<string, unknown> = { prompt: input.prompt }
+  if (input.preset) body.preset = input.preset
+  if (input.topology) body.topology = input.topology
+  if (input.webTools !== undefined) body.web_tools = input.webTools
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/fusion`,
+    body,
+  )
+  if (!isRecord(raw) || raw.ok !== true) {
+    const message = isRecord(raw) ? asString(raw.error) : null
+    throw new Error(message ?? 'runKeeperFusion: invalid response envelope')
+  }
+  const runId = asString(raw.run_id)
+  const ownerKeeper = asString(raw.owner_keeper)
+  const fusionRoute = asString(raw.fusion_route)
+  if (!runId || !ownerKeeper || !fusionRoute) {
+    throw new Error('runKeeperFusion: missing run metadata')
+  }
+  return { ok: true, status: 'fusion_started', runId, ownerKeeper, fusionRoute }
+}

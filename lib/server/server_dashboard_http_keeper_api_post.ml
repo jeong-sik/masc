@@ -115,6 +115,95 @@ let is_finite_float value =
   | FP_infinite | FP_nan -> false
 ;;
 
+(* Operator-initiated deliberation. [handle_keeper_catchup_judge_post] already
+   runs [Fusion_tool.handle] from an HTTP request, but it fixes the prompt to a
+   catch-up digest and hard-codes [topology = "simple"], so the judge-of-judges
+   and staged topologies the tool advertises had no reachable surface at all:
+   only a keeper deciding on its own to call the tool could exercise them. This
+   generalises that path to the operator, keeping every other property the same
+   (the run is owned by [name], so its wake, board post and chat delivery land
+   on that keeper exactly as a self-initiated run would).
+
+   Validation stays in the tool. Preset/topology/prompt rejections come back as
+   the tool's own typed refusals rather than a second copy of those rules here,
+   which is what keeps this endpoint from drifting away from what a keeper-side
+   call would do. *)
+let handle_keeper_fusion_post state req reqd body_str =
+  let req_path = Http.Request.path req in
+  let name = extract_keeper_name_for_suffix req_path keeper_suffix_fusion in
+  if name = "" then respond_error reqd "keeper name required"
+  else if not (Keeper_config.validate_name name) then
+    respond_error reqd (Printf.sprintf "invalid keeper name: %s" name)
+  else
+    try
+      let args = Yojson.Safe.from_string body_str in
+      let prompt =
+        match Json_util.assoc_member_opt "prompt" args with
+        | Some (`String value) -> String.trim value
+        | _ -> ""
+      in
+      if prompt = "" then respond_error reqd "prompt is required"
+      else
+        let config = Mcp_server.workspace_config state in
+        let now_unix = Time_compat.now () in
+        match Eio_context.get_root_switch_opt (), Eio_context.get_net_opt () with
+        | None, _ | _, None ->
+          respond_error reqd "fusion requires the server root switch + net (unavailable)"
+        | Some sw, Some net ->
+          (match Fusion_config_loader.load ~base_path:config.base_path with
+           | Error msg -> respond_error reqd msg
+           | Ok policy ->
+             let string_arg key =
+               match Json_util.assoc_member_opt key args with
+               | Some (`String value) when String.trim value <> "" ->
+                 [ key, `String (String.trim value) ]
+               | _ -> []
+             in
+             let web_tools =
+               match Json_util.assoc_member_opt "web_tools" args with
+               | Some (`Bool value) -> [ "web_tools", `Bool value ]
+               | _ -> []
+             in
+             (* preset/topology 를 생략하면 도구의 기본값(default_preset / simple)이
+                그대로 적용된다 — 여기서 기본값을 새로 정하지 않는다. *)
+             let fusion_args =
+               `Assoc
+                 (("prompt", `String prompt)
+                  :: (string_arg "preset" @ string_arg "topology" @ web_tools))
+             in
+             let raw =
+               Fusion_tool.handle ~sw ~net ~base_dir:config.base_path ~keeper:name
+                 ~now_unix ~policy ~args:fusion_args ()
+             in
+             let fusion_json = parse_fusion_result raw in
+             (match Json_util.assoc_member_opt "ok" fusion_json with
+              | Some (`Bool true) ->
+                (match Json_util.assoc_member_opt "run_id" fusion_json with
+                 | Some (`String run_id) ->
+                   Http.Response.json_value ~compress:true ~request:req
+                     (`Assoc
+                        [ "ok", `Bool true
+                        ; "status", `String "fusion_started"
+                        ; "run_id", `String run_id
+                        ; "owner_keeper", `String name
+                        ; "fusion_route", `String ("/#fusion?run_id=" ^ run_id)
+                        ])
+                     reqd
+                 | _ -> respond_error reqd "fusion accepted without canonical run_id")
+              | _ ->
+                let message =
+                  match Json_util.assoc_member_opt "error" fusion_json with
+                  | Some (`String msg) -> msg
+                  | _ ->
+                    (match Json_util.assoc_member_opt "reason" fusion_json with
+                     | Some (`String msg) -> msg
+                     | _ -> "fusion refused the request")
+                in
+                respond_error reqd message))
+    with
+    | Yojson.Json_error msg -> respond_error reqd ("invalid JSON body: " ^ msg)
+;;
+
 let handle_keeper_catchup_judge_post state req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_suffix req_path keeper_suffix_catchup_judge in

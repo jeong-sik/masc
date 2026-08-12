@@ -58,17 +58,17 @@ let find_run runs id =
 (* a registry carrying one of each terminal/active status *)
 let seeded () =
   let t = R.create () in
-  R.register_running t ~run_id:"r-run" ~keeper:"k1" ~preset:"balanced" ~started_at:300.0;
-  R.register_running t ~run_id:"r-done" ~keeper:"k1" ~preset:"deep" ~started_at:100.0;
+  R.register_running t ~run_id:"r-run" ~keeper:"k1" ~preset:"balanced" ~topology:Fusion_types.Simple ~started_at:300.0;
+  R.register_running t ~run_id:"r-done" ~keeper:"k1" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:100.0;
   R.mark_completed t ~run_id:"r-done" ~outcome:R.Succeeded;
-  R.register_running t ~run_id:"r-fail" ~keeper:"k1" ~preset:"deep" ~started_at:200.0;
+  R.register_running t ~run_id:"r-fail" ~keeper:"k1" ~preset:"deep" ~topology:Fusion_types.Simple ~started_at:200.0;
   R.mark_completed t ~run_id:"r-fail"
     ~outcome:(R.Failed { reason = "judge failed: timeout"; code = "timeout" });
   R.register_running
     t
     ~run_id:"r-foreign"
     ~keeper:"k2"
-    ~preset:"balanced"
+    ~preset:"balanced" ~topology:Fusion_types.Simple
     ~started_at:400.0;
   t
 ;;

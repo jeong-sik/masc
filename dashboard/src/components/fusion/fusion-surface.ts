@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
-import type { FusionRunRecord, FusionRunStatusLabel } from '../../api/dashboard'
+import type { FusionRunRecord, FusionRunStatusLabel, FusionTopologyLabel } from '../../api/dashboard'
 import { navigate, replaceRoute, route } from '../../router'
 import {
   fusionBoardError,
@@ -12,6 +12,7 @@ import {
   refreshFusionBoard,
   refreshFusionRuns,
 } from '../../store'
+import { FusionRunForm } from './fusion-run-form'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 import { RichContent } from '../common/rich-content'
@@ -594,6 +595,24 @@ interface FusionShapeInfo {
   okFirstCount: number
 }
 
+
+// The topology the run was *asked* to execute, from the registry. This is not
+// the same fact as [classifyFusionJudgeShape], which infers the shape after the
+// fact from the judge nodes the sink recorded: a run that requested
+// judge_of_judges but lost its meta judge shows first-pass nodes only, and the
+// two chips side by side are what makes that visible. A registry row written
+// before topology was tracked has none, so the chip is omitted rather than
+// guessed.
+function topologyChip(topology: FusionTopologyLabel | null) {
+  if (!topology) return null
+  return html`<span
+    class="fus-preset"
+    title="masc_fusion topology — the deliberation shape this run requested"
+    data-testid="fusion-topology-chip"
+    >topology · ${topology.replace(/_/g, ' ')}</span
+  >`
+}
+
 function fusionShapeInfo(judges: readonly FusionJudgeNode[]): FusionShapeInfo {
   const shape = classifyFusionJudgeShape(judges)
   const firstNodes = judges.filter(node => node.role === 'first')
@@ -981,6 +1000,13 @@ function findPreset(runId: string): string | null {
   return fusionRuns.value.find(run => run.runId === runId)?.preset ?? null
 }
 
+// Board-sink evidence carries the panel and judge nodes but not the requested
+// topology; only the registry row has it. Looked up by run id for the same
+// reason [findPreset] is.
+function findTopology(runId: string): FusionTopologyLabel | null {
+  return fusionRuns.value.find(run => run.runId === runId)?.topology ?? null
+}
+
 function paramChip(label: string, value: number | null): ReturnType<typeof html> | null {
   if (value === null) return null
   return html`<span class="fus-param"><span class="k">${label}</span><span class="v">${value}</span></span>`
@@ -1036,6 +1062,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   const decClass = dec && dec.cls ? `dec-${dec.cls}` : ''
   const tokenLabel = combinedTokenLabel(run.usage)
   const preset = run.preset ?? findPreset(run.runId)
+  const requestedTopology = findTopology(run.runId)
   const shape = fusionShapeInfo(run.judges)
   return html`
     <div class="fus-run-scroll" data-testid="fusion-detail">
@@ -1044,6 +1071,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           <${FusionStatusGlyph} status=${run.status} />
           <h1 class="mono">${run.runId}</h1>
           ${preset ? html`<span class="fus-preset" title="runtime.toml [fusion.presets.*]">preset · ${preset}</span>` : null}
+          ${topologyChip(requestedTopology)}
           <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
         </div>
         <div class="fus-run-by">
@@ -1245,6 +1273,7 @@ function FusionRegistryDetail({ record }: { record: FusionRunRecord }) {
           ${record.preset
             ? html`<span class="fus-preset" title="runtime.toml [fusion.presets.*]">preset · ${record.preset}</span>`
             : null}
+          ${topologyChip(record.topology)}
           <span class=${`fus-status tone-${tone}`}>${fusionRunStatusText(record.status)}</span>
         </div>
         <div class="fus-run-by">
@@ -1307,6 +1336,10 @@ export function FusionSurface() {
         <strong>부분 지원</strong>
         <span>보드 sink + registry 관측 · live JoJ judges 미구성 시 fail-closed</span>
       </div>
+      <details class="fus-block" data-testid="fusion-run-form-disclosure">
+        <summary>심의 실행</summary>
+        <${FusionRunForm} />
+      </details>
       ${boardError
         ? html`<div
             class="fus-board-error"

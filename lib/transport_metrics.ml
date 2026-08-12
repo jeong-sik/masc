@@ -266,24 +266,6 @@ let inc_ws_delta_payload_serialization () =
   Otel_metric_store.inc_counter Otel_metric_store.metric_ws_delta_payload_serializations ()
 ;;
 
-let inc_grpc_backlog_replay_lines_scanned ?(delta = 1) () =
-  if delta > 0
-  then
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_grpc_backlog_replay_lines_scanned
-      ~delta:(float_of_int delta)
-      ()
-;;
-
-let inc_grpc_backlog_replay_events_replayed ?(delta = 1) () =
-  if delta > 0
-  then
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_grpc_backlog_replay_events_replayed
-      ~delta:(float_of_int delta)
-      ()
-;;
-
 (** {1 Primary HTTP listener state} *)
 
 let http_listener_mode_runtime : string Atomic.t = Atomic.make "unknown"

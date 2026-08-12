@@ -142,16 +142,6 @@ val inc_grpc_events_dropped : unit -> unit
     [bytes <= 0]. *)
 val inc_grpc_bytes_sent : bytes:int -> unit
 
-(** [inc_grpc_backlog_replay_lines_scanned ?(delta=1) ()]
-    increments [masc_grpc_backlog_replay_lines_scanned_total].
-    No-op when [delta <= 0]. *)
-val inc_grpc_backlog_replay_lines_scanned : ?delta:int -> unit -> unit
-
-(** [inc_grpc_backlog_replay_events_replayed ?(delta=1) ()]
-    increments [masc_grpc_backlog_replay_events_replayed_total].
-    No-op when [delta <= 0]. *)
-val inc_grpc_backlog_replay_events_replayed : ?delta:int -> unit -> unit
-
 (** {1 Primary HTTP listener state} *)
 
 (** Marks the primary HTTP accept loop as listening.  [mode] is one of

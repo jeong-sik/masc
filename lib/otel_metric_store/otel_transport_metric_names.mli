@@ -176,15 +176,6 @@ val metric_ws_delta_payload_serializations : string
     large frames from many small frames. *)
 val metric_ws_message_bytes : string
 
-(** Lines walked while replaying [.masc/backlog.jsonl] on a gRPC
-    Subscribe RPC, including those filtered out by [since_seq]. *)
-val metric_grpc_backlog_replay_lines_scanned : string
-
-(** Backlog events actually delivered (post-[since_seq] filter)
-    on a gRPC Subscribe RPC. The gap between scanned-lines and
-    replayed-events isolates wasted scan cost. *)
-val metric_grpc_backlog_replay_events_replayed : string
-
 (** Primary HTTP listener accepted TCP connections. Labels: [mode]. *)
 val metric_http_accepts : string
 

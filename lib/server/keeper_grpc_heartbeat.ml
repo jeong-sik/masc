@@ -4,8 +4,8 @@ let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
 let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
 
 (* Transport control remains responsive even when autonomous turns use a
-   slower cadence. Pause/assignment directives arrive on this stream and must
-   not wait for the five-minute Keeper work interval. *)
+   slower cadence. Control directives received on this stream must not wait
+   for the five-minute Keeper work interval. *)
 let grpc_control_heartbeat_interval_sec = 30.0
 
 let set_grpc_client ?(env : Eio_unix.Stdenv.base option) c =

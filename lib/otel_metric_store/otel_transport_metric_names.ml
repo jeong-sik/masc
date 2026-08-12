@@ -151,14 +151,6 @@ let metric_ws_delta_payload_serializations =
 
 let metric_ws_message_bytes = "masc_ws_message_bytes"
 
-let metric_grpc_backlog_replay_lines_scanned =
-  Otel_metric_store_core.declare_counter "masc_grpc_backlog_replay_lines_scanned_total"
-;;
-
-let metric_grpc_backlog_replay_events_replayed =
-  Otel_metric_store_core.declare_counter "masc_grpc_backlog_replay_events_replayed_total"
-;;
-
 let metric_http_accepts = Otel_metric_store_core.declare_counter "masc_http_accepts_total"
 let metric_http_accept_errors = Otel_metric_store_core.declare_counter "masc_http_accept_errors_total"
 let metric_http_active_connections = "masc_http_active_connections"

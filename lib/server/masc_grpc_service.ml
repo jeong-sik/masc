@@ -36,31 +36,6 @@ let decode_request_or_raise ~rpc decode bytes =
       (Printf.sprintf "%s request decode failed: %s" rpc msg)
 ;;
 
-(** Read a file to string. Returns [""] on non-cancellation errors.
-    Propagates [Eio.Cancel.Cancelled] so cooperative cancellation is preserved. *)
-let read_file_safe path =
-  try Fs_compat.load_file path with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Transport.warn "read_file_safe failed for %s: %s" path (Printexc.to_string exn);
-    ""
-;;
-
-(** Safe filename: replace non-alphanumeric chars with underscores. *)
-let safe_filename name =
-  String.map
-    (fun c ->
-       if
-         (c >= 'a' && c <= 'z')
-         || (c >= 'A' && c <= 'Z')
-         || (c >= '0' && c <= '9')
-         || c = '-'
-         || c = '_'
-       then c
-       else '_')
-    name
-;;
-
 let task_assignee_of_status status =
   match Masc_domain.task_assignee_of_status status with
   | Some a -> a
@@ -111,39 +86,17 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
 let handle_get_status (workspace_config : Workspace_utils_backend_setup.config) (_bytes : string)
   : string
   =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
-  let agents_dir = Filename.concat masc_dir "agents" in
   let agents =
-    if Sys.file_exists agents_dir && Sys.is_directory agents_dir
-    then
-      Sys.readdir agents_dir
-      |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".json")
-      |> List.filter_map (fun f ->
-        let path = Filename.concat agents_dir f in
-        try
-          let json = Yojson.Safe.from_string (read_file_safe path) in
-          match Masc_domain.agent_of_yojson json with
-          | Ok agent ->
-            let status_str =
-              Masc_domain.agent_status_to_string agent.Masc_domain.status
-            in
-            Some
-              ({ T.name = agent.name
-               ; status = status_str
-               ; capabilities = agent.capabilities
-               ; last_heartbeat_ms = now_ms ()
-               ; session_bound_at_ms = now_ms ()
-               ; current_task_id = Option.value ~default:"" agent.current_task
-               }
-               : T.agent_info)
-          | _ -> None
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Log.Transport.debug "gRPC status: agent parse skip: %s" (Printexc.to_string exn);
-          None)
-    else []
+    Workspace.get_all_agents workspace_config
+    |> List.map (fun (agent : Masc_domain.agent) ->
+      ({ T.name = agent.name
+       ; status = Masc_domain.agent_status_to_string agent.status
+       ; capabilities = agent.capabilities
+       ; last_heartbeat_ms = now_ms ()
+       ; session_bound_at_ms = now_ms ()
+       ; current_task_id = Option.value ~default:"" agent.current_task
+       }
+       : T.agent_info))
   in
   let tasks = Workspace.get_tasks_safe workspace_config |> List.map task_info_of_task in
   T.StatusResponse.(
@@ -227,64 +180,70 @@ let active_heartbeat_streams = Atomic.make 0
 (** Active subscribe stream count (atomic for signal safety). *)
 let active_subscribe_streams = Atomic.make 0
 
-(** Compute directives for a keeper based on current workspace state.
-    Returns typed directives to include in HeartbeatAck.
-    Reads agent paused state and unclaimed tasks from the filesystem. *)
-let compute_directives
-      ~(workspace_config : Workspace_utils_backend_setup.config)
-      ~(agent_name : string)
-  : Keeper_directive.t list
-  =
-  let masc_dir = Common.masc_dir_from_base_path ~base_path:workspace_config.base_path in
-  let directives = ref [] in
-  (* 1. Pause directive: check if agent is marked paused *)
-  let agent_file =
-    Filename.concat
-      (Filename.concat masc_dir "agents")
-      (safe_filename agent_name ^ ".json")
+type task_directive_decision =
+  | No_task_directive
+  | Assign_task of Keeper_id.Task_id.t
+  | Invalid_task_id of
+      { task_id : string
+      ; error : string
+      }
+
+type heartbeat_workspace_view =
+  { active_agent_count : int
+  ; pending_task_count : int
+  ; task_directive : task_directive_decision
+  }
+
+let task_is_pending (task : Masc_domain.task) =
+  match task.task_status with
+  | Masc_domain.Todo
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _
+  | Masc_domain.AwaitingVerification _ -> true
+  | Masc_domain.Done _ | Masc_domain.Cancelled _ -> false
+;;
+
+let decide_task_directive tasks =
+  let rec first_todo = function
+    | [] -> No_task_directive
+    | (task : Masc_domain.task) :: rest ->
+      (match task.task_status with
+       | Masc_domain.Todo ->
+         (match Keeper_id.Task_id.of_string task.id with
+          | Ok task_id -> Assign_task task_id
+          | Error error -> Invalid_task_id { task_id = task.id; error })
+       | Masc_domain.Claimed _
+       | Masc_domain.InProgress _
+       | Masc_domain.AwaitingVerification _
+       | Masc_domain.Done _
+       | Masc_domain.Cancelled _ ->
+         first_todo rest)
   in
-  if Sys.file_exists agent_file
-  then (
-    try
-      let json = Yojson.Safe.from_string (read_file_safe agent_file) in
-      match Json_util.assoc_member_opt "paused" json with
-      | Some (`Bool true) -> directives := Keeper_directive.Pause :: !directives
-      | Some (`Bool false)
-      | Some `Null | Some (`Int _) | Some (`Intlit _) | Some (`Float _) | Some (`String _) | Some (`Assoc _) | Some (`List _) | None -> ()
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Transport.warn
-        "compute_directives: failed to parse agent file %s: %s"
-        agent_file
-        (Printexc.to_string exn));
-  (* 2. Task assignment: find first unclaimed task for idle agent *)
-  if Workspace.root_is_initialized workspace_config
-  then (
-    let unclaimed =
-      Workspace.get_tasks_safe workspace_config
-      |> List.filter_map (fun (task : Masc_domain.task) ->
-        match task.task_status with
-        | Masc_domain.Todo -> Some task.id
-        | Masc_domain.Claimed _
-        | Masc_domain.InProgress _
-        | Masc_domain.AwaitingVerification _
-        | Masc_domain.Done _
-        | Masc_domain.Cancelled _ -> None)
-    in
-    match unclaimed with
-    | task_id :: _ ->
-      (match Keeper_id.Task_id.of_string task_id with
-       | Ok parsed_task_id ->
-         directives := Keeper_directive.Assign_task parsed_task_id :: !directives
-       | Error error ->
-         Log.Transport.error
-           "compute_directives: invalid task id %S for keeper %s: %s"
-           task_id
-           agent_name
-           error)
-    | [] -> ());
-  List.rev !directives
+  first_todo tasks
+;;
+
+(** Pure projection from one authoritative Workspace snapshot. *)
+let heartbeat_workspace_view ~active_agents ~tasks =
+  { active_agent_count = List.length active_agents
+  ; pending_task_count =
+      List.fold_left
+        (fun count task -> if task_is_pending task then count + 1 else count)
+        0
+        tasks
+  ; task_directive = decide_task_directive tasks
+  }
+;;
+
+let directives_of_decision ~agent_name = function
+  | No_task_directive -> []
+  | Assign_task task_id -> [ Keeper_directive.Assign_task task_id ]
+  | Invalid_task_id { task_id; error } ->
+    Log.Transport.error
+      "gRPC heartbeat: invalid task id %S for keeper %s: %s"
+      task_id
+      agent_name
+      error;
+    []
 ;;
 
 (** Heartbeat bidi handler: receive pings, respond with acks. *)
@@ -321,67 +280,25 @@ let handle_heartbeat
          | Ok ping ->
            (try
               let t0 = Unix.gettimeofday () in
-              (* Update agent last_seen *)
-              (try
-                 let agent_file =
-                   Filename.concat
-                     (Filename.concat
-                        (Common.masc_dir_from_base_path ~base_path:workspace_config.base_path)
-                        "agents")
-                     (safe_filename ping.agent_name ^ ".json")
-                 in
-                 if Sys.file_exists agent_file
-                 then (
-                   let json = Yojson.Safe.from_string (read_file_safe agent_file) in
-                   match Masc_domain.agent_of_yojson json with
-                   | Ok agent ->
-                     let now = Unix.gettimeofday () in
-                     let iso_now = Masc_domain.iso8601_of_unix_seconds now in
-                     let updated = { agent with Masc_domain.last_seen = iso_now } in
-                     let content =
-                       Yojson.Safe.to_string (Masc_domain.agent_to_yojson updated)
-                     in
-                     let tmp_path = agent_file ^ ".tmp" in
-                     Fs_compat.save_file tmp_path content;
-                     Unix.rename tmp_path agent_file
-                   | Error e ->
-                     Log.Transport.warn
-                       "gRPC heartbeat: invalid agent JSON for %s: %s"
-                       ping.agent_name
-                       e)
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                 Log.Transport.error
-                   "gRPC heartbeat update failed: %s"
-                   (Printexc.to_string exn));
-              (* Count active agents and pending tasks *)
-              let masc_dir =
-                Common.masc_dir_from_base_path ~base_path:workspace_config.base_path
-              in
-              (* Backend-aware counts: bare [Sys.readdir] here saw only the
-                 local mirror, so a Memory-backend workspace reported zero
-                 agents and zero pending tasks over gRPC (RFC-0371 B9).
-                 [list_dir] is total — missing dirs read as []. *)
-              let agents_dir = Filename.concat masc_dir "agents" in
-              let agent_count =
-                Workspace_utils_paths_backend.list_dir workspace_config agents_dir
-                |> List.length
-              in
-              let tasks_dir = Filename.concat masc_dir "tasks" in
-              let pending_count =
-                Workspace_utils_paths_backend.list_dir workspace_config tasks_dir
-                |> List.filter (fun f -> Filename.check_suffix f ".json")
-                |> List.length
-              in
+              if Workspace.root_is_initialized workspace_config
+              then (
+                match Workspace.heartbeat workspace_config ~agent_name:ping.agent_name with
+                | Workspace.Heartbeat_updated _ | Workspace.Agent_not_found _ -> ()
+                | Workspace.Agent_file_invalid actual_name ->
+                  Log.Transport.warn
+                    "gRPC heartbeat: invalid agent JSON for %s"
+                    actual_name);
+              let active_agents = Workspace.get_active_agents workspace_config in
+              let tasks = Workspace.get_tasks_safe workspace_config in
+              let view = heartbeat_workspace_view ~active_agents ~tasks in
               let directives =
-                compute_directives ~workspace_config ~agent_name:ping.agent_name
+                directives_of_decision ~agent_name:ping.agent_name view.task_directive
               in
               let ack =
                 T.HeartbeatAck.
                   { timestamp_ms = now_ms ()
-                  ; active_agent_count = agent_count
-                  ; pending_task_count = pending_count
+                  ; active_agent_count = view.active_agent_count
+                  ; pending_task_count = view.pending_task_count
                   ; directives
                   }
               in
@@ -413,9 +330,7 @@ let handle_heartbeat
 ;;
 
 (** Subscribe server-streaming handler: push workspace events to the agent. *)
-let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (bytes : string)
-  : string Grpc_eio.Stream.t
-  =
+let handle_subscribe (bytes : string) : string Grpc_eio.Stream.t =
   let req =
     decode_request_or_raise ~rpc:"Subscribe" T.SubscribeRequest.of_bytes_result bytes
   in
@@ -456,50 +371,6 @@ let handle_subscribe (workspace_config : Workspace_utils_backend_setup.config) (
   Transport_metrics.inc_grpc_bytes_sent ~bytes:(String.length init_bytes);
   Grpc_eio.Stream.add stream init_bytes;
   incr events_count;
-  (* Read recent messages and push as events *)
-  let backlog_file =
-    Filename.concat
-      (Common.masc_dir_from_base_path ~base_path:workspace_config.base_path)
-      "backlog.jsonl"
-  in
-  if Sys.file_exists backlog_file
-  then (
-    let content = Fs_compat.load_file backlog_file in
-    let lines = String.split_on_char '\n' content in
-    let seq = ref 1L in
-    let scanned = ref 0 in
-    let replayed = ref 0 in
-    List.iter
-      (fun line ->
-         if String.length line > 0
-         then (
-           incr scanned;
-           let msg_seq = !seq in
-           if Int64.compare msg_seq req.since_seq > 0
-           then (
-             let event =
-               T.Event.
-                 { seq = msg_seq
-                 ; event_type = "message"
-                 ; source_agent = ""
-                 ; timestamp_ms = now_ms ()
-                 ; payload_json = line
-                 }
-             in
-             let event_bytes = T.Event.to_bytes event in
-             Transport_metrics.inc_grpc_bytes_sent ~bytes:(String.length event_bytes);
-             Grpc_eio.Stream.add stream event_bytes;
-             incr events_count;
-             incr replayed);
-           seq := Int64.add !seq 1L))
-      lines;
-    (* Attribution: scanned vs replayed splits wasted scan cost from
-       useful catch-up delivery on this Subscribe RPC. *)
-    if !scanned > 0
-    then Transport_metrics.inc_grpc_backlog_replay_lines_scanned ~delta:!scanned ();
-    if !replayed > 0
-    then Transport_metrics.inc_grpc_backlog_replay_events_replayed ~delta:!replayed ());
-  (* Record delivered events from backlog replay *)
   Transport_metrics.inc_grpc_events_delivered ~delta:!events_count ();
   (* Hook into SSE broadcast mechanism for real-time event push.
      External subscriber receives formatted SSE event strings on every
@@ -589,6 +460,6 @@ let create_service
   |> Grpc_eio.Service.add_unary "GetStatus" (handle_get_status workspace_config)
   |> Grpc_eio.Service.add_unary "ToolCall" (handle_tool_call tool_dispatcher)
   |> Grpc_eio.Service.add_unary "LspCall" (handle_lsp_call lsp_dispatcher)
-  |> Grpc_eio.Service.add_server_streaming "Subscribe" (handle_subscribe workspace_config)
+  |> Grpc_eio.Service.add_server_streaming "Subscribe" handle_subscribe
   |> Grpc_eio.Service.add_bidi_streaming "Heartbeat" (handle_heartbeat workspace_config)
 ;;

@@ -317,7 +317,7 @@ let test_sharding_layout () =
 (* Fixtures here hold a handful of small files and compete with no startup
    watchdog, so they scan unbounded; the budget path has its own tests. *)
 let maintenance_ok ~base_path ~mode =
-  match M.run ~base_path ~mode ~budget:M.Unbounded with
+  match M.run ~base_path ~mode with
   | Ok report -> report
   | Error error ->
     Alcotest.failf "maintenance failed: %s" (M.error_to_string error)
@@ -464,7 +464,7 @@ let test_maintenance_rejects_uncoordinated_cluster_roots () =
            (`Assoc
              [ "response_text", `String (O.encode_for_agent_core (O.Stored blob)) ])
          ^ "\n");
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error
            (M.Clustered_durable_roots_uncoordinated
              { path; entries }) ->
@@ -505,7 +505,7 @@ let test_maintenance_malformed_reference_fails_closed () =
       in
       Fs_compat.mkdir_p (Filename.dirname source);
       Fs_compat.save_file source "{\"output\":\"[masc:blob sha256=garbage]\"}\n";
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error (M.Malformed_artifact_reference { path; line; _ }) ->
          Alcotest.(check string) "exact malformed source" source path;
          Alcotest.(check int) "exact malformed line" 1 line
@@ -519,7 +519,40 @@ let test_maintenance_malformed_reference_fails_closed () =
         (Some "must survive malformed source")
         (fetch_ok store ~sha256:blob.sha256))
 
-let test_maintenance_ignores_prose_blob_placeholder () =
+let test_maintenance_noncanonical_reference_fails_closed () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"must survive noncanonical source" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "gate/noncanonical.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname source);
+      Fs_compat.save_file
+        source
+        (Yojson.Safe.to_string
+           (`String
+             (O.encode_for_agent_core (O.Stored blob) ^ " trailing text")));
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error (M.Malformed_artifact_reference { path; line; offset; _ }) ->
+         Alcotest.(check string) "exact noncanonical source" source path;
+         Alcotest.(check int) "exact malformed line" 1 line;
+         Alcotest.(check int) "whole-value offset" 0 offset
+       | Error error ->
+         Alcotest.failf
+           "unexpected maintenance error: %s"
+           (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "noncanonical reference reached deletion");
+      Alcotest.(check (option string))
+        "blob retained on noncanonical reference"
+        (Some "must survive noncanonical source")
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_ignores_marker_embedded_in_prose () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
       let blob =
@@ -536,10 +569,18 @@ let test_maintenance_ignores_prose_blob_placeholder () =
         source
         (Yojson.Safe.to_string
            (`Assoc
-             [ "content", `String "documentation example: [masc:blob ...]" ]));
+             [ ( "content"
+               , `String
+                   ("documentation example: "
+                    ^ O.encode_for_agent_core (O.Stored blob)) )
+             ]));
       let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
       Alcotest.(check int)
-        "prose placeholder does not claim blob ownership"
+        "embedded marker is not a live reference"
+        0
+        observed.live_references;
+      Alcotest.(check int)
+        "prose does not claim blob ownership"
         1
         observed.candidates_recorded;
       Alcotest.(check (option string))
@@ -577,6 +618,44 @@ let test_maintenance_does_not_scan_repository_mirrors () =
       Alcotest.(check (option string))
         "repository text did not retain the blob"
         None
+        (fetch_ok store ~sha256:blob.sha256))
+
+let test_maintenance_does_not_scan_trajectory_previews () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let blob =
+        B.put store ~bytes:"not owned by a trajectory preview" ~mime:"text/plain"
+        |> stored_ref_exn
+      in
+      let trajectory_source =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "trajectories/keeper-a/trace.jsonl"
+      in
+      Fs_compat.mkdir_p (Filename.dirname trajectory_source);
+      let marker = O.encode_for_agent_core (O.Stored blob) in
+      Fs_compat.save_file
+        trajectory_source
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "result"
+               , `String
+                   (String.sub marker 0 (min 120 (String.length marker))
+                    ^ "...") )
+             ])
+         ^ "\n");
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "trajectory preview is not a live reference"
+        0
+        observed.live_references;
+      Alcotest.(check int)
+        "trajectory preview does not claim blob ownership"
+        1
+        observed.candidates_recorded;
+      Alcotest.(check (option string))
+        "observe-only scan retains trajectory candidate"
+        (Some "not owned by a trajectory preview")
         (fetch_ok store ~sha256:blob.sha256))
 
 let test_maintenance_rechecks_candidate_referenced_before_startup () =
@@ -689,7 +768,7 @@ let test_maintenance_malformed_normalized_blob_fails_closed () =
                    ] )
              ])
          ^ "\n");
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error
            (M.Malformed_structured_artifact_reference
              { path; line; _ }) ->
@@ -730,7 +809,7 @@ let test_maintenance_truncated_normalized_blob_fails_closed () =
       Fs_compat.save_file
         tool_call_log
         ("{\"output\":" ^ complete_reference);
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error
            (M.Malformed_structured_artifact_reference
              { path; line; _ }) ->
@@ -757,7 +836,7 @@ let test_maintenance_unlink_failure_is_typed () =
       Fs_compat.mkdir_p shard_dir;
       Unix.mkdir (Filename.concat shard_dir sha256) 0o755;
       ignore (maintenance_ok ~base_path ~mode:M.Observe_only);
-      match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      match M.run ~base_path ~mode:M.Delete_previous_candidates with
       | Error
           (M.Blob_delete_failed
             { Tool_blob_store.sha256 = actual; _ }) ->
@@ -767,104 +846,6 @@ let test_maintenance_unlink_failure_is_typed () =
           "unexpected unlink error: %s"
           (M.error_to_string error)
       | Ok _ -> Alcotest.fail "unlink failure was silently skipped")
-
-(* --- Scan budget --- *)
-
-(* One durable consumer holding one live reference, plus one unreferenced
-   blob. A complete scan sees the live reference and records exactly one
-   candidate; a scan that stops before reading the consumer would see zero
-   live references and record both blobs as candidates. *)
-let with_one_live_and_one_dead_blob f =
-  with_temp_dir (fun base_path ->
-      let store = B.create ~base_path in
-      let live =
-        B.put store ~bytes:"live budget fixture output" ~mime:"text/plain"
-        |> stored_ref_exn
-      in
-      let dead =
-        B.put store ~bytes:"dead budget fixture output" ~mime:"text/plain"
-        |> stored_ref_exn
-      in
-      let durable_consumer =
-        Filename.concat
-          (Common.masc_dir_from_base_path ~base_path)
-          "keepers/keeper-a/sessions/history.jsonl"
-      in
-      Fs_compat.mkdir_p (Filename.dirname durable_consumer);
-      Fs_compat.save_file
-        durable_consumer
-        (Yojson.Safe.to_string
-           (`Assoc [ "output_ref", `String (O.encode_for_agent_core (O.Stored live)) ])
-         ^ "\n");
-      f ~base_path ~store ~live ~dead)
-
-let expired_budget () =
-  M.Bounded_by { deadline_epoch_seconds = Unix.gettimeofday () -. 1.0 }
-
-let test_maintenance_exhausted_budget_is_a_typed_error () =
-  with_one_live_and_one_dead_blob (fun ~base_path ~store:_ ~live:_ ~dead:_ ->
-      match
-        M.run
-          ~base_path
-          ~mode:M.Delete_previous_candidates
-          ~budget:(expired_budget ())
-      with
-      | Error (M.Scan_budget_exhausted { files_scanned; _ }) ->
-        Alcotest.(check int)
-          "aborted before reading any durable file"
-          0
-          files_scanned
-      | Error error ->
-        Alcotest.failf
-          "expected Scan_budget_exhausted, got: %s"
-          (M.error_to_string error)
-      | Ok _ -> Alcotest.fail "expired budget completed a full scan")
-
-(* The safety property the budget must not break: a partial scan sees fewer
-   live references than exist, so writing its candidate set would mark a
-   referenced blob for deletion on the next pass. *)
-let test_maintenance_exhausted_budget_leaves_candidate_snapshot_untouched () =
-  with_one_live_and_one_dead_blob (fun ~base_path ~store:_ ~live:_ ~dead ->
-      let complete = maintenance_ok ~base_path ~mode:M.Observe_only in
-      Alcotest.(check int) "complete scan records one candidate" 1
-        complete.candidates_recorded;
-      let snapshot_path = M.candidate_snapshot_path ~base_path in
-      let after_complete_scan = Fs_compat.load_file_opt snapshot_path in
-      Alcotest.(check bool)
-        "complete scan wrote a candidate snapshot"
-        true
-        (Option.is_some after_complete_scan);
-      (match
-         M.run
-           ~base_path
-           ~mode:M.Delete_previous_candidates
-           ~budget:(expired_budget ())
-       with
-       | Error (M.Scan_budget_exhausted _) -> ()
-       | Error error ->
-         Alcotest.failf
-           "expected Scan_budget_exhausted, got: %s"
-           (M.error_to_string error)
-       | Ok _ -> Alcotest.fail "expired budget completed a full scan");
-      Alcotest.(check (option string))
-        "partial scan did not rewrite the candidate snapshot"
-        after_complete_scan
-        (Fs_compat.load_file_opt snapshot_path);
-      Alcotest.(check bool)
-        "partial scan deleted nothing"
-        true
-        (Sys.file_exists
-           (Filename.concat
-              (Filename.concat (B.root_dir (B.create ~base_path))
-                 (String.sub dead.O.sha256 0 2))
-              dead.O.sha256)))
-
-let test_maintenance_unbounded_budget_still_completes () =
-  with_one_live_and_one_dead_blob (fun ~base_path ~store:_ ~live:_ ~dead:_ ->
-      let report = maintenance_ok ~base_path ~mode:M.Observe_only in
-      Alcotest.(check int) "one live reference" 1 report.live_references;
-      Alcotest.(check int) "two blobs observed" 2 report.blobs_observed;
-      Alcotest.(check int) "one candidate" 1 report.candidates_recorded)
 
 let test_maintenance_rejects_symbolic_link_shard () =
   with_temp_dir (fun base_path ->
@@ -876,7 +857,7 @@ let test_maintenance_rejects_symbolic_link_shard () =
         (Filename.concat outside (String.make 64 'a'))
         "outside";
       Unix.symlink outside (Filename.concat (B.root_dir store) "aa");
-      match M.run ~base_path ~mode:M.Observe_only ~budget:M.Unbounded with
+      match M.run ~base_path ~mode:M.Observe_only with
       | Error (M.Blob_listing_failed { Tool_blob_store.path; _ }) ->
         Alcotest.(check string)
           "exact symbolic-link shard"
@@ -908,7 +889,7 @@ let test_maintenance_rejects_symbolic_link_durable_source () =
       in
       Fs_compat.mkdir_p (Filename.dirname linked_source);
       Unix.symlink outside linked_source;
-      (match M.run ~base_path ~mode:M.Observe_only ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Observe_only with
        | Error (M.Durable_source_stat_failed { path; _ }) ->
          Alcotest.(check string) "exact linked source" linked_source path
        | Error error ->
@@ -940,7 +921,7 @@ let test_maintenance_rejects_symbolic_link_candidate_snapshot () =
              ]));
       Sys.remove candidate_path;
       Unix.symlink outside candidate_path;
-      (match M.run ~base_path ~mode:M.Delete_previous_candidates ~budget:M.Unbounded with
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
        | Error (M.Candidate_snapshot_read_failed { path; _ }) ->
          Alcotest.(check string) "exact linked snapshot" candidate_path path
        | Error error ->
@@ -1138,9 +1119,13 @@ let () =
             `Quick
             test_maintenance_malformed_reference_fails_closed;
           Alcotest.test_case
-            "maintenance ignores prose blob placeholder"
+            "maintenance noncanonical reference fails closed"
             `Quick
-            test_maintenance_ignores_prose_blob_placeholder;
+            test_maintenance_noncanonical_reference_fails_closed;
+          Alcotest.test_case
+            "maintenance ignores marker embedded in prose"
+            `Quick
+            test_maintenance_ignores_marker_embedded_in_prose;
           Alcotest.test_case
             "maintenance keeps wire-capture reference within retention"
             `Quick
@@ -1153,6 +1138,10 @@ let () =
             "maintenance ignores repository mirrors"
             `Quick
             test_maintenance_does_not_scan_repository_mirrors;
+          Alcotest.test_case
+            "maintenance ignores trajectory previews"
+            `Quick
+            test_maintenance_does_not_scan_trajectory_previews;
           Alcotest.test_case
             "maintenance rechecks candidate referenced before startup"
             `Quick
@@ -1185,18 +1174,6 @@ let () =
             "maintenance rejects symbolic-link candidate snapshot"
             `Quick
             test_maintenance_rejects_symbolic_link_candidate_snapshot;
-          Alcotest.test_case
-            "maintenance exhausted budget is a typed error"
-            `Quick
-            test_maintenance_exhausted_budget_is_a_typed_error;
-          Alcotest.test_case
-            "maintenance exhausted budget leaves candidate snapshot untouched"
-            `Quick
-            test_maintenance_exhausted_budget_leaves_candidate_snapshot_untouched;
-          Alcotest.test_case
-            "maintenance unbounded budget still completes"
-            `Quick
-            test_maintenance_unbounded_budget_still_completes;
         ] );
       ( "atomicity",
         [

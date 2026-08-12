@@ -167,7 +167,7 @@ export function MessageWorkspaceTimeline() {
       ${model.workspaces.length === 0
         ? html`
             <${ComposerV2} workspaceId=${composerWorkspace} />
-            <${EmptyState} message="메시지 타임라인이 없습니다" compact />
+            <${EmptyState} message="메시지 타임라인 없음" compact />
           `
         : html`
             <div class="flex flex-wrap gap-2" role="tablist" aria-label="Message workspaces">

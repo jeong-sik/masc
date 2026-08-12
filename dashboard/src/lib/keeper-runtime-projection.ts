@@ -508,7 +508,7 @@ function buildProjectionSignals({
       tone: fiberAlive.alive ? 'ok' : 'warn',
       state: fiberAlive.alive ? 'ok' : 'attention',
       contributesToAttention: !fiberAlive.alive,
-      hint: fiberAlive.alive ? null : 'fiber 생존 증거가 없습니다.',
+      hint: fiberAlive.alive ? null : 'fiber 생존 증거 없음',
     },
     {
       kind: 'stop_requested',

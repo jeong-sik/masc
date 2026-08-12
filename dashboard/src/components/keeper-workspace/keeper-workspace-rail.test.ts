@@ -1115,7 +1115,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('before/after token count는 기록하지 않았습니다')
     expect(container.textContent).toContain('latest turn-record')
     expect(container.textContent).toContain('선택한 snapshot trace가 최근 1개 turn-records 안에 없어')
-    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
+    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot 없음')
   })
 
   it('surfaces compaction snapshot scan diagnostics when successful payload has no items', async () => {
@@ -1150,7 +1150,7 @@ describe('KeeperWorkspaceRail', () => {
     const coverage = await findByTestId('compaction-coverage-status')
     expect(coverage.textContent).toContain('표시 0/0')
     expect(container.textContent).toContain('컴팩션 이력 유무를 확인하지 못했습니다.')
-    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
+    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot 없음')
   })
 
   it('distinguishes empty durable compaction results from decoded schema drift', async () => {

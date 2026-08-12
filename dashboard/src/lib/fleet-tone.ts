@@ -178,7 +178,7 @@ export const PHASE_DESCRIPTION_KO: Readonly<Record<KeeperPhaseToken, string>> =
       unbooted: '등록만 되어 있고 아직 부팅되지 않았습니다.',
       crashed: 'fiber가 비정상적으로 종료되었습니다.',
       dead: '명시적인 tombstone으로 종료된 상태입니다.',
-      idle: '프로세스는 살아 있지만 현재 턴 작업은 없습니다.',
+      idle: '프로세스는 살아 있지만 현재 턴 작업 없음',
       listening: '프로세스는 살아 있고 입력을 기다리고 있습니다.',
       offline: '런타임 연결을 확인하지 못했습니다.',
       unknown: 'phase 정보가 부족해 수동 확인이 필요합니다.',

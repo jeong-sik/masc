@@ -178,7 +178,7 @@ describe('KeeperTurnInspectorPanel', () => {
   it('adopts the roster when it arrives late', async () => {
     noTurns()
     const { rerender } = render(html`<${KeeperTurnInspectorPanel} keepers=${[]} />`)
-    expect(screen.getByText('관측된 keeper 가 없습니다.')).toBeTruthy()
+    expect(screen.getByText('관측된 keeper 없음')).toBeTruthy()
 
     rerender(html`<${KeeperTurnInspectorPanel} keepers=${['taskmaster']} />`)
     await waitFor(() => expect(api.fetchKeeperRawTraces).toHaveBeenCalledWith(

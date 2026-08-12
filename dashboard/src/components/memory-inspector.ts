@@ -460,7 +460,7 @@ function MemoryOsMissingState({ response }: { response: TurnRecordsResponse | nu
       <strong>memory-os 소스 없음</strong><br />
       ${hasTurnRecords
         ? html`turn-records ${recordCount}건은 있지만 memory_os projection이 null입니다.`
-        : html`이 keeper의 turn-records가 비어 있습니다.`}
+        : html`이 keeper의 turn-records가 비어 있음`}
       <br />
       <span class="mono">source=${source} · health=${health} · stale=${staleReason} · skipped=${skipped}</span>
       ${durableStore ? html`<br /><span class="mono">${durableStore}</span>` : null}

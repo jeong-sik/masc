@@ -291,8 +291,8 @@ function ApHistory({
         : html`
             <div class="ap-clear compact" data-testid="approvals-history-empty">
               <div class="ico">${'✓'}</div>
-              <h3>해당 필터의 처리 이력이 없습니다</h3>
-              <div class="ap-clear-sub">최근 처리 projection에 일치하는 항목이 없습니다.</div>
+              <h3>해당 필터의 처리 이력 없음</h3>
+              <div class="ap-clear-sub">최근 처리 projection에 일치하는 항목 없음</div>
             </div>
           `}
     </section>
@@ -936,8 +936,8 @@ export function ApprovalsSurface() {
           ? html`
               <div class="ap-clear" data-testid="approvals-empty">
                 <div class="ico">${'✓'}</div>
-                <h3>열린 Human 판단이 없습니다</h3>
-                <div class="ap-clear-sub">HITL 큐가 비어 있습니다 — keeper들은 계속 진행 중입니다.</div>
+                <h3>열린 Human 판단 없음</h3>
+                <div class="ap-clear-sub">HITL 큐 비어 있음</div>
               </div>
             `
           : null}

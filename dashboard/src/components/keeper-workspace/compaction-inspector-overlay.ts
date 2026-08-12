@@ -204,7 +204,7 @@ function CompactionEmptyState({
   }
   return html`
     <div class="cmp-empty">
-      <strong>${schemaDrift ? '표시 가능한 compaction snapshot이 없습니다.' : '아직 이 keeper에서 durable compaction snapshot이 없습니다.'}</strong><br />
+      <strong>${schemaDrift ? '표시 가능한 compaction snapshot 없음' : '아직 이 keeper에서 durable compaction snapshot 없음'}</strong><br />
       ${schemaDrift
         ? html`API는 ${keeperName} snapshot ${payloadCount}건을 보고했지만 대시보드 디코더가 표시 가능한 행 ${decodedCount}건만 수락했습니다.`
         : html`컨텍스트가 임계치를 넘거나 ‘지금 컴팩트’를 실행하면 새 결과가 기록됩니다.`}

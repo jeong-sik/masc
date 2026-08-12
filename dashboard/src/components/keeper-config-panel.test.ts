@@ -1400,7 +1400,7 @@ describe('KeeperConfigPanel', () => {
     maxContext!.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
 
-    expect(container.textContent).toContain('컨텍스트 오버라이드는 양의 정수여야 합니다')
+    expect(container.textContent).toContain('양의 정수만 허용 (0 = 해제)')
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('런타임 설정 저장'),
     )

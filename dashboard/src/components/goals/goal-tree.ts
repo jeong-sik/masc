@@ -1324,7 +1324,7 @@ export function GoalTree() {
       ${loading && !data ? html`
         <${LoadingState}>goal manager 로드 중...<//>
       ` : data && data.tree.length === 0 ? html`
-        <${EmptyState} message="등록된 목표가 없습니다." />
+        <${EmptyState} message="등록된 목표 없음" />
       ` : data && isFiltering && visibleTree.length === 0 ? html`
         <section class="py-4 text-center text-xs text-text-dim" aria-label="필터 결과 없음">
           필터 결과 없음 (${data.tree.length} 목표)

@@ -150,7 +150,7 @@ export function useVoiceInput({ onTranscribed, onError }: UseVoiceInputOptions):
       recorderRef.current = null
       if (blob.size === 0) {
         setState('idle')
-        onErrorRef.current?.('녹음된 오디오가 없습니다.')
+        onErrorRef.current?.('녹음된 오디오 없음')
         return
       }
       setState('transcribing')

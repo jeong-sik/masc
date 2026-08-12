@@ -220,7 +220,7 @@ export function ToolMetrics() {
                   </div>
                 ` : null}
                 ${filtered.length === 0 ? html`
-                  <p class="muted">조건에 맞는 도구가 없습니다.</p>
+                  <p class="muted">조건에 맞는 도구 없음</p>
                 ` : html`
                   <${BarChart}
                     items=${filtered}

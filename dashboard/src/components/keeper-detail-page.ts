@@ -87,7 +87,7 @@ export function KeeperDetailPage() {
         <div class="kw-detail">
           <div class="kw-detail-scroll">
             <div class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-6 text-sm text-[var(--color-fg-muted)]">
-              표시할 keeper가 없습니다.
+              표시할 keeper 없음
             </div>
           </div>
         </div>

@@ -938,7 +938,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
                   subtitle=${section.subtitle}
                   items=${section.items}
                   valueFormatter=${(value: number) => `${value}`}
-                  emptyLabel="집계가 아직 없습니다."
+                  emptyLabel="집계가 아직 없음"
                 />
               `)}
             </div>

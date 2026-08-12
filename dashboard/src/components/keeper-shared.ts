@@ -547,7 +547,7 @@ function KeeperQueueControlPanel({
                   onClick=${() => void mutateChat('interrupt-current-turn', async () => {
                     const cancelled = await interruptKeeperTurn(keeperName)
                     showToast(
-                      cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+                      cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴 없음',
                       cancelled ? 'success' : 'warning',
                     )
                   })}
@@ -848,8 +848,8 @@ export function KeeperConversationPanel({
   )
   const transcriptEmptyText =
     hasQuery && visibleThread.length > 0
-      ? '검색어와 일치하는 메시지가 없습니다.'
-      : '아직 표시할 대화가 없습니다. 내부 메시지는 Tweaks의 "내부 메시지"로 볼 수 있습니다.'
+      ? '검색어와 일치하는 메시지 없음'
+      : '표시할 대화 없음'
   const hydrating = keeperHydrating.value[keeperName] ?? false
   const error = keeperActionErrors.value[keeperName]
   const renderError = (extraClass = 'mt-2') => {
@@ -871,7 +871,7 @@ export function KeeperConversationPanel({
   }
   const composerDisabled = !keeperName || chatAccess.blocked
   const composerPlaceholder = chatAccess.blocked
-    ? '현재 actor는 direct keeper chat 권한이 없습니다'
+    ? '현재 actor는 direct keeper chat 권한 없음'
     : isKeeperBusy
       ? '현재 턴 실행 중 — 지금 보내면 새 durable operation으로 접수됩니다'
       : sending
@@ -935,7 +935,7 @@ export function KeeperConversationPanel({
         void interruptKeeperTurn(keeperName)
           .then(cancelled => {
             showToast(
-              cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴이 없습니다',
+              cancelled ? '현재 턴을 중단했습니다' : '중단할 실행 중인 턴 없음',
               cancelled ? 'success' : 'warning',
             )
           })

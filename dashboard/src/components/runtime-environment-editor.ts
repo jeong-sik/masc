@@ -813,7 +813,7 @@ export function RuntimeEnvironmentEditor({
                 </div>
                 <div class="rt-note">
                   ${providerProtocols.find(protocol => protocol.protocol === newProvider.protocol)?.semantics === 'official_client'
-                    ? '공식 클라이언트의 기존 구독 로그인을 사용합니다. API key는 저장하지 않으며 non-interactive 실행을 강제합니다.'
+                    ? '구독 로그인 사용 · API key 미저장 · non-interactive 강제'
                     : '일반 provider는 endpoint transport를 사용합니다.'}
                 </div>
                 <div class="rt-field">
@@ -918,7 +918,7 @@ export function RuntimeEnvironmentEditor({
             </div>
           `)}
           ${filteredModels.length === 0 ? html`
-            <div class="rt-note" data-testid="runtime-models-empty">일치하는 모델이 없습니다.</div>
+            <div class="rt-note" data-testid="runtime-models-empty">일치하는 모델 없음</div>
           ` : null}
           <div class="rt-model rt-card-add" data-testid="runtime-add-model-card">
             ${!modelFormOpen ? html`
@@ -1189,7 +1189,7 @@ export function RuntimeEnvironmentEditor({
             [runtime.assignments] — keeper → 런타임 id.
           </div>
           ${keeperList.length === 0 ? html`
-            <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper가 없습니다.</div>
+            <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper 없음</div>
           ` : html`
             <div class="rt-assign-summary mono" data-testid="runtime-assignments-summary">
               고정 ${pinnedAssignments.length}개 · default 폴백 ${fallbackAssignments.length}개

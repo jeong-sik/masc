@@ -150,7 +150,7 @@ describe('PromptBookPanel', () => {
   it('renders an empty state when no prompts are loaded', () => {
     render(html`<${PromptBookPanel} prompts=${[]} loading=${false} />`, container)
     expect(container.querySelector('[data-testid="prompt-book-panel"]')).not.toBeNull()
-    expect(container.textContent).toContain('표시할 프롬프트가 없습니다')
+    expect(container.textContent).toContain('표시할 프롬프트 없음')
     expect(container.querySelector('[data-testid="prompt-book-catalog"]')).toBeNull()
   })
 })

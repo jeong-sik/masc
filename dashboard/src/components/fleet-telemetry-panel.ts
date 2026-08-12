@@ -259,13 +259,13 @@ function ControlWorkspacePanel({ state }: { state: FleetTelemetryState }) {
         <${SummaryCard}
           title="Gate 대기"
           value=${pendingApprovals.toString()}
-          detail=${pendingApprovals > 0 ? 'Gate/HITL 요청이 대기 중입니다.' : '대기 중인 Gate/HITL 요청이 없습니다.'}
+          detail=${pendingApprovals > 0 ? 'Gate/HITL 요청이 대기 중입니다.' : '대기 중인 Gate/HITL 요청 없음'}
           tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
           title="주의"
           value=${attentionEvents.length.toString()}
-          detail=${attentionEvents.length > 0 ? '심각한 차단 요인과 일시정지 후보 상태를 표시합니다.' : '활성 주의 이벤트가 없습니다.'}
+          detail=${attentionEvents.length > 0 ? '심각한 차단 요인과 일시정지 후보 상태를 표시합니다.' : '활성 주의 이벤트 없음'}
           tone=${attentionEvents.length > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
@@ -434,7 +434,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     class=${row.goal_linked
                       ? 'rounded-[var(--r-1)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)]'
                       : 'rounded-[var(--r-1)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-warn)]'}
-                    title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표가 없습니다.'}
+                    title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표 없음'}
                   >
                     ${row.goal_label
                       ? (row.active_goal_count > 1 ? `goal ${row.active_goal_count}` : 'goal linked')
@@ -728,7 +728,7 @@ export function FleetTelemetryPanel() {
 
       state.value = {
         loading: false,
-        error: hasAnyData ? null : '함대 텔레메트리 데이터가 없습니다.',
+        error: hasAnyData ? null : '함대 텔레메트리 데이터 없음',
         warnings,
         rows,
         execution_trust: executionTrust,
@@ -843,7 +843,7 @@ export function FleetTelemetryPanel() {
           value=${counts.blocked.toString()}
           detail=${counts.blocked > 0
             ? '런타임은 살아있지만 typed blocker_class를 가진 키퍼 — 행 필터에서 blocker 클래스 이름으로 검색해 원인 확인.'
-            : '활성 차단 사유가 보고된 키퍼가 없습니다.'}
+            : '활성 차단 사유가 보고된 키퍼 없음'}
           tone=${counts.blocked > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
@@ -852,8 +852,8 @@ export function FleetTelemetryPanel() {
           detail=${value.tool_quality.total > 0
             ? `${value.tool_quality.total.toLocaleString()}회 중 ${value.tool_quality.failure.toLocaleString()}회 실패${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` (최근 ${value.tool_quality.window_hours}시간).` : ' (최근 호출).'}`
             : value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null
-              ? `최근 ${value.tool_quality.window_hours}시간 동안 도구 품질 샘플이 없습니다.`
-              : '최근 도구 품질 샘플이 없습니다.'}
+              ? `최근 ${value.tool_quality.window_hours}시간 동안 도구 품질 샘플 없음`
+              : '최근 도구 품질 샘플 없음'}
           tone=${value.tool_quality.total > 0 ? toneForToolSuccess(value.tool_quality.success_rate) : 'neutral'}
         />
         <${SummaryCard}

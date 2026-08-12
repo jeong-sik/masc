@@ -154,7 +154,7 @@ export function PromptBookPanel({
           <div class="pb-cat-intro">
             <h1>프롬프트 라이브러리</h1>
             <div class="pb-frontis-sub">
-              ${loading ? '프롬프트 레지스트리를 불러오는 중입니다.' : '표시할 프롬프트가 없습니다.'}
+              ${loading ? '불러오는 중…' : '표시할 프롬프트 없음'}
             </div>
           </div>
         </div>

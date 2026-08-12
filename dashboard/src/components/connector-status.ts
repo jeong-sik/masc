@@ -518,7 +518,7 @@ export async function startSidecar(connectorId: string) {
   markStartAttempt(connectorId)
   try {
     await post(`/api/v1/sidecar/start?name=${encodeURIComponent(connectorId)}`, {})
-    showToast(`${connectorId} sidecar 시작 요청 — 잠시 후 상태 갱신됩니다.`, 'success')
+    showToast(`${connectorId} sidecar 시작 요청됨`, 'success')
     await refresh()
   } catch (err) {
     showConnectorActionError(`${connectorId} sidecar 시작 실패`, err)

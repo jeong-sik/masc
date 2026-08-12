@@ -1070,7 +1070,7 @@ function LogViewer() {
   const emptyLabel =
     status === 'loading' ? '로그를 불러오는 중…'
     : status === 'error' ? '시스템 로그를 불러오지 못했습니다.'
-    : '조건에 맞는 로그가 없습니다.'
+    : '조건에 맞는 로그 없음'
 
   return html`
     <div class="log-view" data-testid="log-viewer">
@@ -1442,7 +1442,7 @@ export function SettingsSurface() {
               })}
             </div>
           `)}
-          <div class="set-nav-note">live-backed 섹션은 API나 대시보드 shell 상태를 직접 읽고 씁니다. writer가 없는 값은 read-only로만 표시합니다.</div>
+          <div class="set-nav-note">live-backed = 직접 읽고 씀 · writer 없는 값은 read-only</div>
         </nav>
 
         <div class="set-content">

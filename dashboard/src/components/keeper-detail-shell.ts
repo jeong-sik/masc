@@ -28,7 +28,7 @@ export function KeeperDetailMissingState({
   const isLikelyDead = liveCount > 0
   const explanation = isLikelyDead
     ? `현재 fleet에 ${keeperName}이(가) 없습니다 (live ${liveCount}명). watchdog 종료 또는 operator stop 가능성이 높습니다 — masc_keeper_stale_termination_total{keeper=\"${keeperName}\"} 에서 종료 시각을 확인하세요.`
-    : '레지스트리가 아직 로드되지 않았습니다. 잠시 후 자동 갱신됩니다.'
+    : '레지스트리 불러오는 중…'
   return html`
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4 v2-monitoring-surface">
       <div class="rounded-[var(--r-6)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-6 py-6 shadow-[var(--shadow-raised)] v2-monitoring-panel">

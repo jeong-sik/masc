@@ -553,7 +553,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
             </div>
           ` : html`
             <div class="v2-lab-card rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] px-4 py-10 text-center text-xs text-[var(--color-fg-muted)]">
-              ${loading ? '프롬프트 목록을 불러오는 중입니다.' : '표시할 프롬프트가 없습니다.'}
+              ${loading ? '불러오는 중…' : '표시할 프롬프트 없음'}
             </div>
           `}
         </div>

@@ -418,7 +418,7 @@ export function TaskBacklog() {
         <${TaskColumn}
           title="할 일"
           count=${sortedTodo.length}
-          description="아직 claim되지 않은 태스크입니다. 우선순위가 높은 순서대로 위에 옵니다."
+          description="미claim · 우선순위순"
           badgeClass="border border-bad/25 bg-bad/10 text-bad"
         >
           ${sortedTodo.length === 0

@@ -1873,8 +1873,8 @@ let test_turn_runtime_redacts_the_mounted_github_snapshot () =
   Unix.chmod hosts_path 0o600;
   let raw = execute snapshot_token in
   Alcotest.(check bool) "mounted snapshot token never reaches response" false
-    (contains_substring raw snapshot_token);
-  if not (contains_substring raw "[REDACTED]")
+    (String_util.contains_substring raw snapshot_token);
+  if not (String_util.contains_substring raw "[REDACTED]")
   then Alcotest.failf "exact snapshot token was not redacted: %s" raw
 
 let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =

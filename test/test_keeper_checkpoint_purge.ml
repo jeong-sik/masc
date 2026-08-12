@@ -127,17 +127,66 @@ let test_reasoning_strip_scope () =
     [ "answer"; "<thinking>|signed" ]
     (message_texts purged)
 
-let test_reasoning_inside_tool_cycle_is_kept () =
+(* Contract change: R2 used to skip any message carrying a ToolUse, so the
+   assistant message that opens a tool cycle kept its unsigned reasoning. On an
+   agentic keeper that is almost every assistant message — measured on the
+   sangsu checkpoint, 418 of 422 surviving unsigned Thinking blocks (490,370 B,
+   41.0% of the file) were held by this rule. Unsigned reasoning carries no
+   signature to replay, so the exemption bought nothing. *)
+let test_unsigned_reasoning_inside_tool_cycle_is_stripped () =
   let messages =
     [ block_message Types.Assistant [ unsigned_thinking "pre-tool"; tool_use "a" ]
     ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
     ]
   in
-  let _purged, report = run messages in
+  let purged, report = run messages in
   Alcotest.(check int)
-    "a tool-use message keeps its reasoning"
+    "unsigned reasoning is stripped even beside a tool_use"
+    1
+    report.reasoning_blocks_stripped;
+  Alcotest.(check int) "no cycle message dropped" 2 (List.length purged);
+  (match List.hd purged with
+   | { Types.content = [ Types.ToolUse { id; _ } ]; _ } ->
+     Alcotest.(check string) "the tool_use itself survives" "a" id
+   | other ->
+     Alcotest.failf
+       "expected a lone surviving ToolUse, got %s"
+       (Types.show_message other))
+
+(* The safety line the old guard was reaching for, pinned where it belongs:
+   per block, by signature — not per message, by "has a tool_use". *)
+let test_signed_reasoning_inside_tool_cycle_is_kept () =
+  let messages =
+    [ block_message Types.Assistant [ signed_thinking "pre-tool"; tool_use "a" ]
+    ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
+    ]
+  in
+  let purged, report = run messages in
+  Alcotest.(check int)
+    "signed reasoning beside a tool_use is untouched"
     0
-    report.reasoning_blocks_stripped
+    report.reasoning_blocks_stripped;
+  Alcotest.(check int) "no cycle message dropped" 2 (List.length purged);
+  match List.hd purged with
+  | { Types.content = [ Types.Thinking { signature = Some _; _ }; Types.ToolUse _ ]; _ } ->
+    ()
+  | other ->
+    Alcotest.failf
+      "signed thinking must replay byte-exact, got %s"
+      (Types.show_message other)
+
+(* A cycle message is never dropped, even when stripping would empty it:
+   dropping it would orphan the paired ToolResult and fail structural
+   validation. *)
+let test_thinking_only_cycle_message_is_not_dropped () =
+  let messages =
+    [ block_message Types.Assistant [ unsigned_thinking "only-thinking"; tool_use "a" ]
+    ; { (block_message Types.Tool [ tool_result "a" ]) with tool_call_id = Some "a" }
+    ; text_message Types.User "after"
+    ]
+  in
+  let purged, _report = run messages in
+  Alcotest.(check int) "pairing intact" 3 (List.length purged)
 
 let test_tool_result_clear_preserves_pairing () =
   let messages = cycle "a" @ [ text_message Types.User "after" ] in
@@ -347,9 +396,17 @@ let () =
             test_duplicate_tool_cycles_are_never_collapsed
         ; Alcotest.test_case "reasoning strip scope" `Quick test_reasoning_strip_scope
         ; Alcotest.test_case
-            "reasoning inside a tool cycle is kept"
+            "unsigned reasoning inside a tool cycle is stripped"
             `Quick
-            test_reasoning_inside_tool_cycle_is_kept
+            test_unsigned_reasoning_inside_tool_cycle_is_stripped
+        ; Alcotest.test_case
+            "signed reasoning inside a tool cycle is kept"
+            `Quick
+            test_signed_reasoning_inside_tool_cycle_is_kept
+        ; Alcotest.test_case
+            "a thinking-only cycle message is not dropped"
+            `Quick
+            test_thinking_only_cycle_message_is_not_dropped
         ; Alcotest.test_case
             "tool result clear preserves pairing"
             `Quick

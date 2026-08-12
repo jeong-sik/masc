@@ -79,6 +79,11 @@ let codex_failure_status = function
   | Protocol_error _ | Rpc_error _ | Unsupported_server_request _ ->
     "protocol_error"
   | Context_window_exceeded _ | Turn_failed _ | Turn_interrupted
+  (* The host raises [Stopped_by_host] to abort a repeated tool loop mid-turn,
+     and this probe measures [initialize] plus login only — see "The probe
+     never starts a turn" at runtime_codex_app_server.ml. It joins the other
+     turn-shaped outcomes the probe's no-turn contract already rules out; it
+     is matched because [error] is the one sum type [run_turn] also returns. *)
   | Stopped_by_host _ ->
     "probe_contract_error"
 ;;
@@ -93,6 +98,9 @@ let claude_failure_status = function
   | Context_window_exceeded _
   | Turn_failed _
   | Quota_blocked _
+  (* Same reading as [codex_failure_status]: [probe_subscription] measures
+     "the official CLI login without submitting a model turn"
+     (runtime_claude_code.mli), so a mid-turn host abort cannot reach here. *)
   | Stopped_by_host _ ->
     "probe_contract_error"
 ;;

@@ -127,6 +127,31 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
 }
 
 describe('deriveKeeperRuntimeProjection', () => {
+  it('uses the server-resolved Keeper heartbeat freshness window', () => {
+    const lastHeartbeat = '2026-05-21T00:05:00Z'
+    const shortCadence = deriveKeeperRuntimeProjection({
+      keeper: keeper({
+        last_heartbeat: lastHeartbeat,
+        heartbeat_stale_after_s: 120,
+      }),
+      composite: composite(),
+      nowMs: NOW_MS,
+    })
+    const defaultCadence = deriveKeeperRuntimeProjection({
+      keeper: keeper({
+        last_heartbeat: lastHeartbeat,
+        heartbeat_stale_after_s: 360,
+      }),
+      composite: composite(),
+      nowMs: NOW_MS,
+    })
+
+    expect(shortCadence.heartbeat.thresholdMs).toBe(120_000)
+    expect(shortCadence.heartbeat.stale).toBe(true)
+    expect(defaultCadence.heartbeat.thresholdMs).toBe(360_000)
+    expect(defaultCadence.heartbeat.stale).toBe(false)
+  })
+
   it('couples heartbeat, context, fiber, stop, trace, tool, and FSM lanes', () => {
     const projection = deriveKeeperRuntimeProjection({
       keeper: keeper({

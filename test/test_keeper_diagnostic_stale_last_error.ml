@@ -27,6 +27,11 @@ let error_reason = "unified:error:Tool retry budget exhausted after 2/2 retries"
 let proactive_error_ts = 1_780_994_419.0 (* ~2026-06-09T08:40Z, echo's real error *)
 let later_turn_ts = 1_781_022_342.0 (* ~2026-06-09T16:25Z, echo's real last turn *)
 let now_ts = 1_781_100_000.0
+let diagnostic_config =
+  Workspace.default_config
+    (Filename.concat
+       (Filename.get_temp_dir_name ())
+       (Printf.sprintf "keeper-diagnostic-%d" (Unix.getpid ())))
 
 (* Local member access avoids pulling yojson in as a direct dune dependency;
    yojson values are plain polymorphic variants. *)
@@ -82,6 +87,7 @@ let external_live_agent_status ~last_seen =
 
 let last_error_of_diagnostic ~meta ~agent_status ~keepalive_running =
   Keeper_status_runtime.keeper_diagnostic_json
+    ~config:diagnostic_config
     ~meta
     ~agent_status
     ~keepalive_running
@@ -92,6 +98,7 @@ let last_error_of_diagnostic ~meta ~agent_status ~keepalive_running =
 
 let diagnostic_of ~meta ~agent_status ~keepalive_running =
   Keeper_status_runtime.keeper_diagnostic_json
+    ~config:diagnostic_config
     ~meta
     ~agent_status
     ~keepalive_running

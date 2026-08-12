@@ -539,6 +539,19 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             | _ -> 0
           in
           let keepalive_running = runtime_keepalive_running config m in
+          let keepalive_interval_s =
+            Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec
+            |> float_of_int
+          in
+          let snapshot_interval_s =
+            Runtime_params.get Runtime_settings.keeper_snapshot_sec
+            |> float_of_int
+          in
+          let heartbeat_stale_after_s =
+            Keeper_status_runtime.keeper_heartbeat_stale_after_s
+              ~keepalive_interval_s
+              ~snapshot_interval_s
+          in
           let registry_entry =
             Keeper_registry.get ~base_path:config.base_path m.name in
           let phase =
@@ -669,6 +682,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               in
               let diagnostic =
 	                Keeper_status_runtime.keeper_diagnostic_json
+	                  ~config
 	                  ~meta:m
 	                  ~agent_status:agent
 	                  ~keepalive_running
@@ -805,6 +819,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("runtime_trust", runtime_trust);
               ("paused", `Bool m.paused);
               ("keepalive_running", `Bool keepalive_running);
+              ("keeper_keepalive_interval_s", `Float keepalive_interval_s);
+              ("keeper_snapshot_interval_s", `Float snapshot_interval_s);
+              ("heartbeat_stale_after_s", `Float heartbeat_stale_after_s);
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("agent", agent);
               ( "status",
@@ -1011,6 +1028,7 @@ let execution_trust_row_of_meta
      that state, so the trust surface must not read the conversation log. *)
   let diagnostic =
     Keeper_status_runtime.keeper_diagnostic_json
+      ~config
       ~meta:m
       ~agent_status:agent
       ~keepalive_running

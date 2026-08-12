@@ -288,6 +288,7 @@ let enrich_keeper_with_diagnostic ~(config : Workspace.config) (keeper_json : Yo
                | Some diagnostic -> diagnostic
                | None ->
                  Keeper_status_runtime.keeper_diagnostic_json
+                   ~config
                    ~meta
                    ~agent_status:(Option.value ~default:`Null (Json_util.assoc_member_opt "agent" keeper_json))
                    ~keepalive_running

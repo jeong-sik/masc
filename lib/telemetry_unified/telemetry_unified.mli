@@ -34,6 +34,7 @@ type source =
 val source_to_string : source -> string
 val source_of_string : string -> source option
 val all_sources : source list
+val source_freshness_slo_s : ?keeper_keepalive_interval_s:float -> source -> float
 
 type read_result = {
   entries : Yojson.Safe.t list;
@@ -86,6 +87,8 @@ val read_unified_result :
     entries before truncation plus whether truncation occurred. *)
 
 val summary_json :
+  ?keeper_keepalive_interval_s:float ->
+  ?keeper_metric_producer_active:bool ->
   base_path:string ->
   masc_root:string ->
   unit ->
@@ -93,14 +96,18 @@ val summary_json :
 (** [summary_json ~base_path ~masc_root ()] returns a JSON overview of
     each source: path, entry count, whether the store directory exists,
     and freshness metadata ([latest_ts_unix], [latest_ts_iso],
-    [latest_age_s]).  [masc_root] is the cluster-aware .masc directory. *)
+    [latest_age_s]). A live Keeper metrics producer suppresses only
+    age-derived staleness; missing, empty, read-error, and coverage-gap states
+    remain fail-visible. [masc_root] is the cluster-aware .masc directory. *)
 
 val replay_retention_json :
+  ?keeper_keepalive_interval_s:float ->
   base_path:string ->
   masc_root:string ->
   sources:source list ->
+  unit ->
   Yojson.Safe.t
-(** [replay_retention_json ~base_path ~masc_root ~sources] returns the
+(** [replay_retention_json ~base_path ~masc_root ~sources ()] returns the
     provenance block for the dashboard telemetry replay endpoint, including
     the selected source list and durable stores read for each source. *)
 

@@ -251,7 +251,7 @@ async function fixtureFetch(input: RequestInfo | URL, init?: RequestInit): Promi
   const path = requestPath(input)
   const method = requestMethod(input, init)
   if (path === '/api/v1/dashboard/dev-token' && method === 'GET') {
-    return json({ token: 'fixture-token', actor: 'dashboard', role: 'worker' })
+    return json({ token: 'fixture-token', actor: 'dashboard', role: 'admin' })
   }
   if (path === `/api/v1/keepers/${KEEPER}/chat/history` && method === 'GET') return json([])
   if (path === `/api/v1/keepers/${KEEPER}/waiting-inventory` && method === 'GET') {

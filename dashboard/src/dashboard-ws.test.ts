@@ -789,7 +789,7 @@ describe('dashboard websocket route subscriptions', () => {
   it('reconnects with a fresh token after hello auth rejection', async () => {
     vi.useFakeTimers()
     installWebSocketMocks()
-    setStoredToken('stale-token', { source: 'dev', actor: 'dashboard', role: 'worker' })
+    setStoredToken('stale-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
 
     await connectDashboardWS({ tab: 'overview', params: {} })
     const socket = mockSockets[0]!
@@ -806,7 +806,7 @@ describe('dashboard websocket route subscriptions', () => {
     await flushPromises()
     expect(mockSockets).toHaveLength(1)
 
-    setStoredToken('fresh-token', { source: 'dev', actor: 'dashboard', role: 'worker' })
+    setStoredToken('fresh-token', { source: 'dev', actor: 'dashboard', role: 'admin' })
     await flushPromises()
     await flushPromises()
 

@@ -107,15 +107,20 @@ type keepalive_cycle_status =
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_owner.autonomous_block
 
-type keepalive_cycle_accounting =
-  { record_turn_status : bool
-  ; refresh_work_heartbeat : bool
-  }
+type work_heartbeat_action =
+  | Refresh_work_heartbeat
+  | Preserve_work_heartbeat
 
-val keepalive_cycle_accounting :
-  keepalive_cycle_status -> keepalive_cycle_accounting
-(** Closed accounting policy used by the heartbeat loop. Busy cycles record
-    neither turn completion nor work-heartbeat success. *)
+type keepalive_cycle_action =
+  | Defer_autonomous_work of Keeper_owner.autonomous_block
+  | Record_turn_status of work_heartbeat_action
+
+val decide_keepalive_cycle_action :
+  keepalive_cycle_status -> keepalive_cycle_action
+(** Total accounting decision used by the heartbeat effect shell. Completed
+    cycles record and refresh, crashed cycles record while preserving the
+    existing work-health lease, and busy cycles retain their typed admission
+    block without recording a turn. *)
 
 (** Outcome of one keepalive cycle evaluation.
 

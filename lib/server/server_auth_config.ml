@@ -41,6 +41,7 @@ let parse_boolean ~name = function
   | None -> Ok false
   | Some raw ->
     (match String.trim raw |> String.lowercase_ascii with
+     | "" -> Ok false
      | "1" | "true" | "yes" | "on" -> Ok true
      | "0" | "false" | "no" | "off" -> Ok false
      | _ -> Error (Malformed_boolean { name; raw }))
@@ -84,6 +85,14 @@ let fail_closed =
 
 let allow_anonymous_mutations config = config.anonymous_mutations_allowed
 let loopback_dev_mutation_origins config = config.allowlisted_dev_origins
+
+let equal left right =
+  Bool.equal left.anonymous_mutations_allowed right.anonymous_mutations_allowed
+  && List.equal
+       Server_request_authority.serialized_origin_equal
+       left.allowlisted_dev_origins
+       right.allowlisted_dev_origins
+;;
 
 let resolve_error_to_string = function
   | Malformed_boolean { name; raw } ->

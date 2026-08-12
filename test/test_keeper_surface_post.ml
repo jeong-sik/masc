@@ -15,11 +15,14 @@ let target_pp fmt = function
   | SP.To_dashboard -> Format.fprintf fmt "To_dashboard"
   | SP.To_discord { channel_id } ->
       Format.fprintf fmt "To_discord{%s}" channel_id
-  | SP.To_slack { channel_id; blocks } ->
+  | SP.To_slack { channel_id; thread_ts; blocks } ->
       let blocks_label =
         match blocks with None -> "no-blocks" | Some [] -> "empty" | Some _ -> "blocks"
       in
-      Format.fprintf fmt "To_slack{%s,%s}" channel_id blocks_label
+      let thread_label =
+        match thread_ts with None -> "root" | Some ts -> "thread:" ^ ts
+      in
+      Format.fprintf fmt "To_slack{%s,%s,%s}" channel_id thread_label blocks_label
 
 let target : SP.post_target testable = testable target_pp ( = )
 
@@ -164,7 +167,7 @@ let test_slack_unbound_is_error () =
 
 let test_slack_single_binding_resolves_implicitly () =
   check (result target string) "single slack binding"
-    (Ok (SP.To_slack { channel_id = "C123456"; blocks = None }))
+    (Ok (SP.To_slack { channel_id = "C123456"; thread_ts = None; blocks = None }))
     (resolve ~surface:"slack" ~channel_id:None
        ~bound_discord_channels:[] ~bound_slack_channels:[ "C123456" ] ())
 
@@ -178,7 +181,7 @@ let test_slack_multiple_bindings_require_channel_id () =
         (Astring.String.is_infix ~affix:"AAA, BBB" message)
   | Ok _ -> fail "ambiguous slack binding must not resolve");
   check (result target string) "explicit channel_id picks one"
-    (Ok (SP.To_slack { channel_id = "BBB"; blocks = None }))
+    (Ok (SP.To_slack { channel_id = "BBB"; thread_ts = None; blocks = None }))
     (resolve ~surface:"slack" ~channel_id:(Some "BBB")
        ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ())
 
@@ -194,9 +197,23 @@ let test_slack_continuation_selects_exact_bound_channel () =
     | Ok channel -> channel
     | Error message -> fail message
   in
-  check (result target string) "typed Slack continuation channel"
-    (Ok (SP.To_slack { channel_id = "BBB"; blocks = None }))
+  check (result target string) "typed Slack continuation channel keeps its thread"
+    (Ok
+       (SP.To_slack
+          { channel_id = "BBB"; thread_ts = Some "thread"; blocks = None }))
     (resolve ~surface:"slack" ~channel_id:None ~continuation_channel
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ());
+  check (result target string)
+    "explicit continuation channel also keeps its thread"
+    (Ok
+       (SP.To_slack
+          { channel_id = "BBB"; thread_ts = Some "thread"; blocks = None }))
+    (resolve ~surface:"slack" ~channel_id:(Some "BBB") ~continuation_channel
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ());
+  check (result target string)
+    "explicit different channel posts to its root, not a foreign thread"
+    (Ok (SP.To_slack { channel_id = "AAA"; thread_ts = None; blocks = None }))
+    (resolve ~surface:"slack" ~channel_id:(Some "AAA") ~continuation_channel
        ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA"; "BBB" ] ())
 
 let test_slack_foreign_channel_id_is_error () =
@@ -224,10 +241,14 @@ let test_unsupported_surface_is_error () =
 let test_set_blocks_attaches_to_slack () =
   let block = `Assoc [ ("type", `String "section") ] in
   let resolved =
-    SP.set_blocks (SP.To_slack { channel_id = "C1"; blocks = None }) (Some [ block ])
+    SP.set_blocks
+      (SP.To_slack { channel_id = "C1"; thread_ts = None; blocks = None })
+      (Some [ block ])
   in
   check (result target string) "blocks attached"
-    (Ok (SP.To_slack { channel_id = "C1"; blocks = Some [ block ] }))
+    (Ok
+       (SP.To_slack
+          { channel_id = "C1"; thread_ts = None; blocks = Some [ block ] }))
     (Ok resolved)
 
 let test_set_blocks_ignores_other_targets () =
@@ -282,15 +303,40 @@ let test_terminal_receipt_requires_exact_supported_route () =
   in
   check bool "Slack post to the channel delivers an unthreaded continuation" true
     (SP.matches_continuation_route
-       (SP.To_slack { channel_id = "C1"; blocks = None })
+       (SP.To_slack { channel_id = "C1"; thread_ts = None; blocks = None })
        (slack "C1"));
-  (* Slack thread_ts is a destination distinct from the channel root and the
-     tool does not thread its post, so a channel post does not prove delivery of
-     a threaded Slack continuation; recovery settles it. *)
+  (* Slack thread_ts is a destination distinct from the channel root, so a
+     root post does not prove delivery of a threaded Slack continuation;
+     recovery settles it. *)
   check bool "Slack channel post does not satisfy a threaded continuation" false
     (SP.matches_continuation_route
-       (SP.To_slack { channel_id = "C1"; blocks = None })
+       (SP.To_slack { channel_id = "C1"; thread_ts = None; blocks = None })
        (slack ~thread_ts:"1700000000.000100" "C1"));
+  check bool "Slack thread post delivers the same threaded continuation" true
+    (SP.matches_continuation_route
+       (SP.To_slack
+          { channel_id = "C1"
+          ; thread_ts = Some "1700000000.000100"
+          ; blocks = None
+          })
+       (slack ~thread_ts:"1700000000.000100" "C1"));
+  check bool "Slack thread post does not satisfy a different thread" false
+    (SP.matches_continuation_route
+       (SP.To_slack
+          { channel_id = "C1"
+          ; thread_ts = Some "1700000000.000100"
+          ; blocks = None
+          })
+       (slack ~thread_ts:"1700000000.000200" "C1"));
+  check bool "Slack thread post does not satisfy an unthreaded continuation"
+    false
+    (SP.matches_continuation_route
+       (SP.To_slack
+          { channel_id = "C1"
+          ; thread_ts = Some "1700000000.000100"
+          ; blocks = None
+          })
+       (slack "C1"));
   check bool "keeper-global dashboard post has no exact thread receipt" false
     (SP.matches_continuation_route
        SP.To_dashboard

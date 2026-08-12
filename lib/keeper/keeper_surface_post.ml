@@ -3,7 +3,11 @@ type rich_block = Yojson.Safe.t
 type post_target =
   | To_dashboard
   | To_discord of { channel_id : string }
-  | To_slack of { channel_id : string; blocks : rich_block list option }
+  | To_slack of
+      { channel_id : string
+      ; thread_ts : string option
+      ; blocks : rich_block list option
+      }
 
 let dashboard_label = "dashboard"
 let discord_label = "discord"
@@ -13,7 +17,10 @@ let resolve_target ~surface ~channel_id ?continuation_channel
     ?(bound_discord_channels = [])
     ?(bound_slack_channels = []) () : (post_target, string) result =
   let surface = String.trim surface in
-  let continuation_channel_id, continuation_parent_channel_id =
+  let ( continuation_channel_id
+      , continuation_parent_channel_id
+      , continuation_slack_thread_ts )
+    =
     match continuation_channel with
     | Some
         (Keeper_continuation_channel.Discord
@@ -23,17 +30,28 @@ let resolve_target ~surface ~channel_id ?continuation_channel
       , (match thread_id, parent_channel_id with
          | Some thread_id, Some parent_channel_id
            when String.equal thread_id channel_id -> Some parent_channel_id
-         | _ -> None) )
-    | Some (Keeper_continuation_channel.Slack { channel_id; _ })
+         | _ -> None)
+      , None )
+    | Some (Keeper_continuation_channel.Slack { channel_id; thread_ts; _ })
       when String.equal surface slack_label ->
-      Some channel_id, None
+      Some channel_id, None, thread_ts
     | Some
         ( Keeper_continuation_channel.Dashboard _
         | Keeper_continuation_channel.Discord _
         | Keeper_continuation_channel.Slack _
         | Keeper_continuation_channel.Unrouted _ )
     | None ->
-      None, None
+      None, None, None
+  in
+  (* A Slack [thread_ts] names a conversation inside one channel, so it only
+     travels with a post that lands on the continuation's own channel; an
+     explicit different channel gets a root post (a foreign thread_ts would be
+     rejected by Slack). *)
+  let slack_thread_ts_for ~channel_id =
+    match continuation_channel_id with
+    | Some continuation_id when String.equal channel_id continuation_id ->
+      continuation_slack_thread_ts
+    | Some _ | None -> None
   in
   let channel_id =
     match channel_id with
@@ -81,7 +99,13 @@ let resolve_target ~surface ~channel_id ?continuation_channel
         Error
           "this keeper has no Slack channel binding; bind a channel first \
            (posting to an unbound surface is an error, not a no-op)"
-    | None, [ only ] -> Ok (To_slack { channel_id = only; blocks = None })
+    | None, [ only ] ->
+        Ok
+          (To_slack
+             { channel_id = only
+             ; thread_ts = slack_thread_ts_for ~channel_id:only
+             ; blocks = None
+             })
     | None, _ :: _ :: _ ->
         Error
           (Printf.sprintf
@@ -91,7 +115,12 @@ let resolve_target ~surface ~channel_id ?continuation_channel
     | Some requested, bound ->
         let requested = String.trim requested in
         if List.exists (String.equal requested) bound then
-          Ok (To_slack { channel_id = requested; blocks = None })
+          Ok
+            (To_slack
+               { channel_id = requested
+               ; thread_ts = slack_thread_ts_for ~channel_id:requested
+               ; blocks = None
+               })
         else
           Error
             (Printf.sprintf
@@ -123,15 +152,15 @@ let matches_continuation_route target channel =
        continuation now carries [reply_to_message_id = Some _], so requiring
        [= None] here quarantined all of them (PR #28225 review). *)
     String.equal posted channel_id
-  | ( To_slack { channel_id = posted; _ }
-    , Keeper_continuation_channel.Slack
-        { channel_id; thread_ts = None; _ } ) ->
-    (* Slack differs from Discord: [thread_ts] is a destination distinct from the
-       channel root and the surface-post tool does not thread its post, so a
-       same-channel post only proves delivery for an unthreaded continuation.
-       Threaded Slack continuations settle through the recovery publisher, which
-       does thread via [?reply_to_message_id]. *)
+  | ( To_slack { channel_id = posted; thread_ts = posted_thread_ts; _ }
+    , Keeper_continuation_channel.Slack { channel_id; thread_ts; _ } ) ->
+    (* Slack differs from Discord: [thread_ts] is a destination distinct from
+       the channel root, so delivery is proven only when the post carried the
+       continuation's exact thread coordinate — both unthreaded, or both the
+       same thread. A root post never proves delivery for a threaded
+       continuation (that still settles through the recovery publisher). *)
     String.equal posted channel_id
+    && Option.equal String.equal posted_thread_ts thread_ts
   | ( To_dashboard
     , Keeper_continuation_channel.Dashboard _ ) ->
     (* Dashboard posts are currently keeper-global ([session_id=None]), so

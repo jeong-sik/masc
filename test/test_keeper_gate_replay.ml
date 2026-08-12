@@ -731,17 +731,50 @@ let test_large_connector_post_preserves_exact_durable_request () =
       (Replay_slack_post
          { input = decoded_input
          ; channel_id
+         ; thread_ts
          ; content = decoded_content
          ; blocks = decoded_blocks
          }) ->
     Alcotest.check json "exact durable request retained" input decoded_input;
     Alcotest.check Alcotest.string "channel retained" "C-exact" channel_id;
+    Alcotest.check
+      (Alcotest.option Alcotest.string)
+      "absent thread_ts stays absent"
+      None
+      thread_ts;
     Alcotest.check Alcotest.string "large content retained" content decoded_content;
     Alcotest.check
       (Alcotest.list json)
       "large blocks retained"
       blocks
       decoded_blocks
+  | Ok (Replay_discord_post _) ->
+    Alcotest.fail "Slack request decoded as Discord"
+  | Error detail -> Alcotest.fail detail
+;;
+
+let test_slack_connector_post_retains_thread_ts () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  let input =
+    `Assoc
+      [ "connector", `String "slack"
+      ; "channel_id", `String "C-exact"
+      ; "thread_ts", `String "1700000000.000100"
+      ; "content", `String "threaded reply"
+      ; "blocks", `List []
+      ]
+  in
+  match
+    Masc.Keeper_tool_in_process_runtime.connector_post_replay_of_gate_input
+      input
+  with
+  | Ok (Replay_slack_post { thread_ts; channel_id; _ }) ->
+    Alcotest.check Alcotest.string "channel retained" "C-exact" channel_id;
+    Alcotest.check
+      (Alcotest.option Alcotest.string)
+      "thread coordinate retained"
+      (Some "1700000000.000100")
+      thread_ts
   | Ok (Replay_discord_post _) ->
     Alcotest.fail "Slack request decoded as Discord"
   | Error detail -> Alcotest.fail detail
@@ -768,6 +801,20 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
         ; "channel_id", `String "D-exact"
         ; "content", `String "exact"
         ; "truncated", `Bool true
+        ]
+    ; `Assoc
+        [ "connector", `String "slack"
+        ; "channel_id", `String "C-exact"
+        ; "thread_ts", `String "   "
+        ; "content", `String "blank thread coordinate"
+        ; "blocks", `List []
+        ]
+    ; `Assoc
+        [ "connector", `String "slack"
+        ; "channel_id", `String "C-exact"
+        ; "thread_ts", `Int 1700000000
+        ; "content", `String "non-string thread coordinate"
+        ; "blocks", `List []
         ]
     ]
 ;;
@@ -861,6 +908,10 @@ let () =
             "connector decoder rejects heuristic input"
             `Quick
             test_connector_post_rejects_heuristic_or_truncated_input
+        ; Alcotest.test_case
+            "slack connector request retains thread_ts"
+            `Quick
+            test_slack_connector_post_retains_thread_ts
         ; Alcotest.test_case
             "memory write replay keeps exact input"
             `Quick

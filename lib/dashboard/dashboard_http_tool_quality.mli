@@ -26,6 +26,11 @@ val unknown_runtime_profile_bucket : string
     [runtime_profile] evidence at either the top level or in
     [runtime_contract]. *)
 
+val tool_success_of_record : Yojson.Safe.t -> bool
+(** Project the compatibility [success] bit through the typed disposition.
+    A deferred call is pending rather than failed, even when its legacy bit is
+    [false]. *)
+
 val aggregate :
   ?n:int -> ?window_hours:float -> unit -> Yojson.Safe.t
 (** Build the dashboard payload from the most recent [n] keeper

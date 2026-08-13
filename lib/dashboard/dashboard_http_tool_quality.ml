@@ -73,9 +73,12 @@ let bool_field_opt record field =
   | _ -> None
 
 let tool_success_of_record record =
-  match bool_field_opt record "success" with
-  | Some value -> value
-  | None -> false
+  match Safe_ops.json_string_opt "disposition" record with
+  | Some "deferred" -> true
+  | Some _ | None ->
+    (match bool_field_opt record "success" with
+     | Some value -> value
+     | None -> false)
 
 let hour_key_of_record record =
   let hour_of_unix ts =

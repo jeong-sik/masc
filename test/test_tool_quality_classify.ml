@@ -67,6 +67,11 @@ let test_timeout_status_is_classified () =
   check string "timeout process classified"
     "bash_timeout" (classify output)
 
+let test_deferred_record_is_not_counted_as_failure () =
+  let record = `Assoc [ "success", `Bool false; "disposition", `String "deferred" ] in
+  check bool "typed deferred disposition overrides legacy success=false" true
+    (Dashboard_http_tool_quality.tool_success_of_record record)
+
 let () =
   run "tool_quality_classify"
     [
@@ -83,5 +88,7 @@ let () =
            test_case "signaled status classified" `Quick test_signaled_status_is_classified;
            test_case "timeout error preserved" `Quick test_timeout_error_is_preserved;
            test_case "timeout status classified" `Quick test_timeout_status_is_classified;
+           test_case "deferred is not failure" `Quick
+             test_deferred_record_is_not_counted_as_failure;
          ]);
     ]

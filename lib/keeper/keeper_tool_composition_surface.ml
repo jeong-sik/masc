@@ -75,88 +75,99 @@ let observe_node_result
       ~composition_run_id
       ~parent_invocation
       ~meta
-      ~turn_context
+      ~(turn_context : Keeper_tool_call_log_context.turn_context)
       (result : Executor.node_result)
   =
-  let context =
-    Option.value
-      ~default:Keeper_tool_call_log_context.empty_turn_context
-      turn_context
+  let observe () =
+    let context = turn_context in
+    let schedule = result.schedule in
+    let committed = ref false in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:meta.Keeper_meta_contract.name
+      ~tool_name:result.tool_name
+      ~input:result.input
+      ~output_text:(Tool_result.message result.result)
+      ~success:(Tool_result.is_success result.result)
+      ~duration_ms:(Tool_result.duration_ms result.result)
+      ?agent_name:context.agent_name
+      ?lane:context.lane
+      ?tool_choice:context.tool_choice
+      ?thinking_enabled:context.thinking_enabled
+      ?thinking_budget:context.thinking_budget
+      ?prompt_fingerprint:context.prompt_fingerprint
+      ?tool_use_id:result.tool_use_id
+      ~planned_index:schedule.planned_index
+      ~batch_index:schedule.batch_index
+      ~batch_size:schedule.batch_size
+      ~execution_mode:schedule.execution_mode
+      ~typed_result:result.result
+      ~composition_tool
+      ~composition_run_id:
+        (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
+      ~composition_node_id:(Keeper_tool_plan.Node_id.to_string result.node_id)
+      ~composition_execution
+      ~parent_tool_use_id:
+        (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
+      ?trace_id:context.trace_id
+      ?session_id:context.session_id
+      ?generation:context.generation
+      ~turn:(Agent_core.Tool_contract.Invocation.turn parent_invocation)
+      ?keeper_turn_id:context.keeper_turn_id
+      ?task_id:context.task_id
+      ?goal_ids:context.goal_ids
+      ?sandbox_profile:context.sandbox_profile
+      ?sandbox_root:context.sandbox_root
+      ?allowed_paths:context.allowed_paths
+      ?network_mode:context.network_mode
+      ?runtime_profile:context.runtime_profile
+      ~on_committed:(fun () -> committed := true)
+      ();
+    if not !committed
+    then failwith "composition telemetry commit callback was not delivered";
+    let fields =
+      [ "type", `String "keeper_tool_call_evidence_committed"
+      ; "name", `String meta.name
+      ; "tool_name", `String result.tool_name
+      ; ( "composition_run_id"
+        , `String
+            (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) )
+      ; ( "composition_node_id"
+        , `String (Keeper_tool_plan.Node_id.to_string result.node_id) )
+      ; "composition_tool", `String composition_tool
+      ; ( "composition_execution"
+        , `String
+            (Keeper_tool_composition_catalog.execution_mode_to_string
+               composition_execution) )
+      ; ( "parent_tool_use_id"
+        , `String
+            (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation) )
+      ; "turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
+      ; "planned_index", `Int schedule.planned_index
+      ; "batch_index", `Int schedule.batch_index
+      ; "batch_size", `Int schedule.batch_size
+      ; ( "execution_mode"
+        , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
+      ; "ts_unix", `Float (Time_compat.now ())
+      ]
+      @
+      match result.tool_use_id with
+      | Some tool_use_id -> [ "tool_use_id", `String tool_use_id ]
+      | None -> []
+    in
+    Sse.broadcast (`Assoc fields)
   in
-  let schedule = result.schedule in
-  Keeper_tool_call_log.log_call
-    ~keeper_name:meta.Keeper_meta_contract.name
-    ~tool_name:result.tool_name
-    ~input:result.input
-    ~output_text:(Tool_result.message result.result)
-    ~success:(Tool_result.is_success result.result)
-    ~duration_ms:(Tool_result.duration_ms result.result)
-    ?agent_name:context.agent_name
-    ?lane:context.lane
-    ?tool_choice:context.tool_choice
-    ?thinking_enabled:context.thinking_enabled
-    ?thinking_budget:context.thinking_budget
-    ?prompt_fingerprint:context.prompt_fingerprint
-    ?tool_use_id:result.tool_use_id
-    ~planned_index:schedule.planned_index
-    ~batch_index:schedule.batch_index
-    ~batch_size:schedule.batch_size
-    ~execution_mode:schedule.execution_mode
-    ~typed_result:result.result
-    ~composition_tool
-    ~composition_run_id:
-      (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
-    ~composition_node_id:(Keeper_tool_plan.Node_id.to_string result.node_id)
-    ~composition_execution
-    ~parent_tool_use_id:
-      (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
-    ?trace_id:context.trace_id
-    ?session_id:context.session_id
-    ?generation:context.generation
-    ~turn:(Agent_core.Tool_contract.Invocation.turn parent_invocation)
-    ?keeper_turn_id:context.keeper_turn_id
-    ?task_id:context.task_id
-    ?goal_ids:context.goal_ids
-    ?sandbox_profile:context.sandbox_profile
-    ?sandbox_root:context.sandbox_root
-    ?allowed_paths:context.allowed_paths
-    ?network_mode:context.network_mode
-    ?runtime_profile:context.runtime_profile
-    ~on_committed:(fun () -> ())
-    ()
-  ;
-  Dashboard_cache.invalidate_prefix "keeper:tool-calls:fleet-rows:";
-  let fields =
-    [ "type", `String "keeper_tool_call_evidence_committed"
-    ; "name", `String meta.name
-    ; "tool_name", `String result.tool_name
-    ; ( "composition_run_id"
-      , `String
-          (Keeper_tool_plan.Composition_run_id.to_string composition_run_id) )
-    ; ( "composition_node_id"
-      , `String (Keeper_tool_plan.Node_id.to_string result.node_id) )
-    ; "composition_tool", `String composition_tool
-    ; ( "composition_execution"
-      , `String
-          (Keeper_tool_composition_catalog.execution_mode_to_string
-             composition_execution) )
-    ; ( "parent_tool_use_id"
-      , `String (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation) )
-    ; "turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
-    ; "planned_index", `Int schedule.planned_index
-    ; "batch_index", `Int schedule.batch_index
-    ; "batch_size", `Int schedule.batch_size
-    ; ( "execution_mode"
-      , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
-    ; "ts_unix", `Float (Time_compat.now ())
-    ]
-    @
-    match result.tool_use_id with
-    | Some tool_use_id -> [ "tool_use_id", `String tool_use_id ]
-    | None -> []
-  in
-  Sse.broadcast (`Assoc fields);
-  Ok ()
+  try
+    observe ();
+    Ok ()
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn
+      "composition action telemetry degraded without changing execution: tool=%s node=%s error=%s"
+      composition_tool
+      (Keeper_tool_plan.Node_id.to_string result.node_id)
+      (Printexc.to_string exn);
+    Ok ()
 ;;
 
 let json_type_to_string = function
@@ -429,7 +440,7 @@ let async_worker_result
               ~composition_run_id
               ~parent_invocation:source_invocation
               ~meta
-              ~turn_context:(Some turn_context))
+              ~turn_context)
          turn_context)
     ?clock
     ()
@@ -807,7 +818,7 @@ let make_tools
                            ~composition_run_id
                            ~parent_invocation
                            ~meta
-                           ~turn_context:(Some turn_context))
+                           ~turn_context)
                       turn_context)
                  ()
              in

@@ -1210,11 +1210,71 @@ let start_keeper_loops_owned
      fanout so one broad announcement cannot create a fleet-wide turn storm.
      Board signals have their own capped keeper wake path above. *)
   let broadcast_mention_handler =
-    fun mention ->
-    match broadcast_mention_wakeup_action mention with
+    fun (delivery : Workspace_broadcast.broadcast_delivery) ->
+    match broadcast_mention_wakeup_action delivery.mention with
     | `Wake_keeper target ->
-      Keeper_keepalive.wakeup_keeper ~base_path:(Mcp_server.workspace_config state).base_path target;
-      Log.Keeper.info "broadcast mention → wakeup keeper %s" target
+      let base_path = (Mcp_server.workspace_config state).base_path in
+      let config = Mcp_server.workspace_config state in
+      let delivery_key =
+        Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id
+        |> Result.map (fun request_id ->
+          Keeper_chat_delivery_identity.Workspace_message request_id)
+      in
+      (match
+         ( Keeper_meta_store.read_meta config target
+         , Keeper_identity.Keeper_id.of_string target
+         , delivery_key )
+       with
+       | Ok (Some _), Some target_id, Ok delivery_key ->
+         let speaker : Keeper_chat_store.speaker =
+           { speaker_id = Some delivery.from_agent
+           ; speaker_name = Some delivery.from_agent
+           ; speaker_authority = Keeper_chat_store.External
+           }
+         in
+         (match
+            Keeper_chat_store.append_user_message_once
+              ~base_dir:base_path
+              ~keeper_name:target
+              ~delivery_key
+              ~content:delivery.content
+              ~surface:Surface_ref.Agent
+              ~external_message_id:delivery.request_id
+              ~speaker
+              ~extra_mentions:[ target_id ]
+              ()
+          with
+          | Ok (Keeper_chat_store.Appended _ | Keeper_chat_store.Already_present _) ->
+            (match Keeper_registry.get ~base_path target with
+             | Some _ ->
+               Keeper_keepalive.wakeup_keeper ~base_path target;
+               Log.Keeper.info
+                 "broadcast mention delivered → wakeup keeper %s request_id=%s seq=%d"
+                 target delivery.request_id delivery.seq
+             | None ->
+               Log.Keeper.info
+                 "broadcast mention persisted for stopped keeper; wake deferred keeper=%s request_id=%s seq=%d"
+                 target delivery.request_id delivery.seq)
+          | Error message ->
+            Log.Keeper.error
+              "broadcast mention intake failed; wake suppressed keeper=%s request_id=%s seq=%d: %s"
+              target delivery.request_id delivery.seq message)
+       | Ok None, _, _ ->
+         Log.Keeper.warn
+           "broadcast mention target has no persisted Keeper metadata; delivery suppressed keeper=%s request_id=%s seq=%d"
+           target delivery.request_id delivery.seq
+       | Error message, _, _ ->
+         Log.Keeper.error
+           "broadcast mention target metadata is unavailable; delivery suppressed keeper=%s request_id=%s seq=%d: %s"
+           target delivery.request_id delivery.seq message
+       | Ok (Some _), None, _ ->
+         Log.Keeper.error
+           "broadcast mention target identity is invalid; delivery suppressed keeper=%s request_id=%s seq=%d"
+           target delivery.request_id delivery.seq
+       | Ok (Some _), Some _, Error message ->
+         Log.Keeper.error
+           "broadcast mention request identity is invalid; delivery suppressed keeper=%s request_id=%s seq=%d: %s"
+           target delivery.request_id delivery.seq message)
     | `Suppress_no_target ->
       Log.Keeper.info
         "broadcast without mention -> keeper wakeup suppressed (passive fanout)"

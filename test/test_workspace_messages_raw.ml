@@ -95,7 +95,7 @@ let test_repeated_mention_delivers_each_canonical_event () =
         in
         activities := (kind, subject) :: !activities);
     Workspace_broadcast.set_on_broadcast_mention
-      (fun mention -> wakes := mention :: !wakes);
+      (fun delivery -> wakes := delivery.mention :: !wakes);
     let content = "@gemini review the canonical event" in
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);

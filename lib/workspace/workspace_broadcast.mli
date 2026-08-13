@@ -2,8 +2,12 @@
     accompanying message-activity event. *)
 
 
+exception Broadcast_not_persisted of string
+
 type broadcast_delivery =
-  { rendered : string
+  { request_id : string
+  ; seq : int
+  ; rendered : string
   ; from_agent : string
   ; content : string
   ; mention : string option
@@ -20,8 +24,10 @@ val emit_message_activity : Workspace_utils_backend_setup.config ->
            ?evidence_refs:string list -> unit -> unit
 val broadcast_channel : Workspace_utils_backend_setup.config -> string
 
-(** Atomically replace the process-wide mention notification handler. *)
-val set_on_broadcast_mention : (string option -> unit) -> unit
+(** Atomically replace the process-wide committed-broadcast notification
+    handler. The handler runs only after the authoritative workspace message
+    write commits. *)
+val set_on_broadcast_mention : (broadcast_delivery -> unit) -> unit
 
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
@@ -31,5 +37,5 @@ val broadcast : ?trace_context:string ->
 module For_testing : sig
   (** Replace the handler and return the prior one. Test isolation only. *)
   val replace_on_broadcast_mention :
-    (string option -> unit) -> string option -> unit
+    (broadcast_delivery -> unit) -> broadcast_delivery -> unit
 end

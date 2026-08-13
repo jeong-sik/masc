@@ -168,7 +168,11 @@ let json_string_field_exn label json field =
         (Yojson.Safe.to_string json)
 
 let log_detail_string (entry : Masc_log.Ring.entry) field =
-  Yojson.Safe.Util.(entry.details |> member field |> to_string_option)
+  match Yojson.Safe.Util.member field entry.details with
+  | `String value | `Intlit value -> Some value
+  | `Int value -> Some (string_of_int value)
+  | `Null -> None
+  | _ -> None
 
 let find_mcp_tool_log_exn ~phase ~tool_name ~request_id entries =
   match
@@ -871,8 +875,8 @@ let test_handle_request_initialize_managed_profile () =
             in
             Alcotest.(check bool) "mentions managed profile" true
               (String_util.contains_substring instructions "managed-agent profile");
-            Alcotest.(check bool) "mentions canonical task control" true
-              (String_util.contains_substring instructions "masc_transition")
+            Alcotest.(check bool) "distinguishes public inventory" true
+              (String_util.contains_substring instructions "public /mcp surface")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -1055,7 +1059,7 @@ let test_handle_request_tools_call_missing_params_records_duration () =
      -. before_count);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_managed_translation_error_records_duration () =
+let test_handle_request_tools_call_managed_invalid_arguments_records_duration () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1105,9 +1109,9 @@ let test_handle_request_tools_call_managed_translation_error_records_duration ()
       request
   in
   let response_text = Yojson.Safe.to_string response in
-  Alcotest.(check bool) "translation error is returned" true
-    (String_util.contains_substring response_text "managed agent tool translation failed");
-  Alcotest.(check (float 0.0001)) "translation error records duration count"
+  Alcotest.(check bool) "invalid arguments are rejected at admission" true
+    (String_util.contains_substring response_text "arguments must be an object");
+  Alcotest.(check (float 0.0001)) "admission error records duration count"
     1.0
     (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
      -. before_count);
@@ -3097,8 +3101,8 @@ let eio_tests = [
     test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias;
   "handle tools/call missing params records duration", `Quick,
     test_handle_request_tools_call_missing_params_records_duration;
-  "handle tools/call managed translation error records duration", `Quick,
-    test_handle_request_tools_call_managed_translation_error_records_duration;
+  "handle tools/call managed invalid arguments record duration", `Quick,
+    test_handle_request_tools_call_managed_invalid_arguments_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
   "handle tools/call transition done requires LLM verdict", `Quick,

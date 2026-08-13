@@ -49,6 +49,8 @@ module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
 module Dashboard_purge = Masc.Keeper_dashboard_purge
 module Dashboard_delete = Server_dashboard_http_delete_actions
 
+exception Librarian_executor_cancel
+
 let bp = "/tmp/test-heartbeat-integ"
 
 let temp_dir prefix =
@@ -705,6 +707,83 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
+
+let test_direct_stop_resolves_done_after_librarian_drain_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  Memory_lane.For_testing.reset ();
+  let base_dir = temp_dir "direct-keepalive-librarian-failure" in
+  let keeper_name = "direct-librarian-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Memory_lane.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      Eio.Switch.run @@ fun keeper_sw ->
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw = keeper_sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env keeper_sw config)
+        }
+      in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      (try
+         Eio.Switch.run @@ fun librarian_sw ->
+         Memory_lane.init ~sw:librarian_sw;
+         (match Masc.Keeper_keepalive.start_keepalive ctx meta with
+          | Masc.Keeper_keepalive.Keepalive_started _ -> ()
+          | outcome ->
+            failf
+              "direct Librarian fixture failed to start: %s"
+              (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+         Eio.Time.sleep ctx.clock 0.05;
+         let started, resolve_started = Eio.Promise.create () in
+         let never, _resolve_never = Eio.Promise.create () in
+         (match
+            Memory_lane.submit
+              ~base_path:config.base_path
+              ~keeper_name
+              (fun () ->
+                 Eio.Promise.resolve resolve_started ();
+                 Eio.Promise.await never)
+          with
+          | Memory_lane.Submitted -> ()
+          | Memory_lane.Coalesced
+          | Memory_lane.Ran_inline
+          | Memory_lane.Dropped
+          | Memory_lane.Rejected_draining ->
+            fail "failed Librarian receipt fixture was not submitted");
+         Eio.Promise.await started;
+         Eio.Switch.fail librarian_sw Librarian_executor_cancel
+       with
+       | Librarian_executor_cancel -> ());
+      match
+        Masc.Keeper_keepalive.stop_keepalive_and_await
+          ~base_path:config.base_path
+          keeper_name
+      with
+      | Masc.Keeper_keepalive.Keeper_not_registered ->
+        fail "failed-drain keeper disappeared before joined stop"
+      | Masc.Keeper_keepalive.Keeper_joined
+          { terminal = `Stopped; lane_exit = { cleanup_error = Some _; _ } } -> ()
+      | Masc.Keeper_keepalive.Keeper_joined
+          { terminal = `Stopped; lane_exit = { cleanup_error = None; _ } } ->
+        fail "failed Librarian drain was not preserved as lane cleanup evidence"
+      | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+        fail ("failed Librarian drain changed explicit stop into crash: " ^ reason))
 
 let test_keeper_lane_join_waits_for_children_and_cleanup () =
   Eio_main.run @@ fun _env ->
@@ -4550,6 +4629,8 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "stop resolves done after Librarian drain failure" `Quick
+        test_direct_stop_resolves_done_after_librarian_drain_failure;
       test_case "lane join waits for children and cleanup" `Quick
         test_keeper_lane_join_waits_for_children_and_cleanup;
       test_case "lane join surfaces cleanup failure" `Quick

@@ -98,66 +98,80 @@ let supervise_keepalive
         meta.name
         (Keeper_owner_registry.command_error_to_string error)
   in
-  let launch_registered reg =
-    (try
-       if not (Workspace_utils.is_initialized ctx.config)
-       then (
-         let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
-         ())
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string WorkspaceInitFailures)
-         ~labels:[ "keeper", meta.name ]
-         ();
-       Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
-    match launch_supervised_fiber ~proactive_warmup_sec ctx meta reg with
-    | Error _ -> ()
-    | Ok () ->
-      wake_queued_owner_operations ();
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Started
-             ; phase = Some Keeper_state_machine.Running
-             })
+  let librarian_lifecycle_ready () =
+    match Keeper_memory_lane.begin_librarian_lifecycle ~base_path ~keeper_name:meta.name with
+    | Error error ->
+      Log.Keeper.info
+        "supervisor launch deferred until prior Librarian owner exits keeper=%s error=%s"
         meta.name
-        "supervised"
-        ()
+        (Keeper_memory_lane.lifecycle_open_error_to_string error);
+      false
+    | Ok () -> true
+  in
+  let launch_registered reg =
+    if librarian_lifecycle_ready ()
+    then (
+      (try
+         if not (Workspace_utils.is_initialized ctx.config)
+         then (
+           let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
+           ())
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WorkspaceInitFailures)
+           ~labels:[ "keeper", meta.name ]
+           ();
+         Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
+      (match launch_supervised_fiber ~proactive_warmup_sec ctx meta reg with
+       | Error _ -> ()
+       | Ok () ->
+         wake_queued_owner_operations ();
+         publish_lifecycle
+           ~event:
+             (Keeper_lifecycle_events.Custom_event
+                { verb = Keeper_lifecycle_events.Started
+                ; phase = Some Keeper_state_machine.Running
+                })
+           meta.name
+           "supervised"
+           ()))
   in
   let register_and_launch () =
-    match
-      Keeper_registry.register_offline_if_admitted
-        ~base_path
-        meta.name
-        meta
-    with
-    | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
-      Log.Keeper.warn
-        "supervisor launch skipped %s because shutdown operation %s owns admission"
-        meta.name
-        (Keeper_shutdown_types.Operation_id.to_string operation_id)
-    | Error Keeper_registry.Registration_intake_token_not_live ->
-      Log.Keeper.error
-        "supervisor launch rejected an unexpected inactive durable-intake token for %s"
-        meta.name
-    | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
-      Log.Keeper.warn
-        "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
-        meta.name
-        (Keeper_lifecycle_reservation.snapshot_to_string owner)
-    | Error (Keeper_registry.Registration_invalid validation_error) ->
-      Log.Keeper.error
-        "supervisor registry validation rejected %s: %s"
-        meta.name
-        (Keeper_registry.registry_entry_validation_error_to_string validation_error)
-    | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
-      Log.Keeper.error
-        "supervisor registry event queue unavailable keeper=%s: %s"
-        keeper_name
-        detail
-    | Ok reg -> launch_registered reg
+    if librarian_lifecycle_ready ()
+    then
+      match
+         Keeper_registry.register_offline_if_admitted
+           ~base_path
+           meta.name
+           meta
+       with
+         | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+           Log.Keeper.warn
+             "supervisor launch skipped %s because shutdown operation %s owns admission"
+             meta.name
+             (Keeper_shutdown_types.Operation_id.to_string operation_id)
+         | Error Keeper_registry.Registration_intake_token_not_live ->
+           Log.Keeper.error
+             "supervisor launch rejected an unexpected inactive durable-intake token for %s"
+             meta.name
+         | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+         Log.Keeper.warn
+           "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
+           meta.name
+           (Keeper_lifecycle_reservation.snapshot_to_string owner)
+       | Error (Keeper_registry.Registration_invalid validation_error) ->
+         Log.Keeper.error
+           "supervisor registry validation rejected %s: %s"
+           meta.name
+           (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+       | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+         Log.Keeper.error
+           "supervisor registry event queue unavailable keeper=%s: %s"
+           keeper_name
+           detail
+         | Ok reg -> launch_registered reg
   in
   match execution_truth with
   | Keeper_activation_readiness.Unknown detail ->

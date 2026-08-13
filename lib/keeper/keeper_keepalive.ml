@@ -1219,11 +1219,10 @@ let start_keepalive
             if graceful_librarian_boundary
             then (
               let librarian_result = handle_librarian () in
-              let terminal_result =
-                match librarian_result with
-                | Ok () -> terminalize ()
-                | Error _ -> Ok ()
-              in
+              (* A failed detached drain is still a terminal Keeper boundary.
+                 Resolve [done_p] before returning the cleanup error so stop,
+                 update, and restart waiters cannot hang after lane exit. *)
+              let terminal_result = terminalize () in
               terminal_result, librarian_result)
             else (
               (* Crash publication must not wait behind root-scoped provider

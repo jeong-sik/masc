@@ -10,8 +10,6 @@ const workspaceApiMocks = vi.hoisted(() => ({
 const ideApiMocks = vi.hoisted(() => ({
   fetchIdeAnnotations: vi.fn(),
   fetchIdeRegions: vi.fn(),
-  ideScopeFromKeeperLane: vi.fn((keeperId: string | undefined) =>
-    keeperId ? { kind: 'keeper_lane' as const, keeperId } : null),
 }))
 const repositoryApiMocks = vi.hoisted(() => ({
   discoverRepositories: vi.fn(),
@@ -33,7 +31,7 @@ import {
   replaceWorkspaceFetchIssue,
   retainCurrentWorkspaceFetchIssues,
   sameWorkspaceTreeIdentity,
-  selectPreferredIdeRepositoryId,
+  resolveActiveIdeRepositoryId,
   workspaceFetchIssueFromError,
   workspaceTreeIdentity,
 } from './ide-data-workspace-store'
@@ -58,11 +56,13 @@ function repo(
   id: string,
   localPath: string,
   name = id,
+  codebase: string | null = null,
 ): Repository {
   return {
     id,
     name,
     url: '',
+    codebase,
     local_path: localPath,
     default_branch: 'main',
     status: 'active',
@@ -148,6 +148,7 @@ function seedWorkspaceApiMocks(): void {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  window.localStorage.clear()
   seedWorkspaceApiMocks()
   clearIdeFileFocus()
   clearIdeContextFocus()
@@ -185,139 +186,106 @@ describe('firstObservedChangedFilePath', () => {
   })
 })
 
-describe('selectPreferredIdeRepositoryId', () => {
-  // ── Current selection persistence ────────────────────────────
+describe('resolveActiveIdeRepositoryId', () => {
+  // RFC-0378 §5.4: the viewer's explicit choice is the only selection
+  // authority. The path-shape heuristic is gone — when neither the live
+  // selection nor the persisted one is usable, the answer is none.
+  const repositories = [
+    repo('repo-a', '/Users/dancer/me/workspace/repo-a'),
+    repo('repo-b', '.masc/repos/repo-b'),
+  ]
 
   it('keeps the current repository when it is still present', () => {
-    const repositories = [
-      repo('repo-a', '/Users/dancer/me/workspace/repo-a'),
-      repo('repo-b', '.masc/repos/repo-b'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, 'repo-b')).toBe('repo-b')
+    expect(resolveActiveIdeRepositoryId(repositories, 'repo-b', null)).toBe('repo-b')
   })
 
-  // ── Workspace repo priority (absolute paths, not mirrors) ───
-
-  it('prefers a workspace repo over managed mirrors', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('managed-b', '.masc/repos/managed-b'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-a')
+  it('restores the persisted choice when there is no live selection', () => {
+    expect(resolveActiveIdeRepositoryId(repositories, null, 'repo-a')).toBe('repo-a')
   })
 
-  it('selects the first workspace repo when multiple exist', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('workspace-alpha', '/Users/dancer/me/workspace/alpha'),
-      repo('workspace-beta', '/Users/dancer/me/workspace/beta'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-alpha')
+  it('never guesses: no usable selection resolves to none', () => {
+    expect(resolveActiveIdeRepositoryId(repositories, null, null)).toBeNull()
+    expect(resolveActiveIdeRepositoryId(repositories, 'gone', 'also-gone')).toBeNull()
   })
 
-  it('does not treat absolute .masc/repos mirrors as workspace checkouts', () => {
-    const repositories = [
-      repo('mirror-a', '/Users/dancer/me/.masc/repos/mirror-a'),
-      repo('workspace-b', '/Users/dancer/me/workspace/project-b'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-b')
+  it('excludes unreachable repos from both live and persisted selection', () => {
+    const excluded = new Set(['repo-b'])
+    expect(resolveActiveIdeRepositoryId(repositories, 'repo-b', null, excluded)).toBeNull()
+    expect(resolveActiveIdeRepositoryId(repositories, null, 'repo-b', excluded)).toBeNull()
+    expect(resolveActiveIdeRepositoryId(repositories, null, 'repo-a', excluded)).toBe('repo-a')
   })
 
-  // ── Mirror-only fallback ─────────────────────────────────────
-
-  it('falls back to the first non-mirror repository when only mirrors exist', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('managed-b', '.masc/repos/managed-b'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('managed-a')
-  })
-
-  it('returns null for an empty repository list', () => {
-    expect(selectPreferredIdeRepositoryId([], null)).toBeNull()
-  })
-
-  // ── excludeIds: self-healing after unreachable repo ──────────
-
-  it('skips excluded repo IDs and selects the next workspace repo', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('broken-cache', '/Users/dancer/me/.cache/some-tool'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    const excluded = new Set(['broken-cache'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-a')
-  })
-
-  it('drops current if it is in the exclude set', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('broken-cache', '/Users/dancer/me/.cache/some-tool'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    const excluded = new Set(['broken-cache'])
-    expect(selectPreferredIdeRepositoryId(repositories, 'broken-cache', excluded)).toBe('workspace-a')
-  })
-
-  it('skips multiple excluded repos', () => {
-    const repositories = [
-      repo('broken-a', '/Users/dancer/me/.cache/a'),
-      repo('broken-b', '/Users/dancer/me/.cache/b'),
-      repo('workspace-c', '/Users/dancer/me/workspace/c'),
-    ]
-
-    const excluded = new Set(['broken-a', 'broken-b'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-c')
-  })
-
-  it('returns null when all repos are excluded', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('managed-b', '.masc/repos/managed-b'),
-    ]
-
-    const excluded = new Set(['managed-a', 'managed-b'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBeNull()
-  })
-
-  // ── Reported bug: cache dir picked as first workspace repo ──
-
-  it('selects first workspace repo initially, even if it is a cache dir', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('llama-cpp', '/Users/dancer/me/.cache/llama.cpp'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    // Initial selection: llama-cpp is the first workspace repo.
-    // The self-healing in createIdeDataWorkspaceStore handles the
-    // auto-switch when workspace tree returns repository_missing.
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('llama-cpp')
-  })
-
-  it('self-heals by excluding broken cache and selecting next workspace repo', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('llama-cpp', '/Users/dancer/me/.cache/llama.cpp'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    // After self-healing excludes llama-cpp:
-    const excluded = new Set(['llama-cpp'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-a')
+  it('empty repository list resolves to none', () => {
+    expect(resolveActiveIdeRepositoryId([], 'repo-a', 'repo-a')).toBeNull()
   })
 })
 
 describe('IDE focus workspace provenance', () => {
+  it('addresses repository observation reads with the canonical codebase slug', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
+    repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
+      repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_test_repo-a'),
+    ])
+    workspaceApiMocks.fetchWorkspaceTree.mockResolvedValue(
+      repositoryTree('repo-a', [changedFile('lib/a.ml')]),
+    )
+    workspaceApiMocks.fetchWorkspaceFile.mockResolvedValue(
+      workspaceFile('let codebase = "github.com_test_repo-a"\n'),
+    )
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      await vi.waitFor(() => {
+        expect(store.activeRepositoryId()).toBe('repo-a')
+        expect(ideApiMocks.fetchIdeAnnotations).toHaveBeenCalled()
+      })
+      const options = ideApiMocks.fetchIdeAnnotations.mock.calls.at(-1)?.[1]
+      expect(options).toEqual(expect.objectContaining({
+        codebase: 'github.com_test_repo-a',
+        signal: expect.any(AbortSignal),
+      }))
+      expect(options).not.toHaveProperty('repoId')
+    } finally {
+      store.dispose()
+    }
+  })
+
+  it('clears an unreachable persisted repository instead of retrying it on reload', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
+    repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
+      repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_test_repo-a'),
+    ])
+    workspaceApiMocks.fetchWorkspaceTree.mockImplementation(
+      (_depth: number, opts: { repoId?: string | null }) =>
+        opts.repoId === 'repo-a'
+          ? Promise.resolve({
+              nodes: [],
+              source: { kind: 'repository_missing' as const, repoId: 'repo-a' },
+              basePath: '/workspace/project',
+            })
+          : Promise.resolve(projectTree([])),
+    )
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      await vi.waitFor(() => {
+        expect(workspaceApiMocks.fetchWorkspaceTree).toHaveBeenCalledWith(
+          2,
+          expect.objectContaining({ repoId: 'repo-a' }),
+        )
+      })
+      await vi.waitFor(() => {
+        expect(store.activeRepositoryId()).toBeNull()
+        expect(window.localStorage.getItem('masc.ide.activeRepositoryId')).toBeNull()
+      })
+    } finally {
+      store.dispose()
+    }
+  })
+
   it('keeps the newest repository refresh when the startup list resolves late', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-b')
     const startupList = deferred<ReadonlyArray<Repository>>()
     const scannedList = deferred<ReadonlyArray<Repository>>()
     repositoryApiMocks.fetchRepositoriesList
@@ -348,6 +316,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('reselects observed focus for repo B and invalidates the repo A document before B resolves', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     const repoBTree = deferred<WorkspaceTreeResult>()
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
@@ -381,7 +351,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'lib/a.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'available',
         })
         expect(store.documentStore.document().content).toContain('repo-a')
@@ -414,7 +384,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'lib/b.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-b' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-b', codebase: null },
           availability: 'available',
         })
         expect(store.documentStore.document()).toMatchObject({
@@ -428,6 +398,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('ignores a repo A file completion that arrives after repo B owns the focus', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     const staleRepoAFile = deferred<WorkspaceFileResponse | null>()
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
@@ -459,7 +431,7 @@ describe('IDE focus workspace provenance', () => {
       await vi.waitFor(() => {
         expect(activeIdeFocus.value).toMatchObject({
           path: 'lib/a.ml',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'available',
         })
         expect(workspaceApiMocks.fetchWorkspaceFile).toHaveBeenCalledWith(
@@ -489,7 +461,9 @@ describe('IDE focus workspace provenance', () => {
     }
   })
 
-  it('drops project auto-focus when a late repository list selects a repository', async () => {
+  it('drops project auto-focus when a late repository list restores the persisted selection', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-b')
     const repositories = deferred<ReadonlyArray<Repository>>()
     const repoTree = deferred<WorkspaceTreeResult>()
     repositoryApiMocks.fetchRepositoriesList.mockReturnValue(repositories.promise)
@@ -535,7 +509,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'repo.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-b' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-b', codebase: null },
           availability: 'available',
         })
         expect(store.documentStore.document().content).toContain('repo-b')
@@ -600,6 +574,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('keeps explicit provenance but materializes not-found when the target repo lacks the path', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
       repo('repo-b', '/workspace/repo-b'),
@@ -630,7 +606,7 @@ describe('IDE focus workspace provenance', () => {
       focusIdeFile({
         path: 'shared.ml',
         origin: 'operator',
-        workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+        workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
         availability: 'available',
       })
       await vi.waitFor(() => {
@@ -644,7 +620,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'shared.ml',
           origin: 'operator',
-          workspace_identity: { kind: 'repository', repoId: 'repo-b' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-b', codebase: null },
           availability: 'not_found',
         })
         expect(store.workspaceIssues()).toContainEqual(expect.objectContaining({
@@ -661,6 +637,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('terminates explicit validation as unavailable on transport failure without claiming not-found', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
     ])
@@ -679,7 +657,7 @@ describe('IDE focus workspace provenance', () => {
       focusIdeFile({
         path: 'private.ml',
         origin: 'route',
-        workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+        workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
         availability: 'pending',
       })
 
@@ -687,7 +665,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'private.ml',
           origin: 'route',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'unavailable',
         })
         expect(store.workspaceIssues()).toContainEqual(expect.objectContaining({
@@ -705,6 +683,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('does not misclassify an unavailable observed file as an explicit not-found focus', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
     ])
@@ -721,7 +701,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'ghost.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'unavailable',
         })
         expect(store.workspaceIssues()).toContainEqual(expect.objectContaining({
@@ -791,8 +771,8 @@ describe('workspace fetch diagnostics', () => {
         expect(ideApiMocks.fetchIdeRegions).toHaveBeenCalledWith(
           'lib/scheduler/round.ml',
           expect.objectContaining({
-            repoId: null,
-            scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
+            keeper: 'sangsu',
+            codebase: null,
           }),
         )
       })

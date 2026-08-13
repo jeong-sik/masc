@@ -44,8 +44,8 @@ export interface KeeperCursorStreamState {
 
 export interface KeeperCursorStreamOptions {
   readonly scope?: IdeScope | null
-  readonly repoId?: string | null
-  readonly canonicalUrl?: string | null
+  /** RFC-0378 §5.3b: the canonical codebase slug — the one wire key. */
+  readonly codebase?: string | null
   readonly onStatus?: (state: KeeperCursorStreamState) => void
 }
 
@@ -275,8 +275,7 @@ export function connectKeeperCursorPush(
     try {
       const snapshot = await fetchIdeCursors({
         scope: options.scope,
-        repoId: options.repoId,
-        canonicalUrl: options.canonicalUrl,
+        codebase: options.codebase,
       })
       if (closed) return
       onUpdate(normalizeKeeperCursorSnapshot(snapshot))

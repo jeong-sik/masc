@@ -260,6 +260,8 @@ normal_targets=(
   @test/runtest-test_keeper_run_tools_hooks
   @test/runtest-test_keeper_connector_attention_batch
   @test/runtest-test_ide_lsp_join_key
+  @test/runtest-test_code_address
+  @test/runtest-test_keeper_ide_annotate_contract
   @test/runtest-test_dashboard_workspace
   @test/runtest-test_host_fd_pressure_poller
   @test/runtest-test_keeper_turn_driver_failover

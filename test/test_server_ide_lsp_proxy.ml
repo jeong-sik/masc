@@ -421,7 +421,7 @@ let test_code_actions_have_no_workspace_edit () =
          let actions =
            Lsp_overlay_provider.code_actions
              ~base_dir
-             ~partition:(Some Ide_paths.Legacy_default)
+             ~codebase:(Some "github.com_other_repo")
              ~file_path:"a.ml"
              ~line:0
              ~diagnostics:[]

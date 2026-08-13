@@ -1,4 +1,4 @@
-(** Tests for [Ide_paths] — RFC-0128 §6.1 unit tests.
+(** Tests for [Ide_paths] — slug and store-path unit tests.
 
     Verifies that {!Ide_paths.canonical_url_of_remote} is total,
     deterministic, and produces the same slug regardless of which
@@ -63,7 +63,7 @@ let test_scp_form_no_dot_git () =
 ;;
 
 let test_https_uppercase () =
-  (* RFC-0128 §4.1 rule 1: lowercase normalisation precedes parsing. *)
+  (* Lowercase normalisation precedes parsing. *)
   check_some_slug
     ~expected:"github.com_jeong-sik_masc"
     ~input:"HTTPS://GitHub.com/Jeong-Sik/MASC.GIT"
@@ -78,8 +78,8 @@ let test_nested_path () =
 ;;
 
 let test_join_invariant_https_ssh () =
-  (* RFC-0128 §4.1 invariant: same upstream in different transport
-     forms must produce the same slug. Without this property
+  (* Join invariant: same upstream in different transport forms
+     must produce the same slug. Without this property
      sandbox/working-tree join across keepers cannot work. *)
   let a = Paths.canonical_url_of_remote "https://github.com/jeong-sik/masc.git" in
   let b = Paths.canonical_url_of_remote "git@github.com:jeong-sik/masc.git" in
@@ -110,56 +110,16 @@ let test_segment_with_colon () =
 
 (* Store path constructors. *)
 
-let test_by_url_path () =
+let test_code_store_dir () =
   let p =
-    Paths.by_url_path
+    Paths.code_store_dir
       ~base_dir:"/tmp/base"
-      ~canonical_url:"github.com_jeong-sik_masc"
+      ~codebase:"github.com_jeong-sik_masc"
   in
   check string
     "by-url path layout"
     "/tmp/base/.masc-ide/by-url/github.com_jeong-sik_masc"
     p
-;;
-
-let test_orphan_path () =
-  check string
-    "orphan path layout"
-    "/tmp/base/.masc-ide/_orphan"
-    (Paths.orphan_path ~base_dir:"/tmp/base")
-;;
-
-let check_partition_metadata ~name ~partition ~kind ~is_orphan =
-  check string (name ^ " kind") kind (Paths.partition_kind partition);
-  check bool (name ^ " orphan") is_orphan (Paths.partition_is_orphan partition)
-;;
-
-let test_partition_metadata () =
-  check_partition_metadata
-    ~name:"by_url"
-    ~partition:(Paths.By_url "github.com_jeong-sik_masc")
-    ~kind:"by_url"
-    ~is_orphan:false;
-  check_partition_metadata
-    ~name:"no_canonical_url"
-    ~partition:Paths.No_canonical_url
-    ~kind:"no_canonical_url"
-    ~is_orphan:true;
-  check_partition_metadata
-    ~name:"unmatched"
-    ~partition:Paths.Unmatched
-    ~kind:"unmatched"
-    ~is_orphan:true;
-  check_partition_metadata
-    ~name:"base_unresolved"
-    ~partition:Paths.Base_unresolved
-    ~kind:"base_unresolved"
-    ~is_orphan:true;
-  check_partition_metadata
-    ~name:"legacy_default"
-    ~partition:Paths.Legacy_default
-    ~kind:"legacy_default"
-    ~is_orphan:true
 ;;
 
 let () =
@@ -186,9 +146,6 @@ let () =
         ; test_case "segment with colon" `Quick test_segment_with_colon
         ] )
     ; ( "store path constructors"
-      , [ test_case "by_url_path" `Quick test_by_url_path
-        ; test_case "orphan_path" `Quick test_orphan_path
-        ] )
-    ; "partition metadata", [ test_case "kind and orphan flag" `Quick test_partition_metadata ]
+      , [ test_case "code_store_dir" `Quick test_code_store_dir ] )
     ]
 ;;

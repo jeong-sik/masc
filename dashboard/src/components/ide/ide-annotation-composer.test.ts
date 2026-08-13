@@ -49,6 +49,7 @@ function composer({
     <${IdeAnnotationComposer}
       documentStore=${documentStoreFixture(filePath)}
       activeRepositoryId=${() => repoId}
+      codebaseForRepo=${() => 'github.com_jeong-sik_masc'}
       subscribeActiveRepositoryId=${() => () => {}}
       refresh=${refresh}
     />
@@ -61,6 +62,7 @@ function SharedComposerPair() {
   const props = {
     documentStore: documentStoreFixture('lib/foo.ml'),
     activeRepositoryId: () => 'masc',
+    codebaseForRepo: () => 'github.com_jeong-sik_masc',
     subscribeActiveRepositoryId: () => () => {},
     refresh: () => {},
     draft,
@@ -114,7 +116,7 @@ describe('IdeAnnotationComposer', () => {
     expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()
   })
 
-  it('disables the entry button without a repo scope (keeper_lane is read-only)', () => {
+  it('disables the entry button without a repository-backed codebase', () => {
     const el = mount(composer({ repoId: null }))
     const button = el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-open"]')
     expect(button?.disabled).toBe(true)
@@ -242,7 +244,7 @@ describe('IdeAnnotationComposer', () => {
         kind: 'Comment',
         content: '경계 조건 확인 필요',
       },
-      { repoId: 'masc' },
+      { codebase: 'github.com_jeong-sik_masc' },
     )
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()

@@ -8,7 +8,7 @@ import {
   type IdeContextFocus,
   type IdeContextFocusRouteLink,
 } from './ide-state'
-import { getIdeDataWorkspaceStore } from './ide-workspace-singleton'
+import { codebaseForRepositoryId, getIdeDataWorkspaceStore } from './ide-workspace-singleton'
 import { parsePositiveLineString } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
@@ -957,7 +957,8 @@ export function IdeShell() {
 
   useEffect(() => {
     const repoId = activeRepositoryId?.trim()
-    if (!repoId) {
+    const codebase = codebaseForRepositoryId(repoId)
+    if (!repoId || !codebase) {
       cursorOverlaySignal.value = {
         ...cursorOverlaySignal.value,
         stream: { status: 'closed', failedCount: 0 },
@@ -967,7 +968,7 @@ export function IdeShell() {
     return connectKeeperCursorPush((overlay) => {
       cursorOverlaySignal.value = { ...overlay, stream: cursorOverlaySignal.value.stream }
     }, {
-      repoId,
+      codebase,
       onStatus: stream => {
         cursorOverlaySignal.value = { ...cursorOverlaySignal.value, stream }
       },
@@ -1154,7 +1155,7 @@ export function IdeShell() {
   }
 
   // Annotation deletion (#23471 FE follow-up). Mirrors the composer's
-  // contract: mutations need a repo scope (keeper_lane is read-only) and
+  // contract: mutations need a repository-backed codebase scope and
   // ownership is decided server-side from the token identity, so the
   // handler translates each outcome into a toast instead of pre-judging
   // deletability in the FE.
@@ -1163,10 +1164,12 @@ export function IdeShell() {
   ): Promise<IdeAnnotationDeleteOutcome> => {
     const repoId = workspaceStore.activeRepositoryId()
     if (repoId === null) {
-      showToast('주석 삭제에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)', 'error')
+      showToast('주석 삭제에는 repo 선택이 필요합니다', 'error')
       return 'error'
     }
-    const outcome = await deleteIdeAnnotation(annotation.id, { repoId })
+    const outcome = await deleteIdeAnnotation(annotation.id, {
+      codebase: codebaseForRepositoryId(repoId),
+    })
     switch (outcome) {
       case 'deleted':
         showToast(`주석 삭제됨: ${annotation.file_path}:${annotation.line_start}`, 'success')
@@ -1386,6 +1389,7 @@ export function IdeShell() {
               documentStore=${workspaceStore.documentStore}
               activeRepositoryId=${workspaceStore.activeRepositoryId}
               subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+              codebaseForRepo=${codebaseForRepositoryId}
               refresh=${workspaceStore.refresh}
               draft=${annotationDraft}
               onDraftChange=${setAnnotationDraft}
@@ -1441,8 +1445,7 @@ export function IdeShell() {
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
-                      repoId=${activeRepositoryId}
-                      keeperLane=${terminalKeeper}
+                      codebase=${codebaseForRepositoryId(activeRepositoryId)}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}
@@ -1458,7 +1461,7 @@ export function IdeShell() {
                         <div class="ide-plane-context-stack" data-testid="ide-right-context-stack">
                           <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                           <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                          <${IdeMemoryPanel} keeperName=${terminalKeeper} repoId=${activeRepositoryId} />
+                          <${IdeMemoryPanel} keeperName=${terminalKeeper} codebase=${codebaseForRepositoryId(activeRepositoryId)} />
                         </div>
                         <div class="ide-plane-primary-rail" data-testid="ide-primary-conversation-rail">
                           <${IdeConversationRail} />
@@ -1473,6 +1476,7 @@ export function IdeShell() {
                       documentStore=${workspaceStore.documentStore}
                       activeRepositoryId=${workspaceStore.activeRepositoryId}
                       subscribeActiveRepositoryId=${workspaceStore.subscribeActiveRepositoryId}
+              codebaseForRepo=${codebaseForRepositoryId}
                       refresh=${workspaceStore.refresh}
                       draft=${annotationDraft}
                       onDraftChange=${setAnnotationDraft}

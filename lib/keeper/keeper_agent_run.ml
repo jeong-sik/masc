@@ -15,11 +15,6 @@ let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
 
-let observation_timestamp_ms () =
-  (* NDT-OK: wall-clock timestamp for IDE observation telemetry only; keeper
-     control flow does not branch on this value. *)
-  Int64.of_float (Unix.gettimeofday () *. 1000.0)
-;;
 
 let normalize_response_text_for_finalization
       ~runtime_id
@@ -431,69 +426,12 @@ let run_turn
   in
   let user_message = Keeper_run_prompt.sanitize_user_message user_message in
   Masc_runtime_events.emit_turn_start ();
-  let partition, _ =
-    Keeper_tool_filesystem_runtime.resolve_partition_for_write
-      ~base_dir:config.base_path ~kind:"turn_event" ~file_path:config.base_path
-  in
-  Agent_observation.emit_turn_event
-    { base_path = config.base_path
-    ; partition
-    ; turn_id =
-        (match meta.current_task_id with
-         | Some t -> Keeper_id.Task_id.to_string t
-         | None -> "turn-" ^ meta.name)
-    ; keeper_id = meta.name
-    ; phase = "started"
-    ; model_used = None
-    ; tools_used = []
-    ; stop_reason = None
-    ; duration_ms = None
-    ; timestamp_ms = observation_timestamp_ms ()
-    };
   (* Cancel-safe cleanup (#9747): [Eio_guard.protect] already uses
      [Eio.Switch.on_release], so cleanup runs under cooperative cancellation
-     and does not mask the outer [Eio.Cancel.Cancelled]. We still need to
-     preserve the *terminal state* through the finally block: a cancelled
-     turn must emit phase="cancelled" in the observation event so receipts
-     and registry consumers agree with the FSM terminal [Cancelled _].
-     The [turn_cancelled] ref is set only when the turn body actually raises
-     [Eio.Cancel.Cancelled]; the finally block inspects it to pick the
-     observation phase. *)
-  let turn_start_time = Unix.gettimeofday () in
-  let turn_cancelled = ref None in
-  let emit_observation_turn_end ~phase ~stop_reason () =
-    let duration_ms = int_of_float ((Unix.gettimeofday () -. turn_start_time) *. 1000.0) in
-    let turn_id = match meta.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "turn-" ^ meta.name in
-    let partition, _ =
-      Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir:config.base_path ~kind:"turn_event" ~file_path:config.base_path
-    in
-    Agent_observation.emit_turn_event
-      { base_path = config.base_path
-      ; partition
-      ; turn_id
-      ; keeper_id = meta.name
-      ; phase
-      ; model_used = None
-      ; tools_used = []
-      ; stop_reason
-      ; duration_ms = Some duration_ms
-      ; timestamp_ms = observation_timestamp_ms ()
-      }
-  in
-  let safe_emit_turn_end () =
-    let phase, stop_reason =
-      match !turn_cancelled with
-      | Some exn -> "cancelled", Some (Printexc.to_string exn)
-      | None -> "completed", None
-    in
-    (try emit_observation_turn_end ~phase ~stop_reason ()
-     with Eio.Cancel.Cancelled _ as ce -> raise ce
-     | exn ->
-       Log.Keeper.warn "keeper:%s emit_observation_turn_end failed: %s"
-         meta.name (Printexc.to_string exn));
-    Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name ()
-  in
+     and does not mask the outer [Eio.Cancel.Cancelled]. The turn's durable
+     record is the keeper turn-records store (RFC-0378 §5.2); the
+     observation bus carries no turn events. *)
+  let safe_emit_turn_end () = Turn_helpers.emit_turn_end_safely ~keeper_name:meta.name () in
   Eio_guard.protect ~finally:safe_emit_turn_end
   @@ fun () ->
   try
@@ -1399,10 +1337,8 @@ let run_turn
        receipt_result)
 with
 | Eio.Cancel.Cancelled Keeper_registry.Operator_interrupt as ce ->
-  turn_cancelled := Some ce;
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path meta.name (Some Keeper_registry.Operator_interrupt);
   raise ce
 | Eio.Cancel.Cancelled _ as ce ->
-  turn_cancelled := Some ce;
   raise ce

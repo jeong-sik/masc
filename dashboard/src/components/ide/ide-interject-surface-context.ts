@@ -47,6 +47,9 @@ export function buildIdeInterjectSurfaceContext(
   const identity = inputs.focus?.workspace_identity
   if (identity?.kind === 'repository') {
     fields.push({ k: 'repo', v: identity.repoId })
+    // RFC-0378 §5.3: the codebase slug is the anchor vocabulary the keeper
+    // hands back to keeper_ide_annotate verbatim.
+    if (identity.codebase) fields.push({ k: 'codebase', v: identity.codebase })
   } else if (identity?.kind === 'keeper') {
     fields.push({ k: 'workspace_keeper', v: identity.keeper })
   }

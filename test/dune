@@ -190,7 +190,6 @@
   test_ide_paths
   test_ide_canonical_url_join
   test_ide_lsp_join_key
-  test_ide_partition_resolution
   test_ide_diagnostics
   test_keeper_runtime_contract
   test_goal_scope_terminal_phase
@@ -490,7 +489,6 @@
   test_ide_paths
   test_ide_canonical_url_join
   test_ide_lsp_join_key
-  test_ide_partition_resolution
   test_ide_diagnostics
   test_keeper_runtime_contract
   test_goal_scope_terminal_phase
@@ -2574,3 +2572,13 @@
 (include stanzas/test_keeper_operator_note.inc)
 
 (include stanzas/test_keeper_memory_journal_projection.inc)
+
+(test
+ (name test_code_address)
+ (modules test_code_address)
+ (libraries alcotest masc_agent_observation))
+
+(test
+ (name test_keeper_ide_annotate_contract)
+ (modules test_keeper_ide_annotate_contract)
+ (libraries alcotest yojson masc masc_test_deps))

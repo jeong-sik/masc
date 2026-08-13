@@ -31,22 +31,17 @@ import { DEFAULT_LANGUAGE_ID } from './ide-language'
 /**
  * Which codebase this editor's LSP connection is looking at.
  *
- * The server needs it for two things at once: the `.masc-ide/` partition to
- * read annotations from, and the workspace tree our repo-relative document
- * paths hang off. A connection that declares neither gets language-server
- * passthrough with no MASC overlay — never a guessed default partition.
- *
- * `repoId` is authoritative when a repository is selected; otherwise a
- * selected keeper reads its own orphan observation lane. This mirrors the
- * scope the workspace store already sends to the IDE REST routes, so the
- * two surfaces address the same rows.
+ * `codebase` addresses the optional MASC overlay store. `repoId`/`keeper`
+ * independently select the workspace tree. A connection without a codebase
+ * gets language-server passthrough with no guessed MASC overlay.
  */
 export interface LspScope {
   readonly repoId: string | null
+  readonly codebase: string | null
   readonly keeper: string | null
 }
 
-const EMPTY_LSP_SCOPE: LspScope = { repoId: null, keeper: null }
+const EMPTY_LSP_SCOPE: LspScope = { repoId: null, codebase: null, keeper: null }
 
 /**
  * Deliberately a plain cell, not a signal. The publisher writes it from
@@ -70,11 +65,9 @@ function lspScopeQuery(scope: LspScope): string {
   if (scope.repoId) {
     params.set('repo_id', scope.repoId)
   } else if (scope.keeper) {
-    // `keeper_lane` picks the partition; `keeper` picks the tree. The server
-    // resolves them with two different resolvers and both need naming.
-    params.set('keeper_lane', scope.keeper)
     params.set('keeper', scope.keeper)
   }
+  if (scope.codebase) params.set('codebase', scope.codebase)
   const query = params.toString()
   return query === '' ? '' : `?${query}`
 }
@@ -596,6 +589,7 @@ export class LspConnection {
     const scope = lspScopeSnapshot()
     if (
       scope.repoId === this.connectedScope.repoId
+      && scope.codebase === this.connectedScope.codebase
       && scope.keeper === this.connectedScope.keeper
     ) return
     const previous = this.ws

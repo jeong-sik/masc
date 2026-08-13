@@ -37,40 +37,36 @@ val extract_region_from_full_file :
 
 val regions_file
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> unit
   -> string
-(** Append-only region store path under the chosen
-    {!Ide_paths.partition}. Default [partition] is
-    {!Ide_paths.Legacy_default}. *)
+(** Append-only region store path under the codebase's store directory. *)
 
 val append_region
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> code_region
   -> unit
-(** Append one region to the chosen partition's [regions.jsonl].
-    Default [partition] is {!Ide_paths.Legacy_default}. *)
+(** Append one region to the codebase's [regions.jsonl]. *)
 
 val ingest_tool_call
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> keeper_id:string
   -> turn:int
   -> Yojson.Safe.t
   -> unit
 (** Inspect a tool_call JSON record. If it is a file-writing tool,
-    extract regions and append them to the chosen partition's
-    [regions.jsonl]. Non-matching tool_calls are silently ignored.
-    Default [partition] is {!Ide_paths.Legacy_default}. *)
+    extract regions and append them to the codebase's
+    [regions.jsonl]. Non-matching tool_calls are silently ignored. *)
 
 val read_regions
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> codebase:string
   -> ?file_path:string
   -> unit
   -> code_region list
-(** Read regions from the chosen partition.
+(** Read regions from the codebase's store.
 
     [?file_path] filters by [file_path] field; when omitted every
     region is returned. Streaming-friendly: lines whose JSON does not

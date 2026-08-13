@@ -4,9 +4,8 @@
 // could not leave a comment/decision from the IDE at all.
 //
 // Contract notes (server-enforced, mirrored here instead of re-invented):
-// - Mutations require a repo scope; `keeper_lane` is read-only
-//   (`keeper_lane_read_only`), so the composer submits with the explorer's
-//   active repository and disables itself when none is selected.
+// - Mutations require the active repository's canonical codebase slug, so the
+//   composer disables itself when no repository is selected.
 // - Identity comes from the auth token; the composer never sends a
 //   keeper_id.
 // - After a successful create the workspace fetches re-run, so the new
@@ -73,6 +72,7 @@ function draftProblem(draft: IdeAnnotationComposerDraft): string | null {
 export function IdeAnnotationComposer({
   documentStore,
   activeRepositoryId,
+  codebaseForRepo,
   subscribeActiveRepositoryId,
   refresh,
   draft: controlledDraft,
@@ -85,6 +85,8 @@ export function IdeAnnotationComposer({
     subscribe: (listener: () => void) => () => void
   }
   activeRepositoryId: () => string | null
+  /** RFC-0378 §5.3b: repo id → canonical codebase slug (the wire key). */
+  codebaseForRepo: (repoId: string) => string | null
   subscribeActiveRepositoryId: (listener: () => void) => () => void
   refresh: () => void
   draft?: IdeAnnotationComposerDraft | null
@@ -116,7 +118,7 @@ export function IdeAnnotationComposer({
           data-testid="ide-annotation-open"
           disabled=${repoId === null}
           title=${repoId === null
-            ? '주석 생성에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)'
+            ? '주석 생성에는 repo 선택이 필요합니다'
             : '현재 선택 라인에 주석을 남깁니다'}
           onClick=${() => setDraft(draftFromSelection(filePath))}
         >
@@ -146,7 +148,7 @@ export function IdeAnnotationComposer({
           kind: draft.kind,
           content: draft.content.trim(),
         },
-        { repoId },
+        { codebase: codebaseForRepo(repoId) },
       )
       if (created === null) {
         showToast('주석 응답 파싱 실패 — 서버 응답을 확인하세요', 'error')

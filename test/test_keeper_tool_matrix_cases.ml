@@ -304,7 +304,6 @@ let prepare_keeper_name fixture name =
   then
     ensure_keeper_claim fixture;
   if name = "keeper_voice_session_end" then ensure_voice_session fixture;
-  if name = "keeper_ide_annotate" then ignore (ensure_sample_file fixture);
   (* keeper_memory_search: needle "tool matrix memory needle" is already
      in ctx_snapshot from fixture creation (line ~128). No mutation needed. *)
   ignore (name = "keeper_memory_search")
@@ -328,9 +327,12 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "analyze_image" ->
       `Assoc [ ("artifact", `String "tool-matrix-missing-query") ]
   | "keeper_ide_annotate" ->
+      (* RFC-0378 §5.3: the anchor is the co-view vocabulary — a codebase
+         slug plus a repo-root-relative path, handed back verbatim. *)
       `Assoc
         [
-          ("file_path", `String (ensure_sample_file fixture));
+          ("codebase", `String "github.com_owner_repo");
+          ("file_path", `String "lib/sample.ml");
           ("line_start", `Int 1);
           ("content", `String "tool matrix ide annotation");
         ]

@@ -23,6 +23,11 @@ export interface Repository {
   id: string
   name: string
   url: string
+  /** RFC-0378 §5.3b: canonical codebase slug, minted by the server from
+   *  the git remote. Clients carry it into co-view context and scope
+   *  queries; they never derive it from `url`. Null when the remote
+   *  cannot canonicalize. */
+  codebase: string | null
   local_path: string
   default_branch: string
   status: RepoStatus
@@ -125,6 +130,7 @@ export function normalizeRepository(raw: unknown): Repository | null {
     id,
     name,
     url: typeof r.url === 'string' ? r.url : '',
+    codebase: typeof r.codebase === 'string' && r.codebase !== '' ? r.codebase : null,
     local_path: typeof r.local_path === 'string' ? r.local_path : '',
     default_branch: typeof r.default_branch === 'string' ? r.default_branch : 'main',
     status: normalizeRepoStatus(typeof r.status === 'string' ? r.status : undefined),

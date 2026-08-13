@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Breaking (keeper output contract, RFC-0376)**: an autonomous turn's final
+  text no longer auto-delivers to the channel that woke it. The
+  continuation-delivery outbox/publisher/recovery subsystem and the schedule
+  result-delivery dashboard view are removed; keeper speech reaches connectors
+  only through speech tools (`keeper_surface_post` / connector posts), and the
+  connector-attention ledger consumes the typed continuation-route disposition
+  carried by `Turn_completed`. Live measurement before/after: obligation
+  growth +11/hour under the old path, zero after, with real replies unaffected.
+- **Keeper turn batching (RFC-0377)**: one turn consumes the pending backlog
+  of a single conversation together (one-scan batch read, pure batch
+  disposition) instead of one stimulus per wake.
+
 - **Breaking (agent execution ownership)**: MASC now owns its execution engine
   as the embedded `masc.agent_core` library. Runtime modules, configuration,
   environment keys, telemetry, dashboard events, persistence fields, and

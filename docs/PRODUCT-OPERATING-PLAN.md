@@ -12,7 +12,7 @@ code_refs:
 > Current package version: v0.21.2
 > Latest changelog entry: v0.21.2 (2026-07-20)
 > Latest published GitHub release: v0.21.1 (2026-07-20)
-> Updated: 2026-07-03
+> Updated: 2026-08-14
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope

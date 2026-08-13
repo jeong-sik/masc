@@ -7,4 +7,4 @@
  (modules agent_observation)
  (flags
   (:standard -w +4 -w +33))
- (libraries yojson))
+ (libraries fpath yojson))

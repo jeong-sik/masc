@@ -140,6 +140,7 @@ module Code_address = struct
     | Malformed_codebase
     | Empty_path
     | Absolute_path
+    | Malformed_path
     | Unnormalized_path
 
   let invalid_to_string = function
@@ -147,6 +148,7 @@ module Code_address = struct
     | Malformed_codebase -> "codebase is not a canonical host_path slug"
     | Empty_path -> "empty repo-relative path"
     | Absolute_path -> "path is absolute, expected repo-root relative"
+    | Malformed_path -> "path is not syntactically valid"
     | Unnormalized_path -> "path has ., .., or empty segments"
   ;;
 
@@ -158,8 +160,6 @@ module Code_address = struct
     && String.for_all is_slug_char slug
   ;;
 
-  let normalized_segment seg = seg <> "" && seg <> "." && seg <> ".."
-
   let v ~codebase ~path =
     if codebase = ""
     then Error Empty_codebase
@@ -167,11 +167,18 @@ module Code_address = struct
     then Error Malformed_codebase
     else if path = ""
     then Error Empty_path
-    else if path.[0] = '/'
-    then Error Absolute_path
-    else if not (List.for_all normalized_segment (String.split_on_char '/' path))
-    then Error Unnormalized_path
-    else Ok { codebase; path }
+    else
+      match Fpath.of_string path with
+      | Error _ -> Error Malformed_path
+      | Ok parsed ->
+        if Fpath.is_abs parsed
+        then Error Absolute_path
+        else if
+          not (String.equal path (Fpath.to_string parsed))
+          || not (Fpath.equal parsed (Fpath.rem_empty_seg parsed))
+          || List.exists Fpath.is_rel_seg (Fpath.segs parsed)
+        then Error Unnormalized_path
+        else Ok { codebase; path }
   ;;
 
   let codebase t = t.codebase

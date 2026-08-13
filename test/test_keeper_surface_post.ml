@@ -510,7 +510,7 @@ let roster_message ~surface ~speaker_id : Store.chat_message =
   ; kind = Store.Row_kind.Utterance
   ; turn_ref = None
   ; stream_lifecycle = None
-  ; delivery_key = None
+  ; delivery_provenance = None
   }
 
 let test_mentions_require_exact_resolved_target_roster () =

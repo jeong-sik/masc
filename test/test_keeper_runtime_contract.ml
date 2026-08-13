@@ -368,6 +368,117 @@ let test_sandbox_routing_rejects_unenforceable_host_network_none () =
   | Ok _ -> fail "local/network-none cannot be represented as enforced"
 ;;
 
+let test_sandbox_factory_refuses_toml_effective_mismatch_before_effect () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      let meta =
+        { (make_meta ()) with
+          sandbox_profile = Sandbox.Local
+        ; network_mode = Sandbox.Network_inherit
+        }
+      in
+      let factory =
+        Keeper_sandbox_factory.create
+          ~requested_sandbox_profile:Sandbox.Docker
+          ~requested_network_mode:Sandbox.Network_none
+          ~config
+          ~meta
+          ()
+      in
+      Fun.protect
+        ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+        (fun () ->
+          match Keeper_sandbox_factory.routing_admission factory with
+          | Ok () -> fail "Docker request/local effective route must be refused"
+          | Error refusal ->
+            let descriptor =
+              match Keeper_sandbox_factory.routing_refusal_evidence refusal with
+              | Some evidence -> Routing.descriptor_to_yojson evidence
+              | None -> fail "mismatch refusal must retain staged evidence"
+            in
+            check string "factory mismatch status" "mismatch"
+              (json_string [ "verification"; "status" ] descriptor);
+            check string "factory refuses containment" "not_verified"
+              (json_string [ "verification"; "containment" ] descriptor);
+            check string "factory typed violation" "config_effective_mismatch"
+              (json_string [ "verification"; "violation" ] descriptor)))
+;;
+
+let test_sandbox_factory_receipt_observes_frozen_effective_route () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      let meta =
+        { (make_meta ()) with
+          sandbox_profile = Sandbox.Docker
+        ; network_mode = Sandbox.Network_none
+        }
+      in
+      let factory =
+        Keeper_sandbox_factory.create
+          ~requested_sandbox_profile:Sandbox.Docker
+          ~requested_network_mode:Sandbox.Network_none
+          ~config
+          ~meta
+          ()
+      in
+      Fun.protect
+        ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+        (fun () ->
+          (match Keeper_sandbox_factory.routing_admission factory with
+           | Ok () -> ()
+           | Error refusal ->
+             fail
+               (Keeper_sandbox_factory.routing_refusal_to_string refusal));
+          let evidence =
+            match Keeper_sandbox_factory.routing_evidence_for_receipt factory with
+            | Ok evidence -> evidence
+            | Error refusal ->
+              fail
+                (Keeper_sandbox_factory.routing_refusal_to_string refusal)
+          in
+          let descriptor = Routing.descriptor_to_yojson evidence in
+          check string "receipt route verified" "verified"
+            (json_string [ "verification"; "status" ] descriptor);
+          check string "receipt route contained" "docker_contained"
+            (json_string [ "verification"; "containment" ] descriptor)))
+;;
+
+let test_sandbox_factory_does_not_fallback_when_receipt_evidence_is_unavailable () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      let meta =
+        { (make_meta ()) with
+          sandbox_profile = Sandbox.Local
+        ; network_mode = Sandbox.Network_inherit
+        }
+      in
+      let factory =
+        Keeper_sandbox_factory.create
+          ~requested_sandbox_profile:Sandbox.Local
+          ~requested_network_mode:Sandbox.Network_none
+          ~config
+          ~meta
+          ()
+      in
+      Fun.protect
+        ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+        (fun () ->
+          match Keeper_sandbox_factory.routing_evidence_for_receipt factory with
+          | Error refusal ->
+            check bool "typed unavailable evidence detail" true
+              (String.starts_with
+                 ~prefix:"invalid requested sandbox route:"
+                 (Keeper_sandbox_factory.routing_refusal_to_string refusal))
+          | Ok _ ->
+            fail "unavailable routing evidence must not fall back to meta"))
+;;
+
 let () =
   run
     "keeper_runtime_contract"
@@ -392,6 +503,12 @@ let () =
             test_sandbox_routing_requires_receipt_evidence
         ; test_case "rejects unenforceable host network-none" `Quick
             test_sandbox_routing_rejects_unenforceable_host_network_none
+        ; test_case "factory refuses TOML/effective mismatch before effect" `Quick
+            test_sandbox_factory_refuses_toml_effective_mismatch_before_effect
+        ; test_case "receipt observes factory-frozen effective route" `Quick
+            test_sandbox_factory_receipt_observes_frozen_effective_route
+        ; test_case "receipt absence does not fall back to meta" `Quick
+            test_sandbox_factory_does_not_fallback_when_receipt_evidence_is_unavailable
         ] )
     ]
 ;;

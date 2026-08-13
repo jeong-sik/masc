@@ -50,6 +50,7 @@ let finalize
     ~keeper_visible_sandbox_root
     ~receipt_started_at
     ~runtime_manifest_context
+    ~sandbox_routing
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~degraded_retry_applied
     ~degraded_retry_runtime
@@ -148,6 +149,7 @@ let finalize
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some keeper_visible_sandbox_root
     ; network_mode = meta.network_mode
+    ; sandbox_routing
     ; runtime_id
     ; runtime_selected_model =
         Option.bind runtime_observation (fun obs -> obs.selected_model)

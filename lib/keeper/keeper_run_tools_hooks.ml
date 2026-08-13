@@ -13,6 +13,11 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
 type agent_setup =
   { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
+  ; sandbox_routing_for_receipt :
+      unit ->
+      ( Keeper_runtime_contract.Sandbox_routing.evidence
+      , Keeper_sandbox_factory.routing_refusal )
+      result
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_core.Hooks.hooks
@@ -39,6 +44,11 @@ type ctx =
       turn:int -> tool_list:string list -> lane:turn_lane -> unit
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
+  ; sandbox_routing_for_receipt :
+      unit ->
+      ( Keeper_runtime_contract.Sandbox_routing.evidence
+      , Keeper_sandbox_factory.routing_refusal )
+      result
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; keeper_turn_id : int
   ; meta : Keeper_meta_contract.keeper_meta
@@ -171,6 +181,7 @@ let assemble_hooks
       ~base_path:config.Workspace.base_path
   in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
+  let sandbox_routing_for_receipt = ctx.sandbox_routing_for_receipt in
   let terminal_effect_state = ctx.terminal_effect_state in
   let keeper_turn_id = ctx.keeper_turn_id in
   let meta = ctx.meta in
@@ -617,6 +628,7 @@ let assemble_hooks
     Ok
       { tools
       ; cleanup = keeper_tools_cleanup
+      ; sandbox_routing_for_receipt
       ; terminal_effect_state
       ; user_message
       ; hooks

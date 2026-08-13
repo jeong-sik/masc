@@ -23,3 +23,19 @@ type keeper_profile_defaults = {
 }
 
 val empty_keeper_profile_defaults : keeper_profile_defaults
+
+type sandbox_route_resolution =
+  | Sandbox_route of
+      { sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
+      ; network_mode : Keeper_types_profile_sandbox.network_mode
+      }
+  | Sandbox_profile_missing of { manifest_path : string }
+
+val resolve_sandbox_route :
+  fallback_sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
+  fallback_network_mode:Keeper_types_profile_sandbox.network_mode ->
+  keeper_profile_defaults ->
+  sandbox_route_resolution
+(** Single resolver for the persisted TOML sandbox request. A loaded manifest
+    without [sandbox_profile] remains a typed missing request; it never falls
+    back to runtime metadata. *)

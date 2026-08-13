@@ -514,26 +514,18 @@ let effective_meta_of_profile_defaults
     (meta : keeper_meta) : (keeper_meta, string) result =
   let open Keeper_types_profile in
   let has_profile_source = Option.is_some defaults.manifest_path in
-  let target_sandbox_profile =
-    match defaults.sandbox_profile, defaults.manifest_path with
-    | Some profile, _ -> Ok profile
-    | None, None -> Ok meta.sandbox_profile
-    | None, Some _ ->
-      Error
-        (missing_required_sandbox_profile_error
-           ~keeper_name:meta.name
-           defaults)
-  in
-  match target_sandbox_profile with
-  | Error _ as err -> err
-  | Ok sandbox_profile ->
-      let default_network_mode =
-        if has_profile_source then default_network_mode_for_profile sandbox_profile
-        else meta.network_mode
-      in
-      let network_mode =
-        apply_profile_default defaults.network_mode default_network_mode
-      in
+  match
+    resolve_sandbox_route
+      ~fallback_sandbox_profile:meta.sandbox_profile
+      ~fallback_network_mode:meta.network_mode
+      defaults
+  with
+  | Sandbox_profile_missing _ ->
+    Error
+      (missing_required_sandbox_profile_error
+         ~keeper_name:meta.name
+         defaults)
+  | Sandbox_route { sandbox_profile; network_mode } ->
       Ok
         { meta with
           proactive =

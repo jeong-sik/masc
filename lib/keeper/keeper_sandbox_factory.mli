@@ -2,8 +2,8 @@
 
     A single keeper turn may dispatch tool calls from different cwds,
     each implying a different [in_playground] state.  The factory
-    centralizes the {!Keeper_sandbox_runner.effective_sandbox_profile}
-    invariant, evaluates [in_playground] from the call-site [cwd] only for
+    evaluates {!Keeper_sandbox_runner.effective_sandbox_profile} once at
+    construction, evaluates [in_playground] from the call-site [cwd] only for
     runtime workspace reuse, and memoizes one runtime per
     [(in_playground, network_mode)]
     so a Docker container is created at most once per compatible dispatch
@@ -30,22 +30,57 @@ type resolve_result =
 
 type t
 
+type routing_refusal =
+  | Invalid_requested_boundary of
+      Keeper_runtime_contract.Sandbox_routing.invalid_boundary
+  | Invalid_effective_boundary of
+      Keeper_runtime_contract.Sandbox_routing.invalid_boundary
+  | Admission_violation of
+      { violation : Keeper_runtime_contract.Sandbox_routing.violation
+      ; evidence : Keeper_runtime_contract.Sandbox_routing.evidence
+      }
+  | Receipt_violation of
+      { violation : Keeper_runtime_contract.Sandbox_routing.violation
+      ; evidence : Keeper_runtime_contract.Sandbox_routing.evidence
+      }
+  | Invalid_receipt_boundary of
+      Keeper_runtime_contract.Sandbox_routing.invalid_boundary
+  | Invalid_receipt_detail of string
+
+val routing_refusal_to_string : routing_refusal -> string
+val routing_refusal_evidence : routing_refusal -> Keeper_runtime_contract.Sandbox_routing.evidence option
+
 val create :
   ?default_network_override:Keeper_types_profile_sandbox.network_mode ->
+  ?requested_sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
+  ?requested_network_mode:Keeper_types_profile_sandbox.network_mode ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   ?turn_id:int ->
   unit ->
   t
-(** Create an empty factory.  [default_network_override], when supplied,
-    is applied to every runtime created via {!resolve}. *)
+(** Create an empty factory and freeze both the requested and actual effective
+    route. [requested_*] must come from the persisted keeper profile; callers
+    that omit them use [meta] as both stages. [default_network_override], when
+    supplied, participates in the effective stage and is applied to every
+    runtime created via {!resolve}. *)
+
+val routing_admission : t -> (unit, routing_refusal) result
+(** Typed pre-effect admission. A config/effective mismatch is rejected before
+    any Docker runtime or tool effect can start. *)
+
+val routing_evidence_for_receipt :
+  t ->
+  (Keeper_runtime_contract.Sandbox_routing.evidence, routing_refusal) result
+(** Observe the factory-frozen effective route at receipt assembly. Absence or
+    inconsistency remains a typed refusal; it is never replaced with [meta]. *)
 
 val resolve :
   t ->
   cwd:string ->
   resolve_result
-(** Returns [Runtime runtime] when {!Keeper_sandbox_runner.effective_sandbox_profile}
-    yields [Docker] for the construction meta. [in_playground] is
+(** Returns [Runtime runtime] when the factory-frozen effective route yields
+    [Docker]. [in_playground] is
     derived from [cwd] vs the keeper's playground root for runtime workspace
     reuse only. Memoizes per [(in_playground, network_mode, host_root, image)]
     so subsequent compatible calls reuse the same container without crossing

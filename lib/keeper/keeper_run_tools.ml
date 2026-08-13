@@ -52,6 +52,11 @@ let freeze = Keeper_run_tools_hook_accumulator.freeze
 type agent_setup = Keeper_run_tools_hooks.agent_setup =
   { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
+  ; sandbox_routing_for_receipt :
+      unit ->
+      ( Keeper_runtime_contract.Sandbox_routing.evidence
+      , Keeper_sandbox_factory.routing_refusal )
+      result
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_core.Hooks.hooks

@@ -49,16 +49,30 @@ let make_tool_bundle_for_descriptors
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?requested_sandbox_profile
+      ?requested_network_mode
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
   =
-  (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
-     instances with a factory.  in_playground/cwd are unknown at
-     turn-start, so the factory defers
-     [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
-     each tool call site that already knows its [cwd]. *)
-  let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
+  (* Runtime construction stays lazy because in_playground/cwd are unknown at
+     turn start. Route resolution is different: the factory freezes it now so
+     dispatch and the execution receipt observe the same effective boundary. *)
+  let sandbox_factory =
+    Keeper_sandbox_factory.create
+      ?requested_sandbox_profile
+      ?requested_network_mode
+      ~config
+      ~meta
+      ()
+  in
+  let turn_sandbox_factory = Some sandbox_factory in
+  let sandbox_routing_admission =
+    Keeper_sandbox_factory.routing_admission sandbox_factory
+  in
+  let sandbox_routing_for_receipt () =
+    Keeper_sandbox_factory.routing_evidence_for_receipt sandbox_factory
+  in
   let gate_grant =
     Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
   in
@@ -78,8 +92,9 @@ let make_tool_bundle_for_descriptors
      producer's ordinary Gate behavior instead of inventing another replay
      constraint. *)
   let gate_replay_delivery =
-    match hitl_resolution, gate_grant with
-    | ( Some
+    match sandbox_routing_admission, hitl_resolution, gate_grant with
+    | ( Ok ()
+      , Some
           { Keeper_event_queue.approval_id
           ; decision = Keeper_event_queue.Hitl_approved
           ; _
@@ -125,7 +140,7 @@ let make_tool_bundle_for_descriptors
            approval_id
            (Keeper_gate_replay.outcome_to_string outcome));
       Some Keeper_tools_agent_core.{ approval_id; outcome }
-    | _ -> None
+    | Error _, _, _ | Ok (), _, _ -> None
   in
   let record_gate_result =
     Option.map
@@ -294,6 +309,8 @@ let make_tool_bundle_for_descriptors
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
+  ; sandbox_routing_admission
+  ; sandbox_routing_for_receipt
   ; terminal_effect_state = (fun () -> Atomic.get terminal_effect_state)
   ; gate_replay_delivery
   }
@@ -309,6 +326,8 @@ let make_tool_bundle
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?requested_sandbox_profile
+      ?requested_network_mode
       ()
   =
   make_tool_bundle_for_descriptors
@@ -320,6 +339,8 @@ let make_tool_bundle
     ?continuation_channel
     ?gate_context
     ?hitl_resolution
+    ?requested_sandbox_profile
+    ?requested_network_mode
     ~descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     ()
 ;;

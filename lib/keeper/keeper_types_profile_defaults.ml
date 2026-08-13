@@ -52,3 +52,34 @@ let empty_keeper_profile_defaults =
     agent_core_env = [];
   }
 ;;
+
+type sandbox_route_resolution =
+  | Sandbox_route of
+      { sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
+      ; network_mode : Keeper_types_profile_sandbox.network_mode
+      }
+  | Sandbox_profile_missing of { manifest_path : string }
+
+let resolve_sandbox_route
+      ~fallback_sandbox_profile
+      ~fallback_network_mode
+      defaults
+  =
+  match defaults.sandbox_profile, defaults.manifest_path with
+  | None, Some manifest_path -> Sandbox_profile_missing { manifest_path }
+  | sandbox_profile, manifest_path ->
+    let sandbox_profile =
+      Option.value sandbox_profile ~default:fallback_sandbox_profile
+    in
+    let network_default =
+      match manifest_path with
+      | Some _ ->
+        Keeper_types_profile_sandbox.default_network_mode_for_profile
+          sandbox_profile
+      | None -> fallback_network_mode
+    in
+    let network_mode =
+      Option.value defaults.network_mode ~default:network_default
+    in
+    Sandbox_route { sandbox_profile; network_mode }
+;;

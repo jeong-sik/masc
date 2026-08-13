@@ -305,6 +305,7 @@ let to_json_with_operator_disposition
       ~sandbox_profile:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
       ?sandbox_root:receipt.sandbox_root
       ~network_mode:(Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode)
+      ?sandbox_routing:receipt.sandbox_routing
       ~runtime_profile:(receipt.runtime_id)
       ()
   in
@@ -359,6 +360,11 @@ let to_json_with_operator_disposition
           ; ( "sandbox_root", string_opt_json receipt.sandbox_root )
           ; ( "network_mode"
             , `String (Keeper_types_profile_sandbox.network_mode_to_string receipt.network_mode) )
+          ; ( "routing"
+            , match receipt.sandbox_routing with
+              | Some evidence ->
+                Keeper_runtime_contract.Sandbox_routing.descriptor_to_yojson evidence
+              | None -> `Null )
           ] )
     ; ( "runtime"
       , `Assoc

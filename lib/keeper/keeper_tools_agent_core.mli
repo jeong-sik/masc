@@ -35,6 +35,13 @@ type gate_replay_delivery =
 type tool_bundle =
   { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
+  ; sandbox_routing_admission :
+      (unit, Keeper_sandbox_factory.routing_refusal) result
+  ; sandbox_routing_for_receipt :
+      unit ->
+      ( Keeper_runtime_contract.Sandbox_routing.evidence
+      , Keeper_sandbox_factory.routing_refusal )
+      result
   ; terminal_effect_state : unit -> terminal_effect_state
   ; gate_replay_delivery : gate_replay_delivery option
   }

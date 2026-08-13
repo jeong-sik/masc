@@ -621,6 +621,7 @@ let run_turn
     Keeper_run_tools.prepare_agent_setup
       ~config
       ~meta
+      ~profile_defaults
       ~publication_recovery
       ?continuation_channel
       ?on_tool_result_ready
@@ -731,6 +732,9 @@ let run_turn
     in
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
+    in
+    let sandbox_routing_for_receipt =
+      s.Keeper_run_tools.sandbox_routing_for_receipt
     in
     let request_evidence_ref = ref None in
     let current_request_input_messages_ref = ref None in
@@ -1170,6 +1174,17 @@ let run_turn
          | Some (_, reason) -> Some reason
          | None -> fallback_reason
        in
+       let sandbox_routing, receipt_turn_result =
+         match sandbox_routing_for_receipt () with
+         | Ok evidence -> Some evidence, turn_result
+         | Error refusal ->
+           let detail = Keeper_sandbox_factory.routing_refusal_to_string refusal in
+           ( Keeper_sandbox_factory.routing_refusal_evidence refusal
+           , Error
+               (Agent_core.Error.Config
+                  (Agent_core.Error.InvalidConfig
+                     { field = "keeper.sandbox_routing.receipt"; detail })) )
+       in
        let settled_runtime_id, settled_max_context =
          match turn_result with
          | Ok result -> result.runtime_id, result.max_context
@@ -1185,12 +1200,13 @@ let run_turn
            ~keeper_visible_sandbox_root
            ~receipt_started_at
            ~runtime_manifest_context
+           ~sandbox_routing
            ~acc
            ~degraded_retry_applied
            ~degraded_retry_runtime:receipt_degraded_retry_runtime
            ~fallback_reason:receipt_fallback_reason
            ~runtime_rotation_attempts
-           ~turn_result
+           ~turn_result:receipt_turn_result
            ~receipt_turn_count_ref
            ~receipt_stop_reason_ref
            ~receipt_runtime_observation_ref

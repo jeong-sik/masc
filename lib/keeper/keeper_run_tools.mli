@@ -53,6 +53,11 @@ val freeze : hook_accumulator -> hook_outputs
 type agent_setup =
   { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
+  ; sandbox_routing_for_receipt :
+      unit ->
+      ( Keeper_runtime_contract.Sandbox_routing.evidence
+      , Keeper_sandbox_factory.routing_refusal )
+      result
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; user_message : string
   ; hooks : Agent_core.Hooks.hooks
@@ -71,6 +76,7 @@ type agent_setup =
 val prepare_agent_setup
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> publication_recovery:
        Keeper_publication_recovery_availability.turn_context
   -> turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell

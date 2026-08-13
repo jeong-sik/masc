@@ -14,6 +14,8 @@ val make_tool_bundle
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:Keeper_gate_causal_context.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?requested_sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile
+  -> ?requested_network_mode:Keeper_types_profile_sandbox.network_mode
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
 

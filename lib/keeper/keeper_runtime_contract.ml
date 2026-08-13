@@ -195,6 +195,15 @@ module Sandbox_routing = struct
 
   let evidence ~requested ~effective ~receipt = { requested; effective; receipt }
 
+  let verify_effective (Requested requested) effective =
+    match effective with
+    | Resolution_failed { detail } ->
+      Error (Effective_resolution_unavailable { detail })
+    | Resolved effective when not (equal_boundary requested effective) ->
+      Error (Config_effective_mismatch { requested; effective })
+    | Resolved _ -> Ok ()
+  ;;
+
   let verify { requested = Requested requested; effective; receipt } =
     match effective with
     | Resolution_failed { detail } ->

@@ -167,6 +167,7 @@ type t =
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option
   ; network_mode : Keeper_types_profile_sandbox.network_mode
+  ; sandbox_routing : Keeper_runtime_contract.Sandbox_routing.evidence option
   ; runtime_id : string
   ; runtime_selected_model : string option
   ; runtime_attempt_count : int

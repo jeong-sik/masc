@@ -100,6 +100,7 @@ let gate_causal_initial
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(publication_recovery :
           Keeper_publication_recovery_availability.turn_context)
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
@@ -161,9 +162,45 @@ let prepare_agent_setup
     ; extra_system_context_size = None
     }
   in
+  let* requested_sandbox_profile, requested_network_mode =
+    match
+      Keeper_types_profile.resolve_sandbox_route
+        ~fallback_sandbox_profile:meta.sandbox_profile
+        ~fallback_network_mode:meta.network_mode
+        profile_defaults
+    with
+    | Keeper_types_profile.Sandbox_route { sandbox_profile; network_mode } ->
+      Ok (sandbox_profile, network_mode)
+    | Keeper_types_profile.Sandbox_profile_missing { manifest_path } ->
+      let detail =
+        Printf.sprintf
+          "keeper %s sandbox request is missing sandbox_profile in %s"
+          meta.name
+          manifest_path
+      in
+      Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+        ~config
+        ~meta
+        ~generation
+        ~runtime_id:runtime_id_string
+        ~outcome:`Error
+        ~terminal_reason_code:"config_error"
+        ~activity_kind:"keeper.sandbox_routing_refused"
+        ~trajectory_outcome:(Trajectory.Failed detail)
+        ~error_kind:(Keeper_execution_receipt.error_kind_of_string "config_error")
+        ~error_message:detail
+        ~keeper_turn_id
+        ();
+      Error
+        (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig
+              { field = "keeper.sandbox_profile"; detail }))
+  in
   let
     { Keeper_tools_agent_core.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
+    ; sandbox_routing_admission
+    ; sandbox_routing_for_receipt
     ; terminal_effect_state
     ; gate_replay_delivery
     }
@@ -176,7 +213,40 @@ let prepare_agent_setup
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
+      ~requested_sandbox_profile
+      ~requested_network_mode
       ()
+  in
+  let* () =
+    match sandbox_routing_admission with
+    | Ok () -> Ok ()
+    | Error refusal ->
+      let detail = Keeper_sandbox_factory.routing_refusal_to_string refusal in
+      (try keeper_tools_cleanup () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.error
+           "keeper tool cleanup after sandbox routing refusal raised: %s"
+           (Printexc.to_string exn));
+      Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+        ~config
+        ~meta
+        ~generation
+        ~runtime_id:runtime_id_string
+        ~outcome:`Error
+        ~terminal_reason_code:"config_error"
+        ~activity_kind:"keeper.sandbox_routing_refused"
+        ~trajectory_outcome:(Trajectory.Failed detail)
+        ~error_kind:(Keeper_execution_receipt.error_kind_of_string "config_error")
+        ~error_message:detail
+        ?sandbox_routing:
+          (Keeper_sandbox_factory.routing_refusal_evidence refusal)
+        ~keeper_turn_id
+        ();
+      Error
+        (Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig
+              { field = "keeper.sandbox_routing"; detail }))
   in
   let replay_delivery =
     Option.map
@@ -386,6 +456,7 @@ let prepare_agent_setup
     ; record_tool_assignment
     ; config
     ; keeper_tools_cleanup
+    ; sandbox_routing_for_receipt
     ; terminal_effect_state
     ; keeper_turn_id
     ; meta

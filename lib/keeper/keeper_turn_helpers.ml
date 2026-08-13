@@ -196,6 +196,7 @@ let record_pre_dispatch_terminal_observation
       ?degraded_retry_runtime
       ?fallback_reason
       ?(runtime_rotation_attempts = [])
+      ?sandbox_routing
       ?keeper_turn_id
       ()
   : unit
@@ -234,6 +235,7 @@ let record_pre_dispatch_terminal_observation
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)
     ; network_mode = meta.network_mode
+    ; sandbox_routing
     ; runtime_id
     ; runtime_selected_model = None
     ; runtime_attempt_count = 0

@@ -87,6 +87,11 @@ module Sandbox_routing : sig
   val evidence :
     requested:requested -> effective:effective -> receipt:receipt -> evidence
 
+  val verify_effective : requested -> effective -> (unit, violation) result
+  (** Admit an execution route only when runtime resolution exists and matches
+      the persisted request. Receipt evidence is deliberately checked later,
+      at receipt assembly. *)
+
   val verify : evidence -> (verified, violation) result
   (** Fail closed unless effective resolution exists and all three boundaries
       are identical. No [bool] success flag exists for a caller to combine with

@@ -78,6 +78,13 @@ export async function sendBroadcast(_actorHint: string, message: string): Promis
         // A contradictory or malformed response cannot prove that the
         // workspace commit did not happen. Preserve uncertainty instead of
         // encouraging a duplicate resend.
+        return {
+          ok: false,
+          requestId: null,
+          deliveryKind: 'outcome_unknown',
+          reason: 'Broadcast returned a malformed delivery receipt.',
+          workspacePersisted: null,
+        }
       }
     }
     if (mcpCallFailureDisposition(error) !== 'outcome_unknown') throw error

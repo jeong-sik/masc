@@ -2600,6 +2600,53 @@ let test_active_librarian_abort_defers_then_retries_restart () =
               Memory_lane.librarian_drain_error)
                result))
 
+let test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle () =
+  Eio_main.run @@ fun _env ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Memory_lane.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+       Memory_lane.For_testing.reset ();
+       let keeper_name = "unexpected-librarian-reopen" in
+       (match
+          Memory_lane.begin_librarian_lifecycle
+            ~base_path:base_dir
+            ~keeper_name
+        with
+        | Ok () -> ()
+        | Error error -> fail (Memory_lane.lifecycle_open_error_to_string error));
+       let replacement_opened = ref false in
+       (match
+          Launch_transaction.finish_lifecycle
+            ~boundary:Launch_transaction.Unexpected
+            ~base_path:base_dir
+            ~keeper_name
+            ~terminalize:(fun () ->
+              match
+                Memory_lane.begin_librarian_lifecycle
+                  ~base_path:base_dir
+                  ~keeper_name
+              with
+              | Ok () ->
+                replacement_opened := true;
+                Ok ()
+              | Error error ->
+                Error (Memory_lane.lifecycle_open_error_to_string error))
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check bool "terminal publication admitted replacement" true !replacement_opened;
+       match Memory_lane.submit ~base_path:base_dir ~keeper_name ignore with
+       | Memory_lane.Ran_inline -> ()
+       | Memory_lane.Submitted
+       | Memory_lane.Coalesced
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "stale unexpected cleanup closed the replacement lifecycle")
+;;
+
 let crashed_restart_fixture ~base_path name meta =
   let initial = Reg.For_testing.register ~base_path name meta in
   (match
@@ -3113,6 +3160,8 @@ let () =
         test_restart_denies_persisted_dead_tombstone;
       test_case "active Librarian abort defers then retries restart" `Quick
         test_active_librarian_abort_defers_then_retries_restart;
+      test_case "unexpected cleanup preserves reopened Librarian lifecycle" `Quick
+        test_unexpected_cleanup_cannot_close_reopened_librarian_lifecycle;
       test_case "launch callback failure rolls back restart transaction" `Quick
         test_launch_callback_failure_rolls_back_restart_transaction;
       test_case "launch callback cancellation rolls back restart transaction" `Quick

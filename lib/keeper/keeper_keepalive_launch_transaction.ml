@@ -132,15 +132,16 @@ let run
               with
               | Error error ->
                 let rollback_error =
-                  match rollback with
-                  | Retain_registered -> None
-                  | Remove_registered | Restore_previous _ ->
-                    (match reject_for_rollback reg with
-                     | Error detail -> Some detail
-                     | Ok () ->
-                       (match rollback_registry rollback token reg with
-                        | Ok () -> None
-                        | Error detail -> Some detail))
+                  Eio.Cancel.protect (fun () ->
+                    match rollback with
+                    | Retain_registered -> None
+                    | Remove_registered | Restore_previous _ ->
+                      (match reject_for_rollback reg with
+                       | Error detail -> Some detail
+                       | Ok () ->
+                         (match rollback_registry rollback token reg with
+                          | Ok () -> None
+                          | Error detail -> Some detail)))
                 in
                 Error (Lifecycle_open_failed { error; rollback_error })
               | Ok () ->
@@ -260,9 +261,12 @@ let finish_lifecycle ~boundary ~base_path ~keeper_name ~terminalize =
         let terminal = terminalize_safely terminalize in
         combine "Librarian cleanup" librarian "terminal cleanup" terminal
       | Unexpected ->
-        let terminal = terminalize_safely terminalize in
         let librarian = abort_result ~base_path ~keeper_name in
-        combine "terminal cleanup" terminal "Librarian cleanup" librarian
+        (* Fence this lifecycle's Librarian intake before publishing a terminal
+           state that may admit its replacement. A name-only abort after
+           publication could otherwise close the newly reopened lifecycle. *)
+        let terminal = terminalize_safely terminalize in
+        combine "Librarian cleanup" librarian "terminal cleanup" terminal
     with
     | exn -> Error (Printexc.to_string exn))
 ;;

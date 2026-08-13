@@ -850,6 +850,261 @@ let test_initializing_recovery_isolates_only_publication_writes () =
          (read_file existing_path))
 ;;
 
+let test_identical_keeper_invocations_join_across_production_boundaries () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "keeper_tool_observation_exact_invocation"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let net =
+         match Eio_context.get_net_opt () with
+         | Some net -> net
+         | None -> fail "test Eio net missing"
+       in
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_execution_join.For_testing.clear ();
+       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+       Masc.Keeper_chat_store.append_user_message
+         ~base_dir:config.base_path
+         ~keeper_name:meta.name
+         ~content:
+           (String.make
+              (Tool_bridge.default_externalize_threshold_bytes + 1)
+              'x')
+         ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+         ();
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           Masc.Keeper_execution_join.For_testing.clear ();
+           Masc.Keeper_tool_call_log.reset_for_testing ();
+           bundle.cleanup ())
+         (fun () ->
+            let agent_name = Masc.Keeper_identity.keeper_agent_name meta.name in
+            let trace_id = "keeper-tool-observation-exact-invocation" in
+            let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+            Masc.Keeper_tool_call_log.set_turn_context
+              ~cell:turn_ctx_cell
+              ~agent_name
+              ~trace_id
+              ~generation:0
+              ~turn:0
+              ~keeper_turn_id:1
+              ();
+            let hooks =
+              Masc.Keeper_hooks_agent_core.make_hooks
+                ~config
+                ~meta_ref:(ref meta)
+                ~turn_ctx_cell
+                ~generation:0
+                ~trace_id
+                ~keeper_turn_id:1
+                ~on_after_turn_ordinal:ignore
+                ()
+            in
+            let event_bus = Agent_core.Event_bus.create () in
+            let subscription =
+              Agent_core.Event_bus.subscribe
+                ~config:
+                  (Agent_core.Event_bus.subscription_config
+                     ~capacity:8
+                     ~overflow:Agent_core.Event_bus.Drop_oldest
+                   |> Result.get_ok)
+                event_bus
+            in
+            let agent =
+              Agent_core.Agent.create
+                ~net
+                ~config:
+                  { (Agent_core.Types.default_config ~model:"test-model") with
+                    name = agent_name
+                  }
+                ~tools:bundle.tools
+                ~options:{ Agent_core.Agent.default_options with hooks }
+                ()
+            in
+            let execute_identical_occurrence () =
+              let options = Agent_core.Agent.options agent in
+              match
+                Agent_core.Agent_tools.execute_tools
+                  ~context:(Agent_core.Agent.context agent)
+                  ~tools:
+                    (Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent))
+                  ~hooks:options.hooks
+                  ?tool_approval:options.tool_approval
+                  ~event_bus:(Some event_bus)
+                  ~tracer:options.tracer
+                  ~agent_name
+                  ~turn_count:0
+                  ~usage:(Agent_core.Agent.state agent).usage
+                  [ Agent_core.Types.ToolUse
+                      { id = ""
+                      ; name = "keeper_surface_read"
+                      ; input =
+                          `Assoc
+                            [ "surface", `String "dashboard"
+                            ; "limit", `Int 1
+                            ]
+                      }
+                  ]
+              with
+              | Ok
+                  { Agent_core.Agent_tools.completed_results = [ result ]
+                  ; completion = Agent_core.Agent_tools.Continue_after_batch
+                  } ->
+                result
+              | Ok _ -> fail "identical Keeper invocation returned an unexpected report"
+              | Error _ -> fail "identical Keeper invocation failed"
+            in
+            (* Both calls deliberately have the same provider id, turn, planned
+               index, tool and input. Their heap identity is the only occurrence
+               discriminator, and neither completion is bridged until both hooks
+               have registered their joins. *)
+            let first = execute_identical_occurrence () in
+            let second = execute_identical_occurrence () in
+            check bool
+              "production dispatch creates distinct invocation objects"
+              false
+              (first.invocation == second.invocation);
+            check string
+              "provider ids are structurally identical"
+              (Agent_core.Tool_contract.Invocation.tool_use_id first.invocation)
+              (Agent_core.Tool_contract.Invocation.tool_use_id second.invocation);
+            check int
+              "turns are structurally identical"
+              (Agent_core.Tool_contract.Invocation.turn first.invocation)
+              (Agent_core.Tool_contract.Invocation.turn second.invocation);
+            check int
+              "planned indices are structurally identical"
+              (Agent_core.Tool_contract.Invocation.planned_index first.invocation)
+              (Agent_core.Tool_contract.Invocation.planned_index second.invocation);
+            check bool
+              "schedules are structurally identical"
+              true
+              (Agent_core.Tool_contract.Invocation.schedule first.invocation
+               = Agent_core.Tool_contract.Invocation.schedule second.invocation);
+            check bool
+              "completion contracts are structurally identical"
+              true
+              (Agent_core.Tool_contract.Invocation.completion first.invocation
+               = Agent_core.Tool_contract.Invocation.completion second.invocation);
+            let original_result_bytes =
+              List.map
+                (fun (result : Agent_core.Agent_tools.tool_execution_result) ->
+                   match Tool_output.decode_from_agent_core result.content with
+                   | Tool_output.Decoded reference ->
+                     let original =
+                       fetch_artifact_exn
+                         ~base_path:config.base_path
+                         reference
+                     in
+                     check bool
+                       "externalized result is smaller than its original payload"
+                       true
+                       (String.length result.content < String.length original);
+                     String.length original
+                   | Tool_output.Not_marker ->
+                     fail "production Keeper result was not externalized"
+                   | Tool_output.Invalid_marker { detail } ->
+                     failf "production Keeper result has invalid marker: %s" detail)
+                [ first; second ]
+            in
+            let expected_original_bytes =
+              match original_result_bytes with
+              | [ first_bytes; second_bytes ] ->
+                check int
+                  "identical reads externalize the same original byte count"
+                  first_bytes
+                  second_bytes;
+                first_bytes
+              | _ -> fail "expected original byte counts for two Keeper results"
+            in
+            let completion_json =
+              Agent_core.Event_bus.drain subscription
+              |> List.filter_map (fun (event : Agent_core.Event_bus.event) ->
+                match event.payload with
+                | Agent_core.Event_bus.ToolCompleted _ ->
+                  Masc.Keeper_event_bridge.native_event_to_json event
+                | _ -> None)
+            in
+            check int
+              "both production completions reach the bridge"
+              2
+              (List.length completion_json);
+            let string_member key = function
+              | `Assoc fields ->
+                (match List.assoc_opt key fields with
+                 | Some (`String value) -> Some value
+                 | _ -> None)
+              | _ -> None
+            in
+            let event_execution_ids =
+              List.map
+                (fun json ->
+                   match
+                     Option.bind
+                       (match json with
+                        | `Assoc fields -> List.assoc_opt "payload" fields
+                        | _ -> None)
+                       (string_member "execution_id")
+                   with
+                   | Some execution_id -> execution_id
+                   | None -> fail "bridged Keeper completion has no execution_id")
+                completion_json
+            in
+            check int
+              "each occurrence keeps a distinct execution id"
+              2
+              (List.length (List.sort_uniq String.compare event_execution_ids));
+            let log_rows =
+              Masc.Keeper_tool_call_log.read_recent
+                ~keeper_name:meta.name
+                ~n:2
+                ()
+            in
+            check int "both calls reach the durable tool log" 2 (List.length log_rows);
+            let log_execution_ids =
+              List.map
+                (fun row ->
+                   match string_member "execution_id" row with
+                   | Some execution_id -> execution_id
+                   | None -> fail "durable Keeper tool row has no execution_id")
+                log_rows
+            in
+            check
+              (list string)
+              "event and durable-log joins agree"
+              (List.sort String.compare log_execution_ids)
+              (List.sort String.compare event_execution_ids);
+            List.iter
+              (fun row ->
+                 match row with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "result_bytes" fields with
+                    | Some (`Int bytes) ->
+                      check int
+                        "handler original-byte observation reaches durable row"
+                        expected_original_bytes
+                        bytes
+                    | _ -> fail "durable Keeper tool row has no result_bytes")
+                 | _ -> fail "durable Keeper tool row is not an object")
+              log_rows;
+            check int
+              "post hooks consume both handler observations"
+              0
+              (Masc.Keeper_tool_call_log.pending_truncation_count_for_testing ());
+            check int
+              "bridge consumes both exact joins"
+              0
+              (Masc.Keeper_execution_join.For_testing.size ())))
+;;
+
 let test_manual_gate_defers_publication_writes_before_recovery () =
   with_exec_fixture
     "keeper_tool_dispatch_manual_publication_gate"
@@ -4378,6 +4633,8 @@ let () =
         test_execute_with_outcome_missing_file_is_failure;
       test_case "initializing recovery isolates only publication writes" `Quick
         test_initializing_recovery_isolates_only_publication_writes;
+      test_case "identical Keeper invocations join across production boundaries" `Quick
+        test_identical_keeper_invocations_join_across_production_boundaries;
       test_case "Manual Gate defers writes before recovery acquisition" `Quick
         test_manual_gate_defers_publication_writes_before_recovery;
       test_case "Manual Gate defers memory write before persistence" `Quick

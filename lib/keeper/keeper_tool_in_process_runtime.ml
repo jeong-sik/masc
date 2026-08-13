@@ -1044,6 +1044,14 @@ let connector_post_replay_of_gate_input input =
   | _ -> Error "approved connector_post input must be an object"
 ;;
 
+let connector_post_replay_target = function
+  | Replay_discord_post { channel_id; _ } ->
+    Keeper_surface_post.To_discord { channel_id }
+  | Replay_slack_post { channel_id; thread_ts; blocks; _ } ->
+    Keeper_surface_post.To_slack
+      { channel_id; thread_ts; blocks = Some blocks }
+;;
+
 let with_connector_post_gate_execution
       ~config
       ~(meta : keeper_meta)

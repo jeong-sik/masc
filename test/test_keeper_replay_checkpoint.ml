@@ -385,6 +385,34 @@ let test_empty_success_preserves_tool_execution_suffix () =
     (prune_reason_to_string reason)
 ;;
 
+let test_terminal_effect_suppression_drops_plain_provider_response () =
+  let open Agent_core.Types in
+  let history =
+    [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
+  in
+  let current_user = message User [ Text "approved connector replay evidence" ] in
+  let provider_response =
+    message Assistant [ Text "The approved message was already sent." ]
+  in
+  let patched, reason =
+    Finalize.checkpoint_for_replay_persistence
+      ~history_messages:history
+      ~session_id:"terminal-effect-session"
+      ~response_text:""
+      ~suppress_visible_response:true
+      (checkpoint (history @ [ current_user; provider_response ]))
+    |> expect_ok
+  in
+  Alcotest.(check bool)
+    "typed replay evidence remains and provider response is absent"
+    true
+    (patched.messages = history @ [ current_user ]);
+  Alcotest.(check (option string))
+    "terminal effect response pruning is observable"
+    (Some "suppressed_terminal_effect_response")
+    (prune_reason_to_string reason)
+;;
+
 let test_input_required_preserves_exact_tool_failure_suffix () =
   let open Agent_core.Types in
   let history =
@@ -673,6 +701,10 @@ let () =
             "empty success preserves tool execution suffix"
             `Quick
             test_empty_success_preserves_tool_execution_suffix
+        ; Alcotest.test_case
+            "terminal effect suppression drops provider response"
+            `Quick
+            test_terminal_effect_suppression_drops_plain_provider_response
         ; Alcotest.test_case
             "InputRequired preserves exact tool-failure suffix"
             `Quick

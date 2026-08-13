@@ -90,9 +90,20 @@ let finalize
     Keeper_agent_run_response_text.stop_reason_suppresses_visible_response
       result.stop_reason
   in
+  (* Every arm named, no catch-all: a new outcome must state whether its effect
+     already reached the reader rather than defaulting to "did not". *)
+  let terminal_effect_settled =
+    match turn_outcome with
+    | Keeper_turn_outcome.External_effect_completed -> true
+    | Keeper_turn_outcome.Visible_reply
+    | Keeper_turn_outcome.Continuation_checkpoint
+    | Keeper_turn_outcome.External_effect_pending
+    | Keeper_turn_outcome.No_visible_reply -> false
+  in
   let suppression_reasons =
     Keeper_replay_checkpoint.wire_capture_response_suppression_reasons
       ~control_checkpoint
+      ~terminal_effect_settled
   in
   let suppress_visible_response = suppression_reasons <> [] in
   let raw_response_text_present =
@@ -165,6 +176,7 @@ let finalize
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
+          ~suppress_visible_response
           ~stop_reason:result.stop_reason
           checkpoint
       in

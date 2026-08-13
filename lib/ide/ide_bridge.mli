@@ -83,20 +83,6 @@ val ingest_tool_event :
     {!ingest_tool_event_from_hook}, which projects both from the fact's
     attribution. *)
 
-val ingest_turn_event :
-  base_path:string ->
-  turn_id:string ->
-  keeper_id:string ->
-  phase:string ->
-  model_used:string option ->
-  tools_used:string list ->
-  stop_reason:string option ->
-  duration_ms:int option ->
-  timestamp_ms:int64 ->
-  unit
-(** RFC-0378: a turn is a keeper-timeline fact and carries no
-    attribution — the per-codebase timeline is a join on [turn_id]. *)
-
 (** Extract and ingest tool event from raw hook parameters.
     [typed_outcome_str] is pre-computed from [Keeper_tool_outcome.t]. *)
 val ingest_tool_event_from_hook :

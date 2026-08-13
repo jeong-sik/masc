@@ -15,22 +15,10 @@ let storage_partition_of_file_attribution = function
   | Agent_observation.Unaddressed _ -> default_partition
 ;;
 
-let storage_partition_of_attribution = function
-  | Agent_observation.File file_attribution ->
-    storage_partition_of_file_attribution file_attribution
-  | Agent_observation.Pathless -> default_partition
-;;
-
 let file_path_of_file_attribution = function
   | Agent_observation.Addressed { address; _ } ->
     Agent_observation.Code_address.path address
   | Agent_observation.Unaddressed { attempted_path; _ } -> attempted_path
-;;
-
-let file_path_of_attribution = function
-  | Agent_observation.File file_attribution ->
-    Some (file_path_of_file_attribution file_attribution)
-  | Agent_observation.Pathless -> None
 ;;
 
 type event_kind =
@@ -497,41 +485,6 @@ let ingest_tool_event
    | exn ->
      Printf.eprintf "Ide_bridge.ingest_tool_event error: %s\n%!" (Printexc.to_string exn))
 
-let ingest_turn_event
-    ~base_path
-    ~turn_id
-    ~keeper_id
-    ~phase
-    ~model_used
-    ~tools_used
-    ~stop_reason
-    ~duration_ms
-    ~timestamp_ms
-  =
-  (* RFC-0378: a turn is a keeper-timeline fact — it can touch any number
-     of codebases, so it carries no attribution and the per-codebase
-     timeline is a join on [turn_id]. Routed to the shared orphan
-     directory until the B rung gives keeper facts their own store. *)
-  let partition = default_partition in
-  let event =
-    Turn_event
-      { turn_id
-      ; keeper_id
-      ; phase
-      ; model_used
-      ; tools_used
-      ; stop_reason
-      ; duration_ms
-      ; timestamp_ms
-      }
-  in
-  (try append_event ~base_dir:base_path ~partition ~event
-   with
-   | Eio.Cancel.Cancelled _ as e ->
-     Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
-   | exn ->
-     Printf.eprintf "Ide_bridge.ingest_turn_event error: %s\n%!" (Printexc.to_string exn))
-
 let cursor_line_of_input input =
   match int_field "line" input with
   | Some n -> Some n
@@ -743,9 +696,17 @@ let ingest_tool_event_from_hook
      [input] here is what put absolute host paths, sandbox-rooted
      [repos/<id>/…] paths, and repo-relative paths in one partition, none
      of which a reader can join against the region and annotation rows
-     the same resolver produced (masc#28582). *)
-  let partition = storage_partition_of_attribution attribution in
-  let file_path = file_path_of_attribution attribution in
+     the same resolver produced (masc#28582).
+
+     RFC-0378 §5.2: the ide store persists addressed code facts only.
+     Pathless and unaddressed tool facts stay on the bus; their durable
+     record is the keeper tool_calls store. *)
+  match attribution with
+  | Agent_observation.Pathless
+  | Agent_observation.File (Agent_observation.Unaddressed _) -> ()
+  | Agent_observation.File (Agent_observation.Addressed _ as addressed) ->
+  let partition = storage_partition_of_file_attribution addressed in
+  let file_path = Some (file_path_of_file_attribution addressed) in
   let summary =
     String_util.utf8_safe ~max_bytes:200 ~suffix:"" output_text
     |> String_util.to_string
@@ -807,28 +768,21 @@ let install_agent_observation_sinks () =
           ~duration_ms:event.duration_ms
           ~output_text:event.output_text
           ~input:event.input));
-  Agent_observation.register_turn_event_sink
-    (fun (event : Agent_observation.turn_event) ->
-      Ide_ingest_queue.submit (fun () ->
-        ingest_turn_event
-          ~base_path:event.base_path
-          ~turn_id:event.turn_id
-          ~keeper_id:event.keeper_id
-          ~phase:event.phase
-          ~model_used:event.model_used
-          ~tools_used:event.tools_used
-          ~stop_reason:event.stop_reason
-          ~duration_ms:event.duration_ms
-          ~timestamp_ms:event.timestamp_ms));
   Agent_observation.register_write_region_sink
     (fun (event : Agent_observation.write_region_event) ->
       try
-        Ide_region_tracker.ingest_tool_call
-          ~base_dir:event.base_path
-          ~partition:(storage_partition_of_file_attribution event.attribution)
-          ~keeper_id:event.keeper_id
-          ~turn:event.turn
-          event.tool_call_json;
+        (match event.attribution with
+         | Agent_observation.Unaddressed _ ->
+           (* RFC-0378 §5.2: not persisted here — the durable record of an
+              unattributed write is the keeper tool_calls store. *)
+           ()
+         | Agent_observation.Addressed _ as addressed ->
+           Ide_region_tracker.ingest_tool_call
+             ~base_dir:event.base_path
+             ~partition:(storage_partition_of_file_attribution addressed)
+             ~keeper_id:event.keeper_id
+             ~turn:event.turn
+             event.tool_call_json);
         Ok ()
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -850,12 +804,23 @@ let install_agent_observation_sinks () =
            ; references
            }
           : Agent_observation.annotation_request) ->
+      match attribution with
+      | Agent_observation.Unaddressed { reason; attempted_path } ->
+        (* RFC-0378 §5.3: an annotation that fails attribution is a typed
+           reject, never an ok:true burial in a partition no repo-scoped
+           read can see. *)
+        Error
+          (Printf.sprintf
+             "annotation target failed attribution (%s): %s"
+             (Agent_observation.Unattributed.reason_to_string reason)
+             attempted_path)
+      | Agent_observation.Addressed _ as addressed ->
       match
         Ide_annotations.create
           ~base_dir:base_path
-          ~partition:(storage_partition_of_file_attribution attribution)
+          ~partition:(storage_partition_of_file_attribution addressed)
           ~keeper_id
-          ~file_path:(file_path_of_file_attribution attribution)
+          ~file_path:(file_path_of_file_attribution addressed)
           ~line_start
           ~line_end
           ~kind

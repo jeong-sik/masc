@@ -258,22 +258,6 @@ type tool_event =
   ; input : Yojson.Safe.t
   }
 
-(* A turn is a keeper-timeline fact by definition (RFC-0378 §1): it can
-   touch any number of codebases, so it carries no attribution — the
-   per-codebase timeline is derived by joining addressed tool facts on
-   [turn_id]. *)
-type turn_event =
-  { base_path : string
-  ; turn_id : string
-  ; keeper_id : string
-  ; phase : string
-  ; model_used : string option
-  ; tools_used : string list
-  ; stop_reason : string option
-  ; duration_ms : int option
-  ; timestamp_ms : int64
-  }
-
 type write_region_event =
   { base_path : string
   ; attribution : file_attribution
@@ -392,7 +376,6 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type turn_event_sink = turn_event -> unit
 type write_region_error =
   | Write_region_sink_not_installed
   | Write_region_sink_failed
@@ -406,17 +389,14 @@ type write_region_sink = write_region_event -> (unit, write_region_error) result
 type annotation_sink = annotation_request -> (annotation_result, string) result
 
 let noop_tool_event_sink (_ : tool_event) = ()
-let noop_turn_event_sink (_ : turn_event) = ()
 let noop_write_region_sink (_ : write_region_event) = Error Write_region_sink_not_installed
 let noop_annotation_sink (_ : annotation_request) = Error "annotation sink is not installed"
 
 let tool_event_sink = Atomic.make noop_tool_event_sink
-let turn_event_sink = Atomic.make noop_turn_event_sink
 let write_region_sink = Atomic.make noop_write_region_sink
 let annotation_sink = Atomic.make noop_annotation_sink
 
 let register_tool_event_sink sink = Atomic.set tool_event_sink sink
-let register_turn_event_sink sink = Atomic.set turn_event_sink sink
 let register_write_region_sink sink = Atomic.set write_region_sink sink
 let register_annotation_sink sink = Atomic.set annotation_sink sink
 
@@ -424,18 +404,11 @@ let register_annotation_sink sink = Atomic.set annotation_sink sink
 
 type snapshot =
   { tool_events : tool_event list
-  ; turn_events : turn_event list
   ; write_regions : write_region_event list
   ; annotations : annotation_request list
   }
 
-let empty_snapshot =
-  { tool_events = []
-  ; turn_events = []
-  ; write_regions = []
-  ; annotations = []
-  }
-;;
+let empty_snapshot = { tool_events = []; write_regions = []; annotations = [] }
 
 let current_snapshot = Atomic.make empty_snapshot
 
@@ -447,7 +420,6 @@ let rec update_snapshot f =
 
 let reverse_snapshot snap =
   { tool_events = List.rev snap.tool_events
-  ; turn_events = List.rev snap.turn_events
   ; write_regions = List.rev snap.write_regions
   ; annotations = List.rev snap.annotations
   }
@@ -493,16 +465,6 @@ let tool_event_to_json (e : tool_event) =
     ]
 ;;
 
-let turn_event_to_json (e : turn_event) =
-  `Assoc
-    [ ("base_path", `String e.base_path)
-    ; ("turn_id", `String e.turn_id)
-    ; ("keeper_id", `String e.keeper_id)
-    ; ("phase", `String e.phase)
-    ; ("timestamp_ms", `Int (Int64.to_int e.timestamp_ms))
-    ]
-;;
-
 let write_region_to_json (e : write_region_event) =
   `Assoc
     [ ("base_path", `String e.base_path)
@@ -528,13 +490,11 @@ let annotation_to_json (a : annotation_request) =
 let snapshot_to_json (snap : snapshot) =
   `Assoc
     [ ("tool_events", `List (List.map tool_event_to_json snap.tool_events))
-    ; ("turn_events", `List (List.map turn_event_to_json snap.turn_events))
     ; ("write_regions", `List (List.map write_region_to_json snap.write_regions))
     ; ("annotations", `List (List.map annotation_to_json snap.annotations))
     ; ( "summary"
       , `Assoc
           [ ("tool_event_count", `Int (List.length snap.tool_events))
-          ; ("turn_event_count", `Int (List.length snap.turn_events))
           ; ("write_region_count", `Int (List.length snap.write_regions))
           ; ("annotation_count", `Int (List.length snap.annotations))
           ] )
@@ -550,11 +510,6 @@ let emit_tool_event event =
   Atomic.get tool_event_sink event
 ;;
 
-let emit_turn_event event =
-  update_snapshot (fun snap -> { snap with turn_events = event :: snap.turn_events });
-  Atomic.get turn_event_sink event
-;;
-
 let emit_write_region_event event =
   update_snapshot (fun snap -> { snap with write_regions = event :: snap.write_regions });
   Atomic.get write_region_sink event
@@ -567,7 +522,6 @@ let emit_annotation_request request =
 
 let reset_for_testing () =
   Atomic.set tool_event_sink noop_tool_event_sink;
-  Atomic.set turn_event_sink noop_turn_event_sink;
   Atomic.set write_region_sink noop_write_region_sink;
   Atomic.set annotation_sink noop_annotation_sink;
   Atomic.set current_snapshot empty_snapshot

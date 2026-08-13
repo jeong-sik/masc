@@ -55,7 +55,9 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
     install_fresh_ide_sink ();
     Agent_observation.emit_tool_event
       { base_path = base_dir
-      ; attribution = Agent_observation.File (unattributed_file "lib/test.ml")
+      ; attribution =
+          Agent_observation.File
+            (addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/test.ml")
         (* The producer mints this from the resolver; the raw [input]
            below still carries the argument the keeper typed. *)
       ; tool_name = "keeper_ide_annotate"
@@ -72,37 +74,28 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
             ; "focus_mode", `String "editing"
             ]
       };
-    (match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool ~limit:1 () with
+    (match
+       Ide_bridge.list_events
+         ~base_path:base_dir
+         ~partition:(Ide_paths.By_url "github.com_owner_repo")
+         ~kind:Ide_bridge.Tool
+         ~limit:1
+         ()
+     with
      | [ event ] ->
        check string "tool_name" "keeper_ide_annotate" (json_string "tool_name" event);
        check string "keeper_id" "keeper-alpha" (json_string "keeper_id" event)
      | _ -> fail "expected one tool event");
-    match Ide_bridge.list_cursors ~base_path:base_dir () with
+    match
+      Ide_bridge.list_cursors
+        ~base_path:base_dir
+        ~partition:(Ide_paths.By_url "github.com_owner_repo")
+        ()
+    with
     | [ cursor ] ->
       check string "cursor file" "lib/test.ml" (json_string "file_path" cursor);
       check int "cursor line" 42 (json_int "line" cursor)
     | _ -> fail "expected one cursor")
-;;
-
-let test_turn_observation_reaches_ide_storage () =
-  with_temp_dir (fun base_dir ->
-    install_fresh_ide_sink ();
-    Agent_observation.emit_turn_event
-      { base_path = base_dir
-      ; turn_id = "turn-10"
-      ; keeper_id = "keeper-beta"
-      ; phase = "completed"
-      ; model_used = Some "test-model"
-      ; tools_used = [ "execute" ]
-      ; stop_reason = Some "end_turn"
-      ; duration_ms = Some 123
-      ; timestamp_ms = 1717400000000L
-      };
-    match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Turn ~limit:1 () with
-    | [ event ] ->
-      check string "phase" "completed" (json_string "phase" event);
-      check string "keeper_id" "keeper-beta" (json_string "keeper_id" event)
-    | _ -> fail "expected one turn event")
 ;;
 
 let test_write_region_observation_reaches_ide_storage () =
@@ -187,7 +180,8 @@ let test_annotation_request_reaches_ide_storage () =
     let result =
       Agent_observation.emit_annotation_request
         { base_path = base_dir
-        ; attribution = unattributed_file "lib/annotated.ml"
+        ; attribution =
+            addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/annotated.ml"
         ; keeper_id = "keeper-epsilon"
         ; line_start = 7
         ; line_end = 9
@@ -212,7 +206,13 @@ let test_annotation_request_reaches_ide_storage () =
         ; task_id = None
         }
       in
-      (match Ide_annotations.list ~base_dir ~filter () with
+      (match
+         Ide_annotations.list
+           ~base_dir
+           ~partition:(Ide_paths.By_url "github.com_owner_repo")
+           ~filter
+           ()
+       with
        | [ annotation ] ->
          check string "id" created.id annotation.id;
          check string "content" "route through neutral observation bus" annotation.content;
@@ -376,7 +376,6 @@ let () =
             "tool observation reaches IDE storage and cursor"
             `Quick
             test_tool_observation_reaches_ide_storage_and_cursor
-        ; test_case "turn observation reaches IDE storage" `Quick test_turn_observation_reaches_ide_storage
         ; test_case
             "write-region observation reaches IDE storage"
             `Quick

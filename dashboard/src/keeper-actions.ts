@@ -45,7 +45,6 @@ import {
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
-  clearActiveStreamRequestId,
   finalizeAssistantEntry,
   releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
@@ -56,7 +55,6 @@ import {
   liveSendOwnsRequest,
   releaseLiveSendRequest,
   setActiveStream,
-  setActiveStreamRequestId,
   setRecordValue,
   setStatusDetail,
   updateThreadEntry,
@@ -989,7 +987,6 @@ export async function sendKeeperThreadMessage(
             [localId, assistantId],
             acceptedOperationId,
           )
-          setActiveStreamRequestId(keeperName, acceptedOperationId)
           upsertTrackedKeeperChatOperation({
             operationId: acceptedOperationId,
             keeperName,
@@ -1049,7 +1046,7 @@ export async function sendKeeperThreadMessage(
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
       if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-      clearActiveStreamRequestId(keeperName)
+      releaseActiveStreamRequestId(operationId)
       return
     }
 

@@ -4,6 +4,7 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  clearActiveStream,
   setActiveStream,
   setActiveStreamRequestId,
 } from './keeper-state'
@@ -143,6 +144,176 @@ describe('Keeper operation stream projection', () => {
     const entries = keeperThreads.value.sangsu ?? []
     expect(entries.find(entry => entry.requestId === 'kmsg-operation-1')?.text).toBe('')
     expect(entries.find(entry => entry.requestId === 'kmsg-operation-2')?.text).toBe('second')
+  })
+
+  // The direct send stamps the accepted operation id onto the bubble it is
+  // already streaming into (see [stampPlaceholderRequestId] in keeper-actions).
+  // The server also broadcasts every operation event to all sessions, so the
+  // same turn arrives twice in the tab that issued it. Both applications
+  // append, so each fragment lands twice. The echo joins late and misses the
+  // leading fragments, which puts the two copies out of phase -- that is why
+  // the operator sees them interleaved rather than cleanly repeated.
+  const directlyStreamingBubble = (): void => {
+    appendThreadEntry('sangsu', {
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: null,
+      requestId: 'kmsg-operation-1',
+      delivery: 'streaming',
+      streamState: 'streaming',
+      details: null,
+    })
+    // Mirrors keeper-actions: the direct send claims the accepted operation id.
+    setActiveStreamRequestId('sangsu', 'kmsg-operation-1')
+  }
+
+  // The server hands the very same AG-UI event to both transports
+  // (server_routes_http_keeper_stream: broadcast then
+  // publish_operation_live_event), so the echo carries an identical delta.
+  it('ignores the broadcast echo of a turn the direct stream already owns', () => {
+    directlyStreamingBubble()
+
+    for (const delta of ['오퍼레이터가 ', '비유/', '빈정거림']) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta })
+      applyKeeperOperationTurnEvent('sangsu', {
+        operationId: 'kmsg-operation-1',
+        event: { type: 'TEXT_MESSAGE_CONTENT', delta },
+      })
+    }
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('오퍼레이터가 비유/빈정거림')
+  })
+
+  it('claims ownership before the direct stream receives acceptance', () => {
+    appendThreadEntry('sangsu', {
+      id: 'reply-opening',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: null,
+      requestId: 'kmsg-opening',
+      delivery: 'sending',
+      streamState: 'opening',
+      details: null,
+    })
+    setActiveStream(
+      'sangsu',
+      'kmsg-opening',
+      'reply-opening',
+      new AbortController(),
+    )
+
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-opening',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'observer raced acceptance' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-opening')
+    expect(entry?.text).toBe('')
+  })
+
+  it('accepts observer events immediately after the direct owner exits', () => {
+    directlyStreamingBubble()
+    setActiveStream(
+      'sangsu',
+      'kmsg-operation-1',
+      'reply-1',
+      new AbortController(),
+    )
+
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-operation-1',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'owned echo' },
+    })
+    clearActiveStream('sangsu', 'kmsg-operation-1')
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-operation-1',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'observer continuation' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('observer continuation')
+  })
+
+  // A late-attaching echo drops the leading fragments, so the two copies land
+  // out of phase and read as interleaved rather than as a clean repetition --
+  // this is the shape the operator reported.
+  it('ignores a broadcast echo that joined the turn late', () => {
+    directlyStreamingBubble()
+
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: '오퍼레이터가 ',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: '비유/',
+    })
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-operation-1',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '비유/' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('오퍼레이터가 비유/')
+  })
+
+  it('ignores the broadcast echo of thinking deltas the direct stream already owns', () => {
+    directlyStreamingBubble()
+
+    // Both paths enqueue into one pending buffer keyed by keeper+entry, so an
+    // echo appends into the same chunk array the direct stream is filling.
+    for (const delta of ['오퍼레이터가 ', '비유/']) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta },
+      })
+      applyKeeperOperationTurnEvent('sangsu', {
+        operationId: 'kmsg-operation-1',
+        event: {
+          type: 'CUSTOM',
+          name: 'KEEPER_THINKING_DELTA',
+          value: { index: 0, delta },
+        },
+      })
+    }
+    _flushPendingKeeperStreamDeltasForTests()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    const think = (entry?.traceSteps ?? []).filter(step => step.kind === 'think')
+    expect(think.map(step => step.text)).toEqual(['오퍼레이터가 비유/'])
+  })
+
+  it('still applies broadcast events for a turn this session does not own', () => {
+    appendThreadEntry('sangsu', {
+      id: 'reply-1',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: null,
+      requestId: 'kmsg-operation-1',
+      delivery: 'streaming',
+      streamState: 'streaming',
+      details: null,
+    })
+
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-operation-1',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'from another tab' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('from another tab')
   })
 
   it('keeps concurrent operation controllers independent', () => {

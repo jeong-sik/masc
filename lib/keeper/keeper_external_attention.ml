@@ -391,6 +391,33 @@ let recorded_item_by_event_id events event_id =
       | Recorded _ | Resolved _ | Ignored _ -> None)
     events
 
+(* RFC-0377: [load_events] parses the whole file on every call, exactly the
+   O(file)-per-call shape the [dedup_window_bytes] comment above already
+   warns against for [record]'s dedup scan. A caller resolving a *batch* of
+   event_ids (e.g. every stimulus admitted into one turn) must not call
+   [load_events] once per id — that reintroduces the same O(N * file) trap
+   on the read side. Load once, then resolve every id against that one
+   in-memory list via a single pass building an id -> item table (first
+   [Recorded] occurrence per id wins, matching [recorded_item_by_event_id]
+   exactly), so the whole batch costs one file read regardless of size. *)
+let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
+  let events = load_events ~base_path ~keeper_name in
+  let wanted : (string, unit) Hashtbl.t = Hashtbl.create (List.length event_ids) in
+  List.iter (fun event_id -> Hashtbl.replace wanted event_id ()) event_ids;
+  let found : (string, item) Hashtbl.t = Hashtbl.create (List.length event_ids) in
+  List.iter
+    (function
+      | Recorded item
+        when Hashtbl.mem wanted item.event_id
+             && not (Hashtbl.mem found item.event_id) ->
+        Hashtbl.add found item.event_id item
+      | Recorded _ | Resolved _ | Ignored _ -> ())
+    events;
+  List.filter_map
+    (fun event_id ->
+       Option.map (fun item -> event_id, item) (Hashtbl.find_opt found event_id))
+    event_ids
+
 (* Read one bounded tail without parsing either boundary fragment. The writer
    may be mid-append, and [from] usually lands mid-line, so only bytes strictly
    between the first and last newline are complete records. *)

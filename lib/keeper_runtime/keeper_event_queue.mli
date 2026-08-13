@@ -317,6 +317,12 @@ val urgency_of_string : string -> (urgency, string) result
 val is_board_signal : stimulus_payload -> bool
 (** [true] iff the payload is a [Board_signal]. *)
 
+val connector_attention_channel :
+  stimulus_payload -> Keeper_continuation_channel.t option
+(** [Some channel] iff the payload is [Connector_attention], carrying its
+    routed channel. [None] for every other payload kind (RFC-0377 batch
+    intake). *)
+
 val drain_board_all : t -> stimulus list * t
 (** [drain_board_all q] separates every board-signal stimulus from the
     rest of the queue, regardless of arrival time (RFC-0334 W2: the turn

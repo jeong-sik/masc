@@ -181,6 +181,46 @@ let same_route a b =
   | (Dashboard _ | Discord _ | Slack _ | Unrouted _), (Dashboard _ | Discord _ | Slack _ | Unrouted _)
     -> false
 
+(* RFC-0377: batching pending Connector_attention stimuli needs "is this the
+   same conversation", which is deliberately looser than [same_route].
+   [reply_to_message_id] (Discord) is stamped with the inbound message's own
+   id at enqueue time (server_discord_in_process_gateway.handle_ambient), so
+   every ambient message gets a distinct value there — comparing it would
+   make two pending messages from the same channel never coalesce, which
+   defeats the batch this predicate exists to build. [thread_ts] (Slack) has
+   the same per-message shape at the ambient producer. [channel_id] alone is
+   already the exact conversation coordinate, for both connectors:
+   - Discord channel ids are Discord-global-unique snowflakes (never reused
+     across guilds), so comparing [guild_id] too would be redundant, not
+     more precise — [channel_id] alone is compared here. The Discord
+     producer additionally sets [thread_id = Some channel_id] when
+     [channel_id] is itself a tracked thread, so [channel_id] alone already
+     disambiguates thread vs. parent channel too.
+   - An existing comment on [slack_conversation_id] establishes the same for
+     Slack ("threads share the parent channel id, so the conversation id is
+     keyed on the channel alone").
+   [user_id] is the message's author, not the conversation's location, so
+   two different users posting into the same channel still share one
+   conversation coordinate — the Keeper decides per RFC-0377 §3 whether to
+   answer each individually. *)
+let same_conversation a b =
+  match a, b with
+  | Dashboard { thread_id = left }, Dashboard { thread_id = right } ->
+    String.equal left right
+  | ( Discord { channel_id = left_channel; _ }
+    , Discord { channel_id = right_channel; _ } ) ->
+    String.equal left_channel right_channel
+  | ( Slack { channel_id = left_channel; _ }
+    , Slack { channel_id = right_channel; _ } ) ->
+    String.equal left_channel right_channel
+  | Unrouted _, Unrouted _ -> false
+  (* Distinct-constructor pairs share no conversation. Listing the
+     constructors explicitly (not [_]) keeps this exhaustive: a new
+     connector forces a compile error here rather than silently
+     defaulting to [false]. *)
+  | (Dashboard _ | Discord _ | Slack _ | Unrouted _), (Dashboard _ | Discord _ | Slack _ | Unrouted _)
+    -> false
+
 let option_string_fields fields =
   List.filter_map
     (fun (name, value) -> Option.map (fun value -> name, `String value) value)

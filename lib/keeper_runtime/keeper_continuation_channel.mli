@@ -79,6 +79,16 @@ val describe : t -> string
     destination to share). *)
 val same_route : t -> t -> bool
 
+(** [same_conversation a b] is [true] when two channels identify the same
+    connector conversation for stimulus-batching purposes (RFC-0377): same
+    channel/thread location, regardless of which specific message a reply
+    would target. This is deliberately looser than {!same_route}: Discord's
+    [reply_to_message_id] and Slack's [thread_ts] are stamped per inbound
+    message at the ambient producer, so two pending messages from the same
+    conversation almost never share a {!same_route} value. Two [Unrouted]
+    values are never the same conversation, matching {!same_route}. *)
+val same_conversation : t -> t -> bool
+
 (** [to_yojson t] serializes to a tagged object [{ "kind": <tag>; ... }]. *)
 val to_yojson : t -> Yojson.Safe.t
 

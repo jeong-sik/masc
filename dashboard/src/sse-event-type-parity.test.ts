@@ -4,10 +4,11 @@ import { resolve } from 'node:path'
 import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from './lib/keeper-chat-stream-contract'
+import { SSE_EVENT_TYPES } from './types/sse-event-registry'
 
 // Cross-boundary parity gate for the SSE event-type strings the dashboard
-// routes by EXACT MATCH (`event.type === 'X'` in sse-store.ts). These are the
-// approval-class events: a backend rename or removal silently drops the FE
+// routes by exact comparison or as a SIMPLE_ROUTES key. A backend rename or
+// removal silently drops the FE
 // handler (the badge/feature stops updating) while the test suite stays green,
 // because nothing binds the FE literal to the backend emit. PR #22115 fixed
 // this for approval:pending / approval:resolved; this generalizes it to every
@@ -20,11 +21,10 @@ import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from './lib/keeper-chat-stream-contrac
 // of both maps, so a new exact-match route forces a classification here instead
 // of slipping through unclassified.
 //
-// Scope (interim, RFC-0049 parity-gate precedent): FE -> backend direction only
-// — every FE-routed type must be backend-emitted-or-excepted. The reverse
-// (backend emits a type the FE never handles) and full compile-time enforcement
-// (closed event-type sum + typed broadcast API + raw-string ban) are the
-// keystone, tracked separately (MASC task-1478 sibling / RFC-0004 increment).
+// The assertions are deliberately bilateral: every FE route has a producer or
+// explicit external owner, and every registered backend producer has a FE
+// route. SSEEventType itself is a closed sum derived from SSE_EVENT_TYPES.
+// Schedule remains polling-only and is outside this server-push registry.
 //
 // vitest cwd = dashboard/, so backend sources are one level up under ../lib. A
 // wrong path throws ENOENT (loud fail), never a vacuous pass. The source parser
@@ -44,6 +44,18 @@ import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from './lib/keeper-chat-stream-contrac
 // (`"type", `String "..."` or `~event_type:"..."`), not the site that branches
 // on it.
 const BACKEND_EMITTED: Record<string, string> = {
+  broadcast: '../lib/mcp_tool_runtime_comm.ml',
+  keeper_handoff: '../lib/keeper/keeper_unified_metrics_broadcast.ml',
+  keeper_compaction: '../lib/keeper/keeper_unified_metrics_broadcast.ml',
+  keeper_phase_changed: '../lib/keeper/keeper_registry.ml',
+  'masc/board_post': '../lib/mcp_tool_runtime_board.ml',
+  board_comment: '../lib/mcp_tool_runtime_board.ml',
+  'masc/board_delete': '../lib/mcp_tool_runtime_board.ml',
+  comment_added: '../lib/server/server_bootstrap_loops.ml',
+  post_voted: '../lib/server/server_bootstrap_loops.ml',
+  comment_voted: '../lib/server/server_bootstrap_loops.ml',
+  reaction_changed: '../lib/server/server_bootstrap_loops.ml',
+  internal_agent_runs_changed: '../lib/server/server_runtime_bootstrap.ml',
   'approval:audit': '../lib/keeper/keeper_gate.ml',
   'approval:pending': '../lib/keeper/keeper_approval_queue.ml',
   'approval:resolved': '../lib/keeper/keeper_approval_queue.ml',
@@ -61,15 +73,35 @@ const BACKEND_EMITTED: Record<string, string> = {
   namespace_truth_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   operator_digest: '../lib/server/server_dashboard_http_core_digest_refresh.ml',
   operator_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
-  post_created: '../lib/keeper_runtime/keeper_event_queue.ml',
+  post_created: '../lib/server/server_bootstrap_loops.ml',
   project_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   transport_health_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   fusion_run_status: '../lib/fusion/fusion_sink.ml',
 }
 
+// The router normalizes these wire aliases before dispatch. Keep the route key
+// in BACKEND_EMITTED and bind its exact producer literal here.
+const BACKEND_WIRE_TYPE_ALIASES: Partial<Record<keyof typeof BACKEND_EMITTED, string>> = {
+  broadcast: 'masc/broadcast',
+}
+
 // event-type -> why it has no masc backend literal to bind to. Keep short and
 // justified; every entry is an event the FE routes but masc lib/ does not emit.
 const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
+  agent_bound:
+    'Workspace lifecycle wire alias consumed by the dashboard; the current masc backend has no direct literal emitter.',
+  agent_unbound:
+    'Workspace lifecycle wire alias consumed by the dashboard; the current masc backend has no direct literal emitter.',
+  keeper_guardrail:
+    'Agent/runtime guardrail event consumed by the dashboard; the current masc backend has no direct literal emitter.',
+  board_post:
+    'Legacy board alias; the current masc backend emits masc/board_post.',
+  'masc/board_comment':
+    'Namespaced board alias; the current masc backend emits board_comment.',
+  board_delete:
+    'Legacy board alias; the current masc backend emits masc/board_delete.',
+  activity:
+    'Dashboard activity invalidation signal; current backend activity updates use runtime_param_changed or activity_* events.',
   'agent_core:agent_failed':
     'Agent Core subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (agent_core: prefix).',
   'agent_core:context_compacted':
@@ -77,7 +109,7 @@ const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
 }
 
 function parseExportedStringConstants(source: string): Map<string, string> {
-  const file = ts.createSourceFile('schemas/sse.ts', source, ts.ScriptTarget.Latest, true)
+  const file = ts.createSourceFile('sse-event-registry.ts', source, ts.ScriptTarget.Latest, true)
   const constants = new Map<string, string>()
   for (const statement of file.statements) {
     if (!ts.isVariableStatement(statement)) continue
@@ -131,7 +163,7 @@ function routedEventTypeFromExpression(
     const value = exportedConstants.get(expression.text)
     if (!value) {
       throw new Error(
-        `SSE exact-route comparison references ${expression.text}, but schemas/sse.ts does not export it as a string constant`,
+        `SSE exact-route comparison references ${expression.text}, but sse-event-registry.ts does not export it as a string constant`,
       )
     }
     return value
@@ -160,6 +192,27 @@ function parseFeRoutedEventTypes(
   const found = new Set<string>()
   const file = ts.createSourceFile('sse-store.ts', source, ts.ScriptTarget.Latest, true)
   function visit(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node)
+      && ts.isIdentifier(node.name)
+      && node.name.text === 'SIMPLE_ROUTES'
+      && node.initializer
+    ) {
+      const initializer = node.initializer
+      if (!ts.isObjectLiteralExpression(initializer)) {
+        throw new Error('SIMPLE_ROUTES must remain an object literal for parity extraction')
+      }
+      for (const property of initializer.properties) {
+        if (!ts.isPropertyAssignment(property)) {
+          throw new Error('SIMPLE_ROUTES entries must be explicit property assignments')
+        }
+        if (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) {
+          found.add(property.name.text)
+          continue
+        }
+        throw new Error('SIMPLE_ROUTES keys must be identifier or string literals')
+      }
+    }
     if (ts.isBinaryExpression(node)) {
       const eventType = routedEventTypeFromBinaryExpression(node, exportedConstants)
       if (eventType) found.add(eventType)
@@ -170,16 +223,33 @@ function parseFeRoutedEventTypes(
   return found
 }
 
-const sseSchemaSource = readFileSync(resolve(process.cwd(), 'src/schemas/sse.ts'), 'utf8')
-const sseSchemaConstants = parseExportedStringConstants(sseSchemaSource)
+const sseRegistrySource = readFileSync(resolve(process.cwd(), 'src/types/sse-event-registry.ts'), 'utf8')
+const sseRegistryConstants = parseExportedStringConstants(sseRegistrySource)
 const sseStoreSource = readFileSync(resolve(process.cwd(), 'src/sse-store.ts'), 'utf8')
-const feRouted = parseFeRoutedEventTypes(sseStoreSource, sseSchemaConstants)
+const feRouted = parseFeRoutedEventTypes(sseStoreSource, sseRegistryConstants)
 const classified = new Set([
   ...Object.keys(BACKEND_EMITTED),
   ...Object.keys(FE_ONLY_OR_EXTERNAL),
 ])
 
 describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
+  it('keeps the closed event registry duplicate-free', () => {
+    expect(new Set(SSE_EVENT_TYPES).size).toBe(SSE_EVENT_TYPES.length)
+  })
+
+  it('extracts identifier and quoted SIMPLE_ROUTES keys', () => {
+    const source = `
+      const SIMPLE_ROUTES = {
+        keeper_heartbeat: { target: 'execution' },
+        'masc/board_post': { target: 'board' },
+      }
+    `
+    expect([...parseFeRoutedEventTypes(source, new Map())].sort()).toEqual([
+      'keeper_heartbeat',
+      'masc/board_post',
+    ])
+  })
+
   it('parses a non-empty FE exact-match routing inventory', () => {
     // Guard against a regex/refactor that silently makes the gate vacuous.
     expect(feRouted.size).toBeGreaterThanOrEqual(Object.keys(BACKEND_EMITTED).length)
@@ -193,6 +263,25 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
     ).toEqual([])
   })
 
+  it('registers every FE-routed event type in the closed frontend sum', () => {
+    const registered = new Set<string>(SSE_EVENT_TYPES)
+    const unregistered = [...feRouted].filter(t => !registered.has(t))
+    expect(unregistered, `FE routes missing from SSE_EVENT_TYPES: ${unregistered.join(', ')}`).toEqual([])
+  })
+
+  it('routes every registered backend-emitted event on the FE', () => {
+    const unrouted = Object.keys(BACKEND_EMITTED).filter(t => !feRouted.has(t))
+    expect(unrouted, `backend events without FE routes: ${unrouted.join(', ')}`).toEqual([])
+  })
+
+  it('registers every backend-emitted event in the closed frontend sum', () => {
+    const registered = new Set<string>(SSE_EVENT_TYPES)
+    const unregistered = Object.keys(BACKEND_EMITTED)
+      .map(t => BACKEND_WIRE_TYPE_ALIASES[t] ?? t)
+      .filter(t => !registered.has(t))
+    expect(unregistered, `backend events missing from SSE_EVENT_TYPES: ${unregistered.join(', ')}`).toEqual([])
+  })
+
   it('has no stale classification (every classified type is still FE-routed)', () => {
     const stale = [...classified].filter(t => !feRouted.has(t))
     expect(stale, `classified but no longer FE-routed (remove from maps): ${stale.join(', ')}`).toEqual(
@@ -203,18 +292,17 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
   for (const [eventType, backendFile] of Object.entries(BACKEND_EMITTED)) {
     it(`backend ${backendFile.replace('../', '')} still emits "${eventType}"`, () => {
       const source = readFileSync(resolve(process.cwd(), backendFile), 'utf8')
-      expect(source).toContain(`"${eventType}"`)
+      const wireType = BACKEND_WIRE_TYPE_ALIASES[eventType] ?? eventType
+      expect(source).toContain(`"${wireType}"`)
     })
   }
 
-  // Reverse direction, scoped to the approval:* class. The interim scope note
-  // at the top of this file excludes "backend emits a type the FE never
-  // handles", and that exclusion is exactly how approval:summary_updated
+  // Independent source extraction for the approval:* class. This is how
+  // approval:summary_updated
   // shipped unrouted: the constant existed in schemas/sse.ts, the payload had
   // schema coverage, and nothing bound it to a refresh — so Auto Judge
-  // verdicts settled invisibly until the 120-180s periodic sweep. Full-surface
-  // reverse parity remains the closed-sum keystone's job; this pins the one
-  // class the HITL queue's liveness depends on.
+  // verdicts settled invisibly until the 120-180s periodic sweep. Keep this
+  // producer-side positive control in addition to the bilateral registry gate.
   const backendApprovalEvents = ((): string[] => {
     const source = readFileSync(
       resolve(process.cwd(), '../lib/keeper/keeper_approval_queue.ml'),

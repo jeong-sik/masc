@@ -1,98 +1,11 @@
 import type { BoardActorIdentity, BoardPost } from './core'
+import type { SSEEventType } from './sse-event-registry'
+
+export { SSE_EVENT_TYPES, isSSEEventType } from './sse-event-registry'
+export type { SSEEventType }
 
 // --- SSE Events ---
-
-export type SSEEventType =
-  | 'agent_bound'
-  | 'masc/agent_bound'
-  | 'agent_unbound'
-  | 'masc/agent_unbound'
-  | 'broadcast'
-  | 'masc/broadcast'
-  | 'task_update'
-  | 'board_post'
-  | 'masc/board_post'
-  | 'board_comment'
-  | 'masc/board_comment'
-  | 'board_delete'
-  | 'masc/board_delete'
-  // Path A board events (notifications/board envelope, unwrapped to params.type)
-  | 'post_created'
-  | 'comment_added'
-  | 'post_voted'
-  | 'comment_voted'
-  | 'reaction_changed'
-  | 'heartbeat'
-  | 'keeper_heartbeat'
-  | 'keeper_handoff'
-  | 'masc/keeper_handoff'
-  | 'keeper_compaction'
-  | 'masc/keeper_compaction'
-  | 'keeper_guardrail'
-  | 'masc/keeper_guardrail'
-  | 'keeper_phase_changed'
-  | 'keeper_composite_changed'
-  | 'keeper_chat_appended'
-  | 'keeper_chat_operation_event'
-  | 'keeper_waiting_inventory_changed'
-  | 'keeper_compaction_snapshots_changed'
-  | 'agent_core_telemetry_sample'
-  | 'ide_cursor_changed'
-  | 'keeper_tool_call'
-  | 'masc/keeper_tool_call'
-  | 'keeper_tool_skipped'
-  | 'keeper_turn_complete'
-  | 'masc/keeper_turn_complete'
-  // RFC-0266 Phase 4: fusion run-status transitions pushed to the dashboard.
-  | 'fusion_run_status'
-  | 'internal_agent_runs_changed'
-  | 'client_input_approved'
-  | 'client_input_rejected'
-  | 'client_input_updated'
-  | 'runtime_param_changed'
-  | 'approval:pending'
-  | 'approval:resolved'
-  | 'approval:audit'
-  | 'approval:summary_updated'
-  // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
-  // Emitted by server_routes_http_routes_dashboard.ml.
-  | 'gate_mode_changed'
-  // Task claim notifications. Emitted by lib/task/tool_task_handlers.ml.
-  | 'masc/task_claimed'
-  // Agent Core bridge events (relayed from Event_bus via agent_core_sse_bridge)
-  | 'agent_core:masc:keeper:lifecycle'
-  | 'agent_core:masc:trust_updated'
-  | 'agent_core:masc:reputation_changed'
-  | 'agent_core:agent_started'
-  | 'agent_core:agent_completed'
-  | 'agent_core:agent_failed'
-  | 'agent_core:tool_called'
-  | 'agent_core:tool_completed'
-  | 'agent_core:turn_started'
-  | 'agent_core:turn_completed'
-  | 'agent_core:handoff_requested'
-  | 'agent_core:handoff_completed'
-  | 'agent_core:context_compacted'
-  | 'agent_core:task_state_changed'
-  // Harness observability events (#3165)
-  | 'agent_core:masc:harness:verdict_recorded'
-  | 'agent_core:masc:harness:pre_compact'
-  | 'agent_core:masc:harness:handoff'
-  // Forward-compat: the dashboard parser accepts any `agent_core:*` event so
-  // newer runtime bridges do not get dropped at the schema boundary.
-  | `agent_core:${string}`
-  // Server-push snapshot events (proactive cache broadcasts)
-  | 'project_snapshot'
-  | 'namespace_truth_snapshot'
-  | 'execution_snapshot'
-  | 'operator_snapshot'
-  | 'operator_digest'
-  | 'transport_health_snapshot'
-  // Global audit ledger streaming events (O2 Phase 2)
-  | 'audit_event'
-  | 'masc/audit_event'
-  | 'masc:audit_event'
-  | 'agent_core:masc:audit_event'
+// SSE types are derived from sse-event-registry.ts above.
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 // Closed set of journal sources. `'unknown'` is a first-class variant

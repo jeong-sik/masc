@@ -13,6 +13,7 @@ import type {
   SSEEvent,
   SSEEventType,
 } from '../types/sse'
+import { isSSEEventType } from '../types/sse-event-registry'
 import { KEEPER_CHAT_CUSTOM_EVENT_NAMES } from '../lib/keeper-chat-stream-contract'
 import { isRecord } from '../lib/type-guards'
 
@@ -25,83 +26,6 @@ type SchemaLike<T> = {
   parse(value: unknown): T
   safeParse(value: unknown): SafeParseResult<T>
 }
-
-export const SSE_APPROVAL_PENDING_EVENT = 'approval:pending'
-export const SSE_APPROVAL_RESOLVED_EVENT = 'approval:resolved'
-export const SSE_APPROVAL_AUDIT_EVENT = 'approval:audit'
-export const SSE_APPROVAL_SUMMARY_UPDATED_EVENT = 'approval:summary_updated'
-
-const FIXED_SSE_EVENT_TYPES = new Set([
-  'agent_bound',
-  'masc/agent_bound',
-  'agent_unbound',
-  'masc/agent_unbound',
-  'broadcast',
-  'masc/broadcast',
-  'task_update',
-  'board_post',
-  'masc/board_post',
-  'board_comment',
-  'masc/board_comment',
-  'board_delete',
-  'masc/board_delete',
-  'post_created',
-  'comment_added',
-  'post_voted',
-  'comment_voted',
-  'reaction_changed',
-  'heartbeat',
-  'keeper_heartbeat',
-  'keeper_handoff',
-  'masc/keeper_handoff',
-  'keeper_compaction',
-  'masc/keeper_compaction',
-  'keeper_guardrail',
-  'masc/keeper_guardrail',
-  'keeper_phase_changed',
-  'keeper_composite_changed',
-  'keeper_chat_appended',
-  'keeper_chat_operation_event',
-  'keeper_waiting_inventory_changed',
-  'keeper_compaction_snapshots_changed',
-  'agent_core_telemetry_sample',
-  'ide_cursor_changed',
-  'keeper_tool_call',
-  'masc/keeper_tool_call',
-  'keeper_tool_skipped',
-  'keeper_turn_complete',
-  'masc/keeper_turn_complete',
-  // RFC-0266 Phase 4: fusion run-status transitions (running -> completed/failed).
-  // Must be in this closed allowlist or parseSSEMessage drops the event at the
-  // parse boundary, before the live WS router (sse-store.ts routeServerPushEvent
-  // -> SIMPLE_ROUTES['fusion_run_status'] -> refreshFusionRuns) can dispatch it.
-  'fusion_run_status',
-  'internal_agent_runs_changed',
-  'client_input_approved',
-  'client_input_rejected',
-  'client_input_updated',
-  'runtime_param_changed',
-  SSE_APPROVAL_PENDING_EVENT,
-  SSE_APPROVAL_RESOLVED_EVENT,
-  SSE_APPROVAL_AUDIT_EVENT,
-  SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
-  // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
-  // Emitted by server_routes_http_routes_dashboard.ml.
-  'gate_mode_changed',
-  // Task claim notifications (#18839). Emitted by
-  // lib/task/tool_task_handlers.ml. Routed by the 'masc/task_' PREFIX_ROUTES
-  // entry in sse-store.ts.
-  'masc/task_claimed',
-  'project_snapshot',
-  'namespace_truth_snapshot',
-  'execution_snapshot',
-  'operator_snapshot',
-  'operator_digest',
-  'transport_health_snapshot',
-  'masc:audit_event',
-  'audit_event',
-  'masc/audit_event',
-])
 
 const STRING_FIELDS = new Set([
   'severity',
@@ -566,12 +490,6 @@ function isIgnorableMcpNotification(value: unknown): boolean {
   return value.method.startsWith('notifications/')
 }
 
-function isSSEEventType(value: unknown): value is SSEEventType {
-  return typeof value === 'string' && (
-    FIXED_SSE_EVENT_TYPES.has(value) || value.startsWith(AGENT_CORE_EVENT_PREFIX)
-  )
-}
-
 function schema<T>(
   safeParse: (value: unknown) => SafeParseResult<T>,
 ): SchemaLike<T> {
@@ -587,7 +505,7 @@ function schema<T>(
 
 export const SSEEventTypeSchema = schema<SSEEventType>((value) => {
   if (isSSEEventType(value)) return ok(value)
-  return fail(undefined, 'Expected a known SSE event type or an agent_core:* event type')
+  return fail(undefined, 'Expected a registered SSE event type')
 })
 
 export type { SSEEventType }
@@ -682,7 +600,7 @@ function malformedKeeperOperationProjection(
 export const SSEMessageSchema = schema<SSEMessage>((value) => {
   if (!isRecord(value)) return fail(undefined, 'Expected SSE message object')
   if (!isSSEEventType(value.type)) {
-    return fail('type', 'Expected known SSE event type or agent_core:* event type')
+    return fail('type', 'Expected registered SSE event type')
   }
 
   for (const key of STRING_FIELDS) {

@@ -22,10 +22,10 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('masc/agent_unbound')).toBe('masc/agent_unbound')
   })
 
-  it('accepts current and future agent-core-prefixed event types', () => {
+  it('accepts registered Agent Core event types and rejects unknown ones', () => {
     expect(SSEEventTypeSchema.parse('agent_core:agent_failed')).toBe('agent_core:agent_failed')
-    expect(SSEEventTypeSchema.parse('agent_core:masc:keeper_gate')).toBe('agent_core:masc:keeper_gate')
-    expect(SSEEventTypeSchema.parse('agent_core:future:event')).toBe('agent_core:future:event')
+    expect(SSEEventTypeSchema.parse('agent_core:turn_ready')).toBe('agent_core:turn_ready')
+    expect(SSEEventTypeSchema.safeParse('agent_core:future:event').success).toBe(false)
   })
 
   it('accepts audit event wire aliases', () => {
@@ -571,13 +571,28 @@ describe('parseSSEMessage', () => {
     warnSpy.mockRestore()
   })
 
-  it('keeps unknown agent-core-prefixed events instead of dropping them', () => {
+  it('keeps registered Agent Core events instead of dropping them', () => {
     const msg = parseSSEMessage({
       type: 'agent_core:slot_scheduler_observed',
       payload: { state: 'saturated', active: 3, max_slots: 3 },
     })
     expect(msg).not.toBeNull()
     expect(msg?.type).toBe('agent_core:slot_scheduler_observed')
+  })
+
+  it('drops unregistered Agent Core events at the wire boundary', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseSSEMessage({
+      type: 'agent_core:future:event',
+      payload: { state: 'unknown' },
+    })).toBeNull()
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[server-push] schema drift, event dropped',
+      expect.objectContaining({
+        raw: expect.objectContaining({ type: 'agent_core:future:event' }),
+      }),
+    )
+    warnSpy.mockRestore()
   })
 
   it('keeps agentCore telemetry tuple payloads instead of logging schema drift', () => {

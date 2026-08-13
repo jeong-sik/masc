@@ -20,7 +20,9 @@ import type {
   DashboardExecutionResponse,
   KeeperApprovalAuditReceipt,
   SSEEvent,
+  SSEEventType,
 } from './types'
+import { isSSEEventType } from './types/sse-event-registry'
 import type * as TransportHealth from './components/transport-health'
 import {
   keeperHeartbeats,
@@ -61,7 +63,7 @@ import {
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,
   SSE_APPROVAL_SUMMARY_UPDATED_EVENT,
-} from './schemas/sse'
+} from './types/sse-event-registry'
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
 import {
@@ -216,10 +218,10 @@ interface SimpleRoute {
   force?: boolean
 }
 
-// Route table maps server-push event type → refresh target. Only entries whose
-// corresponding server emitter exists in lib/ are kept; dead keys were
-// removed after cross-referencing the OCaml sources under lib/.
-const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
+// Route table maps registered server-push event types to refresh targets.
+// Source parity tests bind each key to an OCaml producer or an explicit
+// external/legacy alias classification.
+const SIMPLE_ROUTES: Partial<Record<SSEEventType, SimpleRoute>> = {
   // Agent lifecycle — emitted by lib/mcp_tool_runtime_workspace.ml
   agent_bound:         { target: 'execution' },
   agent_unbound:       { target: 'execution' },
@@ -626,7 +628,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
   }
 
   const routedType = normalizeSSEDispatchType(event.type)
-  const simpleRoute = SIMPLE_ROUTES[routedType]
+  const simpleRoute = isSSEEventType(routedType) ? SIMPLE_ROUTES[routedType] : undefined
   if (simpleRoute) {
     const refreshFn =
       simpleRoute.force && simpleRoute.target === 'execution'

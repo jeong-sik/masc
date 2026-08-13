@@ -203,7 +203,199 @@ let test_bundle_exactly_matches_model_visible_descriptors () =
             expected_names
             actual_names;
           check int "bundle contains no duplicate model names" (List.length actual_names)
-            (List.length bundle.tools)))
+            (List.length bundle.tools);
+          List.iter
+            (fun (tool : Agent_core.Tool.t) ->
+               let name = tool.schema.name in
+               let descriptor =
+                 match
+                   Keeper_tool_descriptor_resolution.descriptor_for_tool_name name
+                 with
+                 | Some descriptor -> descriptor
+                 | None -> failf "bundle tool %s has no descriptor owner" name
+               in
+               check bool
+                 (name ^ " has an explicit Agent Core descriptor")
+                 true
+                 (Option.is_some (Agent_core.Tool.descriptor tool));
+               (match descriptor.execution with
+                | Keeper_tool_descriptor.Ordinary expected_mode ->
+                  let expected_mode =
+                    match expected_mode with
+                    | Keeper_tool_descriptor.Serial -> Agent_core.Tool_contract.Serial
+                    | Keeper_tool_descriptor.Concurrent ->
+                      Agent_core.Tool_contract.Concurrent
+                  in
+                  check bool
+                    (name ^ " execution mode matches its descriptor")
+                    true
+                    (Agent_core.Tool.execution_mode tool = expected_mode);
+                  check bool
+                    (name ^ " continues after success")
+                    true
+                    (Agent_core.Tool.completion tool
+                     = Agent_core.Tool_contract.Continue_after_success)
+                | Keeper_tool_descriptor.Terminal ->
+                  check bool
+                    (name ^ " terminal tools are serial")
+                    true
+                    (Agent_core.Tool.execution_mode tool
+                     = Agent_core.Tool_contract.Serial);
+                  check bool
+                    (name ^ " terminal completion preserves unknown effect outcome")
+                    true
+                    (Agent_core.Tool.completion tool
+                     = Agent_core.Tool_contract.Terminal_after_success
+                         Agent_core.Tool_contract.Effect_outcome_unknown)))
+            bundle.tools))
+
+let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
+  ignore (init_registry ());
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_concurrent_tool_batch_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with
+   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      try Unix.rmdir dir with
+      | _ -> ())
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Eio.Switch.run
+       @@ fun sw ->
+       Masc_test_deps.with_publication_recovery_registry
+         ~sw
+         ~fs:(Eio.Stdenv.fs env)
+         ~registry_root:dir
+       @@ fun publication_recovery_registry ->
+       let config = Workspace.default_config dir in
+       let meta = make_meta ~name:"test-concurrent-tool-batch" () in
+       let publication_recovery =
+         publication_recovery_turn_context
+           ~registry:publication_recovery_registry
+           ~keeper_name:meta.name
+       in
+       let ctx_snapshot =
+         Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+       in
+       let bundle =
+         Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let require_tool name =
+              match
+                List.find_opt
+                  (fun (tool : Agent_core.Tool.t) ->
+                     String.equal tool.schema.name name)
+                  bundle.tools
+              with
+              | Some tool -> tool
+              | None -> failf "missing bundle tool %s" name
+            in
+            let entered_count = Atomic.make 0 in
+            let entered_schedules = ref [] in
+            let entered_schedules_mu = Stdlib.Mutex.create () in
+            let both_entered, resolve_both_entered = Eio.Promise.create () in
+            let release, resolve_release = Eio.Promise.create () in
+            let wrap tool =
+              { tool with
+                handler =
+                  (fun execution_env _input ->
+                     let invocation =
+                       match Agent_core.Tool.Execution_env.invocation execution_env with
+                       | Some invocation -> invocation
+                       | None -> failwith "scheduled tool omitted invocation"
+                     in
+                     let schedule =
+                       Agent_core.Tool_contract.Invocation.schedule invocation
+                     in
+                     Stdlib.Mutex.lock entered_schedules_mu;
+                     Fun.protect
+                       ~finally:(fun () -> Stdlib.Mutex.unlock entered_schedules_mu)
+                       (fun () ->
+                          entered_schedules := schedule :: !entered_schedules);
+                     let prior = Atomic.fetch_and_add entered_count 1 in
+                     if prior = 1 then Eio.Promise.resolve resolve_both_entered ();
+                     Eio.Promise.await release;
+                     Ok { Agent_core.Types.content = "barrier passed"; _meta = None })
+              }
+            in
+            let tools =
+              [ wrap (require_tool "keeper_time_now")
+              ; wrap (require_tool "masc_board_stats")
+              ]
+            in
+            let report = ref None in
+            Eio.Time.with_timeout_exn
+              (Eio.Stdenv.clock env)
+              2.0
+              (fun () ->
+                 Eio.Fiber.both
+                   (fun () ->
+                      report :=
+                        Some
+                          (Agent_core.Agent_tools.execute_tools
+                             ~context:(Agent_core.Context.create ())
+                             ~tools
+                             ~hooks:Agent_core.Hooks.empty
+                             ~event_bus:None
+                             ~tracer:Agent_core.Tracing.null
+                             ~agent_name:"test-concurrent-tool-batch-agent"
+                             ~turn_count:7
+                             ~usage:Agent_core.Types.empty_usage
+                             [ Agent_core.Types.ToolUse
+                                 { id = "time-1"
+                                 ; name = "keeper_time_now"
+                                 ; input = `Assoc []
+                                 }
+                             ; Agent_core.Types.ToolUse
+                                 { id = "stats-1"
+                                 ; name = "masc_board_stats"
+                                 ; input = `Assoc []
+                                 }
+                             ]))
+                   (fun () ->
+                      Eio.Promise.await both_entered;
+                      Eio.Promise.resolve resolve_release ()));
+            (match !report with
+             | Some (Ok { completed_results; _ }) ->
+               check int "both calls completed" 2 (List.length completed_results)
+             | Some (Error _) -> fail "concurrent batch returned an execution failure"
+             | None -> fail "concurrent batch returned no report");
+            let schedules =
+              !entered_schedules
+              |> List.sort (fun left right ->
+                Int.compare left.planned_index right.planned_index)
+            in
+            check int "both handlers crossed the barrier" 2 (List.length schedules);
+            List.iter
+              (fun (schedule : Agent_core.Tool_contract.schedule) ->
+                 check int "one shared batch index" 0 schedule.batch_index;
+                 check int "batch carries both calls" 2 schedule.batch_size;
+                 check bool
+                   "execution mode is concurrent"
+                   true
+                   (schedule.execution_mode = Agent_core.Tool_contract.Concurrent))
+              schedules;
+            check
+              (list int)
+              "results retain planned order"
+              [ 0; 1 ]
+              (List.map
+                 (fun (schedule : Agent_core.Tool_contract.schedule) ->
+                    schedule.planned_index)
+                 schedules)))
 
 let test_missing_current_task_reconciled_before_transition_hint () =
   ignore (init_registry ());
@@ -436,6 +628,8 @@ let () =
             test_fusion_default_descriptor_is_bundle_visible;
           test_case "bundle exactly matches model-visible descriptors" `Quick
             test_bundle_exactly_matches_model_visible_descriptors;
+          test_case "explicit concurrent tools enter one Agent Core batch" `Quick
+            test_explicit_concurrent_tools_enter_one_agent_core_batch;
           test_case "missing current task reconciles before transition hint" `Quick
             test_missing_current_task_reconciled_before_transition_hint;
           test_case "bundle assembly does not emit assignment" `Quick

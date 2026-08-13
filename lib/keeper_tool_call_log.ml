@@ -418,6 +418,9 @@ let log_call
       ?execution_id
       ?tool_use_id
       ?planned_index
+      ?batch_index
+      ?batch_size
+      ?execution_mode
       ?trace_id
       ?session_id
       ?generation
@@ -515,6 +518,23 @@ let log_call
       let planned_index_field =
         match planned_index with
         | Some value -> [ "planned_index", `Int value ]
+        | None -> []
+      in
+      let batch_index_field =
+        match batch_index with
+        | Some value -> [ "batch_index", `Int value ]
+        | None -> []
+      in
+      let batch_size_field =
+        match batch_size with
+        | Some value -> [ "batch_size", `Int value ]
+        | None -> []
+      in
+      let execution_mode_field =
+        match execution_mode with
+        | Some value ->
+          [ ( "execution_mode"
+            , Agent_core.Tool_contract.execution_mode_to_yojson value ) ]
         | None -> []
       in
       let session_id_field =
@@ -621,6 +641,9 @@ let log_call
            @ execution_id_field
            @ tool_use_id_field
            @ planned_index_field
+           @ batch_index_field
+           @ batch_size_field
+           @ execution_mode_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

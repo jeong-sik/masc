@@ -418,6 +418,9 @@ describe('keeper tool telemetry fetchers', () => {
             tool_use_id: '',
             turn: 6,
             planned_index: 2,
+            batch_index: 1,
+            batch_size: 3,
+            execution_mode: 'concurrent',
             goal_ids: ['g-1', 'g-2'],
           },
         ],
@@ -432,6 +435,9 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.tool_use_id).toBe('')
     expect(entry?.turn).toBe(6)
     expect(entry?.planned_index).toBe(2)
+    expect(entry?.batch_index).toBe(1)
+    expect(entry?.batch_size).toBe(3)
+    expect(entry?.execution_mode).toBe('concurrent')
   })
 
   it('keeps missing or malformed tool-call duration unmeasured', async () => {

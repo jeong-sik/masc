@@ -42,6 +42,10 @@ export type ToolCallEntry = {
   // Agent Core model-tool occurrence slot. Together with turn it scopes provider ids
   // that may be blank or repeated.
   planned_index?: number
+  // Agent Core's actual batch assignment. These are schedule truth, not timing inference.
+  batch_index?: number
+  batch_size?: number
+  execution_mode?: 'serial' | 'concurrent'
   // Goal id(s) this call was attributed to (conditional on the row carrying
   // them), for goal-scoped drill-down alongside task_id/turn.
   goal_ids?: string[]
@@ -98,6 +102,12 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     execution_id: asString(raw.execution_id),
     tool_use_id: typeof raw.tool_use_id === 'string' ? raw.tool_use_id : undefined,
     planned_index: asNumber(raw.planned_index),
+    batch_index: asNumber(raw.batch_index),
+    batch_size: asNumber(raw.batch_size),
+    execution_mode:
+      raw.execution_mode === 'serial' || raw.execution_mode === 'concurrent'
+        ? raw.execution_mode
+        : undefined,
     goal_ids: asStringArray(raw.goal_ids),
   }
 }

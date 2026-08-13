@@ -512,20 +512,26 @@ let discover_repositories_with_budget_impl
               in
               collect_candidates (inspected + 1) (candidate :: acc) rest
               (* Now that [get_origin_url] is bounded, this branch fires on a
-                 timeout as well as on a checkout that genuinely has no origin.
+                 timeout as well as on a checkout that genuinely has no origin,
+                 and [(string, string) result] cannot tell them apart. So do not
+                 ask the budget which case it was — that answer is a proxy, and
+                 it turned "this checkout has no origin remote" into a discovery
+                 failure whenever the budget happened to be spent.
+
+                 Skipping is right either way. A spent budget only matters while
+                 candidates remain unfunded, and [remaining_timeout] aborts on
+                 the next iteration for exactly that reason. When [rest] is
+                 empty every entry in [git_dirs] has already been collected,
+                 skipped, or attempted, so nothing was left uninspected and
+                 discarding [acc] bought nothing.
+
                  The rendered fields use OCaml string escaping so repository
                  names and Git stderr cannot inject terminal controls or forge
                  a second log line. *)
               | Error detail ->
                 Log.Misc.warn "%s"
                   (discovery_skip_log_line ~abs_repo_dir ~detail);
-                if Repo_git.Inspection_budget.is_exhausted budget
-                then
-                  Error
-                    (Printf.sprintf
-                       "repository origin inspection budget exhausted after %d candidates"
-                       (inspected + 1))
-                else collect_candidates (inspected + 1) acc rest))
+                collect_candidates (inspected + 1) acc rest))
   in
   collect_candidates 0 [] git_dirs
 ;;

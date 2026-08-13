@@ -453,9 +453,6 @@ let repository_checkouts_json_with_budget
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
   =
-  let inspection_budget =
-    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
-  in
   let sandbox_abs =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
@@ -463,6 +460,13 @@ let repository_checkouts_json_with_budget
   let observed_at_unix = Time_compat.now () in
   let catalog = Repo_store.load_all ~base_path:config.base_path in
   let scan = Keeper_playground_checkouts.discover ~root:sandbox_abs in
+  (* The budget bounds the per-checkout Git inspections below, so it starts
+     after [load_all] and [discover]. Opening it first let a large catalog or a
+     slow filesystem walk exhaust it before any Git subprocess ran, and every
+     checkout then reported branch/head/status as unavailable. *)
+  let inspection_budget =
+    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+  in
   let entries =
     match scan with
     | Ok discovery ->

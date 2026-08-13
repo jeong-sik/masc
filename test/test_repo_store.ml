@@ -563,6 +563,46 @@ let test_discover_origin_budget_is_cumulative () =
            (elapsed < 1.0)))
 ;;
 
+(* A spent budget is only a discovery failure while candidates remain unfunded.
+   When the last candidate is the one that failed, every entry has already been
+   collected, skipped, or attempted, so the walk is complete. Aborting there used
+   to discard the whole collected list, and — because the bounded
+   [get_origin_url] returns an untyped string error — it did so for a checkout
+   that simply had no origin remote as readily as for a timeout. *)
+let test_discover_spent_budget_on_last_candidate_is_not_a_failure () =
+  with_temp_base_path (fun base_path ->
+    let fake_bin = Filename.concat base_path "fake-bin" in
+    Unix.mkdir fake_bin 0o755;
+    let fake_git = Filename.concat fake_bin "git" in
+    write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+    Unix.chmod fake_git 0o755;
+    let repo = Filename.concat base_path "stalled-only" in
+    Unix.mkdir repo 0o755;
+    Unix.mkdir (Filename.concat repo ".git") 0o755;
+    let old_path = Sys.getenv "PATH" in
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "PATH" old_path)
+      (fun () ->
+         Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+         let started_at = Unix.gettimeofday () in
+         let result =
+           Repo_store.For_testing.discover_repositories_with_budget
+             ~origin_budget_sec:0.2
+             ~base_path
+         in
+         let elapsed = Unix.gettimeofday () -. started_at in
+         (match result with
+          | Ok repos ->
+            Alcotest.(check int)
+              "the uninspectable checkout is skipped, not registered"
+              0
+              (List.length repos)
+          | Error detail ->
+            Alcotest.fail
+              ("a completed walk was reported as a discovery failure: " ^ detail));
+         Alcotest.(check bool) "still bounded by the budget" true (elapsed < 1.0)))
+;;
+
 let test_discover_origin_budget_starts_after_filesystem_scan () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -870,6 +910,8 @@ let () =
             test_discover_origin_budget_is_cumulative;
           Alcotest.test_case "starts origin budget after filesystem scan" `Quick
             test_discover_origin_budget_starts_after_filesystem_scan;
+          Alcotest.test_case "spent budget on the last candidate is not a failure"
+            `Quick test_discover_spent_budget_on_last_candidate_is_not_a_failure;
           Alcotest.test_case "escapes discovery warning fields" `Quick
             test_discovery_warning_escapes_untrusted_fields;
         ] );

@@ -8,7 +8,9 @@
   "health": {
     "status": "ok",
     "overall_status": "degraded",
-    "build_commit": "f83f655904",
+    "runtime_commit": "f83f655904",
+    "runtime_commit_source": "runtime_repo_head",
+    "binary_commit": null,
     "repo_head_commit": "f83f655904",
     "started_at": "2026-08-13T13:19:03Z",
     "uptime_seconds": 403,
@@ -58,6 +60,7 @@
     }
   },
   "interpretation": {
+    "binary_identity": "Unknown. runtime_commit is a checkout probe and is not proof of the executable build SHA.",
     "queue": "Idle snapshot only; no enqueue-drain-restart item receipt was captured.",
     "scheduler": "Healthy idle ticks only; no create-due-wake-terminal-cancel occurrence was captured.",
     "live_numbers": "Historical after captured_at; do not present as current without a new snapshot."

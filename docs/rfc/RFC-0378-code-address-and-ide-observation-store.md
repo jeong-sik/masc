@@ -1,6 +1,6 @@
 ---
 rfc: "0378"
-title: "Code fact 는 태어날 때 주소를 받는다 — typed address, observation store 이분, anchor 계약 통일"
+title: "Code fact 는 태어날 때 주소를 받는다 — typed address, code-fact 전용 store, anchor 계약 통일"
 status: Draft
 created: 2026-08-14
 updated: 2026-08-14
@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## 0. Summary
 
-Keeper 의 코드 작업이 IDE 에 보이려면 쓰기와 읽기가 같은 주소로 만나야 한다. 지금은 `file_path : string` 하나가 4개 어휘(repo-relative / `repos/<id>/` 접두 / `.worktrees/` 접두 / 절대경로)를 실어 나르고, 읽기는 그중 1개만 묻는다. 이 RFC 는 주소를 **발행 시점에 한 번 파싱된 타입**으로 확정하고, store 를 code fact / keeper fact 로 이분해 `_orphan` 을 없애고, annotate 의 anchor 계약을 IDE co-view 계약과 동일하게 만든다. 귀속 *메커니즘*(경로→저장소 정체)은 RFC-keeper-workspace-root-only 소관이고, 이 RFC 는 **그 결과값의 타입·수명·저장·소비**를 소관한다.
+Keeper 의 코드 작업이 IDE 에 보이려면 쓰기와 읽기가 같은 주소로 만나야 한다. 지금은 `file_path : string` 하나가 4개 어휘(repo-relative / `repos/<id>/` 접두 / `.worktrees/` 접두 / 절대경로)를 실어 나르고, 읽기는 그중 1개만 묻는다. 이 RFC 는 주소를 **발행 시점에 한 번 파싱된 타입**으로 확정하고, IDE store 를 addressed code fact 전용으로 좁혀 `_orphan` 을 없애고 (keeper fact 는 기존 SSOT 인 turn-records/tool_calls 가 소유 — §5.2), annotate 의 anchor 계약을 IDE co-view 계약과 동일하게 만든다. 귀속 *메커니즘*(경로→저장소 정체)은 RFC-keeper-workspace-root-only 소관이고, 이 RFC 는 **그 결과값의 타입·수명·저장·소비**를 소관한다.
 
 ## 1. 원칙 → 설계 강제
 

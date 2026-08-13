@@ -38,8 +38,8 @@ keeper `sangsu`, 2026-08-13 13:28–17:35 (4시간 07분), 모델
 
 ### 2.2 배달 실측
 
-`~/.masc/keepers/sangsu/continuation_delivery_obligations_v1/` 의 obligation 19건
-전수:
+`<base-path>/.masc/keepers/sangsu/continuation_delivery_obligations_v1/` 의
+obligation 19건 전수:
 
 - 19건 전부가 사고 독백이다. "이 replay 는 이미 처리한 X 의 중복 결과다",
   "새 근거 없으니 무응답으로 끝낸다" 형태.

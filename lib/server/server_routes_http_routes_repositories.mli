@@ -16,10 +16,5 @@
 val repository_json :
   base_path:string -> Repo_manager_types.repository -> Yojson.Safe.t
 
-(** {!repository_json} plus [git_status] and [sync_currency], each of which is
-    a git subprocess against the working tree. For one repository at a time. *)
-val repository_observation_json :
-  base_path:string -> Repo_manager_types.repository -> Yojson.Safe.t
-
 val add_routes :
   Http_server_eio.Router.t -> Http_server_eio.Router.t

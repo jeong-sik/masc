@@ -520,10 +520,15 @@ let transition_task_outcome_r
            | None -> ()
            | Some content ->
              (try
-                let (_ : Workspace_broadcast.broadcast_delivery) =
-                  broadcast config ~from_agent:agent_name ~content
-                in
-                ()
+                match broadcast config ~from_agent:agent_name ~content with
+                | Ok _ -> ()
+                | Error error ->
+                  Log.TaskState.error
+                    "task transition committed but broadcast was not persisted task_id=%s agent=%s action=%s detail=%s"
+                    task_id
+                    agent_name
+                    action_s
+                    (broadcast_error_to_string error)
               with
               | Eio.Cancel.Cancelled _ as exn -> raise exn
               | exn ->

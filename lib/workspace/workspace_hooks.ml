@@ -204,13 +204,15 @@ let tool_assigned_fn
      string) Atomic.t
   = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?config_hash:_ ?reason:_ () -> "")
 
-(** Wall-clock latency of [Workspace_broadcast.broadcast] including
+(** Wall-clock latency of a successfully committed
+    [Workspace_broadcast.broadcast], including
     [next_seq] (state.json file lock + read + write), agent.json read
     for the cache-invariant check, msg.json write, [backend_publish],
     [emit_message_activity], and the [on_broadcast_mention] callback.
     Labelled by [msg_type] so [cache_invalidated] follow-ups (which
     skip the agent.json read + use the rewritten content) are
-    distinguishable from regular broadcasts.  Default no-op; emit
+    distinguishable from regular broadcasts. Authoritative write failures do
+    not emit this success observation. Default no-op; emit
     lives in [lib/workspace.ml] to avoid a [masc_workspace → Otel_metric_store] dep
     cycle. *)
 let workspace_broadcast_observed_fn

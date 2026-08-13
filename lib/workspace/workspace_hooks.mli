@@ -92,13 +92,14 @@ val tool_assigned_fn : (agent_id:string ->
             tool_list:string list ->
             ?config_hash:string -> ?reason:string -> unit -> string)
            Atomic.t
-(** Fires once per [Workspace_broadcast.broadcast] return, with the wall-clock
+(** Fires once per successful [Workspace_broadcast.broadcast] commit, with the wall-clock
     duration of the broadcast body (next_seq + agent.json read +
     msg.json write + activity emit + on_broadcast_mention).  Wired at
     startup ([lib/workspace.ml]) to a Otel_metric_store histogram
     [masc_workspace_broadcast_duration_seconds] labelled by [msg_type] so
     operators can compare regular broadcasts against
-    [cache_invalidated] / mention follow-ups. *)
+    [cache_invalidated] / mention follow-ups. Authoritative write failures are
+    excluded rather than merged into the success latency distribution. *)
 val workspace_broadcast_observed_fn :
   (msg_type:string -> elapsed_s:float -> unit) Atomic.t
 

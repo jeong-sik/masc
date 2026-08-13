@@ -466,16 +466,26 @@ let handle_keeper_task_tool_with_outcome
         ~class_:Tool_result.Policy_rejection
         (error_json "message is required. Good: message='Build complete, all tests pass.'.")
     else (
-      let _ =
-        Workspace.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
-      in
-      Keeper_tool_execution.success
-        (Yojson.Safe.to_string
-           (`Assoc
-              [ "ok", `Bool true
-              ; "broadcast", `String message
-              ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
-              ])))
+      match
+        Workspace.broadcast
+          config
+          ~from_agent:(keeper_agent_sender ~meta)
+          ~content:message
+      with
+      | Error error ->
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Runtime_failure
+          (error_json
+             ("broadcast was not persisted: "
+              ^ Workspace.broadcast_error_to_string error))
+      | Ok _ ->
+        Keeper_tool_execution.success
+          (Yojson.Safe.to_string
+             (`Assoc
+                [ "ok", `Bool true
+                ; "broadcast", `String message
+                ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
+                ])))
     | Task_create ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in

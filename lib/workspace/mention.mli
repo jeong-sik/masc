@@ -22,8 +22,8 @@ val parse : string -> mode
 
     Priority:
     1. [@@agent] → Broadcast
-    2. [@agent-adj-animal] → Stateful
-    3. [@agent] → Stateless
+    2. any hyphenated [@target] → Stateful exact target
+    3. non-hyphenated [@agent] → Stateless
 *)
 
 val extract : string -> string option
@@ -37,5 +37,4 @@ val is_mentioned : string -> string -> bool
 
 val any_mentioned : targets:string list -> string -> bool
 (** Check whether content contains an exact direct mention for any target *)
-
 

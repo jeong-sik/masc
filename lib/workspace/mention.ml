@@ -34,29 +34,15 @@ let is_nickname mention =
   let parts = String.split_on_char '-' mention in
   List.length parts >= 3
 
-(* The three mention patterns are static.  [Re.compile] runs the
-   DFA construction once at module load instead of per [parse] call;
-   on a high-broadcast workspace every message previously paid three
-   compilations + three DFA builds before [Re.exec_opt] could
+(* The mention patterns are static. [Re.compile] runs the DFA construction once
+   at module load instead of per [parse] call; on a high-broadcast workspace
+   every message previously paid repeated compilations + DFA builds before [Re.exec_opt] could
    even start. *)
 let broadcast_re =
   Re.(compile
         (seq [
           str "@@";
           group (rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_']));
-        ]))
-
-let stateful_re =
-  Re.(compile
-        (seq [
-          char '@';
-          group (seq [
-            rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_']);
-            char '-';
-            rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9']);
-            char '-';
-            rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9']);
-          ]);
         ]))
 
 let mention_re =
@@ -72,25 +58,18 @@ let mention_re =
 
     Priority order:
     1. @@agent → Broadcast
-    2. @agent-adj-animal → Stateful
-    3. @agent → Stateless
+    2. any hyphenated @target → Stateful exact target
+    3. non-hyphenated @agent → Stateless
 *)
 let parse content =
   match Re.exec_opt broadcast_re content with
   | Some g -> Broadcast (Re.Group.get g 1)
   | None ->
-    match Re.exec_opt stateful_re content with
-    | Some g -> Stateful (Re.Group.get g 1)
-    | None ->
-      match Re.exec_opt mention_re content with
-      | Some g ->
-        let matched = Re.Group.get g 1 in
-        (* Heuristic: if contains hyphen but not 3-part nickname, still stateful *)
-        if String.contains matched '-' then
-          Stateful matched
-        else
-          Stateless matched
-      | None -> None
+    match Re.exec_opt mention_re content with
+    | Some g ->
+      let matched = Re.Group.get g 1 in
+      if String.contains matched '-' then Stateful matched else Stateless matched
+    | None -> None
 
 (** Extract raw mention target (backward-compatible with old extract_mention) *)
 let extract content =
@@ -175,4 +154,3 @@ let any_mentioned ~targets content =
   targets
   |> List.filter (fun target -> String.trim target <> "")
   |> List.exists (fun target -> is_mentioned target content)
-

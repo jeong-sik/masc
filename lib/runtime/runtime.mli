@@ -163,6 +163,29 @@ val validate_request_body_cap :
     sites must invoke it again after feature-local transforms. The successful
     value is the exact positive cap validated on that final provider config. *)
 
+type keeper_dispatch_readiness =
+  | Dispatchable
+  | Missing_request_body_cap of { table_path : string }
+      (** Whether a materialized runtime could carry a keeper turn if one were
+          routed to it, independent of whether anything routes to it today.
+          Boot validation judges only reachable ids on purpose, which left a
+          declared-but-unassigned blocked runtime with no observer: listed by
+          [/api/v1/runtime/resolved], impossible to assign, and silent about
+          why (masc#28404). *)
+
+val keeper_dispatch_readiness : t -> keeper_dispatch_readiness
+(** The single definition of "blocked", so the operator-facing projection and
+    the fail-closed boot gate cannot disagree. Official-client runtimes are
+    always [Dispatchable]: the spawned vendor client owns its own context
+    window. *)
+
+val keeper_dispatch_blocker : keeper_dispatch_readiness -> string option
+(** Operator-facing reason, [None] when dispatchable. *)
+
+val keeper_dispatch_blocked : t list -> (t * string) list
+(** Every runtime a keeper could not be assigned to, in declaration order, with
+    its reason. Empty is the healthy state. *)
+
 (** {1 Lazy default runtime singleton}
 
     Initialized once at startup via {!init_default}.  All consumer

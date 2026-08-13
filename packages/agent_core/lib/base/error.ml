@@ -291,3 +291,35 @@ let is_retryable = function
   | Agent _ | Config _ | Serialization _ | Io _ | Orchestration _ | Internal _
   | Internal_carried _ -> false
 ;;
+
+(* ── Raised-exception classification ──────────────────────────────── *)
+
+(* Classify an exception that escaped a call into this vocabulary.
+
+   [Internal] is documented above as reserved for unreachable agent-core
+   invariant failures, so wrapping every escaped exception in it told an
+   operator the agent broke when a call had merely run out of time. Two live
+   runtimes reported exactly that on 2026-08-12 — [Unhandled exception:
+   Cancelled: Eio__Time.Timeout] — with nothing to separate a bug from a
+   timeout, and nothing downstream able to read the free-form text.
+
+   Eio raises the timeout bare when the expiry fires on the sleep itself, and
+   wrapped in [Cancel.Cancelled] when the expiry cancels a surrounding fiber.
+   Both are the same outcome; a handler matching only the bare form misses the
+   wrapped one, which is how the wrapped form reached [Internal].
+
+   Only a timeout is reclassified. A [Cancel.Cancelled] carrying anything else
+   is a genuine cancellation with no typed variant here, and inventing one to
+   absorb it would be worse than reporting it plainly. Callers re-raise the
+   original exception regardless — this decides what an observer is told, never
+   whether the exception propagates. *)
+let of_raised_exn (exn : exn) : t =
+  match exn with
+  | Eio.Time.Timeout | Eio.Cancel.Cancelled Eio.Time.Timeout ->
+    Api
+      (Timeout
+         { message = Printf.sprintf "Call timed out: %s" (Printexc.to_string exn)
+         ; phase = None
+         })
+  | exn -> Internal (Printf.sprintf "Unhandled exception: %s" (Printexc.to_string exn))
+;;

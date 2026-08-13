@@ -200,6 +200,51 @@ let apply_reducer_command meta command =
   (Keeper_owner_reducer.projection transition.state).meta |> Option.get
 ;;
 
+let test_pause_directive_leaves_an_existing_latch_intact () =
+  (* The heartbeat emits [Pause] because the lane is already paused, so an
+     already-latched keeper receives its own state back as a command carrying a
+     synthesized Operator_paused reason. Before #28397 the reducer overwrote the
+     real reason with it -- every cycle, so a terminal latch never survived. *)
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "already-latched-keeper" in
+       let meta =
+         { (make_meta keeper_name) with
+           paused = true
+         ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+         }
+       in
+       Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+       Keeper_owner_registry.install_from_store
+         ~sw
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         config
+       |> Result.get_ok
+       |> ignore;
+       Keeper_registry.For_testing.clear ();
+       ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper_name meta);
+       Keeper_keepalive.process_directive ~agent_name:keeper_name Keeper_directive.Pause;
+       match Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool "keeper stays paused" true entry.meta.paused;
+         check
+           (option string)
+           "the terminal latch survives a reflected pause directive"
+           (Some wire_dead_tombstone)
+           (latched_reason_wire entry.meta)
+       | None -> fail "expected registered keeper after pause directive")
+
 let test_keeper_down_retain_records_reason () =
   let retained =
     apply_reducer_command
@@ -270,5 +315,7 @@ let () =
             test_keeper_down_retain_records_reason
         ; test_case "dead final meta records terminal tombstone reason" `Quick
             test_dead_tombstone_final_meta_records_reason
+        ; test_case "reflected pause leaves an existing latch intact" `Quick
+            test_pause_directive_leaves_an_existing_latch_intact
         ] )
     ]

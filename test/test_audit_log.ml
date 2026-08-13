@@ -159,6 +159,79 @@ let test_read_entries_is_chronological_and_drops_corrupt_rows () =
         [ "keeper-100"; "keeper-200"; "keeper-300" ]
         (List.map (fun (e : Audit_log.audit_entry) -> e.agent_id) entries))
 
+(* Locate the single day-file the fixtures above write into, so a row the
+   decoder rejects can be placed at a chosen position rather than only at the
+   end. *)
+let sole_audit_day_file config =
+  let audit_dir =
+    Filename.concat (Workspace_utils.masc_dir config) Audit_log.store_dirname
+  in
+  match Sys.readdir audit_dir with
+  | [| month |] ->
+    let month_dir = Filename.concat audit_dir month in
+    (match Sys.readdir month_dir with
+     | [| day |] -> Filename.concat month_dir day
+     | _ -> fail "expected exactly one day file")
+  | _ -> fail "expected exactly one month directory"
+
+let append_undecodable_row config label =
+  Fs_compat.append_file
+    (sole_audit_day_file config)
+    (Printf.sprintf {|{"not":"an audit entry","label":%S}|} label ^ "\n")
+
+let append_entry_at config ts =
+  Audit_log.append_entry config
+    (entry ~timestamp:ts ~agent_id:"keeper-a" ~action:Audit_log.AuthSuccess
+       ~outcome:Audit_log.Success)
+
+let read_timestamps ?n config =
+  Audit_log.read_entries ?n config
+  |> List.map (fun (e : Audit_log.audit_entry) -> e.Audit_log.timestamp)
+
+(* Position matters. The neighbouring case appends its undecodable row last, so
+   a reader that abandoned the scan at the first rejection would still return
+   every good entry and pass. Interleaving the rejections leaves such a reader
+   holding only what it read before the first one. *)
+let test_read_entries_survives_interleaved_undecodable_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      append_entry_at config 100.0;
+      append_undecodable_row config "between-100-and-200";
+      append_entry_at config 200.0;
+      append_undecodable_row config "between-200-and-300";
+      append_entry_at config 300.0;
+      check (list (float 0.001))
+        "every decodable row survives its rejected neighbours, in order"
+        [ 100.0; 200.0; 300.0 ]
+        (read_timestamps ~n:10 config))
+
+(* [n] is a bound on rows read, not on entries produced, so a window that spans
+   a rejected row yields fewer entries than [n]. A reader that kept consuming
+   until it had [n] *entries* would return both good rows here. *)
+let test_read_entries_window_bounds_rows_read_not_entries_returned () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      append_entry_at config 100.0;
+      append_undecodable_row config "inside-the-window";
+      append_entry_at config 200.0;
+      (* The two newest rows are the rejected one and 200.0. *)
+      check (list (float 0.001)) "the window bounds rows read"
+        [ 200.0 ]
+        (read_timestamps ~n:2 config);
+      check (list (float 0.001)) "a window covering everything still drops it"
+        [ 100.0; 200.0 ]
+        (read_timestamps ~n:10 config))
+
 (* ── Codec round-trip tests ────────────────────────────────────────── *)
 
 let action_roundtrip label action expected_wire =
@@ -355,6 +428,10 @@ let () =
             test_get_stats_reports_oldest_and_newest_in_read_order;
           test_case "read_entries is chronological and drops corrupt rows"
             `Quick test_read_entries_is_chronological_and_drops_corrupt_rows;
+          test_case "read_entries survives interleaved undecodable rows" `Quick
+            test_read_entries_survives_interleaved_undecodable_rows;
+          test_case "read_entries window bounds rows read" `Quick
+            test_read_entries_window_bounds_rows_read_not_entries_returned;
         ] );
       ( "codec_roundtrip",
         [

@@ -219,11 +219,11 @@ let dashboard_asset_root () =
 let dashboard_index_path () =
   Filename.concat (dashboard_asset_root ()) "index.html"
 
-let dashboard_etag_hex_chars = 12
-
-let dashboard_etag_of_body body =
-  let hash = Digest.string body |> Digest.to_hex in
-  String.sub hash 0 (min dashboard_etag_hex_chars (String.length hash))
+(* The tag policy lives with the responder that emits it, so the HTML route
+   here and the JSON responses share one definition rather than two copies
+   that agree until one is edited. *)
+let dashboard_etag_hex_chars = Http.Response.etag_hex_chars
+let dashboard_etag_of_body = Http.Response.etag_of_body
 
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 

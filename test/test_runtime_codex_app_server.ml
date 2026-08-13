@@ -1001,33 +1001,17 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
        | Ok _ -> fail "no-deadline turn made a post-accept tool write unbounded")
 ;;
 
-let test_dispatch_ambiguity_precedes_turn_start_ack () =
-  let request index =
-    Printf.sprintf
-      {|{"id":"unsupported-%d","method":"item/commandExecution/requestApproval","params":{}}|}
-      index
-  in
-  let requests = List.init 2048 request in
-  with_fixture
-    ([ init_result; account_chatgpt; thread_result ] @ requests)
-    (fun path ->
-       match
-         run_fixture
-           ~admission_timeout_s:0.05
-           ~no_turn_deadline:true
-           path
-       with
-       | Error
-           (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = true }) ->
-         check (float 0.001) "pre-ack response write timeout" 0.05 seconds
-       | Error
-           (Runtime_codex_app_server.Timeout
-              { turn_accepted = false; _ }) ->
-         fail "complete turn dispatch was classified as safe to retry"
-       | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-       | Ok _ -> fail "unread pre-ack server responses did not hit the write bound")
-;;
+(* The former "dispatch ambiguity precedes turn-start acknowledgement" case
+   was deleted rather than repaired (#28485). Born in #28322 asserting a
+   write-bound saturation the runtime has never had — [await_response] rejects
+   the FIRST unsupported server request and fails the turn, so its
+   2048-request flood never reached the reject-write path, and under a 0.05s
+   admission bound the observed error raced between [Unsupported_server_request]
+   and the idle timeout. The fail-fast contract it could have pinned is
+   already pinned deterministically by [test_server_request_fails_closed]
+   above. Whether a pre-ack failure should classify as dispatch-ambiguous
+   (not safe to retry) is a live design question tracked in the follow-up
+   issue; a test for it belongs with that implementation. *)
 
 let test_callback_timeout_origin_is_preserved_without_deadline () =
   with_fixture [ init_result; account_chatgpt; thread_result ] (fun path ->
@@ -3342,10 +3326,6 @@ let () =
             "no deadline keeps post-accept writes bounded"
             `Quick
             test_no_deadline_keeps_post_accept_writes_bounded
-        ; test_case
-            "dispatch ambiguity precedes turn-start acknowledgement"
-            `Quick
-            test_dispatch_ambiguity_precedes_turn_start_ack
         ; test_case
             "callback timeout origin is preserved without deadline"
             `Quick

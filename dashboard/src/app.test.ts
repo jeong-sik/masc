@@ -142,10 +142,13 @@ describe('App v2 header chrome', () => {
     // button instead. The live-count + pulse coverage is preserved here.
     const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
     expect(liveChip).not.toBeNull()
-    expect(liveChip?.textContent).toContain('7 실행 중')
-    // Pulse is now carried by the StatusDot pip (`.dot2.pulse`), replacing the old
-    // `motion-safe:animate-pulse` utility class on an inner span.
-    expect(liveChip?.querySelector('.dot2.pulse')).not.toBeNull()
+    // The chip now names its source: without a runtime-health projection it
+    // reports unknown rather than asserting a running count it cannot derive.
+    expect(liveChip?.textContent).toContain('미수집')
+    // Pulse is carried by the StatusDot pip (`.dot2.pulse`), and it now tracks
+    // the count's meaning rather than the chip's presence: an unknown count has
+    // nothing live to pulse for, so the pip is idle.
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
   })
 
   it('uses runtime health for the live running-count chip when rows are stale', () => {
@@ -174,7 +177,9 @@ describe('App v2 header chrome', () => {
 
     const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
     expect(liveChip).not.toBeNull()
-    expect(liveChip?.textContent).toContain('1 실행 중')
+    // runtime-health counts what can execute; 실행 중 is the row-derived
+    // fallback vocabulary and no longer applies to this source.
+    expect(liveChip?.textContent).toContain('1 실행 가능')
     expect(liveChip?.title).toContain('runtime health')
     expect(liveChip?.title).toContain('paused=3')
     expect(liveChip?.title).toContain('offline=0 (not derived from execution rows)')

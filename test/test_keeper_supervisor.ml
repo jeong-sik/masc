@@ -980,7 +980,7 @@ let test_supervise_recovery_requires_same_offline_generation () =
       in
       let name = "recoverable-offline-generation" in
       let entry =
-        Reg.For_testing.register ~base_path:config.base_path name (make_meta name)
+        Reg.register_offline ~base_path:config.base_path name (make_meta name)
       in
       check bool "same Offline generation remains launchable" true
         (KSS.For_testing.same_offline_generation ~expected:entry entry);

@@ -87,6 +87,33 @@ let test_inline_contains_raise () =
     Alcotest.fail "expected Ran_inline, got Rejected_draining"
 ;;
 
+(* The startup inline fallback is still behind the lifecycle fence. A failed
+   launch closes Librarian admission before the long-lived executor switch is
+   installed, so falling back to inline execution must not reopen it. *)
+let test_inline_rejects_draining_lifecycle () =
+  Lane.For_testing.reset ();
+  let ran = ref false in
+  (match
+     Lane.drain_and_join_librarian
+       ~base_path
+       ~keeper_name:"inline-draining"
+   with
+   | Ok Lane.No_librarian_work -> ()
+   | Ok Lane.Librarian_drained ->
+     Alcotest.fail "empty inline drain reported completed work"
+   | Error error -> Alcotest.fail (Lane.librarian_drain_error_to_string error));
+  (match
+     Lane.submit
+       ~base_path
+       ~keeper_name:"inline-draining"
+       (fun () -> ran := true)
+   with
+   | Lane.Rejected_draining -> ()
+   | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+     Alcotest.fail "inline fallback bypassed the lifecycle fence");
+  Alcotest.(check bool) "draining inline unit did not run" false !ran
+;;
+
 (* Two units for the same keeper run one after another: the second only starts
    after the first releases the keeper's mutex. *)
 let test_serializes_within_keeper () =
@@ -741,6 +768,10 @@ let () =
             "inline contains raise"
             `Quick
             test_inline_contains_raise
+        ; Alcotest.test_case
+            "inline rejects draining lifecycle"
+            `Quick
+            test_inline_rejects_draining_lifecycle
         ; Alcotest.test_case
             "serializes within keeper"
             `Quick

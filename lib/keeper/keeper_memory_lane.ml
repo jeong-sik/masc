@@ -405,17 +405,25 @@ let submit ~base_path ~keeper_name f =
   match current_sw () with
   | None ->
     (* Not initialized: run inline. The caller is still inside the per-keeper
-       turn lane, so single-fiber-per-keeper memory access is preserved. A
-       raising unit is contained and counted rather than escaping. *)
-    (try f () with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       record_counter ~keeper_name MemoryLaneUnitFailures;
-       Log.Keeper.warn ~keeper_name
-         "memory lane unit failed (inline): %s"
-         (Printexc.to_string exn));
-    record_counter ~keeper_name MemoryLaneRanInline;
-    Ran_inline
+       turn lane, so single-fiber-per-keeper memory access is preserved. The
+       lifecycle fence still applies before the executor switch exists: a
+       launch rollback or terminal drain must not be bypassed by the inline
+       fallback. A raising admitted unit is contained and counted rather than
+       escaping. *)
+    let entry = entry_for ~base_path ~keeper_name in
+    if
+      Stdlib.Mutex.protect entry.state_mu (fun () -> entry.lifecycle = Draining)
+    then Rejected_draining
+    else (
+      (try f () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         record_counter ~keeper_name MemoryLaneUnitFailures;
+         Log.Keeper.warn ~keeper_name
+           "memory lane unit failed (inline): %s"
+           (Printexc.to_string exn));
+      record_counter ~keeper_name MemoryLaneRanInline;
+      Ran_inline)
   | Some sw ->
     let entry = entry_for ~base_path ~keeper_name in
     submit_librarian ~keeper_name entry sw f

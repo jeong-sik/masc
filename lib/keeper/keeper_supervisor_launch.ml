@@ -626,11 +626,10 @@ let launch_supervised_fiber_body
 let launch_supervised_fiber
       ~lifecycle_token
       ~proactive_warmup_sec
-      ctx
-      (meta : keeper_meta)
-      (reg : Keeper_registry.registry_entry)
+  ctx
+  (meta : keeper_meta)
+  (reg : Keeper_registry.registry_entry)
   =
-  let base_path = ctx.config.base_path in
   match Keeper_registry.prepare_fiber_launch_for_lifecycle lifecycle_token reg with
   | Error err ->
     (* Fail closed: a rejected [Fiber_started] (terminal state, invalid

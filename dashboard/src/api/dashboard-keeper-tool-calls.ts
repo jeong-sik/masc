@@ -17,6 +17,9 @@ export type ToolCallOutputBlob = {
   }
 }
 
+export type ToolCallDisposition = 'completed' | 'deferred' | 'failed'
+export type ToolCallCompositionExecution = 'inline' | 'async'
+
 export type ToolCallEntry = {
   ts: number
   keeper: string
@@ -46,6 +49,14 @@ export type ToolCallEntry = {
   batch_index?: number
   batch_size?: number
   execution_mode?: 'serial' | 'concurrent'
+  // Typed nested-composition identity. These fields are emitted directly by
+  // the executor observer; the dashboard never reconstructs them from names.
+  disposition?: ToolCallDisposition
+  composition_tool?: string
+  composition_run_id?: string
+  composition_node_id?: string
+  composition_execution?: ToolCallCompositionExecution
+  parent_tool_use_id?: string
   // Goal id(s) this call was attributed to (conditional on the row carrying
   // them), for goal-scoped drill-down alongside task_id/turn.
   goal_ids?: string[]
@@ -108,6 +119,21 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
       raw.execution_mode === 'serial' || raw.execution_mode === 'concurrent'
         ? raw.execution_mode
         : undefined,
+    disposition:
+      raw.disposition === 'completed' ||
+      raw.disposition === 'deferred' ||
+      raw.disposition === 'failed'
+        ? raw.disposition
+        : undefined,
+    composition_tool: asString(raw.composition_tool),
+    composition_run_id: asString(raw.composition_run_id),
+    composition_node_id: asString(raw.composition_node_id),
+    composition_execution:
+      raw.composition_execution === 'inline' || raw.composition_execution === 'async'
+        ? raw.composition_execution
+        : undefined,
+    parent_tool_use_id:
+      typeof raw.parent_tool_use_id === 'string' ? raw.parent_tool_use_id : undefined,
     goal_ids: asStringArray(raw.goal_ids),
   }
 }

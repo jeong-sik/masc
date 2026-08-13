@@ -30,6 +30,7 @@ type node_result = private
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
   ; result : Tool_result.result
+  ; tool_use_id : string option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   }
@@ -40,7 +41,8 @@ type dispatch_result
     producer evidence must supply it; absent failure evidence is conservatively
     treated as an unknown effect outcome. *)
 val dispatch_result
-  :  ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  :  ?tool_use_id:string
+  -> ?failure_effect_disposition:Tool_result.failure_effect_disposition
   -> ?deferred_kind:Keeper_tool_execution.deferred_kind
   -> Tool_result.result
   -> dispatch_result
@@ -52,6 +54,10 @@ type cause =
       ; error : Keeper_tool_plan.execution_error
       }
   | Tool_did_not_complete of node_result
+  | Node_observation_failed of
+      { node : node_result
+      ; detail : string
+      }
   | Outer_completion_mismatch of
       { expected : Agent_core.Tool_contract.completion
       ; actual : Agent_core.Tool_contract.completion
@@ -75,11 +81,15 @@ type dispatch =
     or [Failed] tool result is carried unchanged in [Tool_did_not_complete];
     no text or payload inference is performed. A deferred node produces no
     composable output, so it cannot satisfy a downstream output reference and
-    terminates the plan instead of being resumed as a producer. *)
+    terminates the plan instead of being resumed as a producer.
+    [observe_node_result], when supplied, is part of settlement: an observation
+    error becomes [Node_observation_failed] after every sibling in the current
+    batch has settled, preserving the aggregate effect disposition. *)
 val execute
   :  plan:Keeper_tool_plan.t
   -> run_id:Keeper_tool_plan.Run_id.t
   -> dispatch:dispatch
+  -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
   -> (node_result list, failure) result
 
@@ -89,6 +99,7 @@ val execute
 val execute_keeper
   :  plan:Keeper_tool_plan.t
   -> run_id:Keeper_tool_plan.Run_id.t
+  -> ?composition_run_id:Keeper_tool_plan.Composition_run_id.t
   -> parent_invocation:Agent_core.Tool_contract.Invocation.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -105,5 +116,6 @@ val execute_keeper
   -> ?on_deferred:(unit -> unit)
   -> ?on_external_effect_deferred:(unit -> unit)
   -> ?on_failed:(Keeper_tools_agent_core.terminal_effect_failure -> unit)
+  -> ?observe_node_result:(node_result -> (unit, string) result)
   -> unit
   -> (node_result list, failure) result

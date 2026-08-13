@@ -104,6 +104,7 @@ let test_schedule_and_parallel_dataflow () =
        (left.schedule.execution_mode = Agent_core.Tool_contract.Concurrent)
    | _ -> fail "descriptor-aware schedule shape changed");
   let sibling_count = Atomic.make 0 in
+  let observed = ref [] in
   let both_started, release = Eio.Promise.create () in
   let dispatch ~node ~descriptor:_ ~schedule:_ ~input =
     let name = node_name node in
@@ -113,9 +114,25 @@ let test_schedule_and_parallel_dataflow () =
       if Atomic.fetch_and_add sibling_count 1 = 1 then Eio.Promise.resolve release ();
       Eio.Promise.await both_started);
     Executor.dispatch_result
+      ~tool_use_id:("nested-" ^ name)
       (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
   in
-  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  let observe_node_result result =
+    observed
+      := ( Plan.Node_id.to_string result.Executor.node_id
+         , result.Executor.tool_use_id
+         , result.Executor.schedule.planned_index )
+         :: !observed;
+    Ok ()
+  in
+  match
+    Executor.execute
+      ~plan
+      ~run_id:(Plan.Run_id.fresh ())
+      ~dispatch
+      ~observe_node_result
+      ()
+  with
   | Error _ -> fail "valid parallel plan stopped"
   | Ok results ->
     check
@@ -123,7 +140,16 @@ let test_schedule_and_parallel_dataflow () =
       "settled execution order"
       [ "producer"; "left"; "right"; "final" ]
       (List.map (fun result -> Plan.Node_id.to_string result.Executor.node_id) results);
-    check int "both siblings entered before either returned" 2 (Atomic.get sibling_count)
+    check int "both siblings entered before either returned" 2 (Atomic.get sibling_count);
+    check
+      (list (triple string (option string) int))
+      "observer receives exact nested occurrence after settlement"
+      [ "final", Some "nested-final", 3
+      ; "left", Some "nested-left", 1
+      ; "producer", Some "nested-producer", 0
+      ; "right", Some "nested-right", 2
+      ]
+      (List.sort compare !observed)
 ;;
 
 let test_failed_sibling_stops_downstream_after_batch_settlement () =
@@ -166,8 +192,48 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
        | Tool_result.Failed { class_ = Tool_result.Workflow_rejection; _ } -> ()
         | Tool_result.Completed _ | Tool_result.Deferred _ | Tool_result.Failed _ ->
           fail "canonical failed disposition changed")
-     | Executor.Plan_execution_failed _ | Executor.Outer_completion_mismatch _ ->
+     | Executor.Plan_execution_failed _
+     | Executor.Node_observation_failed _
+     | Executor.Outer_completion_mismatch _ ->
        fail "tool failure became a plan error")
+;;
+
+let test_observation_failure_settles_siblings_and_stops_downstream () =
+  Eio_main.run @@ fun _env ->
+  let plan = fixture () in
+  let observed = ref [] in
+  let dispatch ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    Executor.dispatch_result
+      (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
+  in
+  let observe_node_result result =
+    let name = Plan.Node_id.to_string result.Executor.node_id in
+    observed := name :: !observed;
+    if String.equal name "left" then Error "durable append failed" else Ok ()
+  in
+  match
+    Executor.execute
+      ~plan
+      ~run_id:(Plan.Run_id.fresh ())
+      ~dispatch
+      ~observe_node_result
+      ()
+  with
+  | Ok _ -> fail "observation failure did not stop the plan"
+  | Error failure ->
+    check
+      (list string)
+      "all current siblings observed before stop"
+      [ "left"; "producer"; "right" ]
+      (List.sort String.compare !observed);
+    (match failure.cause with
+     | Executor.Node_observation_failed { node; detail } ->
+       check string "failed observation node" "left" (Plan.Node_id.to_string node.node_id);
+       check string "exact observation error" "durable append failed" detail
+     | Executor.Plan_execution_failed _
+     | Executor.Tool_did_not_complete _
+     | Executor.Outer_completion_mismatch _ ->
+       fail "observation failure lost its typed cause")
 ;;
 
 let test_deferred_cause_does_not_mask_unknown_sibling () =
@@ -201,7 +267,9 @@ let test_deferred_cause_does_not_mask_unknown_sibling () =
         | Tool_result.Deferred _ -> ()
         | Tool_result.Completed _ | Tool_result.Failed _ ->
           fail "lower-index deferred cause changed")
-     | Executor.Plan_execution_failed _ | Executor.Outer_completion_mismatch _ ->
+     | Executor.Plan_execution_failed _
+     | Executor.Node_observation_failed _
+     | Executor.Outer_completion_mismatch _ ->
        fail "deferred cause became a plan error");
     check string
       "unknown sibling dominates deferred cause"
@@ -228,6 +296,7 @@ let test_malformed_declared_output_stops_before_consumer () =
        when Plan.Node_id.equal failed (node_id "producer") -> ()
      | Executor.Plan_execution_failed _
      | Executor.Tool_did_not_complete _
+     | Executor.Node_observation_failed _
      | Executor.Outer_completion_mismatch _ ->
        fail "malformed producer did not retain its typed validation cause")
 ;;
@@ -267,6 +336,10 @@ let () =
             "failed sibling stops downstream"
             `Quick
             test_failed_sibling_stops_downstream_after_batch_settlement
+        ; test_case
+            "observation failure settles siblings and stops downstream"
+            `Quick
+            test_observation_failure_settles_siblings_and_stops_downstream
         ; test_case
             "deferred cause does not mask unknown sibling"
             `Quick

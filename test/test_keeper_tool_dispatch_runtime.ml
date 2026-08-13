@@ -4845,6 +4845,144 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
           | _ -> fail "composition did not expose its single settled action"))
 ;;
 
+let test_composition_action_commit_invalidates_cache_before_refresh_event () =
+  with_exec_fixture "composition-action-commit-refresh"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let subscriber_id = "composition-action-commit-refresh" in
+       let frames = ref [] in
+       let refresh_observed_cache_miss = ref false in
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+       Dashboard_cache.invalidate_all ();
+       let cache_key = "keeper:tool-calls:fleet-rows:test" in
+       ignore
+         (Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+            `List []));
+       Masc.Sse.subscribe_external
+         ~id:subscriber_id
+         ~callback:(fun event ->
+           let frame = event.Masc.Sse.ext_frame in
+           frames := frame :: !frames;
+           match Masc.Sse.data_payload_of_frame frame with
+           | Error Masc.Sse.Missing_data_payload -> ()
+           | Ok payload ->
+             let json = Yojson.Safe.from_string payload in
+             if Safe_ops.json_string_opt "composition_node_id" json = Some "time"
+             then
+               refresh_observed_cache_miss
+                 := Option.is_none (Dashboard_cache.peek cache_key))
+         ();
+       Fun.protect
+         ~finally:(fun () ->
+           Masc.Sse.unsubscribe_external subscriber_id;
+           Masc.Keeper_tool_call_log.reset_for_testing ();
+           Dashboard_cache.invalidate_all ())
+         (fun () ->
+            let composition_catalog =
+              match
+                Masc.Keeper_tool_composition_catalog.parse one_node_clock_composition
+              with
+              | Ok catalog -> catalog
+              | Error _ -> fail "valid clock composition catalog was rejected"
+            in
+            let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+            let tool =
+              Masc.Keeper_tools_agent_core_bundle.make_tools
+                ~config
+                ~meta
+                ~publication_recovery
+                ~ctx_snapshot:ctx_work
+                ~composition_catalog
+                ~turn_ctx_cell
+                ()
+              |> List.find_opt (fun tool ->
+                String.equal tool.Agent_core.Tool.schema.name "keeper_compose_clock")
+              |> Option.get
+            in
+            (match
+               Agent_core.Tool.execute
+                 ~invocation:
+                   (composition_invocation
+                      ~completion:Agent_core.Tool_contract.Continue_after_success)
+                 tool
+                 (`Assoc [])
+             with
+             | Ok _ -> ()
+             | Error error ->
+               failf "materialized composition failed: %s" error.Agent_core.Types.message);
+            let rows =
+              Masc.Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:1 ()
+            in
+            let committed_row =
+              match rows with
+              | [ row ] ->
+               check
+                 (option string)
+                 "committed nested row is immediately readable"
+                 (Some "time")
+                 (Safe_ops.json_string_opt "composition_node_id" row);
+               row
+              | _ -> fail "expected one synchronously committed nested action row"
+            in
+            check
+              bool
+              "fleet-row cache invalidated before refresh"
+              true
+              (Option.is_none (Dashboard_cache.peek cache_key));
+            let committed_refresh =
+              List.find_map
+                (fun frame ->
+                   match Masc.Sse.data_payload_of_frame frame with
+                   | Error Masc.Sse.Missing_data_payload -> None
+                   | Ok payload ->
+                     let json = Yojson.Safe.from_string payload in
+                     if Safe_ops.json_string_opt "composition_node_id" json = Some "time"
+                     then Some json
+                     else None)
+                !frames
+            in
+            let committed_refresh =
+              match committed_refresh with
+              | Some event -> event
+              | None -> fail "post-commit refresh event was not broadcast"
+            in
+            let physical_tool_call_events =
+              List.filter_map
+                (fun frame ->
+                   match Masc.Sse.data_payload_of_frame frame with
+                   | Error Masc.Sse.Missing_data_payload -> None
+                   | Ok payload ->
+                     let json = Yojson.Safe.from_string payload in
+                     if Safe_ops.json_string_opt "type" json = Some "keeper_tool_call"
+                     then Some json
+                     else None)
+                !frames
+            in
+            check
+              int
+              "one physical tool execution event"
+              1
+              (List.length physical_tool_call_events);
+            check
+              (option string)
+              "commit refresh has a distinct event type"
+              (Some "keeper_tool_call_evidence_committed")
+              (Safe_ops.json_string_opt "type" committed_refresh);
+            List.iter
+              (fun field ->
+                 check
+                   (option string)
+                   (field ^ " joins committed row and refresh event")
+                   (Safe_ops.json_string_opt field committed_row)
+                   (Safe_ops.json_string_opt field committed_refresh))
+              [ "tool_use_id"; "composition_run_id" ];
+            check
+              bool
+              "refresh subscriber observes invalidated cache"
+              true
+              !refresh_observed_cache_miss))
+;;
+
 let test_terminal_composition_materializes_terminal_completion () =
   with_exec_fixture "composition-terminal-surface"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -5408,6 +5546,7 @@ let test_composition_runtime_uses_canonical_descriptor () =
          Masc.Keeper_tool_plan_executor.execute_keeper
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+           ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
            ~parent_invocation:
              (composition_invocation
                 ~completion:Agent_core.Tool_contract.Continue_after_success)
@@ -5450,6 +5589,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
          Masc.Keeper_tool_plan_executor.execute_keeper
            ~plan
            ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+           ~composition_run_id:(Masc.Keeper_tool_plan.Composition_run_id.fresh ())
            ~parent_invocation:
              (composition_invocation
                 ~completion:Agent_core.Tool_contract.Continue_after_success)
@@ -5570,6 +5710,8 @@ let () =
         test_composition_runtime_uses_canonical_descriptor;
       test_case "catalog composition is a first-class executable tool" `Quick
         test_composition_catalog_materializes_and_executes_first_class_tool;
+      test_case "composition action commit refreshes dashboard evidence" `Quick
+        test_composition_action_commit_invalidates_cache_before_refresh_event;
       test_case "terminal catalog composition keeps terminal completion" `Quick
         test_terminal_composition_materializes_terminal_completion;
       test_case "composition failure exposes typed plan cause" `Quick

@@ -249,6 +249,12 @@ describe('KeeperToolCallInspector render', () => {
           batch_index: 0,
           batch_size: 2,
           execution_mode: 'concurrent',
+          disposition: 'failed',
+          composition_tool: 'keeper_research_pipeline',
+          composition_run_id: 'run-42',
+          composition_node_id: 'publish_report',
+          composition_execution: 'inline',
+          parent_tool_use_id: 'outer-7',
           lane: 'autonomous',
         },
       ],
@@ -274,8 +280,58 @@ describe('KeeperToolCallInspector render', () => {
     expect(text).toContain('Code')
     expect(text).toContain('Task')
     expect(text).toContain(
-      'turn 9 · plan 4 · batch 0 · size 2 · mode concurrent · tool_use_id (blank)',
+      'turn 9 · plan 4 · batch 0 · size 2 · mode concurrent · result failed',
     )
+    expect(text).toContain('composition keeper_research_pipeline')
+    expect(text).toContain('node publish_report')
+    expect(text).toContain('execution inline')
+    expect(text).toContain('parent_tool_use_id outer-7')
+    const compositionRow = container.querySelector('[data-composition-node="publish_report"]')
+    expect(compositionRow).not.toBeNull()
+    expect(compositionRow?.getAttribute('data-composition-run')).toBe('run-42')
+    expect(compositionRow?.getAttribute('data-composition-execution')).toBe('inline')
+    expect(compositionRow?.getAttribute('data-tool-call-disposition')).toBe('failed')
+    expect(text).toContain('↳ publish_report · inline')
+  })
+
+  it('renders a typed deferred composition action without counting it as failed', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'fresh',
+      entry_count: 1,
+      entries: [
+        {
+          ts: 1_777_100_020,
+          keeper: 'analyst',
+          tool: 'keeper_board_await',
+          input: {},
+          output: 'waiting',
+          success: false,
+          duration_ms: 15,
+          disposition: 'deferred',
+          composition_tool: 'keeper_watch_pipeline',
+          composition_run_id: 'run-43',
+          composition_node_id: 'wait_for_board',
+          composition_execution: 'async',
+          parent_tool_use_id: 'outer-8',
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const dossier = container.querySelector('[data-testid="keeper-tool-call-dossier"]')
+    expect(dossier?.textContent).toContain('1 deferred / 1')
+    expect(dossier?.textContent).toContain('no failed calls in this window')
+    expect(container.querySelector('[title="deferred"]')?.textContent).toBe('D')
+    expect(container.querySelector('[data-composition-node="wait_for_board"]')).not.toBeNull()
   })
 
   it('does not render Code links for unsafe absolute tool-call file inputs', async () => {

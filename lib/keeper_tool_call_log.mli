@@ -150,6 +150,12 @@ val log_call :
   ?batch_index:int ->
   ?batch_size:int ->
   ?execution_mode:Agent_core.Tool_contract.execution_mode ->
+  ?typed_result:Tool_result.result ->
+  ?composition_tool:string ->
+  ?composition_run_id:string ->
+  ?composition_node_id:string ->
+  ?composition_execution:Keeper_tool_composition_catalog.execution_mode ->
+  ?parent_tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -177,6 +183,10 @@ val log_call :
     [planned_index], so they are persisted unchanged. [batch_index],
     [batch_size], and [execution_mode] preserve Agent Core's actual schedule
     rather than inferring concurrency from timing.
+    [typed_result] serializes the producer-owned disposition when it is
+    available. The composition fields are an explicit observation envelope
+    supplied by the typed plan executor; readers must not reconstruct them
+    from [tool_use_id] or tool-name strings.
     [on_committed], when supplied, forces this row through the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the

@@ -50,6 +50,7 @@ let make_tool_bundle_for_descriptors
       ?gate_context
       ?hitl_resolution
       ?composition_catalog
+      ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
@@ -329,6 +330,7 @@ let make_tool_bundle_for_descriptors
         ~publication_recovery
         ~ctx_snapshot
         ?turn_sandbox_factory
+        ?turn_ctx_cell
         ?clock
         ?continuation_channel
         ?gate_context:gate_context_provider
@@ -369,6 +371,7 @@ let make_tool_bundle
       ?gate_context
       ?hitl_resolution
       ?composition_catalog
+      ?turn_ctx_cell
       ()
   =
   make_tool_bundle_for_descriptors
@@ -381,6 +384,7 @@ let make_tool_bundle
     ?gate_context
     ?hitl_resolution
     ?composition_catalog
+    ?turn_ctx_cell
     ~descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     ()
 ;;
@@ -393,6 +397,7 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
       ?composition_catalog
+      ?turn_ctx_cell
       ()
   : Agent_core.Tool.t list
   =
@@ -403,6 +408,7 @@ let make_tools
      ~ctx_snapshot
      ?clock
      ?composition_catalog
+     ?turn_ctx_cell
      ())
     .tools
 ;;

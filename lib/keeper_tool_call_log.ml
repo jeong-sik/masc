@@ -421,6 +421,12 @@ let log_call
       ?batch_index
       ?batch_size
       ?execution_mode
+      ?typed_result
+      ?composition_tool
+      ?composition_run_id
+      ?composition_node_id
+      ?composition_execution
+      ?parent_tool_use_id
       ?trace_id
       ?session_id
       ?generation
@@ -537,6 +543,30 @@ let log_call
             , Agent_core.Tool_contract.execution_mode_to_yojson value ) ]
         | None -> []
       in
+      let typed_disposition_field =
+        match typed_result with
+        | Some result ->
+          [ "disposition", `String (Tool_result.string_of_disposition result) ]
+        | None -> []
+      in
+      let composition_fields =
+        [ "composition_tool", composition_tool
+        ; "composition_run_id", composition_run_id
+        ; "composition_node_id", composition_node_id
+        ; "parent_tool_use_id", parent_tool_use_id
+        ]
+        |> List.filter_map (fun (key, value) ->
+          Option.map (fun value -> key, `String value) value)
+      in
+      let composition_execution_field =
+        match composition_execution with
+        | Some value ->
+          [ ( "composition_execution"
+            , `String
+                (Keeper_tool_composition_catalog.execution_mode_to_string value) )
+          ]
+        | None -> []
+      in
       let session_id_field =
         match session_id with
         | Some value -> [ "session_id", `String value ]
@@ -644,6 +674,9 @@ let log_call
            @ batch_index_field
            @ batch_size_field
            @ execution_mode_field
+           @ typed_disposition_field
+           @ composition_fields
+           @ composition_execution_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

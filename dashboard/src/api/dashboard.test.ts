@@ -421,6 +421,12 @@ describe('keeper tool telemetry fetchers', () => {
             batch_index: 1,
             batch_size: 3,
             execution_mode: 'concurrent',
+            disposition: 'deferred',
+            composition_tool: 'keeper_research_pipeline',
+            composition_run_id: 'run-42',
+            composition_node_id: 'fetch_sources',
+            composition_execution: 'async',
+            parent_tool_use_id: 'outer-7',
             goal_ids: ['g-1', 'g-2'],
           },
         ],
@@ -438,6 +444,12 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.batch_index).toBe(1)
     expect(entry?.batch_size).toBe(3)
     expect(entry?.execution_mode).toBe('concurrent')
+    expect(entry?.disposition).toBe('deferred')
+    expect(entry?.composition_tool).toBe('keeper_research_pipeline')
+    expect(entry?.composition_run_id).toBe('run-42')
+    expect(entry?.composition_node_id).toBe('fetch_sources')
+    expect(entry?.composition_execution).toBe('async')
+    expect(entry?.parent_tool_use_id).toBe('outer-7')
   })
 
   it('keeps missing or malformed tool-call duration unmeasured', async () => {

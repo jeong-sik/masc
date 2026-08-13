@@ -1069,6 +1069,42 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       1
       (Safe_ops.json_int ~default:0 "calls" unknown_bucket))
 
+let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
+  with_tmp_log (fun () ->
+    let result =
+      Tool_result.make_deferred
+        ~tool_name:"keeper_wait"
+        ~start_time:(Time_compat.now ())
+        ~data:(`Assoc [ "reason", `String "external_effect_pending" ])
+        ()
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k-deferred"
+      ~tool_name:"keeper_wait"
+      ~input:(`Assoc [])
+      ~output_text:(Tool_result.message result)
+      ~success:(Tool_result.is_success result)
+      ~duration_ms:(Tool_result.duration_ms result)
+      ~typed_result:result
+      ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int)
+      "deferred remains visible as typed neutral outcome"
+      1
+      (Safe_ops.json_int ~default:0 "deferred" summary);
+    Alcotest.(check int)
+      "deferred excluded from settled quality total"
+      0
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int)
+      "deferred is not a failure"
+      0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    Alcotest.(check bool)
+      "deferred is absent from settled per-tool rates"
+      true
+      Yojson.Safe.Util.(member "by_tool" summary |> to_list |> List.is_empty))
+
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
     let store =
@@ -1523,6 +1559,8 @@ let () =
             test_dashboard_aggregate_groups_runtime_fields
         ; eio_test "dashboard aggregate marks missing runtime profile unknown"
             test_dashboard_aggregate_missing_runtime_profile_is_unknown
+        ; eio_test "dashboard aggregate keeps deferred neutral"
+            test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"

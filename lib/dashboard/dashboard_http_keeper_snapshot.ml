@@ -45,22 +45,42 @@ let keeper_config_json (config : Workspace.config) (name : string)
       (`Not_found,
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
   | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
+      let raw_meta = m in
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
-      let defaults, profile_config_error =
+      let defaults, effective_meta, config_error =
         match
           Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
             ~base_path:config.base_path
             m.name
         with
-        | Ok defaults -> defaults, None
+        | Ok defaults ->
+          (match Keeper_meta_contract.effective_meta_of_profile_defaults defaults m with
+           | Ok meta -> defaults, meta, None
+           | Error detail ->
+             let keeper_path =
+               Option.value
+                 ~default:(Keeper_types_profile.keeper_meta_path config m.name)
+                 defaults.manifest_path
+             in
+             ( defaults
+             , m
+             , Some
+                 { Keeper_types_profile.keeper_name = m.name
+                 ; keeper_path
+                 ; failing_path = keeper_path
+                 ; kind = Keeper_types_profile.Profile_error
+                 ; detail
+                 } ))
         | Error error ->
           ( Keeper_types_profile.empty_keeper_profile_defaults
+          , m
           , Some
               (Keeper_types_profile.keeper_toml_config_error_of_load_error
                  ~keeper_name:m.name
                  error) )
       in
+      let m = effective_meta in
       let active_goals =
         List.filter_map
           (fun goal_id ->
@@ -278,21 +298,30 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ( "autonomous_wake_prompt",
            Json_util.string_opt_to_json
              defaults.Keeper_types_profile.autonomous_wake_prompt );
-         ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
-         ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
-         ("allowed_paths",
-           `List (List.map (fun s -> `String s) m.allowed_paths));
-	         ("effective_allowed_paths",
-	           `List (List.map (fun s -> `String s)
-	             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
-	         ("pipeline_stage", `String pipeline_stage);
-	         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
-	         ("pipeline_stage_detail", `String pipeline_stage_detail);
+         ( "sandbox_profile"
+         , `String
+             (Keeper_types_profile_sandbox.sandbox_profile_to_string
+                m.sandbox_profile) );
+         ( "network_mode"
+         , `String
+             (Keeper_types_profile_sandbox.network_mode_to_string
+                m.network_mode) );
+         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ( "allowed_paths"
+         , `List (List.map (fun s -> `String s) m.allowed_paths) );
+         ( "effective_allowed_paths"
+         , `List
+             (List.map
+                (fun s -> `String s)
+                (Keeper_alerting_path.effective_allowed_paths ~meta:m)) );
+         ("pipeline_stage", `String pipeline_stage);
+         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
+         ("pipeline_stage_detail", `String pipeline_stage_detail);
 	         ("state_diagram", `String state_diagram);
          ( "config_error",
            Json_util.option_to_yojson
              Keeper_types_profile.keeper_toml_config_error_to_json
-             profile_config_error );
+             config_error );
          ("prompt", prompt);
          ("execution", execution);
          ("proactive", proactive);
@@ -301,7 +330,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);
          ("workspace", workspace);
-         ("sources", source_provenance_json config m);
+         ("sources", source_provenance_json config raw_meta);
          ("metrics", metrics);
        ]
       in

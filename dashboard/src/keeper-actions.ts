@@ -920,6 +920,14 @@ export async function sendKeeperThreadMessage(
   appendThreadEntry(keeperName, {
     id: localId,
     role: 'user',
+    // The operation id is the same value the backend stamps as the row's
+    // delivery_key request_id, so carrying it from the start lets the history
+    // merge recognise its own placeholder. Waiting for
+    // KEEPER_CHAT_OPERATION_ACCEPTED to stamp it leaves the row identity-less
+    // whenever the stream dies first, and sameConversationEntry reads
+    // "one side has a request id" as "different rows" — which renders the sent
+    // message twice, once local and once from history.
+    requestId: operationId,
     source: 'direct_user',
     label: 'You',
     text: message,
@@ -937,6 +945,7 @@ export async function sendKeeperThreadMessage(
   appendThreadEntry(keeperName, {
     id: assistantId,
     role: 'assistant',
+    requestId: operationId,
     source: 'direct_assistant',
     label: keeperName,
     text: '',

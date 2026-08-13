@@ -6,10 +6,9 @@ let filesystem_tools : Masc_domain.tool_schema list =
   [ { name = "tool_read_file"
     ; description =
         "Read a file as text (truncated at max_bytes). path is REQUIRED. Paths resolve \
-         relative to your playground — use 'repos/X/lib/foo.ml' not \
-         '.masc/playground/your-name/repos/X/lib/foo.ml'. Good: path='lib/foo.ml', \
-         path='repos/masc/lib/workspace.ml'. Bad: path=''. For multi-file search, use \
-         Grep."
+         relative to your workspace root, or to the typed `cwd` when you pass one — \
+         never a host path like '.masc/playground/your-name/...'. Good: \
+         path='lib/foo.ml'. Bad: path=''. For multi-file search, use Grep."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

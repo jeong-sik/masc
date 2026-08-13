@@ -21,7 +21,22 @@
     probed one, [initialize] and [tools/list] both answered, and the models
     still reported no masc tool present. So [Projected] means a turn is worth
     spending, and nothing more. Only observing an actual call establishes
-    reachability, which is [probe_invocation]'s job (not yet implemented).
+    reachability.
+
+    {1 Which lanes observe a call}
+
+    {!probe_invocation} answers for Agent Core runtimes over HTTP;
+    {!probe_official_client_invocation} answers for claude_code and
+    codex_app_server by spawning their vendor client. Neither writes under a
+    keeper: the Agent Core request carries no session, and the official-client
+    entry points take no keeper name, so a probe turn opens a session of its
+    own and abandons it.
+
+    Antigravity takes no host-declared tool list at all: MASC reaches it only
+    through a per-turn MCP bridge published into the client's HOME. Its probe
+    is {!probe_antigravity_invocation}, which stands that bridge up against a
+    throwaway owner leaf — the discardable session the other lanes get for free
+    by leaving their session mode at its default (masc#28414).
 
     @since 0.21.3 *)
 
@@ -105,9 +120,26 @@ type invocation_error =
       (** [probe_surface] already answers this one; no turn is worth spending. *)
   | Unresolvable_runtime of string
   | Not_agent_core_lane of string
-      (** The official-client lanes own a durable session keyed by keeper name,
-          so probing them needs the session isolation this function does not
-          implement. Reported rather than approximated. *)
+      (** {!probe_invocation} was asked about an official-client runtime.
+          Use {!probe_official_client_invocation} instead, which spawns the
+          vendor client rather than issuing an HTTP completion. *)
+  | Not_official_client_lane of string
+      (** {!probe_official_client_invocation} was asked about an Agent Core
+          runtime. Use {!probe_invocation}. *)
+  | Tools_only_via_mcp_bridge of string
+      (** {!probe_official_client_invocation} was asked about Antigravity,
+          which declares no host-side tool list. Use
+          {!probe_antigravity_invocation}, which publishes the MCP bridge the
+          client actually reads. Answering from the descriptor table instead
+          would report advertisement as consumption — the distinction F1 of the
+          2026-08-12 audit turned on. *)
+  | Not_antigravity_lane of string
+      (** {!probe_antigravity_invocation} was asked about a lane that declares
+          its tools directly. Use {!probe_invocation} or
+          {!probe_official_client_invocation}. *)
+  | Antigravity_home_unavailable of string
+      (** The throwaway HOME or its MCP config could not be written, so the
+          client would have started without the surface under test. *)
   | Tool_schema_rejected of string
 
 val invocation_error_to_string : invocation_error -> string
@@ -132,3 +164,66 @@ val probe_invocation
   -> prompt:string
   -> unit
   -> (invocation, invocation_error) result
+
+val probe_official_client_invocation
+  :  mgr:_ Eio.Process.mgr
+  -> clock:_ Eio.Time.clock
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> base_path:string
+  -> now:(unit -> float)
+  -> runtime_id:string
+  -> tool:string
+  -> prompt:string
+  -> unit
+  -> (invocation, invocation_error) result
+(** The same question for the claude_code and codex_app_server lanes, which
+    answer it by spawning their vendor client rather than by an HTTP
+    completion.
+
+    Writes nothing under a keeper. The durable session those lanes own is a
+    {i keeper-layer} construct: [Keeper_*_runtime] reads the previous
+    settlement and asks for [Resume]. The runtime entry points take no keeper
+    name at all, and this probe leaves the session mode at its default, so
+    every probe turn opens a session of its own and abandons it. That is the
+    isolation — the same shape as {!probe_invocation}'s absence of a session,
+    reached differently.
+
+    Evidence is stronger here than on the Agent Core lane: MASC hands the
+    client a host-declared tool whose implementation records its own
+    invocation, so a call is observed at the callback rather than inferred
+    from response content.
+
+    Antigravity is refused with {!Tools_only_via_mcp_bridge}: its entry point
+    declares no tool list, so its surface exists only once the per-turn MCP
+    bridge is up. Answering from MASC's descriptor table instead would repeat
+    the 2026-08-12 mistake of reading advertisement as consumption. *)
+
+val probe_antigravity_invocation
+  :  sw:Eio.Switch.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> secure_random:Eio.Flow.source_ty Eio.Resource.t
+  -> mgr:_ Eio.Process.mgr
+  -> clock:_ Eio.Time.clock
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> base_path:string
+  -> now:(unit -> float)
+  -> runtime_id:string
+  -> tool:string
+  -> prompt:string
+  -> unit
+  -> (invocation, invocation_error) result
+(** The same question for the Antigravity lane, which needs more machinery than
+    the other two because MASC does not hand it a tool list: the client reads
+    an MCP server URL from its own HOME, so the probe publishes a bridge
+    advertising exactly the probed tool and then spawns the client.
+
+    Isolation is an owner leaf no keeper uses. {!Runtime_antigravity_home}
+    already keys the HOME by owner, so a probe owner gets its own credential
+    copy, settings, and MCP config; the conversation is left at its default
+    (new), and the MCP config is cleared when the switch releases. Nothing the
+    probe writes is read by a keeper turn.
+
+    The extra handles are not incidental. [net] and [secure_random] exist
+    because this lane's surface {i is} a local HTTP server — the one whose
+    reply to an unknown notification killed every antigravity session in 32ms
+    (masc#28431). Probing it exercises that server, not a description of it. *)

@@ -172,3 +172,15 @@ val to_string : t -> string
 
 (** Whether the error is transient and the operation can be retried. *)
 val is_retryable : t -> bool
+
+val of_raised_exn : exn -> t
+(** Classify an exception that escaped a call. An Eio timeout — bare, or wrapped
+    in [Cancel.Cancelled] when the expiry cancelled a surrounding fiber —
+    becomes [Api (Timeout _)]; everything else keeps the [Internal] wording it
+    had. Reporting a timeout as [Internal] contradicted this module's own rule
+    that [Internal] is for unreachable invariant failures, and left an operator
+    unable to tell a bug from a call that ran out of time.
+
+    This decides what an observer is told. It does not decide whether the
+    exception propagates: callers re-raise the original, so a cancellation is
+    never absorbed. *)

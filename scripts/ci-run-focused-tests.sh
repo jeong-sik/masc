@@ -15,6 +15,24 @@ export DUNE_JOBS="${DUNE_JOBS:-1}"
 export ME_ROOT="${ME_ROOT:-/tmp/me}"
 mkdir -p "${ME_ROOT}"
 
+# Which groups failed, recorded through a file rather than a shell array: two
+# groups run inside subshells so their test knobs cannot leak, and a subshell
+# cannot append to its parent's array. Without this the step exited 1 while
+# every group in the log reported success, and the only way to find the failing
+# one was to re-run the suites by hand (masc#28502).
+failed_groups_file="$(mktemp)"
+trap 'rm -f "${failed_groups_file}"' EXIT
+
+record_group_failure() {
+  local label="$1"
+  local status="$2"
+  printf '%s (exit %s)\n' "${label}" "${status}" >>"${failed_groups_file}"
+  # Emitted after ::endgroup:: on purpose: an annotation written inside a
+  # collapsed group is only visible to someone who already knows to expand it,
+  # which is the thing that was missing.
+  echo "::error::focused tests: ${label} failed (exit ${status})"
+}
+
 run_group() {
   local label="$1"
   local timeout_sec="$2"
@@ -26,8 +44,38 @@ run_group() {
   CI_TEST_TIMEOUT_SEC="${timeout_sec}" \
     scripts/ci-run-tests.sh "opam exec -- dune build --root .${target_args}" || status=$?
   echo "::endgroup::"
+  if [ "${status}" -ne 0 ]; then
+    record_group_failure "${label}" "${status}"
+  fi
   return "${status}"
 }
+
+# A group that runs a shell test rather than dune targets. Shares the
+# announcement so a shell test cannot fail more quietly than a dune suite —
+# which it did: [host-fd-health-paths] prints nothing when it passes, so a
+# silent group and a silent failure looked identical in the log.
+run_shell_group() {
+  local label="$1"
+  local script_path="$2"
+  local status=0
+  echo "::group::focused tests: ${label}"
+  bash "${script_path}" || status=$?
+  echo "::endgroup::"
+  if [ "${status}" -ne 0 ]; then
+    record_group_failure "${label}" "${status}"
+  fi
+  return "${status}"
+}
+
+# Sourced rather than executed: stop here and expose only the definitions
+# above. Standard bash idiom, and it changes nothing when the script runs
+# normally ([BASH_SOURCE[0]] equals [$0] then). It exists so the failure
+# announcement can be tested without a dune build, which is the only way to
+# show that a change whose entire purpose is "name the failing group" actually
+# names it.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
 
 paused_targets=(
   @test/runtest-test_keeper_turn_outcome
@@ -149,6 +197,7 @@ normal_targets=(
   @test/runtest-test_keeper_gate_effect_coverage
   @test/runtest-test_keeper_gate_replay
   @test/runtest-test_workspace
+  @test/runtest-test_http_server_eio
   @test/runtest-test_verification
   @test/runtest-test_dashboard_verification
   @test/runtest-test_tool_schema_constraint_enforcement
@@ -232,6 +281,7 @@ normal_targets=(
   @test/runtest-test_keeper_sandbox_docker_route
   @test/runtest-test_dashboard_dev_token_host_gate
   @test/runtest-test_dashboard_harness_health
+  @test/runtest-test_eval_calibration
   @test/runtest-test_telemetry_unified_keeper_fan_in
   @test/runtest-test_dated_jsonl
   @test/runtest-test_audit_log
@@ -269,11 +319,15 @@ overall_status=0
   run_group paused-work 600 "${paused_targets[@]}"
 ) || overall_status=1
 
-echo "::group::focused tests: host-fd-health-paths"
-if ! bash test/test_monitor_system_health_paths.sh; then
-  overall_status=1
-fi
-echo "::endgroup::"
+run_shell_group host-fd-health-paths test/test_monitor_system_health_paths.sh \
+  || overall_status=1
+
+# Runs first among the cheap checks on purpose: it asserts that this script
+# still names a failing group, and it costs no build. If it is the thing that
+# breaks, the run says so by name instead of exiting 1 in silence — the state
+# masc#28502 describes.
+run_shell_group focused-failure-reporting \
+  test/test_ci_focused_tests_names_failing_group.sh || overall_status=1
 
 run_group board-attention-worker 180 "${board_attention_targets[@]}" || overall_status=1
 run_group normal 1200 "${normal_targets[@]}" || overall_status=1
@@ -295,5 +349,22 @@ fi
   export MASC_E2E_TESTS=true
   run_group sse 900 "${sse_targets[@]}"
 ) || overall_status=1
+
+# One place that states the outcome in full. A reader who opens the step and
+# scrolls to the bottom should not have to reconstruct which of seven groups
+# set the exit code.
+if [ -s "${failed_groups_file}" ]; then
+  echo "focused tests: failing groups"
+  sed 's/^/  /' "${failed_groups_file}"
+  overall_status=1
+elif [ "${overall_status}" -ne 0 ]; then
+  # The exit code says something failed and no group claimed it. That is a
+  # defect in this script, not in the suites, and saying so is better than
+  # exiting 1 with nothing to read.
+  echo "::error::focused tests: exit ${overall_status} with no group recorded; \
+ci-run-focused-tests.sh has a failure path that does not call record_group_failure"
+else
+  echo "focused tests: all groups passed"
+fi
 
 exit "${overall_status}"

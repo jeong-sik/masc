@@ -34,9 +34,9 @@ val existing_sibling_dirs_hint : ?workdir:string -> string -> string option
 (** For a required directory [path] that is missing on disk, enumerate the
     real child-directory names under its nearest existing ancestor (read via
     [Sys.readdir]) and render them as a [Cwd_not_directory] hint. Grounds
-    caller self-correction in filesystem truth (e.g. a stale
-    ["repos/masc-mcp"] yields the real ["repos/"] entries) without a rename
-    table or any substring/similarity matching. [None] when no existing
+    caller self-correction in filesystem truth (a stale directory name yields
+    the real sibling entries) without a rename table or any
+    substring/similarity matching. [None] when no existing
     ancestor directory has child directories to surface. *)
 
 val validate_shell_ir_paths :

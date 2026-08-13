@@ -80,6 +80,9 @@ if [ -z "$ROOT" ]; then
 fi
 
 ROOT="${ROOT%/}"
+# Containment is checked against the resolved root: every candidate path is
+# canonicalised before the comparison, so both sides must be realpaths.
+ROOT_REAL="$(cd "$ROOT" 2>/dev/null && pwd -P || echo "$ROOT")"
 NOW_TS=$(date +%s)
 CUTOFF_TS=$(( NOW_TS - DAYS * 86400 ))
 
@@ -114,36 +117,73 @@ canonical_path() {
   (cd "$path" 2>/dev/null && pwd -P)
 }
 
-for keeper_dir in "$ROOT"/*; do
-  [ -d "$keeper_dir" ] || continue
-  keeper_name="$(basename "$keeper_dir")"
+# Candidates are found by what they are, not by where they sit.
+#
+# A linked git worktree has a regular file at <dir>/.git holding a gitdir:
+# pointer; a primary checkout has a directory there. Selecting only the file
+# form means this script can never propose removing a primary checkout — a
+# stronger guarantee than the previous path-shape guard, which would have
+# accepted any directory under <keeper>/repos/<x>/.worktrees/ including a
+# clone someone put there.
+#
+# The old shape also stopped matching: nothing creates repos/ any more, so the
+# three nested loops would have scanned zero entries and exited 0, reporting
+# success while cleaning nothing.
+#
+# -maxdepth bounds the walk; keepers place worktrees at depths 2-4 below the
+# root in the live playground (2026-08-13), and the primary checkouts they
+# hang off are found at 1-3.
+while IFS= read -r git_pointer; do
+  wt_path="$(dirname "$git_pointer")"
+  [ -d "$wt_path" ] || continue
+
+  # A linked worktree's .git holds a "gitdir:" pointer. dune leaves a
+  # zero-byte .git under _build/.sandbox, which is a build artifact, not a
+  # worktree — measured 13 of them in the live playground. Without this they
+  # reach the --include-broken path and become removal candidates, which would
+  # put this script inside dune's own directory.
+  case "$(head -c 7 "$git_pointer" 2>/dev/null)" in
+    "gitdir:") ;;
+    *) continue ;;
+  esac
+
+  rel="${wt_path#"$ROOT"/}"
+  keeper_name="${rel%%/*}"
   if [ -n "$KEEPER_FILTER" ] && [ "$keeper_name" != "$KEEPER_FILTER" ]; then
     continue
   fi
-  repos_dir="$keeper_dir/repos"
-  [ -d "$repos_dir" ] || continue
 
-  for repo_dir in "$repos_dir"/*; do
-    [ -d "$repo_dir" ] || continue
-    repo_name="$(basename "$repo_dir")"
-    if [ -n "$REPO_FILTER" ] && [ "$repo_name" != "$REPO_FILTER" ]; then
+  # The repository a worktree belongs to is what its own git metadata says,
+  # not what its path spells. The primary checkout is also where
+  # `git worktree remove` has to run from, so it is kept, not just its name.
+  common_dir="$(git -C "$wt_path" rev-parse --git-common-dir 2>/dev/null || true)"
+  main_checkout=""
+  if [ -n "$common_dir" ]; then
+    common_real="$(canonical_path "$common_dir" 2>/dev/null || echo "$common_dir")"
+    main_checkout="$(dirname "$common_real")"
+  fi
+  repo_name="unknown"
+  if [ -n "$main_checkout" ]; then
+    repo_name="$(basename "$main_checkout")"
+  fi
+  if [ -n "$REPO_FILTER" ] && [ "$repo_name" != "$REPO_FILTER" ]; then
+    continue
+  fi
+
+  scanned=$((scanned + 1))
+
+  # Containment: the resolved path must still be under ROOT. Everything below
+  # removes directories, so this is checked against the realpath rather than
+  # the spelling that reached us.
+  wt_canonical="$(canonical_path "$wt_path" 2>/dev/null || true)"
+  case "$wt_canonical" in
+    "$ROOT_REAL"/*) ;;
+    *)
+      echo "BROKEN  $wt_path -- skipped (resolves outside the playground root)"
+      broken=$((broken + 1))
       continue
-    fi
-    worktrees_dir="$repo_dir/.worktrees"
-    [ -d "$worktrees_dir" ] || continue
-
-    for wt_path in "$worktrees_dir"/*; do
-      [ -d "$wt_path" ] || continue
-      scanned=$((scanned + 1))
-
-      case "$wt_path" in
-        "$ROOT"/*/repos/*/.worktrees/*) ;;
-        *)
-          echo "BROKEN  $wt_path -- skipped (outside docker playground worktree shape)"
-          broken=$((broken + 1))
-          continue
-          ;;
-      esac
+      ;;
+  esac
 
       if git -C "$wt_path" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
         git_top="$(git -C "$wt_path" rev-parse --show-toplevel 2>/dev/null || true)"
@@ -230,8 +270,9 @@ for keeper_dir in "$ROOT"/*; do
       candidates=$((candidates + 1))
 
       if [ "$APPLY" -eq 1 ]; then
-        if git -C "$repo_dir" worktree remove "$wt_path" 2>/dev/null; then
-          git -C "$repo_dir" worktree prune 2>/dev/null || true
+        if [ -n "$main_checkout" ] \
+           && git -C "$main_checkout" worktree remove "$wt_path" 2>/dev/null; then
+          git -C "$main_checkout" worktree prune 2>/dev/null || true
           echo "REMOVED keeper=$keeper_name repo=$repo_name age_days=$age_days path=$wt_path"
           removed=$((removed + 1))
         else
@@ -241,9 +282,7 @@ for keeper_dir in "$ROOT"/*; do
       else
         echo "CANDID  keeper=$keeper_name repo=$repo_name age_days=$age_days path=$wt_path"
       fi
-    done
-  done
-done
+done < <(find "$ROOT" -mindepth 2 -maxdepth 7 -name .git -type f 2>/dev/null)
 
 mode="dry-run"
 if [ "$APPLY" -eq 1 ]; then

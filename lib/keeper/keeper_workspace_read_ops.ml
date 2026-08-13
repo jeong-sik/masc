@@ -105,15 +105,15 @@ let try_handle_with_outcome
   let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
     (* Pre-flight parity with [Keeper_sandbox_read_backend.read_file]: verify
-       the host target exists before spawning a container, so a wrong
-       repos/<segment> guess fails with a precise host-path error instead of
-       burning a docker run that ends in "No such file or directory". *)
+       the host target exists before spawning a container, so a wrong path
+       guess fails with a precise host-path error instead of burning a docker
+       run that ends in "No such file or directory". *)
     if not (Sys.file_exists target) then
       Error
         (sandbox_read_error ~target
            (Printf.sprintf
-              "path_not_found: %s (host path does not exist; list repos/ to \
-               see your actual checkouts before searching)"
+              "path_not_found: %s (host path does not exist; list your \
+               workspace root to see what is actually there before searching)"
               target))
     else
       match

@@ -115,6 +115,35 @@ let test_applies_health_overrides () =
     (Some "45.5")
     (List.assoc_opt "MASC_KEEPER_DURABLE_QUEUE_STALE_SEC" overrides)
 
+(* The whole [wire_capture] table resolves, not just its switch. [enabled] was
+   [Toml_and_env] while [retention_days] and [max_bytes] were [Env_only], and
+   because [wire_capture] is an owned namespace an unmapped sibling is rejected
+   rather than ignored — so writing the obvious three keys together took the
+   server down at boot. This fails if either sibling is returned to [Env_only].
+   Live evidence: the keys sat commented out in runtime.toml with the FATAL
+   recorded above them. *)
+let test_applies_wire_capture_overrides () =
+  let doc =
+    parse_or_fail
+      "[wire_capture]\n\
+       enabled = true\n\
+       retention_days = 7\n\
+       max_bytes = 536870912\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "all three wire-capture keys apply" 3 count;
+  check (option string) "enabled"
+    (Some "true")
+    (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE" overrides);
+  check (option string) "retention days"
+    (Some "7")
+    (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" overrides);
+  check (option string) "max bytes"
+    (Some "536870912")
+    (List.assoc_opt "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" overrides)
+
 (* RFC-0297 P0-1: the three lifecycle kill-switches must map TOML ->
    canonical env instead of being silently dropped. Before the key_to_env
    mappings existed, [reactive]/[proactive]/[autonomous] enabled were never
@@ -649,6 +678,8 @@ let () =
         ; test_case "applies sleep/batch overrides" `Quick test_applies_sleep_and_batch_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies health overrides" `Quick test_applies_health_overrides
+        ; test_case "applies the whole wire_capture table" `Quick
+            test_applies_wire_capture_overrides
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error
         ; test_case "current schema rejects unknown Keeper key" `Quick

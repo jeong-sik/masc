@@ -103,7 +103,28 @@ module Payload = struct
   let name = "exact_lane_run_registry"
   let running_noun = "exact lane run(s)"
   let restart_reason = "exact-output fibers do not survive server restart"
-  let completed_retention = `All
+
+  (* Bounded against the surface that reads this, not against the sibling
+     registries.
+
+     [`All] was deliberate — #27823 kept every completed run so internal agent
+     execution evidence survived. What it did not bound was growth: the live log
+     reached 302 MiB across 14 179 rows, and server_runtime_bootstrap.ml:770
+     replays all of it on every start, 2 946 ms of read and parse.
+
+     The bound is derived from the consumer rather than copied from
+     fusion/verification (which use 64 and have no paging UI).
+     [GET /api/v1/dashboard/exact-lane-runs] serves the internal-agents monitor
+     with cursor pagination and [exact_lane_run_page_max = 200], so a bound has
+     to be a multiple of that page size or the operator's "older" button walks
+     off the end of the store. 2 000 is ten full pages at the maximum size, or
+     forty at the default of 50, and brings the boot replay to ~416 ms.
+
+     [Run_registry_core.prune] keeps every running entry regardless, so a
+     restart cannot lose work in flight; only completed runs past the bound are
+     dropped, and [run_registry_core.ml:498] compacts the log to that set on the
+     next clean replay. *)
+  let completed_retention = `Latest 2000
 
   let registration_to_yojson registration =
     `Assoc
@@ -211,6 +232,10 @@ let completion_error_to_string = function
 ;;
 
 let storage_filename = "exact-lane-runs-v3.jsonl"
+
+(* Re-exported from the store rather than re-derived from [Payload], so the
+   bound a test reads is the bound [prune] applies. *)
+let max_completed_retained = Store.max_completed_retained
 
 let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
 

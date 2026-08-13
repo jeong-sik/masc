@@ -319,6 +319,20 @@ let test_turn_scoped_capability_and_protocol () =
       (json_request 5 "tools/call" call_params)
   in
   check int "tools/call" 200 called.status;
+  (* [after_response_sent] runs in the bridge's fiber after the response
+     bytes flush, so the client can observe the completed response before
+     that fiber is scheduled again. Yield until the hook lands instead of
+     asserting a scheduling order the contract never promised (#28485:
+     expected ["5"], CI received []). Bounded so a hook that never fires
+     still fails here rather than hanging the suite. *)
+  let rec await_response_acknowledgement remaining =
+    if !responses_sent <> [] || remaining = 0
+    then ()
+    else (
+      Eio.Fiber.yield ();
+      await_response_acknowledgement (remaining - 1))
+  in
+  await_response_acknowledgement 1_000;
   check (list string) "response acknowledgement" [ "5" ] !responses_sent;
   check string
     "tool result"

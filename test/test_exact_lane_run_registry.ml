@@ -63,6 +63,57 @@ let test_current_storage_generation () =
   check string "current store file" "exact-lane-runs-v3.jsonl" R.storage_filename
 ;;
 
+(* The retained-run bound exists to serve the internal-agents monitor, which
+   pages backwards through this store with a cursor. A bound below that route's
+   maximum page size would let the operator's "older" request walk off the end
+   of the store, so the relation is pinned here rather than left to the comment
+   that derives it: raising exact_lane_run_page_max without revisiting the
+   retention fails this. *)
+let monitor_pages_retained = 10
+
+let test_retention_is_derived_from_the_monitor_page_size () =
+  let page_max = Server_routes_http_routes_dashboard.exact_lane_run_page_max in
+  check bool "retention holds whole pages, not a fraction of one" true
+    (R.max_completed_retained >= page_max);
+  check int "retention is the page maximum times the pages the monitor keeps"
+    (page_max * monitor_pages_retained)
+    R.max_completed_retained
+;;
+
+(* The bound is applied, not merely declared. In-memory registry so writing
+   past it stays cheap. *)
+let test_completed_runs_are_bounded () =
+  let registry = R.create () in
+  let total = R.max_completed_retained + 8 in
+  for index = 1 to total do
+    let run_id = Printf.sprintf "run-%05d" index in
+    R.register_running
+      registry
+      ~run_id
+      ~lane:R.Librarian
+      ~subject_id:run_id
+      ~actor:"keeper-a"
+      ~started_at:(float_of_int index)
+      ~input:(R.Exact_input (`Assoc [ "index", `Int index ]));
+    mark_completed_exn
+      registry
+      ~run_id
+      ~outcome:R.Succeeded
+      ~elapsed_s:0.1
+      ~output:(`Assoc [ "index", `Int index ])
+  done;
+  check int "completed runs are bounded"
+    R.max_completed_retained
+    (List.length (R.list_runs registry));
+  let has run_id =
+    List.exists (fun (run : R.run) -> String.equal run.R.run_id run_id)
+      (R.list_runs registry)
+  in
+  check bool "the newest completed run is retained" true
+    (has (Printf.sprintf "run-%05d" total));
+  check bool "the oldest completed run is evicted" false (has "run-00001")
+;;
+
 let test_exact_history_is_not_pruned_across_lanes () =
   let path = Filename.temp_file "exact-lane-runs-all-" ".jsonl" in
   remove_if_exists path;
@@ -322,6 +373,10 @@ let () =
         ; test_case "current storage generation" `Quick test_current_storage_generation
         ; test_case "exact history is not cross-lane pruned" `Quick
             test_exact_history_is_not_pruned_across_lanes
+        ; test_case "retention is derived from the monitor page size" `Quick
+            test_retention_is_derived_from_the_monitor_page_size
+        ; test_case "completed runs are bounded" `Quick
+            test_completed_runs_are_bounded
         ; test_case "failed durable registration is not published" `Quick
             test_failed_durable_registration_is_not_published_in_memory
         ; test_case "failed durable completion is explicitly visible" `Quick

@@ -1092,7 +1092,7 @@ function OverviewKpiStrip({
       : undefined
   return html`
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
-      <${OverviewKpi} label="실행 중 keeper" value=${fleetCountText(fleet?.running)} sub=${` / ${stats.total}`} tone=${fleet?.running != null ? 'ok' : undefined} testId="kpi-run" onClick=${() => navigate('monitoring')} />
+      <${OverviewKpi} label="실행 Fiber" value=${fleetCountText(fleet?.running)} sub=${` / 등록 ${stats.total}`} tone=${fleet?.running != null ? 'ok' : undefined} testId="kpi-run" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="주의 필요" value=${attentionValue} tone=${attentionTone} testId="kpi-att" onClick=${() => navigate('monitoring', { section: 'fleet-health' })} />
       ${approvalQueueState && approvalQueueState.state !== 'ready'
         ? html`<${OverviewKpi}
@@ -1571,12 +1571,12 @@ function OverviewDomainSection({
       <!-- FLEET summary · overview.jsx:252-260 -->
       <${DomainCard} title="Fleet 요약" linkLabel="Monitor" nav=${{ tab: 'monitoring' }} testId="domain-fleet">
         <div class="ov-fleet-sum">
-          <div class="ov-fleet-stat" data-testid="fleet-stat-running"><span class="v ok">${fleetCountText(fleet?.running)}</span><span class="k">실행</span></div>
+          <div class="ov-fleet-stat" data-testid="fleet-stat-running"><span class="v ok">${fleetCountText(fleet?.running)}</span><span class="k">실행 Fiber</span></div>
           <div class="ov-fleet-stat" data-testid="fleet-stat-recovering"><span class=${`v ${(fleet?.recovering ?? 0) > 0 ? 'warn' : ''}`}>${fleetCountText(fleet?.recovering)}</span><span class="k">복구</span></div>
           <div class="ov-fleet-stat" data-testid="fleet-stat-paused"><span class="v">${fleetCountText(fleet?.paused)}</span><span class="k">일시정지</span></div>
           <div class="ov-fleet-stat"><span class="v warn">${stats.att}</span><span class="k">주의</span></div>
           <div class="ov-fleet-stat"><span class=${`v ${stats.hot > 0 ? 'bad' : ''}`}>${stats.hot}</span><span class="k">압박</span></div>
-          <div class="ov-fleet-stat"><span class="v">${stats.total}</span><span class="k">전체</span></div>
+          <div class="ov-fleet-stat"><span class="v">${stats.total}</span><span class="k">등록</span></div>
         </div>
         ${keeperQueueSummary.hasProjection
           ? html`

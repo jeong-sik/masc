@@ -212,7 +212,7 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
       </div>
       <div class="v2-top-spacer"></div>
       <span class="v2-statchip live" title=${countTitle}>
-        <${StatusDot} status="run" pulse=${true} />${running} 실행 중
+        <${StatusDot} status="run" pulse=${true} />${running} 실행 가능
       </span>
       <${AttentionIndicatorV2} />
       <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">

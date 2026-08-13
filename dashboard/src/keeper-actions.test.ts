@@ -355,6 +355,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
     keeperStreamLastEventAt.value = {}
+    _resetChatHydrationForTests()
     _clearTrackedKeeperChatOperationsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
@@ -427,13 +428,13 @@ describe('sendKeeperThreadMessage operation stream', () => {
         role: 'user',
         content: 'hi',
         ts: 1_780_000_000,
-        delivery_key: { kind: 'operation', request_id: submittedRequestId },
+        delivery_key: { kind: 'operation', operation_id: submittedRequestId },
       },
       {
         role: 'assistant',
         content: 'hello there',
         ts: 1_780_000_001,
-        delivery_key: { kind: 'operation', request_id: submittedRequestId },
+        delivery_key: { kind: 'operation', operation_id: submittedRequestId },
       },
     ])
     await hydrateKeeperChatHistory('echo')

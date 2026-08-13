@@ -1948,7 +1948,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)
               (* Expose the persisted delivery identity so the dashboard can
                  reconcile a history reload against its optimistic turn rows
-                 on the exact [delivery_key.request_id]. *)
+                 on the exact delivery-key id (e.g. [operation_id]). *)
               @ (match m.delivery_key with
                  | None -> []
                  | Some key ->

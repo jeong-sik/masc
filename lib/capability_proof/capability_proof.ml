@@ -326,3 +326,218 @@ let scenario t = t.scenario
 let protocol t = t.protocol
 let build_commit t = t.build_commit
 let config_revision t = t.config_revision
+
+type proof_path =
+  | Hermetic
+  | Isolated
+  | Fleet
+
+type evidence_kind =
+  | Journal
+  | Receipt
+  | Durable_queue
+  | Gate
+  | Domain_store
+  | Api
+  | Sse_trace
+  | Browser_screenshot
+  | Config_snapshot
+  | Deployment_identity
+
+type evidence_ref =
+  { path : proof_path
+  ; kind : evidence_kind
+  ; locator : string
+  ; sha256 : string
+  ; captured_at : string
+  }
+
+type evidence_error =
+  | Blank_locator
+  | Blank_captured_at
+  | Invalid_sha256
+
+let proof_path_to_string = function
+  | Hermetic -> "hermetic"
+  | Isolated -> "isolated"
+  | Fleet -> "fleet"
+;;
+
+let evidence_kind_to_string = function
+  | Journal -> "journal"
+  | Receipt -> "receipt"
+  | Durable_queue -> "durable_queue"
+  | Gate -> "gate"
+  | Domain_store -> "domain_store"
+  | Api -> "api"
+  | Sse_trace -> "sse_trace"
+  | Browser_screenshot -> "browser_screenshot"
+  | Config_snapshot -> "config_snapshot"
+  | Deployment_identity -> "deployment_identity"
+;;
+
+let evidence_error_to_string = function
+  | Blank_locator -> "blank_locator"
+  | Blank_captured_at -> "blank_captured_at"
+  | Invalid_sha256 -> "invalid_sha256"
+;;
+
+let all_proof_paths = [ Hermetic; Isolated; Fleet ]
+
+let is_lower_hex = function
+  | '0' .. '9' | 'a' .. 'f' -> true
+  | _ -> false
+;;
+
+let valid_sha256 value = String.length value = 64 && String.for_all is_lower_hex value
+
+let create_evidence_ref ~path ~kind ~locator ~sha256 ~captured_at =
+  if String.trim locator = ""
+  then Error Blank_locator
+  else if not (valid_sha256 sha256)
+  then Error Invalid_sha256
+  else if String.trim captured_at = ""
+  then Error Blank_captured_at
+  else Ok { path; kind; locator; sha256; captured_at }
+;;
+
+let evidence_path evidence = evidence.path
+let evidence_kind evidence = evidence.kind
+let evidence_locator evidence = evidence.locator
+let evidence_sha256 evidence = evidence.sha256
+let evidence_captured_at evidence = evidence.captured_at
+
+type evidence_bundle = evidence_ref list
+
+type bundle_error =
+  | Missing_proof_paths of proof_path list
+  | Duplicate_evidence_ref of string
+
+let evidence_identity evidence =
+  String.concat
+    "\000"
+    [ proof_path_to_string evidence.path
+    ; evidence_kind_to_string evidence.kind
+    ; evidence.locator
+    ; evidence.sha256
+    ; evidence.captured_at
+    ]
+;;
+
+let rec first_duplicate seen = function
+  | [] -> None
+  | evidence :: rest ->
+    let identity = evidence_identity evidence in
+    if List.mem identity seen then Some evidence.locator else first_duplicate (identity :: seen) rest
+;;
+
+let create_evidence_bundle refs =
+  match first_duplicate [] refs with
+  | Some locator -> Error (Duplicate_evidence_ref locator)
+  | None ->
+    let missing =
+      List.filter
+        (fun path -> not (List.exists (fun evidence -> evidence.path = path) refs))
+        all_proof_paths
+    in
+    if missing = [] then Ok refs else Error (Missing_proof_paths missing)
+;;
+
+let evidence_bundle_refs bundle = bundle
+
+let bundle_error_to_string = function
+  | Missing_proof_paths paths ->
+    "missing_proof_paths:" ^ String.concat "," (List.map proof_path_to_string paths)
+  | Duplicate_evidence_ref locator -> "duplicate_evidence_ref:" ^ locator
+;;
+
+type failure_kind =
+  | Contract_violation
+  | Provider_failure
+  | Infrastructure_failure
+  | Evidence_mismatch
+  | Stream_replay_duplicate
+  | Queue_order_violation
+  | Sandbox_escape
+  | Scheduler_settlement_failure
+  | Gate_settlement_failure
+  | Domain_receipt_failure
+
+type runtime_role_policy = Local_agentworld_librarian_only
+
+type unsupported_reason =
+  | Runtime_role_policy of runtime_role_policy
+  | Protocol_not_supported of protocol
+  | Capability_not_declared of capability_case
+
+type blocker_ref = string
+
+type proof_result =
+  | Passed of evidence_bundle
+  | Failed of failure_kind * evidence_ref list
+  | Unsupported of unsupported_reason
+  | Not_run
+  | Blocked of blocker_ref
+
+type result_error =
+  | Invalid_evidence_bundle of bundle_error
+  | Failure_without_evidence
+  | Blank_blocker_ref
+
+let failure_kind_to_string = function
+  | Contract_violation -> "contract_violation"
+  | Provider_failure -> "provider_failure"
+  | Infrastructure_failure -> "infrastructure_failure"
+  | Evidence_mismatch -> "evidence_mismatch"
+  | Stream_replay_duplicate -> "stream_replay_duplicate"
+  | Queue_order_violation -> "queue_order_violation"
+  | Sandbox_escape -> "sandbox_escape"
+  | Scheduler_settlement_failure -> "scheduler_settlement_failure"
+  | Gate_settlement_failure -> "gate_settlement_failure"
+  | Domain_receipt_failure -> "domain_receipt_failure"
+;;
+
+let runtime_role_policy_to_string = function
+  | Local_agentworld_librarian_only -> "local_agentworld_librarian_only"
+;;
+
+let unsupported_reason_to_string = function
+  | Runtime_role_policy policy -> "runtime_role_policy:" ^ runtime_role_policy_to_string policy
+  | Protocol_not_supported protocol -> "protocol_not_supported:" ^ protocol_to_string protocol
+  | Capability_not_declared capability ->
+    "capability_not_declared:" ^ capability_case_to_string capability
+;;
+
+let passed refs =
+  match create_evidence_bundle refs with
+  | Ok bundle -> Ok (Passed bundle)
+  | Error error -> Error (Invalid_evidence_bundle error)
+;;
+
+let failed kind = function
+  | [] -> Error Failure_without_evidence
+  | refs -> Ok (Failed (kind, refs))
+;;
+
+let unsupported reason = Unsupported reason
+let not_run = Not_run
+
+let blocked blocker =
+  if String.trim blocker = "" then Error Blank_blocker_ref else Ok (Blocked blocker)
+;;
+
+let blocker_ref_to_string blocker = blocker
+
+let proof_result_to_string = function
+  | Passed _ -> "passed"
+  | Failed (kind, _) -> "failed:" ^ failure_kind_to_string kind
+  | Unsupported reason -> "unsupported:" ^ unsupported_reason_to_string reason
+  | Not_run -> "not_run"
+  | Blocked blocker -> "blocked:" ^ blocker
+;;
+
+let result_error_to_string = function
+  | Invalid_evidence_bundle error -> "invalid_evidence_bundle:" ^ bundle_error_to_string error
+  | Failure_without_evidence -> "failure_without_evidence"
+  | Blank_blocker_ref -> "blank_blocker_ref"
+;;

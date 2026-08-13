@@ -84,6 +84,84 @@ let test_closed_inventory_has_unique_case_ids () =
   check (list string) "no matrix identity collisions" [] (List.rev !collisions)
 ;;
 
+let evidence ?(path = Hermetic) ?(kind = Journal) locator =
+  create_evidence_ref
+    ~path
+    ~kind
+    ~locator
+    ~sha256:(String.make 64 'a')
+    ~captured_at:"2026-08-13T09:00:00Z"
+  |> function
+  | Ok evidence -> evidence
+  | Error error -> failf "unexpected evidence error: %s" (evidence_error_to_string error)
+;;
+
+let three_path_evidence () =
+  [ evidence ~path:Hermetic "fixture:capability-proof"
+  ; evidence ~path:Isolated ~kind:Receipt "receipt:isolated-run"
+  ; evidence ~path:Fleet ~kind:Api "api:/health?full=1"
+  ]
+;;
+
+let test_pass_requires_all_three_proof_paths () =
+  match passed [ evidence ~path:Hermetic "fixture:only" ] with
+  | Error (Invalid_evidence_bundle (Missing_proof_paths [ Isolated; Fleet ])) -> ()
+  | Error error -> failf "unexpected pass error: %s" (result_error_to_string error)
+  | Ok result -> failf "incomplete evidence passed as %s" (proof_result_to_string result)
+;;
+
+let test_pass_accepts_complete_bundle () =
+  match passed (three_path_evidence ()) with
+  | Error error -> failf "unexpected pass error: %s" (result_error_to_string error)
+  | Ok (Passed bundle) -> check int "all evidence retained" 3 (List.length (evidence_bundle_refs bundle))
+  | Ok result -> failf "expected passed, got %s" (proof_result_to_string result)
+;;
+
+let test_duplicate_evidence_is_rejected () =
+  let duplicate = evidence ~path:Hermetic "fixture:duplicate" in
+  match passed (duplicate :: duplicate :: three_path_evidence ()) with
+  | Error (Invalid_evidence_bundle (Duplicate_evidence_ref "fixture:duplicate")) -> ()
+  | Error error -> failf "unexpected duplicate error: %s" (result_error_to_string error)
+  | Ok result -> failf "duplicate evidence passed as %s" (proof_result_to_string result)
+;;
+
+let test_invalid_digest_is_typed () =
+  match
+    create_evidence_ref
+      ~path:Hermetic
+      ~kind:Journal
+      ~locator:"fixture:bad-digest"
+      ~sha256:"not-a-sha256"
+      ~captured_at:"2026-08-13T09:00:00Z"
+  with
+  | Error Invalid_sha256 -> ()
+  | Error error -> failf "unexpected evidence error: %s" (evidence_error_to_string error)
+  | Ok _ -> fail "invalid digest was accepted"
+;;
+
+let test_failed_requires_evidence () =
+  match failed Provider_failure [] with
+  | Error Failure_without_evidence -> ()
+  | Error error -> failf "unexpected failure error: %s" (result_error_to_string error)
+  | Ok result -> failf "evidence-free failure accepted as %s" (proof_result_to_string result)
+;;
+
+let test_unsupported_policy_is_not_a_failure () =
+  let result = unsupported (Runtime_role_policy Local_agentworld_librarian_only) in
+  check
+    string
+    "policy exclusion stays typed"
+    "unsupported:runtime_role_policy:local_agentworld_librarian_only"
+    (proof_result_to_string result)
+;;
+
+let test_blank_blocker_is_rejected () =
+  match blocked " \t" with
+  | Error Blank_blocker_ref -> ()
+  | Error error -> failf "unexpected blocker error: %s" (result_error_to_string error)
+  | Ok result -> failf "blank blocker accepted as %s" (proof_result_to_string result)
+;;
+
 let () =
   run
     "capability proof identity"
@@ -93,6 +171,15 @@ let () =
         ; test_case "absence is distinct" `Quick test_present_and_absent_values_have_distinct_identity
         ; test_case "blank rejected" `Quick test_blank_values_are_rejected
         ; test_case "closed inventory unique" `Quick test_closed_inventory_has_unique_case_ids
+        ] )
+    ; ( "verdict"
+      , [ test_case "pass requires A/B/C" `Quick test_pass_requires_all_three_proof_paths
+        ; test_case "complete pass" `Quick test_pass_accepts_complete_bundle
+        ; test_case "duplicate evidence" `Quick test_duplicate_evidence_is_rejected
+        ; test_case "invalid digest" `Quick test_invalid_digest_is_typed
+        ; test_case "failure needs evidence" `Quick test_failed_requires_evidence
+        ; test_case "unsupported is typed" `Quick test_unsupported_policy_is_not_a_failure
+        ; test_case "blocker nonblank" `Quick test_blank_blocker_is_rejected
         ] )
     ]
 ;;

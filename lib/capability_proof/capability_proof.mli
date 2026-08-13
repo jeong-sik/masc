@@ -113,3 +113,104 @@ val all_capability_cases : capability_case list
 val all_scenarios : scenario list
 val all_protocols : protocol list
 (** Closed variant inventories used by manifest generators. *)
+
+type proof_path =
+  | Hermetic
+  | Isolated
+  | Fleet
+
+type evidence_kind =
+  | Journal
+  | Receipt
+  | Durable_queue
+  | Gate
+  | Domain_store
+  | Api
+  | Sse_trace
+  | Browser_screenshot
+  | Config_snapshot
+  | Deployment_identity
+
+type evidence_ref
+
+type evidence_error =
+  | Blank_locator
+  | Blank_captured_at
+  | Invalid_sha256
+
+val create_evidence_ref
+  :  path:proof_path
+  -> kind:evidence_kind
+  -> locator:string
+  -> sha256:string
+  -> captured_at:string
+  -> (evidence_ref, evidence_error) result
+
+val evidence_path : evidence_ref -> proof_path
+val evidence_kind : evidence_ref -> evidence_kind
+val evidence_locator : evidence_ref -> string
+val evidence_sha256 : evidence_ref -> string
+val evidence_captured_at : evidence_ref -> string
+val proof_path_to_string : proof_path -> string
+val evidence_kind_to_string : evidence_kind -> string
+val evidence_error_to_string : evidence_error -> string
+val all_proof_paths : proof_path list
+
+type evidence_bundle
+
+type bundle_error =
+  | Missing_proof_paths of proof_path list
+  | Duplicate_evidence_ref of string
+
+val create_evidence_bundle : evidence_ref list -> (evidence_bundle, bundle_error) result
+(** A passing bundle requires evidence from Hermetic, Isolated, and Fleet.
+    Exact duplicate references are rejected instead of being counted twice. *)
+
+val evidence_bundle_refs : evidence_bundle -> evidence_ref list
+val bundle_error_to_string : bundle_error -> string
+
+type failure_kind =
+  | Contract_violation
+  | Provider_failure
+  | Infrastructure_failure
+  | Evidence_mismatch
+  | Stream_replay_duplicate
+  | Queue_order_violation
+  | Sandbox_escape
+  | Scheduler_settlement_failure
+  | Gate_settlement_failure
+  | Domain_receipt_failure
+
+type runtime_role_policy = Local_agentworld_librarian_only
+
+type unsupported_reason =
+  | Runtime_role_policy of runtime_role_policy
+  | Protocol_not_supported of protocol
+  | Capability_not_declared of capability_case
+
+type blocker_ref = private string
+
+type proof_result = private
+  | Passed of evidence_bundle
+  | Failed of failure_kind * evidence_ref list
+  | Unsupported of unsupported_reason
+  | Not_run
+  | Blocked of blocker_ref
+
+type result_error =
+  | Invalid_evidence_bundle of bundle_error
+  | Failure_without_evidence
+  | Blank_blocker_ref
+
+val passed : evidence_ref list -> (proof_result, result_error) result
+val failed : failure_kind -> evidence_ref list -> (proof_result, result_error) result
+val unsupported : unsupported_reason -> proof_result
+val not_run : proof_result
+val blocked : string -> (proof_result, result_error) result
+
+val blocker_ref_to_string : blocker_ref -> string
+val failure_kind_to_string : failure_kind -> string
+val runtime_role_policy_to_string : runtime_role_policy -> string
+val unsupported_reason_to_string : unsupported_reason -> string
+val proof_result_to_string : proof_result -> string
+val result_error_to_string : result_error -> string

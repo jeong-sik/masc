@@ -458,6 +458,84 @@ let test_current_schema_round_trip () =
      Alcotest.fail "duplicate pending source identity was accepted")
 ;;
 
+let settle_completed ~applied_at state selection =
+  match
+    State.terminalize_pending_turn_completed
+      ~current_owner_nonce:7
+      ~applied_at
+      ~selection
+      state
+    |> require_ok "terminalize long-backlog source"
+  with
+  | staged, State.Transition_applied receipt ->
+    State.mark_transition_projected ~transition_id:receipt.transition_id staged
+    |> require_ok "project long-backlog receipt"
+  | _, State.Transition_already_applied _ ->
+    Alcotest.fail "fresh long-backlog selection replayed an older receipt"
+;;
+
+let restart_state label state =
+  State.to_yojson state |> State.of_yojson |> require_ok label
+;;
+
+let test_long_backlog_skips_blocked_head_and_survives_restarts () =
+  let backlog_size = 1024 in
+  let sources =
+    List.init backlog_size (fun ordinal ->
+      stimulus (Printf.sprintf "drain-%04d" ordinal) (Float.of_int ordinal))
+  in
+  let blocked_ids = Hashtbl.create 151 in
+  sources
+  |> List.iteri (fun ordinal source ->
+    if ordinal mod 7 = 0 then Hashtbl.add blocked_ids source.Queue.post_id ());
+  let ready source = not (Hashtbl.mem blocked_ids source.Queue.post_id) in
+  let expected_ready, expected_blocked = List.partition ready sources in
+  let rec drain ~ready state consumed_count consumed_rev =
+    match State.select_when ~ready state with
+    | None -> state, List.rev consumed_rev
+    | Some selection ->
+      let next =
+        settle_completed
+          ~applied_at:(Float.of_int (consumed_count + 1))
+          state
+          selection
+      in
+      let next =
+        if consumed_count mod 64 = 63
+        then restart_state "periodic long-backlog restart" next
+        else next
+      in
+      drain
+        ~ready
+        next
+        (consumed_count + 1)
+        (selection.source.post_id :: consumed_rev)
+  in
+  let initial = State.with_pending (queue sources) State.empty in
+  let after_ready, consumed_ready = drain ~ready initial 0 [] in
+  Alcotest.(check (list string))
+    "ready followers preserve FIFO past blocked heads"
+    (List.map (fun source -> source.Queue.post_id) expected_ready)
+    consumed_ready;
+  Alcotest.(check (list string))
+    "blocked sources remain in original FIFO order"
+    (List.map (fun source -> source.Queue.post_id) expected_blocked)
+    (post_ids (State.pending after_ready));
+  let restarted = restart_state "blocked-only restart" after_ready in
+  let drained, consumed_blocked =
+    drain ~ready:(fun _ -> true) restarted (List.length consumed_ready) []
+  in
+  Alcotest.(check (list string))
+    "released blocked sources preserve FIFO"
+    (List.map (fun source -> source.Queue.post_id) expected_blocked)
+    consumed_blocked;
+  Alcotest.(check int)
+    "every source terminalized exactly once"
+    backlog_size
+    (List.length consumed_ready + List.length consumed_blocked);
+  Alcotest.(check int) "queue fully drained" 0 (Queue.length (State.pending drained))
+;;
+
 let with_temp_dir prefix f =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -920,6 +998,10 @@ let () =
             "current schema only"
             `Quick
             test_current_schema_round_trip
+        ; Alcotest.test_case
+            "long backlog skips blocked head across restarts"
+            `Quick
+            test_long_backlog_skips_blocked_head_and_survives_restarts
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case "durable peek ack restart" `Quick test_durable_peek_ack_restart

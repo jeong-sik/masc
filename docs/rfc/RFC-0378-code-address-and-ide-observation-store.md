@@ -223,16 +223,21 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 
 workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 소비하므로 **2a 선행이 이상적**이나, 2a 미착륙 시 A 가 동등 타입을 자기 모듈에 정의하고 2a 착륙 시 치환한다 (facade 아님 — 동일 개념의 소유권 이관).
 
-## 8. 참고 제품 (원칙 5 — confidence 표기, 개선 패스에서 검색 검증 예정)
+## 8. 참고 제품 (원칙 5 — 검색 검증 2026-08-14)
 
-| 제품 | 관측 | confidence |
-|---|---|---|
-| Codex (cloud) | 코드 앵커 코멘트를 GitHub PR 리뷰 어휘로 남김 — 호스트의 안정 anchor 어휘를 재사용, 자체 주소 발명 안 함 | Medium |
-| Claude Code | 세션 내 편집 표시는 ephemeral, 영속 주석 DB 없음 | High (직접 관측) |
-| OpenHands 계열 | event stream + replay, 파일 앵커는 이벤트 페이로드 | Medium |
-| Hermes Agent / Orca | 확인 필요 | — |
+| 제품 | 관측 | 근거 | confidence |
+|---|---|---|---|
+| Codex (GitHub 통합) | 리뷰를 **standard GitHub code review 의 inline comment** 로 게시 — 호스트(PR diff)의 anchor 어휘를 재사용, 자체 주소 발명 안 함 | [공식 문서](https://developers.openai.com/codex/integrations/github) | High |
+| OpenHands | **append-only event log 가 authority** — file 편집·관측·인과 링크가 전부 이벤트이고, UI/agent/runtime 은 서로 직접 호출 없이 같은 로그를 읽고 쓴다. "every run replayable by construction". 파일 앵커는 이벤트 페이로드, 별도 per-repo 주석 store 없음 | [SDK events 문서](https://docs.openhands.dev/sdk/arch/events), [arXiv 2511.03690](https://arxiv.org/abs/2511.03690) | High |
+| OpenClaw | 영속성은 markdown 파일 + SQLite(sqlite-vec) 의 **agent 메모리** — 코드 앵커 store 아님 | [forensic 분석 arXiv 2604.05589](https://arxiv.org/pdf/2604.05589) | Medium |
+| Hermes Agent (Nous) | FTS5 세션 검색 + curated memory + subagent 관측 오버레이 — 역시 세션/메모리 축이고 per-repo 코드 앵커 영속화는 부재 | [문서 저장소](https://github.com/mudrii/hermes-agent-docs) | Medium (2차 출처) |
+| Claude Code | 세션 내 편집 표시는 ephemeral, 영속 주석 DB 없음 | 직접 관측 | High |
+| Orca | 확인 필요 (동명 대상 다수, 식별 불가) | — | — |
 
-패턴: 성공한 제품은 (a) 호스트(GitHub)의 anchor 어휘를 빌리거나 (b) ephemeral 로 남긴다. 자체 어휘의 영속 per-repo 주석 DB 를 유지하는 사례는 드물다 — §5.5 의 축소 방향과 정합.
+검증된 패턴 두 가지:
+
+1. **anchor 어휘는 빌리거나(GitHub PR diff) ephemeral 로 남긴다.** 자체 어휘의 영속 per-repo 주석 DB 를 유지하는 제품은 4개 검증 대상 중 0 — §5.5 축소 방향과 정합.
+2. **이벤트 로그가 authority, 뷰는 projection** (OpenHands). masc 용어로: observation bus 의 fact 가 authority 이고 per-repo 타임라인·gutter 는 파생 — §5.1 의 turn join 파생과 같은 구조다.
 
 ## 9. Open questions
 

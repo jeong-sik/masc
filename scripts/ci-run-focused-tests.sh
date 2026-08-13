@@ -255,6 +255,7 @@ normal_targets=(
   @test/runtest-test_ide_bridge
   @test/runtest-test_keeper_librarian_retry
   @test/runtest-test_keeper_run_tools_hooks
+  @test/runtest-test_keeper_connector_attention_batch
   @test/runtest-test_ide_lsp_join_key
   @test/runtest-test_dashboard_workspace
   @test/runtest-test_host_fd_pressure_poller

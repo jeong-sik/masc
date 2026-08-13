@@ -17,34 +17,6 @@ type codebase_partition =
           annotation_request). Structural ceiling, NOT a soft fallback.
           v2 §7 "(3) default 미갱신". *)
 
-type tool_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; file_path : string option
-  ; tool_name : string
-  ; keeper_id : string
-  ; turn_id : string
-  ; outcome : string
-  ; typed_outcome : string
-  ; duration_ms : float
-  ; output_text : string
-  ; input : Yojson.Safe.t
-  }
-
-type turn_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; turn_id : string
-  ; keeper_id : string
-  ; phase : string
-  ; model_used : string option
-  ; tools_used : string list
-  ; stop_reason : string option
-  ; duration_ms : int option
-  ; timestamp_ms : int64
-  }
-
-
 (* RFC-0128 §4.1 neutral codebase slug derivation.
 
    Kept below the Keeper/IDE boundary so runtime producers can route
@@ -214,9 +186,91 @@ module Code_address = struct
   let equal a b = String.equal a.codebase b.codebase && String.equal a.path b.path
 end
 
+(* Typed reasons a write's file path failed attribution to a codebase.
+   RFC-0378 §5.1: attribution failure is a fact kind, not a store
+   partition — the reason rides the fact as a queryable field.
+   RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
+   once attribution moves to git observation. *)
+module Unattributed = struct
+  type reason =
+    | Blank_remote_url
+    | Unparseable_remote_url of string
+    | Unregistered_repo_id of string
+    | Unregistered_path
+    | Repository_catalog_unavailable
+
+  let reason_to_string = function
+    | Blank_remote_url -> "blank_remote_url"
+    | Unparseable_remote_url _ -> "unparseable_remote_url"
+    | Unregistered_repo_id _ -> "unregistered_repo_id"
+    | Unregistered_path -> "unregistered_path"
+    | Repository_catalog_unavailable -> "repository_catalog_unavailable"
+  ;;
+end
+
+type addressed =
+  { address : Code_address.t
+  ; checkout : string option
+    (* Projection metadata: which checkout the write was observed in.
+       Never part of the join key. [None] until attribution measures it
+       (workspace-root-only 2b). *)
+  }
+
+type unaddressed =
+  { reason : Unattributed.reason
+  ; attempted_path : string
+    (* The path exactly as the resolver saw it — forensic identity for
+       records that never joined a codebase. *)
+  }
+
+(* Where a fact that names a file belongs. An annotation or write region
+   always names a file, so [Pathless] is unrepresentable for them. *)
+type file_attribution =
+  | Addressed of addressed
+  | Unaddressed of unaddressed
+
+(* Where any tool fact belongs: a pathless call is a keeper-timeline
+   fact with no document — distinct from a failed attribution. *)
+type attribution =
+  | File of file_attribution
+  | Pathless
+
+type tool_event =
+  { base_path : string
+  ; attribution : attribution
+    (* RFC-0378 §5.1: the address is minted where the write is attributed
+       and carried as a parsed value. Producers must not hand consumers a
+       raw tool argument — a consumer re-deriving the path from [input]
+       produced three incompatible shapes in one partition (masc#28582). *)
+  ; tool_name : string
+  ; keeper_id : string
+  ; turn_id : string
+  ; outcome : string
+  ; typed_outcome : string
+  ; duration_ms : float
+  ; output_text : string
+  ; input : Yojson.Safe.t
+  }
+
+(* A turn is a keeper-timeline fact by definition (RFC-0378 §1): it can
+   touch any number of codebases, so it carries no attribution — the
+   per-codebase timeline is derived by joining addressed tool facts on
+   [turn_id]. *)
+type turn_event =
+  { base_path : string
+  ; turn_id : string
+  ; keeper_id : string
+  ; phase : string
+  ; model_used : string option
+  ; tools_used : string list
+  ; stop_reason : string option
+  ; duration_ms : int option
+  ; timestamp_ms : int64
+  }
+
 type write_region_event =
   { base_path : string
-  ; partition : codebase_partition
+  ; attribution : file_attribution
   ; keeper_id : string
   ; turn : int
   ; tool_call_json : Yojson.Safe.t
@@ -313,9 +367,8 @@ let annotation_references_of_json = function
 
 type annotation_request =
   { base_path : string
-  ; partition : codebase_partition
+  ; attribution : file_attribution
   ; keeper_id : string
-  ; file_path : string
   ; line_start : int
   ; line_end : int
   ; kind : annotation_kind
@@ -394,18 +447,38 @@ let reverse_snapshot snap =
   }
 ;;
 
-let partition_to_json = function
-  | By_url slug -> `Assoc [ ("type", `String "By_url"); ("slug", `String slug) ]
-  | No_canonical_url -> `String "No_canonical_url"
-  | Unmatched -> `String "Unmatched"
-  | Base_unresolved -> `String "Base_unresolved"
-  | Legacy_default -> `String "Legacy_default"
+let code_address_to_json address =
+  `Assoc
+    [ ("codebase", `String (Code_address.codebase address))
+    ; ("path", `String (Code_address.path address))
+    ]
+;;
+
+let file_attribution_to_json = function
+  | Addressed { address; checkout } ->
+    `Assoc
+      ([ ("type", `String "Addressed"); ("address", code_address_to_json address) ]
+       @
+       match checkout with
+       | None -> []
+       | Some c -> [ ("checkout", `String c) ])
+  | Unaddressed { reason; attempted_path } ->
+    `Assoc
+      [ ("type", `String "Unaddressed")
+      ; ("reason", `String (Unattributed.reason_to_string reason))
+      ; ("attempted_path", `String attempted_path)
+      ]
+;;
+
+let attribution_to_json = function
+  | File file_attribution -> file_attribution_to_json file_attribution
+  | Pathless -> `String "Pathless"
 ;;
 
 let tool_event_to_json (e : tool_event) =
   `Assoc
     [ ("base_path", `String e.base_path)
-    ; ("partition", partition_to_json e.partition)
+    ; ("attribution", attribution_to_json e.attribution)
     ; ("tool_name", `String e.tool_name)
     ; ("keeper_id", `String e.keeper_id)
     ; ("turn_id", `String e.turn_id)
@@ -417,7 +490,6 @@ let tool_event_to_json (e : tool_event) =
 let turn_event_to_json (e : turn_event) =
   `Assoc
     [ ("base_path", `String e.base_path)
-    ; ("partition", partition_to_json e.partition)
     ; ("turn_id", `String e.turn_id)
     ; ("keeper_id", `String e.keeper_id)
     ; ("phase", `String e.phase)
@@ -428,7 +500,7 @@ let turn_event_to_json (e : turn_event) =
 let write_region_to_json (e : write_region_event) =
   `Assoc
     [ ("base_path", `String e.base_path)
-    ; ("partition", partition_to_json e.partition)
+    ; ("attribution", file_attribution_to_json e.attribution)
     ; ("keeper_id", `String e.keeper_id)
     ; ("turn", `Int e.turn)
     ; ("tool_call", e.tool_call_json)
@@ -437,13 +509,12 @@ let write_region_to_json (e : write_region_event) =
 
 let annotation_to_json (a : annotation_request) =
   `Assoc
-    [ ("file_path", `String a.file_path)
+    [ ("attribution", file_attribution_to_json a.attribution)
     ; ("line_start", `Int a.line_start)
     ; ("line_end", `Int a.line_end)
     ; ("keeper_id", `String a.keeper_id)
     ; ("kind", `String (annotation_kind_to_string a.kind))
     ; ("content", `String a.content)
-    ; ("partition", partition_to_json a.partition)
     ; ("references", annotation_references_to_json a.references)
     ]
 ;;

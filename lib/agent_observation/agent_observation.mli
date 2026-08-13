@@ -22,45 +22,6 @@ type codebase_partition =
           field (tool/turn). Structural ceiling, NOT a soft fallback.
           v2 §7 "(3) default 미갱신". *)
 
-type tool_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; file_path : string option
-        (** The edited file as the partition resolver named it: relative to the
-            codebase the [partition] identifies, or the original absolute path
-            when the resolver could not attribute it. [None] is a tool call that
-            names no file at all (coordination, board, memory) — a
-            keeper-timeline fact with no document.
-
-            Producers must not hand consumers the raw tool argument instead.
-            The resolver is the only thing that knows which root the argument
-            was relative to, so a consumer re-deriving the path from [input]
-            produced a different vocabulary than the one the same resolver
-            stored in [regions]/[annotations] — three incompatible shapes in a
-            single partition (masc#28582). *)
-  ; tool_name : string
-  ; keeper_id : string
-  ; turn_id : string
-  ; outcome : string
-  ; typed_outcome : string
-  ; duration_ms : float
-  ; output_text : string
-  ; input : Yojson.Safe.t
-  }
-
-type turn_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; turn_id : string
-  ; keeper_id : string
-  ; phase : string
-  ; model_used : string option
-  ; tools_used : string list
-  ; stop_reason : string option
-  ; duration_ms : int option
-  ; timestamp_ms : int64
-  }
-
 val canonical_url_of_remote : string -> string option
 (** [canonical_url_of_remote remote] normalises a git remote string into a
     deterministic host_path slug. Returns [None] for blank, malformed, or
@@ -99,9 +60,90 @@ module Code_address : sig
   val equal : t -> t -> bool
 end
 
+module Unattributed : sig
+  (** Typed reasons a write's file path failed attribution to a codebase.
+
+      RFC-0378 §5.1: attribution failure is a fact kind, not a store
+      partition — the reason rides the fact as a queryable field.
+      RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
+      once attribution moves to git observation. *)
+
+  type reason =
+    | Blank_remote_url
+    | Unparseable_remote_url of string
+    | Unregistered_repo_id of string
+    | Unregistered_path
+    | Repository_catalog_unavailable
+
+  val reason_to_string : reason -> string
+end
+
+type addressed =
+  { address : Code_address.t
+  ; checkout : string option
+        (** Projection metadata: which checkout the write was observed in.
+            Never part of the join key. [None] until attribution measures
+            it (workspace-root-only 2b). *)
+  }
+
+type unaddressed =
+  { reason : Unattributed.reason
+  ; attempted_path : string
+        (** The path exactly as the resolver saw it — forensic identity
+            for records that never joined a codebase. *)
+  }
+
+(** Where a fact that names a file belongs. An annotation or write region
+    always names a file, so [Pathless] is unrepresentable for them. *)
+type file_attribution =
+  | Addressed of addressed
+  | Unaddressed of unaddressed
+
+(** Where any tool fact belongs: a pathless call (coordination, board,
+    memory) is a keeper-timeline fact with no document — distinct from a
+    failed attribution. *)
+type attribution =
+  | File of file_attribution
+  | Pathless
+
+type tool_event =
+  { base_path : string
+  ; attribution : attribution
+        (** RFC-0378 §5.1: the address is minted where the write is
+            attributed and carried as a parsed value. Producers must not
+            hand consumers the raw tool argument — the resolver is the
+            only thing that knows which root the argument was relative
+            to, and a consumer re-deriving the path from [input] produced
+            three incompatible shapes in one partition (masc#28582). *)
+  ; tool_name : string
+  ; keeper_id : string
+  ; turn_id : string
+  ; outcome : string
+  ; typed_outcome : string
+  ; duration_ms : float
+  ; output_text : string
+  ; input : Yojson.Safe.t
+  }
+
+type turn_event =
+  { base_path : string
+  ; turn_id : string
+  ; keeper_id : string
+  ; phase : string
+  ; model_used : string option
+  ; tools_used : string list
+  ; stop_reason : string option
+  ; duration_ms : int option
+  ; timestamp_ms : int64
+  }
+(** A turn is a keeper-timeline fact by definition (RFC-0378): it can
+    touch any number of codebases, so it carries no attribution — the
+    per-codebase timeline is derived by joining addressed tool facts on
+    [turn_id]. *)
+
 type write_region_event =
   { base_path : string
-  ; partition : codebase_partition
+  ; attribution : file_attribution
   ; keeper_id : string
   ; turn : int
   ; tool_call_json : Yojson.Safe.t
@@ -138,9 +180,8 @@ val annotation_references_of_json :
 
 type annotation_request =
   { base_path : string
-  ; partition : codebase_partition
+  ; attribution : file_attribution
   ; keeper_id : string
-  ; file_path : string
   ; line_start : int
   ; line_end : int
   ; kind : annotation_kind

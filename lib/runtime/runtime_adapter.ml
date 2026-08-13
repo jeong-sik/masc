@@ -309,28 +309,31 @@ let agent_core_thinking_control_format = function
 ;;
 
 (** A runtime [api-name] is an opaque deployment string, not automatically an
-    AGENT_CORE catalog model. When AGENT_CORE has no exact provider/model row, project the
-    complete typed runtime declaration into the Provider_config override that
-    AGENT_CORE exposes for concrete endpoint contracts. Catalogued models keep the AGENT_CORE
-    row unchanged; an absent runtime capability block remains absent and is
-    rejected later by the normal startup gate. *)
+    AGENT_CORE catalog model. A present runtime capability block is the complete
+    declaration for this concrete transport binding, so project every exposed
+    runtime axis over the exact provider/model catalog row. Axes that runtime.toml
+    does not expose (for example reasoning-stream parsing) remain catalog-owned.
+    An absent runtime capability block remains absent and resolves through the
+    normal catalog/startup path. *)
 let model_capabilities_override_of_model_spec
       ~(provider_id : string)
       (spec : Runtime_schema.model_spec)
   =
-  match
-    Llm_provider.Capabilities.for_provider_model_id
-      ~allow_bare_fallback:false
-      ~provider_label:provider_id
-      ~model_id:spec.api_name
-  with
-  | Some _ -> None
-  | None ->
-    Option.map
+  Option.map
       (fun (caps : Runtime_schema.model_capabilities) ->
-         let base = Llm_provider.Capabilities.default_capabilities in
+         let base =
+           Option.value
+             ~default:Llm_provider.Capabilities.default_capabilities
+             (Llm_provider.Capabilities.for_provider_model_id
+                ~allow_bare_fallback:false
+                ~provider_label:provider_id
+                ~model_id:spec.api_name)
+         in
          { base with
-           max_context_tokens = spec.max_context
+           max_context_tokens =
+             (match spec.max_context with
+              | Some _ as max_context -> max_context
+              | None -> base.max_context_tokens)
          ; max_output_tokens = caps.max_output_tokens
          ; supports_tools = spec.tools_support
          ; supports_tool_choice = caps.supports_tool_choice

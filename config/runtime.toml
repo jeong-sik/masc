@@ -954,8 +954,12 @@ streaming = true
 [models.ollama-cloud-qwen3-5-397b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+# ollama.com exposes this binding through its OpenAI-compatible /v1 endpoint.
+# Reasoning is inherent/default-on here; the endpoint has no explicit control
+# field, while the native /api/chat binding keeps its separate Ollama think
+# contract through [ollama_cloud_native].
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 

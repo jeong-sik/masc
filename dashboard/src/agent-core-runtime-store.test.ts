@@ -333,7 +333,7 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
   })
 
-  it('dedupes the current native envelope across replay and live delivery', () => {
+  it('preserves current native envelopes until the producer emits an identity', () => {
     const event = {
       type: 'agent_core:masc:trust_updated',
       ts_unix: 610,
@@ -350,9 +350,9 @@ describe('agent-core-runtime-store', () => {
     hydrateAgentCoreRuntimeFromTelemetryEntries([
       { source: 'agent_core_event', ...event } as TelemetryEntry,
     ])
-    expect(applyAgentCoreRuntimeEvent(event)).toBe(false)
-    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
-    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
   })
 
   it('preserves identical events with no producer identity', () => {
@@ -506,6 +506,13 @@ describe('agent-core-runtime-store', () => {
     })
     await loadMoreAgentCoreEvents()
 
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 1,
+      signal: undefined,
+    })
+
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
     expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(3)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
@@ -558,5 +565,48 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(4)
     expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(1200)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+  })
+
+  it('pages by fetched replay rows rather than projected Agent Core rows', async () => {
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      total_matching_entries: 2,
+      has_more: true,
+      entries: [{
+        source: 'agent_core_event',
+        type: 'agent_core:durable:llm_request',
+        event_id: 'evt-page-1',
+        run_id: 'run-page-offset',
+        payload: { agent_name: 'alpha', model: 'gpt-5', input_tokens: 10 },
+      } as TelemetryEntry],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    expect(agentCoreAgentEvents.value).toHaveLength(0)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      total_matching_entries: 2,
+      has_more: false,
+      entries: [{
+        source: 'agent_core_event',
+        type: 'agent_core:durable:error_occurred',
+        event_id: 'evt-page-2',
+        run_id: 'run-page-offset',
+        payload: { agent_name: 'alpha', error_domain: 'tool' },
+      } as TelemetryEntry],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 1,
+      signal: undefined,
+    })
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
   })
 })

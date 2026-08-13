@@ -84,16 +84,16 @@ let handle_ide_annotate_with_outcome
        else file_path)
       |> keeper_observation_host_path_of_visible_path ~config ~meta
     in
-    let partition, stored_file_path =
-      Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir:base_dir ~kind:"annotation" ~file_path:anchored_file_path
+    let attribution =
+      Keeper_tool_filesystem_runtime.resolve_write_attribution
+        ~base_dir
+        ~file_path:anchored_file_path
     in
     match
       Agent_observation.emit_annotation_request
         { base_path = base_dir
-        ; partition
+        ; attribution
         ; keeper_id = meta.name
-        ; file_path = stored_file_path
         ; line_start
         ; line_end
         ; kind

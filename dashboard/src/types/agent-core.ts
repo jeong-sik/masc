@@ -57,6 +57,7 @@ export interface AgentCoreHealthSummary {
   replayLoadedEvents: number
   replayTotalMatchingEvents: number
   replayTruncated: boolean
+  replayCapped: boolean
   hasMore: boolean
   totalLlmCalls: number
   totalErrors: number

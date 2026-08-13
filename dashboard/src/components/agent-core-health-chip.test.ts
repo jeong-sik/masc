@@ -4,6 +4,7 @@ import { cleanup, render, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TelemetryEntry } from '../api/dashboard'
 import { hydrateAgentCoreRuntimeFromTelemetryEntries } from '../agent-core-runtime-store'
+import { noteAgentCoreReplayWindow } from '../store'
 import { AgentCoreHealthChip } from './agent-core-health-chip'
 
 const fetchTelemetryMock = vi.hoisted(() => vi.fn())
@@ -85,6 +86,7 @@ describe('AgentCoreHealthChip', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 0,
+      offset: 0,
       total_matching_entries: 0,
       truncated: false,
       entries: [],
@@ -111,5 +113,25 @@ describe('AgentCoreHealthChip', () => {
       expect(container.textContent).toContain('Agent Core 리플레이를 불러오지 못했습니다')
       expect(container.textContent).toContain('journal unavailable')
     })
+  })
+
+  it('shows the server replay cap without offering another duplicate page', () => {
+    hydrateAgentCoreRuntimeFromTelemetryEntries([{
+      source: 'agent_core_event',
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'visible-capped-window',
+      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+    }] as TelemetryEntry[])
+    noteAgentCoreReplayWindow({
+      loadedEvents: 5499,
+      totalMatchingEvents: 6000,
+      truncated: false,
+      capped: true,
+    })
+
+    const { container } = render(html`<${AgentCoreHealthChip} />`)
+
+    expect(container.textContent).toContain('서버 조회 한도')
+    expect(container.textContent).not.toContain('더 보기')
   })
 })

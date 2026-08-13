@@ -9,7 +9,7 @@ module Lsp = Lsp_overlay_provider
    through the codebase [Store.create] names explicitly, so they read that same one;
    the by-URL producer/reader join is covered in
    [test_ide_lsp_join_key.ml]. *)
-let legacy_partition = Some "github.com_test_legacy"
+let test_codebase = Some "github.com_other_repo"
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
@@ -71,7 +71,7 @@ let load_regions_from path =
 ;;
 
 let load_regions base_dir =
-  load_regions_from (Region.regions_file ~base_dir ~codebase:"github.com_test_legacy" ())
+  load_regions_from (Region.regions_file ~base_dir ~codebase:"github.com_other_repo" ())
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -131,7 +131,7 @@ let test_create_lists_route_context () =
     match
       Store.create
         ~base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~keeper_id:"sangsu"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
@@ -153,7 +153,7 @@ let test_create_lists_route_context () =
         ; task_id = None
         }
       in
-      (match Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter () with
+      (match Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter () with
        | [ listed ] ->
          check string "id" created.id listed.id;
          check yojson "listed references"
@@ -168,7 +168,7 @@ let test_lsp_overlay_exposes_route_context () =
     match
       Store.create
         ~base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~keeper_id:"sangsu"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
@@ -184,7 +184,7 @@ let test_lsp_overlay_exposes_route_context () =
     | Ok _ ->
       Lsp.clear_cache ();
       let codelenses =
-        Lsp.codelenses ~base_dir ~codebase:legacy_partition ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
+        Lsp.codelenses ~base_dir ~codebase:test_codebase ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
       in
       (match codelenses with
        | [ codelens ] ->
@@ -195,7 +195,7 @@ let test_lsp_overlay_exposes_route_context () =
       let diagnostics =
         Lsp.diagnostics
           ~base_dir
-          ~codebase:legacy_partition
+          ~codebase:test_codebase
           ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~lsp_diagnostics:[]
       in
@@ -207,7 +207,7 @@ let test_lsp_overlay_exposes_route_context () =
       let hover =
         Lsp.enrich_hover
           ~base_dir
-          ~codebase:legacy_partition
+          ~codebase:test_codebase
           ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~line:11
           (`Assoc
@@ -224,7 +224,7 @@ let test_region_tracker_writes_fixed_regions_file () =
   with_temp_dir (fun base_dir ->
     Region.ingest_tool_call
       ~base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~keeper_id:"sangsu"
       ~turn:7
       (`Assoc
@@ -235,7 +235,7 @@ let test_region_tracker_writes_fixed_regions_file () =
               ; "content", `String "let x = 1\n"
               ] )
         ]);
-    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ~codebase:"github.com_test_legacy" ()));
+    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ~codebase:"github.com_other_repo" ()));
     match load_regions base_dir with
     | [ region ] ->
       check string "file path" "lib/a.ml" region.Types.file_path;
@@ -291,7 +291,7 @@ let test_create_by_url_isolates_from_legacy () =
         ~filter:(make_filter ())
         ()
     in
-    let orphan = Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) () in
+    let orphan = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check int "by-url count" 1 (List.length by_url);
     check int "orphan is empty" 0 (List.length orphan))
 ;;
@@ -302,7 +302,7 @@ let test_create_orphan_separates_from_by_url () =
     let _ =
       create_in_partition
         ~base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~kind:Types.Comment
         ~content:"orphan record"
         ()
@@ -323,7 +323,7 @@ let test_create_orphan_separates_from_by_url () =
         ()
     in
     let orphan =
-      Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) ()
+      Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) ()
     in
     check int "by-url count" 1 (List.length by_url);
     check int "orphan count" 1 (List.length orphan);
@@ -333,7 +333,7 @@ let test_create_orphan_separates_from_by_url () =
     check string "orphan content" "orphan record" orphan_content)
 ;;
 
-let test_legacy_default_is_unchanged () =
+let test_explicit_codebase_store () =
   with_temp_dir (fun base_dir ->
     (* No ?codebase argument → defaults to Orphan → writes to the
        historical flat path. PR-1c will flip the keeper write path,
@@ -341,7 +341,7 @@ let test_legacy_default_is_unchanged () =
     let _ =
       Store.create
         ~base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~keeper_id:"sangsu"
         ~file_path:"lib/foo.ml"
         ~line_start:1
@@ -350,13 +350,13 @@ let test_legacy_default_is_unchanged () =
         ~content:"orphan default"
         ()
     in
-    let legacy_path =
+    let other_path =
       Filename.concat
-        (Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_test_legacy")
+        (Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo")
         "annotations.jsonl"
     in
-    check bool "orphan file exists" true (Sys.file_exists legacy_path);
-    let orphan = Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) () in
+    check bool "orphan file exists" true (Sys.file_exists other_path);
+    let orphan = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check int "orphan count" 1 (List.length orphan))
 ;;
 
@@ -376,7 +376,7 @@ let test_delete_partition_scoped () =
     let in_legacy =
       Store.delete
         ~base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~id:by_url.id
         ~keeper_id:"sangsu"
         ()
@@ -411,9 +411,9 @@ let test_region_append_by_url_isolates_from_legacy () =
     in
     Region.append_region ~base_dir ~codebase:(slug) region;
     let by_url_path = Region.regions_file ~base_dir ~codebase:(slug) () in
-    let legacy_path = Region.regions_file ~base_dir ~codebase:"github.com_test_legacy" () in
+    let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
     check bool "by-url regions exists" true (Sys.file_exists by_url_path);
-    check bool "orphan regions absent" false (Sys.file_exists legacy_path))
+    check bool "orphan regions absent" false (Sys.file_exists other_path))
 ;;
 
 (* RFC-0128 PR-1e — content fallback + single-write invariant.
@@ -506,16 +506,16 @@ let test_ingest_no_double_write () =
     let by_url_path =
       Region.regions_file ~base_dir ~codebase:(slug) ()
     in
-    let legacy_path = Region.regions_file ~base_dir ~codebase:"github.com_test_legacy" () in
+    let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
     check int "by-url has one region" 1 (count_lines by_url_path);
-    check int "orphan has zero regions" 0 (count_lines legacy_path))
+    check int "orphan has zero regions" 0 (count_lines other_path))
 ;;
 
 let test_completion_items_kinds () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
-    let items = Lsp.completion_items ~base_dir ~codebase:legacy_partition ~file_path:"lib/test.ml" ~line:0 in
+    let items = Lsp.completion_items ~base_dir ~codebase:test_codebase ~file_path:"lib/test.ml" ~line:0 in
     check int "four completion items" 4 (List.length items);
     let labels = List.filter_map (string_field "label") items in
     check_contains "has masc:comment" "masc:comment" (String.concat "," labels);
@@ -526,7 +526,7 @@ let test_code_actions_create () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
-    let actions = Lsp.code_actions ~base_dir ~codebase:legacy_partition ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
+    let actions = Lsp.code_actions ~base_dir ~codebase:test_codebase ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
     check bool "has create action" true (List.length actions >= 1);
     let title = Option.value ~default:"" (string_field "title" (List.hd actions)) in
     check string "first action is create" "Create MASC Annotation" title))
@@ -538,7 +538,7 @@ let test_folding_ranges_groups () =
     match
       Store.create
         ~base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~keeper_id:"k1"
         ~file_path:"lib/test.ml"
         ~line_start:1
@@ -552,7 +552,7 @@ let test_folding_ranges_groups () =
       (match
          Store.create
            ~base_dir
-           ~codebase:"github.com_test_legacy"
+           ~codebase:"github.com_other_repo"
            ~keeper_id:"k1"
            ~file_path:"lib/test.ml"
            ~line_start:3
@@ -564,7 +564,7 @@ let test_folding_ranges_groups () =
        | Error msg -> fail msg
        | Ok _ ->
          Lsp.clear_cache ();
-         let ranges = Lsp.folding_ranges ~base_dir ~codebase:legacy_partition ~file_path:"lib/test.ml" in
+         let ranges = Lsp.folding_ranges ~base_dir ~codebase:test_codebase ~file_path:"lib/test.ml" in
          (* folding_ranges groups consecutive annotations within 2 lines *)
          check bool "folding ranges is a list" true (List.length ranges >= 0))))
 ;;
@@ -575,7 +575,7 @@ let test_compact_preserves_annotations () =
       match
         Store.create
           ~base_dir
-          ~codebase:"github.com_test_legacy"
+          ~codebase:"github.com_other_repo"
           ~keeper_id:"sangsu"
           ~file_path:"lib/x.ml"
           ~line_start:1
@@ -592,11 +592,11 @@ let test_compact_preserves_annotations () =
     in
     let a1 = mk "first" in
     let a2 = mk "second" in
-    Store.compact ~base_dir ~codebase:"github.com_test_legacy" ();
+    Store.compact ~base_dir ~codebase:"github.com_other_repo" ();
     let filter =
       { Types.file_path = None; keeper_id = None; goal_id = None; task_id = None }
     in
-    let listed = Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter () in
     check int "compact preserves count" 2 (List.length listed);
     let ids =
       List.map (fun (a : Types.annotation) -> a.id) listed
@@ -621,7 +621,7 @@ let make_alice_annotation base_dir =
   Result.get_ok
     (Store.create
        ~base_dir
-       ~codebase:"github.com_test_legacy"
+       ~codebase:"github.com_other_repo"
        ~keeper_id:"alice"
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -641,7 +641,7 @@ let make_alice_annotation base_dir =
 let test_delete_rejects_other_keeper () =
   with_temp_dir (fun base_dir ->
     let created = make_alice_annotation base_dir in
-    match Store.delete ~base_dir ~codebase:"github.com_test_legacy" ~id:created.id ~keeper_id:"bob" () with
+    match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:created.id ~keeper_id:"bob" () with
     | Ok () -> fail "bob must not delete alice's annotation"
     | Error _ -> ())
 ;;
@@ -649,7 +649,7 @@ let test_delete_rejects_other_keeper () =
 let test_delete_allows_owner () =
   with_temp_dir (fun base_dir ->
     let created = make_alice_annotation base_dir in
-    match Store.delete ~base_dir ~codebase:"github.com_test_legacy" ~id:created.id ~keeper_id:"alice" () with
+    match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:created.id ~keeper_id:"alice" () with
     | Ok () -> ()
     | Error msg -> failf "owner delete failed: %s" msg)
 ;;
@@ -667,7 +667,7 @@ let create_note ~base_dir ~keeper_id ~content () =
   Result.get_ok
     (Store.create
        ~base_dir
-       ~codebase:"github.com_test_legacy"
+       ~codebase:"github.com_other_repo"
        ~keeper_id
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -686,10 +686,10 @@ let test_list_excludes_soft_deleted_without_compaction () =
         create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
     in
     let victim = List.hd notes in
-    (match Store.delete ~base_dir ~codebase:"github.com_test_legacy" ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    let listed = Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check int "list excludes the tombstoned annotation" 5 (List.length listed);
     check
       bool
@@ -702,10 +702,10 @@ let test_list_keeps_sibling_after_delete () =
   with_temp_dir (fun base_dir ->
     let victim = create_note ~base_dir ~keeper_id:"alice" ~content:"to delete" () in
     let survivor = create_note ~base_dir ~keeper_id:"alice" ~content:"to keep" () in
-    (match Store.delete ~base_dir ~codebase:"github.com_test_legacy" ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    let listed = Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check
       bool
       "deleted sibling absent"
@@ -721,7 +721,7 @@ let test_list_keeps_sibling_after_delete () =
 let test_list_returns_live_annotation () =
   with_temp_dir (fun base_dir ->
     let note = create_note ~base_dir ~keeper_id:"alice" ~content:"live" () in
-    match Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) () with
+    match Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () with
     | [ only ] -> check string "live annotation returned unchanged" note.id only.id
     | rows -> failf "expected one live annotation, got %d" (List.length rows))
 ;;
@@ -733,13 +733,13 @@ let test_compact_drops_tombstoned () =
         create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
     in
     let victim = List.hd notes in
-    (match Store.delete ~base_dir ~codebase:"github.com_test_legacy" ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    Store.compact ~base_dir ~codebase:"github.com_test_legacy" ();
+    Store.compact ~base_dir ~codebase:"github.com_other_repo" ();
     let path =
       Filename.concat
-        (Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_test_legacy")
+        (Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo")
         "annotations.jsonl"
     in
     let compact_end_markers =
@@ -754,7 +754,7 @@ let test_compact_drops_tombstoned () =
         path
     in
     check int "compact writes one end marker" 1 compact_end_markers;
-    let listed = Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check int "list count after compact" 5 (List.length listed);
     check
       bool
@@ -769,7 +769,7 @@ let make_cas_annotation base_dir =
   Result.get_ok
     (Store.create
        ~base_dir
-       ~codebase:"github.com_test_legacy"
+       ~codebase:"github.com_other_repo"
        ~keeper_id:"alice"
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -785,7 +785,7 @@ let make_cas_annotation base_dir =
    count stays exact without a codebase-wide writer lock. *)
 let test_concurrent_create_compact_no_loss () =
   with_temp_dir (fun base_dir ->
-    Store.ensure_store ~base_dir ~codebase:"github.com_test_legacy" ();
+    Store.ensure_store ~base_dir ~codebase:"github.com_other_repo" ();
     let n_writers = 4 in
     let per_writer = 25 in
     let writers =
@@ -795,7 +795,7 @@ let test_concurrent_create_compact_no_loss () =
             match
               Store.create
                 ~base_dir
-                ~codebase:"github.com_test_legacy"
+                ~codebase:"github.com_other_repo"
                 ~keeper_id:"alice"
                 ~file_path:"lib/a.ml"
                 ~line_start:1
@@ -811,12 +811,12 @@ let test_concurrent_create_compact_no_loss () =
     let compactor =
       Domain.spawn (fun () ->
         for _ = 1 to 50 do
-          Store.compact ~base_dir ~codebase:"github.com_test_legacy" ()
+          Store.compact ~base_dir ~codebase:"github.com_other_repo" ()
         done)
     in
     List.iter Domain.join writers;
     Domain.join compactor;
-    let listed = Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
     check
       int
       "no annotation lost to concurrent compaction"
@@ -831,7 +831,7 @@ let test_cas_rejects_version_mismatch () =
     (match
        Store.delete
          ~base_dir
-         ~codebase:"github.com_test_legacy"
+         ~codebase:"github.com_other_repo"
          ~id:created.id
          ~keeper_id:"alice"
          ~expected_version:wrong_version
@@ -843,14 +843,14 @@ let test_cas_rejects_version_mismatch () =
     let still_there =
       List.exists
         (fun (a : Types.annotation) -> a.id = created.id)
-        (Store.list ~base_dir ~codebase:"github.com_test_legacy" ~filter:(make_filter ()) ())
+        (Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) ())
     in
     check bool "annotation survives rejected CAS delete" true still_there;
     (* The correct version deletes. *)
     match
       Store.delete
         ~base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~id:created.id
         ~keeper_id:"alice"
         ~expected_version:created.updated_at_ms
@@ -864,7 +864,7 @@ let test_cas_absent_version_is_legacy () =
   with_temp_dir (fun base_dir ->
     let created = make_cas_annotation base_dir in
     (* No expected_version → legacy delete-by-id contract. *)
-    match Store.delete ~base_dir ~codebase:"github.com_test_legacy" ~id:created.id ~keeper_id:"alice" () with
+    match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:created.id ~keeper_id:"alice" () with
     | Ok () -> ()
     | Error msg -> failf "legacy delete without version must succeed: %s" msg)
 ;;
@@ -932,7 +932,7 @@ let () =
         ; test_case
             "Orphan default is unchanged"
             `Quick
-            test_legacy_default_is_unchanged
+            test_explicit_codebase_store
         ; test_case
             "delete is codebase-scoped"
             `Quick

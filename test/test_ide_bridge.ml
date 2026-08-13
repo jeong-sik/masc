@@ -30,7 +30,7 @@ let test_ingest_tool_event () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"fs_write"
       ~keeper_id:"keeper-alpha"
       ~turn_id:"turn-123"
@@ -41,7 +41,7 @@ let test_ingest_tool_event () =
       ~file_path:(Some "lib/test.ml")
       ~timestamp_ms:1717400000000L
       ();
-    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_test_legacy" in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -67,7 +67,7 @@ let rec mkdir_p path =
 ;;
 
 let seed_turn_row ~base_dir ~turn_id ~keeper_id ~phase ~timestamp_ms =
-  let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_test_legacy" in
+  let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo" in
   mkdir_p dir;
   let row =
     Ide_event_types.ide_event_to_json
@@ -103,7 +103,7 @@ let test_turn_rows_remain_readable () =
     match
       Ide_bridge.list_events
         ~base_path:base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~kind:Ide_bridge.Turn
         ()
     with
@@ -118,7 +118,7 @@ let test_ingest_multiple_events () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"fs_write"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -131,7 +131,7 @@ let test_ingest_multiple_events () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -142,7 +142,7 @@ let test_ingest_multiple_events () =
       ~file_path:None
       ~timestamp_ms:2000L
       ();
-    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_test_legacy" in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -176,7 +176,7 @@ let test_list_events_filters_keeper_and_pages () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-old"
@@ -189,7 +189,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"read_file"
       ~keeper_id:"k2"
       ~turn_id:"t-other"
@@ -202,7 +202,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-new"
@@ -216,7 +216,7 @@ let test_list_events_filters_keeper_and_pages () =
     let events =
       Ide_bridge.list_events
         ~base_path:base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~kind:Ide_bridge.Tool
         ~keeper_id:"k1"
         ~limit:1
@@ -233,7 +233,7 @@ let test_list_events_merges_kinds_newest_first () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-tool"
@@ -253,7 +253,7 @@ let test_list_events_merges_kinds_newest_first () =
     let events =
       Ide_bridge.list_events
         ~base_path:base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~limit:2
         ()
     in
@@ -569,7 +569,7 @@ let test_hook_no_file_path () =
       ~input;
     (* RFC-0378 §5.2: a pathless call is a keeper fact — the ide store
        persists nothing for it, in any partition. *)
-    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_test_legacy" in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "pathless call persists no ide row" false (Sys.file_exists path))
 ;;
@@ -639,7 +639,7 @@ let test_concurrent_ingest () =
       fun () ->
         Ide_bridge.ingest_tool_event
           ~base_path:base_dir
-          ~codebase:"github.com_test_legacy"
+          ~codebase:"github.com_other_repo"
           ~tool_name:"fs_write"
           ~keeper_id:"k1"
           ~turn_id:(Printf.sprintf "t-%d" i)
@@ -656,7 +656,7 @@ let test_concurrent_ingest () =
       Eio.Switch.run (fun sw ->
         List.iter (fun f -> Eio.Fiber.fork ~sw f) fibers));
     (* Verify all events were written *)
-    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_test_legacy" in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -806,7 +806,7 @@ let test_list_events_reads_across_segments () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~codebase:"github.com_test_legacy"
+      ~codebase:"github.com_other_repo"
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-live"
@@ -817,7 +817,7 @@ let test_list_events_reads_across_segments () =
       ~file_path:None
       ~timestamp_ms:5000L
       ();
-    let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_test_legacy" in
+    let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let oc = open_out (path ^ ".1") in
     output_string oc
@@ -827,7 +827,7 @@ let test_list_events_reads_across_segments () =
     let events =
       Ide_bridge.list_events
         ~base_path:base_dir
-        ~codebase:"github.com_test_legacy"
+        ~codebase:"github.com_other_repo"
         ~kind:Ide_bridge.Tool
         ~limit:10
         ()
@@ -902,12 +902,9 @@ let test_queue_writer_drains () =
     check int "writer drained all jobs" n (Atomic.get ran))
 ;;
 
-(* task-1733 regression: a partition threaded through the hook path (as the
-   agent-observation sink now does with [event.partition]) must route the tool
-   event AND its derived cursor into that partition's store — not the orphan
-   [Legacy_default]. This is the exact split that left dashboard by-url reads
-   empty while data piled up in _orphan. *)
-let test_partition_routes_tool_event_and_cursor_by_url () =
+(* The typed codebase carried through the hook path must route the tool event
+   and its derived cursor into the same store. *)
+let test_codebase_routes_tool_event_and_cursor () =
   with_temp_dir (fun base_dir ->
     let by_url = "github.com_jeong-sik_wkbl" in
     let input =
@@ -932,33 +929,26 @@ let test_partition_routes_tool_event_and_cursor_by_url () =
     let by_url_events =
       Ide_bridge.list_events ~base_path:base_dir ~codebase:by_url ()
     in
-    check bool "by-url partition holds the tool event" true
+    check bool "codebase holds the tool event" true
       (List.length by_url_events >= 1);
     let by_url_cursors =
       Ide_bridge.list_cursors ~base_path:base_dir ~codebase:by_url ()
     in
-    check bool "by-url partition holds the derived cursor" true
+    check bool "codebase holds the derived cursor" true
       (List.length by_url_cursors >= 1);
-    (* The orphan partition (what an unscoped read used to fall back to) stays
-       empty for a scoped write — proving the write is no longer hardcoded to
-       Legacy_default. *)
-    let orphan_events =
+    let other_events =
       Ide_bridge.list_events ~base_path:base_dir
-        ~codebase:"github.com_test_legacy" ()
+        ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan partition has no scoped tool event" 0
-      (List.length orphan_events);
-    let orphan_cursors =
+    check int "other codebase has no tool event" 0 (List.length other_events);
+    let other_cursors =
       Ide_bridge.list_cursors ~base_path:base_dir
-        ~codebase:"github.com_test_legacy" ()
+        ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan partition has no scoped cursor" 0
-      (List.length orphan_cursors))
+    check int "other codebase has no cursor" 0 (List.length other_cursors))
 ;;
 
-(* Backward compat: an explicit [Legacy_default] write still lands in the orphan
-   store and is invisible to a by-url read (partitions are isolated). *)
-let test_partition_legacy_default_isolated_from_by_url () =
+let test_codebases_are_isolated () =
   with_temp_dir (fun base_dir ->
     let input =
       `Assoc
@@ -984,13 +974,13 @@ let test_partition_legacy_default_isolated_from_by_url () =
         ~codebase:("github.com_x_y")
         ()
     in
-    check bool "addressed write lands in its by-url partition" true
+    check bool "addressed write lands in its codebase" true
       (List.length by_url_events >= 1);
-    let orphan_events =
-      Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_test_legacy" ()
+    let other_events =
+      Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan read does not see the addressed write" 0
-      (List.length orphan_events))
+    check int "other codebase does not see the addressed write" 0
+      (List.length other_events))
 ;;
 
 let () =
@@ -1001,11 +991,10 @@ let () =
         ; test_case "seeded turn rows remain readable" `Quick test_turn_rows_remain_readable
         ; test_case "multiple events" `Quick test_ingest_multiple_events
         ] )
-    ; ( "partition_attribution"
-      , [ test_case "by-url routes tool event + cursor" `Quick
-            test_partition_routes_tool_event_and_cursor_by_url
-        ; test_case "addressed write isolated from orphan" `Quick
-            test_partition_legacy_default_isolated_from_by_url
+    ; ( "codebase attribution"
+      , [ test_case "routes tool event + cursor" `Quick
+            test_codebase_routes_tool_event_and_cursor
+        ; test_case "codebases are isolated" `Quick test_codebases_are_isolated
         ] )
     ; ( "read"
       , [ test_case "filters keeper and pages" `Quick test_list_events_filters_keeper_and_pages

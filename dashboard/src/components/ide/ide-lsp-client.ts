@@ -31,15 +31,9 @@ import { DEFAULT_LANGUAGE_ID } from './ide-language'
 /**
  * Which codebase this editor's LSP connection is looking at.
  *
- * The server needs it for two things at once: the `.masc-ide/` partition to
- * read annotations from, and the workspace tree our repo-relative document
- * paths hang off. A connection that declares neither gets language-server
- * passthrough with no MASC overlay — never a guessed default partition.
- *
- * `repoId` anchors the workspace tree while `codebase` names the overlay
- * partition. Otherwise a selected keeper reads its own orphan observation
- * lane. This mirrors the scope the workspace store sends to the IDE REST
- * routes, so the two surfaces address the same rows.
+ * `codebase` addresses the optional MASC overlay store. `repoId`/`keeper`
+ * independently select the workspace tree. A connection without a codebase
+ * gets language-server passthrough with no guessed MASC overlay.
  */
 export interface LspScope {
   readonly repoId: string | null
@@ -70,13 +64,10 @@ function lspScopeQuery(scope: LspScope): string {
   const params = new URLSearchParams()
   if (scope.repoId) {
     params.set('repo_id', scope.repoId)
-    if (scope.codebase) params.set('codebase', scope.codebase)
   } else if (scope.keeper) {
-    // `keeper_lane` picks the partition; `keeper` picks the tree. The server
-    // resolves them with two different resolvers and both need naming.
-    params.set('keeper_lane', scope.keeper)
     params.set('keeper', scope.keeper)
   }
+  if (scope.codebase) params.set('codebase', scope.codebase)
   const query = params.toString()
   return query === '' ? '' : `?${query}`
 }

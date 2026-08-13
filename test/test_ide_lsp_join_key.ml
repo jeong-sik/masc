@@ -63,7 +63,7 @@ let codelens_titles ~base_dir ~codebase =
 
 (* The defect this file exists for: the write names a by-URL codebase and the
    read has to name the same one. A reader that omits the codebase (the old
-   behaviour, which defaulted to [Legacy_default]) sees nothing. *)
+   behavior) sees nothing. *)
 let test_by_url_write_is_read_under_its_partition () =
   with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
@@ -83,7 +83,7 @@ let test_by_url_write_is_read_under_its_partition () =
       (list string)
       "the orphan codebase does not"
       []
-      (codelens_titles ~base_dir ~codebase:(Some "github.com_test_legacy"))
+      (codelens_titles ~base_dir ~codebase:(Some "github.com_other_repo"))
   )
 ;;
 
@@ -96,7 +96,7 @@ let test_unaddressed_store_reads_empty () =
     ignore
       (create_annotation
          ~base_dir
-         ~codebase:"github.com_test_legacy"
+         ~codebase:"github.com_other_repo"
          ~keeper_id:"analyst"
          ~content:"orphan lane row"
          ~line:3);
@@ -124,7 +124,7 @@ let test_partitions_do_not_share_cache_entries () =
     ignore
       (create_annotation
          ~base_dir
-         ~codebase:"github.com_test_legacy"
+         ~codebase:"github.com_other_repo"
          ~keeper_id:"sangsu"
          ~content:"orphan row"
          ~line:5);
@@ -138,7 +138,7 @@ let test_partitions_do_not_share_cache_entries () =
       (list string)
       "orphan codebase is not served the by-url row"
       [ "[Decision] orphan row" ]
-      (codelens_titles ~base_dir ~codebase:(Some "github.com_test_legacy"))
+      (codelens_titles ~base_dir ~codebase:(Some "github.com_other_repo"))
   )
 ;;
 

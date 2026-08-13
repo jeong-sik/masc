@@ -1155,7 +1155,7 @@ export function IdeShell() {
   }
 
   // Annotation deletion (#23471 FE follow-up). Mirrors the composer's
-  // contract: mutations need a repo scope (keeper_lane is read-only) and
+  // contract: mutations need a repository-backed codebase scope and
   // ownership is decided server-side from the token identity, so the
   // handler translates each outcome into a toast instead of pre-judging
   // deletability in the FE.
@@ -1164,7 +1164,7 @@ export function IdeShell() {
   ): Promise<IdeAnnotationDeleteOutcome> => {
     const repoId = workspaceStore.activeRepositoryId()
     if (repoId === null) {
-      showToast('주석 삭제에는 repo 선택이 필요합니다 (keeper_lane scope는 read-only)', 'error')
+      showToast('주석 삭제에는 repo 선택이 필요합니다', 'error')
       return 'error'
     }
     const outcome = await deleteIdeAnnotation(annotation.id, {
@@ -1446,7 +1446,6 @@ export function IdeShell() {
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
                       codebase=${codebaseForRepositoryId(activeRepositoryId)}
-                      keeperLane=${terminalKeeper}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}

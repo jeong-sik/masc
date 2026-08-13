@@ -99,7 +99,7 @@ let test_owner_probe_round_trip () =
       (List.length
          (Ide_annotations.list
             ~base_dir:base_path
-            ~codebase:"github.com_test_legacy"
+            ~codebase:"github.com_other_repo"
             ~filter:{ file_path = None; keeper_id = None; goal_id = None; task_id = None }
             ())))
 ;;

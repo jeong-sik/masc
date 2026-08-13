@@ -140,8 +140,7 @@ export function IdeMemoryPanel({ keeperName, scope, codebase }: IdeMemoryPanelPr
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Mirrors api/ide.ts's resolveIdeScope: the server requires exactly one
-  // of repo_id / canonical_url / keeper_lane. Without one it fails closed
+  // The server requires one canonical codebase slug. Without one it fails closed
   // with 400 missing_ide_scope — checking here first means the panel never
   // makes that doomed request and never surfaces its bare status code.
   const hasScope = Boolean(scope) || Boolean(codebase?.trim())

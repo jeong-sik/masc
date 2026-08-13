@@ -74,6 +74,8 @@ let keeper_trust_json ?(include_receipt = false)
       ("next_human_action", Option.value ~default:`Null (Json_util.assoc_member_opt "next_human_action" runtime_trust));
       ("approval_state", Option.value ~default:`Null (Json_util.assoc_member_opt "approval" runtime_trust));
       ("execution_summary", Option.value ~default:`Null (Json_util.assoc_member_opt "execution" runtime_trust));
+      ("sandbox_routing", Option.value ~default:`Null (Json_util.assoc_member_opt "sandbox_routing" runtime_trust));
+      ("sandbox_routing_attention", Option.value ~default:`Null (Json_util.assoc_member_opt "sandbox_routing_attention" runtime_trust));
       ( "latest_terminal_reason",
         Option.value ~default:`Null (Json_util.assoc_member_opt "latest_terminal_reason" runtime_trust) );
       ("latest_next_action", Option.value ~default:`Null (Json_util.assoc_member_opt "latest_next_action" runtime_trust));

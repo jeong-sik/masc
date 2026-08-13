@@ -978,6 +978,143 @@ let test_approval_queue_failure_remains_typed_unavailable () =
           |> to_string))
 ;;
 
+let sandbox_routing_descriptor ~status ~containment ~violation ~detail =
+  `Assoc
+    [ "schema", `String "masc.keeper.sandbox-routing.v1"
+    ; "config_requested", `String "docker_contained"
+    ; ( "resolved_effective"
+      , `Assoc
+          [ "status", `String "resolved"
+          ; "boundary", `String "host_local"
+          ] )
+    ; ( "receipt_evidence"
+      , `Assoc
+          [ "status", `String "observed"
+          ; "boundary", `String "host_local"
+          ] )
+    ; ( "verification"
+      , `Assoc
+          [ "status", `String status
+          ; "containment", `String containment
+          ; "violation", violation
+          ; "detail", detail
+          ] )
+    ]
+;;
+
+let routing_receipt descriptor =
+  `Assoc
+    [ "ended_at", `String "2026-08-13T00:00:00Z"
+    ; "operator_disposition", `String "pass"
+    ; "operator_disposition_reason", `String "healthy"
+    ; "terminal_reason_code", `String "success"
+    ; "completion_contract_result", `String "response_observed"
+    ; ( "sandbox"
+      , `Assoc
+          [ "kind", `String "local"
+          ; "network_mode", `String "inherit"
+          ; "routing", descriptor
+          ] )
+    ]
+;;
+
+let test_sandbox_routing_mismatch_projects_attention_from_descriptor () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let meta = make_meta "runtime-trust-sandbox-routing-mismatch" in
+      let descriptor =
+        sandbox_routing_descriptor
+          ~status:"mismatch"
+          ~containment:"not_verified"
+          ~violation:(`String "config_effective_mismatch")
+          ~detail:(`String "config requested Docker but runtime resolved local")
+      in
+      Masc.Keeper_types_support.keeper_execution_receipt_store config meta.name
+      |> fun store -> Dated_jsonl.append store (routing_receipt descriptor);
+      let snapshot =
+        K.For_testing.snapshot_json_inner_with_pending_reader
+          ~read_pending:(fun ~base_path:_ -> Ok [])
+          ~config
+          ~meta
+      in
+      let open Yojson.Safe.Util in
+      Alcotest.(check bool)
+        "descriptor is projected without re-inference"
+        true
+        (snapshot |> member "sandbox_routing" = descriptor);
+      Alcotest.(check bool)
+        "execution summary shares descriptor"
+        true
+        (snapshot |> member "execution" |> member "sandbox_routing" = descriptor);
+      Alcotest.(check bool)
+        "routing mismatch requires attention"
+        true
+        (snapshot |> member "needs_attention" |> to_bool);
+      Alcotest.(check string)
+        "attention reason comes from typed violation"
+        "sandbox_routing_config_effective_mismatch"
+        (snapshot |> member "attention_reason" |> to_string);
+      Alcotest.(check string)
+        "routing attention has an operator action"
+        "inspect_sandbox_routing_evidence"
+        (snapshot |> member "next_human_action" |> to_string);
+      Alcotest.(check string)
+        "nested routing attention uses the same reason"
+        "sandbox_routing_config_effective_mismatch"
+        (snapshot
+         |> member "sandbox_routing_attention"
+         |> member "reason"
+         |> to_string);
+      let dashboard_trust =
+        Masc.Dashboard_http_keeper_trust.keeper_trust_json config meta
+      in
+      Alcotest.(check bool)
+        "dashboard trust API exposes the same descriptor"
+        true
+        (dashboard_trust |> member "sandbox_routing" = descriptor))
+;;
+
+let test_sandbox_routing_verified_or_absent_projects_optional_null () =
+  let verified =
+    sandbox_routing_descriptor
+      ~status:"verified"
+      ~containment:"docker_contained"
+      ~violation:`Null
+      ~detail:`Null
+  in
+  let verified_observation =
+    Masc.Keeper_sandbox_routing_dashboard_projection.of_receipt
+      (routing_receipt verified)
+  in
+  Alcotest.(check bool)
+    "verified descriptor remains present"
+    true
+    (Masc.Keeper_sandbox_routing_dashboard_projection.descriptor_to_yojson
+       verified_observation
+     = verified);
+  Alcotest.(check bool)
+    "verified descriptor has no attention"
+    true
+    (Masc.Keeper_sandbox_routing_dashboard_projection.attention
+       verified_observation
+     = None);
+  let absent =
+    Masc.Keeper_sandbox_routing_dashboard_projection.of_receipt
+      (`Assoc [ "sandbox", `Assoc [ "routing", `Null ] ])
+  in
+  Alcotest.(check bool)
+    "absent routing evidence stays JSON null"
+    true
+    (Masc.Keeper_sandbox_routing_dashboard_projection.descriptor_to_yojson absent
+     = `Null)
+;;
+
 let () =
   Alcotest.run
     "keeper_runtime_trust_snapshot"
@@ -1068,6 +1205,16 @@ let () =
             "queue failure remains typed unavailable"
             `Quick
             test_approval_queue_failure_remains_typed_unavailable
+        ] )
+    ; ( "sandbox_routing_projection"
+      , [ Alcotest.test_case
+            "mismatch projects descriptor attention"
+            `Quick
+            test_sandbox_routing_mismatch_projects_attention_from_descriptor
+        ; Alcotest.test_case
+            "verified and absent evidence project optional null"
+            `Quick
+            test_sandbox_routing_verified_or_absent_projects_optional_null
         ] )
     ]
 ;;

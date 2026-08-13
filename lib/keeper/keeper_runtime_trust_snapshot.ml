@@ -54,6 +54,7 @@ module Snapshot_cache = struct
 end
 
 module Completion_contract_result = Keeper_completion_contract_result_label
+module Sandbox_routing = Keeper_sandbox_routing_dashboard_projection
 
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
@@ -297,7 +298,12 @@ let approval_queue_state_of_projection
 
 let trust_model_of_observations ~pending_approval_projection
     ~runtime_blocker_fields ~latest_receipt ~latest_next_action
-    ~attention_fields =
+    ~attention_fields ~sandbox_routing =
+  let sandbox_routing_attention =
+    Sandbox_routing.attention sandbox_routing
+    |> Option.map (fun attention ->
+      attention.Sandbox_routing.reason, attention.next_human_action)
+  in
   Trust_core.decide
     { approval_queue =
         approval_queue_state_of_projection pending_approval_projection
@@ -312,6 +318,7 @@ let trust_model_of_observations ~pending_approval_projection
     ; attention_reason = assoc_string_opt "attention_reason" attention_fields
     ; attention_next_human_action =
         assoc_string_opt "next_human_action" attention_fields
+    ; sandbox_routing_attention
     ; terminal_next_human_action = latest_next_action
     }
 ;;
@@ -522,7 +529,11 @@ let approval_queue_unavailable_timeline_event ~observed_at_unix
             ("observation_only", `Bool false);
           ])
 
-let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_receipt =
+let execution_summary_json
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~latest_receipt
+      ~sandbox_routing
+  =
   let sandbox_kind =
     match latest_receipt with
     | Some receipt ->
@@ -613,6 +624,11 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
       ("completion_observation_summary", `String completion_observation_summary);
       ( "latest_receipt_at",
         Json_util.string_opt_to_json (Option.bind latest_receipt (json_string_opt_member "ended_at")) );
+      ( "sandbox_routing",
+        Sandbox_routing.descriptor_to_yojson sandbox_routing );
+      ( "sandbox_routing_attention",
+        Sandbox_routing.attention sandbox_routing
+        |> Sandbox_routing.attention_to_yojson );
     ]
 
 let latest_causal_event_summary ~observed_at_unix ~meta ~latest_decision
@@ -729,6 +745,11 @@ let collect_summary_raw ~(config : Workspace.config) ~(meta : keeper_meta) =
 ;;
 
 let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
+  let sandbox_routing =
+    match raw.latest_receipt with
+    | Some receipt -> Sandbox_routing.of_receipt receipt
+    | None -> Sandbox_routing.Absent
+  in
   let latest_receipt_for_runtime_state =
     current_receipt_for_runtime_state ~meta
       ~runtime_blocker_fields:raw.runtime_blocker_fields raw.latest_receipt
@@ -752,9 +773,11 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
       ~runtime_blocker_fields:raw.runtime_blocker_fields
       ~latest_receipt:latest_receipt_for_runtime_state
       ~latest_next_action ~attention_fields:raw.attention_fields
+      ~sandbox_routing
   in
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt:raw.latest_receipt
+      ~sandbox_routing
   in
   let approval_state =
     approval_state_json
@@ -782,6 +805,11 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
      @ [ ("approval_queue_state", raw.pending_approval_projection.state)
        ; ("approval", approval_state)
        ; ("execution", execution_summary)
+       ; ( "sandbox_routing",
+           Sandbox_routing.descriptor_to_yojson sandbox_routing )
+       ; ( "sandbox_routing_attention",
+           Sandbox_routing.attention sandbox_routing
+           |> Sandbox_routing.attention_to_yojson )
        ; ("latest_terminal_reason", latest_terminal_reason_json)
        ; ("latest_next_action", Json_util.string_opt_to_json latest_next_action)
        ; ("latest_causal_event", latest_causal_event)
@@ -924,6 +952,11 @@ let collect_raw_snapshot_with_pending_reader
 
 let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   let observations = raw.observations in
+  let sandbox_routing =
+    match observations.latest_receipt with
+    | Some receipt -> Sandbox_routing.of_receipt receipt
+    | None -> Sandbox_routing.Absent
+  in
   let latest_receipt_for_runtime_state =
     current_receipt_for_runtime_state ~meta
       ~runtime_blocker_fields:observations.runtime_blocker_fields
@@ -958,6 +991,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
       ~runtime_blocker_fields:observations.runtime_blocker_fields
       ~latest_receipt:latest_receipt_for_runtime_state ~latest_next_action
       ~attention_fields:observations.attention_fields
+      ~sandbox_routing
   in
   let approval_state =
     approval_state_json
@@ -966,6 +1000,7 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
   in
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt:observations.latest_receipt
+      ~sandbox_routing
   in
   let causal_timeline =
     causal_timeline_json
@@ -1015,6 +1050,11 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
      @ [ ("approval_queue_state", observations.pending_approval_projection.state)
        ; ("approval", approval_state)
        ; ("execution", execution_summary)
+       ; ( "sandbox_routing",
+           Sandbox_routing.descriptor_to_yojson sandbox_routing )
+       ; ( "sandbox_routing_attention",
+           Sandbox_routing.attention sandbox_routing
+           |> Sandbox_routing.attention_to_yojson )
        ; ("latest_terminal_reason", latest_terminal_reason_json)
        ; ("latest_next_action", Json_util.string_opt_to_json latest_next_action)
        ; ( "pending_approval_count"

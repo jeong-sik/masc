@@ -16,6 +16,7 @@ type raw =
   ; attention_needs_attention : bool
   ; attention_reason : string option
   ; attention_next_human_action : string option
+  ; sandbox_routing_attention : (string * string) option
   ; terminal_next_human_action : string option
   }
 

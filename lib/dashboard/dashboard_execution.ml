@@ -104,6 +104,8 @@ let compact_keeper_trust_json ~(config : Workspace.config) ~(meta : Keeper_meta_
     ; "next_human_action", member "next_human_action"
     ; "approval_state", member "approval"
     ; "execution_summary", member "execution"
+    ; "sandbox_routing", member "sandbox_routing"
+    ; "sandbox_routing_attention", member "sandbox_routing_attention"
     ; "latest_terminal_reason", member "latest_terminal_reason"
     ; "latest_next_action", member "latest_next_action"
     ; "latest_causal_event", member "latest_causal_event"

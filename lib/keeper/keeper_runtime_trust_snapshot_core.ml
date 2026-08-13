@@ -10,6 +10,7 @@ type raw =
   ; attention_needs_attention : bool
   ; attention_reason : string option
   ; attention_next_human_action : string option
+  ; sandbox_routing_attention : (string * string) option
   ; terminal_next_human_action : string option
   }
 
@@ -94,10 +95,16 @@ let decide raw =
   in
   let needs_attention =
     raw.attention_needs_attention
+    || Option.is_some raw.sandbox_routing_attention
     || display_disposition_requires_attention disposition
   in
   let attention_reason =
     match raw.attention_reason with
+    | Some _ as reason -> reason
+    | None -> Option.map fst raw.sandbox_routing_attention
+  in
+  let attention_reason =
+    match attention_reason with
     | Some _ as reason -> reason
     | None when needs_attention -> Some disposition_reason
     | None -> None
@@ -105,8 +112,11 @@ let decide raw =
   let next_human_action =
     match raw.attention_next_human_action with
     | Some _ as action -> action
-    | None when needs_attention -> raw.terminal_next_human_action
-    | None -> None
+    | None ->
+      (match raw.sandbox_routing_attention with
+       | Some (_, action) -> Some action
+       | None when needs_attention -> raw.terminal_next_human_action
+       | None -> None)
   in
   { disposition
   ; disposition_reason

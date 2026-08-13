@@ -116,6 +116,8 @@ type invocation_error =
   | Not_on_surface of verdict
   | Unresolvable_runtime of string
   | Not_agent_core_lane of string
+  | Not_official_client_lane of string
+  | Tools_only_via_mcp_bridge of string
   | Tool_schema_rejected of string
 
 let invocation_error_to_string = function
@@ -123,8 +125,14 @@ let invocation_error_to_string = function
   | Unresolvable_runtime detail -> detail
   | Not_agent_core_lane label ->
     Printf.sprintf
-      "%s is an official-client lane; its session is keyed by keeper name and \
-       this probe does not isolate one"
+      "%s is an official-client lane; use probe_official_client_invocation"
+      label
+  | Not_official_client_lane label ->
+    Printf.sprintf "%s is an Agent Core lane; use probe_invocation" label
+  | Tools_only_via_mcp_bridge label ->
+    Printf.sprintf
+      "%s declares no host-side tool list; its surface exists only behind the \
+       per-turn MCP bridge, which this probe does not stand up"
       label
   | Tool_schema_rejected detail -> Printf.sprintf "tool schema rejected: %s" detail
 ;;
@@ -277,4 +285,164 @@ let probe_invocation ~sw ~net ?clock ~now ~runtime_id ~tool ~prompt () =
                    Ok
                      (Other_tool_invoked
                         { requested = model_facing_name; invoked; elapsed_s }))))))))
+;;
+
+(* --- Official-client lanes --- *)
+
+(* The tool MASC hands the spawned client. Its implementation is the
+   observation: a call lands in [seen] before any transcript, stream frame, or
+   response body is parsed, so a positive answer here cannot be a decoding
+   artifact. The returned content is inert -- the probe asks whether the client
+   can reach the tool, not what the tool would do. *)
+let recording_dynamic_tool ~(schema : Masc_domain.tool_schema) ~seen =
+  { Runtime_official_client_tool.name = schema.name
+  ; description = schema.description
+  ; input_schema = schema.input_schema
+  ; call =
+      (fun ~call_id:_ _arguments ->
+        seen := schema.name :: !seen;
+        { Runtime_official_client_tool.success = true
+        ; content = "probe acknowledged; no side effect performed"
+        ; abort_turn = None
+        })
+  }
+;;
+
+(* Both lanes answer the same four-way question, and both report the count of
+   host-tool calls they admitted. Splitting only on the run itself keeps the
+   classification identical across lanes, so a difference in the result is a
+   difference in the runtime rather than in how the probe read it. *)
+let classify_official_client_turn ~model_facing_name ~seen ~elapsed_s ~text
+    ~dynamic_tool_calls =
+  match !seen with
+  | names when List.exists (String.equal model_facing_name) names ->
+    Tool_invoked { tool = model_facing_name; elapsed_s }
+  | [] when dynamic_tool_calls > 0 ->
+    (* The client admitted a host-tool call the callback never saw. Only one
+       tool was declared, so this is a transport-level disagreement, not the
+       model choosing a different tool -- do not report it as either. *)
+    Provider_rejected
+      { detail =
+          Printf.sprintf
+            "client reported %d host-tool call(s) but no declared tool ran"
+            dynamic_tool_calls
+      }
+  | [] -> Replied_no_tool { reply_bytes = String.length text; elapsed_s }
+  | invoked -> Other_tool_invoked { requested = model_facing_name; invoked; elapsed_s }
+;;
+
+let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
+    ~tool ~prompt () =
+  match probe_surface ~tool with
+  | (Not_a_descriptor | Operator_only | Aliased _ | Withheld_by_schema_error _) as v ->
+    Error (Not_on_surface v)
+  | Projected { model_facing_name } ->
+    (match Runtime.get_runtime_by_id runtime_id with
+     | None ->
+       Error
+         (Unresolvable_runtime
+            (Printf.sprintf "%s is not a configured runtime" runtime_id))
+     | Some rt ->
+       let schemas =
+         Keeper_tool_descriptor.model_visible_schemas ()
+         |> List.filter (fun (s : Masc_domain.tool_schema) ->
+           String.equal s.name model_facing_name)
+       in
+       (match schemas with
+        | [] ->
+          Error
+            (Tool_schema_rejected
+               (Printf.sprintf
+                  "%s is projected but absent from model_visible_schemas"
+                  model_facing_name))
+        | schema :: _ ->
+          let seen = ref [] in
+          let dynamic_tools = [ recording_dynamic_tool ~schema ~seen ] in
+          let started = now () in
+          (match rt.Runtime.execution with
+           | Runtime_execution.Agent_core _ ->
+             Error
+               (Not_official_client_lane
+                  (Runtime_execution.label rt.Runtime.execution))
+           | Runtime_execution.Antigravity_cli _ ->
+             Error
+               (Tools_only_via_mcp_bridge
+                  (Runtime_execution.label rt.Runtime.execution))
+           | Runtime_execution.Claude_code exec ->
+             (* Built from the same fields the keeper path builds it from, and
+                the deadline resolved by the same function, so the probe
+                measures the runtime a real turn would get rather than a
+                lenient stand-in. Only [system_prompt] differs: the probe's
+                prompt is the whole instruction.
+
+                Session mode is left at its default -- a fresh session per
+                probe, abandoned when the turn ends. *)
+             let config : Runtime_claude_code.config =
+               { cli_path = exec.cli_path
+               ; cwd = base_path
+               ; model = exec.model
+               ; system_prompt = None
+               ; admission_timeout_s = exec.timeout_s
+               ; timeout_s =
+                   (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+                    | None -> Some exec.timeout_s
+                    | Some 0.0 -> None
+                    | Some s -> Some s)
+               }
+             in
+             (match
+                Runtime_claude_code.run_turn
+                  ~dynamic_tools
+                  ~mgr
+                  ~clock
+                  ~cwd:Eio.Path.(fs / base_path)
+                  config
+                  ~prompt
+              with
+              | Error error ->
+                Ok
+                  (Provider_rejected
+                     { detail = Runtime_claude_code.error_to_string error })
+              | Ok (turn : Runtime_claude_code.turn_result) ->
+                Ok
+                  (classify_official_client_turn
+                     ~model_facing_name
+                     ~seen
+                     ~elapsed_s:(now () -. started)
+                     ~text:turn.text
+                     ~dynamic_tool_calls:turn.dynamic_tool_calls))
+           | Runtime_execution.Codex_app_server exec ->
+             let config : Runtime_codex_app_server.config =
+               { cli_path = exec.cli_path
+               ; model = exec.model
+               ; developer_instructions = None
+               ; admission_timeout_s = exec.timeout_s
+               ; timeout_s =
+                   (match Runtime_inference.resolve_turn_timeout_s ~runtime_id with
+                    | None -> Some exec.timeout_s
+                    | Some 0.0 -> None
+                    | Some s -> Some s)
+               }
+             in
+             (match
+                Runtime_codex_app_server.run_turn
+                  ~dynamic_tools
+                  ~mgr
+                  ~clock
+                  ~cwd:Eio.Path.(fs / base_path)
+                  config
+                  ~prompt
+              with
+              | Error error ->
+                Ok
+                  (Provider_rejected
+                     { detail = Runtime_codex_app_server.error_to_string error })
+              | Ok (turn : Runtime_codex_app_server.turn_result) ->
+                Ok
+                  (classify_official_client_turn
+                     ~model_facing_name
+                     ~seen
+                     ~elapsed_s:(now () -. started)
+                     ~text:turn.text
+                     ~dynamic_tool_calls:turn.dynamic_tool_calls)))))
 ;;

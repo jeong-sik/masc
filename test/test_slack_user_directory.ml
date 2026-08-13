@@ -89,6 +89,17 @@ let test_mention_rewrite () =
     "plain @text < unrelated >"
     (D.rewrite_mentions t "plain @text < unrelated >")
 
+let test_empty_user_id_never_fetches () =
+  let now_ref = ref 0.0 in
+  let t, calls = directory ~now_ref [ ("U1", Ok (info ~display_name:"Vincent" "U1")) ] in
+  check (option string) "empty id resolves to nothing" None (D.display_label t ~user_id:"");
+  check int "empty id never fetches" 0 !calls;
+  (* The guard must not poison the cache under the empty key: the next real id
+     still reaches the fetch. *)
+  check (option string) "a real id still resolves" (Some "Vincent")
+    (D.display_label t ~user_id:"U1");
+  check int "the real id is the first fetch" 1 !calls
+
 let test_mention_rewrite_malformed_tokens_pass_through () =
   let now_ref = ref 0.0 in
   let t, calls = directory ~now_ref [] in
@@ -115,5 +126,7 @@ let () =
           test_case "rewrite" `Quick test_mention_rewrite;
           test_case "malformed tokens pass through" `Quick
             test_mention_rewrite_malformed_tokens_pass_through;
+          test_case "empty user id never fetches" `Quick
+            test_empty_user_id_never_fetches;
         ] );
     ]

@@ -73,7 +73,14 @@ let store_entry t ~user_id entry =
   Mutex.unlock t.mu
 
 let display_label t ~user_id =
-  match live_entry t ~user_id with
+  (* Slack omits [user] on bot and system events, so an empty id reaches here.
+     It can never resolve -- users.info answers user_not_found -- and letting it
+     through spends an API call, a WARN naming no one, and a failure-cache entry
+     keyed on "" to learn that. Answer it here instead (#28402). *)
+  if String.equal user_id ""
+  then None
+  else
+    match live_entry t ~user_id with
   | Some (Label label) -> Some label
   | Some Fetch_failed -> None
   | None ->

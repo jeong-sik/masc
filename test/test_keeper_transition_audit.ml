@@ -159,6 +159,86 @@ let test_record_and_read_multiple_turns () =
       check int (Printf.sprintf "turn %d id" idx) expected_id turn.Audit.turn_id)
     turns
 
+(* [recent_completed_turns] answers from the per-keeper in-memory ring when one
+   exists and falls through to [recent_completed_turns_from_store] otherwise —
+   the state a keeper is in after a restart. The store branch scans one shared
+   JSONL store and keeps only rows whose [keeper] field matches.
+
+   That branch was unguarded: dropping its keeper-name comparison left the
+   whole suite green, because every case here records under a single keeper and
+   reads back through the ring. Clearing the rings after recording (the store
+   keeps its rows) routes the read down the store branch. *)
+let test_store_branch_filters_by_keeper () =
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Audit.For_testing.reset_state ();
+      cleanup_dir base_dir)
+    (fun () ->
+      (* No sink path: [recent_completed_turns_from_store] returns [] when one
+         is configured, which would make this test vacuous. *)
+      with_env "MASC_KEEPER_TRANSITION_LOG" "" (fun () ->
+        with_env "MASC_BASE_PATH" base_dir (fun () ->
+          with_env "MASC_BASE_PATH_INPUT" base_dir (fun () ->
+            Audit.For_testing.reset_state ();
+            let record keeper_name turn_id =
+              Audit.record_completed_turn
+                ~keeper_name
+                {
+                  Audit.turn_id;
+                  started_at = float_of_int (turn_id * 10);
+                  ended_at = float_of_int ((turn_id * 10) + 5);
+                  outcome = Audit.Turn_failed;
+                }
+            in
+            (* Interleaved, so a reader that ignores the filter cannot pass by
+               ordering luck: the other keeper's rows sit between the wanted
+               ones at every position. *)
+            record "keeper-a" 1;
+            record "keeper-b" 2;
+            record "keeper-a" 3;
+            record "keeper-b" 4;
+            record "keeper-a" 5;
+            (* Drop the rings only; the JSONL rows written above survive. *)
+            Audit.For_testing.reset_state ();
+            let ids keeper_name =
+              Audit.recent_completed_turns ~keeper_name ~limit:10
+              |> List.map (fun turn -> turn.Audit.turn_id)
+              |> List.sort compare
+            in
+            check (list int) "store branch returns only keeper-a's turns"
+              [ 1; 3; 5 ] (ids "keeper-a");
+            check (list int) "store branch returns only keeper-b's turns"
+              [ 2; 4 ] (ids "keeper-b")))))
+
+(* The ring branch keys by keeper name, so its filtering is structural. Pinned
+   separately because the two branches answer the same question differently. *)
+let test_completed_turns_are_filtered_by_keeper () =
+  Audit.For_testing.reset_state ();
+  let record keeper_name turn_id =
+    Audit.record_completed_turn
+      ~keeper_name
+      {
+        Audit.turn_id;
+        started_at = float_of_int (turn_id * 10);
+        ended_at = float_of_int ((turn_id * 10) + 5);
+        outcome = Audit.Turn_failed;
+      }
+  in
+  (* Interleaved so a reader that ignores the filter cannot pass by ordering
+     luck: the other keeper's rows sit between the wanted ones. *)
+  record "keeper-a" 1;
+  record "keeper-b" 2;
+  record "keeper-a" 3;
+  record "keeper-b" 4;
+  record "keeper-a" 5;
+  let ids keeper_name =
+    Audit.recent_completed_turns ~keeper_name ~limit:10
+    |> List.map (fun turn -> turn.Audit.turn_id)
+  in
+  check (list int) "only keeper-a's turns, newest first" [ 5; 3; 1 ] (ids "keeper-a");
+  check (list int) "only keeper-b's turns, newest first" [ 4; 2 ] (ids "keeper-b")
+
 let test_ring_capacity_limit () =
   Audit.For_testing.reset_state ();
   let keeper_name = "capacity-keeper" in
@@ -598,6 +678,10 @@ let () =
         [
           test_case "empty store" `Quick test_recent_completed_turns_empty_store;
           test_case "record and read multiple" `Quick test_record_and_read_multiple_turns;
+          test_case "completed turns are filtered by keeper" `Quick
+            test_completed_turns_are_filtered_by_keeper;
+          test_case "store branch filters by keeper" `Quick
+            test_store_branch_filters_by_keeper;
           test_case "ring capacity limit" `Quick test_ring_capacity_limit;
           test_case "ring ordering newest first" `Quick test_ring_ordering_is_newest_first;
           test_case "limit respected" `Quick test_limit_respected;

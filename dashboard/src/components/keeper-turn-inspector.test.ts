@@ -267,6 +267,27 @@ describe('KeeperTurnInspector v2 drawer', () => {
     })
   })
 
+  it('distinguishes incompatible retained rows from an empty turn history', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue({
+      ...turnRecordsWithMemoryOs(),
+      health: 'incompatible',
+      stale_reason: 'incompatible_rows',
+      skipped_rows: 3,
+      count: 0,
+      entries: [],
+      latest_ts_unix: null,
+      latest_ts_iso: null,
+      latest_age_s: null,
+    })
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('current decoder가 최근 3행을 모두 거부했습니다')
+    })
+    expect(container.textContent).not.toContain('턴 레코드 없음')
+  })
+
   it('renders the detail drawer when a turn row is clicked', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 

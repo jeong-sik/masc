@@ -89,10 +89,11 @@ product.
 | Broadcast turn | owner delivery | duplicate delivery and replay |
 | Stream/reasoning | identified ordered deltas | duplicate replay, reconnect/restart, hidden CoT withheld |
 
-Runtime scope is the configured Claude Code subscription, Codex subscription,
-GLM Coding Plan, Kimi Coding Plan, Ollama Cloud, and local AgentWorld model.
-AgentWorld is policy-limited to the librarian role. Registration does not claim
-credentials, health, completion, or role eligibility.
+Required production scope is the configured Claude Code subscription, Codex
+subscription, GLM Coding Plan, Kimi Coding Plan, and Ollama Cloud runtimes.
+Locally discovered runtimes are optional canary targets: their absence never
+fails the production campaign. Registration does not claim credentials,
+health, completion, or capability support.
 
 ## SSOT and effect boundaries
 
@@ -145,9 +146,8 @@ Execution Journal
             -> #28568 durable locator lifecycle
                  -> #28569 exact API-boundary dispatch
 
-Runtime/model policy
-#28552 closed role policy
-  -> #28560 typed completion-probe result
+Runtime/model probe
+#28560 typed completion-probe result
 
 Sandbox
 #28562 requested/effective/receipt contract

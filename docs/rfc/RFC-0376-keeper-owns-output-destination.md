@@ -11,48 +11,61 @@ related: ["0315", "0358"]
 ## 1. 결정
 
 Keeper 는 자기 출력을 board 에 놓을지, discord 채널에 놓을지, dashboard 에 놓을지
-판단한다. 그 판단은 발화 도구 호출로 표현된다 — `keeper_board_post`,
-`connector_post`.
+판단한다. 그 판단은 발화 도구 호출로 표현된다.
 
-턴의 최종 텍스트는 목적지를 갖지 않는다. 그것은 turn record 와 raw trace 에 남는
-사고 기록이며, 어떤 채널로도 자동 발송되지 않는다.
+자율턴의 최종 텍스트는 목적지를 갖지 않는다. turn record 와 raw trace 에 남는 사고
+기록이며 어떤 채널로도 자동 발송되지 않는다.
 
-`Keeper_continuation_delivery_intent` 와 그 배달 경로를 삭제한다. 이 모듈은 최종
-텍스트를 "턴을 유발한 source" 로 되돌려 보내는데, 그 목적지 결정이 Keeper 를
-거치지 않는다.
+`Keeper_continuation_delivery_intent` 와 그 배달 경로를 삭제한다. 이 경로는 최종
+텍스트를 "턴을 유발한 source" 로 되돌려 보내며, 그 목적지 결정이 Keeper 를 거치지
+않는다.
+
+Direct 턴(dashboard chat)의 응답 계약은 바꾸지 않는다. §4.3 이 그 보존 수단을
+명시한다.
 
 ## 2. 증거
 
-측정일 2026-08-13. §2.1 과 §2.4 는 keeper `sangsu` (13:28–17:35, 4시간 07분, 모델
-`ollama_cloud.deepseek-v4-flash`), §2.2 는 obligation 을 가진 keeper 전수다.
+### 2.0 측정 조건
+
+`<base-path>/.masc/keepers/<name>/raw-traces/` 는 최근 200개만 유지하는 롤링
+윈도우다 (RFC-0358 §3). 아래 턴 수치는 2026-08-13 17:35 시점 스냅샷이며 재측정하면
+윈도우가 이동해 다른 값이 나온다. obligation 디렉터리는 롤링이 아니지만 라이브
+데이터이므로 측정 이후 증가할 수 있다.
+
+측정 대상 200턴의 모델 분포는 단일하지 않다.
+
+| 모델 | 턴 |
+|---|---|
+| `glm-coding.glm-5-turbo` | 120 |
+| `ollama_cloud.deepseek-v4-flash` | 75 |
+| `ollama-cloud-deepseek-v4-flash-0731` | 5 |
+
+같은 형태가 세 모델에 걸쳐 나온다. 이 문서가 다루는 것은 모델 특성이 아니라 시스템
+계약이다.
 
 ### 2.1 배달 실측
 
-`<base-path>/.masc/keepers/sangsu/continuation_delivery_obligations_v1/` 의
-obligation 19건 전수:
+keeper `sangsu` 의 obligation 19건 전수:
 
 | 항목 | 값 |
 |---|---|
 | obligation 총계 | 19 |
-| 사고 기록이 배달된 건 | 19 (100%) |
-| `state=delivered` + `connector_message_id` | 17 |
+| 사고 기록이 배달된 건 | 19 |
+| `state=delivered` + non-null `connector_message_id` | 17 |
 | Keeper 가 목적지를 판단한 건 | 0 |
 
-배달된 내용은 전부 "이 replay 는 이미 처리한 X 의 중복 결과다", "새 근거 없으니
-무응답으로 끝낸다" 형태다.
+사용자에게 실제로 유용했던 답변(patchroom 페스티벌 상세 정보)은 이 목록에 없다.
+Keeper 가 `connector_post` 도구로 목적지를 정해 보냈다. obligation 중 patchroom 을
+언급하는 12건은 전부 "이미 답변을 보냈다" 는 메타 코멘트다.
 
-사용자에게 실제로 유용했던 답변(patchroom 페스티벌 상세 정보)은 이 목록에 **없다**.
-그것은 Keeper 가 `connector_post` 도구로 목적지를 정해 보냈다
-(`appr_a2071663`, `appr_63ede856`).
-
-즉 Keeper 는 이미 두 가지를 구분해서 하고 있었다 — **말할 때는 도구를 썼고, 생각할
-때는 텍스트로 썼다.** 배달 경로가 그 구분을 무시하고 사고 기록만 골라 발송했다.
+즉 Keeper 는 이미 구분하고 있었다 — **말할 때는 도구를 썼고, 생각할 때는 텍스트로
+썼다.**
 
 ### 2.2 단일 keeper 현상이 아니다
 
-obligation 을 가진 keeper 전수 (42건):
+obligation 을 가진 keeper 전수 (측정 시점 42건):
 
-| keeper | obligation | `connector_message_id` 보유 | 커넥터 |
+| keeper | obligation | non-null `connector_message_id` | 커넥터 |
 |---|---|---|---|
 | sangsu | 19 | 17 | discord |
 | kidsnote | 10 | 2 | slack |
@@ -60,34 +73,54 @@ obligation 을 가진 keeper 전수 (42건):
 | analyst | 3 | 0 | dashboard |
 | rondo | 2 | 0 | dashboard |
 
-42건 중 38건의 본문을 확인했고 전부 사고 기록이었다. 목적지를 판단해 작성한 발화는
-한 건도 없다. 커넥터 종류와 무관하게 같은 형태가 나온다.
+본문을 확인한 38건이 전부 사고 기록이다. 커넥터 종류와 무관하다.
 
 - kidsnote: `"이미 처리한 Vincent의 Slack 메시지입니다. 새 요청 없음. 게시 없이
   종료합니다."`
 - rondo: `"Memory write confirmed. 상태 불변 — 말할 것 없음."`
-- analyst: `"중복 wake(appr_10736fa7 …)는 이미 읽어 evidence 에 반영 완료"`
 
-"게시 없이 종료합니다" 와 "말할 것 없음" 이 게시 대상이 됐다. Keeper 가 내린 결론과
-배달 경로가 실행한 동작이 정반대다.
+"게시 없이 종료합니다" 와 "말할 것 없음" 이 게시됐다.
+
+source family 분포는 `hitl_resolution` 과 `connector_attention` 뿐이다.
+`fusion_completion` 과 `schedule_occurrence` 는 0건 — §4.2 가 이 공백을 다룬다.
 
 ### 2.3 목적지 판단 부재의 결과
 
 사용자가 discord 에서 "미안해 그만 좀 조용하거라" 라고 요청했다. Keeper 는
 `"조용히 하라는 요청이니, 추가 반응 없이 무응답으로 끝낸다."` 를 생성했고, 이 문장이
 obligation `kdelivery-34d18e16…` 으로 같은 채널에 발송됐다
-(`connector_message_id = 1537387311699075102`). Keeper 는 침묵을 결정했는데 배달
-경로가 그 결정을 채널에 실어 보냈다.
+(`connector_message_id = 1537387311699075102`). Keeper 가 내린 결론과 배달 경로가
+실행한 동작이 정반대다.
 
-### 2.4 반복 실측
+### 2.4 반복
 
-`run_finished` 200턴 중 183턴(비어 있지 않은 184턴의 99%)이 같은 결론을 재진술했다.
-그중 140턴은 `새 근거 없으니 무응답으로 끝낸다.` 한 문장이 전부다.
+측정 시점 200턴 중 비어 있지 않은 턴의 약 99% 가 같은 결론을 재진술했고, 그중 약
+70% 는 `새 근거 없으니 무응답으로 끝낸다.` 한 문장이 전부였다. §2.0 의 롤링 윈도우
+때문에 정확한 절대값은 재현되지 않는다.
 
-Keeper 의 기억은 작동하고 있다 — 매 턴 "이미 처리했다" 를 정확히 식별한다. 실패한
-것은 그 앎이 **말하지 않을 근거**가 아니라 **말할 내용**이 된 지점이다.
+Keeper 의 기억은 작동한다 — 매 턴 "이미 처리했다" 를 정확히 식별한다. 실패한 것은 그
+앎이 **말하지 않을 근거**가 아니라 **말할 내용**이 된 지점이다.
 
-## 3. 왜 사고 기록이 발화가 되는가
+## 3. 계약이 이미 인정하는 것
+
+`lib/keeper/keeper_unified_turn.ml:1160-1174` 는 Keeper 의 목적지 판단을 이미 1급으로
+다룬다.
+
+```ocaml
+| Some origin, None, External_effect_completed, Completed,
+  Some (Surface_post_completed target)
+  when Keeper_surface_post.matches_continuation_route target origin.channel ->
+    Continuation_delivery_settled_by_terminal_surface_post
+| Some _, None, _, Completed, _ ->
+    Continuation_delivery_quarantined
+      { detail = "routable continuation completed without a visible delivery intent" }
+```
+
+첫 arm 은 Keeper 가 발화 도구로 origin 채널에 게시했으면 그것으로 배달이 종결됐다고
+판정한다. 채널 일치까지 `matches_continuation_route` 로 확인한다.
+
+즉 **"발화 도구 호출 = 목적지 판단"** 은 새로 만들 계약이 아니라 이미 있는 계약이다.
+obligation 경로는 그 위에 덧붙은 두 번째 경로이며, 최종 텍스트를 근거로 삼는다.
 
 `Keeper_turn_outcome.of_result_surface` (`lib/keeper/keeper_turn_outcome.ml:55-57`):
 
@@ -96,72 +129,126 @@ Keeper 의 기억은 작동하고 있다 — 매 턴 "이미 처리했다" 를 �
     if String.trim response_text = "" then No_visible_reply else Visible_reply
 ```
 
-빈 문자열 비교가 목적지 판단을 대신한다. 텍스트가 비어 있지 않다는 사실 하나로
-`Visible_reply` 가 되고, `keeper_agent_result.ml:115` 가 그 값을 보고 obligation 을
-만든다.
-
-목적지는 Keeper 가 아는 사실이다. 문자열 길이는 그 사실을 알지 못한다.
+빈 문자열 비교가 두 번째 경로의 판정자다. 목적지는 Keeper 가 아는 사실이고 문자열
+길이는 그 사실을 알지 못한다.
 
 ## 4. 설계
 
-### 4.1 삭제
+### 4.1 삭제 대상
+
+모듈과 그 전용 테스트:
 
 - `lib/keeper_runtime/keeper_continuation_delivery_intent.ml{,i}`
-- `lib/keeper/keeper_agent_result.ml` 의 `continuation_delivery_intent_for_result`
-  와 그 호출 경로
-- obligation 저장 디렉터리와 그 reader/writer
-- 위 경로에만 존재하던 테스트
+- `lib/keeper/keeper_continuation_delivery_store.ml{,i}`
+- `lib/keeper/keeper_continuation_delivery_publisher.ml{,i}`
+- `lib/keeper/keeper_continuation_delivery_recovery.ml{,i}`
+- `test/keeper_continuation_delivery_{intent,store,publisher}/`
 
-RFC-0358 이 이미 turn record 와 raw trace 를 read-only dashboard projection 으로
-소유한다. 사고 기록의 보존과 관측은 그쪽이 담당하므로 배달 경로가 없어져도 잃는
-관측성은 없다.
+참조를 걷어내야 하는 소비자:
 
-### 4.2 명시적 목적지를 가진 두 source family
+- `lib/keeper/keeper_agent_result.ml{,i}` — `run_result` 필드와 빌더
+- `lib/keeper/keeper_unified_turn.ml{,i}` — §4.4
+- `lib/keeper/keeper_unified_turn_execution.ml`
+- `lib/keeper/keeper_heartbeat_loop.ml{,i}` — §4.4
+- `lib/keeper/keeper_heartbeat_loop_cycle.ml{,i}`
+- `lib/keeper/keeper_execution_outcome.ml{,i}`
+- `lib/keeper/keeper_terminal_effect_policy.ml`
+- `lib/keeper/keeper_agent_run.ml{,i}`
+- `lib/keeper/keeper_agent_run_finalize_response.ml`
+- `lib/server/server_bootstrap_loops.ml{,i}`
+- `lib/server/server_dashboard_schedule_projection.ml` — §4.5
+- `test/test_schedule_consumer_dispatch.ml`,
+  `test/test_keeper_terminal_reason_typed.ml`
 
-`origin_of_payload` 의 4개 source family 중 `Schedule_occurrence` 와
-`Fusion_completion` 은 §1 의 논거가 그대로 적용되지 않는다. mli 는 예약 wake 가
-"creation boundary 가 명시적 result destination 을 저장했을 때만" 참여한다고
-규정한다. 그 경우 목적지는 요청 시점에 정해진 것이므로 Keeper 판단이 빠졌다고 할 수
-없다.
+### 4.2 실측이 없는 두 source family
 
-그럼에도 삭제 대상에 포함하는 근거는 두 가지다.
+`origin_of_payload` 의 4개 family 중 `Schedule_occurrence` 와 `Fusion_completion` 은
+obligation 실측이 0건이다. 이 둘에 대해서는 "오늘 이 경로에 얼마나 의존하는가" 를
+모른다.
 
-1. 배달 **내용**은 4개 family 모두 동일하게 턴 최종 텍스트다. 목적지가 정당해도
-   사고 기록을 보내는 것은 고쳐야 한다.
-2. 실측에서 이 두 family 의 obligation 은 0건이다 (§2.2 의 42건은 전부
-   `hitl_resolution` 과 `connector_attention`). 삭제로 즉시 깨지는 동작이 없다.
+그럼에도 같은 결정에 묶는 근거:
 
-예약·fusion 결과를 지정된 목적지로 보내는 요구가 생기면, 그 목적지를 Keeper 의 턴
-입력으로 전달하고 Keeper 가 발화 도구로 보내는 방식으로 재구현한다. 시스템이 최종
+1. 배달 **내용**은 4개 family 모두 턴 최종 텍스트로 동일하다. 목적지가 요청 시점에
+   고정된 경우(mli 가 규정하는 "explicit result destination")에도 사고 기록을 보내는
+   문제는 같다.
+2. §3 의 `Settled_by_terminal_surface_post` arm 이 네 family 모두에 적용되므로, Keeper
+   가 발화 도구로 지정 채널에 보내는 경로는 삭제 후에도 살아 있다.
+
+예약·fusion 결과를 지정 목적지로 보내는 요구가 확인되면, 목적지를 Keeper 의 턴
+입력으로 전달하고 Keeper 가 발화 도구로 보내는 방식으로 구현한다. 시스템이 최종
 텍스트를 대신 보내는 방식으로 되돌리지 않는다.
 
-### 4.3 turn outcome
+### 4.3 turn outcome — Direct 턴 보존
 
-`of_result_surface` 의 `response_text` 인자를 제거한다. `Completed` 는
-`No_visible_reply` 다. 발화는 도구가 소유하므로 최종 텍스트에서 발화 여부를 읽지
-않는다.
+`of_result_surface` 의 프로덕션 호출은 `lib/keeper/keeper_agent_run.ml:1092` 한
+곳이며 Direct 턴과 자율턴이 이 호출을 공유한다. 그 값은
+`server_routes_http_keeper_stream.ml:1465` 에 도달해 큐잉된 사용자 메시지의 응답
+전달을 결정한다. `No_visible_reply` 는 "no visible reply was produced" 경로로
+떨어진다.
 
-`Direct` 턴(dashboard chat, 사용자가 직접 물은 턴)의 응답 경로는 이 RFC 범위 밖이며
-변경하지 않는다.
+따라서 `Completed` 를 무조건 `No_visible_reply` 로 만들면 dashboard chat 응답이
+사라진다. 그렇게 하지 않는다.
+
+`of_result_surface` 는 `turn_kind` 를 받는다.
+
+- `Direct` — 현재 판정을 그대로 유지한다.
+- `Autonomous` — `Completed` 는 `No_visible_reply` 다.
+
+`turn_kind` 는 RFC-0358 이 이미 `Turn_record.t` 의 필수 필드로 소유하므로 새 상태를
+만들지 않는다.
+
+### 4.4 disposition
+
+§4.3 이후 자율턴의 intent 는 항상 없다. `keeper_unified_turn.ml:1169` 의
+
+```ocaml
+| Some _, None, _, Completed, _ -> Continuation_delivery_quarantined { ... }
+```
+
+는 그대로 두면 발화 도구를 쓰지 않은 모든 자율턴을 격리하고,
+`keeper_heartbeat_loop.ml` 의 `continuation_source_disposition` 이 그것을
+`terminalize_failed_selection` 으로 실패 종결시킨다. 오늘 정상 처리되는 턴이 대량으로
+실패 전환된다.
+
+이 arm 을 `Continuation_delivery_not_required` 로 바꾼다. 말하지 않기로 한 턴은 정상
+완료이며 stimulus 는 acknowledge 된다.
+
+`Settled_by_terminal_surface_post` arm 은 그대로 둔다 — Keeper 가 발화 도구로 지정
+채널에 보낸 경우의 종결 판정이다.
+
+stimulus 재시도는 배달 성공이 아니라 턴 성공을 기준으로 남는다. `Cycle.Failed` 경로는
+배달과 독립적이므로 턴이 실패하면 stimulus 는 계속 큐에 남는다.
+
+### 4.5 schedule 배달 상태 대시보드 뷰
+
+`server_dashboard_schedule_projection.ml` 의 `masc.dashboard.schedule_result_delivery.v1`
+는 obligation 의 state 를 대시보드에 노출한다. §4.1 이 그 데이터 소스를 없애므로 이
+뷰도 폐기한다.
+
+근거: `schedule_occurrence` obligation 실측 0건이므로 이 뷰가 현재 표시하는 배달
+상태가 없다. 예약 결과 관측이 필요해지면 turn record 기반으로 다시 만든다 — 그때는
+Keeper 가 발화 도구로 보낸 사실이 관측 대상이다.
 
 ## 5. 비목표
 
 - 반복 억제 장치. 문구 탐지, 유사도 비교, 발화 rate cap, noop 백오프 강화. 턴이
   계속 도는 것은 이 제품의 성공 조건이지 억제 대상이 아니다.
 - 침묵 강제. Keeper 가 말할지 말지는 Keeper 가 정한다.
-- 새 게이트나 제약 추가. 이 RFC 는 목적지 판단권을 Keeper 에게 돌려줄 뿐이다.
 - `Direct` 턴 응답 계약 변경.
+- 스케줄러 깨우기 빈도 변경.
 
 ## 6. 검증 계약
 
 기능 단위로 검증한다.
 
+- 사용자가 dashboard chat 에서 물으면 Keeper 의 답변이 그대로 표시된다 (§4.3 회귀
+  방지).
 - Keeper 가 `connector_post` 로 discord 에 답하면 그 내용이 해당 채널에 도달한다.
 - Keeper 가 `keeper_board_post` 로 board 에 올리면 board 에만 나타난다.
-- Keeper 가 발화 도구를 쓰지 않고 턴을 끝내면 어떤 채널에도 메시지가 나타나지
-  않으며, 그 턴의 사고 기록은 dashboard turn record 에서 읽을 수 있다.
-- HITL 승인이 해소된 뒤 이어지는 턴에서 Keeper 가 발화 도구를 쓰지 않으면 원래
-  채널에 아무것도 발송되지 않는다.
-- §2.1 의 19건을 재생하면 0건이 발송된다.
+- 자율턴이 발화 도구 없이 끝나면 어떤 채널에도 메시지가 나타나지 않고, 그 턴은 실패로
+  기록되지 않으며, stimulus 는 acknowledge 된다 (§4.4).
+- 턴 자체가 실패하면 stimulus 는 큐에 남는다.
+- HITL 승인 해소 후 이어지는 턴에서 Keeper 가 발화 도구를 쓰지 않으면 원래 채널에
+  아무것도 발송되지 않는다.
 
 검증은 실제 discord 채널과 dashboard 에서 수행하고 로그와 스크린샷을 증거로 남긴다.

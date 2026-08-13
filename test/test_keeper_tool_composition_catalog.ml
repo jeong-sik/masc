@@ -250,6 +250,33 @@ let test_catalog_loader_distinguishes_missing_valid_and_invalid () =
        | Ok _ | Error _ -> fail "invalid catalog did not return typed config error")
 ;;
 
+let test_catalog_tools_join_runtime_projection_authority () =
+  let catalog =
+    match Catalog.parse (one_node_composition "projected") with
+    | Ok catalog -> catalog
+    | Error _ -> fail "valid projection catalog was rejected"
+  in
+  let descriptors = Masc.Keeper_tool_descriptor.model_visible_descriptors () in
+  let descriptor_names =
+    descriptors
+    |> List.concat_map Masc.Keeper_tool_descriptor.keeper_model_names
+    |> List.sort_uniq String.compare
+  in
+  let expected =
+    Masc.Keeper_run_tools_setup.expected_model_tool_names
+      ~model_visible_descriptors:descriptors
+      ~composition_catalog:(Some catalog)
+  in
+  check bool
+    "dynamic composition joins descriptor projection"
+    true
+    (List.mem "keeper_compose_projected" expected);
+  check int
+    "projection adds exactly one composition tool"
+    (List.length descriptor_names + 1)
+    (List.length expected)
+;;
+
 let () =
   run
     "keeper_tool_composition_catalog"
@@ -287,6 +314,10 @@ let () =
             "loader distinguishes missing valid and invalid"
             `Quick
             test_catalog_loader_distinguishes_missing_valid_and_invalid
+        ; test_case
+            "catalog tools join runtime projection authority"
+            `Quick
+            test_catalog_tools_join_runtime_projection_authority
         ] )
     ]
 ;;

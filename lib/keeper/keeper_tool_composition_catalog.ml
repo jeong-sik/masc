@@ -223,6 +223,7 @@ and parse_output_template ~path fields =
            | Error _ as error -> error
            | Ok node_id ->
              (match pointer ~path:(path @ [ "pointer" ]) raw_pointer with
+              | Error _ as error -> error
               | Ok pointer -> Ok (Plan.Json_template.output ~node_id ~pointer)))))
 
 and parse_object_template ~path fields =

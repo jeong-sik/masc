@@ -53,15 +53,15 @@ let event_kind_of_event = function
 
    Size-based rotation on the flat layout is chosen over date-sharding
    because it keeps the live filename stable (existing readers/tests still
-   observe [<kind>_events.jsonl]) and because the pre-existing oversized
-   file is rotated out on its first oversized append and then ages off
-   under retention — no separate migration of legacy data is needed. *)
+   observe [<kind>_events.jsonl]) and because an oversized file rotates
+   out on its first oversized append and then ages off under
+   retention. *)
 
 let default_max_segment_bytes = 32 * 1024 * 1024
 
 (* Retain this many archived segments beyond the live one; older archives
    are pruned. Segment-count (not byte-budget) retention keeps rotation
-   math trivial and lets a legacy oversized segment age out over N
+   math trivial and lets an oversized segment age out over N
    rotations rather than persisting forever. *)
 let default_max_retained_segments = 8
 

@@ -229,14 +229,6 @@ let mark_connector_attention_resolved_after_delivery ~base_path ~keeper_name eve
          err)
 ;;
 
-(* PR #28225 (comment 3760417416): a sent-but-unsettled connector delivery
-   ([Delivery_ambiguous]) or one still pending recovery is neither resolved — we
-   hold no durable receipt — nor ignored — the reply was dispatched.
-   Terminalizing it as [Ignored] mislabels a handled conversation in the
-   attention projection. Leaving the attention item open records the honest
-   pending state and lets the recovery path settle it. The connector-attention
-   stimulus is edge-triggered (dequeued once), so an open ledger item does not
-   re-drive a turn; it only surfaces as pending in the operator digest. *)
 type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored

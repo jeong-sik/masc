@@ -22,11 +22,9 @@
    state the caller already read. This projection dispatches nothing and mutates
    no durable state. Queue evidence uses the non-locking, non-compacting
    request-local snapshot, while reaction evidence is one request-local batch
-   per Keeper. A routed result row reads the exact continuation-delivery
-   obligation inventory so dispatch acceptance and user-visible delivery are
-   never collapsed into one status. Read failures remain typed projection facts.
-   Telemetry for the described actions lives with Schedule_runner for dispatch,
-   Keeper_event_queue for wake intake, and
+   per Keeper. Read failures remain typed projection facts. Telemetry for the
+   described actions lives with Schedule_runner for dispatch and
+   Keeper_event_queue for wake intake.
 
    The telemetry ratchet flags these as new handlers because this module is a
    new file; the code moved here verbatim from

@@ -59,7 +59,9 @@ type dispatch =
 (** Execute dependency batches to completion. Concurrent siblings are all
     settled before the lowest-planned-index cause is selected. A [Deferred]
     or [Failed] tool result is carried unchanged in [Tool_did_not_complete];
-    no text or payload inference is performed. *)
+    no text or payload inference is performed. A deferred node produces no
+    composable output, so it cannot satisfy a downstream output reference and
+    terminates the plan instead of being resumed as a producer. *)
 val execute
   :  plan:Keeper_tool_plan.t
   -> run_id:Keeper_tool_plan.Run_id.t

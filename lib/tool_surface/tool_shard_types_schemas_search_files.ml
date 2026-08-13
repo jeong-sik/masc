@@ -8,9 +8,9 @@ let tool_search_files_schema : Masc_domain.tool_schema =
   { name = "tool_search_files"
   ; description =
         "Search file contents with ripgrep. Provide a regex `pattern` (and \
-         optionally path/glob/type). Paths resolve automatically — use \
-         'repos/X' or 'scratch/X'; never include host paths like \
-         '.masc/playground/your-name/repos/X'. To list a directory, read a \
+         optionally path/glob/type). Paths resolve against your workspace \
+         root — pass a path relative to it, never a host path like \
+         '.masc/playground/your-name/...'. To list a directory, read a \
          file, run find, or view git status/log/diff, use the Execute tool."
   ; input_schema =
         `Assoc

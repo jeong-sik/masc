@@ -276,14 +276,13 @@ let path_resolution_contract_json =
     ; ( "discover_before_read"
       , `String
           "When unsure, inspect visible paths with the currently exposed read/listing \
-           tools before Read. For repo files, use cwd=\"repos/<repo>\" plus \
-           file_path=\"lib/...\", or use file_path=\"repos/<repo>/lib/...\"."
+           tools before Read. For files inside a checkout, set cwd to that checkout \
+           and pass file_path relative to it."
       )
     ; ( "execute_path_basis"
       , `String
-          "Execute path arguments resolve against cwd. If cwd=\"repos/<repo>\" is set, \
-           pass repo-relative paths such as lib/...; do not repeat the repo prefix \
-           as repos/<repo>/lib/..." )
+          "Execute path arguments resolve against cwd. When cwd is set, pass paths \
+           relative to it; do not repeat the cwd prefix in the path." )
     ; ( "masc_state_basis"
       , `String
           ".masc runtime state is not a sandbox filesystem target. Use keeper \

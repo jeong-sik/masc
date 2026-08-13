@@ -63,6 +63,7 @@ function repo(
     id,
     name,
     url: '',
+    codebase: null,
     local_path: localPath,
     default_branch: 'main',
     status: 'active',
@@ -381,7 +382,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'lib/a.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'available',
         })
         expect(store.documentStore.document().content).toContain('repo-a')
@@ -414,7 +415,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'lib/b.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-b' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-b', codebase: null },
           availability: 'available',
         })
         expect(store.documentStore.document()).toMatchObject({
@@ -459,7 +460,7 @@ describe('IDE focus workspace provenance', () => {
       await vi.waitFor(() => {
         expect(activeIdeFocus.value).toMatchObject({
           path: 'lib/a.ml',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'available',
         })
         expect(workspaceApiMocks.fetchWorkspaceFile).toHaveBeenCalledWith(
@@ -535,7 +536,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'repo.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-b' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-b', codebase: null },
           availability: 'available',
         })
         expect(store.documentStore.document().content).toContain('repo-b')
@@ -630,7 +631,7 @@ describe('IDE focus workspace provenance', () => {
       focusIdeFile({
         path: 'shared.ml',
         origin: 'operator',
-        workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+        workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
         availability: 'available',
       })
       await vi.waitFor(() => {
@@ -644,7 +645,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'shared.ml',
           origin: 'operator',
-          workspace_identity: { kind: 'repository', repoId: 'repo-b' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-b', codebase: null },
           availability: 'not_found',
         })
         expect(store.workspaceIssues()).toContainEqual(expect.objectContaining({
@@ -679,7 +680,7 @@ describe('IDE focus workspace provenance', () => {
       focusIdeFile({
         path: 'private.ml',
         origin: 'route',
-        workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+        workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
         availability: 'pending',
       })
 
@@ -687,7 +688,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'private.ml',
           origin: 'route',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'unavailable',
         })
         expect(store.workspaceIssues()).toContainEqual(expect.objectContaining({
@@ -721,7 +722,7 @@ describe('IDE focus workspace provenance', () => {
         expect(activeIdeFocus.value).toEqual({
           path: 'ghost.ml',
           origin: 'observed_change',
-          workspace_identity: { kind: 'repository', repoId: 'repo-a' },
+          workspace_identity: { kind: 'repository', repoId: 'repo-a', codebase: null },
           availability: 'unavailable',
         })
         expect(store.workspaceIssues()).toContainEqual(expect.objectContaining({

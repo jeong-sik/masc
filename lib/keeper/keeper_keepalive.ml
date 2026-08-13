@@ -223,17 +223,27 @@ let set_keeper_paused_state ~agent_name paused =
           only reason available here is a synthesized [Operator_paused]. Applying
           it to a lane that already carries a classified latch relabels a
           terminal failure as an operator pause -- every heartbeat cycle, so the
-          real reason never survives. Nothing to reconcile: skip (#28397).
+          real reason never survives. Skip the durable owner command, but still
+          reconcile a stale registry phase with the existing pause bit (#28397).
 
           A paused lane with no latched reason is left alone by this guard: the
           contract calls that a fail-closed unclassified state, and deciding what
           it should become is a separate question from not clobbering a reason
           that exists. *)
        if paused && entry.meta.paused && Option.is_some entry.meta.latched_reason
-       then
+       then (
          Log.Keeper.debug
            "directive pause: %s already latched, leaving its reason intact"
-           entry.name
+           entry.name;
+         if
+           Keeper_state_machine.can_transition
+             ~from_phase:entry.phase
+             ~to_phase:Keeper_state_machine.Paused
+         then
+           Keeper_registry.dispatch_event_unit
+             ~base_path:entry.base_path
+             entry.name
+             Keeper_state_machine.Operator_pause)
        else if (not paused) && transcript_corruption_reset_required entry.meta
        then (
           Otel_metric_store.inc_counter

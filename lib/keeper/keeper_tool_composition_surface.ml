@@ -289,12 +289,12 @@ let async_parent_invocation ~request_id source =
 ;;
 
 let async_worker_result
-      ~entry
+      ~(entry : Catalog.entry)
       ~tool_name
       ~request_id
       ~source_invocation
       ~request_sw
-      ~config
+      ~(config : Workspace.config)
       ~meta
       ~publication_recovery
       ~ctx_snapshot
@@ -338,8 +338,8 @@ let async_submission_result
       ~entry
       ~tool_name
       ~parent_invocation
-      ~config
-      ~meta
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
       ~publication_recovery
       ~ctx_snapshot
       ?clock
@@ -423,7 +423,11 @@ let async_submission_result
          data)
 ;;
 
-let status_result ~config ~meta ~request_id =
+let status_result
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~request_id
+  =
   let tool_name = Catalog.status_tool_name in
   let start_time = Time_compat.now () in
   match
@@ -473,7 +477,11 @@ let status_result ~config ~meta ~request_id =
           ])
 ;;
 
-let cancel_result ~config ~meta ~request_id =
+let cancel_result
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~request_id
+  =
   let tool_name = Catalog.cancel_tool_name in
   let start_time = Time_compat.now () in
   let result =
@@ -520,7 +528,7 @@ let cancel_result ~config ~meta ~request_id =
 ;;
 
 let make_request_control_tool
-      ~config
+      ~(config : Workspace.config)
       ~name
       ~description
       ~descriptor

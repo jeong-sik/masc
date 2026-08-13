@@ -430,7 +430,7 @@ let parse_composition ~index value =
                           | Async ->
                             (match
                                Plan.nodes plan
-                               |> List.find_map (fun node ->
+                               |> List.find_map (fun (node : Plan.node) ->
                                  match Plan.descriptor plan node.id with
                                  | Some descriptor
                                    when Keeper_tool_descriptor.readonly_static_hint
@@ -446,7 +446,7 @@ let parse_composition ~index value =
                                     { name
                                     ; node_id = node.id
                                     ; tool_name = node.tool_name
-                                    }))))))))))))
+                                    })))))))))))))
 ;;
 
 let parse content =

@@ -84,6 +84,24 @@ let test_pending_observations_are_occurrence_scoped () =
     (consume first)
 ;;
 
+let test_abandoned_observation_is_released_with_invocation () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let record_abandoned () =
+    let abandoned = invocation ~tool_use_id:"cancelled" ~turn:9 ~planned_index:0 in
+    Keeper_tool_call_log.set_truncation_info
+      ~invocation:abandoned
+      ~original_bytes:99
+      ()
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  Alcotest.(check int)
+    "settlement-skip observation is weakly released"
+    0
+    (Keeper_tool_call_log.pending_truncation_count_for_testing ())
+;;
+
 let with_tmp_log f =
   incr counter;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -1398,6 +1416,10 @@ let () =
             "blank and repeated ids remain occurrence-scoped"
             `Quick
             test_pending_observations_are_occurrence_scoped
+        ; Alcotest.test_case
+            "cancelled invocation releases abandoned observation"
+            `Quick
+            test_abandoned_observation_is_released_with_invocation
         ] )
     ; ( "read_recent",
         [ eio_test "n=0 returns []" test_read_recent_n_zero

@@ -406,6 +406,42 @@ describe('sendKeeperThreadMessage operation stream', () => {
     expect(operationIds.every(id => id.startsWith('kmsg-'))).toBe(true)
   })
 
+  it('keeps one row per turn when the stream dies before the operation is accepted', async () => {
+    // No KEEPER_CHAT_OPERATION_ACCEPTED: this is the disconnected-socket case,
+    // where the accept handler never runs and the placeholders are left with
+    // whatever identity they were created with. The backend still accepted the
+    // message, so history comes back carrying the operation's request id.
+    let submittedRequestId = ''
+    streamKeeperMessage.mockImplementation(
+      async (_name: string, _message: string, opts: { requestId: string }) => {
+        submittedRequestId = opts.requestId
+        return { terminal: true }
+      },
+    )
+
+    await sendKeeperThreadMessage('echo', 'hi')
+
+    fetchKeeperChatHistory.mockResolvedValue([
+      {
+        role: 'user',
+        content: 'hi',
+        ts: 1_780_000_000,
+        delivery_key: { kind: 'operation', request_id: submittedRequestId },
+      },
+      {
+        role: 'assistant',
+        content: 'hello there',
+        ts: 1_780_000_001,
+        delivery_key: { kind: 'operation', request_id: submittedRequestId },
+      },
+    ])
+    await hydrateKeeperChatHistory('echo')
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.filter(entry => entry.role === 'user')).toHaveLength(1)
+    expect(thread.filter(entry => entry.role === 'assistant')).toHaveLength(1)
+  })
+
   it('does not abort the running operation when a second operation is accepted', async () => {
     const streams: Array<{
       requestId: string

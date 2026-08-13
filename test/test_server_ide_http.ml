@@ -586,11 +586,13 @@ let test_hook_cursors_broadcast_ws_invalidation () =
         Ide_bridge.ingest_tool_event_from_hook
           ~base_path
           ~attribution:
-            (Agent_observation.File
-               (Agent_observation.Unaddressed
-                  { reason = Agent_observation.Unattributed.Unregistered_path
-                  ; attempted_path = "lib/a.ml"
-                  }))
+            (match
+               Agent_observation.Code_address.v ~codebase:"github.com_x_y" ~path:"lib/a.ml"
+             with
+             | Ok address ->
+               Agent_observation.File
+                 (Agent_observation.Addressed { address; checkout = None })
+             | Error _ -> failwith "test address must mint")
           ~tool_name:"keeper_ide_annotate"
           ~keeper_id:"alice"
           ~turn_id:"turn-7"
@@ -1002,17 +1004,42 @@ let test_memory_response_honors_canonical_url_scope () =
    to the lane keeper, conflicts with repo scopes, and never authorizes
    mutations. *)
 
+(* RFC-0378 B: the bus carries no turn events; lane-read tests seed the
+   stored row directly — standing in for the pre-existing data the read
+   path serves until rung E. *)
+let rec seed_mkdir_p path =
+  if path = "" || path = "/" || Sys.file_exists path
+  then ()
+  else (
+    seed_mkdir_p (Filename.dirname path);
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
+
 let seed_lane_turn_event ~base_path ~keeper_id ~turn_id ~timestamp_ms =
-  Ide_bridge.ingest_turn_event
-    ~base_path
-    ~turn_id
-    ~keeper_id
-    ~phase:"completed"
-    ~model_used:None
-    ~tools_used:[]
-    ~stop_reason:None
-    ~duration_ms:(Some 10)
-    ~timestamp_ms
+  let dir = Ide_paths.partition_store_dir ~base_dir:base_path Ide_paths.Legacy_default in
+  seed_mkdir_p dir;
+  let row =
+    Ide_event_types.ide_event_to_json
+      (Ide_event_types.Turn_event
+         { turn_id
+         ; keeper_id
+         ; phase = "completed"
+         ; model_used = None
+         ; tools_used = []
+         ; stop_reason = None
+         ; duration_ms = Some 10
+         ; timestamp_ms
+         })
+  in
+  let oc =
+    open_out_gen
+      [ Open_append; Open_creat ]
+      0o644
+      (Filename.concat dir "turn_events.jsonl")
+  in
+  output_string oc (Yojson.Safe.to_string row ^ "\n");
+  close_out oc
 ;;
 
 let test_events_keeper_lane_returns_only_lane_events () =

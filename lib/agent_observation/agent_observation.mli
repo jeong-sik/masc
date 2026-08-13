@@ -128,21 +128,10 @@ type tool_event =
   ; input : Yojson.Safe.t
   }
 
-type turn_event =
-  { base_path : string
-  ; turn_id : string
-  ; keeper_id : string
-  ; phase : string
-  ; model_used : string option
-  ; tools_used : string list
-  ; stop_reason : string option
-  ; duration_ms : int option
-  ; timestamp_ms : int64
-  }
-(** A turn is a keeper-timeline fact by definition (RFC-0378): it can
-    touch any number of codebases, so it carries no attribution — the
-    per-codebase timeline is derived by joining addressed tool facts on
-    [turn_id]. *)
+(** A turn is a keeper-timeline fact (RFC-0378): its durable record is
+    the keeper turn-records store, and the per-codebase timeline is
+    derived by joining addressed tool facts on [turn_id]. The
+    observation bus carries no turn events. *)
 
 type write_region_event =
   { base_path : string
@@ -202,7 +191,6 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type turn_event_sink = turn_event -> unit
 type write_region_error =
   | Write_region_sink_not_installed
   | Write_region_sink_failed
@@ -213,12 +201,10 @@ type write_region_sink = write_region_event -> (unit, write_region_error) result
 type annotation_sink = annotation_request -> (annotation_result, string) result
 
 val register_tool_event_sink : tool_event_sink -> unit
-val register_turn_event_sink : turn_event_sink -> unit
 val register_write_region_sink : write_region_sink -> unit
 val register_annotation_sink : annotation_sink -> unit
 
 val emit_tool_event : tool_event -> unit
-val emit_turn_event : turn_event -> unit
 val emit_write_region_event : write_region_event -> (unit, write_region_error) result
 val emit_annotation_request : annotation_request -> (annotation_result, string) result
 

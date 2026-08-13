@@ -68,9 +68,7 @@ type thinking_observation =
   | Withheld_reasoning_details of { char_count : int }
   | Withheld_redacted_thinking
 
-type thinking_identity =
-  | Trajectory_block of { block_index : int }
-  | Internal_history_message of { message_id : string }
+type thinking_identity = Trajectory_block of { block_index : int }
 
 type thinking_entry = {
   ts : float;

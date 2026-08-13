@@ -82,9 +82,7 @@ type thinking_observation =
   | Withheld_reasoning_details of { char_count : int }
   | Withheld_redacted_thinking
 
-type thinking_identity =
-  | Trajectory_block of { block_index : int }
-  | Internal_history_message of { message_id : string }
+type thinking_identity = Trajectory_block of { block_index : int }
 
 type thinking_entry = {
   ts : float;
@@ -176,11 +174,6 @@ let thinking_identity_to_json = function
   | Trajectory_block { block_index } ->
     `Assoc
       [ "source", `String "trajectory_block"; "block_index", `Int block_index ]
-  | Internal_history_message { message_id } ->
-    `Assoc
-      [ "source", `String "internal_history_message"
-      ; "message_id", `String message_id
-      ]
 ;;
 
 let thinking_entry_to_json (e : thinking_entry) : Yojson.Safe.t =
@@ -906,11 +899,6 @@ let thinking_identity_of_json json =
        (match List.assoc_opt "block_index" fields with
         | Some (`Int block_index) when block_index >= 0 ->
           Some (Trajectory_block { block_index })
-        | _ -> None)
-     | Some (`String "internal_history_message") ->
-       (match List.assoc_opt "message_id" fields with
-        | Some (`String message_id) when String.trim message_id <> "" ->
-          Some (Internal_history_message { message_id })
         | _ -> None)
      | _ -> None)
   | _ -> None

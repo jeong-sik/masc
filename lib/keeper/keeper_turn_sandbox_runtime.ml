@@ -155,39 +155,58 @@ let container_path_of_host (t : t) ~host_path =
          t.host_root)
 ;;
 
-let repos_in_playground host_root =
-  let repos_dir = Filename.concat host_root "repos" in
-  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
-  then []
-  else (
-    try
-      Sys.readdir repos_dir
-      |> Array.to_list
-      |> List.filter (fun name ->
-        let p = Filename.concat repos_dir name in
-        try Sys.is_directory p && Sys.file_exists (Filename.concat p ".git") with
-        | Sys_error _ -> false)
-      |> List.sort compare
-    with
-    | Sys_error _ -> [])
+(* Previously listed [<host_root>/repos/*] and swallowed every failure into an
+   empty list, which made "no checkout", "no repos directory" and "could not
+   read" indistinguishable. A cwd that cannot be mapped is silently redirected
+   to the container root, so the reason has to reach the log. *)
+let discovered_checkouts (t : t) =
+  match Keeper_playground_checkouts.discover ~root:t.host_root with
+  | Ok (Keeper_playground_checkouts.Complete checkouts) -> checkouts
+  | Ok (Keeper_playground_checkouts.Partial { found; limit }) ->
+    Log.Keeper.warn
+      "playground checkout scan incomplete keeper=%s root=%s limit=%s"
+      t.meta.name
+      t.host_root
+      (Keeper_playground_checkouts.limit_to_string limit);
+    found
+  | Error error ->
+    Log.Keeper.warn
+      "playground checkout scan failed keeper=%s root=%s error=%s"
+      t.meta.name
+      t.host_root
+      (Keeper_playground_checkouts.scan_error_to_string error);
+    []
+;;
 
 let skip_worktree_prefix = function
   | ".worktrees" :: _branch :: rest -> rest
   | "./.worktrees" :: _branch :: rest -> rest
   | other -> other
 
-let find_repo_segment_and_suffix ~repos ~host_cwd =
-  let segments = String.split_on_char '/' host_cwd in
-  let rec find_suffix = function
-    | [] -> None
+type cwd_match =
+  | Matched of Keeper_playground_checkouts.checkout * string
+  | Ambiguous_segment of string * Keeper_playground_checkouts.checkout list
+  | No_match
+
+(* Once the layout is free, two checkouts can share a basename (a keeper
+   holding both [repos/masc] and [.masc/repos/masc]). The previous [List.mem]
+   answered such a case by sort order, i.e. arbitrarily. *)
+let find_checkout_and_suffix ~checkouts ~host_cwd =
+  let rec find = function
+    | [] -> No_match
     | head :: tail ->
-      if List.mem head repos then
-        let effective_tail = skip_worktree_prefix tail in
-        Some (head, String.concat "/" effective_tail)
-      else
-        find_suffix tail
+      (match
+         List.filter
+           (fun (c : Keeper_playground_checkouts.checkout) ->
+              String.equal c.name head)
+           checkouts
+       with
+       | [ checkout ] ->
+         Matched (checkout, String.concat "/" (skip_worktree_prefix tail))
+       | [] -> find tail
+       | many -> Ambiguous_segment (head, many))
   in
-  find_suffix segments
+  find (String.split_on_char '/' host_cwd)
 
 let container_cwd_of_host (t : t) ~host_cwd =
   match container_path_of_host t ~host_path:host_cwd with
@@ -197,14 +216,28 @@ let container_cwd_of_host (t : t) ~host_cwd =
             ~container_root:t.container_root ~host_cwd with
     | Some cwd -> cwd
     | None ->
-      let repos = repos_in_playground t.host_root in
-      (match find_repo_segment_and_suffix ~repos ~host_cwd with
-       | Some (repo_name, suffix) ->
-         let logical_path =
-           Filename.concat (Filename.concat "repos" repo_name) suffix
-         in
-         Filename.concat t.container_root logical_path
-       | None -> t.container_root)
+      let checkouts = discovered_checkouts t in
+      (match find_checkout_and_suffix ~checkouts ~host_cwd with
+       | Matched (checkout, suffix) ->
+         Filename.concat
+           t.container_root
+           (Keeper_playground_checkouts.join checkout ~suffix)
+       | Ambiguous_segment (segment, many) ->
+         (* Falling back to the container root is still the answer — there is
+            no better one — but which of the candidates was meant is now
+            recorded instead of decided by sort order. *)
+         Log.Keeper.warn
+           "playground cwd segment matches multiple checkouts keeper=%s segment=%s \
+            paths=%s"
+           t.meta.name
+           segment
+           (String.concat
+              ","
+              (List.map
+                 (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
+                 many));
+         t.container_root
+       | No_match -> t.container_root)
 ;;
 
 let format_docker_exec_error ~head_program ~st ~out =

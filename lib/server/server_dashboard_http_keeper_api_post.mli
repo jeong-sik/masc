@@ -99,6 +99,15 @@ val context_shrink_of_patch :
   (string * Yojson.Safe.t) list ->
   (string * int) option
 
+(** Pure validation of a dashboard config patch body: duplicate keys, the
+    allowed-field list, and per-field types/contracts (including the shared
+    autonomous wake-prompt contract). [Ok ()] means {!handle_keeper_config_post}
+    would proceed to apply it. *)
+val validate_dashboard_config_patch :
+  meta:Keeper_meta_contract.keeper_meta ->
+  (string * Yojson.Safe.t) list ->
+  (unit, string) result
+
 val handle_keeper_config_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->

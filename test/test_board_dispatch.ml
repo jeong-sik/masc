@@ -352,7 +352,15 @@ let test_keeper_signal_hook_cancellation_propagates () =
    with Eio.Cancel.Cancelled _ -> raised := true);
   Alcotest.(check bool) "cancellation propagated" true !raised
 
-let test_dedup_hit_does_not_emit_post_created_fanout () =
+(* [create_post] has no content dedup: identical bodies from one keeper turn
+   become two posts and fan out twice. The idempotent entry point is
+   [create_post_once_by_fusion_run_id], which keys on a run id rather than on
+   content.
+
+   Pinned rather than left unasserted because the read side has no defence: a
+   keeper that posts the same body twice reaches every subscriber twice. If
+   dedup returns, this fails and the author has to say so. *)
+let test_identical_content_creates_two_posts () =
   let keeper_signals = ref 0 in
   let sse_post_created = ref 0 in
   Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
@@ -374,12 +382,14 @@ let test_dedup_hit_does_not_emit_post_created_fanout () =
     | Ok post -> post
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
-  Alcotest.(check string)
-    "dedup returns existing post"
-    (Board.Post_id.to_string first.id)
-    (Board.Post_id.to_string second.id);
-  Alcotest.(check int) "keeper signal emitted once" 1 !keeper_signals;
-  Alcotest.(check int) "SSE post_created emitted once" 1 !sse_post_created
+  Alcotest.(check bool)
+    "identical content yields a distinct post"
+    false
+    (String.equal
+       (Board.Post_id.to_string first.id)
+       (Board.Post_id.to_string second.id));
+  Alcotest.(check int) "keeper signal emitted per post" 2 !keeper_signals;
+  Alcotest.(check int) "SSE post_created emitted per post" 2 !sse_post_created
 
 let test_create_post_persistence_failure_returns_error_without_fanout () =
   let keeper_signals = ref 0 in
@@ -477,17 +487,15 @@ let test_list_posts_with_sort () =
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
+(* A hand-written meta object cannot stay valid: the current schema requires
+   some fifty fields and rejects anything outside itself, so every field the
+   schema gains or moves breaks this fixture. [meta_of_json_fixture] fills the
+   rest from the canonical defaults, which is also how
+   [test_keeper_waiting_inventory] recovered from the same two drifts —
+   [agent_name] spelled by hand, and [sandbox_profile] / [network_mode], which
+   are keeper TOML fields rather than meta JSON fields. *)
 let board_observation_meta name =
-  match
-    Keeper_meta_json_parse.meta_of_json
-      (`Assoc
-        [ "name", `String name
-        ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
-        ; "trace_id", `String ("trace-" ^ name)
-        ; "sandbox_profile", `String "local"
-        ; "network_mode", `String "inherit"
-        ])
-  with
+  match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
   | Ok meta -> meta
   | Error message -> Alcotest.failf "board observation meta failed: %s" message
 
@@ -613,9 +621,15 @@ let test_dashboard_projection_does_not_produce_attention_candidate () =
             (List.length candidates)
         | Error detail ->
           Alcotest.failf "owner candidate read failed: %s" detail);
+       (* The live collector records the candidate and asks
+          [Keeper_board_attention_worker_wake] for a judgment. Neither it nor
+          [Wake.request] touches [fiber_wakeup]: the keeper wakes once the
+          worker has judged, which [test_keeper_board_attention_worker] covers.
+          Pinned as [false] so a synchronous wake here — which would put the
+          keeper on a candidate the judge has not seen — fails. *)
        Alcotest.(check bool)
-         "live owner collection woke the Keeper"
-         true
+         "live owner collection defers the wake to the judgment worker"
+         false
          (Atomic.get entry.fiber_wakeup))
 ;;
 
@@ -1743,14 +1757,35 @@ let test_direct_post_requires_exact_targets () =
        ())
 ;;
 
-let test_malformed_target_fails_closed () =
-  expect_validation_error
-    "malformed target"
-    (Board_dispatch.create_post
-       ~author:"validator"
-       ~content:"please inspect @!"
-       ~post_kind:Board.Human_post
-       ())
+let audience_label = function
+  | Board.Targets _ -> "targets"
+  | Board.Broadcast -> "broadcast"
+  | Board.Thread_participants -> "thread_participants"
+  | Board.Discoverable -> "discoverable"
+;;
+
+(* [Agent_id.of_string] checks shape only — 1..64 of [a-zA-Z0-9._-] with one
+   optional colon — so a candidate it rejects fails on a character or a length
+   no keeper name can have. [board_audience.ml] reads those as prose rather
+   than as an address that went wrong, and records what the rejection was
+   actually catching in the live log: a bare "@" five times, "@@" three times,
+   and "@internals/libs/errors/asyncErrorHandler." once.
+
+   A plausible misspelling ("@alcie" for "@alice") passes the shape check and
+   is still lost on the read side; that gap needs the keeper registry at the
+   write boundary and is not what this pins. *)
+let test_malformed_target_is_read_as_prose () =
+  Alcotest.(check string)
+    "a token no Agent_id can be is prose, not a failed address"
+    "discoverable"
+    (match
+       Board.audience_for_post
+         ~visibility:Board.Public
+         ~title:""
+         ~content:"please inspect @!"
+     with
+     | Ok audience -> audience_label audience
+     | Error error -> Board.show_board_error error)
 ;;
 
 let test_write_boundary_emits_typed_audience () =
@@ -2146,8 +2181,8 @@ let () =
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick
         (with_eio test_keeper_signal_hook_cancellation_propagates);
-      Alcotest.test_case "dedup hit does not fan out post_created" `Quick
-        (with_eio test_dedup_hit_does_not_emit_post_created_fanout);
+      Alcotest.test_case "identical content creates two posts" `Quick
+        (with_eio test_identical_content_creates_two_posts);
       Alcotest.test_case "create append failure returns error without fanout" `Quick
         (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
@@ -2242,8 +2277,8 @@ let () =
       Alcotest.test_case "invalid author" `Quick (with_eio test_invalid_author);
       Alcotest.test_case "Direct requires exact targets" `Quick
         (with_eio test_direct_post_requires_exact_targets);
-      Alcotest.test_case "malformed target fails closed" `Quick
-        (with_eio test_malformed_target_fails_closed);
+      Alcotest.test_case "malformed target is read as prose" `Quick
+        (with_eio test_malformed_target_is_read_as_prose);
       Alcotest.test_case "write emits typed audience" `Quick
         (with_eio test_write_boundary_emits_typed_audience);
       Alcotest.test_case "target case is identity-level" `Quick

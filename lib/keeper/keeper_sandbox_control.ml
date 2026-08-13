@@ -255,55 +255,10 @@ let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
     ~timeout_sec
     ()
 
-let observed_is_dir path =
-  try
-    match Fs_compat.exact_path_kind ~follow:false path with
-    | Fs_compat.Exact_kind Unix.S_DIR -> true
-    | Fs_compat.Exact_missing
-    | Fs_compat.Exact_kind _
-    | Fs_compat.Exact_unknown -> false
-  with
-  | Sys_error error ->
-    Log.Keeper.warn
-      "playground filesystem observation failed path=%s error=%s"
-      path
-      error;
-    false
-  | Unix.Unix_error (error, operation, argument) ->
-    Log.Keeper.warn
-      "playground filesystem observation failed path=%s error=%s(%s): %s"
-      path
-      operation
-      argument
-      (Unix.error_message error);
-    false
-
-let valid_checkout_name name =
-  name <> ""
-  && name <> "."
-  && name <> ".."
-  && not (String.contains name '/')
-  && not (String.contains name '\\')
-  && String.equal (Filename.basename name) name
-
-let filesystem_checkout_names sandbox_abs =
-  let repos_dir = Filename.concat sandbox_abs "repos" in
-  if not (observed_is_dir repos_dir) then []
-  else
-    try
-      Sys.readdir repos_dir
-      |> Array.to_list
-      |> List.filter (fun name ->
-        let repo_path = Filename.concat repos_dir name in
-        valid_checkout_name name && observed_is_dir repo_path)
-      |> List.sort String.compare
-    with
-    | Sys_error error ->
-      Log.Keeper.warn
-        "repository checkout observation failed path=%s error=%s"
-        repos_dir
-        error;
-      []
+(* [observed_is_dir], [valid_checkout_name] and [filesystem_checkout_names]
+   lived here to list [<sandbox>/repos/*]. Discovery now measures the tree
+   ([Keeper_playground_checkouts]), which also validates entry kinds and
+   reports read failures as a typed result instead of a warn-and-empty-list. *)
 
 type catalog_resolution =
   | Registered of Repo_manager_types.repository
@@ -411,8 +366,13 @@ let freshness_json = function
   | Freshness_unavailable error ->
     `Assoc [ "state", `String "unavailable"; "error", `String error ]
 
-let checkout_json ~catalog ~sandbox_abs name =
-  let checkout_abs = Filename.concat (Filename.concat sandbox_abs "repos") name in
+let checkout_json ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+  (* The checkout's own path, as discovered. Previously this reassembled
+     [sandbox_abs/repos/<name>], which meant any checkout found outside that
+     one shape was inspected at a path that does not exist — every git call
+     below would fail and the entry would render as "unavailable". *)
+  let checkout_abs = checkout.absolute_path in
+  let name = checkout.name in
   let origin = Repo_git.get_origin_url ~local_path:checkout_abs in
   let catalog_resolution =
     match origin with
@@ -439,7 +399,17 @@ let checkout_json ~catalog ~sandbox_abs name =
   in
   `Assoc
     [ "checkout_name", `String name
-    ; "path", `String (Filename.concat "repos" name)
+    ; "path", `String checkout.relative_path
+      (* [path] is relative to the keeper's workspace root and is whatever the
+         keeper actually used; it is no longer prefixed with a segment the
+         system prescribes. [path_base] states that basis on the wire so a
+         reader does not have to know the old convention. *)
+    ; "path_base", `String "playground_root"
+    ; ( "git_link"
+      , `String
+          (match checkout.git_link with
+           | Keeper_playground_checkouts.Git_directory -> "directory"
+           | Keeper_playground_checkouts.Git_pointer_file -> "pointer_file") )
     ; "catalog", catalog_json catalog_resolution
     ; "branch", (match branch with Ok value -> `String value | Error _ -> `Null)
     ; "head", (match head with Ok value -> `String value | Error _ -> `Null)
@@ -457,12 +427,24 @@ let repository_checkouts_json ~(config : Workspace.config) ~(meta : keeper_meta)
   in
   let observed_at_unix = Time_compat.now () in
   let catalog = Repo_store.load_all ~base_path:config.base_path in
+  let scan = Keeper_playground_checkouts.discover ~root:sandbox_abs in
   let entries =
-    filesystem_checkout_names sandbox_abs
-    |> List.map (checkout_json ~catalog ~sandbox_abs)
+    match scan with
+    | Ok discovery ->
+      Keeper_playground_checkouts.found discovery
+      |> List.map (checkout_json ~catalog)
+    | Error _ -> []
   in
   `Assoc
-    [ "state", `String (match catalog with Ok _ -> "available" | Error _ -> "catalog_unavailable")
+    [ ( "state"
+      , `String
+          (match catalog, scan with
+           | Ok _, Ok _ -> "available"
+           | Error _, _ -> "catalog_unavailable"
+           (* A failed scan and an empty playground used to be the same empty
+              list. They are different answers and now say so. *)
+           | Ok _, Error _ -> "filesystem_unavailable") )
+    ; "scan", Keeper_playground_checkouts.scan_json scan
     ; "freshness_basis", `String "local_tracking_ref"
     ; "observed_at", `String (Masc_domain.iso8601_of_unix_seconds observed_at_unix)
     ; "observed_at_unix", `Float observed_at_unix

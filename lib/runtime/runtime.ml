@@ -61,13 +61,40 @@ let quota_scope_of_materialized
   Runtime_quota_window.scope_of_credential ~provider_id:provider.id credential
 ;;
 
-let of_binding (cfg : config) (b : binding) : (t, string) result =
+(* Why a binding did not become a runtime, as a closed vocabulary rather than a
+   string. The distinction the variant makes is the one the config loader has to
+   act on: [Binding_disabled] and [Provider_disabled] are choices the operator
+   wrote down, [Execution_unbuildable] is a capability limit of the adapter, and
+   the two [*_not_declared] cases are dangling references — the binding names a
+   [\[providers.x\]] or [\[models.y\]] row that does not exist. Collapsing all
+   five into one string is what let a dangling reference be dropped as quietly as
+   a deliberate disable (masc#28403): a [local_llama_server.qwen3-6-35b-uncensored]
+   binding pointed at a model row an unquoted dot had split into
+   [models.qwen3."6-35b-uncensored"], and nothing reported the runtime's absence.
+   Deciding fatality by matching the reason string would be the same defect one
+   layer up, so the vocabulary is closed and {!load_list} matches it. *)
+type drop_reason =
+  | Binding_disabled
+  | Provider_disabled of string (* provider id *)
+  | Provider_not_declared of string (* provider id the binding names *)
+  | Model_not_declared of string (* model id the binding names *)
+  | Execution_unbuildable of string (* adapter's own reason *)
+
+let string_of_drop_reason = function
+  | Binding_disabled -> "binding is disabled by runtime.toml"
+  | Provider_disabled id -> Printf.sprintf "provider %S is disabled by runtime.toml" id
+  | Provider_not_declared id -> Printf.sprintf "provider not found: %s" id
+  | Model_not_declared id -> Printf.sprintf "model not found: %s" id
+  | Execution_unbuildable reason -> reason
+;;
+
+let of_binding (cfg : config) (b : binding) : (t, drop_reason) result =
   if not b.enabled
-  then Error "binding is disabled by runtime.toml"
+  then Error Binding_disabled
   else match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
   | Some provider, Some model ->
     if not provider.enabled
-    then Error (Printf.sprintf "provider %S is disabled by runtime.toml" provider.id)
+    then Error (Provider_disabled provider.id)
     else
       (match Runtime_adapter.binding_to_execution cfg b with
        | Ok execution ->
@@ -79,9 +106,9 @@ let of_binding (cfg : config) (b : binding) : (t, string) result =
            ; execution
            ; quota_scope = quota_scope_of_materialized ~provider ~execution
            }
-       | Error reason -> Error reason)
-  | None, _ -> Error (Printf.sprintf "provider not found: %s" b.provider_id)
-  | Some _, None -> Error (Printf.sprintf "model not found: %s" b.model_id)
+       | Error reason -> Error (Execution_unbuildable reason))
+  | None, _ -> Error (Provider_not_declared b.provider_id)
+  | Some _, None -> Error (Model_not_declared b.model_id)
 ;;
 
 let is_local_provider (provider : provider) =
@@ -104,7 +131,7 @@ let is_local_runtime (runtime : t) = is_local_provider runtime.provider
    typo that does not exist. Materialize failure stays fail-closed: the binding
    is still excluded from [runtimes] (RFC-0206 §2.1). *)
 let partition_bindings (cfg : config) (bindings : binding list)
-  : t list * (string * string) list
+  : t list * (string * drop_reason) list
   =
   let runtimes, dropped =
     List.fold_left
@@ -125,14 +152,51 @@ let partition_bindings (cfg : config) (bindings : binding list)
    runtimes" wording. The result is the suffix that follows the quoted id in
    each caller's message, so the existing prefix ("[runtime.assignments].<k> =
    <id>") is preserved and the typo case stays byte-for-byte unchanged. *)
-let unresolved_runtime_suffix ~(dropped_bindings : (string * string) list)
+let unresolved_runtime_suffix ~(dropped_bindings : (string * drop_reason) list)
     ~(runtime_count : int) (id : string) : string =
   match List.assoc_opt id dropped_bindings with
   | Some reason ->
     Printf.sprintf
       ": binding is defined but could not be materialized as a runtime — %s"
-      reason
+      (string_of_drop_reason reason)
   | None -> Printf.sprintf " not found among %d runtimes" runtime_count
+;;
+
+(* A dangling reference is an operator typo, and unlike every other drop reason
+   it is not survivable by ignoring the binding: the runtime the operator
+   declared simply does not exist, and nothing downstream will say so unless the
+   id happens to be referenced by an assignment, route, or lane. Reporting it
+   here — at load, over the whole binding list — is what makes the absence
+   visible without a reference to hang the message on (masc#28403). The other
+   three reasons stay non-fatal: they keep the RFC-0206 §2.1 contract that a
+   binding MASC cannot run is excluded rather than fatal. *)
+let dangling_reference_reason = function
+  | Provider_not_declared id ->
+    Some (Printf.sprintf "names provider %S, which has no [providers.%s] row" id id)
+  | Model_not_declared id ->
+    Some (Printf.sprintf "names model %S, which has no [models.%s] row" id id)
+  | Binding_disabled | Provider_disabled _ | Execution_unbuildable _ -> None
+;;
+
+let validate_no_dangling_bindings ~(config_path : string)
+    ~(dropped_bindings : (string * drop_reason) list) : (unit, string) result =
+  match
+    List.filter_map
+      (fun (id, reason) ->
+        Option.map
+          (fun why -> Printf.sprintf "  %s %s" id why)
+          (dangling_reference_reason reason))
+      dropped_bindings
+  with
+  | [] -> Ok ()
+  | dangling ->
+    Error
+      (Printf.sprintf
+         "%s: %d binding(s) reference a provider or model that is not declared, \
+          so the runtime they define does not exist:\n%s"
+         config_path
+         (List.length dangling)
+         (String.concat "\n" dangling))
 ;;
 
 (** TOML 에서 Runtime 목록과 default Runtime 을 로드한다.
@@ -173,7 +237,7 @@ type runtime_reference =
   }
 
 let validate_runtime_references ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
     (lanes : Runtime_lane.t list) (references : runtime_reference list)
   : (unit, string) result
   =
@@ -248,7 +312,7 @@ let media_failover_references (media_failover : string list) =
    Empty candidate lists are rejected at parse time; here we reject unknown ids
    as operator typos (mirrors [runtime].default validation). *)
 let validate_lanes ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (unit, string) result
   =
@@ -276,7 +340,7 @@ let validate_lanes ~(config_path : string)
 ;;
 
 let lanes_of_decls ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (Runtime_lane.t list, string) result
   =
@@ -1010,6 +1074,10 @@ let materialize_config
     result
   =
   let runtimes, dropped_bindings = partition_bindings cfg cfg.bindings in
+  (* Ahead of default / assignment / route validation on purpose: a dangling
+     binding makes a runtime the operator declared not exist, and the messages
+     below can only describe an id something else referenced. *)
+  let* () = validate_no_dangling_bindings ~config_path ~dropped_bindings in
   let assignments = cfg.keeper_assignments in
   let* rt =
     match cfg.default_runtime_id with

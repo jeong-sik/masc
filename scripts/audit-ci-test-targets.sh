@@ -124,7 +124,7 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Exact current count. Adding an unwired suite is a regression.
-UNWIRED_BASELINE=659
+UNWIRED_BASELINE=566
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
@@ -141,10 +141,19 @@ if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then
   exit 2
 fi
 
-# A lower count is accepted so the exact baseline can be tightened in the same
-# change that wires more current suites.
+# A count below the baseline is a regression too. The gap between the two is
+# budget: a later change can add an unwired suite and still read as "OK", so a
+# gain nobody locked in becomes room for new debt. Measured on 2026-08-13: 45
+# test files added after this ratchet landed (#26959) are still unwired, and
+# #28383 is one of them -- it added test_caller_identity_credential_binding
+# with the baseline unchanged at 662 on both sides of the merge.
 if [ "$unwired" -lt "$UNWIRED_BASELINE" ]; then
-  echo "[ci-test-targets] OK - ${unwired} suites unwired, ${UNWIRED_BASELINE} baseline — lower UNWIRED_BASELINE in $0 to hold the gain"
-else
-  echo "[ci-test-targets] OK - ${unwired} suites unwired, at baseline"
+  echo
+  echo "[ci-test-targets] FAIL - ${unwired} suites unwired, under the ${UNWIRED_BASELINE} baseline by $((UNWIRED_BASELINE - unwired))"
+  echo
+  echo "Set UNWIRED_BASELINE=${unwired} in $0. The gap is not slack to spend:"
+  echo "leaving it lets a later change add an unwired suite and still pass."
+  exit 2
 fi
+
+echo "[ci-test-targets] OK - ${unwired} suites unwired, at baseline"

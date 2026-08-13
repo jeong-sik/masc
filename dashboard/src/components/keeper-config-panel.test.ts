@@ -91,6 +91,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       precedence: ['live_meta', 'keeper_config'],
       has_live_override: true,
       override_fields: ['prompt.instructions'],
+      override_field_sources: [],
     },
     metrics: {
       generation: 3,
@@ -459,6 +460,34 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     })
     const draft = initRuntimeDraftFromConfig(c)
     expect(draft.runtime_id).toBe('runpod_mtp.qwen36-35b-a3b-mtp')
+  })
+
+  it('uses the declarative proactive value when live meta has drifted', () => {
+    const base = makeKeeperConfigForSandbox()
+    const c = makeKeeperConfigForSandbox({
+      proactive: { enabled: true },
+      sources: {
+        ...base.sources,
+        override_field_sources: [{
+          field: 'proactive.enabled',
+          source: 'live_meta',
+          live_source: 'runtime_overlay',
+          default_source: 'toml',
+          default_source_kind: 'toml',
+          default_manifest_path: '/tmp/config/keepers/rtprobe.toml',
+          default_manifest_exists: true,
+          default_missing: false,
+          default_value: false,
+          live_value: true,
+        }],
+      },
+    })
+
+    expect(initRuntimeDraftFromConfig(c).proactive_enabled).toBe(false)
+    expect(buildRuntimePayload({
+      ...initRuntimeDraftFromConfig(c),
+      proactive_enabled: true,
+    }, c)).toEqual({ proactive_enabled: true })
   })
 
   it('defaults sandbox fields when config is missing them', () => {
@@ -1433,6 +1462,62 @@ describe('KeeperConfigPanel', () => {
         autoboot_enabled: false,
         max_context_override: 64000,
       }),
+    )
+  })
+
+  it('edits proactive policy from TOML truth when live meta has drifted', async () => {
+    const base = makeKeeperConfig()
+    const drifted = makeKeeperConfig({
+      proactive: { enabled: true },
+      sources: {
+        ...base.sources,
+        override_fields: ['proactive.enabled'],
+        override_field_sources: [{
+          field: 'proactive.enabled',
+          source: 'live_meta',
+          live_source: 'runtime_overlay',
+          default_source: 'toml',
+          default_source_kind: 'toml',
+          default_manifest_path: '/tmp/config/keepers/rtprobe.toml',
+          default_manifest_exists: true,
+          default_missing: false,
+          default_value: false,
+          live_value: true,
+        }],
+      },
+    })
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(drifted)
+    mocks.patchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({
+      proactive: { enabled: true },
+    }))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    expect(container.textContent).toContain('프로액티브 설정 드리프트')
+    expect(container.textContent).toContain('TOML OFF / live meta ON')
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    const proactive = container.querySelector('button[aria-label="프로액티브 활성"]') as HTMLButtonElement | null
+    expect(proactive?.getAttribute('aria-checked')).toBe('false')
+    expect(container.textContent).toContain('TOML OFF / live meta ON')
+
+    proactive?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    expect(proactive?.getAttribute('aria-checked')).toBe('true')
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      { proactive_enabled: true },
     )
   })
 

@@ -6,7 +6,7 @@ import { get, post } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
-import type { KeeperConfig, KeeperHookSlot } from '../types'
+import type { KeeperConfig, KeeperConfigOverrideFieldSource, KeeperHookSlot } from '../types'
 
 function asLooseBoolean(value: unknown, fallback = false): boolean {
   const booleanValue = asBoolean(value)
@@ -135,6 +135,27 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   }
 }
 
+function normalizeOverrideFieldSources(raw: unknown): KeeperConfigOverrideFieldSource[] {
+  return asRecordArray(raw)
+    .map((row): KeeperConfigOverrideFieldSource | null => {
+      const field = asNullableString(row.field)
+      if (!field) return null
+      return {
+        field,
+        source: asNullableString(row.source),
+        live_source: asNullableString(row.live_source),
+        default_source: asNullableString(row.default_source),
+        default_source_kind: normalizeDefaultSourceKind(row.default_source_kind),
+        default_manifest_path: asNullableString(row.default_manifest_path),
+        default_manifest_exists: asBoolean(row.default_manifest_exists) ?? null,
+        default_missing: asBoolean(row.default_missing) ?? null,
+        default_value: row.default_value,
+        live_value: row.live_value,
+      }
+    })
+    .filter((row): row is KeeperConfigOverrideFieldSource => row !== null)
+}
+
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
   const data = isRecord(raw) ? raw : {}
   const prompt = isRecord(data.prompt) ? data.prompt : {}
@@ -219,6 +240,7 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       precedence: normalizeStringList(sources.precedence),
       has_live_override: asLooseBoolean(sources.has_live_override),
       override_fields: normalizeStringList(sources.override_fields),
+      override_field_sources: normalizeOverrideFieldSources(sources.override_field_sources),
     },
     metrics: {
       generation: asInt(metrics.generation) ?? 0,

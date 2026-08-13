@@ -1953,6 +1953,7 @@
 
 (include stanzas/test_runtime_agent_execution_store_source.inc)
 (include stanzas/test_runtime_agent_execution_owner_source.inc)
+(include stanzas/test_keeper_agent_core_execution_identity.inc)
 
 
 (include stanzas/test_runtime_model_temperature_toml.inc)

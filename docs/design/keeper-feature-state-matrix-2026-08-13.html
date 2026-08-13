@@ -160,9 +160,9 @@
 
   <h2>3. 병렬 트랙과 실제 의존성</h2>
   <div class="stack">
-    <article class="card lane next"><div class="step"><strong>Track A</strong><h3>#28597 CI 배선</h3><p>head <code>abe0e09c2b4c</code>, non-Draft. 현재 run <a href="https://github.com/jeong-sik/masc/actions/runs/31704177944">31704177944</a>의 Build and Test가 진행 중이다. #28470/#28488만 이 baseline 뒤에 둔다.</p></div></article>
-    <article class="card lane"><div class="step"><strong>A →</strong><h3>#28470 / #28488</h3><p>#28597이 만든 baseline을 받은 최신 main으로 갱신한 뒤 exact-head CI를 다시 판정한다. 이 두 PR만 Track A에 실제로 의존한다.</p></div></article>
-    <article class="card lane block"><div class="step"><strong>Track B</strong><h3>Discord 출력 경계</h3><p>#28574 head <code>c9df777b83</code>, run <a href="https://github.com/jeong-sik/masc/actions/runs/31704238533">31704238533</a>의 Build and Test가 진행 중이다. Track A와 독립적으로 CI/live 3종을 끝낼 수 있다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>Track A</strong><h3>#28597 병합 완료</h3><p>head <code>abe0e09c2b4c</code>의 Build and Test, Keeper Real-World Gate, CI Gate 성공 후 <code>f473c0e8bf</code>로 병합됐다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>A →</strong><h3>#28470 / #28488 재검증</h3><p>둘 다 새 main <code>f473c0e8bf</code> 위로 재배치했다. 새 head는 각각 <code>2da9e2ad7a</code>, <code>7b1b921c53</code>이며 CI가 시작됐다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>Track B</strong><h3>Discord 출력 경계</h3><p>#28574는 exact-head 3개 gate 성공 후 <code>0d2609fa9b</code>로 병합됐다. #28596은 새 head <code>e9a300ed0c</code>의 CI와 live 침묵·명시 post·무발화 시나리오가 남았다.</p></div></article>
     <article class="card lane block"><div class="step"><strong>Track C</strong><h3>Evidence campaign preflight</h3><p>카탈로그는 16 mission/29 assertion 검증을 통과했다. 다만 live는 <code>binary_commit</code>이 없고 current source에 존재하는 operator tool 5개를 노출하지 않아 mutation 전 preflight에서 멈췄다. exact SHA로 재빌드·재기동한 뒤 다시 시작한다.</p></div></article>
     <article class="card lane"><div class="step"><strong>C1</strong><h3>Memory 관계 회상</h3><p>화자·대상·관계·행동·시간·근거를 N→N+3과 session restart에서 확인하며 추측된 관계는 저장하지 않는다.</p></div></article>
     <article class="card lane"><div class="step"><strong>C2</strong><h3>Scenario campaigns</h3><p>협업 코드, 연구/논문, 연작 글, 반론·변론을 Goal/Task/Board/Fusion/Verification/Memory 조합으로 실행하고 10-turn과 장기 구간을 수집한다.</p></div></article>
@@ -193,6 +193,7 @@
     <li><code>lib/dashboard/dashboard_keeper_feature_proof.ml</code> — 현재 5개 autonomy feature proof read model.</li>
     <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — health/feature-proof/PR head를 <code>2026-08-13T13:25:46Z</code>에 동결한 축약 JSON. <code>binary_commit=null</code>도 보존한다.</li>
     <li><a href="../evidence/keeper-multi-collaboration-preflight-2026-08-13T133813Z.json"><code>keeper-multi-collaboration-preflight-2026-08-13T133813Z.json</code></a> — mutation 없이 검증한 16 mission catalog와 live preflight blocker.</li>
+    <li><a href="../evidence/keeper-pr-transition-2026-08-13T134218Z.json"><code>keeper-pr-transition-2026-08-13T134218Z.json</code></a> — #28574/#28597 병합 및 #28470/#28488 재배치 exact head.</li>
     <li><code>/health?full=1</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — live 원본 route. 동결 JSON 이후의 현재값은 새 캡처 없이는 주장하지 않는다.</li>
     <li>#28597 exact head <code>abe0e09c2b4cd43398f14533858b24913f06371b</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704177944">31704177944</a>.</li>
     <li>#28574 exact head <code>c9df777b836477c9a60ecf89fe9e3b3e70e4a770</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704238533">31704238533</a>.</li>

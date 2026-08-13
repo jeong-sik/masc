@@ -148,9 +148,10 @@ describe('Keeper operation stream projection', () => {
   // The direct send stamps the accepted operation id onto the bubble it is
   // already streaming into (see [stampPlaceholderRequestId] in keeper-actions).
   // The server also broadcasts every operation event to all sessions, so the
-  // same turn arrives twice in the tab that issued it. The two transports chunk
-  // the text differently, so a second application does not overwrite the first
-  // -- it interleaves with it, which is what the operator sees on screen.
+  // same turn arrives twice in the tab that issued it. Both applications
+  // append, so each fragment lands twice. The echo joins late and misses the
+  // leading fragments, which puts the two copies out of phase -- that is why
+  // the operator sees them interleaved rather than cleanly repeated.
   const directlyStreamingBubble = (): void => {
     appendThreadEntry('sangsu', {
       id: 'reply-1',

@@ -167,12 +167,6 @@ type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
 
-val connector_attention_outcome_of_route :
-  Keeper_unified_turn.continuation_route_disposition ->
-  connector_attention_outcome
-(** Attention-ledger terminal for a completed connector-attention turn: an
-    addressed continuation route resolves the item, an unaddressed one
-    ignores it. The stimulus is edge-triggered either way. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

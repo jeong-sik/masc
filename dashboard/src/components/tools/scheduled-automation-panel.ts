@@ -672,7 +672,6 @@ function WakeEvidenceSummary({ request }: { request: DashboardScheduledAutomatio
       data-schedule-wake-evidence-receipt=${receiptStatus}
       data-schedule-wake-evidence-queue=${queueStatus}
       data-schedule-wake-evidence-reaction=${reactionStatus}
-      data-schedule-wake-evidence-result=${resultStatus}
     >
       <span class="sch-wake-title">wake evidence</span>
       ${items.map(item => html`

@@ -253,7 +253,6 @@ export type {
   DashboardScheduledAutomationKeeperQueueEvidence,
   DashboardScheduledAutomationActor,
   DashboardScheduledAutomationSignal,
-  DashboardScheduledAutomationResultDelivery,
   DashboardScheduledAutomationRequest,
   DashboardScheduledAutomationPayloadSupport,
   DashboardScheduledAutomationLiveSupportedNonTerminalEvidence,

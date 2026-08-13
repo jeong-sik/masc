@@ -926,6 +926,9 @@ let run_turn
                              ~site:"runtime_runtime"
                              config
                              manifest)
+                      ~execution_store_factory:
+                        (Keeper_agent_core_execution_store.current_owner_factory
+                           ~base_path:config.base_path)
                       ?deferred_runtime_lane
                       ~on_runtime_retry_deferred:record_runtime_retry_deferred
                       ?on_deferred_runtime_consumed

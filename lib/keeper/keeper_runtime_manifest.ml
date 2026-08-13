@@ -249,8 +249,8 @@ let context_compaction_id ctx ~source =
     ctx.manifest_trace_id (turn_label ctx) source
 
 let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
-    ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
-    ?logical_seq ?compaction_source () =
+    ?provider_attempt_id ?event_bus_correlation_id ?event_bus_run_id
+    ?parent_event_id ?caused_by ?logical_seq ?compaction_source () =
   let tool_batch_id =
     match event with
     | Provider_lane_resolved ->
@@ -274,7 +274,7 @@ let clock_refs_for_context ctx ~event ?agent_core_turn_count ?elapsed_ms
   in
   clock_refs ~edge_id:(context_edge_id ctx event)
     ~lane:(clock_lane_of_event event) ~source_clock:(source_clock_of_event event)
-    ?elapsed_ms ?tool_batch_id
+    ?elapsed_ms ?provider_attempt_id ?tool_batch_id
     ?checkpoint_id ?compaction_id ?compaction_source
     ?event_bus_correlation_id ?event_bus_run_id ?parent_event_id ?caused_by
     ?logical_seq ()

@@ -134,6 +134,7 @@ val run_named :
      unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
+  ?execution_store_factory:Keeper_agent_core_execution_store.factory ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
   ?on_runtime_retry_deferred:(deferred_runtime_lane -> unit) ->
   ?on_deferred_runtime_consumed:(unit -> unit) ->

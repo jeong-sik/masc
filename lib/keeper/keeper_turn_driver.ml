@@ -538,6 +538,7 @@ let run_named
     ?on_request_wire_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
+    ?execution_store_factory
     ?deferred_runtime_lane
     ?on_runtime_retry_deferred
     ?on_deferred_runtime_consumed
@@ -834,7 +835,7 @@ let run_named
       | Resolved_runtime _ -> true
       | Missing_runtime _ -> false)
     ~emit_runtime_manifest
-    ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id candidate ->
+    ~run_attempt:(fun ~idx:runtime_candidate_index ~runtime_id:attempt_runtime_id candidate ->
       match candidate with
       | Missing_runtime runtime_id ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -1108,6 +1109,8 @@ let run_named
           let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
             { runtime_id = attempt_runtime_id
             ; error_runtime_id
+            ; runtime_candidate_index
+            ; context_shrink_attempt = 0
             ; max_request_body_bytes
             ; (* #27320: the first attempt's windowing budget starts at the
                  full declared cap; [run_try_provider_with_context_overflow_shrink]
@@ -1188,6 +1191,7 @@ let run_named
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append
+            ; execution_store_factory
             ; turn_start
             ; seq_ref
             }

@@ -38,6 +38,8 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
+  ; runtime_candidate_index : int
+  ; context_shrink_attempt : int
   ; max_request_body_bytes : int
   ; (* #27320: the model-input windowing budget consulted by
        [budgeted_model_input_projection]. Starts at [max_request_body_bytes]
@@ -134,6 +136,7 @@ type try_provider_ctx =
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
+  ; execution_store_factory : Keeper_agent_core_execution_store.factory option
   ; turn_start : Mtime.t
   ; seq_ref : int ref
   }
@@ -142,6 +145,7 @@ let emit_runtime_manifest
       (ctx : try_provider_ctx)
       ?status
       ?decision
+      ?provider_attempt_id
       event
   =
   match ctx.runtime_manifest_context, ctx.runtime_manifest_append with
@@ -172,7 +176,7 @@ let emit_runtime_manifest
         (Keeper_runtime_manifest.with_clock_refs
            ~clock_refs:
              (Keeper_runtime_manifest.clock_refs_for_context manifest_ctx ~event
-                ?elapsed_ms ~logical_seq:!(ctx.seq_ref) ())
+                ?elapsed_ms ?provider_attempt_id ~logical_seq:!(ctx.seq_ref) ())
            decision)
     in
     Keeper_runtime_manifest.make_for_context manifest_ctx ~event
@@ -598,6 +602,62 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
        | Some inner -> inner windowed)
 ;;
 
+let execution_operation
+      (ctx : try_provider_ctx)
+      ~enable_thinking_override
+  =
+  match ctx.runtime_manifest_context with
+  | None ->
+    Error
+      (Agent_core.Error.Internal
+         "Keeper Agent Core execution store requires a durable turn context")
+  | Some
+      { Keeper_runtime_manifest.manifest_keeper_name
+      ; manifest_trace_id
+      ; manifest_keeper_turn_id = None
+      ; _
+      } ->
+    Error
+      (Agent_core.Error.Internal
+         (Printf.sprintf
+            "Keeper Agent Core execution store requires a durable turn id (keeper=%s trace=%s)"
+            manifest_keeper_name
+            manifest_trace_id))
+  | Some
+      { Keeper_runtime_manifest.manifest_keeper_name
+      ; manifest_trace_id
+      ; manifest_keeper_turn_id = Some keeper_turn_id
+      ; _
+      } ->
+    Keeper_agent_core_execution_identity.create
+      ~keeper_name:manifest_keeper_name
+      ~trace_id:manifest_trace_id
+      ~keeper_turn_id
+      ~runtime_id:ctx.runtime_id
+      ~candidate_index:ctx.runtime_candidate_index
+      ~context_shrink_attempt:ctx.context_shrink_attempt
+      ~context_capacity_bytes:ctx.model_input_capacity_bytes
+      ~thinking_override:enable_thinking_override
+    |> Result.map_error (fun error ->
+      Agent_core.Error.Internal
+        ("invalid Keeper Agent Core execution identity: "
+         ^ Keeper_agent_core_execution_identity.error_to_string error))
+;;
+
+let execution_scope_decision operation prepared =
+  `Assoc
+    [ ( "operation_id"
+      , `String
+          (Keeper_agent_core_execution_identity.operation_id_to_string
+             prepared.Keeper_agent_core_execution_store.operation_id) )
+    ; ( "execution_mode"
+      , `String
+          (Keeper_agent_core_execution_store.execution_mode_to_string prepared.mode)
+      )
+    ; "operation", Keeper_agent_core_execution_identity.to_yojson operation
+    ]
+;;
+
 let run_try_provider
       (ctx : try_provider_ctx)
       ?enable_thinking_override
@@ -713,31 +773,84 @@ let run_try_provider
       Eio.Switch.run (fun attempt_sw ->
         let run_fn () =
           Eio_guard.check_if_ready ();
-          match ctx.goal_blocks with
-          | Some blocks ->
-              Runtime_agent.run_blocks
-                ~sw:attempt_sw
-                ~net:ctx.net
-                ~config
-                ?agent_core_checkpoint:ctx.agent_core_checkpoint
-                ?on_event:ctx.on_event
-                ?on_yield:ctx.on_yield
-                ?on_resume:ctx.on_resume
-                ~agent_ref:local_agent_ref
-                ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                blocks
-          | None ->
-              Runtime_agent.run
-                ~sw:attempt_sw
-                ~net:ctx.net
-                ~config
-                ?agent_core_checkpoint:ctx.agent_core_checkpoint
-                ?on_event:ctx.on_event
-                ?on_yield:ctx.on_yield
-                ?on_resume:ctx.on_resume
-                ~agent_ref:local_agent_ref
-                ?cooperative_yield_probe:ctx.cooperative_yield_probe
-                ctx.goal
+          let prepared_execution =
+            match ctx.execution_store_factory with
+            | None -> Ok None
+            | Some factory ->
+              let* operation =
+                execution_operation ctx ~enable_thinking_override
+              in
+              (match factory operation with
+               | Ok prepared -> Ok (Some (operation, prepared))
+               | Error error ->
+                 Error
+                   (Keeper_agent_core_execution_store.prepare_error_to_core_error
+                      error))
+          in
+          match prepared_execution with
+          | Error _ as error -> error
+          | Ok prepared_execution ->
+            let execution_store =
+              Option.map
+                (fun (_, prepared) -> prepared.Keeper_agent_core_execution_store.execution_store)
+                prepared_execution
+            in
+            Option.iter
+              (fun (operation, prepared) ->
+                 let provider_attempt_id =
+                   Keeper_agent_core_execution_identity.operation_id_to_string
+                     prepared.Keeper_agent_core_execution_store.operation_id
+                 in
+                 emit_runtime_manifest
+                   ctx
+                   ~status:"started"
+                   ~decision:(execution_scope_decision operation prepared)
+                   ~provider_attempt_id
+                   Keeper_runtime_manifest.Provider_attempt_started)
+              prepared_execution;
+            let result =
+              match ctx.goal_blocks with
+              | Some blocks ->
+                Runtime_agent.run_blocks
+                  ~sw:attempt_sw
+                  ~net:ctx.net
+                  ~config
+                  ?agent_core_checkpoint:ctx.agent_core_checkpoint
+                  ?on_event:ctx.on_event
+                  ?on_yield:ctx.on_yield
+                  ?on_resume:ctx.on_resume
+                  ?execution_store
+                  ~agent_ref:local_agent_ref
+                  ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                  blocks
+              | None ->
+                Runtime_agent.run
+                  ~sw:attempt_sw
+                  ~net:ctx.net
+                  ~config
+                  ?agent_core_checkpoint:ctx.agent_core_checkpoint
+                  ?on_event:ctx.on_event
+                  ?on_yield:ctx.on_yield
+                  ?on_resume:ctx.on_resume
+                  ?execution_store
+                  ~agent_ref:local_agent_ref
+                  ?cooperative_yield_probe:ctx.cooperative_yield_probe
+                  ctx.goal
+            in
+            Option.iter
+              (fun (operation, prepared) ->
+                 let provider_attempt_id =
+                   Keeper_agent_core_execution_identity.operation_id_to_string
+                     prepared.Keeper_agent_core_execution_store.operation_id
+                 in
+                 emit_runtime_manifest
+                   ctx
+                   ~status:(match result with Ok _ -> "completed" | Error _ -> "failed")
+                   ~decision:(execution_scope_decision operation prepared)
+                   ~provider_attempt_id
+                   Keeper_runtime_manifest.Provider_attempt_finished)
+              prepared_execution;
+            result
         in
         run_fn ())
     in
@@ -952,6 +1065,7 @@ let run_try_provider_with_context_overflow_shrink
   in
   let checkpoint_after = ref None in
   let success_sample = ref None in
+  let context_shrink_attempt = ref 0 in
   let result =
     context_overflow_shrink_sequence
       ~starting_capacity_bytes
@@ -963,6 +1077,7 @@ let run_try_provider_with_context_overflow_shrink
           ~runtime_id:ctx.runtime_id
           ~capacity_bytes)
       ~on_shrink_retry:(fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
+        context_shrink_attempt := shrink_attempt;
         emit_context_overflow_shrink_manifest
           ctx
           ~shrink_attempt
@@ -971,7 +1086,10 @@ let run_try_provider_with_context_overflow_shrink
       ~attempt:(fun ~capacity_bytes ->
         let attempt_result, attempt_checkpoint_after, attempt_success_sample =
           run_try_provider
-            { ctx with model_input_capacity_bytes = capacity_bytes }
+            { ctx with
+              model_input_capacity_bytes = capacity_bytes
+            ; context_shrink_attempt = !context_shrink_attempt
+            }
             ?enable_thinking_override
             candidate
         in

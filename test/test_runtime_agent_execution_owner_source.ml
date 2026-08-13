@@ -74,6 +74,11 @@ let () =
   in
   let store = resolve_source "lib/keeper/keeper_agent_core_execution_store.ml" in
   let bootstrap = resolve_source "lib/server/server_runtime_bootstrap.ml" in
+  let keeper = resolve_source "lib/keeper/keeper_agent_run.ml" in
+  let driver = resolve_source "lib/keeper/keeper_turn_driver.ml" in
+  let provider =
+    resolve_source "lib/keeper/keeper_turn_driver_try_provider.ml"
+  in
   assert_contains
     ~label:"typed creation"
     owner
@@ -114,6 +119,19 @@ let () =
     ~label:"unknown effect keeps locator"
     store
     "Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown -> Ok ()";
+  assert_contains
+    ~label:"candidate ordinal ingress"
+    driver
+    "~run_attempt:(fun ~idx:runtime_candidate_index ~runtime_id:attempt_runtime_id candidate";
+  assert_contains
+    ~label:"production factory"
+    keeper
+    "~execution_store_factory: (Keeper_agent_core_execution_store.current_owner_factory ~base_path:config.base_path)";
+  assert_contains
+    ~label:"API boundary factory"
+    provider
+    "let run_fn () = Eio_guard.check_if_ready (); let prepared_execution =";
+  assert_contains ~label:"execution-store forwarding" provider "?execution_store";
   List.iter
     (fun relative ->
        assert_not_contains

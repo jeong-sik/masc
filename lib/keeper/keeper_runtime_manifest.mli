@@ -116,6 +116,7 @@ val clock_refs_for_context :
   event:event_kind ->
   ?agent_core_turn_count:int ->
   ?elapsed_ms:int ->
+  ?provider_attempt_id:string ->
   ?event_bus_correlation_id:string ->
   ?event_bus_run_id:string ->
   ?parent_event_id:string ->

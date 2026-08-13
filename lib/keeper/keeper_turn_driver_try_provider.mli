@@ -16,6 +16,8 @@ type provider_progress_sample =
 type try_provider_ctx =
   { runtime_id : string
   ; error_runtime_id : string
+  ; runtime_candidate_index : int
+  ; context_shrink_attempt : int
   ; max_request_body_bytes : int
   ; model_input_capacity_bytes : int
   ; base_path : string
@@ -72,6 +74,7 @@ type try_provider_ctx =
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
+  ; execution_store_factory : Keeper_agent_core_execution_store.factory option
   ; turn_start : Mtime.t
   ; seq_ref : int ref
   }

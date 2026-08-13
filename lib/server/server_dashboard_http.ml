@@ -11,48 +11,6 @@ let dashboard_projection_cache_ttl_s =
   Server_dashboard_http_core_cache.dashboard_projection_cache_ttl_s
 ;;
 
-(* Repository observation snapshot handler *)
-let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
-  Server_auth.with_public_read (fun state req inner_reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match Repo_store.load_all ~base_path with
-    | Error error ->
-      Http_server_eio.Response.json_value
-        ~status:`Internal_server_error
-        ~compress:true
-        ~request:req
-        (`Assoc [ "ok", `Bool false; "error", `String error ])
-        inner_reqd
-    | Ok repos ->
-      (* Each repository's observation is two git subprocesses, and they do not
-         depend on one another, so the snapshot costs the slowest repository
-         rather than the sum of all of them. Sequentially this was 1.4-2.2 s for
-         2.9 KB. *)
-      let repo_list =
-        Eio.Fiber.List.map
-          (Server_routes_http_routes_repositories.repository_observation_json
-             ~base_path)
-          repos
-      in
-      let snapshot =
-        `Assoc
-          [ "ok", `Bool true
-          ; "timestamp", `Float (Eio.Time.now clock)
-          ; "repository_count", `Int (List.length repos)
-          ; "repositories", `List repo_list
-          ]
-      in
-      Http_server_eio.Response.json_value
-        ~compress:true
-        ~request:req
-        snapshot
-        inner_reqd)
-    request reqd
-
-(* Wire task mutation hook: invalidate execution cache on any task
-   add/transition so the dashboard serves fresh backlog data. *)
-let () = Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
-
 let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 ;;

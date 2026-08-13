@@ -1511,8 +1511,6 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd
              (handle_gate_mode_body state operator_name request reqd))
          request reqd)
-  |> Http.Router.get "/api/v1/dashboard/repository-observation-snapshot" (fun request reqd ->
-       Server_dashboard_http.handle_repository_observation_snapshot ~sw ~clock request reqd)
   |> Http.Router.get "/api/v1/dashboard/proof" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =

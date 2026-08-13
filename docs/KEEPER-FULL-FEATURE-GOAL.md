@@ -24,7 +24,9 @@ Runtime의 고정 role이 아니다. 실제 Lane 실행이 실패하면 그 실�
 기능별 완료 기준은 그 기능의 사용자 관점 동작이다.
 
 1. 요청이 실제 실행 경계까지 도달한다.
-2. 의도한 결과를 내거나 사용자가 확인할 수 있는 구체적인 실패로 끝난다.
+2. 의도한 결과, 사용자가 확인할 수 있는 구체적인 실패, 또는 효과가 실행됐을
+   가능성은 있지만 결과를 증명할 수 없는 명시적 `Effect_outcome_unknown` /
+   `Indeterminate` 상태로 끝난다.
 3. 해당 기능이 원래 제공하는 상태/receipt/UI가 있다면 실제 결과와 모순되지 않는다.
 
 기능이 wait, async handle, queue, scheduler 또는 process restart를 포함하면 같은
@@ -34,6 +36,12 @@ optional telemetry, 증거 문서의 존재를 제품 실행 조건으로 만들
 관측 인프라가 없거나 오래됐다는 이유만으로 정상 기능을 막지 않는다. 단, 요청한
 실행 의미가 바뀌는 경우에는 명시적으로 실패해야 한다. 예를 들어 Docker 실행 요청을
 Host 실행으로 몰래 바꾸는 것은 허용하지 않는다.
+
+외부 효과의 결과가 indeterminate이면 같은 효과를 재실행, 재시도 또는 보상하지
+않는다. 대상 상태를 별도로 확인하거나 operator가 명시적으로 결론낼 때까지 unknown을
+보존한다. 실행 결과와 재시도 의미의 권위는 이 계획 문서가 아니라
+`lib/tool_types/tool_result.mli`와 `lib/keeper/keeper_gate_replay.mli`의 typed source
+계약이다.
 
 성능·효율 최적화는 baseline 기능이 동작한 뒤 별도 PR로 다룬다. 최적화가 없어도
 기능이 정확히 동작한다면 admission gate로 만들지 않는다.
@@ -47,8 +55,9 @@ Host 실행으로 몰래 바꾸는 것은 허용하지 않는다.
   도달하는지 추적한다.
 - B — focused scenario: 성공, 명시적 실패, 재개/중복 중 해당 기능에 필요한 경우만
   작은 fixture로 확인한다.
-- C — live scenario: 고유 canary ID로 실제 `~/me/.masc`에서 실행하고 API, receipt,
-  Dashboard를 같은 ID로 대조한다.
+- C — live scenario: 먼저 `/health?full=1`에서 `effective_base_path`와
+  `effective_masc_root`를 읽고, 확인된 effective root에서 고유 canary ID로 실행한 뒤
+  API, receipt, Dashboard를 같은 ID로 대조한다.
 
 | 기능 | source 조사 예시 | focused 확인 예시 | live 실행 예시 |
 |---|---|---|---|
@@ -141,8 +150,9 @@ framework, runtime-role policy, unused execution-store plumbing처럼 현재 기
 - 기능을 막는 새 admission 조건을 추가하지 않는다.
 - Runtime 이름이나 사용자 로컬 설정을 production OCaml variant로 만들지 않는다.
 - 빠르게 Draft로 발행하고 긴 CI를 기다리지 않고 다음 독립 기능으로 이동한다.
-- 현재 단계에서는 `git diff --check`, parser/typecheck 등 짧은 검사만 수행한다.
-- local Dune build와 대규모 테스트 추가는 뒤의 검증 단계에서 한다.
+- push 전 `git diff --check`, parser/format, 필요한 frontend typecheck와 focused test처럼
+  빠른 검사를 수행한다. 로컬 Dune build는 실행하지 않고 OCaml build와 넓은 동작 검증은
+  exact-head CI에서 판정한다.
 - Dashboard도 reducer, interaction, reconnect를 포함한 실제 UI 기능 고장만 수정한다.
 
 ## 7. Live 실행 경계
@@ -151,6 +161,7 @@ framework, runtime-role policy, unused execution-store plumbing처럼 현재 기
 - canary Board/Task/Goal에는 고유 prefix를 사용한다.
 - Git/commit/PR 효과가 필요한 도구 검증은 새 private canary repository에서만 한다.
 - 기존 운영 객체와 credential은 별도 승인 없이 변경하지 않는다. 격리된 canary
-  Keeper와 canary config는 이 검증 범위 안에서 만들고 변경할 수 있다.
+  Keeper와 canary config를 만들거나 변경하는 것도 operator의 명시적 승인을 받은
+  범위에서만 한다. 이 계획 자체는 live mutation 권한을 부여하지 않는다.
 - source, PR, CI, merged, deployed, live 결과는 서로 다른 상태로 보고한다.
 - screenshot은 보조 증거이며 API/receipt와 다른 사실을 만들지 않는다.

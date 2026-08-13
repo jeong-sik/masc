@@ -935,4 +935,14 @@ module For_testing = struct
     in
     Result.map String.length (prompt_for_turn ~is_resume:false ~goal prepared)
   ;;
+
+  (* One byte more than this is the smallest admissible declared capacity.
+     This is not the rendered empty-history prompt: the reserve charges both
+     separators (the with-history worst case), while an empty-history render
+     joins its two sections with one. *)
+  let reserved_prompt_bytes ~system_prompt ~goal =
+    String.length system_prompt
+    + String.length goal
+    + prompt_section_framing_reserved_bytes
+  ;;
 end

@@ -51,4 +51,13 @@ module For_testing : sig
     (int, string) result
   (** Render through the production start-turn formatter and return the exact
       transmitted prompt byte count. *)
+
+  val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
+  (** The bytes the admission contract reserves for the fixed prompt sections
+      out of a declared capacity. One byte more than this is the smallest
+      admissible declared capacity; the tail window can still refuse such a
+      capacity when its constant undroppable preamble does not fit in what
+      remains. Not the rendered empty-history prompt: the reserve charges
+      both separators (the with-history worst case), while an empty-history
+      render joins its two sections with one. *)
 end

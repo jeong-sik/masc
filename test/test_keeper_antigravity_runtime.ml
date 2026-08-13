@@ -905,19 +905,18 @@ let test_capacity_counts_rendered_role_framing () =
 
 let test_capacity_below_preamble_constant_is_a_typed_refusal () =
   let history = List.init 100 (fun _ -> plain_user_message "") in
-  let fixed_prompt_bytes =
-    match
-      Keeper_antigravity_runtime.For_testing.start_prompt_bytes
-        ~system_prompt:"system"
-        ~goal:"goal"
-        []
-    with
-    | Ok bytes -> bytes
-    | Error detail -> fail detail
+  (* One byte above the admission reserve is the smallest capacity that gets a
+     projection at all (at or below it the fixed sections are refused before
+     any window exists). The rendered empty-history prompt is two bytes less
+     than the reserve — it joins its two sections with one separator while the
+     reserve charges both — so that one-byte history budget cannot fit the
+     window's constant undroppable omission preamble. *)
+  let capacity_bytes =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes
+      ~system_prompt:"system"
+      ~goal:"goal"
+    + 1
   in
-  (* Leave exactly one history byte beyond the real fixed prompt. The
-     undroppable omission preamble cannot fit in that budget. *)
-  let capacity_bytes = fixed_prompt_bytes + 1 in
   match
     capacity_projection
       ~declared_max_prompt_bytes:(Some capacity_bytes)

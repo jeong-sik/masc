@@ -38,6 +38,7 @@ let supervise_keepalive
          event:Keeper_lifecycle_events.lifecycle_event ->
          string -> string -> unit -> unit)
       ~(launch_supervised_fiber :
+         lifecycle_token:Keeper_lifecycle_reservation.token ->
          proactive_warmup_sec:int ->
          _ context ->
          keeper_meta ->
@@ -98,80 +99,122 @@ let supervise_keepalive
         meta.name
         (Keeper_owner_registry.command_error_to_string error)
   in
-  let librarian_lifecycle_ready () =
-    match Keeper_memory_lane.begin_librarian_lifecycle ~base_path ~keeper_name:meta.name with
-    | Error error ->
-      Log.Keeper.info
-        "supervisor launch deferred until prior Librarian owner exits keeper=%s error=%s"
+  let launch_registered lifecycle_token reg =
+    (try
+       if not (Workspace_utils.is_initialized ctx.config)
+       then (
+         let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
+         ())
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string WorkspaceInitFailures)
+         ~labels:[ "keeper", meta.name ]
+         ();
+       Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
+    match
+      launch_supervised_fiber
+        ~lifecycle_token
+        ~proactive_warmup_sec
+        ctx
+        meta
+        reg
+    with
+    | Error _ -> ()
+    | Ok () ->
+      wake_queued_owner_operations ();
+      publish_lifecycle
+        ~event:
+          (Keeper_lifecycle_events.Custom_event
+             { verb = Keeper_lifecycle_events.Started
+             ; phase = Some Keeper_state_machine.Running
+             })
         meta.name
-        (Keeper_memory_lane.lifecycle_open_error_to_string error);
-      false
-    | Ok () -> true
+        "supervised"
+        ()
   in
-  let launch_registered reg =
-    if librarian_lifecycle_ready ()
-    then (
-      (try
-         if not (Workspace_utils.is_initialized ctx.config)
-         then (
-           let (_init_msg : string) = Workspace.init ctx.config ~agent_name:None in
-           ())
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string WorkspaceInitFailures)
-           ~labels:[ "keeper", meta.name ]
-           ();
-         Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
-      (match launch_supervised_fiber ~proactive_warmup_sec ctx meta reg with
-       | Error _ -> ()
-       | Ok () ->
-         wake_queued_owner_operations ();
-         publish_lifecycle
-           ~event:
-             (Keeper_lifecycle_events.Custom_event
-                { verb = Keeper_lifecycle_events.Started
-                ; phase = Some Keeper_state_machine.Running
-                })
+  let log_transaction_error = function
+    | Keeper_keepalive_launch_transaction.Reservation_unavailable owner ->
+      Log.Keeper.info
+        "supervisor launch deferred to lifecycle transaction owner keeper=%s owner=%s"
+        meta.name
+        (Keeper_lifecycle_reservation.snapshot_to_string owner)
+    | Keeper_keepalive_launch_transaction.Registration_failed (`Occupied current) ->
+      Log.Keeper.info
+        "supervisor launch retained concurrently registered lane keeper=%s phase=%s"
+        meta.name
+        (Keeper_state_machine.phase_to_string current.Keeper_registry.phase)
+    | Keeper_keepalive_launch_transaction.Registration_failed (`Registration error) ->
+      (match error with
+       | Keeper_registry.Registration_shutdown_reserved operation_id ->
+         Log.Keeper.warn
+           "supervisor launch skipped %s because shutdown operation %s owns admission"
            meta.name
-           "supervised"
-           ()))
-  in
-  let register_and_launch () =
-    if librarian_lifecycle_ready ()
-    then
-      match
-         Keeper_registry.register_offline_if_admitted
-           ~base_path
+           (Keeper_shutdown_types.Operation_id.to_string operation_id)
+       | Keeper_registry.Registration_intake_token_not_live ->
+         Log.Keeper.error
+           "supervisor launch rejected an unexpected inactive durable-intake token for %s"
            meta.name
-           meta
-       with
-         | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
-           Log.Keeper.warn
-             "supervisor launch skipped %s because shutdown operation %s owns admission"
-             meta.name
-             (Keeper_shutdown_types.Operation_id.to_string operation_id)
-         | Error Keeper_registry.Registration_intake_token_not_live ->
-           Log.Keeper.error
-             "supervisor launch rejected an unexpected inactive durable-intake token for %s"
-             meta.name
-         | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+       | Keeper_registry.Registration_lifecycle_reserved owner ->
          Log.Keeper.warn
            "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
            meta.name
            (Keeper_lifecycle_reservation.snapshot_to_string owner)
-       | Error (Keeper_registry.Registration_invalid validation_error) ->
+       | Keeper_registry.Registration_invalid validation_error ->
          Log.Keeper.error
            "supervisor registry validation rejected %s: %s"
            meta.name
            (Keeper_registry.registry_entry_validation_error_to_string validation_error)
-       | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+       | Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail } ->
          Log.Keeper.error
            "supervisor registry event queue unavailable keeper=%s: %s"
            keeper_name
-           detail
-         | Ok reg -> launch_registered reg
+           detail)
+    | Keeper_keepalive_launch_transaction.Lifecycle_open_failed
+        { error; rollback_error } ->
+      Log.Keeper.warn
+        "supervisor launch deferred until Librarian owner exits keeper=%s error=%s%s"
+        meta.name
+        (Keeper_memory_lane.lifecycle_open_error_to_string error)
+        (match rollback_error with
+         | None -> ""
+         | Some detail -> "; rollback failed: " ^ detail);
+      ignore
+        (Keeper_memory_lane.abort_librarian
+           ~base_path
+           ~keeper_name:meta.name
+          : (Keeper_memory_lane.librarian_abort_outcome,
+             Keeper_memory_lane.librarian_abort_error)
+              result)
+  in
+  let run_launch_transaction ~expected_generation ~register ~rollback =
+    match
+      Keeper_keepalive_launch_transaction.run
+        ~base_path
+        ~keeper_name:meta.name
+        ~expected_generation
+        ~register
+        ~rollback
+        launch_registered
+    with
+    | Ok () -> ()
+    | Error error -> log_transaction_error error
+  in
+  let register_and_launch () =
+    run_launch_transaction
+      ~expected_generation:0
+      ~register:(fun token ->
+        match Keeper_registry.get ~base_path meta.name with
+        | Some current -> Error (`Occupied current)
+        | None ->
+          Keeper_registry.register_offline_if_admitted_for_lifecycle
+            token
+            ~base_path
+            meta.name
+            meta
+          |> Result.map_error (fun error -> `Registration error))
+      ~rollback:Keeper_keepalive_launch_transaction.rollback_remove_registered
   in
   match execution_truth with
   | Keeper_activation_readiness.Unknown detail ->
@@ -210,7 +253,18 @@ let supervise_keepalive
      | None -> register_and_launch ()
      | Some reg ->
        (match reg.phase with
-        | Keeper_state_machine.Offline -> launch_registered reg
+        | Keeper_state_machine.Offline ->
+          run_launch_transaction
+            ~expected_generation:reg.transition_seq
+            ~register:(fun _token ->
+              match Keeper_registry.get ~base_path meta.name with
+              | Some current
+                when Keeper_lane.Id.equal
+                       (Keeper_lane.id current.lane)
+                       (Keeper_lane.id reg.lane) -> Ok current
+              | Some current -> Error (`Occupied current)
+              | None -> Error (`Occupied reg))
+            ~rollback:Keeper_keepalive_launch_transaction.rollback_retain_registered
         | Keeper_state_machine.Running
         | Keeper_state_machine.Failing
         | Keeper_state_machine.Overflowed

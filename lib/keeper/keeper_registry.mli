@@ -71,6 +71,11 @@ val register_restarting :
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result
 
+val register_restarting_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  base_path:string -> string -> keeper_meta ->
+  (registry_entry, register_restarting_error) result
+
 (** Prepare a registry entry for a newly launched keepalive fiber.
     Clears stale per-fiber atomic latches before applying [Fiber_started] so
     the runtime stop flag matches the state machine's restart semantics. *)

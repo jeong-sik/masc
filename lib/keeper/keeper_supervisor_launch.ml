@@ -61,6 +61,7 @@ let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enable
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
 
 let launch_supervised_fiber_body
+      ~lifecycle_token
       ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
@@ -71,6 +72,18 @@ let launch_supervised_fiber_body
   if restart_launch_noop_enabled_for_test ()
   then (* test no-op launch: nothing forked, but not a fork rejection *) Ok ()
   else (
+    let lifecycle_result = Atomic.make None in
+    let finish_lifecycle boundary terminalize =
+      let result =
+        Keeper_keepalive_launch_transaction.finish_lifecycle
+          ~boundary
+          ~base_path
+          ~keeper_name:meta.name
+          ~terminalize
+      in
+      Atomic.set lifecycle_result (Some result);
+      result
+    in
     (* Task 137: Inject bootstrap signal to ensure at least one warm-up turn runs
      and break the initial proactive deadlock. *)
     let bootstrap_signal : Keeper_event_queue.stimulus =
@@ -81,69 +94,19 @@ let launch_supervised_fiber_body
       }
     in
     Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;
-    let librarian_settlement_started = Atomic.make false in
-    let librarian_settlement_result = Atomic.make None in
-    let settle_librarian ~graceful =
-      if Atomic.compare_and_set librarian_settlement_started false true
-      then (
-        let result =
-          Eio.Cancel.protect (fun () ->
-            try
-              if graceful
-              then
-                match
-                  Keeper_memory_lane.drain_and_join_librarian
-                    ~base_path
-                    ~keeper_name:meta.name
-                with
-                | Ok Keeper_memory_lane.No_librarian_work
-                | Ok Keeper_memory_lane.Librarian_drained -> Ok ()
-                | Error error ->
-                  Error (Keeper_memory_lane.librarian_drain_error_to_string error)
-              else
-                match
-                  Keeper_memory_lane.abort_librarian
-                    ~base_path
-                    ~keeper_name:meta.name
-                with
-                | Ok Keeper_memory_lane.Librarian_abort_idle
-                | Ok Keeper_memory_lane.Librarian_abort_requested
-                | Ok Keeper_memory_lane.Librarian_abort_already_in_progress
-                | Ok (Keeper_memory_lane.Librarian_abort_already_exited _) -> Ok ()
-                | Ok (Keeper_memory_lane.Librarian_abort_committed_with_failure exn) ->
-                  Error
-                    ("Librarian cancellation committed with callback failure: "
-                     ^ Printexc.to_string exn)
-                | Error error ->
-                  Error (Keeper_memory_lane.librarian_abort_error_to_string error)
-            with
-            | exn -> Error (Printexc.to_string exn))
-        in
-        Atomic.set librarian_settlement_result (Some result);
-        result)
-      else
-        match Atomic.get librarian_settlement_result with
-        | Some result -> result
-        | None -> Error "Librarian settlement is still in progress"
-    in
     let fork_body body =
       match
         Keeper_lane.fork
           ~sw:ctx.sw
           reg.lane
           ~run:body
-          ~cleanup:(fun outcome ->
-            let graceful =
-              match outcome with
-              | Keeper_lane.Completed
-              | Keeper_lane.Shutdown_before_start
-              | Keeper_lane.Shutdown_requested -> true
-              | Keeper_lane.Cancelled_by_parent _ ->
-                Atomic.get reg.fiber_stop || Shutdown.is_shutting_down_global ()
-              | Keeper_lane.Shutdown_cancel_failed _
-              | Keeper_lane.Failed _ -> false
-            in
-            settle_librarian ~graceful)
+          ~cleanup:(fun _ ->
+            match Atomic.get lifecycle_result with
+            | Some result -> result
+            | None ->
+              finish_lifecycle
+                Keeper_keepalive_launch_transaction.Unexpected
+                (fun () -> Error "supervisor lane exited without terminal disposition"))
       with
       | Ok () -> Ok ()
       | Error error ->
@@ -167,16 +130,21 @@ let launch_supervised_fiber_body
         if owns_terminal_signal
         then (
           let _failure_reason_recorded =
-            Keeper_registry.set_failure_reason_exact
+            Keeper_registry.update_entry_exact_for_lifecycle
+              lifecycle_token
               reg
-              (Some (Keeper_registry.Exception detail))
+              (fun current ->
+                { current with
+                  last_failure_reason = Some (Keeper_registry.Exception detail)
+                })
             |> Keeper_registry.exact_update_succeeded
                  reg
                  ~site:"supervisor_lane_start_rejected.failure_reason"
           in
           let terminalized =
             match
-              Keeper_registry.dispatch_event_exact
+              Keeper_registry.dispatch_event_exact_for_lifecycle
+                lifecycle_token
                 reg
                 (Keeper_state_machine.Fiber_terminated
                    { outcome = detail; provider_id = None; http_status = None })
@@ -193,15 +161,22 @@ let launch_supervised_fiber_body
               false
           in
           let _crash_recorded =
-            Keeper_registry.record_crash_exact
+            Keeper_registry.update_entry_exact_for_lifecycle
+              lifecycle_token
               reg
-              (Time_compat.now ())
-              detail
+              (fun current ->
+                Keeper_registry_error_tracking.record_crash_entry
+                  current
+                  (Time_compat.now ())
+                  detail)
             |> Keeper_registry.exact_update_succeeded
                  reg
                  ~site:"supervisor_lane_start_rejected.crash_log"
           in
-          Keeper_registry_error_recording.record_exact reg detail;
+          Keeper_registry_error_recording.record_exact_for_lifecycle
+            lifecycle_token
+            reg
+            detail;
           if terminalized
           then
             publish_phase_lifecycle
@@ -210,7 +185,9 @@ let launch_supervised_fiber_body
               detail
               ()
           else
-            match Keeper_registry.unregister_exact reg with
+            match
+              Keeper_registry.unregister_exact_for_lifecycle lifecycle_token reg
+            with
             | Keeper_registry.Exact_unregistered ->
               Log.Keeper.error
                 "supervisor: removed non-terminalizable fork-rejected lane name=%s"
@@ -291,7 +268,7 @@ let launch_supervised_fiber_body
                ~finally:stop_board_worker;
              (* A normal return is an explicit stop/shutdown path. Observed
                 idle/progress ages never rewrite it into a crash. *)
-               ignore (settle_librarian ~graceful:true : (unit, string) result);
+             let terminalize_normal () =
                (match
                   Keeper_registry.dispatch_event
                     ~base_path
@@ -330,7 +307,14 @@ let launch_supervised_fiber_body
                    ~phase:Keeper_state_machine.Stopped
                    meta.name
                    "normal exit"
-                   ()
+                   ();
+               Ok ()
+             in
+             ignore
+               (finish_lifecycle
+                  Keeper_keepalive_launch_transaction.Graceful
+                  terminalize_normal
+                : (unit, string) result)
            with
            | Eio.Cancel.Cancelled cause ->
              (match Keeper_lane.classify_cancellation_cause cause with
@@ -344,6 +328,7 @@ let launch_supervised_fiber_body
                 Keeper_fiber_crash carries no payload — failure_reason is
                 pre-stored in registry by the raise site.
                 For unexpected exceptions, wrap in Exception variant. *)
+             let terminalize_crash () =
              let fr =
                match exn with
                | Keeper_registry.Keeper_fiber_crash ->
@@ -357,7 +342,6 @@ let launch_supervised_fiber_body
 	             in
 	             let reason = Keeper_registry.failure_reason_to_string fr in
 	             let outcome = reason in
-	             ignore (settle_librarian ~graceful:false : (unit, string) result);
 	             Keeper_registry.set_failure_reason ~base_path meta.name (Some fr);
 	             (match
 	                Keeper_registry.dispatch_event
@@ -396,7 +380,14 @@ let launch_supervised_fiber_body
                  ~phase:Keeper_state_machine.Crashed
                  meta.name
                  reason
-                 ())
+                 ();
+             Ok ()
+             in
+             ignore
+               (finish_lifecycle
+                  Keeper_keepalive_launch_transaction.Unexpected
+                  terminalize_crash
+                : (unit, string) result))
         ~finally:(fun () ->
           (* Finally runs best-effort. Any exception raised here (including
            Eio.Cancel.Cancelled, which propagates during concurrent fiber
@@ -409,10 +400,17 @@ let launch_supervised_fiber_body
             Keeper_registry.cleanup_tracking ~base_path meta.name;
             Keeper_turn_attempt_observer.reset_keeper ~base_path ~keeper:meta.name;
             if not (Atomic.get resolved)
-            then
+            then (
+              let boundary =
+                if
+                  Shutdown.is_shutting_down_global ()
+                  || Atomic.get cancelled_by_shutdown_request
+                then Keeper_keepalive_launch_transaction.Graceful
+                else Keeper_keepalive_launch_transaction.Unexpected
+              in
+              let terminalize_unresolved () =
               if Shutdown.is_shutting_down_global ()
               then (
-                ignore (settle_librarian ~graceful:true : (unit, string) result);
                 (* Issue #18901: graceful-shutdown branch. Tag the failure
                    reason with [Graceful_shutdown] cause so the cohort
                    key splits away from the legacy "fiber_unresolved"
@@ -439,7 +437,6 @@ let launch_supervised_fiber_body
                      (`Crashed "shutdown")))
               else if Atomic.get cancelled_by_shutdown_request
               then (
-                ignore (settle_librarian ~graceful:true : (unit, string) result);
                 (* Exact exception identity distinguishes an operator lane
                    shutdown from parent cancellation. A requested shutdown is
                    a graceful stop, so the operator observes a joined stop
@@ -488,7 +485,6 @@ let launch_supervised_fiber_body
                     ())
               else if Atomic.get cancelled_by_parent
               then (
-                ignore (settle_librarian ~graceful:false : (unit, string) result);
                 (* Issue #18901 follow-up: parent-cancel branch. The
                    body's try/with caught [Eio.Cancel.Cancelled] and set
                    the flag before re-raising. Shutdown was not in
@@ -518,8 +514,7 @@ let launch_supervised_fiber_body
                      ~source:"supervisor_parent_cancel_cleanup"
                      (`Crashed "cancelled_by_parent")))
               else (
-	                ignore (settle_librarian ~graceful:false : (unit, string) result);
-		                let reason =
+	                let reason =
 	                  Keeper_registry.failure_reason_to_string
 	                    (Keeper_registry.Fiber_unresolved Unexpected)
 	                in
@@ -588,7 +583,12 @@ let launch_supervised_fiber_body
                     ~phase:Keeper_state_machine.Crashed
                     meta.name
                     reason
-                    ()))
+                    ());
+                Ok ()
+              in
+              ignore
+                (finish_lifecycle boundary terminalize_unresolved
+                  : (unit, string) result)))
           with
           | Cleanup_completed -> ()
           | Cleanup_cancelled ->
@@ -624,13 +624,14 @@ let launch_supervised_fiber_body
     case nothing was forked, no [Started]/[Running] event may be published
     by the caller, and [done_p] has been resolved through the crash path. *)
 let launch_supervised_fiber
+      ~lifecycle_token
       ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
       (reg : Keeper_registry.registry_entry)
   =
   let base_path = ctx.config.base_path in
-  match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
+  match Keeper_registry.prepare_fiber_launch_for_lifecycle lifecycle_token reg with
   | Error err ->
     (* Fail closed: a rejected [Fiber_started] (terminal state, invalid
        transition, precondition violation) means the registry refuses a
@@ -678,7 +679,12 @@ let launch_supervised_fiber
     (* Propagate the fork outcome: a rejected [Keeper_lane.fork] returns
        [Error] here so the caller suppresses the Started/Running lifecycle
        for a keeper whose lane was never forked. *)
-    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
+    launch_supervised_fiber_body
+      ~lifecycle_token
+      ~proactive_warmup_sec
+      ctx
+      meta
+      reg
 ;;
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =

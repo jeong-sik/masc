@@ -13,3 +13,10 @@ val record :
     same-name lane's [last_error]. *)
 val record_exact :
   ?details:Yojson.Safe.t -> Keeper_registry.registry_entry -> string -> unit
+
+val record_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token ->
+  ?details:Yojson.Safe.t ->
+  Keeper_registry.registry_entry ->
+  string ->
+  unit

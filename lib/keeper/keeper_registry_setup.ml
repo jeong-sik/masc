@@ -682,7 +682,7 @@ type register_restarting_error =
       ; detail : string
       }
 
-let register_restarting ~base_path name meta
+let register_restarting_internal ?lifecycle_token ~base_path name meta
   : (registry_entry, register_restarting_error) result
   =
   let base_path = canonical_base_path_exn base_path in
@@ -691,7 +691,11 @@ let register_restarting ~base_path name meta
   in
   let key = registry_key ~base_path name in
   match
-    Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
   with
   | Error owner -> Error (Restart_lifecycle_reserved owner)
   | Ok () ->
@@ -761,7 +765,13 @@ let register_restarting ~base_path name meta
   in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
   let guarded_loop_key_locked () =
-    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    match
+      Keeper_lifecycle_reservation.authorize
+        ?token:lifecycle_token
+        ~base_path
+        ~keeper_name:name
+        ()
+    with
     | Error owner -> Error (Restart_lifecycle_reserved owner)
     | Ok () -> loop ()
   in
@@ -784,6 +794,14 @@ let register_restarting ~base_path name meta
       base_path
       (Keeper_state_machine.phase_to_string phase);
     Ok registered
+;;
+
+let register_restarting ~base_path name meta =
+  register_restarting_internal ~base_path name meta
+;;
+
+let register_restarting_for_lifecycle token ~base_path name meta =
+  register_restarting_internal ~lifecycle_token:token ~base_path name meta
 ;;
 
 type unregister_exact_result =

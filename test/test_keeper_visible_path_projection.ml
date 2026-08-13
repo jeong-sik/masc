@@ -256,7 +256,7 @@ let test_repository_checkout_projection_shares_inspection_budget () =
   let fake_bin = Filename.concat playground "fake-bin" in
   ensure_dir fake_bin;
   let fake_git = Filename.concat fake_bin "git" in
-  write_file fake_git "#!/bin/sh\nsleep 30\n";
+  write_file fake_git "#!/bin/sh\nexec sleep 30\n";
   Unix.chmod fake_git 0o755;
   List.iter
     (fun name ->

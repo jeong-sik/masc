@@ -1213,6 +1213,20 @@ let test_readonly_policy_projection_is_descriptor_owned () =
     false
     (List.mem "tool_write_file" projected)
 
+let test_concurrent_execution_opt_ins_are_exact () =
+  let concurrent_internal_names =
+    all_descriptors ()
+    |> List.filter_map (fun (descriptor : Descriptor.t) ->
+      match descriptor.execution with
+      | Descriptor.Ordinary Descriptor.Concurrent -> Some descriptor.internal_name
+      | Descriptor.Ordinary Descriptor.Serial | Descriptor.Terminal -> None)
+    |> List.sort_uniq String.compare
+  in
+  Alcotest.(check (list string))
+    "only explicitly audited handlers opt into concurrent batches"
+    [ "keeper_time_now"; "masc_board_stats" ]
+    concurrent_internal_names
+
 let test_readonly_policy_is_descriptor_input_aware () =
   let public_input =
     `Assoc [ "pattern", `String "Keeper_tool_descriptor"; "op", `String "rm" ]
@@ -1663,6 +1677,10 @@ let () =
         ] )
     ; ( "policy-projection"
       , [ test_case
+            "concurrent execution opt-ins are exact"
+            `Quick
+            test_concurrent_execution_opt_ins_are_exact
+        ; test_case
             "descriptor owns the read-only metadata projection"
             `Quick
             test_readonly_policy_projection_is_descriptor_owned

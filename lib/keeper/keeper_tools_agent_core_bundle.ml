@@ -9,18 +9,6 @@
 
 open Keeper_tools_agent_core
 
-type completion_boundary =
-  | Continue_after_success
-  | Terminal_effect
-
-(* A connected-surface post is the reply deliverable for this Keeper turn.
-   Classify it from the closed runtime-handler ADT: no tool-name comparison,
-   payload inspection, retry count, or elapsed-time threshold participates. *)
-let completion_boundary_of_runtime_handler = function
-  | Keeper_tool_descriptor.Tool_surface_post -> Terminal_effect
-  | _ -> Continue_after_success
-;;
-
 let terminal_externalization_failure
       state
       ({ message; _ } : Tool_bridge.externalization_error)
@@ -255,8 +243,9 @@ let make_tool_bundle_for_descriptors
          let internal = descriptor.internal_name in
          let agent_core_descriptor =
            match descriptor.execution with
-           | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial
-             -> None
+           | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial ->
+             Some
+               (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
            | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
              Some
                (Agent_core.Tool.ordinary_descriptor
@@ -383,12 +372,6 @@ let make_tools
 ;;
 
 module For_testing = struct
-  let is_terminal_effect_handler handler =
-    match completion_boundary_of_runtime_handler handler with
-    | Terminal_effect -> true
-    | Continue_after_success -> false
-  ;;
-
   let initial_terminal_effect_state = initial_terminal_effect_state
 
   let terminal_externalization_failure =

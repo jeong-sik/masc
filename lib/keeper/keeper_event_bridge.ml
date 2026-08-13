@@ -186,8 +186,13 @@ let wrap_event
     compile-time update requirement at this boundary. *)
 let invocation_payload_fields invocation =
   let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
+  let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
   [ "turn", `Int (Agent_core.Tool_contract.Invocation.turn invocation)
-  ; "planned_index", `Int (Agent_core.Tool_contract.Invocation.planned_index invocation)
+  ; "planned_index", `Int schedule.planned_index
+  ; "batch_index", `Int schedule.batch_index
+  ; "batch_size", `Int schedule.batch_size
+  ; ( "execution_mode"
+    , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
   ]
   @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
 ;;

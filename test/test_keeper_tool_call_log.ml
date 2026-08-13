@@ -268,6 +268,9 @@ let test_exact_agent_core_occurrence_persisted () =
       ~tool_use_id:""
       ~turn:9
       ~planned_index:4
+      ~batch_index:2
+      ~batch_size:3
+      ~execution_mode:Agent_core.Tool_contract.Concurrent
       ();
     match Keeper_tool_call_log.read_recent ~n:1 () with
     | [ entry ] ->
@@ -282,7 +285,19 @@ let test_exact_agent_core_occurrence_persisted () =
       Alcotest.(check int)
         "planned index persisted"
         4
-        (Safe_ops.json_int ~default:(-1) "planned_index" entry)
+        (Safe_ops.json_int ~default:(-1) "planned_index" entry);
+      Alcotest.(check int)
+        "batch index persisted"
+        2
+        (Safe_ops.json_int ~default:(-1) "batch_index" entry);
+      Alcotest.(check int)
+        "batch size persisted"
+        3
+        (Safe_ops.json_int ~default:(-1) "batch_size" entry);
+      Alcotest.(check (option string))
+        "execution mode persisted"
+        (Some "concurrent")
+        (Safe_ops.json_string_opt "execution_mode" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
 
 (* ── Redaction: tool names do not suppress evidence ────────────── *)

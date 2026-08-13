@@ -206,6 +206,10 @@ function entryScopeLabel(entry: ToolCallEntry): string {
   const parts = [
     typeof entry.turn === 'number' ? `turn ${entry.turn}` : null,
     typeof entry.planned_index === 'number' ? `plan ${entry.planned_index}` : null,
+    typeof entry.batch_index === 'number' && typeof entry.batch_size === 'number'
+      ? `batch ${entry.batch_index} · size ${entry.batch_size}`
+      : null,
+    entry.execution_mode ? `mode ${entry.execution_mode}` : null,
     entry.tool_use_id !== undefined
       ? `tool_use_id ${entry.tool_use_id === '' ? '(blank)' : entry.tool_use_id}`
       : null,

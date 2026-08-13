@@ -61,13 +61,16 @@ val send_message :
   channel_id:string ->
   content:string ->
   ?reply_to_message_id:string ->
+  ?allowed_user_mentions:string list ->
   unit ->
   (string, error) result
 (** [send_message ~token ~channel_id ~content ?reply_to_message_id ()]
     posts to [POST /api/v10/channels/{channel_id}/messages].
     When [reply_to_message_id] is provided, the message is sent as
-    a reply (Discord threads the conversation). Returns the created
-    message id on [Ok].
+    a reply (Discord threads the conversation). [allowed_user_mentions]
+    contains the only user snowflakes Discord may notify; when omitted or
+    empty, user, role, and everyone mentions are all suppressed. Returns the
+    created message id on [Ok].
 
     Works for guild text channels, DM channels, and threads.
 
@@ -213,11 +216,13 @@ val build_request :
   channel_id:snowflake ->
   content:string ->
   ?reply_to_message_id:snowflake ->
+  ?allowed_user_mentions:snowflake list ->
   unit ->
   string * (string * string) list * string
 (** [(url, headers, body) = build_request ~token ~channel_id ~content
     ?reply_to_message_id ()].  Headers include Authorization (Bot
-    scheme), Content-Type, and a Discord-required User-Agent.  When
+    scheme), Content-Type, a fail-closed [allowed_mentions] object, and a
+    Discord-required User-Agent. When
     [reply_to_message_id] is provided, the body includes a
     [message_reference] field so Discord threads the reply. *)
 

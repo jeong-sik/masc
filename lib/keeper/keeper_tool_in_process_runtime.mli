@@ -31,6 +31,7 @@ type connector_post_replay =
       { input : Yojson.Safe.t
       ; channel_id : string
       ; content : string
+      ; mention_user_ids : string list
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
@@ -38,14 +39,16 @@ type connector_post_replay =
       ; thread_ts : string option
       ; content : string
       ; blocks : Yojson.Safe.t list
+      ; mention_user_ids : string list
       }
 
 val connector_post_replay_of_gate_input :
   Yojson.Safe.t -> (connector_post_replay, string) result
 (** Decode the exact durable connector request emitted by
     [handle_surface_post_with_outcome]. The original JSON value is retained
-    and used for one-shot Gate consumption; content and blocks are never
-    truncated or reconstructed for replay. *)
+    and used for one-shot Gate consumption; content, blocks, and the exact
+    validated mention allowlist are never truncated or reconstructed for
+    replay. *)
 
 val connector_post_replay_target :
   connector_post_replay -> Keeper_surface_post.post_target

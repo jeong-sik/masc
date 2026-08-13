@@ -2692,6 +2692,7 @@ let test_durable_connector_replay_settles_terminal_turn () =
            [ "connector", `String "discord"
            ; "channel_id", `String "D-approved"
            ; "content", `String "approved reply already delivered"
+           ; "mention_user_ids", `List []
            ]
        in
        let approval_id =

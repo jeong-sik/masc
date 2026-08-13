@@ -907,8 +907,8 @@ let handle_person_note_set ~config ~meta ~args =
    gateway and Owner connector delivery — rather than a direct env lookup here. *)
 let slack_token_opt = Env_config_slack.bot_token_opt
 
-let connector_post_gate_input ~connector ~channel_id ~content ?thread_ts ?blocks
-    () =
+let connector_post_gate_input ~connector ~channel_id ~content ~mention_user_ids
+    ?thread_ts ?blocks () =
   let thread_ts_fields =
     match thread_ts with
     | None -> []
@@ -923,6 +923,7 @@ let connector_post_gate_input ~connector ~channel_id ~content ?thread_ts ?blocks
     ([ "connector", `String connector
      ; "channel_id", `String channel_id
      ; "content", `String content
+     ; "mention_user_ids", Json_util.json_string_list mention_user_ids
      ]
      @ thread_ts_fields
      @ block_fields)
@@ -935,6 +936,7 @@ type connector_post_replay =
       { input : Yojson.Safe.t
       ; channel_id : string
       ; content : string
+      ; mention_user_ids : string list
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
@@ -942,6 +944,7 @@ type connector_post_replay =
       ; thread_ts : string option
       ; content : string
       ; blocks : Yojson.Safe.t list
+      ; mention_user_ids : string list
       }
 
 let connector_post_replay_of_gate_input input =
@@ -985,6 +988,31 @@ let connector_post_replay_of_gate_input input =
     | _ ->
       Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
+  let optional_string_list key fields =
+    match
+      List.filter_map
+        (fun (name, value) -> if String.equal name key then Some value else None)
+        fields
+    with
+    | [ `List values ] ->
+      let rec decode acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest when String.trim value <> "" ->
+          decode (String.trim value :: acc) rest
+        | `String _ :: _ ->
+          Error (Printf.sprintf "approved connector_post %s contains a blank id" key)
+        | _ :: _ ->
+          Error
+            (Printf.sprintf
+               "approved connector_post %s must contain only strings"
+               key)
+      in
+      decode [] values
+    | [ _ ] ->
+      Error (Printf.sprintf "approved connector_post %s must be an array" key)
+    | [] -> Ok []
+    | _ -> Error (Printf.sprintf "approved connector_post repeats %s" key)
+  in
   let reject_unknown ~allowed fields =
     match
       fields
@@ -1005,20 +1033,44 @@ let connector_post_replay_of_gate_input input =
     let* connector = required_string "connector" fields in
     let* channel_id = required_string "channel_id" fields in
     let* content = required_string "content" fields in
+    (* Approvals persisted before rich mentions have no field at all. New
+       producers always write the canonical empty list, while replay keeps the
+       exact old no-mention meaning instead of making an approved effect
+       undecodable across the upgrade. *)
+    let* mention_user_ids = optional_string_list "mention_user_ids" fields in
+    let* validated_mention_user_ids =
+      Keeper_surface_post.user_mentions_of_args
+        ~surface:connector
+        (`Assoc [ "mention_user_ids", Json_util.json_string_list mention_user_ids ])
+    in
+    let* mention_user_ids =
+      if validated_mention_user_ids = mention_user_ids then Ok mention_user_ids
+      else
+        Error
+          "approved connector_post mention_user_ids must be sorted and unique"
+    in
     if String.equal connector Keeper_surface_post.discord_label
     then (
       let* () =
         reject_unknown
-          ~allowed:[ "connector"; "channel_id"; "content" ]
+          ~allowed:[ "connector"; "channel_id"; "content"; "mention_user_ids" ]
           fields
       in
-      Ok (Replay_discord_post { input; channel_id; content }))
+      Ok
+        (Replay_discord_post
+           { input; channel_id; content; mention_user_ids }))
     else if String.equal connector Keeper_surface_post.slack_label
     then (
       let* () =
         reject_unknown
           ~allowed:
-            [ "connector"; "channel_id"; "thread_ts"; "content"; "blocks" ]
+            [ "connector"
+            ; "channel_id"
+            ; "thread_ts"
+            ; "content"
+            ; "blocks"
+            ; "mention_user_ids"
+            ]
           fields
       in
       let* thread_ts = optional_string "thread_ts" fields in
@@ -1029,7 +1081,9 @@ let connector_post_replay_of_gate_input input =
           fields
       with
       | [ `List blocks ] ->
-        Ok (Replay_slack_post { input; channel_id; thread_ts; content; blocks })
+        Ok
+          (Replay_slack_post
+             { input; channel_id; thread_ts; content; blocks; mention_user_ids })
       | [ _ ] ->
         Error "approved connector_post blocks must be an array"
       | [] ->
@@ -1098,7 +1152,7 @@ let replay_connector_post_with_outcome
          (Printf.sprintf "%s send applied: %s" connector detail))
   in
   function
-  | Replay_discord_post { input; channel_id; content } ->
+  | Replay_discord_post { input; channel_id; content; mention_user_ids } ->
     with_connector_post_gate_execution
       ~config
       ~meta
@@ -1107,7 +1161,10 @@ let replay_connector_post_with_outcome
       ?gate_grant
       ~input
     @@ fun () ->
-    (match Channel_gate_discord_state.send_message ~channel_id ~content () with
+    (match
+       Channel_gate_discord_state.send_message ~channel_id ~content
+         ~mention_user_ids ()
+     with
      | Error send_error ->
        fail
          Keeper_surface_post.discord_label
@@ -1141,7 +1198,8 @@ let replay_connector_post_with_outcome
             ~content
             ();
           succeed Keeper_surface_post.discord_label ~message_id ()))
-  | Replay_slack_post { input; channel_id; thread_ts; content; blocks } ->
+  | Replay_slack_post
+      { input; channel_id; thread_ts; content; blocks; mention_user_ids } ->
     with_connector_post_gate_execution
       ~config
       ~meta
@@ -1164,6 +1222,7 @@ let replay_connector_post_with_outcome
             ~channel:channel_id
             ~content
             ~blocks
+            ~mention_user_ids
             ()
         with
         | Error send_error ->
@@ -1254,7 +1313,12 @@ let handle_surface_post_with_outcome
     fail
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json "content is required and must be non-empty.")
-  else
+  else match Keeper_surface_post.user_mentions_of_args ~surface args with
+  | Error message ->
+    fail
+      ~effect_disposition:Tool_result.Proven_pre_effect
+      (Keeper_surface_post.error_json message)
+  | Ok mention_user_ids ->
     match
       Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
     with
@@ -1282,7 +1346,23 @@ let handle_surface_post_with_outcome
         fail
           ~effect_disposition:Tool_result.Proven_pre_effect
           (Keeper_surface_post.error_json message)
-      | Ok Keeper_surface_post.To_dashboard ->
+      | Ok target ->
+        let messages =
+          Keeper_chat_store.load
+            ~base_dir:config.Workspace.base_path
+            ~keeper_name:meta.name
+        in
+        (match
+           Keeper_surface_post.validate_user_mentions_against_roster
+             ~target ~messages mention_user_ids
+         with
+         | Error message ->
+           fail
+             ~effect_disposition:Tool_result.Proven_pre_effect
+             (Keeper_surface_post.error_json message)
+         | Ok () ->
+         match target with
+         | Keeper_surface_post.To_dashboard ->
         (match
            Keeper_chat_store.append_assistant_message_result
              ~base_dir:config.Workspace.base_path
@@ -1304,12 +1384,13 @@ let handle_surface_post_with_outcome
            succeed
              Keeper_surface_post.To_dashboard
              (Keeper_surface_post.ok_json ~surface ()))
-    | Ok (Keeper_surface_post.To_discord { channel_id } as target) ->
+         | Keeper_surface_post.To_discord { channel_id } ->
       let input =
         connector_post_gate_input
           ~connector:surface
           ~channel_id
           ~content:safe_content
+          ~mention_user_ids
           ()
       in
       replay_connector_post_with_outcome
@@ -1318,19 +1399,19 @@ let handle_surface_post_with_outcome
         ?continuation_channel
         ?gate_context
         ?gate_grant
-        (Replay_discord_post { input; channel_id; content = safe_content })
+        (Replay_discord_post
+           { input; channel_id; content = safe_content; mention_user_ids })
       |> Keeper_tool_execution.with_surface_post_receipt target
-    | Ok
-        (Keeper_surface_post.To_slack { channel_id; thread_ts; blocks = _ } as
-         target) ->
+         | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks = _ } ->
       let slack_blocks =
-        Keeper_chat_slack.content_blocks_of_text safe_content
+        Keeper_chat_slack.message_blocks_of_text ~mention_user_ids safe_content
       in
       let input =
         connector_post_gate_input
           ~connector:surface
           ~channel_id
           ~content:safe_content
+          ~mention_user_ids
           ?thread_ts
           ~blocks:slack_blocks
           ()
@@ -1347,8 +1428,9 @@ let handle_surface_post_with_outcome
            ; thread_ts
            ; content = safe_content
            ; blocks = slack_blocks
+           ; mention_user_ids
            })
-      |> Keeper_tool_execution.with_surface_post_receipt target)
+      |> Keeper_tool_execution.with_surface_post_receipt target))
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =

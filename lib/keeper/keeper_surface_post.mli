@@ -31,6 +31,26 @@ val dashboard_label : string
 val discord_label : string
 val slack_label : string
 
+val max_user_mentions : int
+
+val user_mentions_of_args :
+  surface:string -> Yojson.Safe.t -> (string list, string) result
+(** Decode and validate the optional [mention_user_ids] tool argument.
+    Slack accepts only stable [U...]/[W...] participant ids; Discord accepts
+    only decimal user snowflakes. Display names are never guessed. Duplicate
+    ids are collapsed and more than {!max_user_mentions} ids are rejected.
+    Non-empty mentions on dashboard or another surface are invalid. *)
+
+val validate_user_mentions_against_roster :
+  target:post_target ->
+  messages:Keeper_chat_store.chat_message list ->
+  string list ->
+  (unit, string) result
+(** Fail closed unless every requested mention id appears as a user speaker on
+    the exact resolved Discord channel or Slack channel/thread in [messages].
+    The persisted chat lane is the roster SSOT; syntactically valid but stale,
+    hallucinated, or cross-channel ids are rejected before any effect. *)
+
 type delivery_target =
   | Delivered_to_dashboard
   | Delivered_to_discord of { channel_id : string }

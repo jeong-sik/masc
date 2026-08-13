@@ -159,12 +159,15 @@ val send_message :
   channel_id:string ->
   content:string ->
   ?reply_to_message_id:string ->
+  ?mention_user_ids:string list ->
   unit ->
   (string, send_error) result
 (** Post a single message to a Discord channel.  When
     [reply_to_message_id] is provided, the message is sent as a
-    reply (Discord threads the conversation).  Returns the created
-    message id on success.  Bot token is resolved from
+    reply (Discord threads the conversation). [mention_user_ids] are prefixed
+    as visible mentions and are the only user ids Discord is allowed to
+    notify; absent means all mention kinds are suppressed. Returns the created
+    message id on success. Bot token is resolved from
     [DISCORD_BOT_TOKEN] at call time so a token rotation doesn't
     require a server restart.
 
@@ -190,3 +193,16 @@ val trigger_typing :
 (** Trigger Discord's typing indicator for [channel_id]. Bot token is
     resolved from [DISCORD_BOT_TOKEN] at call time, matching
     {!send_message}. *)
+
+module For_testing : sig
+  type outbound_message =
+    { content : string
+    ; allowed_user_mentions : string list
+    }
+
+  val message_chunks_with_mentions :
+    limit:int ->
+    content:string ->
+    mention_user_ids:string list ->
+    outbound_message list
+end

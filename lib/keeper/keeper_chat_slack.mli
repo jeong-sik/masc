@@ -29,21 +29,26 @@ val send_message_with_blocks :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
   ?thread_ts:string ->
+  ?mention_user_ids:string list ->
   token:string -> channel:string -> content:string -> blocks:Yojson.Safe.t list -> unit -> (unit, error) result
 (** [send_message_with_blocks ~token ~channel ~content ~blocks] posts to
-    [chat.postMessage] with the given Block Kit [blocks]. Logs errors via
-    [Log.Keeper.warn] and returns the outcome. *)
+    [chat.postMessage] with the given Block Kit [blocks]. Stable Slack ids in
+    [mention_user_ids] are emitted both in the accessible fallback and the
+    visible blocks assembled by the caller. Logs errors via [Log.Keeper.warn]
+    and returns the outcome. *)
 
 val content_blocks_of_text : string -> Yojson.Safe.t list
-(** [content_blocks_of_text text] projects server chat blocks into Slack
-    Block Kit blocks:
-    - Markdown images [![alt](url)] become image blocks.
-    - Standalone image URLs (png/jpg/gif/webp/svg) become image blocks.
-    - Other standalone URLs become link blocks with a hostname-derived title.
-    Code and Mermaid fences become section code-block sections.
-    Text and most other block kinds are omitted because primary text is
-    already delivered via the [content] field; fusion cards also have no
-    Slack-native projection yet. *)
+(** [content_blocks_of_text text] puts the complete LLM-authored standard
+    Markdown in Slack's native [markdown] block, which renders headings,
+    emphasis, lists, links, code, task lists, and tables without a local
+    Markdown-to-mrkdwn heuristic. Safe image chat blocks are also projected as
+    image blocks. Blank text produces no block. *)
+
+val message_blocks_of_text :
+  mention_user_ids:string list -> string -> Yojson.Safe.t list
+(** Prepend one visible mrkdwn mention section to
+    {!content_blocks_of_text}. Ids must already have passed the surface-post
+    validator. *)
 
 val link_block_json :
   url:string -> title:string -> description:string option -> Yojson.Safe.t
@@ -114,6 +119,13 @@ module For_testing : sig
 
   val content_blocks_of_text : string -> Yojson.Safe.t list
   (** Same as {!content_blocks_of_text}; exposed for unit testing. *)
+
+  val message_blocks_of_text :
+    mention_user_ids:string list -> string -> Yojson.Safe.t list
+
+  val markdown_block_json : string -> Yojson.Safe.t
+
+  val mention_block_json : string list -> Yojson.Safe.t
 
   val final_message_blocks :
     content:string -> event_blocks:Yojson.Safe.t list -> Yojson.Safe.t list

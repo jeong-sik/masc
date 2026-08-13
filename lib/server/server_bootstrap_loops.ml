@@ -261,7 +261,11 @@ let deliver_broadcast_mention
              let messages =
                Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name:target
              in
-             if not (List.exists (fun message -> String.equal message.id row_id) messages)
+             if not
+                  (List.exists
+                     (fun (message : Keeper_chat_store.chat_message) ->
+                        String.equal message.id row_id)
+                     messages)
              then (
                Log.Keeper.error
                  "broadcast mention accepted row could not be reloaded keeper=%s request_id=%s row_id=%s"
@@ -274,7 +278,9 @@ let deliver_broadcast_mention
                    ~targets:
                      (Keeper_world_observation_message_scope.message_feed_targets meta)
                    messages
-                 |> List.exists (fun pending -> String.equal pending.message_id row_id)
+                 |> List.exists
+                      (fun (pending : Keeper_world_observation_message_scope.pending_message) ->
+                         String.equal pending.message_id row_id)
                in
                if pending then request_wake ();
                Log.Keeper.info
@@ -964,6 +970,10 @@ let start_keeper_loops_owned
       f
   in
   let config = workspace_scope.Mcp_server.config in
+  (match Workspace_broadcast.validate_current_message_schema config with
+   | Ok () -> ()
+   | Error rejections ->
+     raise (Workspace_broadcast.Current_message_schema_rejected rejections));
   (* The owner inventory is installed by [initialize_owner_state_blocking]
      before persistence preparation. Shutdown admission recovery is itself an
      Owner command after the single-owner hard cut, so installing it here was
@@ -1386,6 +1396,17 @@ let start_keeper_loops_owned
        | Error detail ->
          Log.Keeper.error "broadcast mention recovery unavailable: %s" detail
        | Ok report ->
+         List.iter
+           (fun (receipt : Workspace_broadcast.mention_outbox_quarantine_receipt) ->
+              Log.Keeper.error
+                "broadcast mention quarantine source=%s quarantine=%s reason=%s sha256=%s detail=%s"
+                receipt.source_name
+                receipt.quarantine_name
+                (Workspace_broadcast.mention_outbox_quarantine_reason_to_string
+                   receipt.reason)
+                receipt.raw_sha256
+                receipt.detail)
+           report.quarantine_receipts;
          if report.pending_rows > 0 || report.corrupt_rows > 0
          then
            Log.Keeper.info

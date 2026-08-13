@@ -219,9 +219,22 @@ let test_failed_authoritative_write_suppresses_fanout () =
         Alcotest.(check int) "success latency observation suppressed" 0 !observations))
 ;;
 
-let write_file path content =
-  let oc = open_out_bin path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+let with_failed_message_commit f =
+  let previous_write =
+    Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun _config _path _json -> Error "injected canonical message failure")
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let (_ :
+        Workspace_utils_backend_setup.config ->
+        string ->
+        Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous_write
+      in
+      ())
+    f
 
 let test_durable_outbox_defers_failed_message_commit () =
   with_test_env (fun config ->
@@ -232,21 +245,11 @@ let test_durable_outbox_defers_failed_message_commit () =
     Fun.protect
       ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous_wake)
       (fun () ->
-         let messages_dir = Workspace_utils.messages_dir config in
-         let restore_messages_dir () =
-           if Sys.file_exists messages_dir && not (Sys.is_directory messages_dir)
-           then Sys.remove messages_dir;
-           if not (Sys.file_exists messages_dir) then Unix.mkdir messages_dir 0o755
-         in
          let delivery =
-           Fun.protect
-             ~finally:restore_messages_dir
-             (fun () ->
-                Unix.rmdir messages_dir;
-                write_file messages_dir "block message directory";
-                 Workspace.broadcast config ~from_agent:"claude"
-                   ~content:"@gemini recover me"
-                 |> Result.get_ok)
+           with_failed_message_commit (fun () ->
+             Workspace.broadcast config ~from_agent:"claude"
+               ~content:"@gemini recover me"
+             |> Result.get_ok)
          in
          Alcotest.(check string)
            "durably queued mention is explicitly deferred"
@@ -265,21 +268,86 @@ let test_durable_outbox_defers_failed_message_commit () =
          Alcotest.(check int) "one canonical message is recovered" 1
            (List.length recovered)))
 
-let test_malformed_outbox_filename_is_a_global_barrier () =
+let test_malformed_outbox_is_quarantined_before_successor_delivery () =
   with_test_env (fun config ->
+    let previous_wake =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun _delivery -> Workspace_broadcast.Accepted)
+    in
+    Fun.protect
+      ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous_wake)
+      (fun () ->
     let outbox_dir =
       Filename.concat (Workspace_utils.masc_root_dir config) "message-mention-outbox"
     in
+    let malformed_path = Filename.concat outbox_dir "malformed.json" in
+    let successor =
+      with_failed_message_commit (fun () ->
+        Workspace.broadcast config ~from_agent:"claude"
+          ~content:"@gemini follows quarantined row"
+        |> Result.get_ok)
+    in
     Workspace_utils.write_json config
-      (Filename.concat outbox_dir "malformed.json")
+      malformed_path
       (`Assoc [ "unexpected", `Bool true ]);
+    Alcotest.(check string)
+      "successor waits in the durable outbox"
+      "deferred"
+      (Workspace_broadcast.mention_delivery_kind successor.mention_delivery);
     let report =
       Workspace_broadcast.reconcile_pending_mentions config
       |> Result.get_ok
     in
-    Alcotest.(check bool) "unknown predecessor blocks later delivery" true
+    Alcotest.(check bool) "quarantine releases the global barrier" false
       report.global_barrier;
-    Alcotest.(check int) "malformed outbox remains observable" 1 report.corrupt_rows)
+    Alcotest.(check int) "malformed outbox remains observable" 1 report.corrupt_rows;
+    Alcotest.(check int) "successor is delivered after quarantine" 1 report.accepted;
+    let receipt =
+      match report.quarantine_receipts with
+      | [ receipt ] -> receipt
+      | receipts ->
+        Alcotest.failf "expected one quarantine receipt, got %d" (List.length receipts)
+    in
+    (match receipt.reason with
+     | Workspace_broadcast.Malformed_filename -> ()
+     | _ -> Alcotest.fail "wrong typed quarantine reason");
+    Alcotest.(check bool) "corrupt source removed" false (Sys.file_exists malformed_path);
+    let quarantine_path =
+      Filename.concat
+        (Filename.concat
+           (Workspace_utils.masc_root_dir config)
+           "message-mention-outbox-quarantine")
+        receipt.quarantine_name
+    in
+    Alcotest.(check bool) "quarantine evidence committed" true
+      (Sys.file_exists quarantine_path)))
+
+let test_startup_schema_preflight_rejects_unpurged_message () =
+  with_test_env (fun config ->
+    let old_row =
+      `Assoc
+        [ "seq", `Int 1
+        ; "from_agent", `String "claude"
+        ; "content", `String "pre-current-schema"
+        ; "timestamp", `Float 1.0
+        ; "mention", `Null
+        ; "msg_type", `String "broadcast"
+        ]
+    in
+    Workspace_utils.write_json
+      config
+      (Filename.concat
+         (Workspace_utils.messages_dir config)
+         "000000001_claude_old_broadcast.json")
+      old_row;
+    match Workspace_broadcast.validate_current_message_schema config with
+    | Ok () -> Alcotest.fail "unpurged old message schema passed startup preflight"
+    | Error [ rejection ] ->
+      (match rejection.kind with
+       | Workspace_broadcast.Message_row_incompatible -> ()
+       | _ -> Alcotest.fail "old message row had the wrong rejection kind")
+    | Error rejections ->
+      Alcotest.failf "expected one schema rejection, got %d" (List.length rejections))
 
 let () =
   Alcotest.run "Workspace raw message regression" [
@@ -296,7 +364,9 @@ let () =
         test_failed_authoritative_write_suppresses_fanout;
       Alcotest.test_case "durable outbox defers failed message commit" `Quick
         test_durable_outbox_defers_failed_message_commit;
-      Alcotest.test_case "malformed outbox filename blocks successors" `Quick
-        test_malformed_outbox_filename_is_a_global_barrier;
+      Alcotest.test_case "malformed outbox quarantines before successor" `Quick
+        test_malformed_outbox_is_quarantined_before_successor_delivery;
+      Alcotest.test_case "startup rejects unpurged message schema" `Quick
+        test_startup_schema_preflight_rejects_unpurged_message;
     ]);
   ]

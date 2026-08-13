@@ -39,6 +39,33 @@ type broadcast_delivery =
   ; mention_delivery : mention_delivery
   }
 
+type mention_outbox_quarantine_reason =
+  | Malformed_filename
+  | Malformed_json
+  | Invalid_current_schema
+  | Request_identity_mismatch
+
+type mention_outbox_quarantine_receipt =
+  { source_name : string
+  ; quarantine_name : string
+  ; reason : mention_outbox_quarantine_reason
+  ; detail : string
+  ; raw_sha256 : string
+  }
+
+type message_schema_rejection_kind =
+  | Message_row_unreadable
+  | Message_row_malformed_json
+  | Message_row_incompatible
+
+type message_schema_rejection =
+  { source_name : string
+  ; kind : message_schema_rejection_kind
+  ; detail : string
+  }
+
+exception Current_message_schema_rejected of message_schema_rejection list
+
 type reconciliation_report =
   { outbox_rows : int
   ; pending_rows : int
@@ -47,9 +74,22 @@ type reconciliation_report =
   ; deferred : int
   ; rejected : int
   ; corrupt_rows : int
+  ; quarantine_receipts : mention_outbox_quarantine_receipt list
   ; blocked_targets : string list
   ; global_barrier : bool
   }
+
+val mention_outbox_quarantine_reason_to_string :
+  mention_outbox_quarantine_reason -> string
+
+val message_schema_rejection_to_string : message_schema_rejection -> string
+
+(** Reject any retained workspace message row that predates the current
+    request-id + mention-delivery schema. Startup calls this synchronously
+    before installing Keeper delivery, so the documented pre-deploy purge is
+    an enforced boundary rather than an operator promise. *)
+val validate_current_message_schema :
+  Workspace_utils_backend_setup.config -> (unit, message_schema_rejection list) result
 
 val emit_message_activity : Workspace_utils_backend_setup.config ->
            from_agent:string ->

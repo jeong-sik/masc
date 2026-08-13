@@ -45,6 +45,33 @@ type broadcast_delivery =
   ; mention_delivery : mention_delivery
   }
 
+type mention_outbox_quarantine_reason =
+  | Malformed_filename
+  | Malformed_json
+  | Invalid_current_schema
+  | Request_identity_mismatch
+
+type mention_outbox_quarantine_receipt =
+  { source_name : string
+  ; quarantine_name : string
+  ; reason : mention_outbox_quarantine_reason
+  ; detail : string
+  ; raw_sha256 : string
+  }
+
+type message_schema_rejection_kind =
+  | Message_row_unreadable
+  | Message_row_malformed_json
+  | Message_row_incompatible
+
+type message_schema_rejection =
+  { source_name : string
+  ; kind : message_schema_rejection_kind
+  ; detail : string
+  }
+
+exception Current_message_schema_rejected of message_schema_rejection list
+
 type reconciliation_report =
   { outbox_rows : int
   ; pending_rows : int
@@ -53,9 +80,40 @@ type reconciliation_report =
   ; deferred : int
   ; rejected : int
   ; corrupt_rows : int
+  ; quarantine_receipts : mention_outbox_quarantine_receipt list
   ; blocked_targets : string list
   ; global_barrier : bool
   }
+
+let mention_outbox_quarantine_reason_to_string = function
+  | Malformed_filename -> "malformed_filename"
+  | Malformed_json -> "malformed_json"
+  | Invalid_current_schema -> "invalid_current_schema"
+  | Request_identity_mismatch -> "request_identity_mismatch"
+;;
+
+let message_schema_rejection_kind_to_string = function
+  | Message_row_unreadable -> "unreadable"
+  | Message_row_malformed_json -> "malformed_json"
+  | Message_row_incompatible -> "incompatible_current_schema"
+;;
+
+let message_schema_rejection_to_string rejection =
+  Printf.sprintf
+    "%s:%s:%s"
+    rejection.source_name
+    (message_schema_rejection_kind_to_string rejection.kind)
+    rejection.detail
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Current_message_schema_rejected rejections ->
+      Some
+        ("workspace message current-schema preflight rejected: "
+         ^ String.concat "; " (List.map message_schema_rejection_to_string rejections))
+    | _ -> None)
+;;
 
 let mention_delivery_kind = function
   | Passive -> "passive"
@@ -200,11 +258,36 @@ let message_file config (message : Masc_domain.message) =
 let mention_outbox_dir config =
   Filename.concat (masc_dir config) "message-mention-outbox"
 
+let mention_outbox_quarantine_dir config =
+  Filename.concat (masc_dir config) "message-mention-outbox-quarantine"
+
 let mention_outbox_file config request_id =
   Filename.concat (mention_outbox_dir config) (request_id ^ ".json")
 
 let delete_outbox_marker config request_id =
   let path = mention_outbox_file config request_id in
+  match key_of_path config path with
+  | Some key ->
+    (match backend_delete config ~key with
+     | Error error -> Error (Backend_types.show_error error)
+     | Ok _ ->
+       (try
+          if should_dual_write_local config && Sys.file_exists path
+          then Sys.remove path;
+          Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn)))
+  | None ->
+    (try
+       if Sys.file_exists path then Sys.remove path;
+       Ok ()
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printexc.to_string exn))
+
+let delete_outbox_source config name =
+  let path = Filename.concat (mention_outbox_dir config) name in
   match key_of_path config path with
   | Some key ->
     (match backend_delete config ~key with
@@ -330,8 +413,7 @@ let current_request_id_of_filename name =
         in
       if valid_hex prefix_length then Some request_id else None
 
-let authoritative_outbox_names config =
-  let directory = mention_outbox_dir config in
+let authoritative_directory_names config directory =
   match key_of_path config directory with
   | None ->
     (try
@@ -355,6 +437,94 @@ let authoritative_outbox_names config =
     |> Result.map_error Backend_types.show_error
     |> Result.map (List.map (strip_prefix prefix))
 
+let authoritative_outbox_names config =
+  authoritative_directory_names config (mention_outbox_dir config)
+
+let read_source_raw config path =
+  match key_of_path config path with
+  | Some key ->
+    (match config.backend with
+     | FileSystem _ when Sys.file_exists path ->
+       (try Ok (Fs_compat.load_file path) with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn -> Error (Printexc.to_string exn))
+     | Memory _ | FileSystem _ ->
+       (match backend_get config ~key with
+        | Error error -> Error (Backend_types.show_error error)
+        | Ok (Some raw) -> Ok raw
+        | Ok None -> Error "authoritative row is missing"))
+  | None ->
+    (try
+       if Sys.file_exists path
+       then Ok (Fs_compat.load_file path)
+       else Error "local row is missing"
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printexc.to_string exn))
+
+let quarantine_outbox_source config ~name ~reason ~detail ~raw =
+  let raw_sha256 = Digestif.SHA256.(digest_string raw |> to_hex) in
+  let evidence_sha256 =
+    Digestif.SHA256.(digest_string (name ^ "\000" ^ raw) |> to_hex)
+  in
+  let quarantine_name = "q-" ^ evidence_sha256 ^ ".json" in
+  let quarantine_path =
+    Filename.concat (mention_outbox_quarantine_dir config) quarantine_name
+  in
+  let evidence =
+    `Assoc
+      [ "schema", `String "masc.workspace_mention_outbox_quarantine.v1"
+      ; "source_name", `String name
+      ; "reason", `String (mention_outbox_quarantine_reason_to_string reason)
+      ; "detail", `String detail
+      ; "raw_sha256", `String raw_sha256
+      ; "raw_base64", `String (Base64.encode_string raw)
+      ; "quarantined_at", `Float (Time_compat.now ())
+      ]
+  in
+  match write_json_commit_result config quarantine_path evidence with
+  | Error error -> Error ("quarantine evidence write failed: " ^ error)
+  | Ok { mirror_error } ->
+    Option.iter
+      (fun error ->
+         Log.Misc.warn
+           "workspace mention quarantine mirror failed source=%s quarantine=%s: %s"
+           name quarantine_name error)
+      mirror_error;
+    delete_outbox_source config name
+    |> Result.map_error (fun error -> "quarantine source delete failed: " ^ error)
+    |> Result.map (fun () ->
+      { source_name = name; quarantine_name; reason; detail; raw_sha256 })
+
+let validate_current_message_schema config =
+  match authoritative_directory_names config (messages_dir config) with
+  | Error detail ->
+    Error
+      [ { source_name = "<message-store>"
+        ; kind = Message_row_unreadable
+        ; detail
+        }
+      ]
+  | Ok names ->
+    let rejections =
+      names
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.filter_map (fun name ->
+        let path = Filename.concat (messages_dir config) name in
+        match read_source_raw config path with
+        | Error detail -> Some { source_name = name; kind = Message_row_unreadable; detail }
+        | Ok raw ->
+          (match Safe_ops.parse_json_safe ~context:"workspace message schema preflight" raw with
+           | Error detail ->
+             Some { source_name = name; kind = Message_row_malformed_json; detail }
+           | Ok json ->
+             (match message_of_yojson json with
+              | Ok _ -> None
+              | Error detail ->
+                Some { source_name = name; kind = Message_row_incompatible; detail })))
+    in
+    if rejections = [] then Ok () else Error rejections
+
 let empty_reconciliation_report =
   { outbox_rows = 0
   ; pending_rows = 0
@@ -363,6 +533,7 @@ let empty_reconciliation_report =
   ; deferred = 0
   ; rejected = 0
   ; corrupt_rows = 0
+  ; quarantine_receipts = []
   ; blocked_targets = []
   ; global_barrier = false
   }
@@ -423,96 +594,67 @@ let rematerialize_committed_message config message =
 let reconcile_pending_mentions_unlocked config =
   let open Result.Syntax in
   let* names = authoritative_outbox_names config in
-  let* current =
+  let* current, quarantine_receipts =
     names
     |> List.filter (fun name -> Filename.check_suffix name outbox_filename_suffix)
-    |> List.map (fun name ->
-      match current_request_id_of_filename name with
-      | Some request_id -> Some request_id, name
-      | None -> None, name)
     |> List.fold_left
-         (fun result (filename_request_id, name) ->
-            let* messages = result in
-            match filename_request_id with
-            | None ->
+         (fun result name ->
+            let* messages, receipts = result in
+            let path = Filename.concat (mention_outbox_dir config) name in
+            let* raw =
+              read_source_raw config path
+              |> Result.map_error (fun detail ->
+                Printf.sprintf "workspace mention outbox read failed file=%s: %s" name detail)
+            in
+            let quarantine reason detail =
               Log.Misc.error
-                "workspace mention recovery found malformed outbox filename=%s"
-                name;
-              Ok ((None, "", name) :: messages)
+                "workspace mention recovery quarantining file=%s reason=%s detail=%s"
+                name
+                (mention_outbox_quarantine_reason_to_string reason)
+                detail;
+              let* receipt =
+                quarantine_outbox_source config ~name ~reason ~detail ~raw
+              in
+              Ok (messages, receipt :: receipts)
+            in
+            match current_request_id_of_filename name with
+            | None -> quarantine Malformed_filename "filename is not a current request id"
             | Some filename_request_id ->
-              let path = Filename.concat (mention_outbox_dir config) name in
-              (match read_json_result config path with
-               | Error detail ->
-                 Log.Misc.error
-                   "workspace mention recovery outbox read failed file=%s: %s"
-                   name detail;
-                 Ok ((None, filename_request_id, name) :: messages)
+              (match Safe_ops.parse_json_safe ~context:"workspace mention outbox" raw with
+               | Error detail -> quarantine Malformed_json detail
                | Ok json ->
                  (match message_of_yojson json with
-                  | Error detail ->
-                    Log.Misc.error
-                      "workspace mention recovery outbox decode failed file=%s: %s"
-                      name detail;
-                    Ok ((None, filename_request_id, name) :: messages)
-                  | Ok message ->
-                    Ok ((Some message, filename_request_id, name) :: messages))))
-         (Ok [])
-    |> Result.map
-         (List.sort (fun (left, _, left_name) (right, _, right_name) ->
-           match left, right with
-           | Some left, Some right ->
+                  | Error detail -> quarantine Invalid_current_schema detail
+                  | Ok (message : Masc_domain.message) when
+                      not (String.equal message.request_id filename_request_id) ->
+                    quarantine
+                      Request_identity_mismatch
+                      (Printf.sprintf
+                         "filename_request_id=%s payload_request_id=%s"
+                         filename_request_id message.request_id)
+                  | Ok (message : Masc_domain.message) ->
+                    Ok ((message, name) :: messages, receipts))))
+         (Ok ([], []))
+    |> Result.map (fun (messages, receipts) ->
+      ( List.sort
+          (fun ((left : Masc_domain.message), left_name)
+               ((right : Masc_domain.message), right_name) ->
              let by_seq = Int.compare left.seq right.seq in
-             if by_seq <> 0 then by_seq else String.compare left_name right_name
-           | None, None -> String.compare left_name right_name
-           | None, Some _ -> -1
-           | Some _, None -> 1))
+             if by_seq <> 0 then by_seq else String.compare left_name right_name)
+          messages
+      , List.rev receipts ))
   in
-  let unknown_count =
-    List.fold_left
-      (fun count (message, _, _) ->
-         match message with None -> count + 1 | Some _ -> count)
-      0
-      current
+  let initial_report =
+    { empty_reconciliation_report with
+      outbox_rows = List.length current + List.length quarantine_receipts
+    ; corrupt_rows = List.length quarantine_receipts
+    ; quarantine_receipts
+    }
   in
-  if unknown_count > 0
-  then
-    Ok
-      { empty_reconciliation_report with
-        outbox_rows = List.length current
-      ; pending_rows = List.length current - unknown_count
-      ; deferred = List.length current - unknown_count
-      ; corrupt_rows = unknown_count
-      ; global_barrier = true
-      }
-  else
-  let report, blocked_targets, global_barrier =
+  let report, blocked_targets =
     List.fold_left
-      (fun (report, blocked_targets, global_barrier)
-           (outbox_message, filename_request_id, _name) ->
-         let report = { report with outbox_rows = report.outbox_rows + 1 } in
-         if global_barrier
-         then
-           ( { report with
-               pending_rows = report.pending_rows + 1
-             ; deferred = report.deferred + 1
-             }
-           , blocked_targets
-           , true )
-         else
-         match outbox_message with
-         | None ->
-           { report with corrupt_rows = report.corrupt_rows + 1 }, blocked_targets, true
-         | Some message when not (String.equal message.request_id filename_request_id) ->
-              Log.Misc.error
-                "workspace mention recovery identity mismatch filename_request_id=%s request_id=%s"
-                filename_request_id message.request_id;
-              ( { report with corrupt_rows = report.corrupt_rows + 1 }
-              , Option.fold
-                  ~none:blocked_targets
-                  ~some:(fun value -> value :: blocked_targets)
-                  message.mention
-              , false )
-         | Some outbox_message ->
+      (fun (report, blocked_targets)
+           ((outbox_message : Masc_domain.message), _name) ->
            let target = outbox_message.mention in
            let target_is_blocked =
              Option.fold
@@ -526,8 +668,7 @@ let reconcile_pending_mentions_unlocked config =
                  pending_rows = report.pending_rows + 1
                ; deferred = report.deferred + 1
                }
-             , blocked_targets
-             , false )
+             , blocked_targets )
            else
            let committed_path = message_file config outbox_message in
              let committed = read_committed_message config committed_path in
@@ -537,7 +678,10 @@ let reconcile_pending_mentions_unlocked config =
                  (match rematerialize_committed_message config outbox_message with
                   | Ok message -> Committed_message message
                   | Error detail -> Committed_message_unavailable detail)
-               | other -> other
+               | ( Committed_message _
+                 | Committed_message_unavailable _
+                 | Committed_message_corrupt _ ) as other ->
+                 other
              in
              (match committed with
               | Committed_message_unavailable detail ->
@@ -548,8 +692,7 @@ let reconcile_pending_mentions_unlocked config =
                 , Option.fold
                     ~none:blocked_targets
                     ~some:(fun value -> value :: blocked_targets)
-                    target
-                , false )
+                    target )
               | Committed_message_corrupt detail ->
                    Log.Misc.error
                      "workspace mention recovery committed decode failed request_id=%s: %s"
@@ -558,8 +701,7 @@ let reconcile_pending_mentions_unlocked config =
                    , Option.fold
                        ~none:blocked_targets
                        ~some:(fun value -> value :: blocked_targets)
-                       target
-                   , false )
+                       target )
               | Committed_message message when
                      not (String.equal message.request_id outbox_message.request_id) ->
                    Log.Misc.error
@@ -569,38 +711,37 @@ let reconcile_pending_mentions_unlocked config =
                    , Option.fold
                        ~none:blocked_targets
                        ~some:(fun value -> value :: blocked_targets)
-                       target
-                   , false )
+                       target )
               | Committed_message message ->
-              match reconcile_persisted_mention config message with
-              | None -> report, blocked_targets, false
-              | Some delivery ->
-                let report = { report with pending_rows = report.pending_rows + 1 } in
-                (match delivery with
-                 | Accepted ->
-                   { report with accepted = report.accepted + 1 }, blocked_targets, false
-                 | Already_accepted ->
-                   ( { report with already_accepted = report.already_accepted + 1 }
-                   , blocked_targets
-                   , false )
-                 | Deferred _ | Pending ->
-                   ( { report with deferred = report.deferred + 1 }
-                   , Option.fold
-                       ~none:blocked_targets
-                       ~some:(fun value -> value :: blocked_targets)
-                       target
-                   , false )
-                 | Rejected _ ->
-                   { report with rejected = report.rejected + 1 }, blocked_targets, false
-                 | Passive -> report, blocked_targets, false)
+                (match reconcile_persisted_mention config message with
+                 | None -> report, blocked_targets
+                 | Some delivery ->
+                   let report =
+                     { report with pending_rows = report.pending_rows + 1 }
+                   in
+                   (match delivery with
+                    | Accepted ->
+                      { report with accepted = report.accepted + 1 }, blocked_targets
+                    | Already_accepted ->
+                      ( { report with already_accepted = report.already_accepted + 1 }
+                      , blocked_targets )
+                    | Deferred _ | Pending ->
+                      ( { report with deferred = report.deferred + 1 }
+                      , Option.fold
+                          ~none:blocked_targets
+                          ~some:(fun value -> value :: blocked_targets)
+                          target )
+                    | Rejected _ ->
+                      { report with rejected = report.rejected + 1 }, blocked_targets
+                    | Passive -> report, blocked_targets))
               | Committed_message_absent -> assert false))
-      (empty_reconciliation_report, [], false)
+      (initial_report, [])
       current
   in
   Ok
     { report with
       blocked_targets = List.rev blocked_targets
-    ; global_barrier
+    ; global_barrier = false
     }
 
 let reconcile_pending_mentions config =
@@ -710,7 +851,6 @@ let broadcast_with_mention ?trace_context ~msg_type config ~from_agent ~content
      Log.Misc.error
        "workspace broadcast mention outbox write failed request_id=%s seq=%d: %s"
        request_id seq message;
-     observe safe_msg_type;
      Error (Broadcast_not_persisted message)
    | Ok () ->
   match (Atomic.get write_json_commit) config msg_file (message_to_yojson msg) with
@@ -718,7 +858,6 @@ let broadcast_with_mention ?trace_context ~msg_type config ~from_agent ~content
      Log.Misc.error
        "workspace broadcast authoritative write failed request_id=%s seq=%d: %s"
        request_id seq message;
-     observe safe_msg_type;
      (match mention with
       | None -> Error (Broadcast_not_persisted message)
       | Some _ ->

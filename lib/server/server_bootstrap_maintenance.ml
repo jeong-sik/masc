@@ -559,6 +559,17 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       | Error detail ->
         Log.Server.warn "broadcast mention reconciliation unavailable: %s" detail
       | Ok report ->
+        List.iter
+          (fun (receipt : Workspace_broadcast.mention_outbox_quarantine_receipt) ->
+             Log.Server.error
+               "broadcast mention quarantine source=%s quarantine=%s reason=%s sha256=%s detail=%s"
+               receipt.source_name
+               receipt.quarantine_name
+               (Workspace_broadcast.mention_outbox_quarantine_reason_to_string
+                  receipt.reason)
+               receipt.raw_sha256
+               receipt.detail)
+          report.quarantine_receipts;
         if report.pending_rows > 0 || report.corrupt_rows > 0
         then
           Log.Server.info

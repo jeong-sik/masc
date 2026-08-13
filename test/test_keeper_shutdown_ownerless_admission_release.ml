@@ -222,7 +222,51 @@ let test_retain_meta_supersession_does_not_fast_path () =
         bool
         "retain-meta inconsistency preserves Owner_not_found"
         true
-        (String_util.contains_substring detail "Keeper owner not found"))
+      (String_util.contains_substring detail "Keeper owner not found"))
+;;
+
+let test_ownerless_recovery_hands_intake_to_corrupt_successor () =
+  with_workspace (fun ~config ->
+    let name = "ownerless-corrupt-successor" in
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:(Finalized (finalized_after_removal_evidence name))
+        ~cleanup_intent:
+          { reason = Operator_stop_remove_meta; remove_session = true }
+    in
+    let successor_operation_id = Operation_id.generate () in
+    (match
+       Keeper_shutdown_intake_fence.restore_shutdown
+         ~base_path:config.base_path
+         ~keeper_name:name
+         ~operation_id:operation.operation_id
+     with
+     | Keeper_shutdown_intake_fence.Restored -> ()
+     | Keeper_shutdown_intake_fence.Already_restored
+     | Keeper_shutdown_intake_fence.Restore_conflict _ ->
+       fail "fixture failed to install current intake fence");
+    match
+      Keeper_shutdown_runtime.recover_operation_with_corrupt_owner_fence
+        ~config
+        ~corrupt_owner_fence:
+          (Some
+             { keeper_name = name
+             ; operation_id = successor_operation_id
+             })
+        operation
+    with
+    | Error detail -> failf "ownerless corrupt handoff failed: %s" detail
+    | Ok _ ->
+      check bool "corrupt successor owns the intake fence" true
+        (match
+           Keeper_shutdown_intake_fence.shutdown_operation_id
+             ~base_path:config.base_path
+             ~keeper_name:name
+         with
+         | Some actual -> Operation_id.equal actual successor_operation_id
+         | None -> false);
+      check_create_meta_rejected "corrupt successor" ~config operation)
 ;;
 
 (* Metadata that outlived its owner is an inconsistent state, not a removal:
@@ -455,6 +499,10 @@ let () =
             "retain-meta supersession does not fast-path removal"
             `Quick
             test_retain_meta_supersession_does_not_fast_path
+        ; Alcotest.test_case
+            "ownerless recovery hands intake to corrupt successor"
+            `Quick
+            test_ownerless_recovery_hands_intake_to_corrupt_successor
         ; Alcotest.test_case
             "meta without owner still fails"
             `Quick

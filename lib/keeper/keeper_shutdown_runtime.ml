@@ -559,7 +559,24 @@ let recover_operation_with_corrupt_owner_fence
              ~config
              operation
              error
-         then Ok recovered
+         then
+           (match
+              Keeper_shutdown_intake_fence.transition_shutdown
+                ~base_path:config.Workspace.base_path
+                ~keeper_name
+                ~from_operation_id:operation.operation_id
+                ~to_operation_id:successor_operation_id
+            with
+            | Keeper_shutdown_intake_fence.Transition_applied
+            | Keeper_shutdown_intake_fence.Transition_already_applied ->
+              Ok recovered
+            | Keeper_shutdown_intake_fence.Transition_reserved_by_other existing ->
+              Error
+                (Printf.sprintf
+                   "shutdown admission restore conflict: keeper=%s recovered=%s existing=%s"
+                   keeper_name
+                   (Operation_id.to_string operation.operation_id)
+                   (Operation_id.to_string existing)))
          else Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 

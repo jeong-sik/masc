@@ -155,6 +155,14 @@ val load_events_result :
 
 val load_events : base_path:string -> keeper_name:string -> event list
 
+val evidence_window_bytes : int
+
+val load_recent_evidence_events :
+  base_path:string -> keeper_name:string -> event list
+(** Read a bounded recent tail sized for prompt evidence rather than connector
+    redelivery. The first and last partial lines are excluded when the file is
+    larger than {!evidence_window_bytes}. This is not a whole-history API. *)
+
 val pending_for_keeper :
   base_path:string ->
   keeper_name:string ->

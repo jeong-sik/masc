@@ -391,24 +391,19 @@ let recorded_item_by_event_id events event_id =
       | Recorded _ | Resolved _ | Ignored _ -> None)
     events
 
-(* Events from the last [dedup_window_bytes] of the store, for the
-   redelivery dedup check in [record]. Reads a bounded tail via
-   [read_slice] instead of folding the whole file, so it stays O(window)
-   regardless of how large the append-only store has grown. The slice
-   starts mid-line (and the writer may be mid-append), so only the bytes
-   strictly between the first and last newline are complete lines —
-   parsing just those avoids feeding a partial line to [parse_line]
-   (which would otherwise log a spurious read-drop on every call). *)
-let load_recent_events ~base_path ~keeper_name =
+(* Read one bounded tail without parsing either boundary fragment. The writer
+   may be mid-append, and [from] usually lands mid-line, so only bytes strictly
+   between the first and last newline are complete records. *)
+let load_tail_events ~window_bytes ~base_path ~keeper_name =
   let path = attention_path ~base_path ~keeper_name in
   match Fs_compat.file_size path with
   | None -> []
-  | Some size when size <= dedup_window_bytes ->
+  | Some size when size <= window_bytes ->
       (* Small store: the full scan is already within the window. *)
       load_events ~base_path ~keeper_name
   | Some size ->
-      let from = size - dedup_window_bytes in
-      let slice = Fs_compat.read_slice ~path ~from ~len:dedup_window_bytes in
+      let from = size - window_bytes in
+      let slice = Fs_compat.read_slice ~path ~from ~len:window_bytes in
       (match String.index_opt slice '\n', String.rindex_opt slice '\n' with
        | Some i, Some j when j > i ->
            String.sub slice (i + 1) (j - i - 1)
@@ -421,6 +416,23 @@ let load_recent_events ~base_path ~keeper_name =
               dedup against. Accept the (rare) duplicate over a partial
               parse. *)
            [])
+
+(* Redelivery is always recent, so duplicate admission keeps its small O(1)
+   tail. This must not be reused as a conversation-history policy. *)
+let load_recent_events ~base_path ~keeper_name =
+  load_tail_events ~window_bytes:dedup_window_bytes ~base_path ~keeper_name
+;;
+
+(* Connector content defaults to a 4 KiB gate. A separate 4 MiB evidence tail
+   therefore leaves ample room for the Librarian's default 72-message window
+   plus lifecycle rows, while remaining O(1) in the append-only file. An
+   operator-raised content limit degrades to a shorter window, never a scan of
+   the whole history. *)
+let evidence_window_bytes = 4 * 1024 * 1024
+
+let load_recent_evidence_events ~base_path ~keeper_name =
+  load_tail_events ~window_bytes:evidence_window_bytes ~base_path ~keeper_name
+;;
 
 let record ~base_path (item : item) =
   let events = load_recent_events ~base_path ~keeper_name:item.keeper_name in

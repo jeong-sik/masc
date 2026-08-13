@@ -24,7 +24,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
-  | External_attention
+  | External_attention of Keeper_counterpart_observation.t
   | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected of Keeper_event_queue.completion_authority_rejection
@@ -54,7 +54,7 @@ let is_board_activity_event (event : pending_board_event) =
   | Board_comment_added
   | Board_reaction_changed _
   | Fusion_completed
-  | External_attention
+  | External_attention _
   | Goal_assigned
   (* Goal-lifecycle signal, not a schedule dispatch, so it sits with
      [Goal_assigned]. The [false] arm would also compile but would route the
@@ -73,7 +73,7 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Board_comment_added
   | Board_reaction_changed _
   | Fusion_completed
-  | External_attention
+  | External_attention _
   | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected _
@@ -88,7 +88,7 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Fusion_completed
   | Schedule_due _
-  | External_attention
+  | External_attention _
   | Goal_assigned
   | Goal_reconciliation_ready
   | Task_cancelled _ -> false
@@ -105,7 +105,7 @@ let is_task_cancellation_event (event : pending_board_event) =
   | Board_reaction_changed _
   | Fusion_completed
   | Schedule_due _
-  | External_attention
+  | External_attention _
   | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected _ -> false
@@ -585,6 +585,7 @@ let pending_board_event_of_external_attention
   let surface_label = Surface_ref.lane_label item.conversation.surface in
   let urgency_label = Keeper_external_attention.urgency_to_string item.urgency in
   let actor = external_attention_actor_label item in
+  let counterpart = Keeper_counterpart_observation.of_external_attention item in
   let explicit_mention, matched_targets =
     match item.urgency with
     | Keeper_external_attention.Mention
@@ -594,7 +595,7 @@ let pending_board_event_of_external_attention
     | Keeper_external_attention.System ->
       false, []
   in
-  { event_kind = External_attention
+  { event_kind = External_attention counterpart
   ; post_id = "connector-attention:" ^ item.event_id
   ; author = actor
   ; title =

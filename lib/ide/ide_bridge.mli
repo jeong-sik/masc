@@ -66,7 +66,7 @@ val observation_snapshot_json : take:bool -> Yojson.Safe.t
 
 val ingest_tool_event :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  partition:Ide_paths.partition ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->
@@ -78,10 +78,13 @@ val ingest_tool_event :
   timestamp_ms:int64 ->
   unit ->
   unit
+(** Low-level writer: the caller names the storage partition and the
+    file path explicitly. Producers go through
+    {!ingest_tool_event_from_hook}, which projects both from the fact's
+    attribution. *)
 
 val ingest_turn_event :
   base_path:string ->
-  partition:Ide_paths.partition ->
   turn_id:string ->
   keeper_id:string ->
   phase:string ->
@@ -91,13 +94,14 @@ val ingest_turn_event :
   duration_ms:int option ->
   timestamp_ms:int64 ->
   unit
+(** RFC-0378: a turn is a keeper-timeline fact and carries no
+    attribution — the per-codebase timeline is a join on [turn_id]. *)
 
 (** Extract and ingest tool event from raw hook parameters.
     [typed_outcome_str] is pre-computed from [Keeper_tool_outcome.t]. *)
 val ingest_tool_event_from_hook :
   base_path:string ->
-  partition:Ide_paths.partition ->
-  file_path:string option ->
+  attribution:Agent_observation.attribution ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->

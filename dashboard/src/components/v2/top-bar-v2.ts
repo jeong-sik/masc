@@ -96,7 +96,7 @@ export function AttentionIndicatorV2() {
     const issue = a.health.issues[0]
     return html`
       <button
-        class=${`v2-statchip ${issue.severity}`}
+        class=${`v2-statchip attn ${issue.severity}`}
         onClick=${() => navigate('monitoring', { section: 'fleet-health' })}
         title=${issue.detail}
       >${'◌'} ${issue.label}</button>
@@ -218,18 +218,22 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
     runtimeHealthGeneratedAt: shellRuntimeResolution.value?.generated_at ?? null,
   })
   const keeperCount = runtimeCounts.live.keepers
-  const countMeaning = keeperLiveCountMeaning(
-    runtimeCounts.source,
-    shellKeeperFiberCount === null ? 'running' : 'keeper-fiber',
-  )
+  const countMeaning = runtimeCounts.live.available
+    ? keeperLiveCountMeaning(
+        runtimeCounts.source,
+        shellKeeperFiberCount === null ? 'running' : 'keeper-fiber',
+      )
+    : 'unknown'
   const countPresentation = countMeaning === 'executable'
-    ? { label: '실행 가능', metric: 'executable' }
+    ? { value: String(keeperCount), label: '실행 가능', metric: 'executable' }
     : countMeaning === 'running'
-      ? { label: '실행 중', metric: 'running' }
-      : { label: 'Keeper Fiber', metric: 'keeper_fibers' }
+      ? { value: String(keeperCount), label: '실행 중', metric: 'running' }
+      : countMeaning === 'keeper-fiber'
+        ? { value: String(keeperCount), label: 'Keeper Fiber', metric: 'keeper_fibers' }
+        : { value: '—', label: '미수집', metric: 'unknown' }
   const countTitle = [
     `runtime count: ${runtimeCountSourceLabel(runtimeCounts.source)}`,
-    `${countPresentation.metric}=${runtimeCounts.live.keepers}`,
+    `${countPresentation.metric}=${countPresentation.value}`,
     `paused=${runtimeCounts.live.pausedKeepers}`,
     runtimeCounts.source === 'runtime-health'
       ? 'offline=0 (not derived from execution rows)'
@@ -247,7 +251,7 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
       </div>
       <div class="v2-top-spacer"></div>
       <span class="v2-statchip live" title=${countTitle}>
-        <${StatusDot} status="run" pulse=${countMeaning !== 'keeper-fiber'} />${keeperCount} ${countPresentation.label}
+        <${StatusDot} status=${countMeaning === 'unknown' ? 'idle' : 'run'} pulse=${countMeaning === 'executable' || countMeaning === 'running'} />${countPresentation.value} ${countPresentation.label}
       </span>
       <${AttentionIndicatorV2} />
       <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">

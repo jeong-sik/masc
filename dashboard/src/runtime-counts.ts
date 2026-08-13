@@ -8,7 +8,7 @@ export type RuntimeCountSource =
   | 'partial'
   | 'unknown'
 
-export type KeeperLiveCountMeaning = 'executable' | 'running' | 'keeper-fiber'
+export type KeeperLiveCountMeaning = 'executable' | 'running' | 'keeper-fiber' | 'unknown'
 
 export type ConfiguredCountSource = 'namespace-truth' | 'shell' | 'none'
 
@@ -385,7 +385,7 @@ export function runtimeCountSourceLabel(source: RuntimeCountSource): string {
 
 export function keeperLiveCountMeaning(
   source: RuntimeCountSource,
-  fallbackMeaning: Exclude<KeeperLiveCountMeaning, 'executable'>,
+  fallbackMeaning: Exclude<KeeperLiveCountMeaning, 'executable' | 'unknown'>,
 ): KeeperLiveCountMeaning {
   return source === 'runtime-health' ? 'executable' : fallbackMeaning
 }

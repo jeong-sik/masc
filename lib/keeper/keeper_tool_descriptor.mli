@@ -68,6 +68,15 @@ type execution =
     imply concurrency safety, and terminal concurrent execution is not
     representable. *)
 
+(** Descriptor-owned output contract for typed composition. [Opaque_output]
+    cannot be referenced by another plan node. [Json_output] carries a schema
+    in the closed composable-output subset checked by [Keeper_tool_plan.create]:
+    exact JSON types, object properties/required/boolean additionalProperties,
+    and homogeneous array items. Unsupported JSON Schema keywords fail closed. *)
+type composable_output =
+  | Opaque_output
+  | Json_output of { schema : Yojson.Safe.t }
+
 type identity_validation =
   | Validate_once_before_translation
   | Validate_once_after_translation
@@ -146,6 +155,7 @@ type t =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; model_output_projection : Tool_output.model_projection
+  ; composable_output : composable_output
   ; execution : execution
   ; policy : policy
   ; executor : executor
@@ -166,6 +176,7 @@ val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
+val composable_output_to_json : composable_output -> Yojson.Safe.t
 val runtime_handler_to_string : runtime_handler -> string
 
 (** [public_descriptors] is the LLM-native public surface. Each descriptor has

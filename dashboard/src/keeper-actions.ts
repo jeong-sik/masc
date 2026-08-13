@@ -45,7 +45,6 @@ import {
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
   clearActiveStream,
-  clearActiveStreamRequestId,
   finalizeAssistantEntry,
   releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
@@ -1047,7 +1046,7 @@ export async function sendKeeperThreadMessage(
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
       if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-      clearActiveStreamRequestId(keeperName)
+      releaseActiveStreamRequestId(operationId)
       return
     }
 

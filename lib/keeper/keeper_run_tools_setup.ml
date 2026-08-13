@@ -145,6 +145,21 @@ let load_composition_catalog ~config_root =
     Error (composition_catalog_config_error "catalog path kind is unavailable")
 ;;
 
+let expected_model_tool_names ~model_visible_descriptors ~composition_catalog =
+  let descriptor_names =
+    model_visible_descriptors
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+  in
+  let composition_names =
+    match composition_catalog with
+    | None -> []
+    | Some catalog ->
+      Keeper_tool_composition_catalog.entries catalog
+      |> List.map Keeper_tool_composition_catalog.tool_name
+  in
+  List.sort_uniq String.compare (descriptor_names @ composition_names)
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -349,9 +364,9 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    model_visible_descriptors
-    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-    |> List.sort_uniq String.compare
+    expected_model_tool_names
+      ~model_visible_descriptors
+      ~composition_catalog
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

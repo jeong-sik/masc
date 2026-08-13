@@ -211,6 +211,7 @@ normal_targets=(
   @test/runtest-test_tool_call_quality_benchmark
   @test/runtest-test_client_identity
   @test/runtest-test_mcp_session_task_lifecycle
+  @test/runtest-test_mcp_server_eio
   @test/runtest-test_keeper_sandbox_docker_cwd_response
   @test/runtest-test_goal_store
   @test/runtest-test_keeper_goal_phase_projection

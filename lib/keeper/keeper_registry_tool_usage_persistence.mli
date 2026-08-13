@@ -21,4 +21,4 @@ val restore : base_path:string -> string -> unit
     lifecycle reservation. The replay is exact to that registry lane and uses
     [token] as its mutation authority. *)
 val restore_for_lifecycle :
-  Keeper_lifecycle_reservation.token -> Keeper_registry_types.registry_entry -> unit
+  Keeper_lifecycle_reservation.token -> Keeper_registry.registry_entry -> unit

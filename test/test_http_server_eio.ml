@@ -609,6 +609,135 @@ let test_json_conditional_tag_is_weak_and_body_derived () =
     etag
     (tag_of conditional_body)
 
+(* [json_conditional] is a pure function, which is what lets the cases above
+   cover every combination of method, status, and If-None-Match. It also means
+   none of them touches a response, so the step that turns a [Tagged] decision
+   into bytes stayed unverified: whether the validator headers reach the client
+   at all, and whether a matching tag produces a bodiless 304.
+
+   A client cannot revalidate on a decision it never sees, so that step is
+   exercised here against a real [Server_connection] rather than inferred from
+   the branch that builds it. *)
+
+let serve_json_over_wire ?if_none_match body =
+  Eio_main.run (fun _env ->
+    let response_buf = Buffer.create 1024 in
+    let conn =
+      Httpun.Server_connection.create (fun reqd ->
+        Response.json ~request:(Httpun.Reqd.request reqd) body reqd)
+    in
+    let headers =
+      let base = [ ("host", "127.0.0.1") ] in
+      match if_none_match with
+      | None -> base
+      | Some tag -> ("if-none-match", tag) :: base
+    in
+    let request =
+      Httpun.Request.create ~headers:(Httpun.Headers.of_list headers) `GET "/probe"
+    in
+    let request_head =
+      Printf.sprintf
+        "%s %s HTTP/1.1\r\n%s"
+        (Httpun.Method.to_string request.Httpun.Request.meth)
+        request.Httpun.Request.target
+        (Httpun.Headers.to_string request.Httpun.Request.headers)
+    in
+    let bytes =
+      Bigstringaf.of_string ~off:0 ~len:(String.length request_head) request_head
+    in
+    let rec feed off =
+      let remaining = Bigstringaf.length bytes - off in
+      if remaining > 0
+      then (
+        let consumed = Httpun.Server_connection.read conn bytes ~off ~len:remaining in
+        if consumed <= 0 then Alcotest.fail "httpun test feed made no progress";
+        feed (off + consumed))
+    in
+    feed 0;
+    let rec flush () =
+      match Httpun.Server_connection.next_write_operation conn with
+      | `Write iovecs ->
+        List.iter
+          (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Buffer.add_string
+               response_buf
+               (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
+          iovecs;
+        let written =
+          List.fold_left
+            (fun total (iov : Bigstringaf.t Httpun.IOVec.t) -> total + iov.len)
+            0
+            iovecs
+        in
+        Httpun.Server_connection.report_write_result conn (`Ok written);
+        flush ()
+      | `Yield | `Close _ -> ()
+    in
+    flush ();
+    Buffer.contents response_buf)
+;;
+
+let response_header response name =
+  let field = String.lowercase_ascii name ^ ":" in
+  String.split_on_char '\n' response
+  |> List.filter_map (fun line ->
+       let line = String.trim line in
+       if String.starts_with ~prefix:field (String.lowercase_ascii line)
+       then
+         Some
+           (String.trim
+              (String.sub
+                 line
+                 (String.length field)
+                 (String.length line - String.length field)))
+       else None)
+  |> function
+  | value :: _ -> Some value
+  | [] -> None
+;;
+
+let response_status_line response =
+  match String.index_opt response '\r' with
+  | Some idx -> String.sub response 0 idx
+  | None -> response
+;;
+
+let test_json_response_puts_the_validator_on_the_wire () =
+  let response = serve_json_over_wire conditional_body in
+  Alcotest.(check string)
+    "a plain read is answered in full"
+    "HTTP/1.1 200 OK"
+    (response_status_line response);
+  Alcotest.(check (option string))
+    "the client receives the tag it must present to revalidate"
+    (Some (tag_of conditional_body))
+    (response_header response "etag");
+  Alcotest.(check (option string))
+    "and is told to revalidate rather than invent a freshness window"
+    (Some "no-cache")
+    (response_header response "cache-control")
+;;
+
+let test_json_response_matching_tag_sends_no_body () =
+  let response =
+    serve_json_over_wire ~if_none_match:(tag_of conditional_body) conditional_body
+  in
+  Alcotest.(check string)
+    "a client holding the current body is told so"
+    "HTTP/1.1 304 Not Modified"
+    (response_status_line response);
+  Alcotest.(check (option string))
+    "with nothing to read"
+    (Some "0")
+    (response_header response "content-length");
+  Alcotest.(check bool)
+    "and the body itself never reaches the socket"
+    false
+    (List.exists
+       (fun line -> String.equal (String.trim line) conditional_body)
+       (String.split_on_char '\n' response))
+;;
+
 let response_tests =
   [ ( "content_headers preserve all header segments"
     , `Quick
@@ -634,6 +763,12 @@ let response_tests =
   ; ( "the tag is weak and body-derived"
     , `Quick
     , test_json_conditional_tag_is_weak_and_body_derived )
+  ; ( "a JSON response puts the validator on the wire"
+    , `Quick
+    , test_json_response_puts_the_validator_on_the_wire )
+  ; ( "a matching tag sends no body"
+    , `Quick
+    , test_json_response_matching_tag_sends_no_body )
   ]
 ;;
 

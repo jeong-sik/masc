@@ -14,6 +14,7 @@ import {
   getStoredToken,
   getStoredTokenMeta,
   post,
+  readCacheMode,
   runOperatorAction,
   setStoredToken,
   subscribeStoredTokenChanges,
@@ -168,6 +169,45 @@ describe('post', () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(init.cache).toBe('no-store')
+  })
+
+  it('lets a measured polling route revalidate against the server', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"entries":[]}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await get('/api/v1/dashboard/board')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.cache).toBe('no-cache')
+  })
+
+  // Several callers build their path as `${route}?${qs}`. Matching the path as
+  // given would leave every one of them on `no-store` while the unparameterised
+  // caller revalidated -- a difference no route-level reasoning would predict.
+  it('keeps a route revalidating when the caller appends a query string', () => {
+    expect(readCacheMode('/api/v1/dashboard/telemetry?window=1h')).toBe('no-cache')
+  })
+
+  // The mirror failure: a prefix match would sweep in this sibling, which was
+  // never measured for byte-identical repeats.
+  it('does not extend a listed route to its sub-routes', () => {
+    expect(readCacheMode('/api/v1/dashboard/telemetry/summary')).toBe('no-store')
+  })
+
+  // This route repeats byte-identically, so it looks eligible on traffic
+  // grounds alone. It is excluded because its body names environment variables
+  // and host paths, and listing it is what would persist them to disk.
+  it('keeps the secret-bearing composite route out of the browser cache', () => {
+    expect(readCacheMode('/api/v1/keepers/composite')).toBe('no-store')
+  })
+
+  it('leaves an unrecognised route on the conservative default', () => {
+    expect(readCacheMode('/api/v1/some/route/added/later')).toBe('no-store')
   })
 
   it('keeps board voter resolution scoped to query params', () => {

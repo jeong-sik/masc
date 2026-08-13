@@ -336,8 +336,11 @@ let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
          consistent with just-recorded transitions. *)
       let (_ : int) = flush_pending () in
       let items =
-        Dated_jsonl.read_recent store (max limit 1 * 8)
-        |> List.filter_map (function
+        (* Project during the read: the scan window is [8 * limit] rows and only
+           the matching keeper's [record] sub-tree survives, so materialising
+           every row's parsed tree first is wasted. The selector is pure, so the
+           reader's newest-first call order is not observable. *)
+        Dated_jsonl.filter_map_recent store (max limit 1 * 8) ~f:(function
           | `Assoc fields ->
             (match List.assoc_opt "keeper" fields, List.assoc_opt "record" fields with
              | Some (`String name), Some record when String.equal name keeper_name ->
@@ -402,8 +405,9 @@ let recent_completed_turns_from_store ~keeper_name ~limit =
   | Some _, _ | _, None -> []
   | None, Some store ->
     let (_ : int) = flush_pending () in
-    Dated_jsonl.read_recent store (max limit 1 * 8)
-    |> List.filter_map (function
+    (* Same shape as above, and here the projection also decodes to a typed
+       record, so the parsed tree is garbage as soon as the row is read. *)
+    Dated_jsonl.filter_map_recent store (max limit 1 * 8) ~f:(function
       | `Assoc fields ->
         (match List.assoc_opt "keeper" fields, List.assoc_opt "completed_turn" fields with
          | Some (`String name), Some record when String.equal name keeper_name ->

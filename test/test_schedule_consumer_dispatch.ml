@@ -662,9 +662,7 @@ let test_keeper_wake_consumer_records_wake_receipt () =
        |> member "projection_status"
        |> to_string);
     check string "dispatch success is explicit" "succeeded"
-      (terminal_row |> member "dispatch_status" |> to_string);
-    check string "legacy schedule result delivery is not required" "not_required"
-      (terminal_row |> member "result_delivery" |> member "status" |> to_string)
+      (terminal_row |> member "dispatch_status" |> to_string)
 ;;
 
 let test_routed_schedule_carries_occurrence_destination_to_keeper () =

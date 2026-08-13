@@ -1250,7 +1250,7 @@ let test_config_snapshot_does_not_fallback_to_raw_meta () =
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
-  match Masc.Dashboard_http_keeper_snapshot.keeper_config_json config name with
+  match Dashboard_http_keeper_snapshot.keeper_config_json config name with
   | `Not_found, _ -> Alcotest.fail "expected a typed unavailable config snapshot"
   | `OK, json ->
     Alcotest.(check (option string))

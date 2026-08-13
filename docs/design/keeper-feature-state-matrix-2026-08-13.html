@@ -67,15 +67,15 @@
   <p class="lead">기능 이름이 코드에 존재하는지와 Keeper가 실제로 오래, 반복해서, 여러 Runtime에서 그 기능을 끝까지 수행하는지는 다른 사실이다. 이 문서는 source → feature test → exact-head CI → live receipt/log → Dashboard/browser → 장기 실행의 증거를 분리한다.</p>
 
   <section class="grid">
-    <article class="card"><h3>Source 기준</h3><div class="metric info">f83f655904</div><p class="muted">캡처 시점 checkout <code>main</code>. Librarian retry suite 수리까지 병합.</p></article>
+    <article class="card"><h3>Upstream main</h3><div class="metric info">f473c0e8bf</div><p class="muted">#28574와 #28597까지 병합. runtime checkout은 아직 <code>f83f655904</code>.</p></article>
     <article class="card"><h3>Live binary 기준</h3><div class="metric bad">UNKNOWN</div><p class="muted"><code>binary_commit</code> 부재. 표시된 f83은 <code>runtime_repo_head</code> 조회값이라 배포 증거가 아니다.</p></article>
     <article class="card"><h3>Feature proof</h3><div class="metric warn">2 pass / 3 warn</div><p class="muted">현재 API가 측정하는 5개 자율성 축. 전체 기능 수가 아니다.</p></article>
     <article class="card"><h3>24h 연속성</h3><div class="metric warn">1 / 13 Keeper</div><p class="muted">analyst만 53.3h span. 다른 Keeper는 아직 24h 증거 미달.</p></article>
-    <article class="card"><h3>Queue / Scheduler</h3><div class="metric warn">idle / 27 ticks</div><p class="muted">pending 0, 27회 성공·0회 실패. 처리할 item/occurrence가 없어서 기능 완료 증거는 아님.</p></article>
+    <article class="card"><h3>Queue / Scheduler</h3><div class="metric warn">idle / 107 ticks</div><p class="muted">pending 0, 107회 성공·0회 실패·emitted 0. 처리할 item/occurrence가 없어 기능 완료 증거는 아님.</p></article>
     <article class="card"><h3>Fleet health</h3><div class="metric warn">degraded</div><p class="muted">10 fibers 중 executable 7. reaction capacity가 target보다 3 부족.</p></article>
   </section>
 
-  <p class="muted">동결 시각: <code>2026-08-13T13:25:46Z</code>. 아래 수치는 이후 현재값으로 읽으면 안 된다. live binary SHA는 미확인이고 checkout SHA와 대체하지 않는다. 원본 축약 스냅샷은 <a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json">JSON evidence</a>에 있다.</p>
+  <p class="muted">동결 시각: <code>2026-08-13T13:46:26Z</code>. 아래 수치는 이후 현재값으로 읽으면 안 된다. upstream main, runtime checkout, live binary identity는 각각 분리한다. 원본 축약 스냅샷은 <a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T134626Z.json">JSON evidence</a>에 있다.</p>
 
   <article class="card notice">
     <h3>현재 판정</h3>
@@ -115,7 +115,7 @@
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Goal</td><td><span class="badge"></span></td><td>Fleet 범위 미측정</td><td class="axis">미측정</td><td>goal index/reconciliation, Dashboard tree</td><td>source와 UI tests.</td><td>Goal→Task→progress→completion reconciliation canary.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Coordination" data-required="source test ci live" data-evidence="source test"><td>Coordination</td><td class="feature">Broadcast</td><td><span class="badge"></span></td><td>2 Keeper 수신 미측정</td><td class="axis">미측정</td><td><code>workspace_broadcast</code>, wake policy</td><td>focused tests; #28590 별도.</td><td>하이픈 identity 포함 2 Keeper 수신·중복 없음.</td><td>E1·E2·E3·E4</td></tr>
         <tr data-domain="Coordination" data-required="source test live duration" data-evidence="source test live"><td>Coordination</td><td class="feature">Drain Queue</td><td><span class="badge"></span></td><td>13 Keeper, pending 0 snapshot</td><td class="axis">restart drain — · 24h —</td><td><code>Keeper_event_queue</code>, owner lock</td><td>idle snapshot만 있음. 처리 item 없음.</td><td>고유 item enqueue→drain→restart 후 같은 item_id terminal receipt.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live"><td>Coordination</td><td class="feature">Schedule Job</td><td><span class="badge"></span></td><td>runner 27 idle ticks</td><td class="axis">발화 구간 미측정</td><td><code>schedule_service</code>, runner</td><td>27 success, emitted 0 snapshot.</td><td>occurrence create→due→wake→terminal→cancel receipt/UI.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live"><td>Coordination</td><td class="feature">Schedule Job</td><td><span class="badge"></span></td><td>runner 107 idle ticks</td><td class="axis">발화 구간 미측정</td><td><code>schedule_service</code>, runner</td><td>107 success, emitted 0 snapshot.</td><td>occurrence create→due→wake→terminal→cancel receipt/UI.</td><td>E1·E2·E4·E5</td></tr>
 
         <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">Autonomous</td><td><span class="badge"></span></td><td>tool turn 9/13; executable 7/10</td><td class="axis">24h 1/13</td><td>heartbeat, supervisor, turn counters</td><td>fleet snapshot.</td><td>disabled canary와 active denominator를 분리해 장기 진척 추적.</td><td>E1·E2·E4·E6</td></tr>
         <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">Proactive</td><td><span class="badge"></span></td><td>scheduled evidence 13/13</td><td class="axis">24h 1/13</td><td>scheduled decision log</td><td>13/13 recent evidence snapshot.</td><td>실제 새 진척·비반복·실패율을 1/2/4/24h로 판정.</td><td>E1·E2·E4·E6</td></tr>
@@ -191,7 +191,8 @@
     <li><code>docs/KEEPER-CAPABILITY-MATRIX.md</code> — Keeper가 실제 받는 typed capability family.</li>
     <li><code>docs/TOML-RELOAD-MATRIX.md</code> — boot/sweep/request reload 구분.</li>
     <li><code>lib/dashboard/dashboard_keeper_feature_proof.ml</code> — 현재 5개 autonomy feature proof read model.</li>
-    <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — health/feature-proof/PR head를 <code>2026-08-13T13:25:46Z</code>에 동결한 축약 JSON. <code>binary_commit=null</code>도 보존한다.</li>
+    <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T134626Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T134626Z.json</code></a> — latest health/feature-proof/PR head를 <code>2026-08-13T13:46:26Z</code>에 동결. checkout과 binary identity 불일치도 보존한다.</li>
+    <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — 이전 snapshot. live 수치 변화와 재기동 이후 구간을 비교할 때만 사용한다.</li>
     <li><a href="../evidence/keeper-multi-collaboration-preflight-2026-08-13T133813Z.json"><code>keeper-multi-collaboration-preflight-2026-08-13T133813Z.json</code></a> — mutation 없이 검증한 16 mission catalog와 live preflight blocker.</li>
     <li><a href="../evidence/keeper-pr-transition-2026-08-13T134218Z.json"><code>keeper-pr-transition-2026-08-13T134218Z.json</code></a> — #28574/#28597 병합 및 #28470/#28488 재배치 exact head.</li>
     <li><code>/health?full=1</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — live 원본 route. 동결 JSON 이후의 현재값은 새 캡처 없이는 주장하지 않는다.</li>
@@ -205,7 +206,7 @@
   </ul></details>
   <p class="muted">갱신 규칙: live 수치는 캡처 시각이 지나면 역사적 증거다. PR head가 바뀌면 이전 CI는 무효다. 기능 행의 상태는 더 강한 증거가 생길 때만 올리고, source가 사라지거나 live가 모순되면 즉시 내린다.</p>
 
-  <footer>동결 기준 <code>2026-08-13T13:25:46Z</code> · checkout <code>f83f655904</code> · live binary SHA unknown · effective base <code>/Users/dancer/me</code> · MASC root <code>/Users/dancer/me/.masc</code></footer>
+  <footer>동결 기준 <code>2026-08-13T13:46:26Z</code> · upstream <code>f473c0e8bf</code> · runtime checkout <code>f83f655904</code> · live binary SHA unknown · effective base <code>/Users/dancer/me</code></footer>
 </main>
 <script>
   const query = document.querySelector('#query');

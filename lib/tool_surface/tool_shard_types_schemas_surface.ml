@@ -7,7 +7,9 @@ let keeper_surface_post_description =
    Markdown is rendered natively by Discord and by Slack's Block Kit \
    markdown block. To create a real highlighted user mention, pass stable \
    participant-roster ids in mention_user_ids; never guess ids from display \
-   names. Posting to an unbound surface is an error. These endpoints \
+   names. A Slack post may reply inside an existing thread (thread_ts) \
+   or carry Block Kit blocks; see those parameters. Posting to an unbound \
+   surface is an error. These endpoints \
    are read by a person, so an unchanged status reposted every cycle \
    crowds their view and says nothing the previous one did not; when \
    there is nothing new, the turn ends without a post."

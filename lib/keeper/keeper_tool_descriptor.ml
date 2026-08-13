@@ -928,7 +928,9 @@ let surface_post_schema =
         "content"
         "string"
         "Standard Markdown message to deliver. Discord renders it natively; \
-         Slack renders it through the official Block Kit markdown block."
+         Slack renders it through the official Block Kit markdown block. \
+         When blocks is provided, content is only the Slack notification \
+         fallback text."
     ; property
         "channel_id"
         "string"

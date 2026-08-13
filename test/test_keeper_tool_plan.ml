@@ -435,9 +435,9 @@ let test_composition_run_id_is_uuid_v7_identity () =
   check bool "fresh composition identities differ" false (Plan.Composition_run_id.equal first second);
   List.iter
     (fun value ->
-       match Random_id.parse_uuid_v7 (Plan.Composition_run_id.to_string value) with
-       | Ok _ -> ()
-       | Error error -> failf "composition run id is not UUIDv7: %s" error)
+       match Uuidm.of_string (Plan.Composition_run_id.to_string value) with
+       | Some uuid -> check int "composition run id UUID version" 7 (Uuidm.version uuid)
+       | None -> fail "composition run id is not a UUID")
     [ first; second ]
 ;;
 

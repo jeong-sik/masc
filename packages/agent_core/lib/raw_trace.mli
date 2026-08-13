@@ -121,6 +121,11 @@ val record_of_json : Yojson.Safe.t -> (record, Error.t) result
 val record_to_yojson : record -> Yojson.Safe.t
 val record_of_yojson : Yojson.Safe.t -> (record, string) result
 val trace_version : int
+(** Current writer/reader hard-cut version. Version 3 withholds assistant
+    reasoning recursively, including structured ToolResult content. Historical
+    v2 rows may contain reasoning bytes; they are retained as historical files
+    but rejected by the exact-version decoder and are never migrated or
+    rewritten into the v3 read model. *)
 
 val create
   :  ?redact_secrets:bool

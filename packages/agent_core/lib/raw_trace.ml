@@ -129,7 +129,10 @@ type active_run =
 
 exception Trace_error of Error.t
 
-let trace_version = 2
+(* v3 is a privacy hard cut: assistant reasoning is metadata-only at every
+   nesting depth, including structured ToolResult content. v2 rows are not
+   migrated or rewritten and the exact-version decoder rejects them. *)
+let trace_version = 3
 let json_parse_error = Util.json_parse_error
 
 let safe_name name =
@@ -604,6 +607,60 @@ type assistant_block_observation =
       ; redacted : bool
       }
 
+let assistant_block_observation_to_pair = function
+  | Observable_block { block_kind; json } -> block_kind, json
+  | Withheld_reasoning { block_kind; char_count; redacted } ->
+    ( block_kind
+    , `Assoc
+        [ "type", `String "reasoning_observation"
+        ; "observation", `String "withheld"
+        ; "reasoning_kind", `String block_kind
+        ; "present", `Bool true
+        ; "char_count", `Int char_count
+        ; "redacted", `Bool redacted
+        ; "content", `Null
+        ] )
+;;
+
+let withheld_reasoning_json ~block_kind ~char_count ~redacted =
+  Withheld_reasoning { block_kind; char_count; redacted }
+  |> assistant_block_observation_to_pair
+  |> snd
+;;
+
+let rec raw_trace_content_block_to_json block =
+  match block with
+  | Thinking { content; _ } ->
+    withheld_reasoning_json
+      ~block_kind:"thinking"
+      ~char_count:(String.length content)
+      ~redacted:false
+  | ReasoningDetails { reasoning_content; details } ->
+    let projected = Types.reasoning_details_text ~reasoning_content ~details in
+    withheld_reasoning_json
+      ~block_kind:"reasoning_details"
+      ~char_count:(String.length projected)
+      ~redacted:false
+  | RedactedThinking _ ->
+    withheld_reasoning_json
+      ~block_kind:"redacted_thinking"
+      ~char_count:0
+      ~redacted:true
+  | ToolResult { content_blocks = Some blocks; _ } ->
+    (match Llm_provider.Api_common.content_block_to_json block with
+     | `Assoc fields ->
+       `Assoc
+         (List.map
+            (fun (key, value) ->
+              if String.equal key "content"
+              then key, `List (List.map raw_trace_content_block_to_json blocks)
+              else key, value)
+            fields)
+     | json -> json)
+  | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ ->
+    Llm_provider.Api_common.content_block_to_json block
+;;
+
 let observe_assistant_block block =
   match block with
   | Thinking { content; _ } ->
@@ -619,39 +676,17 @@ let observe_assistant_block block =
   | RedactedThinking _ ->
     Withheld_reasoning
       { block_kind = "redacted_thinking"; char_count = 0; redacted = true }
-  | Text _ ->
-    Observable_block
-      { block_kind = "text"; json = Llm_provider.Api_common.content_block_to_json block }
+  | Text _ -> Observable_block { block_kind = "text"; json = raw_trace_content_block_to_json block }
   | ToolUse _ ->
-    Observable_block
-      { block_kind = "tool_use"; json = Llm_provider.Api_common.content_block_to_json block }
+    Observable_block { block_kind = "tool_use"; json = raw_trace_content_block_to_json block }
   | ToolResult _ ->
-    Observable_block
-      { block_kind = "tool_result"; json = Llm_provider.Api_common.content_block_to_json block }
+    Observable_block { block_kind = "tool_result"; json = raw_trace_content_block_to_json block }
   | Image _ ->
-    Observable_block
-      { block_kind = "image"; json = Llm_provider.Api_common.content_block_to_json block }
+    Observable_block { block_kind = "image"; json = raw_trace_content_block_to_json block }
   | Document _ ->
-    Observable_block
-      { block_kind = "document"; json = Llm_provider.Api_common.content_block_to_json block }
+    Observable_block { block_kind = "document"; json = raw_trace_content_block_to_json block }
   | Audio _ ->
-    Observable_block
-      { block_kind = "audio"; json = Llm_provider.Api_common.content_block_to_json block }
-;;
-
-let assistant_block_observation_to_pair = function
-  | Observable_block { block_kind; json } -> block_kind, json
-  | Withheld_reasoning { block_kind; char_count; redacted } ->
-    ( block_kind
-    , `Assoc
-        [ "type", `String "reasoning_observation"
-        ; "observation", `String "withheld"
-        ; "reasoning_kind", `String block_kind
-        ; "present", `Bool true
-        ; "char_count", `Int char_count
-        ; "redacted", `Bool redacted
-        ; "content", `Null
-        ] )
+    Observable_block { block_kind = "audio"; json = raw_trace_content_block_to_json block }
 ;;
 
 let record_assistant_block active ~block_index block =

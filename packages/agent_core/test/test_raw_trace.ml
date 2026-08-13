@@ -667,18 +667,23 @@ let raw_record_json
      @ fields)
 ;;
 
-let test_record_of_json_rejects_version_one () =
-  let json = raw_record_json ~trace_version:1 [] in
-  (match Raw_trace.record_of_json json with
-   | Error (Error.Serialization (VersionMismatch { expected; got })) ->
-     Alcotest.(check int) "expected current" Raw_trace.trace_version expected;
-     Alcotest.(check int) "got old" 1 got
-   | Error error -> Alcotest.fail ("unexpected error: " ^ Error.to_string error)
-   | Ok _ -> Alcotest.fail "trace version 1 must be rejected");
-  Alcotest.(check bool)
-    "public yojson decoder also rejects old version"
-    true
-    (Result.is_error (Raw_trace.record_of_yojson json))
+let test_record_of_json_rejects_historical_versions () =
+  List.iter
+    (fun historical_version ->
+      let json = raw_record_json ~trace_version:historical_version [] in
+      (match Raw_trace.record_of_json json with
+       | Error (Error.Serialization (VersionMismatch { expected; got })) ->
+         Alcotest.(check int) "expected current" Raw_trace.trace_version expected;
+         Alcotest.(check int) "got historical" historical_version got
+       | Error error -> Alcotest.fail ("unexpected error: " ^ Error.to_string error)
+       | Ok _ ->
+         Alcotest.fail
+           (Printf.sprintf "trace version %d must be rejected" historical_version));
+      Alcotest.(check bool)
+        "public yojson decoder also rejects historical version"
+        true
+        (Result.is_error (Raw_trace.record_of_yojson json)))
+    [ 1; 2 ]
 ;;
 
 let test_record_of_json_rejects_removed_descriptor_fields () =
@@ -961,6 +966,27 @@ let test_hidden_reasoning_is_metadata_only () =
   unwrap
     (Raw_trace.record_assistant_block active ~block_index:2
        (Types.RedactedThinking "PRIVATE_REDACTED_PAYLOAD"));
+  unwrap
+    (Raw_trace.record_assistant_block active ~block_index:3
+       (Types.ToolResult
+          { tool_use_id = "tool-with-reasoning"
+          ; content = "structured"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks =
+              Some
+                [ Types.Thinking
+                    { content = "NESTED_PRIVATE_THINKING"
+                    ; signature = Some "NESTED_PRIVATE_SIGNATURE"
+                    }
+                ; Types.ReasoningDetails
+                    { reasoning_content = Some "NESTED_PRIVATE_REASONING"
+                    ; details =
+                        [ { raw = `String "NESTED_PRIVATE_RAW"; text = None } ]
+                    }
+                ; Types.RedactedThinking "NESTED_PRIVATE_REDACTED"
+                ]
+          }));
   ignore
     (unwrap
        (Raw_trace.finish_run active ~final_text:None ~stop_reason:(Some "EndTurn")
@@ -977,6 +1003,11 @@ let test_hidden_reasoning_is_metadata_only () =
     ; "PRIVATE_SIGNATURE"
     ; "PRIVATE_RAW_DETAIL"
     ; "PRIVATE_REDACTED_PAYLOAD"
+    ; "NESTED_PRIVATE_THINKING"
+    ; "NESTED_PRIVATE_SIGNATURE"
+    ; "NESTED_PRIVATE_REASONING"
+    ; "NESTED_PRIVATE_RAW"
+    ; "NESTED_PRIVATE_REDACTED"
     ];
   let records = unwrap (Raw_trace.read_all ~path:(Raw_trace.file_path sink) ()) in
   let observations =
@@ -986,7 +1017,18 @@ let test_hidden_reasoning_is_metadata_only () =
       then record.assistant_block
       else None)
   in
-  Alcotest.(check int) "three reasoning observations" 3 (List.length observations);
+  Alcotest.(check int) "four assistant observations" 4 (List.length observations);
+  let reasoning_observations, tool_results =
+    List.partition
+      (fun json ->
+        Yojson.Safe.Util.(json |> member "observation" |> to_string_option)
+        = Some "withheld")
+      observations
+  in
+  Alcotest.(check int)
+    "three top-level reasoning observations"
+    3
+    (List.length reasoning_observations);
   List.iter
     (fun json ->
        let open Yojson.Safe.Util in
@@ -996,7 +1038,30 @@ let test_hidden_reasoning_is_metadata_only () =
          (json |> member "observation" |> to_string);
        Alcotest.(check bool) "reasoning present" true (json |> member "present" |> to_bool);
        Alcotest.(check bool) "content is null" true (json |> member "content" = `Null))
-    observations
+    reasoning_observations;
+  let nested =
+    match tool_results with
+    | [ json ] -> Yojson.Safe.Util.(json |> member "content" |> to_list)
+    | _ -> Alcotest.fail "expected one structured ToolResult observation"
+  in
+  Alcotest.(check int) "three nested reasoning observations" 3 (List.length nested);
+  List.iter
+    (fun json ->
+      let open Yojson.Safe.Util in
+      Alcotest.(check string)
+        "nested observation withheld"
+        "withheld"
+        (json |> member "observation" |> to_string);
+      Alcotest.(check bool) "nested content is null" true
+        (json |> member "content" = `Null))
+    nested;
+  let runs = unwrap (Raw_trace_query.read_runs ~path:(Raw_trace.file_path sink) ()) in
+  let summary = unwrap (Raw_trace_query.summarize_run (List.hd runs)) in
+  Alcotest.(check int)
+    "all reasoning kinds count as thinking activity"
+    3
+    summary.thinking_block_count;
+  Alcotest.(check bool) "reasoning activity is visible" true summary.saw_thinking
 ;;
 
 let () =
@@ -1021,9 +1086,9 @@ let () =
             `Quick
             test_record_of_json_rejects_invalid_tool_choice
         ; Alcotest.test_case
-            "version one rejected"
+            "historical versions rejected"
             `Quick
-            test_record_of_json_rejects_version_one
+            test_record_of_json_rejects_historical_versions
         ; Alcotest.test_case
             "removed descriptor fields rejected"
             `Quick

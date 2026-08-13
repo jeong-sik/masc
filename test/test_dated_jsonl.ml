@@ -320,6 +320,26 @@ let test_read_recent_result_rejects_base_symlink () =
   | Ok _ -> fail "base symlink was treated as an empty store"
 ;;
 
+(* The environment writes dotfiles into any directory it touches — macOS puts
+   .DS_Store beside the month directories. Failing the read on one of those
+   would hide every row in the store, so they are skipped. A real layout
+   violation still fails: that means a writer is wrong (see the test below). *)
+let test_read_recent_result_skips_dot_entries () =
+  let base_dir = tmpdir "dated_jsonl_dot_entries" in
+  write_dated_file base_dir "2026-02" "01" [ {|{"i":1}|} ];
+  Fs_compat.append_file (Filename.concat base_dir ".DS_Store") "not dated";
+  Fs_compat.append_file
+    (Filename.concat (Filename.concat base_dir "2026-02") ".DS_Store")
+    "not dated";
+  let store = Dated_jsonl.create ~base_dir () in
+  match Dated_jsonl.read_recent_result store 10 with
+  | Ok rows -> check int "the row is still readable" 1 (List.length rows)
+  | Error error ->
+    failf
+      "a stray dotfile hid the whole store: %s"
+      (Dated_jsonl.read_error_to_string error)
+;;
+
 let test_read_recent_result_rejects_invalid_layout () =
   let base_dir = tmpdir "dated_jsonl_invalid_layout" in
   let invalid_month = "2026-aa" in
@@ -935,6 +955,8 @@ let () =
             test_read_recent_result_rejects_base_symlink;
           test_case "strict read rejects invalid layout" `Quick
             test_read_recent_result_rejects_invalid_layout;
+          test_case "strict read skips dot entries" `Quick
+            test_read_recent_result_skips_dot_entries;
           test_case "strict read accepts leap day" `Quick
             test_read_recent_result_accepts_leap_day;
           test_case "strict read rejects FIFO without blocking" `Quick

@@ -120,9 +120,7 @@ let observe_node_result
       ?allowed_paths:context.allowed_paths
       ?network_mode:context.network_mode
       ?runtime_profile:context.runtime_profile
-      ~on_committed:(fun () ->
-        Dashboard_cache.invalidate_prefix "keeper:tool-calls:fleet-rows:";
-        committed := true)
+      ~on_committed:(fun () -> committed := true)
       ();
     if not !committed
     then failwith "composition telemetry commit callback was not delivered";

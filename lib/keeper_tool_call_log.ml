@@ -86,6 +86,9 @@ type store_state =
   }
 
 let store_state = Atomic.make { store = None; configured = None }
+let committed_revision_ref = Atomic.make 0
+
+let committed_revision () = Atomic.get committed_revision_ref
 
 type append_entry =
   { store : Dated_jsonl.t
@@ -171,6 +174,7 @@ let init ?cluster_name ~base_path () =
 
 let reset_for_testing () =
   Atomic.set store_state { store = None; configured = None };
+  Atomic.set committed_revision_ref 0;
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
@@ -262,6 +266,7 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
 let append_to_store_result (entry : append_entry) =
   try
     Dated_jsonl.append entry.store entry.json;
+    ignore (Atomic.fetch_and_add committed_revision_ref 1 : int);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

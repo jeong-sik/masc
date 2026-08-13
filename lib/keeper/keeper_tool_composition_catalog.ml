@@ -250,7 +250,7 @@ and parse_object_template ~path fields =
                           (match parse_template ~path:(field_path @ [ "value" ]) value with
                            | Error _ as error -> error
                            | Ok value ->
-                             parse_fields (index + 1) ((name, value) :: parsed) rest))))
+                             parse_fields (index + 1) ((name, value) :: parsed) rest)))))
           in
           parse_fields 0 [] raw_fields))
 
@@ -312,7 +312,7 @@ let parse_node ~path value =
                        | Ok after ->
                          (match parse_template ~path:(path @ [ "input" ]) raw_input with
                           | Error _ as error -> error
-                          | Ok input -> Ok (Plan.node ~id ~tool_name ~after ~input ())))))))
+                          | Ok input -> Ok (Plan.node ~id ~tool_name ~after ~input ())))))))))
 ;;
 
 let parse_composition ~index value =
@@ -351,7 +351,7 @@ let parse_composition ~index value =
                            nodes
                        with
                        | Ok plan -> Ok { name; description; plan }
-                       | Error error -> Error (Plan_rejected { name; error })))))))
+                       | Error error -> Error (Plan_rejected { name; error }))))))))
 ;;
 
 let parse content =
@@ -378,5 +378,5 @@ let parse content =
                      | Some _ -> Error (Duplicate_composition_name entry.name)
                      | None -> parse_entries (index + 1) (entry :: parsed) rest))
              in
-             parse_entries 0 [] raw_compositions))
+             parse_entries 0 [] raw_compositions)))
 ;;

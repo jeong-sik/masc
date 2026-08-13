@@ -323,6 +323,33 @@ let test_tree_does_not_follow_symlinked_dir_escape () =
           (List.mem "link/outside_secret_name" ps)))
 ;;
 
+(* The node budget bounds the response; it must not decide which directories
+   are reachable. A depth-first walk spent the whole budget inside whatever
+   sorted first, so on a real repository [lib/] was absent from the tree and
+   the client had nothing to expand — the seed has to cover breadth, and the
+   client loads a directory's real contents on expand. *)
+let test_tree_seed_reaches_every_top_level_directory () =
+  with_temp_dir (fun base ->
+    (* An early directory deep and wide enough to exhaust the budget on its
+       own, and a later one holding the file we must still be able to reach. *)
+    for i = 0 to 19 do
+      let branch = Printf.sprintf "aaa_early/branch_%02d" i in
+      mkdir_p (Filename.concat base branch);
+      for j = 0 to 19 do
+        touch (Filename.concat base (Printf.sprintf "%s/leaf_%02d.ml" branch j))
+      done
+    done;
+    mkdir_p (Filename.concat base "zzz_late");
+    touch (Filename.concat base "zzz_late/wanted.ml");
+    let ps = paths (W.scan_dir ~base ~depth:0 ~max_depth:8 ~max_nodes:100 [] base) in
+    check bool "early directory is present" true (List.mem "aaa_early" ps);
+    check
+      bool
+      "late directory survives the budget"
+      true
+      (List.mem "zzz_late" ps))
+;;
+
 let test_noise_dirs_not_confidential () =
   (* Noise dirs are hidden from the tree but are NOT secrets: a read under
      them is allowed, so [component_is_confidential] must stay false for
@@ -376,6 +403,10 @@ let () =
             `Quick
             test_tree_does_not_follow_symlinked_dir_escape
         ; test_case "noise dirs are not confidential" `Quick test_noise_dirs_not_confidential
+        ; test_case
+            "tree seed reaches every top-level directory"
+            `Quick
+            test_tree_seed_reaches_every_top_level_directory
         ] )
     ]
 ;;

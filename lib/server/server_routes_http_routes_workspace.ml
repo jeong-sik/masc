@@ -482,78 +482,92 @@ let file_tree_node ~diff_by_path ~path ~label ~depth ~parent ~has_children =
          ; ("hasChildren", `Bool has_children)
          ; ("diff", diff); ("keeperId", `Null); ("hueIndex", `Null) ]
 
-let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
-  if depth > max_depth || remaining <= 0 then (acc, remaining)
-  else
-    let raw_entries =
-      workspace_or_default
-        ~site:"tree_readdir"
-        ~path:dir
-        ~default:[]
-        (fun () -> Sys.readdir dir |> Array.to_list)
-    in
-    (* Sort alphabetically, then partition directories-first so that
-       the node limit (default 750) is consumed by directory trees
-       (lib/, src/) before leaf files ( *.py, *.md).  Without this,
-       a flat directory like ~/me with hundreds of root-level files
-       exhausts the limit before important subdirectories appear. *)
-    let entries =
-      let sorted = List.sort String.compare raw_entries in
-      let dirs, files = List.partition (fun name ->
-        let full = Filename.concat dir name in
-        workspace_or_default
-          ~warn_on_failure:false
-          ~site:"tree_is_directory_partition"
-          ~path:full
-          ~default:false
-          (fun () -> Sys.is_directory full)
-      ) sorted in
-      dirs @ files
-    in
-    let rec fold acc remaining = function
-      | [] -> (acc, remaining)
-      | _ when remaining <= 0 -> (acc, 0)
-      | f :: rest ->
-        if f = "." || f = ".." then fold acc remaining rest
-        else if component_is_confidential f || List.mem f tree_noise_dirs then
-          fold acc remaining rest
-        else
-          let full = Filename.concat dir f in
-          let is_dir =
-            workspace_or_default
-              ~warn_on_failure:false
-              ~site:"tree_is_directory"
-              ~path:full
-              ~default:false
-              (fun () ->
-                 match Unix.lstat full with
-                 | { Unix.st_kind = Unix.S_LNK; _ } -> false
-                 | _ -> Sys.is_directory full)
-          in
-          let rel = rel_under base full in
-          (* With /api/v1/workspace/children lazy-loading a directory's entries
-             on first expand, a directory is expandable regardless of the
-             initial scan depth. Decoupling [has_children] from
-             [depth < max_depth] keeps the chevron on boundary directories; the
-             recursion guard below stays depth-bounded, so the initial scan
-             shape is unchanged and only the boundary display flag flips. *)
-          let has_children = is_dir in
-          let parent = if depth = 0 then "" else Filename.dirname rel in
-          let node = file_tree_node ~diff_by_path
-              ~path:rel ~label:f ~depth ~parent ~has_children in
-          let acc' = node :: acc in
-          let remaining' = remaining - 1 in
-          let acc'', remaining'' =
-            if is_dir && depth < max_depth then
-              scan_dir_bounded
-                ?diff_by_path
-                ~base ~depth:(depth + 1) ~max_depth ~remaining:remaining'
-                acc' full
-            else (acc', remaining')
-          in
-          fold acc'' remaining'' rest
-    in
-    fold acc remaining entries
+(* One directory's entries, alphabetical with directories first, minus the
+   components the tree never shows. Directories lead so that a level's budget
+   reaches subdirectories before a wide directory's leaf files consume it. *)
+let tree_entries dir =
+  let raw_entries =
+    workspace_or_default
+      ~site:"tree_readdir"
+      ~path:dir
+      ~default:[]
+      (fun () -> Sys.readdir dir |> Array.to_list)
+  in
+  let keep name =
+    not (name = "." || name = ".." || component_is_confidential name
+         || List.mem name tree_noise_dirs)
+  in
+  let sorted = List.sort String.compare (List.filter keep raw_entries) in
+  let dirs, files =
+    List.partition
+      (fun name ->
+         let full = Filename.concat dir name in
+         workspace_or_default
+           ~warn_on_failure:false
+           ~site:"tree_is_directory_partition"
+           ~path:full
+           ~default:false
+           (fun () -> Sys.is_directory full))
+      sorted
+  in
+  dirs @ files
+;;
+
+(* Breadth-first, deliberately.
+
+   A depth-first walk spends the node budget on whatever sorts first: on a
+   repository with 11k source files the default 750 nodes were exhausted
+   partway through [dashboard/], so [lib/] — where most of the activity is —
+   never appeared in the response at all, and no amount of clicking could
+   reach it. The budget is a response-size bound, not a statement about which
+   directories matter, and a walk order that makes it act like one leaves a
+   large repository unnavigable.
+
+   Breadth-first spends the same budget on the shallowest nodes, so every
+   top-level entry is present before any subtree is expanded. That is what the
+   seed is for: the client fetches a directory's real contents from
+   [/api/v1/workspace/children] when it is expanded, so anything the budget
+   cuts is one click away instead of unreachable. *)
+let scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc dir =
+  let pending = Queue.create () in
+  if depth <= max_depth then Queue.add (dir, depth) pending;
+  let acc = ref acc in
+  let remaining = ref remaining in
+  while (not (Queue.is_empty pending)) && !remaining > 0 do
+    let dir, depth = Queue.pop pending in
+    List.iter
+      (fun name ->
+         if !remaining > 0
+         then begin
+           let full = Filename.concat dir name in
+           let is_dir =
+             workspace_or_default
+               ~warn_on_failure:false
+               ~site:"tree_is_directory"
+               ~path:full
+               ~default:false
+               (fun () ->
+                  match Unix.lstat full with
+                  | { Unix.st_kind = Unix.S_LNK; _ } -> false
+                  | _ -> Sys.is_directory full)
+           in
+           let rel = rel_under base full in
+           (* A directory is expandable regardless of the scan depth it was
+              reached at: [/api/v1/workspace/children] loads its entries on
+              first expand, so the chevron stays on boundary directories. *)
+           let has_children = is_dir in
+           let parent = if depth = 0 then "" else Filename.dirname rel in
+           acc
+           := file_tree_node ~diff_by_path ~path:rel ~label:name ~depth ~parent
+                ~has_children
+              :: !acc;
+           remaining := !remaining - 1;
+           if is_dir && depth < max_depth then Queue.add (full, depth + 1) pending
+         end)
+      (tree_entries dir)
+  done;
+  (!acc, !remaining)
+;;
 
 let scan_dir ?diff_by_path ~base ~depth ~max_depth ~max_nodes acc dir =
   fst (scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining:max_nodes acc dir)

@@ -386,9 +386,7 @@ let test_inventory_rejects_empty_invalid_and_duplicate_entries () =
 let test_inventory_expands_all_targets_without_availability_claims () =
   let inventory =
     [ Agent_core_runtime
-        { runtime_id = "ollama.agentworld-35b-a3b"
-        ; model_id = Some "agentworld-35b-a3b"
-        }
+        { runtime_id = "local.canary"; model_id = None }
     ; Official_client_runtime
         { runtime_id = "claude_code.sonnet"; model_id = Some "sonnet" }
     ]

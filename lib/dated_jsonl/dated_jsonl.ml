@@ -322,9 +322,24 @@ let day_file_name_is_valid ~year ~month name =
   | None, _ | _, None -> false
 ;;
 
+(* A name this layout can never produce is a foreign file, not a corrupted
+   member of it. Month directories are [YYYY-MM] and day files are
+   [DD.jsonl]; neither can begin with a dot, so a dotfile was written by
+   something other than this store.
+
+   macOS writes [.DS_Store] into any directory Finder opens, and the live
+   store sits under a browsed home, so failing the whole read for one would
+   take every reader of that store down for the rest of a Finder visit.
+   Entries that do belong to the layout stay strict: a directory named
+   [2026-13] or a file named [32.jsonl] is corruption and still fails. *)
+let entry_is_foreign_to_layout entry =
+  String.length entry > 0 && Char.equal entry.[0] '.'
+;;
+
 let validate_layout_entries ~parent ~expected ~is_valid entries =
   let rec loop valid_entries = function
     | [] -> Ok (List.rev valid_entries)
+    | entry :: rest when entry_is_foreign_to_layout entry -> loop valid_entries rest
     | entry :: rest ->
       if is_valid entry
       then loop (entry :: valid_entries) rest
@@ -1248,7 +1263,14 @@ let read_range t ~since ~until =
    should use this so a wide window cannot scan months of multi-MB files.
    Returns entries oldest-first within the collected set (same convention
    as [read_recent]). *)
-let read_range_recent ?(offset = 0) t ~since ~until n =
+(* Range counterpart to [filter_map_recent]: the caller's projection runs per
+   row so the parsed tree is unreachable before the next row is read, and
+   [read_range_recent] is this with an identity projection.
+
+   [f] runs outside the parse [try] for the same reason as in
+   [filter_map_recent]: the reader swallows [Yojson.Json_error] to skip
+   malformed rows and a caller's decoder must not inherit that swallow. *)
+let filter_map_range_recent ?(offset = 0) t ~since ~until n ~f =
   if n <= 0
   then []
   else (
@@ -1285,16 +1307,21 @@ let read_range_recent ?(offset = 0) t ~since ~until n =
                        List.iter
                          (fun line ->
                             if !count >= n then raise_notrace Done;
-                            try
-                              let json = Yojson.Safe.from_string line in
+                            let parsed =
+                              try Some (Yojson.Safe.from_string line)
+                              with Yojson.Json_error _ -> None
+                            in
+                            match parsed with
+                            | None -> ()
+                            | Some json ->
                               if !skip > 0
                               then decr skip
                               else begin
-                                collected := json :: !collected;
+                                (match f json with
+                                 | Some value -> collected := value :: !collected
+                                 | None -> ());
                                 incr count
-                              end
-                            with
-                            | Yojson.Json_error _ -> ())
+                              end)
                          rev_lines
                      end)
                   days
@@ -1303,6 +1330,10 @@ let read_range_recent ?(offset = 0) t ~since ~until n =
        with
        | Done -> ());
       !collected)
+
+let read_range_recent ?offset t ~since ~until n =
+  filter_map_range_recent ?offset t ~since ~until n ~f:(fun json -> Some json)
+;;
 
 let prune t ~days =
   let mutex = Atomic.get t.mutex in

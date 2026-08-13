@@ -61,6 +61,14 @@ val completion_error_to_string : completion_error -> string
 (** Current-only durable registry with the closed [run_input] contract. *)
 val storage_filename : string
 
+val max_completed_retained : int
+(** How many completed runs survive a replay. Running entries are kept
+    regardless, so this bounds finished work only.
+
+    Derived from the page size of the surface that reads this store rather than
+    copied from the sibling registries, which retain 64 and have no paging UI.
+    A test pins that relation. *)
+
 val create : ?path:string -> unit -> t
 val replay : string -> t
 

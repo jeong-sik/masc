@@ -327,6 +327,30 @@ export type RuntimeDraft = {
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
   proactive_enabled: boolean
+  // Keeper-level autonomous wake prompt; '' = inherit fleet (sent as null)
+  autonomous_wake_prompt: string
+}
+
+// Mirror of the server contract
+// (Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes): the value is
+// appended to the durable checkpoint on every autonomous turn.
+export const AUTONOMOUS_WAKE_PROMPT_MAX_BYTES = 2048
+
+export type AutonomousWakePromptDraftResult =
+  | { ok: true; value: string | null }
+  | { ok: false; error: string }
+
+export function parseAutonomousWakePromptDraft(raw: string): AutonomousWakePromptDraftResult {
+  const trimmed = raw.trim()
+  if (trimmed === '') return { ok: true, value: null }
+  const bytes = new TextEncoder().encode(trimmed).length
+  if (bytes > AUTONOMOUS_WAKE_PROMPT_MAX_BYTES) {
+    return {
+      ok: false,
+      error: `깨우기 프롬프트 ${bytes}B — 상한 ${AUTONOMOUS_WAKE_PROMPT_MAX_BYTES}B (매 자율 턴 히스토리에 누적)`,
+    }
+  }
+  return { ok: true, value: trimmed }
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
@@ -395,6 +419,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
+    autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
   }
 }
 
@@ -644,6 +669,19 @@ export function keeperConfigControlInventory(
             'proactive.enabled',
           ],
         ),
+        keeperRuntimeControlItem(
+          c,
+          tab,
+          'kcf-policy-wake-prompt',
+          'Autonomous wake prompt',
+          `${configApiSource} autonomous_wake_prompt`,
+          'PATCH /api/v1/keepers/:name/config autonomous_wake_prompt',
+          'autonomous_wake_prompt',
+          [
+            'autonomous_wake_prompt',
+            'prompt.unified_user_message_preview',
+          ],
+        ),
       ]
     case 'access':
       return [
@@ -829,6 +867,8 @@ export function buildRuntimePayloadResult(
 ): RuntimePayloadBuildResult {
   const maxContextOverride = parseMaxContextOverrideDraft(draft.max_context_override)
   if (!maxContextOverride.ok) return maxContextOverride
+  const wakePrompt = parseAutonomousWakePromptDraft(draft.autonomous_wake_prompt)
+  if (!wakePrompt.ok) return wakePrompt
   const payload: KeeperConfigUpdatePayload = {}
   const newPaths = listTextToStrings(draft.allowed_paths_text)
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
@@ -840,6 +880,9 @@ export function buildRuntimePayloadResult(
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
   if (maxContextOverride.value !== orig.max_context_override) {
     payload.max_context_override = maxContextOverride.value
+  }
+  if (wakePrompt.value !== (orig.autonomous_wake_prompt ?? null)) {
+    payload.autonomous_wake_prompt = wakePrompt.value
   }
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
@@ -887,6 +930,9 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     max_context_override: result.ok
       ? 'max_context_override' in payload
       : rd.max_context_override !== String(c.max_context_override ?? 0),
+    autonomous_wake_prompt: result.ok
+      ? 'autonomous_wake_prompt' in payload
+      : rd.autonomous_wake_prompt.trim() !== (c.autonomous_wake_prompt ?? ''),
     active_goal_ids: 'active_goal_ids' in payload,
     mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
@@ -1959,9 +2005,23 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
       </${SetRow}>
+      <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${dirtyFlags.autonomous_wake_prompt ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-sm text-[var(--color-fg-secondary)]">자율 턴 깨우기 프롬프트</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">비우면 함대 기본값 상속 · 매 자율 턴 히스토리에 기록</span>
+        </div>
+        <textarea aria-label="autonomous_wake_prompt" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
+          rows=${3}
+          value=${rd.autonomous_wake_prompt}
+          placeholder=${c.prompt.unified_user_message_preview || 'Continue.'}
+          onInput=${(e: Event) => updateRuntimeDraft('autonomous_wake_prompt', (e.target as HTMLTextAreaElement).value)}
+        ></textarea>
+      </div>
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
       <${BoolRow} label="활성" value=${c.proactive.enabled} />
+      <${ConfigRow} label="자율 턴 깨우기 프롬프트"
+        value=${c.autonomous_wake_prompt ?? `(상속) ${c.prompt.unified_user_message_preview || 'Continue.'}`} />
     `}
 
   `

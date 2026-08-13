@@ -2438,6 +2438,161 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
         (String_util.contains_substring msg "disabled by runtime.toml"))
 ;;
 
+(* masc#28403. The runtime this declares — [local.typo] — cannot exist, because
+   no [models.typo] row does. Nothing references it, which is the whole point:
+   before this was a load error the only way a dangling binding surfaced was an
+   assignment / route / lane naming it, so an unreferenced one vanished in
+   silence. A live [local_llama_server.qwen3-6-35b-uncensored] binding did
+   exactly that for an unknown length of time, and was found only by parsing the
+   TOML with a separate script. *)
+let test_binding_naming_an_undeclared_model_fails_the_load () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     [local.typo]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok (runtimes, _, _, _, _, _) ->
+      failf
+        "binding naming an undeclared model must fail the load; got runtimes [%s]"
+        (String.concat "; " (List.map (fun (r : Runtime.t) -> r.id) runtimes))
+    | Error msg ->
+      check bool "error names the dangling binding" true
+        (String_util.contains_substring msg "local.typo");
+      check bool "error names the missing model row" true
+        (String_util.contains_substring msg "[models.typo]"))
+;;
+
+(* The other half of masc#28403: the binding namespace is now the set of
+   declared providers, not "every top-level table that is not reserved". Both
+   tables below exist in the live runtime.toml and are read by other parsers;
+   under the old exclusion rule each parsed as a binding whose provider did not
+   exist, which is why an unresolved binding had to be dropped quietly for boot
+   to survive at all. If this test fails with a dangling-binding error, the
+   namespace has been re-opened and the check above is load-bearing for config
+   sections it was never meant to judge. *)
+let test_non_provider_namespaces_are_not_bindings () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     \n\
+     [voice.local_playback]\n\
+     enabled = true\n\
+     \n\
+     [fusion.presets]\n\
+     quorum = \"three\"\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "non-provider namespaces must not be bindings: %s" msg
+    | Ok (runtimes, _, _, _, _, _) ->
+      check (list string) "only the declared provider binds a runtime"
+        [ "local.good" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+;;
+
+(* RFC-0206 §2.1 is unchanged by the above: a binding MASC is told not to run is
+   still excluded rather than fatal. Only a dangling reference — a runtime that
+   cannot exist — is fatal, so this asserts the two classes stayed apart rather
+   than the load simply becoming stricter. *)
+let test_deliberate_disable_is_still_a_tolerated_drop () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [providers.dormant]\n\
+     enabled = false\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:2/v1\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.good]\n\
+     [local.off]\n\
+     enabled = false\n\
+     [dormant.good]\n\
+     \n\
+     [models.off]\n\
+     api-name = \"off\"\n\
+     max-context = 1024\n\
+     \n\
+     [runtime]\n\
+     default = \"local.good\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "deliberate disables must not fail the load: %s" msg
+    | Ok (runtimes, _, _, _, _, _) ->
+      check (list string) "disabled binding and disabled provider are excluded"
+        [ "local.good" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
+;;
+
+(* [Provider_not_declared] is unreachable from TOML once the namespace is closed
+   — a table under an undeclared provider is no longer read as a binding at all
+   — so it is exercised at its own boundary rather than left as a variant no
+   test constructs. *)
+let test_of_binding_reports_an_undeclared_provider () =
+  let cfg =
+    { Runtime_schema.providers = []
+    ; models = []
+    ; bindings = []
+    ; default_runtime_id = None
+    ; cross_verifier_runtime_id = None
+    ; keeper_assignments = []
+    ; media_failover = []
+    ; lane_decls = []
+    ; exact_output_lane_decls = []
+    }
+  in
+  let binding =
+    { Runtime_schema.provider_id = "absent"
+    ; model_id = "whatever"
+    ; enabled = true
+    ; is_default = false
+    ; wizard_default = false
+    ; max_concurrent = None
+    ; max_request_body_bytes = None
+    ; price_input = None
+    ; price_output = None
+    ; keep_alive = None
+    ; num_ctx = None
+    }
+  in
+  match Runtime.of_binding cfg binding with
+  | Ok _ -> fail "binding with an undeclared provider must not materialize"
+  | Error (Runtime.Provider_not_declared id) ->
+    check string "reports the provider it could not find" "absent" id
+  | Error other ->
+    failf
+      "expected Provider_not_declared, got %s"
+      (Runtime.string_of_drop_reason other)
+;;
+
 let test_runtime_toml_rejects_non_boolean_enabled () =
   let runtime_toml =
     "[providers.local]\n\
@@ -3891,6 +4046,14 @@ let () =
             test_runtime_provider_disable_excludes_its_bindings;
           test_case "disabled binding is excluded and rejected when referenced" `Quick
             test_runtime_binding_disable_excludes_only_that_binding;
+          test_case "unreferenced binding naming an undeclared model fails the load"
+            `Quick test_binding_naming_an_undeclared_model_fails_the_load;
+          test_case "non-provider top-level namespaces are not bindings" `Quick
+            test_non_provider_namespaces_are_not_bindings;
+          test_case "deliberate disables stay tolerated drops" `Quick
+            test_deliberate_disable_is_still_a_tolerated_drop;
+          test_case "of_binding reports an undeclared provider" `Quick
+            test_of_binding_reports_an_undeclared_provider;
           test_case "runtime enabled fields require booleans" `Quick
             test_runtime_toml_rejects_non_boolean_enabled;
           test_case

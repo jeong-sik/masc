@@ -552,6 +552,35 @@ let test_profile_rejects_unknown_key () =
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.typo_field"))
 
+(* Each declared kind must reject a value of another kind. Paired with
+   [keeper_toml_fields], where a key cannot exist without a kind, this covers a
+   newly added key too: it has to pick one of these four, and each is shown to
+   fail the load rather than fall through to [Keeper_toml_loader], where a
+   wrong-typed value and an absent one produce the same default (#26622). *)
+let test_each_keeper_field_kind_rejects_a_wrong_typed_value () =
+  List.iter
+    (fun (field, wrong, expected_kind) ->
+       let input = Printf.sprintf "[keeper]\n%s = %s\n" field wrong in
+       match TL.parse_toml input with
+       | Error error -> failf "fixture for %s did not parse: %s" field error
+       | Ok doc ->
+         (match KTP.profile_defaults_of_toml doc with
+          | Ok _ -> failf "%s accepted a wrong-typed value" field
+          | Error detail ->
+            check bool
+              (field ^ " names the field")
+              true
+              (String_util.contains_substring detail ("keeper." ^ field));
+            check bool
+              (field ^ " names the expected kind")
+              true
+              (String_util.contains_substring detail expected_kind)))
+    [ "name", "true", "string"
+    ; "autoboot_enabled", "\"yes\"", "boolean"
+    ; "max_context_override", "\"128001\"", "integer"
+    ; "mention_targets", "true", "string array"
+    ]
+
 let test_profile_full () =
   let input = {|
 [keeper]
@@ -1669,6 +1698,8 @@ let () =
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "retains invalid files" `Quick
             test_discover_retains_invalid_files;
+          test_case "each field kind rejects a wrong-typed value" `Quick
+            test_each_keeper_field_kind_rejects_a_wrong_typed_value;
           test_case "materializable helper uses base path" `Quick
             test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt defaults" `Quick

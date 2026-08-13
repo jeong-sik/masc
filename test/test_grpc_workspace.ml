@@ -420,13 +420,25 @@ let test_get_status_projects_backlog_tasks () =
   with_temp_dir "masc-grpc-status" (fun dir ->
     let workspace_config = Workspace_utils.default_config dir in
     ignore (Masc.Workspace.init workspace_config ~agent_name:(Some "alpha"));
+    (* Registration turns the requested "alpha" into a generated nickname
+       ("alpha-witty-gecko"), and claiming a task moves the agent off "active".
+       Re-stating either literal here would pin the naming scheme and the
+       status vocabulary instead of the projection, so both come from the
+       workspace itself. *)
+    let sole_agent () =
+      match Masc.Workspace.get_agents_raw workspace_config with
+      | [ (agent : Masc_domain.agent) ] -> agent
+      | agents ->
+        Alcotest.failf "expected exactly 1 registered agent, got %d" (List.length agents)
+    in
+    let agent_name = (sole_agent ()).name in
     ignore
       (Masc.Workspace.add_task
          workspace_config
          ~title:"Fix stale projection"
          ~priority:1
          ~description:"Use backlog SSOT for gRPC status");
-    ignore (Masc.Workspace.claim_next_r workspace_config ~agent_name:"alpha" ());
+    ignore (Masc.Workspace.claim_next_r workspace_config ~agent_name ());
     let service =
       Masc_grpc_service.create_service
         ~workspace_config
@@ -439,14 +451,18 @@ let test_get_status_projects_backlog_tasks () =
       let resp = T.StatusResponse.of_bytes (handler "") in
       Alcotest.(check int) "agents count" 1 (List.length resp.agents);
       let agent = List.hd resp.agents in
-      Alcotest.(check string) "agent name" "alpha" agent.T.name;
-      Alcotest.(check string) "agent status" "active" agent.T.status;
+      let stored = sole_agent () in
+      Alcotest.(check string) "agent name" stored.name agent.T.name;
+      Alcotest.(check string)
+        "agent status"
+        (Masc_domain.agent_status_to_string stored.status)
+        agent.T.status;
       Alcotest.(check int) "tasks count" 1 (List.length resp.tasks);
       let task = List.hd resp.tasks in
       Alcotest.(check string) "task id" "task-001" task.T.id;
       Alcotest.(check string) "task title" "Fix stale projection" task.T.title;
       Alcotest.(check string) "task status" "claimed" task.T.status;
-      Alcotest.(check string) "task assignee" "alpha" task.T.assigned_to;
+      Alcotest.(check string) "task assignee" stored.name task.T.assigned_to;
       Alcotest.(check int) "task priority" 1 task.T.priority
     | _ -> Alcotest.fail "GetStatus unary handler missing")
 ;;

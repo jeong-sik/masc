@@ -916,11 +916,27 @@ let initialize_owner_state_blocking
         ~on_turn_slot_released:
           (Some
              (fun ~keeper_name ->
-               ignore
-                 (Keeper_registry.wakeup_running
-                    ~intent:Keeper_registry.Turn_slot_released
-                    ~base_path:(Mcp_server.workspace_config state).base_path
-                    keeper_name)))
+               match
+                 Keeper_registry.wakeup_running
+                   ~intent:Keeper_registry.Turn_slot_released
+                   ~base_path:(Mcp_server.workspace_config state).base_path
+                   keeper_name
+               with
+               | Keeper_registry.Signaled -> ()
+               | Keeper_registry.Deferred_unregistered ->
+                 Log.Keeper.info
+                   ~keeper_name
+                   "turn slot release wake deferred: keeper is no longer registered"
+               | Keeper_registry.Deferred_not_running phase ->
+                 Log.Keeper.info
+                   ~keeper_name
+                   "turn slot release wake deferred: phase=%s"
+                   (Keeper_state_machine.phase_to_string phase)
+               | Keeper_registry.Deferred_lifecycle _ ->
+                 (* The registry already logged this arm and incremented
+                    LifecycleDispatchRejections with intent=turn_slot_released;
+                    repeating it here would double-count one denial. *)
+                 ()))
         (Mcp_server.workspace_config state)
     with
     | Ok count -> count

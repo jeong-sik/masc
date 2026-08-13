@@ -44,6 +44,35 @@ let record_wake_payload ~trace_id =
     ~role_counts:[ "user", 1; "assistant", 2 ]
     ~tool_count:4
 
+(* The reader capped an unfiltered read and did not cap a filtered one, so
+   supplying a date — which narrows the request — removed the row bound and
+   scanned every day-file in range. Both branches must read at most the same
+   number of rows. The cap's value is deliberately not asserted here: the
+   invariant is that a filter cannot widen the read. *)
+let test_a_date_filter_does_not_remove_the_row_cap () =
+  reset_after @@ fun () ->
+  with_temp_dir "wake-payload-cap" @@ fun dir ->
+  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  let store = H.get_wake_payload_store () in
+  ignore (record_wake_payload ~trace_id:"cap-seed");
+  (* Copy the recorded row instead of hand-writing the schema, so this test
+     does not need editing when the event shape changes. *)
+  let template =
+    match Dated_jsonl.read_recent store 1 with
+    | [ row ] -> row
+    | _ -> fail "expected exactly one seeded row"
+  in
+  let seeded = 600 in
+  for _ = 1 to seeded do
+    Dated_jsonl.append store template
+  done;
+  let unfiltered = List.length (H.read_wake_payload_events ()) in
+  let filtered = List.length (H.read_wake_payload_events ~since:"2020-01-01" ()) in
+  check bool "the unfiltered read is capped below what was seeded" true
+    (unfiltered <= seeded);
+  check int "a date filter reads no more than an unfiltered read" unfiltered
+    filtered
+
 let test_wake_payload_store_round_trip () =
   reset_after @@ fun () ->
   with_temp_dir "wake-payload-store" @@ fun dir ->
@@ -150,6 +179,8 @@ let () =
       ( "runtime_stores",
         [
           test_case "wake payload round trip" `Quick test_wake_payload_store_round_trip;
+          test_case "a date filter does not remove the row cap" `Quick
+            test_a_date_filter_does_not_remove_the_row_cap;
           test_case "wake payload reset rebinds store" `Quick
             test_reset_rebinds_wake_payload_store;
           test_case "malformed exact records are rejected" `Quick

@@ -1448,6 +1448,10 @@ export interface KeeperConfig {
   active_goal_ids: string[]
   autoboot_enabled: boolean
   max_context_override: number | null
+  /** Keeper-level autonomous wake prompt override; null inherits the fleet
+   *  autonomous.wake_prompt. The resolved value a turn would use is
+   *  prompt.unified_user_message_preview. */
+  autonomous_wake_prompt: string | null
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
   sandbox_last_error?: string | null

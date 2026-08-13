@@ -271,6 +271,13 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("active_goal_ids", active_goal_ids_json);
          ("autoboot_enabled", `Bool m.autoboot_enabled);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
+         (* Keeper-level override only ([None] = inherit the fleet
+            autonomous.wake_prompt). The resolved value a turn would
+            actually use is already served as
+            [prompt.unified_user_message_preview]. *)
+         ( "autonomous_wake_prompt",
+           Json_util.string_opt_to_json
+             defaults.Keeper_types_profile.autonomous_wake_prompt );
          ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
          ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("allowed_paths",

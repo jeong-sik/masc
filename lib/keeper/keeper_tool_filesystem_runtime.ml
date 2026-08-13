@@ -197,36 +197,43 @@ let string_opt_nonempty name json =
    A keeper that guesses the host layout ("workspace/<org>/<repo>") gets the
    same "directory does not exist" as one that asked for a repo nobody
    materialized, and the two need opposite responses: retry with the right
-   prefix, or stop asking. Live taskmaster hit the first and kept retrying
-   (#23442). The vocabulary is "repos/<repo>" -- see the projection note in
-   [resolve_read_file_cwd] -- so the accepted set is exactly what sits under
-   the keeper's playground [repos/]. An empty set is reported as empty rather
-   than omitted, because "no repository is materialized" is the answer to a
-   different question than "you named the wrong one". *)
-let materialized_repo_cwds ~config ~meta =
-  let repos_root = Filename.concat (keeper_playground_root ~config ~meta) "repos" in
-  if not (safe_is_dir repos_root)
-  then []
-  else (
-    match Sys.readdir repos_root with
-    | exception Sys_error _ -> []
-    | entries ->
-      Array.to_list entries
-      |> List.filter (fun name ->
-           (not (String.length name > 0 && name.[0] = '.'))
-           && safe_is_dir (Filename.concat repos_root name))
-      |> List.sort String.compare)
-;;
-
+   path, or stop asking. Live taskmaster hit the first and kept retrying
+   (#23442). The set is measured, not prescribed: whatever git checkouts sit
+   under the keeper's workspace root, wherever the keeper put them. An empty
+   set is reported as empty rather than omitted, because "no repository is
+   materialized" is the answer to a different question than "you named the
+   wrong one" — and by the same argument a scan that failed is a third answer
+   and says so. *)
 let available_cwd_hint ~config ~meta =
-  match materialized_repo_cwds ~config ~meta with
-  | [] ->
-    " no repository is materialized under repos/ for this keeper, so no \
-     repos/<repo> cwd exists yet"
-  | repos ->
+  let root = keeper_playground_root ~config ~meta in
+  match Keeper_playground_checkouts.discover ~root with
+  | Ok (Keeper_playground_checkouts.Complete []) ->
+    " no repository is materialized for this keeper yet, so the workspace root \
+     is the only cwd that exists"
+  | Ok (Keeper_playground_checkouts.Complete checkouts) ->
     Printf.sprintf
-      " available repo cwds: %s"
-      (String.concat ", " (List.map (fun name -> "repos/" ^ name) repos))
+      " available cwds: %s"
+      (String.concat
+         ", "
+         (List.map
+            (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
+            checkouts))
+  | Ok (Keeper_playground_checkouts.Partial { found; limit }) ->
+    (* Presenting a truncated list as complete is worse than saying it is
+       truncated: a keeper that cannot find its repo in a list that looks
+       exhaustive concludes it should stop asking. *)
+    Printf.sprintf
+      " available cwds (partial, %s): %s"
+      (Keeper_playground_checkouts.limit_to_string limit)
+      (String.concat
+         ", "
+         (List.map
+            (fun (c : Keeper_playground_checkouts.checkout) -> c.relative_path)
+            found))
+  | Error error ->
+    Printf.sprintf
+      " workspace checkout scan failed (%s); cwds could not be enumerated"
+      (Keeper_playground_checkouts.scan_error_to_string error)
 ;;
 
 let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd =

@@ -3,6 +3,13 @@ open Repo_manager_types
 val inspection_timeout_sec : float
 (** Total default budget for one request's repository Git inspection. *)
 
+type origin_lookup_error =
+  | Origin_missing
+  | Origin_lookup_timed_out of string
+  | Origin_lookup_failed of string
+
+val origin_lookup_error_to_string : origin_lookup_error -> string
+
 module Inspection_budget : sig
   type t
 
@@ -55,9 +62,10 @@ val get_branches :
 (** [get_branches ~repository] returns all local and remote branch names. *)
 
 val get_origin_url :
-  ?timeout_sec:float -> local_path:string -> unit -> (string, string) result
+  ?timeout_sec:float -> local_path:string -> unit -> (string, origin_lookup_error) result
 (** [get_origin_url ~local_path] returns the configured [origin] remote URL
-    for the repository at [local_path]. *)
+    for the repository at [local_path]. Missing configuration, a bounded
+    timeout, and other Git failures remain distinct typed outcomes. *)
 
 val worktree_root : local_path:string -> (string, string) result
 (** [worktree_root ~local_path] returns Git's [--show-toplevel] path for

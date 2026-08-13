@@ -511,27 +511,24 @@ let discover_repositories_with_budget_impl
                 }
               in
               collect_candidates (inspected + 1) (candidate :: acc) rest
-              (* Now that [get_origin_url] is bounded, this branch fires on a
-                 timeout as well as on a checkout that genuinely has no origin,
-                 and [(string, string) result] cannot tell them apart. So do not
-                 ask the budget which case it was — that answer is a proxy, and
-                 it turned "this checkout has no origin remote" into a discovery
-                 failure whenever the budget happened to be spent.
-
-                 Skipping is right either way. A spent budget only matters while
-                 candidates remain unfunded, and [remaining_timeout] aborts on
-                 the next iteration for exactly that reason. When [rest] is
-                 empty every entry in [git_dirs] has already been collected,
-                 skipped, or attempted, so nothing was left uninspected and
-                 discarding [acc] bought nothing.
-
-                 The rendered fields use OCaml string escaping so repository
+              (* Typed origin failures let a real timeout fail the incomplete
+                 scan while a missing remote remains a normal skip. The
+                 rendered fields use OCaml string escaping so repository
                  names and Git stderr cannot inject terminal controls or forge
                  a second log line. *)
               | Error detail ->
+                let detail_text = Repo_git.origin_lookup_error_to_string detail in
                 Log.Misc.warn "%s"
-                  (discovery_skip_log_line ~abs_repo_dir ~detail);
-                collect_candidates (inspected + 1) acc rest))
+                  (discovery_skip_log_line ~abs_repo_dir ~detail:detail_text);
+                (match detail with
+                 | Repo_git.Origin_lookup_timed_out _ ->
+                   Error
+                     (Printf.sprintf
+                        "repository origin inspection budget exhausted after %d candidates"
+                        (inspected + 1))
+                 | Repo_git.Origin_missing
+                 | Repo_git.Origin_lookup_failed _ ->
+                   collect_candidates (inspected + 1) acc rest)))
   in
   collect_candidates 0 [] git_dirs
 ;;

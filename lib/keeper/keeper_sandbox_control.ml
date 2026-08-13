@@ -400,7 +400,8 @@ let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.check
   let catalog_resolution =
     match origin with
     | Ok origin -> resolve_catalog ~catalog ~origin
-    | Error error -> Origin_unavailable error
+    | Error error ->
+      Origin_unavailable (Repo_git.origin_lookup_error_to_string error)
   in
   let repository : Repo_manager_types.repository =
     match catalog_resolution with
@@ -448,7 +449,8 @@ let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.check
           (freshness_of_catalog ~budget ~repository catalog_resolution) )
     ]
 
-let repository_checkouts_json_with_budget
+let repository_checkouts_json_with_budget_impl
+    ~before_git_inspection
     ~inspection_budget_sec
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
@@ -460,6 +462,7 @@ let repository_checkouts_json_with_budget
   let observed_at_unix = Time_compat.now () in
   let catalog = Repo_store.load_all ~base_path:config.base_path in
   let scan = Keeper_playground_checkouts.discover ~root:sandbox_abs in
+  before_git_inspection ();
   (* The budget bounds the per-checkout Git inspections below, so it starts
      after [load_all] and [discover]. Opening it first let a large catalog or a
      slow filesystem walk exhaust it before any Git subprocess ran, and every
@@ -493,6 +496,14 @@ let repository_checkouts_json_with_budget
     ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
     ]
 
+let repository_checkouts_json_with_budget ~inspection_budget_sec ~config ~meta =
+  repository_checkouts_json_with_budget_impl
+    ~before_git_inspection:(fun () -> ())
+    ~inspection_budget_sec
+    ~config
+    ~meta
+;;
+
 let repository_checkouts_json ~config ~meta =
   repository_checkouts_json_with_budget
     ~inspection_budget_sec:Repo_git.inspection_timeout_sec
@@ -502,6 +513,19 @@ let repository_checkouts_json ~config ~meta =
 
 module For_testing = struct
   let repository_checkouts_json_with_budget = repository_checkouts_json_with_budget
+
+  let repository_checkouts_json_with_budget_after_discovery
+      ~before_git_inspection
+      ~inspection_budget_sec
+      ~config
+      ~meta
+    =
+    repository_checkouts_json_with_budget_impl
+      ~before_git_inspection
+      ~inspection_budget_sec
+      ~config
+      ~meta
+  ;;
 end
 
 let preflight_status_json ~timeout_sec =

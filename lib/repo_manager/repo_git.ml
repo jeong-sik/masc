@@ -33,6 +33,17 @@ let read_only_git_env = ("GIT_OPTIONAL_LOCKS", "0") :: non_interactive_git_env
 
 let inspection_timeout_sec = 5.0
 
+type origin_lookup_error =
+  | Origin_missing
+  | Origin_lookup_timed_out of string
+  | Origin_lookup_failed of string
+
+let origin_lookup_error_to_string = function
+  | Origin_missing -> "origin remote is not configured"
+  | Origin_lookup_timed_out detail -> detail
+  | Origin_lookup_failed detail -> detail
+;;
+
 module Inspection_budget = struct
   type t =
     { started_at : Mtime.t
@@ -65,6 +76,23 @@ end
 let split_lines text =
   if text = "" then []
   else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
+
+let git_failure_detail args status stdout stderr =
+  let status_text =
+    match status with
+    | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+    | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+    | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+  in
+  let detail =
+    let stderr = String.trim stderr in
+    let stdout = String.trim stdout in
+    if stderr <> "" then status_text ^ ": " ^ stderr
+    else if stdout <> "" then status_text ^ ": " ^ stdout
+    else status_text
+  in
+  Printf.sprintf "git %s failed: %s" (String.concat " " args) detail
+;;
 
 type status_summary = {
   changed_files : int;
@@ -158,20 +186,7 @@ let run_git ~cwd ?(env = []) ?timeout_sec args : (string list, string) result =
   match status with
   | Unix.WEXITED 0 -> Ok (split_lines stdout)
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-      let status_text =
-        match status with
-        | Unix.WEXITED code -> Printf.sprintf "exit %d" code
-        | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
-        | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
-      in
-      let detail =
-        let stderr = String.trim stderr in
-        let stdout = String.trim stdout in
-        if stderr <> "" then status_text ^ ": " ^ stderr
-        else if stdout <> "" then status_text ^ ": " ^ stdout
-        else status_text
-      in
-      Error (Printf.sprintf "git %s failed: %s" (String.concat " " args) detail)
+    Error (git_failure_detail args status stdout stderr)
 
 let clone ~repository =
   let env = non_interactive_git_env in
@@ -229,16 +244,25 @@ let get_branches ~repository =
    [read_only_git_env] adds GIT_OPTIONAL_LOCKS=0 so an inspection never takes
    a lock that a keeper's own git command then waits on. *)
 let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path () =
-  match
-    run_git
-      ~cwd:local_path
-      ~env:read_only_git_env
+  let args = [ "remote"; "get-url"; "origin" ] in
+  let argv = "git" :: "-C" :: local_path :: args in
+  let status, stdout, stderr =
+    Process_eio.run_argv_with_status_split
+      ~env:(merge_env read_only_git_env)
       ~timeout_sec
-      [ "remote"; "get-url"; "origin" ]
-  with
-  | Ok (url :: _) -> Ok url
-  | Ok [] -> Error "git remote get-url origin returned no output"
-  | Error msg -> Error msg
+      argv
+  in
+  match status, split_lines stdout with
+  | Unix.WEXITED 0, url :: _ -> Ok url
+  | Unix.WEXITED 0, [] ->
+    Error (Origin_lookup_failed "git remote get-url origin returned no output")
+  (* Git gives a missing remote a distinct exit status, so absence stays typed
+     without inspecting mutable stderr text. *)
+  | Unix.WEXITED 2, _ -> Error Origin_missing
+  | Unix.WEXITED 124, _ ->
+    Error (Origin_lookup_timed_out (git_failure_detail args status stdout stderr))
+  | (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _), _ ->
+    Error (Origin_lookup_failed (git_failure_detail args status stdout stderr))
 
 let worktree_root ~local_path =
   match

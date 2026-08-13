@@ -563,13 +563,7 @@ let test_discover_origin_budget_is_cumulative () =
            (elapsed < 1.0)))
 ;;
 
-(* A spent budget is only a discovery failure while candidates remain unfunded.
-   When the last candidate is the one that failed, every entry has already been
-   collected, skipped, or attempted, so the walk is complete. Aborting there used
-   to discard the whole collected list, and — because the bounded
-   [get_origin_url] returns an untyped string error — it did so for a checkout
-   that simply had no origin remote as readily as for a timeout. *)
-let test_discover_spent_budget_on_last_candidate_is_not_a_failure () =
+let test_discover_timeout_on_last_candidate_is_typed_failure () =
   with_temp_base_path (fun base_path ->
     let fake_bin = Filename.concat base_path "fake-bin" in
     Unix.mkdir fake_bin 0o755;
@@ -592,15 +586,32 @@ let test_discover_spent_budget_on_last_candidate_is_not_a_failure () =
          in
          let elapsed = Unix.gettimeofday () -. started_at in
          (match result with
-          | Ok repos ->
-            Alcotest.(check int)
-              "the uninspectable checkout is skipped, not registered"
-              0
-              (List.length repos)
-          | Error detail ->
-            Alcotest.fail
-              ("a completed walk was reported as a discovery failure: " ^ detail));
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "timed-out final origin was silently skipped");
          Alcotest.(check bool) "still bounded by the budget" true (elapsed < 1.0)))
+;;
+
+let test_discover_skips_missing_origin_without_failing_request () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+      let without_origin = Filename.concat base_path "without-origin" in
+      Unix.mkdir without_origin 0o755;
+      init_git_repo without_origin "https://github.com/test/temporary";
+      (match Repo_git.run_git ~cwd:without_origin [ "remote"; "remove"; "origin" ] with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      let with_origin = Filename.concat base_path "with-origin" in
+      Unix.mkdir with_origin 0o755;
+      init_git_repo with_origin "https://github.com/test/with-origin";
+      match Repo_store.discover_repositories ~base_path with
+      | Error detail ->
+        Alcotest.fail ("missing origin failed repository discovery: " ^ detail)
+      | Ok repos ->
+        Alcotest.(check (list string))
+          "missing-origin repository is skipped while valid candidates survive"
+          [ "with-origin" ]
+          (List.map (fun (repo : repository) -> repo.id) repos))
 ;;
 
 let test_discover_origin_budget_starts_after_filesystem_scan () =
@@ -906,12 +917,14 @@ let () =
           Alcotest.test_case "relative base path keeps visible repos" `Quick
             test_discover_relative_base_path_keeps_visible_repos;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
+          Alcotest.test_case "skips missing origin without failing discovery" `Quick
+            test_discover_skips_missing_origin_without_failing_request;
           Alcotest.test_case "shares one origin inspection budget" `Quick
             test_discover_origin_budget_is_cumulative;
           Alcotest.test_case "starts origin budget after filesystem scan" `Quick
             test_discover_origin_budget_starts_after_filesystem_scan;
-          Alcotest.test_case "spent budget on the last candidate is not a failure"
-            `Quick test_discover_spent_budget_on_last_candidate_is_not_a_failure;
+          Alcotest.test_case "timeout on the last candidate is a typed failure" `Quick
+            test_discover_timeout_on_last_candidate_is_typed_failure;
           Alcotest.test_case "escapes discovery warning fields" `Quick
             test_discovery_warning_escapes_untrusted_fields;
         ] );

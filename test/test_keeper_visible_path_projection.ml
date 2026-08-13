@@ -289,6 +289,39 @@ let test_repository_checkout_projection_shares_inspection_budget () =
          (elapsed < 1.0))
 ;;
 
+let test_repository_checkout_budget_starts_after_discovery () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let checkout = Filename.concat playground "repos/fast-checkout" in
+  ensure_dir checkout;
+  ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "main" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.name"; "Test" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout [ "commit"; "--allow-empty"; "-m"; "initial" ]);
+  ignore
+    (run_git_or_fail
+       ~cwd:checkout
+       [ "remote"; "add"; "origin"; "https://example.invalid/fast-checkout.git" ]);
+  let projection =
+    Keeper_sandbox_control.For_testing
+    .repository_checkouts_json_with_budget_after_discovery
+      ~before_git_inspection:(fun () -> Unix.sleepf 0.6)
+      ~inspection_budget_sec:0.5
+      ~config
+      ~meta
+  in
+  Alcotest.(check string)
+    "catalog and filesystem discovery do not spend Git inspection budget"
+    "available"
+    (projection |> Json.member "state" |> Json.to_string);
+  let entry = projection |> Json.member "entries" |> Json.to_list |> List.hd in
+  Alcotest.(check string)
+    "fast checkout remains inspectable after slow discovery"
+    "available"
+    (entry |> Json.member "inspection_state" |> Json.to_string)
+;;
+
 let test_visible_scratch_read_resolves_to_private_storage () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
@@ -620,6 +653,10 @@ let () =
             "shares one inspection budget across checkouts"
             `Quick
             test_repository_checkout_projection_shares_inspection_budget
+        ; Alcotest.test_case
+            "starts inspection budget after discovery"
+            `Quick
+            test_repository_checkout_budget_starts_after_discovery
         ] )
     ]
 ;;

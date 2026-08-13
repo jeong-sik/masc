@@ -147,7 +147,21 @@ let test_get_origin_url () =
             "origin URL"
             "https://example.test/owner/repo.git"
             url
-      | Error e -> Alcotest.fail ("get_origin_url failed: " ^ e))
+      | Error e ->
+        Alcotest.fail
+          ("get_origin_url failed: " ^ Repo_git.origin_lookup_error_to_string e))
+
+let test_get_origin_url_reports_missing_without_text_matching () =
+  with_temp_dir (fun tmp ->
+    let source = Filename.concat tmp "source" in
+    init_local_repo source;
+    match Repo_git.get_origin_url ~local_path:source () with
+    | Error Repo_git.Origin_missing -> ()
+    | Error error ->
+      Alcotest.failf
+        "unexpected missing-origin outcome: %s"
+        (Repo_git.origin_lookup_error_to_string error)
+    | Ok url -> Alcotest.failf "missing origin returned URL %s" url)
 
 let test_get_origin_url_times_out_on_stalled_config () =
   with_temp_dir (fun tmp ->
@@ -164,7 +178,7 @@ let test_get_origin_url_times_out_on_stalled_config () =
           let started_at = Unix.gettimeofday () in
           match Repo_git.get_origin_url ~local_path:tmp () with
           | Ok url -> Alcotest.failf "expected timeout, got origin %s" url
-          | Error error ->
+          | Error (Repo_git.Origin_lookup_timed_out error) ->
               let elapsed = Unix.gettimeofday () -. started_at in
               Alcotest.(check bool)
                 "reports timeout"
@@ -173,7 +187,11 @@ let test_get_origin_url_times_out_on_stalled_config () =
               Alcotest.(check bool)
                 "returns within a bounded interval"
                 true
-                (elapsed >= 4.0 && elapsed < 10.0)))
+                (elapsed >= 4.0 && elapsed < 10.0)
+          | Error error ->
+            Alcotest.failf
+              "expected typed timeout, got %s"
+              (Repo_git.origin_lookup_error_to_string error)))
 
 let test_get_origin_url_uses_read_only_git_env () =
   with_temp_dir (fun tmp ->
@@ -192,7 +210,9 @@ let test_get_origin_url_uses_read_only_git_env () =
       (fun () ->
          Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
          match Repo_git.get_origin_url ~local_path:source () with
-         | Error e -> Alcotest.fail ("origin failed: " ^ e)
+         | Error e ->
+           Alcotest.fail
+             ("origin failed: " ^ Repo_git.origin_lookup_error_to_string e)
          | Ok _ ->
            let joined = String.concat "\n" (List.rev !captured) in
            Alcotest.(check bool)
@@ -334,6 +354,10 @@ let () =
         [ Alcotest.test_case "returns branches" `Quick test_get_branches ] );
       ( "get_origin_url",
         [ Alcotest.test_case "returns configured origin" `Quick test_get_origin_url
+        ; Alcotest.test_case
+            "reports missing origin as typed absence"
+            `Quick
+            test_get_origin_url_reports_missing_without_text_matching
         ; Alcotest.test_case
             "times out on stalled config"
             `Slow

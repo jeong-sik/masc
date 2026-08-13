@@ -237,7 +237,15 @@ RFC-0312 (**Accepted**, PR #23359) 가 "keeper repo 매핑은 advisory default s
 | 3 | 모델 대면 산문 + `scratch` 허용목록 + `sandbox_repos` wire | 합쳐야 함 |
 | 3b | GC/FD 스크립트 (`rm -rf` 경로라 분리) | dry-run 근거 필요 |
 | 4 | 잔여 타입/필드 | 컴파일러 검증 |
-| 5 | `validate-prompt-paths.sh` 를 실제 대상 + lower-bound 어서션으로 교체 | 게이트 복구 |
+| 5 | `validate-prompt-paths.sh` 제거 (아래 정정) | 규약이 사라졌다 |
+
+> **§5 단계 5 정정 (구현 중 확인).** 원안은 이 게이트를 "실제 대상 + lower-bound 어서션" 으로 교체하는 것이었다. 스크립트를 읽고 바꿨다.
+>
+> 그 게이트의 불변식은 *"`config/` 의 모든 `.worktrees/` 참조는 `repos/<repo>/.worktrees/` 형태여야 한다"* 이다. **그 canonical form 자체가 이 RFC 로 사라진다.** 검색 루트를 넓혀 되살리면 존재하지 않는 규약을 게이트로 고정하게 된다.
+>
+> 원래 의도(#6527)는 *"bare `.worktrees/<branch>` 가 서버 루트 상대 경로를 가르쳐 harness 가 막는다"* — 즉 **호스트 경로 누출 방지**다. 그 목적은 레이아웃과 무관하며, 대시보드의 `playground-path` 룰(`/\.masc\/playground\//`)이 이미 수행한다. 그 룰은 남긴다.
+>
+> 함께 제거: 대시보드의 `hardcoded-masc-path` 룰. 그 `expected` 문구가 `"Use repos/REPO_NAME/.worktrees/TASK_NAME"` 라서, 이 RFC 이후에는 오퍼레이터에게 **틀린 조언**을 하게 된다.
 
 순서 제약:
 

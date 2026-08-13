@@ -202,13 +202,6 @@ const STALE_RULES: Array<{
     expected: 'Use the current repo-hosting workflow exposed by active tool policy.',
   },
   {
-    id: 'hardcoded-masc-path',
-    severity: 'warn',
-    title: 'Hardcoded repo path example',
-    pattern: /repos\/masc\//,
-    expected: 'Use repos/REPO_NAME/.worktrees/TASK_NAME for task work examples.',
-  },
-  {
     id: 'playground-path',
     severity: 'warn',
     title: 'Host storage path still visible',
@@ -221,7 +214,6 @@ const DUPLICATED_TOOL_TERMS = [
   'keeper_task_done',
   'masc_board_post_get',
   'Execute',
-  'repos/REPO_NAME/.worktrees/TASK_NAME',
 ]
 
 function textByteLength(value: string): number {

@@ -72,7 +72,7 @@ describe('buildKeeperPromptAssemblyReport', () => {
     const report = buildKeeperPromptAssemblyReport([
       prompt({
         key: 'keeper',
-        effective: 'Call keeper_task_done { notes: "evidence" }. Use keeper_pr_create and repos/masc/lib/foo.ml for PR work.',
+        effective: 'Call keeper_task_done { notes: "evidence" }. Use keeper_pr_create for PR work.',
       }),
     ])
 
@@ -80,7 +80,6 @@ describe('buildKeeperPromptAssemblyReport', () => {
       expect.arrayContaining([
         'task-done-notes',
         'keeper-pr-create',
-        'hardcoded-masc-path',
       ]),
     )
     expect(report.stats.criticalCount).toBe(1)

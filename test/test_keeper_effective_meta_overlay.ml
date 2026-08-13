@@ -335,7 +335,7 @@ sandbox_profile = "docker"
 |};
   let config = Workspace.default_config base in
   let persisted = seed_runtime_meta config name in
-  match Profile.load_keeper_profile_defaults ~config ~keeper_name:name with
+  match Profile.load_keeper_profile_defaults_result_for_base_path ~base_path:base name with
   | Error error ->
     Alcotest.failf
       "profile defaults load failed: %s"

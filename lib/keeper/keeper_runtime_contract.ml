@@ -76,6 +76,212 @@ let backend_of_meta (meta : keeper_meta) =
   | Docker -> "docker"
   | Local -> "local"
 
+module Sandbox_routing = struct
+  type boundary =
+    | Host_local
+    | Docker_contained
+    | Docker_inherited_network
+  [@@deriving show, eq]
+
+  type invalid_boundary =
+    | Host_network_none_unenforceable
+  [@@deriving show, eq]
+
+  type requested = Requested of boundary
+
+  type effective =
+    | Resolved of boundary
+    | Resolution_failed of { detail : string }
+
+  type receipt =
+    | Observed of boundary
+    | Unobserved of { detail : string }
+
+  type evidence =
+    { requested : requested
+    ; effective : effective
+    ; receipt : receipt
+    }
+
+  type violation =
+    | Effective_resolution_unavailable of { detail : string }
+    | Config_effective_mismatch of
+        { requested : boundary
+        ; effective : boundary
+        }
+    | Receipt_evidence_unavailable of { detail : string }
+    | Effective_receipt_mismatch of
+        { effective : boundary
+        ; receipt : boundary
+        }
+  [@@deriving show, eq]
+
+  type verified = Verified of boundary
+
+  let boundary_to_string = function
+    | Host_local -> "host_local"
+    | Docker_contained -> "docker_contained"
+    | Docker_inherited_network -> "docker_inherited_network"
+  ;;
+
+  let invalid_boundary_to_string = function
+    | Host_network_none_unenforceable ->
+      "local host execution cannot enforce network_mode=none"
+  ;;
+
+  let violation_to_string = function
+    | Effective_resolution_unavailable { detail } ->
+      "effective sandbox resolution unavailable: " ^ detail
+    | Config_effective_mismatch { requested; effective } ->
+      Printf.sprintf
+        "config requested %s but runtime resolved %s"
+        (boundary_to_string requested)
+        (boundary_to_string effective)
+    | Receipt_evidence_unavailable { detail } ->
+      "sandbox receipt evidence unavailable: " ^ detail
+    | Effective_receipt_mismatch { effective; receipt } ->
+      Printf.sprintf
+        "runtime resolved %s but receipt observed %s"
+        (boundary_to_string effective)
+        (boundary_to_string receipt)
+  ;;
+
+  (* [Local, Network_none] is not another supported boundary. Host execution
+     inherits the server network namespace, so accepting that product would
+     turn an unenforced request into a containment claim. *)
+  let boundary_of_profile_network ~sandbox_profile ~network_mode =
+    match sandbox_profile, network_mode with
+    | Local, Network_inherit -> Ok Host_local
+    | Local, Network_none -> Error Host_network_none_unenforceable
+    | Docker, Network_none -> Ok Docker_contained
+    | Docker, Network_inherit -> Ok Docker_inherited_network
+  ;;
+
+  let requested_of_config ~sandbox_profile ~network_mode =
+    Result.map
+      (fun boundary -> Requested boundary)
+      (boundary_of_profile_network ~sandbox_profile ~network_mode)
+  ;;
+
+  let effective_resolved ~sandbox_profile ~network_mode =
+    Result.map
+      (fun boundary -> Resolved boundary)
+      (boundary_of_profile_network ~sandbox_profile ~network_mode)
+  ;;
+
+  let non_blank ~field detail =
+    if String.equal (String.trim detail) ""
+    then Error (field ^ " must not be blank")
+    else Ok detail
+  ;;
+
+  let effective_resolution_failed ~detail =
+    Result.map
+      (fun detail -> Resolution_failed { detail })
+      (non_blank ~field:"sandbox effective-resolution failure detail" detail)
+  ;;
+
+  let receipt_observed ~sandbox_profile ~network_mode =
+    Result.map
+      (fun boundary -> Observed boundary)
+      (boundary_of_profile_network ~sandbox_profile ~network_mode)
+  ;;
+
+  let receipt_unobserved ~detail =
+    Result.map
+      (fun detail -> Unobserved { detail })
+      (non_blank ~field:"sandbox receipt unobserved detail" detail)
+  ;;
+
+  let evidence ~requested ~effective ~receipt = { requested; effective; receipt }
+
+  let verify { requested = Requested requested; effective; receipt } =
+    match effective with
+    | Resolution_failed { detail } ->
+      Error (Effective_resolution_unavailable { detail })
+    | Resolved effective when not (equal_boundary requested effective) ->
+      Error (Config_effective_mismatch { requested; effective })
+    | Resolved effective ->
+      (match receipt with
+       | Unobserved { detail } -> Error (Receipt_evidence_unavailable { detail })
+       | Observed receipt when not (equal_boundary effective receipt) ->
+         Error (Effective_receipt_mismatch { effective; receipt })
+       | Observed _ -> Ok (Verified effective))
+  ;;
+
+  let boundary_json boundary = `String (boundary_to_string boundary)
+
+  let effective_to_yojson = function
+    | Resolved boundary ->
+      `Assoc
+        [ "status", `String "resolved"
+        ; "boundary", boundary_json boundary
+        ]
+    | Resolution_failed { detail } ->
+      `Assoc
+        [ "status", `String "resolution_failed"
+        ; "boundary", `Null
+        ; "detail", `String detail
+        ]
+  ;;
+
+  let receipt_to_yojson = function
+    | Observed boundary ->
+      `Assoc
+        [ "status", `String "observed"
+        ; "boundary", boundary_json boundary
+        ]
+    | Unobserved { detail } ->
+      `Assoc
+        [ "status", `String "unobserved"
+        ; "boundary", `Null
+        ; "detail", `String detail
+        ]
+  ;;
+
+  let violation_kind = function
+    | Effective_resolution_unavailable _ -> "effective_resolution_unavailable"
+    | Config_effective_mismatch _ -> "config_effective_mismatch"
+    | Receipt_evidence_unavailable _ -> "receipt_evidence_unavailable"
+    | Effective_receipt_mismatch _ -> "effective_receipt_mismatch"
+  ;;
+
+  let descriptor_to_yojson
+      ({ requested = Requested requested; effective; receipt } as evidence)
+    =
+    let verification =
+      match verify evidence with
+      | Ok (Verified boundary) ->
+        `Assoc
+          [ "status", `String "verified"
+          ; "containment", boundary_json boundary
+          ; "violation", `Null
+          ; "detail", `Null
+          ]
+      | Error violation ->
+        let status =
+          match violation with
+          | Config_effective_mismatch _ | Effective_receipt_mismatch _ -> "mismatch"
+          | Effective_resolution_unavailable _ | Receipt_evidence_unavailable _ ->
+            "unobserved"
+        in
+        `Assoc
+          [ "status", `String status
+          ; "containment", `String "not_verified"
+          ; "violation", `String (violation_kind violation)
+          ; "detail", `String (violation_to_string violation)
+          ]
+    in
+    `Assoc
+      [ "schema", `String "masc.keeper.sandbox-routing.v1"
+      ; "config_requested", boundary_json requested
+      ; "resolved_effective", effective_to_yojson effective
+      ; "receipt_evidence", receipt_to_yojson receipt
+      ; "verification", verification
+      ]
+  ;;
+end
+
 let task_is_linked_to_keeper_goals ?(task_goal_index = Hashtbl.create 0) goal_ids (task : Masc_domain.task) =
   let task_goal_ids =
     (* DET-OK: an absent bucket means no recorded links; this is the same []
@@ -252,7 +458,12 @@ let nonempty_list = function
   | None -> []
 
 let backend_detail_keys =
-  [ "sandbox_profile"; "network_mode"; "backend"; "sandbox_target" ]
+  [ "sandbox_profile"
+  ; "network_mode"
+  ; "backend"
+  ; "sandbox_target"
+  ; "sandbox_routing"
+  ]
 
 let is_backend_detail_key key = List.mem key backend_detail_keys
 
@@ -292,7 +503,7 @@ let path_resolution_contract_json =
 
 let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?sandbox_routing
     ?runtime_profile () : Yojson.Safe.t =
   `Assoc
     [
@@ -309,12 +520,16 @@ let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?tr
       ("allowed_paths", Json_util.json_string_list (nonempty_list allowed_paths));
       ("path_resolution", path_resolution_contract_json);
       ("network_mode", string_opt_json network_mode);
+      ( "sandbox_routing"
+      , match sandbox_routing with
+        | None -> `Null
+        | Some evidence -> Sandbox_routing.descriptor_to_yojson evidence );
       ("runtime_profile", string_opt_json runtime_profile);
     ]
 
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
-    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode
+    ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?sandbox_routing
     ?runtime_profile () : Yojson.Safe.t =
   runtime_observability_contract_json_from_fields
     ~keeper_name
@@ -329,6 +544,7 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?sandbox_root
     ?allowed_paths
     ?network_mode
+    ?sandbox_routing
     ?runtime_profile
     ()
   |> redact_backend_details

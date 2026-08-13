@@ -10,6 +10,94 @@ val validate_active_goal_ids :
     Returns only goal IDs that actually exist. Logs pruned IDs at warn level. *)
 
 val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
+
+(** {1 Sandbox routing evidence}
+
+    Persisted config intent, runtime resolution, and receipt observation are
+    separate evidence stages. They used to be projected as the same
+    [(sandbox_profile, network_mode)] pair, which allowed a Docker request and
+    a local/inherit receipt to look self-consistent. This module makes the
+    boundary a closed sum and validates the three stages without starting or
+    inspecting Docker. *)
+module Sandbox_routing : sig
+  type boundary =
+    | Host_local
+    | Docker_contained
+    | Docker_inherited_network
+  [@@deriving show, eq]
+
+  type invalid_boundary =
+    | Host_network_none_unenforceable
+  [@@deriving show, eq]
+
+  type requested = private Requested of boundary
+
+  type effective = private
+    | Resolved of boundary
+    | Resolution_failed of { detail : string }
+
+  type receipt = private
+    | Observed of boundary
+    | Unobserved of { detail : string }
+
+  type evidence = private
+    { requested : requested
+    ; effective : effective
+    ; receipt : receipt
+    }
+
+  type violation =
+    | Effective_resolution_unavailable of { detail : string }
+    | Config_effective_mismatch of
+        { requested : boundary
+        ; effective : boundary
+        }
+    | Receipt_evidence_unavailable of { detail : string }
+    | Effective_receipt_mismatch of
+        { effective : boundary
+        ; receipt : boundary
+        }
+  [@@deriving show, eq]
+
+  type verified = private Verified of boundary
+
+  val boundary_to_string : boundary -> string
+  val invalid_boundary_to_string : invalid_boundary -> string
+  val violation_to_string : violation -> string
+
+  val requested_of_config :
+    sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
+    (requested, invalid_boundary) result
+
+  val effective_resolved :
+    sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
+    (effective, invalid_boundary) result
+
+  val effective_resolution_failed : detail:string -> (effective, string) result
+
+  val receipt_observed :
+    sandbox_profile:Keeper_types_profile_sandbox.sandbox_profile ->
+    network_mode:Keeper_types_profile_sandbox.network_mode ->
+    (receipt, invalid_boundary) result
+
+  val receipt_unobserved : detail:string -> (receipt, string) result
+
+  val evidence :
+    requested:requested -> effective:effective -> receipt:receipt -> evidence
+
+  val verify : evidence -> (verified, violation) result
+  (** Fail closed unless effective resolution exists and all three boundaries
+      are identical. No [bool] success flag exists for a caller to combine with
+      registration or receipt presence permissively. *)
+
+  val descriptor_to_yojson : evidence -> Yojson.Safe.t
+  (** Operator-facing containment descriptor. Failed verification emits
+      [containment = "not_verified"] plus a typed violation; it never reports
+      the requested Docker boundary as effective containment. *)
+end
+
 val task_is_linked_to_keeper_goals :
   ?task_goal_index:(string, string list) Hashtbl.t -> string list -> Masc_domain.task -> bool
 
@@ -74,6 +162,7 @@ val runtime_contract_json_from_fields :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
+  ?sandbox_routing:Sandbox_routing.evidence ->
   ?runtime_profile:string ->
   unit ->
   Yojson.Safe.t
@@ -93,6 +182,7 @@ val runtime_observability_contract_json_from_fields :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
+  ?sandbox_routing:Sandbox_routing.evidence ->
   ?runtime_profile:string ->
   unit ->
   Yojson.Safe.t

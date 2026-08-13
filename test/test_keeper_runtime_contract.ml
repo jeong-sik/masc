@@ -217,6 +217,157 @@ let test_scoped_verification_keeps_isolation () =
         included)
 ;;
 
+module Sandbox = Keeper_types_profile_sandbox
+module Routing = Keeper_runtime_contract.Sandbox_routing
+
+let routing_stage label = function
+  | Ok value -> value
+  | Error invalid ->
+    failf "%s: %s" label (Routing.invalid_boundary_to_string invalid)
+;;
+
+let requested ~sandbox_profile ~network_mode =
+  Routing.requested_of_config ~sandbox_profile ~network_mode
+  |> routing_stage "config request"
+;;
+
+let effective ~sandbox_profile ~network_mode =
+  Routing.effective_resolved ~sandbox_profile ~network_mode
+  |> routing_stage "effective resolution"
+;;
+
+let receipt ~sandbox_profile ~network_mode =
+  Routing.receipt_observed ~sandbox_profile ~network_mode
+  |> routing_stage "receipt observation"
+;;
+
+let json_string path json =
+  let open Yojson.Safe.Util in
+  List.fold_left (fun cursor field -> member field cursor) json path |> to_string
+;;
+
+let test_sandbox_routing_verifies_matching_docker_evidence () =
+  let requested =
+    requested ~sandbox_profile:Sandbox.Docker ~network_mode:Sandbox.Network_none
+  in
+  let effective =
+    effective ~sandbox_profile:Sandbox.Docker ~network_mode:Sandbox.Network_none
+  in
+  let receipt =
+    receipt ~sandbox_profile:Sandbox.Docker ~network_mode:Sandbox.Network_none
+  in
+  let evidence = Routing.evidence ~requested ~effective ~receipt in
+  (match Routing.verify evidence with
+   | Ok _ -> ()
+   | Error violation ->
+     failf "expected verified Docker containment: %s"
+       (Routing.violation_to_string violation));
+  let descriptor = Routing.descriptor_to_yojson evidence in
+  check string "verified status" "verified"
+    (json_string [ "verification"; "status" ] descriptor);
+  check string "verified containment" "docker_contained"
+    (json_string [ "verification"; "containment" ] descriptor)
+;;
+
+let test_sandbox_routing_exposes_requested_effective_receipt_mismatch () =
+  (* Live-shaped negative fixture: config requests Docker/none while both the
+     resolved runtime and its receipt report local/inherit. The legacy flat
+     fields look internally consistent; the staged descriptor must not turn
+     them into a containment claim. *)
+  let requested =
+    requested ~sandbox_profile:Sandbox.Docker ~network_mode:Sandbox.Network_none
+  in
+  let effective =
+    effective ~sandbox_profile:Sandbox.Local ~network_mode:Sandbox.Network_inherit
+  in
+  let receipt =
+    receipt ~sandbox_profile:Sandbox.Local ~network_mode:Sandbox.Network_inherit
+  in
+  let evidence = Routing.evidence ~requested ~effective ~receipt in
+  (match Routing.verify evidence with
+   | Error (Routing.Config_effective_mismatch { requested; effective }) ->
+     check string "requested boundary" "docker_contained"
+       (Routing.boundary_to_string requested);
+     check string "effective boundary" "host_local"
+       (Routing.boundary_to_string effective)
+   | Error violation ->
+     failf "expected config/effective mismatch, got %s"
+       (Routing.violation_to_string violation)
+   | Ok _ -> fail "mismatched routing evidence must fail closed");
+  let descriptor = Routing.descriptor_to_yojson evidence in
+  check string "descriptor config request" "docker_contained"
+    (json_string [ "config_requested" ] descriptor);
+  check string "descriptor effective" "host_local"
+    (json_string [ "resolved_effective"; "boundary" ] descriptor);
+  check string "descriptor receipt" "host_local"
+    (json_string [ "receipt_evidence"; "boundary" ] descriptor);
+  check string "descriptor mismatch status" "mismatch"
+    (json_string [ "verification"; "status" ] descriptor);
+  check string "descriptor never claims containment" "not_verified"
+    (json_string [ "verification"; "containment" ] descriptor);
+  check string "typed violation" "config_effective_mismatch"
+    (json_string [ "verification"; "violation" ] descriptor);
+  let operator_contract =
+    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
+      ~keeper_name:"code-reviewer"
+      ~sandbox_profile:"local"
+      ~network_mode:"inherit"
+      ~sandbox_routing:evidence
+      ()
+  in
+  check string "operator contract retains request" "docker_contained"
+    (json_string [ "sandbox_routing"; "config_requested" ] operator_contract);
+  let keeper_contract =
+    Keeper_runtime_contract.runtime_contract_json_from_fields
+      ~keeper_name:"code-reviewer"
+      ~sandbox_profile:"local"
+      ~network_mode:"inherit"
+      ~sandbox_routing:evidence
+      ()
+  in
+  check bool "keeper projection redacts backend routing evidence" true
+    (Yojson.Safe.Util.member "sandbox_routing" keeper_contract = `Null)
+;;
+
+let test_sandbox_routing_requires_receipt_evidence () =
+  let requested =
+    requested ~sandbox_profile:Sandbox.Docker ~network_mode:Sandbox.Network_none
+  in
+  let effective =
+    effective ~sandbox_profile:Sandbox.Docker ~network_mode:Sandbox.Network_none
+  in
+  let receipt =
+    match
+      Routing.receipt_unobserved
+        ~detail:"execution receipt did not record the runtime route"
+    with
+    | Ok receipt -> receipt
+    | Error error -> fail error
+  in
+  let evidence = Routing.evidence ~requested ~effective ~receipt in
+  (match Routing.verify evidence with
+   | Error (Routing.Receipt_evidence_unavailable _) -> ()
+   | Error violation ->
+     failf "expected unavailable receipt, got %s"
+       (Routing.violation_to_string violation)
+   | Ok _ -> fail "missing receipt evidence must fail closed");
+  let descriptor = Routing.descriptor_to_yojson evidence in
+  check string "unobserved status" "unobserved"
+    (json_string [ "verification"; "status" ] descriptor);
+  check string "unobserved never claims containment" "not_verified"
+    (json_string [ "verification"; "containment" ] descriptor)
+;;
+
+let test_sandbox_routing_rejects_unenforceable_host_network_none () =
+  match
+    Routing.requested_of_config
+      ~sandbox_profile:Sandbox.Local
+      ~network_mode:Sandbox.Network_none
+  with
+  | Error Routing.Host_network_none_unenforceable -> ()
+  | Ok _ -> fail "local/network-none cannot be represented as enforced"
+;;
+
 let () =
   run
     "keeper_runtime_contract"
@@ -231,6 +382,16 @@ let () =
             test_preloaded_tasks_fall_back_to_all_tasks
         ; test_case "keeps isolation for scoped verification" `Quick
             test_scoped_verification_keeps_isolation
+        ] )
+    ; ( "sandbox_routing"
+      , [ test_case "verifies matching Docker evidence" `Quick
+            test_sandbox_routing_verifies_matching_docker_evidence
+        ; test_case "exposes requested/effective/receipt mismatch" `Quick
+            test_sandbox_routing_exposes_requested_effective_receipt_mismatch
+        ; test_case "requires receipt evidence" `Quick
+            test_sandbox_routing_requires_receipt_evidence
+        ; test_case "rejects unenforceable host network-none" `Quick
+            test_sandbox_routing_rejects_unenforceable_host_network_none
         ] )
     ]
 ;;

@@ -744,7 +744,7 @@ let test_execute_typed_repeated_executable_arg_is_preserved () =
     true
     (response_mentions raw "output" "echo hello")
 
-let test_execute_typed_pipeline_falls_back_to_local_playground () =
+let test_execute_typed_pipeline_requires_docker_factory () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -756,37 +756,12 @@ let test_execute_typed_pipeline_falls_back_to_local_playground () =
       ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
       ()
   in
-  check_typed_pipeline_response raw;
-  let local_cwd =
-    Keeper_alerting_path.normalize_path_for_check playground
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
-    (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
-    (parse_string_field raw "sandbox_fallback");
-  Alcotest.(check (option string)) "fallback dispatch identity"
-    (Some "local_fallback")
-    (parse_string_field raw "via");
-  Alcotest.(check bool) "fallback response exposes actual Local host namespace" true
-    (String_util.contains_substring raw config.Workspace.base_path);
-  Alcotest.(check (option string)) "fallback top-level cwd is Local host cwd"
-    (Some local_cwd)
-    (parse_string_field raw "cwd");
-  let execution_location_cwd =
-    try
-      raw
-      |> Yojson.Safe.from_string
-      |> Yojson.Safe.Util.member "execution_location"
-      |> Yojson.Safe.Util.member "cwd"
-      |> Yojson.Safe.Util.to_string_option
-    with
-    | Yojson.Json_error _ -> None
-  in
-  Alcotest.(check (option string)) "fallback nested cwd matches top-level cwd"
-    (Some local_cwd)
-    execution_location_cwd
+  Alcotest.(check (option bool)) "Docker request did not run on Host" None
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "missing factory is explicit" true
+    (response_mentions raw "error" "requires a turn sandbox factory");
+  Alcotest.(check (option string)) "no local fallback" None
+    (parse_string_field raw "sandbox_fallback")
 
 let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local
@@ -834,45 +809,12 @@ let test_execute_routes_through_docker () =
       ~args:(tool_execute_typed_exec_args ~cwd:playground "pwd" ~argv:[])
       ()
   in
-  Alcotest.(check (option bool)) "typed Execute succeeds via local fallback" (Some true)
+  Alcotest.(check (option bool)) "Docker request did not run on Host" None
     (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
-    (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
-    (parse_string_field raw "sandbox_fallback");
-  Alcotest.(check (option string)) "fallback dispatch identity"
-    (Some "local_fallback")
-    (parse_string_field raw "via");
-  Alcotest.(check (option string)) "fallback reason is typed"
-    (Some "docker_preflight_unavailable")
-    (parse_string_field raw "fallback_reason");
-  Alcotest.(check bool) "fallback retains private preflight detail" true
-    (Option.is_some (parse_string_field raw "sandbox_fallback_reason"));
-  let stdout =
-    parse_string_field raw "output"
-    |> Option.map String.trim
-  in
-  let local_cwd =
-    Keeper_alerting_path.normalize_path_for_check playground
-    |> Keeper_alerting_path.strip_trailing_slashes
-  in
-  Alcotest.(check (option string)) "fallback stdout reports Local cwd"
-    (Some local_cwd)
-    stdout;
-  Alcotest.(check (option string)) "fallback top-level cwd reports Local namespace"
-    stdout
-    (parse_string_field raw "cwd");
-  let execution_location_cwd =
-    raw
-    |> Yojson.Safe.from_string
-    |> Yojson.Safe.Util.member "execution_location"
-    |> Yojson.Safe.Util.member "cwd"
-    |> Yojson.Safe.Util.to_string_option
-  in
-  Alcotest.(check (option string)) "fallback nested cwd reports Local namespace"
-    stdout
-    execution_location_cwd
+  Alcotest.(check bool) "missing Docker image is explicit" true
+    (response_mentions raw "error" "docker image");
+  Alcotest.(check (option string)) "no local fallback" None
+    (parse_string_field raw "sandbox_fallback")
 
 let test_execute_legacy_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
@@ -1090,12 +1032,11 @@ let test_execute_git_routes_through_docker () =
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
   in
-  Alcotest.(check (option bool)) "typed git bash uses local fallback" (Some true)
+  Alcotest.(check (option bool)) "Docker git did not run on Host" None
     (parse_bool_field raw "ok");
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
-    (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
+  Alcotest.(check bool) "missing factory is explicit" true
+    (response_mentions raw "error" "requires a turn sandbox factory");
+  Alcotest.(check (option string)) "no local fallback" None
     (parse_string_field raw "sandbox_fallback")
 
 let test_execute_git_uses_turn_runtime () =
@@ -1432,7 +1373,7 @@ let test_docker_shell_ir_parse_failure_blocks_before_run () =
       false
       (Sys.file_exists log_path)
 
-let test_execute_missing_image_falls_back_to_local_playground () =
+let test_execute_missing_image_without_factory_fails_closed () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1451,14 +1392,14 @@ let test_execute_missing_image_falls_back_to_local_playground () =
       ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
       ()
   in
-  check_typed_pipeline_response raw;
-  Alcotest.(check (option string)) "requested docker" (Some "docker")
-    (parse_string_field raw "requested_sandbox");
-  Alcotest.(check (option string)) "fallback local playground"
-    (Some "local_playground")
+  Alcotest.(check (option bool)) "Docker request did not run on Host" None
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "missing factory is explicit" true
+    (response_mentions raw "error" "requires a turn sandbox factory");
+  Alcotest.(check (option string)) "no local fallback" None
     (parse_string_field raw "sandbox_fallback");
-  let log = read_file log_path in
-  Alcotest.(check bool) "image inspect attempted" true
+  let log = if Sys.file_exists log_path then read_file log_path else "" in
+  Alcotest.(check bool) "image inspect skipped without factory" false
     (String_util.contains_substring log "image inspect missing:test");
   Alcotest.(check bool) "docker run skipped" false
     (String_util.contains_substring log "\nrun ")
@@ -2292,8 +2233,8 @@ let () =
             "tool_execute typed repeated executable arg is preserved"
             `Quick test_execute_typed_repeated_executable_arg_is_preserved;
           Alcotest.test_case
-            "tool_execute typed pipeline falls back to local playground"
-            `Quick test_execute_typed_pipeline_falls_back_to_local_playground;
+            "tool_execute typed pipeline requires docker factory"
+            `Quick test_execute_typed_pipeline_requires_docker_factory;
           Alcotest.test_case
             "tool_execute typed pipeline uses turn sandbox docker runner"
             `Quick test_execute_typed_pipeline_uses_turn_sandbox_docker_runner;
@@ -2312,8 +2253,8 @@ let () =
             "docker shell parse failure blocks before run"
             `Quick
             test_docker_shell_ir_parse_failure_blocks_before_run;
-          Alcotest.test_case "tool_execute missing image falls back locally" `Quick
-            test_execute_missing_image_falls_back_to_local_playground;
+          Alcotest.test_case "tool_execute missing image without factory fails closed" `Quick
+            test_execute_missing_image_without_factory_fails_closed;
           Alcotest.test_case
             "tool_execute outside playground rejects before image preflight"
             `Quick

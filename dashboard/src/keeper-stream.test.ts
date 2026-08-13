@@ -169,43 +169,72 @@ describe('Keeper operation stream projection', () => {
     setActiveStreamRequestId('sangsu', 'kmsg-operation-1')
   }
 
+  // The server hands the very same AG-UI event to both transports
+  // (server_routes_http_keeper_stream: broadcast then
+  // publish_operation_live_event), so the echo carries an identical delta.
   it('ignores the broadcast echo of a turn the direct stream already owns', () => {
+    directlyStreamingBubble()
+
+    for (const delta of ['오퍼레이터가 ', '비유/', '빈정거림']) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_CONTENT', delta })
+      applyKeeperOperationTurnEvent('sangsu', {
+        operationId: 'kmsg-operation-1',
+        event: { type: 'TEXT_MESSAGE_CONTENT', delta },
+      })
+    }
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('오퍼레이터가 비유/빈정거림')
+  })
+
+  // A late-attaching echo drops the leading fragments, so the two copies land
+  // out of phase and read as interleaved rather than as a clean repetition --
+  // this is the shape the operator reported.
+  it('ignores a broadcast echo that joined the turn late', () => {
     directlyStreamingBubble()
 
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TEXT_MESSAGE_CONTENT',
-      delta: '오퍼레이터가 비',
+      delta: '오퍼레이터가 ',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: '비유/',
     })
     applyKeeperOperationTurnEvent('sangsu', {
       operationId: 'kmsg-operation-1',
-      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '레이터가 비유/' },
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: '비유/' },
     })
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
-    expect(entry?.text).toBe('오퍼레이터가 비')
+    expect(entry?.text).toBe('오퍼레이터가 비유/')
   })
 
   it('ignores the broadcast echo of thinking deltas the direct stream already owns', () => {
     directlyStreamingBubble()
 
-    applyKeeperStreamEvent('sangsu', 'reply-1', {
-      type: 'CUSTOM',
-      name: 'KEEPER_THINKING_DELTA',
-      value: { index: 0, delta: '오퍼레이터가 비' },
-    })
-    applyKeeperOperationTurnEvent('sangsu', {
-      operationId: 'kmsg-operation-1',
-      event: {
+    // Both paths enqueue into one pending buffer keyed by keeper+entry, so an
+    // echo appends into the same chunk array the direct stream is filling.
+    for (const delta of ['오퍼레이터가 ', '비유/']) {
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
         type: 'CUSTOM',
         name: 'KEEPER_THINKING_DELTA',
-        value: { index: 0, delta: '레이터가 비유/' },
-      },
-    })
+        value: { index: 0, delta },
+      })
+      applyKeeperOperationTurnEvent('sangsu', {
+        operationId: 'kmsg-operation-1',
+        event: {
+          type: 'CUSTOM',
+          name: 'KEEPER_THINKING_DELTA',
+          value: { index: 0, delta },
+        },
+      })
+    }
     _flushPendingKeeperStreamDeltasForTests()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     const think = (entry?.traceSteps ?? []).filter(step => step.kind === 'think')
-    expect(think.map(step => step.text)).toEqual(['오퍼레이터가 비'])
+    expect(think.map(step => step.text)).toEqual(['오퍼레이터가 비유/'])
   })
 
   it('still applies broadcast events for a turn this session does not own', () => {

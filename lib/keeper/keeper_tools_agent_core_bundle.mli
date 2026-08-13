@@ -14,6 +14,7 @@ val make_tool_bundle
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?gate_context:Keeper_gate_causal_context.t
   -> ?hitl_resolution:Keeper_event_queue.hitl_resolution
+  -> ?composition_catalog:Keeper_tool_composition_catalog.t
   -> unit
   -> Keeper_tools_agent_core.tool_bundle
 
@@ -25,6 +26,7 @@ val make_tools
        Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?composition_catalog:Keeper_tool_composition_catalog.t
   -> unit
   -> Agent_core.Tool.t list
 

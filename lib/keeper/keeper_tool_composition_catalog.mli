@@ -33,6 +33,14 @@ type error =
       ; expected : expected_value
       }
   | Empty_name of { path : string list }
+  | Composition_name_too_long of
+      { name : string
+      ; maximum_bytes : int
+      }
+  | Invalid_composition_name_character of
+      { name : string
+      ; character : char
+      }
   | Duplicate_composition_name of string
   | Invalid_template_kind of
       { path : string list
@@ -70,3 +78,10 @@ val parse : string -> (t, error) result
 
 val entries : t -> entry list
 val find : t -> string -> entry option
+val tool_name : entry -> string
+(** Stable model-visible name for this materialized composition. *)
+
+val error_to_string : error -> string
+
+val path : config_root:string -> string
+(** Dedicated catalog path below the resolved MASC config root. *)

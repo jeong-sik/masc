@@ -145,9 +145,46 @@ name = %S
 [[compositions.nodes]]
 id = "time"
 tool = "keeper_time_now"
-input = { kind = "literal", value = {} }
+[compositions.nodes.input]
+kind = "literal"
+value = {}
 |}
     name
+;;
+
+let test_catalog_projects_stable_tool_name_and_path () =
+  let catalog =
+    match Catalog.parse (one_node_composition "clock-check") with
+    | Ok catalog -> catalog
+    | Error _ -> fail "valid named composition was rejected"
+  in
+  let entry =
+    match Catalog.find catalog "clock-check" with
+    | Some entry -> entry
+    | None -> fail "named composition lookup failed"
+  in
+  check string "model-visible tool name" "keeper_compose_clock-check"
+    (Catalog.tool_name entry);
+  check string "resolved catalog path" "config/tool-compositions.toml"
+    (Catalog.path ~config_root:"config")
+;;
+
+let test_catalog_rejects_name_outside_tool_alphabet () =
+  match Catalog.parse (one_node_composition "clock check") with
+  | Error
+      (Catalog.Invalid_composition_name_character
+        { name = "clock check"; character = ' ' }) -> ()
+  | Error _ | Ok _ -> fail "composition name outside the tool alphabet was accepted"
+;;
+
+let test_catalog_rejects_name_beyond_provider_limit () =
+  let name = String.make 50 'a' in
+  match Catalog.parse (one_node_composition name) with
+  | Error
+      (Catalog.Composition_name_too_long
+        { name = actual; maximum_bytes = 49 }) ->
+    check string "rejected exact name" name actual
+  | Error _ | Ok _ -> fail "composition name beyond provider limit was accepted"
 ;;
 
 let test_catalog_rejects_duplicate_composition_names () =
@@ -164,7 +201,9 @@ name = "unknown-tool"
 [[compositions.nodes]]
 id = "unknown"
 tool = "invented_tool"
-input = { kind = "literal", value = {} }
+[compositions.nodes.input]
+kind = "literal"
+value = {}
 |}
   in
   match Catalog.parse document with
@@ -172,6 +211,43 @@ input = { kind = "literal", value = {} }
       (Catalog.Plan_rejected
         { error = Plan.Unknown_tool { tool_name = "invented_tool"; _ }; _ }) -> ()
   | Error _ | Ok _ -> fail "catalog bypassed canonical plan tool authority"
+;;
+
+let test_catalog_loader_distinguishes_missing_valid_and_invalid () =
+  let config_root = Filename.temp_file "keeper-composition-loader" "" in
+  Unix.unlink config_root;
+  Unix.mkdir config_root 0o755;
+  let catalog_path = Catalog.path ~config_root in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists catalog_path then Unix.unlink catalog_path;
+      Unix.rmdir config_root)
+    (fun () ->
+       (match Masc.Keeper_run_tools_setup.load_composition_catalog ~config_root with
+        | Ok None -> ()
+        | Ok (Some _) | Error _ -> fail "missing catalog did not remain optional");
+       let write content =
+         let channel = open_out_bin catalog_path in
+         Fun.protect
+           ~finally:(fun () -> close_out channel)
+           (fun () -> output_string channel content)
+       in
+       write (one_node_composition "loaded");
+       (match Masc.Keeper_run_tools_setup.load_composition_catalog ~config_root with
+        | Ok (Some catalog) ->
+          check bool "valid catalog loaded" true (Option.is_some (Catalog.find catalog "loaded"))
+        | Ok None | Error _ -> fail "existing valid catalog was not loaded");
+       write "[[compositions]]\nname = \"broken\"\n";
+       match Masc.Keeper_run_tools_setup.load_composition_catalog ~config_root with
+       | Error
+           (Agent_core.Error.Config
+             (Agent_core.Error.InvalidConfig
+               { field = "tool-compositions.toml"; detail })) ->
+         check bool
+           "parse detail remains visible"
+           true
+           (String.length detail > 0)
+       | Ok _ | Error _ -> fail "invalid catalog did not return typed config error")
 ;;
 
 let () =
@@ -192,9 +268,25 @@ let () =
             `Quick
             test_catalog_rejects_duplicate_composition_names
         ; test_case
+            "projects stable tool name and path"
+            `Quick
+            test_catalog_projects_stable_tool_name_and_path
+        ; test_case
+            "rejects unsupported name characters"
+            `Quick
+            test_catalog_rejects_name_outside_tool_alphabet
+        ; test_case
+            "rejects name beyond provider limit"
+            `Quick
+            test_catalog_rejects_name_beyond_provider_limit
+        ; test_case
             "rejects unknown tools"
             `Quick
             test_catalog_rejects_unknown_tool_through_plan_authority
+        ; test_case
+            "loader distinguishes missing valid and invalid"
+            `Quick
+            test_catalog_loader_distinguishes_missing_valid_and_invalid
         ] )
     ]
 ;;

@@ -4648,6 +4648,200 @@ let composition_invocation ~completion =
     ~completion
 ;;
 
+let one_node_clock_composition =
+  {|[[compositions]]
+name = "clock"
+description = "Read the exact Keeper clock."
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+;;
+
+let one_node_terminal_composition =
+  {|[[compositions]]
+name = "surface"
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+[compositions.nodes.input]
+kind = "literal"
+value = { surface = "dashboard", content = "composition terminal" }
+|}
+;;
+
+let invalid_clock_input_composition =
+  {|[[compositions]]
+name = "invalid-clock-input"
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = { unsupported = true }
+|}
+;;
+
+let test_composition_catalog_materializes_and_executes_first_class_tool () =
+  with_exec_fixture "composition-first-class-tool"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let composition_catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse one_node_clock_composition
+         with
+         | Ok catalog -> catalog
+         | Error _ -> fail "valid clock composition catalog was rejected"
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_clock" with
+         | Some tool -> tool
+         | None -> fail "catalog entry was not materialized as an Agent-Core tool"
+       in
+       check string
+         "catalog description reaches model-visible schema"
+         "Read the exact Keeper clock."
+         tool.Agent_core.Tool.schema.description;
+       (match Agent_core.Tool.completion tool with
+        | Agent_core.Tool_contract.Continue_after_success -> ()
+        | Agent_core.Tool_contract.Terminal_after_success _ ->
+          fail "ordinary composition was materialized as terminal");
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Error error ->
+         failf "materialized composition failed: %s" error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.Agent_core.Types.content in
+         check string
+           "outer composition identity"
+           "keeper_compose_clock"
+           Yojson.Safe.Util.(member "composition_tool" payload |> to_string);
+         (match Yojson.Safe.Util.member "actions" payload with
+          | `List [ action ] ->
+            check string
+              "nested node identity"
+              "time"
+              Yojson.Safe.Util.(member "node_id" action |> to_string);
+            check string
+              "nested tool identity"
+              "keeper_time_now"
+              Yojson.Safe.Util.(member "tool_name" action |> to_string);
+            check int
+              "nested planned index"
+              0
+              Yojson.Safe.Util.(member "schedule" action |> member "planned_index" |> to_int);
+            (match Yojson.Safe.Util.member "result" action with
+             | `Assoc fields ->
+               check bool
+                 "nested result exposes typed data"
+                 true
+                 (List.mem_assoc "data" fields)
+             | _ -> fail "nested action result lost typed result shape")
+          | _ -> fail "composition did not expose its single settled action"))
+;;
+
+let test_terminal_composition_materializes_terminal_completion () =
+  with_exec_fixture "composition-terminal-surface"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let composition_catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse one_node_terminal_composition
+         with
+         | Ok catalog -> catalog
+         | Error _ -> fail "valid terminal composition catalog was rejected"
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_surface" with
+         | Some tool -> tool
+         | None -> fail "terminal catalog entry was not materialized"
+       in
+       match Agent_core.Tool.completion tool with
+       | Agent_core.Tool_contract.Terminal_after_success
+           Agent_core.Tool_contract.Effect_outcome_unknown -> ()
+       | Agent_core.Tool_contract.Continue_after_success
+       | Agent_core.Tool_contract.Terminal_after_success _ ->
+         fail "terminal composition lost its outer completion contract")
+;;
+
+let test_composition_plan_failure_exposes_typed_cause () =
+  with_exec_fixture "composition-typed-plan-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let composition_catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse invalid_clock_input_composition
+         with
+         | Ok catalog -> catalog
+         | Error _ -> fail "composition with runtime-invalid input was rejected too early"
+       in
+       let tool =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog
+           ()
+         |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
+           String.equal tool.schema.name "keeper_compose_invalid-clock-input")
+         |> function
+         | Some tool -> tool
+         | None -> fail "invalid-input composition was not materialized"
+       in
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Ok _ -> fail "runtime-invalid composition input unexpectedly succeeded"
+       | Error error ->
+         let payload = parse_json error.Agent_core.Types.message in
+         check string
+           "failed outer composition identity"
+           "keeper_compose_invalid-clock-input"
+           Yojson.Safe.Util.(member "composition_tool" payload |> to_string);
+         let cause = Yojson.Safe.Util.member "cause" payload in
+         check string
+           "typed executor cause"
+           "plan_execution_failed"
+           Yojson.Safe.Util.(member "kind" cause |> to_string);
+         check string
+           "typed plan failure"
+           "input_validation_failed"
+           Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string))
+;;
+
 let test_composition_runtime_uses_canonical_descriptor () =
   with_exec_fixture "composition-canonical-descriptor"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4835,6 +5029,12 @@ let () =
         test_surface_post_append_failure_does_not_complete_terminal_effect;
       test_case "composition dispatch uses canonical descriptor authority" `Quick
         test_composition_runtime_uses_canonical_descriptor;
+      test_case "catalog composition is a first-class executable tool" `Quick
+        test_composition_catalog_materializes_and_executes_first_class_tool;
+      test_case "terminal catalog composition keeps terminal completion" `Quick
+        test_terminal_composition_materializes_terminal_completion;
+      test_case "composition failure exposes typed plan cause" `Quick
+        test_composition_plan_failure_exposes_typed_cause;
       test_case "terminal composition requires terminal outer invocation" `Quick
         test_composition_terminal_requires_terminal_outer_invocation;
     ]);

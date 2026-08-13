@@ -660,12 +660,33 @@ let launch_supervised_fiber
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
         ]
       ();
-    Keeper_registry.set_failure_reason
-      ~base_path
-      meta.name
-      (Some (Keeper_registry.Exception reason));
-    Keeper_registry.record_crash ~base_path meta.name (Time_compat.now ()) reason;
-    Keeper_registry_error_recording.record ~base_path meta.name reason;
+    ignore
+      (Keeper_registry.update_entry_exact_for_lifecycle
+         lifecycle_token
+         reg
+         (fun current ->
+            { current with
+              last_failure_reason = Some (Keeper_registry.Exception reason)
+            })
+       |> Keeper_registry.exact_update_succeeded
+            reg
+            ~site:"supervisor_launch_rejected.failure_reason");
+    ignore
+      (Keeper_registry.update_entry_exact_for_lifecycle
+         lifecycle_token
+         reg
+         (fun current ->
+            Keeper_registry_error_tracking.record_crash_entry
+              current
+              (Time_compat.now ())
+              reason)
+       |> Keeper_registry.exact_update_succeeded
+            reg
+            ~site:"supervisor_launch_rejected.crash_log");
+    Keeper_registry_error_recording.record_exact_for_lifecycle
+      lifecycle_token
+      reg
+      reason;
     if
       Keeper_registry.resolve_done reg ~source:"supervisor_launch_rejected" (`Crashed reason)
       |> done_signal_of_registry_result

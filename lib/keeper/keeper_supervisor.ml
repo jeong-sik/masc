@@ -258,7 +258,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               ~base_path
               ~keeper_name:old_entry.name
               ~expected_generation:old_entry.transition_seq
-              ~register:(fun token ->
+              ~register:(fun token intake_token ->
                 match Keeper_registry.get ~base_path old_entry.name with
                 | Some current
                   when Keeper_lane.Id.equal
@@ -274,6 +274,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                    | Ok _ ->
                      (match
                         Keeper_registry.register_restarting_for_lifecycle
+                          ~intake_token
                           token
                           ~base_path
                           old_entry.name
@@ -314,6 +315,23 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                   meta
                   reg)
           with
+          | Error (Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id) ->
+            Log.Keeper.warn
+              "%s: restart skipped because shutdown operation %s owns admission"
+              old_entry.name
+              (Keeper_shutdown_types.Operation_id.to_string operation_id);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
+              ()
+          | Error Keeper_keepalive_launch_transaction.Intake_token_not_live ->
+            Log.Keeper.error
+              "%s: restart transaction rejected an inactive durable-intake token"
+              old_entry.name;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "intake_token_not_live" ]
+              ()
           | Error (Keeper_keepalive_launch_transaction.Reservation_unavailable owner) ->
             Log.Keeper.info
               "%s: supervisor restart deferred to lifecycle transaction owner: %s"
@@ -329,6 +347,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "shutdown_reserved" ]
+              ()
+          | Error
+              (Keeper_keepalive_launch_transaction.Registration_failed
+                 (`Restart Keeper_registry.Restart_intake_token_not_live)) ->
+            Log.Keeper.error
+              "%s: restart registry rejected an inactive durable-intake token"
+              old_entry.name;
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "intake_token_not_live" ]
               ()
           | Error
               (Keeper_keepalive_launch_transaction.Registration_failed
@@ -393,6 +421,23 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "librarian_deferred" ]
+              ()
+          | Error
+              (Keeper_keepalive_launch_transaction.Launch_failed
+                 { exception_detail; librarian_abort_error; rollback_error }) ->
+            let cleanup_detail label = function
+              | None -> ""
+              | Some detail -> "; " ^ label ^ " failed: " ^ detail
+            in
+            Log.Keeper.error
+              "%s: supervisor restart launch callback failed: %s%s%s"
+              old_entry.name
+              exception_detail
+              (cleanup_detail "Librarian abort" librarian_abort_error)
+              (cleanup_detail "registry rollback" rollback_error);
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RestartOutcomes)
+              ~labels:[ "keeper", old_entry.name; "outcome", "launch_callback_failed" ]
               ()
           | Ok launch_result ->
             (match launch_result with

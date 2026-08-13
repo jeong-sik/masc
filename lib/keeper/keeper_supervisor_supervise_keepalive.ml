@@ -162,6 +162,15 @@ let supervise_keepalive
            (Printexc.to_string exn))
   in
   let log_transaction_error = function
+    | Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id ->
+      Log.Keeper.warn
+        "supervisor launch skipped %s because shutdown operation %s owns admission"
+        meta.name
+        (Keeper_shutdown_types.Operation_id.to_string operation_id)
+    | Keeper_keepalive_launch_transaction.Intake_token_not_live ->
+      Log.Keeper.error
+        "supervisor launch rejected an inactive durable-intake token for %s"
+        meta.name
     | Keeper_keepalive_launch_transaction.Reservation_unavailable owner ->
       Log.Keeper.info
         "supervisor launch deferred to lifecycle transaction owner keeper=%s owner=%s"
@@ -214,6 +223,18 @@ let supervise_keepalive
           : (Keeper_memory_lane.librarian_abort_outcome,
              Keeper_memory_lane.librarian_abort_error)
               result)
+    | Keeper_keepalive_launch_transaction.Launch_failed
+        { exception_detail; librarian_abort_error; rollback_error } ->
+      let cleanup_detail label = function
+        | None -> ""
+        | Some detail -> "; " ^ label ^ " failed: " ^ detail
+      in
+      Log.Keeper.error
+        "supervisor launch callback failed keeper=%s error=%s%s%s"
+        meta.name
+        exception_detail
+        (cleanup_detail "Librarian abort" librarian_abort_error)
+        (cleanup_detail "registry rollback" rollback_error)
   in
   let run_launch_transaction ~expected_generation ~register ~rollback =
     match
@@ -231,11 +252,12 @@ let supervise_keepalive
   let register_and_launch () =
     run_launch_transaction
       ~expected_generation:0
-      ~register:(fun token ->
+      ~register:(fun token intake_token ->
         match Keeper_registry.get ~base_path meta.name with
         | Some current -> Error (`Occupied current)
         | None ->
           Keeper_registry.register_offline_if_admitted_for_lifecycle
+            ~intake_token
             token
             ~base_path
             meta.name
@@ -283,7 +305,7 @@ let supervise_keepalive
         | Keeper_state_machine.Offline ->
           run_launch_transaction
             ~expected_generation:reg.transition_seq
-            ~register:(fun _token ->
+            ~register:(fun _token _intake_token ->
               match Keeper_registry.get ~base_path meta.name with
               | Some current when same_offline_generation ~expected:reg current ->
                 Ok current

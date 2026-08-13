@@ -57,6 +57,7 @@ val register_offline_if_admitted_for_lifecycle :
 
 type register_restarting_error =
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_intake_token_not_live
   | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
       { keeper_name : string
@@ -72,6 +73,7 @@ val register_restarting :
   (registry_entry, register_restarting_error) result
 
 val register_restarting_for_lifecycle :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   Keeper_lifecycle_reservation.token ->
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result

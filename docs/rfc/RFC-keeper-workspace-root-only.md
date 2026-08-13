@@ -27,7 +27,7 @@ masc 는 keeper 의 체크아웃이 `<playground_root>/repos/<repo_name>/` 에 �
 
 ### 1.1 규정은 이미 깨져 있고, 관측만 잃고 있다
 
-`~/me/.masc/playground/` 아래 `.git` 전수 조사 (2026-08-13 실측). keeper 들이 이미 `repos/` 밖에 체크아웃을 만들었고 시스템은 그것들을 보지 못한다.
+`<base-path>/.masc/playground/` 아래 `.git` 전수 조사 (2026-08-13, 운영 인스턴스 실측). keeper 들이 이미 `repos/` 밖에 체크아웃을 만들었고 시스템은 그것들을 보지 못한다.
 
 | 실제 위치 | 종류 | 현재 관측 |
 |---|---|---|

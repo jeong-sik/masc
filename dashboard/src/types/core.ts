@@ -105,6 +105,7 @@ export interface Message {
   type?: string
   workspace?: string
   mentionDelivery?: 'passive' | 'pending' | 'accepted' | 'rejected'
+  mentions?: string[]
 }
 
 // --- Board ---

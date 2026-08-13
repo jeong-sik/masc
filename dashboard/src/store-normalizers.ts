@@ -159,6 +159,7 @@ export function normalizeMessage(raw: unknown): Message | null {
     type: asString(raw.type),
     workspace,
     mentionDelivery,
+    mentions: Array.isArray(raw.mentions) ? asStringArray(raw.mentions) : undefined,
   }
 }
 

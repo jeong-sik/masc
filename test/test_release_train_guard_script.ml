@@ -220,6 +220,50 @@ let test_pending_bootstrap_series_blocks_next_train_until_tagged () =
         (String_util.contains_substring stderr
            "publish/tag v0.2.0 before widening the release train"))
 
+let init_repo_with_stale_package_tag dir =
+  git_ok ~cwd:dir [ "init"; "-q" ];
+  git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+  git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+  git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+  commit_version ~dir ~version:"0.21.2" ~message:"stale package truth";
+  git_ok ~cwd:dir [ "tag"; "v0.22.0" ]
+;;
+
+let test_stale_base_accepts_exact_latest_tag_repair () =
+  with_temp_dir "release-train-exact-repair" (fun dir ->
+      init_repo_with_stale_package_tag dir;
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"repair" ~version:"0.22.0"
+           ~message:"repair package truth");
+      let code, stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "repair" |]
+      in
+      if code <> 0 then
+        failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "accepts only the exact latest-tag repair" true
+        (String_util.contains_substring stdout
+           "Release train guard OK (repair): base=0.21.2 head=0.22.0 latest_tag_ref=v0.22.0 latest_tag_version=0.22.0"))
+;;
+
+let test_stale_base_rejects_skipping_past_latest_tag () =
+  with_temp_dir "release-train-skip-repair" (fun dir ->
+      init_repo_with_stale_package_tag dir;
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"skip-repair" ~version:"0.23.0"
+           ~message:"skip package truth repair");
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "skip-repair" |]
+      in
+      check bool "command fails" true (code <> 0);
+      check bool "requires package truth synchronization first" true
+        (String_util.contains_substring stderr
+           "base ref main has package version 0.21.2, which is older than latest tag v0.22.0"))
+;;
+
 let () =
   run "release_train_guard_script"
     [
@@ -237,5 +281,9 @@ let () =
             test_pending_bootstrap_series_warns_without_blocking_same_version;
           test_case "pending bootstrap series blocks next train" `Quick
             test_pending_bootstrap_series_blocks_next_train_until_tagged;
+          test_case "stale base accepts exact latest-tag repair" `Quick
+            test_stale_base_accepts_exact_latest_tag_repair;
+          test_case "stale base rejects skipping latest-tag repair" `Quick
+            test_stale_base_rejects_skipping_past_latest_tag;
         ] );
     ]

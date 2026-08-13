@@ -136,4 +136,11 @@ if version_gt "$base_package_version" "$latest_tag_version"; then
   fail "base ref $base_ref advertises unreleased package version $base_package_version while latest tag is $latest_tag (package version $latest_tag_version), and head changes package version to $head_package_version; publish/tag v$base_package_version before widening the release train"
 fi
 
+if version_gt "$latest_tag_version" "$base_package_version" \
+  && [[ "$head_package_version" == "$latest_tag_version" ]]; then
+  printf 'Release train guard OK (repair): base=%s head=%s latest_tag_ref=%s latest_tag_version=%s\n' \
+    "$base_package_version" "$head_package_version" "$latest_tag" "$latest_tag_version"
+  exit 0
+fi
+
 fail "base ref $base_ref has package version $base_package_version, which is older than latest tag $latest_tag (package version $latest_tag_version); sync version truth before merging"

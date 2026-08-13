@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.22.0] - 2026-08-14
+
 - **Breaking (keeper output contract, RFC-0376)**: an autonomous turn's final
   text no longer auto-delivers to the channel that woke it. The
   continuation-delivery outbox/publisher/recovery subsystem and the schedule

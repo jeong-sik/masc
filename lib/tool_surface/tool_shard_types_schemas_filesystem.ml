@@ -135,7 +135,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             "Canonical codebase slug exactly as the co-view context \
-                             names it (e.g. github.com_owner_repo)" )
+                             names it (e.g. example.com_owner_repo)" )
                       ] )
                 ; ( "file_path"
                   , `Assoc

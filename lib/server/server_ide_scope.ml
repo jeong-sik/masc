@@ -34,7 +34,7 @@ let resolve_declared_scope ~params =
       Error
         (ide_error
            "invalid_codebase"
-           "codebase must be a canonical host_path slug (e.g. github.com_owner_repo)")
+           "codebase must be a canonical host_path slug (e.g. example.com_owner_repo)")
   | None ->
     Error (ide_error "missing_ide_scope" "IDE scope is required; pass codebase=<slug>")
 ;;

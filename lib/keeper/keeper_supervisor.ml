@@ -248,25 +248,6 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
               old_entry.name
               reason
           | Keeper_lifecycle_admission.Autonomous_admitted ->
-           (match
-              Keeper_memory_lane.begin_librarian_lifecycle
-                ~base_path
-                ~keeper_name:old_entry.name
-            with
-            | Error error ->
-              (* Crash cleanup fences and requests cancellation without joining
-                 root-scoped provider work. Do not publish a replacement Keeper
-                 until that exact Librarian owner has exited; the next sweep
-                 retries this admission boundary. *)
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string RestartOutcomes)
-                ~labels:[ "keeper", old_entry.name; "outcome", "librarian_active" ]
-                ();
-              Log.Keeper.info
-                "%s: supervisor restart deferred until prior Librarian owner exits: %s"
-                old_entry.name
-                (Keeper_memory_lane.lifecycle_open_error_to_string error)
-            | Ok () ->
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string RestartAttempts)
               ~labels:[ "keeper", old_entry.name ]
@@ -334,7 +315,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                  ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
                  ();
                Log.Keeper.info "%s: restarted (attempt %d)" old_entry.name attempt);
-            )))
+            ))
        | _ ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string RestartOutcomes)

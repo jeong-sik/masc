@@ -21,7 +21,6 @@ module KSS = Masc.Keeper_supervisor_supervise_keepalive
 module Chat_operation = Masc.Keeper_owner.Chat_operation
 module Supervisor_launch = Masc.Keeper_supervisor_launch
 module Lane = Masc.Keeper_lane
-module Memory_lane = Masc.Keeper_memory_lane
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_types = Masc.Keeper_shutdown_types
@@ -1375,61 +1374,6 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       | Some entry ->
           check int "restart count restored to attempt" 1 entry.restart_count)
 
-let test_restart_reopens_crash_aborted_librarian_lifecycle () =
-  with_restart_launch_noop @@ fun () ->
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  with_config_dir @@ fun config_dir ->
-  let base_dir = temp_dir () in
-  let name = "restart-reopens-librarian" in
-  Fun.protect
-    ~finally:(fun () ->
-      Memory_lane.For_testing.reset ();
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      Memory_lane.For_testing.reset ();
-      let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
-      write_keeper_toml config_dir ~name;
-      let meta = make_meta name in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
-      resolve_done_for_test reg (`Crashed "ordinary crash");
-      (match Memory_lane.abort_librarian ~base_path:config.base_path ~keeper_name:name with
-       | Ok Memory_lane.Librarian_abort_idle -> ()
-       | Ok _ -> fail "empty crash-abort fixture unexpectedly owned Librarian work"
-       | Error error -> fail (Memory_lane.librarian_abort_error_to_string error));
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      sweep_and_recover_no_materialize ctx;
-      (match Reg.get ~base_path:config.base_path name with
-       | Some entry ->
-         check bool "supervisor published replacement registry lane" true
-           (entry.done_p != reg.done_p)
-       | None -> fail "supervisor restart removed the Keeper registry entry");
-      match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name (fun () -> ()) with
-      | Memory_lane.Ran_inline -> ()
-      | Memory_lane.Submitted | Memory_lane.Coalesced -> ()
-      | Memory_lane.Dropped -> fail "restarted Librarian submission was dropped"
-      | Memory_lane.Rejected_draining ->
-        fail "supervisor restart left the Librarian lifecycle fenced")
-;;
-
 let test_restart_path_emits_meta_unavailable_outcome_metric () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2294,8 +2238,6 @@ let () =
     "restart_metrics", [
       test_case "restart path emits attempt and started outcome metrics" `Quick
         test_restart_path_emits_attempt_and_started_outcome_metrics;
-      test_case "restart reopens crash-aborted Librarian lifecycle" `Quick
-        test_restart_reopens_crash_aborted_librarian_lifecycle;
       test_case "restart path emits missing-meta outcome metrics" `Quick
         test_restart_path_emits_meta_unavailable_outcome_metric;
       test_case "restart denies persisted dead tombstone" `Quick

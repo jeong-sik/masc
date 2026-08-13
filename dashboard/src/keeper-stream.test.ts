@@ -4,6 +4,7 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  clearActiveStream,
   setActiveStream,
   setActiveStreamRequestId,
 } from './keeper-state'
@@ -216,6 +217,29 @@ describe('Keeper operation stream projection', () => {
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-opening')
     expect(entry?.text).toBe('')
+  })
+
+  it('accepts observer events immediately after the direct owner exits', () => {
+    directlyStreamingBubble()
+    setActiveStream(
+      'sangsu',
+      'kmsg-operation-1',
+      'reply-1',
+      new AbortController(),
+    )
+
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-operation-1',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'owned echo' },
+    })
+    clearActiveStream('sangsu', 'kmsg-operation-1')
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-operation-1',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'observer continuation' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('observer continuation')
   })
 
   // A late-attaching echo drops the leading fragments, so the two copies land

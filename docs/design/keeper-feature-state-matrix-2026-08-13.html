@@ -67,15 +67,15 @@
   <p class="lead">기능 이름이 코드에 존재하는지와 Keeper가 실제로 오래, 반복해서, 여러 Runtime에서 그 기능을 끝까지 수행하는지는 다른 사실이다. 이 문서는 source → feature test → exact-head CI → live receipt/log → Dashboard/browser → 장기 실행의 증거를 분리한다.</p>
 
   <section class="grid">
-    <article class="card"><h3>Source 기준</h3><div class="metric info">f83f655904</div><p class="muted">캡처 시점 <code>main</code>. Librarian retry suite 수리까지 병합.</p></article>
-    <article class="card"><h3>Live binary 기준</h3><div class="metric info">f83f655904</div><p class="muted">source와 일치. 재기동 6분 43초 뒤 캡처했고 Dashboard asset은 stale.</p></article>
+    <article class="card"><h3>Source 기준</h3><div class="metric info">f83f655904</div><p class="muted">캡처 시점 checkout <code>main</code>. Librarian retry suite 수리까지 병합.</p></article>
+    <article class="card"><h3>Live binary 기준</h3><div class="metric bad">UNKNOWN</div><p class="muted"><code>binary_commit</code> 부재. 표시된 f83은 <code>runtime_repo_head</code> 조회값이라 배포 증거가 아니다.</p></article>
     <article class="card"><h3>Feature proof</h3><div class="metric warn">2 pass / 3 warn</div><p class="muted">현재 API가 측정하는 5개 자율성 축. 전체 기능 수가 아니다.</p></article>
     <article class="card"><h3>24h 연속성</h3><div class="metric warn">1 / 13 Keeper</div><p class="muted">analyst만 53.3h span. 다른 Keeper는 아직 24h 증거 미달.</p></article>
     <article class="card"><h3>Queue / Scheduler</h3><div class="metric warn">idle / 27 ticks</div><p class="muted">pending 0, 27회 성공·0회 실패. 처리할 item/occurrence가 없어서 기능 완료 증거는 아님.</p></article>
     <article class="card"><h3>Fleet health</h3><div class="metric warn">degraded</div><p class="muted">10 fibers 중 executable 7. reaction capacity가 target보다 3 부족.</p></article>
   </section>
 
-  <p class="muted">동결 시각: <code>2026-08-13T13:25:46Z</code>. 아래 수치는 이후 현재값으로 읽으면 안 된다. 원본 축약 스냅샷은 <a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json">JSON evidence</a>에 있다.</p>
+  <p class="muted">동결 시각: <code>2026-08-13T13:25:46Z</code>. 아래 수치는 이후 현재값으로 읽으면 안 된다. live binary SHA는 미확인이고 checkout SHA와 대체하지 않는다. 원본 축약 스냅샷은 <a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json">JSON evidence</a>에 있다.</p>
 
   <article class="card notice">
     <h3>현재 판정</h3>
@@ -131,7 +131,7 @@
 
         <tr data-domain="Memory" data-required="source test live duration" data-evidence="source test"><td>Memory</td><td class="feature">Memory OS recall</td><td><span class="badge"></span></td><td>Keeper별 recall 범위 미측정</td><td class="axis">10T — · restart — · 24h —</td><td><code>memory-current.json</code>, recall CAS</td><td>source/focused tests.</td><td>N→N+3 exact fact·ordering·compaction 재주입.</td><td>E1·E2·E4·E6</td></tr>
         <tr data-domain="Memory" data-required="source test live duration" data-evidence="source test"><td>Memory</td><td class="feature">Librarian</td><td><span class="badge"></span></td><td>Keeper별 미측정</td><td class="axis">10T — · restart —</td><td><code>keeper_librarian_runtime</code>, exact lane</td><td>fence/journal failure tests.</td><td>화자·상대·관계·행동을 근거와 함께 다음 turn에서 회상.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Memory" data-required="source test ci live duration" data-evidence="source test ci"><td>Memory</td><td class="feature">Counterpart relationship</td><td><span class="badge"></span></td><td>live fleet 미측정</td><td class="axis">session restart — · 24h —</td><td>#28592/#28598/#28600, typed evidence</td><td>source/live commit 일치만 확인.</td><td>동명이인·관계 변화·근거 창 multi-session 검증.</td><td>E1·E2·E3·E4·E6</td></tr>
+        <tr data-domain="Memory" data-required="source test ci live duration" data-evidence="source test ci"><td>Memory</td><td class="feature">Counterpart relationship</td><td><span class="badge"></span></td><td>live fleet 미측정</td><td class="axis">session restart — · 24h —</td><td>#28592/#28598/#28600, typed evidence</td><td>source 병합 확인; live binary SHA 미확인.</td><td>재빌드 후 동명이인·관계 변화·근거 창 multi-session 검증.</td><td>E1·E2·E3·E4·E6</td></tr>
 
         <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Multi Lane</td><td><span class="badge"></span></td><td>lane/runtime별 미측정</td><td class="axis">10T — · 장기 —</td><td>ordered runtime lanes, independent Keeper lanes</td><td>source contract.</td><td>lane 격리·공정성·실패 전파를 live receipt로 대조.</td><td>E1·E2·E4·E6</td></tr>
         <tr data-domain="Execution" data-required="scenario source test live" data-evidence="source"><td>Execution</td><td class="feature">Parallel Tool</td><td><span class="badge"></span></td><td>provider별 미측정</td><td class="axis">미측정</td><td>도구 호출/Fusion 내부 병렬</td><td>제품-level 계약 불명확.</td><td>독립 호출·순서 의존·partial failure typed contract와 live run.</td><td>E0·E1·E2·E4</td></tr>
@@ -191,7 +191,7 @@
     <li><code>docs/KEEPER-CAPABILITY-MATRIX.md</code> — Keeper가 실제 받는 typed capability family.</li>
     <li><code>docs/TOML-RELOAD-MATRIX.md</code> — boot/sweep/request reload 구분.</li>
     <li><code>lib/dashboard/dashboard_keeper_feature_proof.ml</code> — 현재 5개 autonomy feature proof read model.</li>
-    <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — health/feature-proof/PR head를 <code>2026-08-13T13:25:46Z</code>에 동결한 축약 JSON.</li>
+    <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — health/feature-proof/PR head를 <code>2026-08-13T13:25:46Z</code>에 동결한 축약 JSON. <code>binary_commit=null</code>도 보존한다.</li>
     <li><code>/health?full=1</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — live 원본 route. 동결 JSON 이후의 현재값은 새 캡처 없이는 주장하지 않는다.</li>
     <li>#28597 exact head <code>abe0e09c2b4cd43398f14533858b24913f06371b</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704177944">31704177944</a>.</li>
     <li>#28574 exact head <code>c9df777b836477c9a60ecf89fe9e3b3e70e4a770</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704238533">31704238533</a>.</li>
@@ -203,7 +203,7 @@
   </ul></details>
   <p class="muted">갱신 규칙: live 수치는 캡처 시각이 지나면 역사적 증거다. PR head가 바뀌면 이전 CI는 무효다. 기능 행의 상태는 더 강한 증거가 생길 때만 올리고, source가 사라지거나 live가 모순되면 즉시 내린다.</p>
 
-  <footer>동결 기준 <code>2026-08-13T13:25:46Z</code> · source/live <code>f83f655904</code> · effective base <code>/Users/dancer/me</code> · MASC root <code>/Users/dancer/me/.masc</code></footer>
+  <footer>동결 기준 <code>2026-08-13T13:25:46Z</code> · checkout <code>f83f655904</code> · live binary SHA unknown · effective base <code>/Users/dancer/me</code> · MASC root <code>/Users/dancer/me/.masc</code></footer>
 </main>
 <script>
   const query = document.querySelector('#query');

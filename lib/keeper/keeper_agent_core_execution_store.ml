@@ -33,6 +33,12 @@ type prepared =
 type factory =
   Keeper_agent_core_execution_identity.t -> (prepared, prepare_error) result
 
+type journal_record_error =
+  | Record_json_invalid
+  | Record_envelope_invalid
+  | Record_operation_mismatch
+  | Record_payload_invalid
+
 let locator_leaf = "recovery-locator.json"
 let terminal_leaf = "terminal-disposition.json"
 let schema_version = 1
@@ -149,13 +155,16 @@ let locator_record_to_yojson operation locator =
     ]
 ;;
 
-let locator_record_of_yojson operation = function
+type locator_envelope =
+  { observed_operation_id : string
+  ; observed_operation : Yojson.Safe.t
+  ; locator_json : Yojson.Safe.t
+  }
+
+let locator_envelope_of_yojson = function
   | `Assoc fields
     when exact_fields [ "schema_version"; "operation_id"; "operation"; "locator" ] fields
     ->
-    let operation_id =
-      Keeper_agent_core_execution_identity.operation_id operation
-    in
     (match
        List.assoc "schema_version" fields,
        List.assoc "operation_id" fields,
@@ -163,37 +172,78 @@ let locator_record_of_yojson operation = function
        List.assoc "locator" fields
      with
      | `Int version, `String observed_operation_id, observed_operation, locator_json
-       when version = schema_version
-            && String.equal
-                 observed_operation_id
-                 (Keeper_agent_core_execution_identity.operation_id_to_string
-                    operation_id)
-            && observed_operation = Keeper_agent_core_execution_identity.to_yojson operation
-       ->
-       Agent_core.Agent.execution_locator_of_yojson locator_json
+       when version = schema_version ->
+       Ok { observed_operation_id; observed_operation; locator_json }
      | `Int version, _, _, _ when version <> schema_version ->
        Error (Printf.sprintf "unsupported locator schema version %d" version)
-     | _, `String observed_operation_id, _, _
-       when not
-              (String.equal
-                 observed_operation_id
-                 (Keeper_agent_core_execution_identity.operation_id_to_string
-                    operation_id)) ->
-       Error
-         (Printf.sprintf
-            "locator operation id mismatch: observed %S"
-            observed_operation_id)
-     | _, _, observed_operation, _
-       when observed_operation <> Keeper_agent_core_execution_identity.to_yojson operation
-       -> Error "locator operation identity does not match its directory"
      | _ -> Error "locator record fields have invalid types")
   | `Assoc _ -> Error "locator record fields are missing, duplicated, or unknown"
   | _ -> Error "locator record is not a JSON object"
 ;;
 
+let locator_record_of_yojson operation json =
+  let* envelope = locator_envelope_of_yojson json in
+  let operation_id = Keeper_agent_core_execution_identity.operation_id operation in
+  if
+    not
+      (String.equal
+         envelope.observed_operation_id
+         (Keeper_agent_core_execution_identity.operation_id_to_string operation_id))
+  then
+    Error
+      (Printf.sprintf
+         "locator operation id mismatch: observed %S"
+         envelope.observed_operation_id)
+  else if
+    envelope.observed_operation
+    <> Keeper_agent_core_execution_identity.to_yojson operation
+  then Error "locator operation identity does not match its directory"
+  else Agent_core.Agent.execution_locator_of_yojson envelope.locator_json
+;;
+
 let parse_json bytes =
   try Ok (Yojson.Safe.from_string bytes) with
   | Yojson.Json_error detail -> Error detail
+;;
+
+let validate_locator_record ~operation_id bytes =
+  match parse_json bytes with
+  | Error _ -> Error Record_json_invalid
+  | Ok json ->
+    (match locator_envelope_of_yojson json with
+     | Error _ -> Error Record_envelope_invalid
+     | Ok envelope ->
+       let expected_operation_id =
+         Keeper_agent_core_execution_identity.operation_id_to_string operation_id
+       in
+       if not (String.equal envelope.observed_operation_id expected_operation_id)
+       then Error Record_operation_mismatch
+       else
+         (match
+            Keeper_agent_core_execution_identity.of_yojson
+              envelope.observed_operation
+          with
+          | Error _ -> Error Record_payload_invalid
+          | Ok observed_operation ->
+            let derived_operation_id =
+              observed_operation
+              |> Keeper_agent_core_execution_identity.operation_id
+              |> Keeper_agent_core_execution_identity.operation_id_to_string
+            in
+            if not (String.equal derived_operation_id expected_operation_id)
+            then Error Record_operation_mismatch
+            else
+              Agent_core.Agent.execution_locator_of_yojson envelope.locator_json
+              |> Result.map (fun _ -> ())
+              |> Result.map_error (fun _ -> Record_payload_invalid)))
+;;
+
+let decode_terminal_record ~operation_id bytes =
+  match parse_json bytes with
+  | Error _ -> Error Record_json_invalid
+  | Ok json ->
+    terminal_record_of_yojson ~operation_id json
+    |> Result.map_error (fun _ -> Record_envelope_invalid)
 ;;
 
 let load_optional path =

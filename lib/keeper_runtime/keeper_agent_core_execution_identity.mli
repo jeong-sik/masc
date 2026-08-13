@@ -31,6 +31,20 @@ type error =
   | Negative_context_shrink_attempt of int
   | Non_positive_context_capacity of int
 
+type operation_id_error =
+  | Invalid_operation_id_prefix
+  | Invalid_operation_id_digest_length
+  | Invalid_operation_id_digest_character
+
+type decoding_error =
+  | Identity_not_object
+  | Identity_fields_invalid
+  | Unsupported_schema_version of int
+  | Candidate_attempt_invalid
+  | Context_attempt_invalid
+  | Thinking_attempt_invalid
+  | Identity_value_invalid of error
+
 type t
 type operation_id = private string
 
@@ -47,5 +61,7 @@ val create
 
 val operation_id : t -> operation_id
 val operation_id_to_string : operation_id -> string
+val operation_id_of_string : string -> (operation_id, operation_id_error) result
 val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, decoding_error) result
 val error_to_string : error -> string

@@ -39,6 +39,25 @@ type prepared = private
 type factory =
   Keeper_agent_core_execution_identity.t -> (prepared, prepare_error) result
 
+type journal_record_error =
+  | Record_json_invalid
+  | Record_envelope_invalid
+  | Record_operation_mismatch
+  | Record_payload_invalid
+
+val validate_locator_record
+  :  operation_id:Keeper_agent_core_execution_identity.operation_id
+  -> string
+  -> (unit, journal_record_error) result
+(** Validate a persisted locator envelope without returning its opaque locator
+    or operation payload. *)
+
+val decode_terminal_record
+  :  operation_id:Keeper_agent_core_execution_identity.operation_id
+  -> string
+  -> (terminal_record, journal_record_error) result
+(** Decode only the closed terminal disposition used by operator inventory. *)
+
 val prepare
   :  base_path:string
   -> owner:Runtime_agent_execution_owner.t

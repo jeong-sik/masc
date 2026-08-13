@@ -18,6 +18,7 @@
   keeper_internal_error
   keeper_runtime_failure_route
   keeper_agent_core_execution_identity
+  keeper_agent_core_execution_inventory_core
   keeper_latched_reason
   keeper_event_queue
   keeper_event_queue_state

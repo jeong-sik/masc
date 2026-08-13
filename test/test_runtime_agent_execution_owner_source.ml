@@ -73,6 +73,13 @@ let () =
       "lib/keeper_runtime/keeper_agent_core_execution_identity.mli"
   in
   let store = resolve_source "lib/keeper/keeper_agent_core_execution_store.ml" in
+  let inventory_core =
+    resolve_source
+      "lib/keeper_runtime/keeper_agent_core_execution_inventory_core.mli"
+  in
+  let inventory =
+    resolve_source "lib/keeper/keeper_agent_core_execution_inventory.ml"
+  in
   let bootstrap = resolve_source "lib/server/server_runtime_bootstrap.ml" in
   let keeper = resolve_source "lib/keeper/keeper_agent_run.ml" in
   let driver = resolve_source "lib/keeper/keeper_turn_driver.ml" in
@@ -119,6 +126,22 @@ let () =
     ~label:"unknown effect keeps locator"
     store
     "Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown -> Ok ()";
+  assert_contains
+    ~label:"closed inventory states"
+    inventory_core
+    "type state = | Active | Terminal of terminal_record | Operator_repair_required of terminal_record | Ambiguous of ambiguity | Corrupt of corruption";
+  assert_contains
+    ~label:"inventory SSOT"
+    inventory
+    "Config_dir_resolver.agent_execution_journals_dir ~base_path";
+  assert_contains
+    ~label:"capability-bound record observation"
+    inventory
+    "Fs_compat.Capability_exact_read.read ~parent ~leaf ~expected_length ~max_length:max_record_length";
+  assert_contains
+    ~label:"no-follow scope inspection"
+    inventory
+    "Eio.Path.kind ~follow:false parent";
   assert_contains
     ~label:"candidate ordinal ingress"
     driver

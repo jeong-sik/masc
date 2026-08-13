@@ -80,5 +80,17 @@ let () =
   let json = Identity.to_yojson base |> Yojson.Safe.to_string in
   if contains json "generation"
   then failwith "generation must not enter crash-stable execution identity";
+  (match Identity.operation_id_of_string (id base) with
+   | Ok parsed when String.equal (Identity.operation_id_to_string parsed) (id base) -> ()
+   | Ok _ -> failwith "operation ID parser changed a valid ID"
+   | Error _ -> failwith "operation ID parser rejected a valid ID");
+  (match Identity.operation_id_of_string "keeper-agent-core-v1-not-a-digest" with
+   | Error Identity.Invalid_operation_id_digest_length -> ()
+   | Error _ -> failwith "operation ID parser returned the wrong closed error"
+   | Ok _ -> failwith "operation ID parser accepted an invalid digest");
+  (match Identity.of_yojson (Identity.to_yojson base) with
+   | Ok decoded when String.equal (id decoded) (id base) -> ()
+   | Ok _ -> failwith "typed JSON decoder changed the operation ID"
+   | Error _ -> failwith "typed JSON decoder rejected writer output");
   print_endline "test_keeper_agent_core_execution_identity: OK"
 ;;

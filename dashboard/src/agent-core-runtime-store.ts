@@ -539,8 +539,26 @@ export function applyAgentCoreRuntimeEvent(raw: unknown, opts?: IngestOptions): 
     runtimeEventKey(event)
   }
   ingestRuntimeProjection(event, opts)
-  agentCoreTotalEvents.value += 1
+  // A live arrival is news the replay window never counted, so it belongs
+  // above the server's total. A replayed row is not: it is already inside
+  // that total, and counting it again is what made "load more" claim 1700
+  // of 1200 and retire `hasMore` with rows still unfetched.
+  if (opts?.origin !== 'replay') agentCoreTotalEvents.value += 1
   return true
+}
+
+/** How many distinct events this store has actually loaded.
+ *
+ *  Separate from `agentCoreTotalEvents`, which `noteAgentCoreReplayWindow`
+ *  assigns the server's total-matching count — feeding that number back as
+ *  `loadedEvents` makes loaded and total equal by construction, which reads
+ *  as "fully loaded" however little was fetched.
+ *
+ *  Both halves are already tracked: stable identities cannot double-count
+ *  because the set rejects repeats, and unidentified events are numbered as
+ *  they are keyed. */
+function loadedAgentCoreEventCount(): number {
+  return seenAgentCoreEventKeys.size + unidentifiedAgentCoreEventSequence
 }
 
 export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEntry[]): void {
@@ -556,8 +574,8 @@ export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEn
     applyAgentCoreRuntimeEvent(entry, { origin: 'replay' })
   }
   noteAgentCoreReplayWindow({
-    loadedEvents: agentCoreTotalEvents.value,
-    totalMatchingEvents: agentCoreTotalEvents.value,
+    loadedEvents: loadedAgentCoreEventCount(),
+    totalMatchingEvents: loadedAgentCoreEventCount(),
     truncated: false,
   })
 }
@@ -583,7 +601,7 @@ export async function replayAgentCoreRuntimeTelemetry(signal?: AbortSignal): Pro
   if (generation !== replayGeneration) return
   hydrateAgentCoreRuntimeFromTelemetryEntries(response.entries)
   noteAgentCoreReplayWindow({
-    loadedEvents: agentCoreTotalEvents.value,
+    loadedEvents: loadedAgentCoreEventCount(),
     totalMatchingEvents: response.total_matching_entries ?? response.count,
     truncated: response.has_more ?? response.truncated ?? false,
   })
@@ -611,7 +629,7 @@ export async function loadMoreAgentCoreEvents(signal?: AbortSignal): Promise<voi
   })
   appendAgentCoreRuntimeFromTelemetryEntries(response.entries)
   noteAgentCoreReplayWindow({
-    loadedEvents: agentCoreTotalEvents.value,
+    loadedEvents: loadedAgentCoreEventCount(),
     totalMatchingEvents: response.total_matching_entries ?? response.count,
     truncated: response.has_more ?? response.truncated ?? false,
   })

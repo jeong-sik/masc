@@ -122,12 +122,12 @@ function fullPendingThinkingText(pending: PendingThinkingState): string {
 }
 
 function persistActiveAssistantDraft(keeperName: string, assistantEntryId: string): void {
-  const requestId = activeStreamRequestId(keeperName)
-  if (!requestId) return
   const entry = (keeperThreads.value[keeperName] ?? [])
     .find(candidate => candidate.id === assistantEntryId) ?? null
   if (!entry) return
-  updateTrackedKeeperChatAssistantDraft(requestId, entry)
+  const deliveryKey = entry.deliveryProvenance?.delivery_key
+  if (deliveryKey?.kind !== 'operation') return
+  updateTrackedKeeperChatAssistantDraft(deliveryKey.operation_id, entry)
 }
 
 function flushPendingThinkingDeltas(

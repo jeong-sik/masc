@@ -268,13 +268,9 @@ const KeeperAutonomousTurnSchema = object({
 })
 
 export const KeeperChatHistoryMessageSchema = object({
-  // R3: producer-assigned stable message id (keeper_chat_store.ml mints it
-  // at append and the read boundary stamps legacy rows, so the backend now
-  // emits it on every row). Left optional for the deploy window — a
-  // dashboard deployed ahead of the backend would otherwise drop every
-  // message; the consumer falls back to a stable content-derived id when
-  // it is absent.
-  id: optional(string()),
+  // Current-record contract: keeper_chat_store mints a stable id on every
+  // append and rejects persisted rows whose id is absent or blank.
+  id: string(),
   role: string(),
   // Autonomous turns can complete through tools without terminal prose. The
   // backend keeps that distinct as null while still projecting the work trace.
@@ -356,6 +352,7 @@ export function safeParseKeeperChatHistoryMessage(
   const result = safeParse(KeeperChatHistoryMessageSchema, data)
   if (!result.success) return null
   const { delivery_key, transcript_slot, ...message } = result.output
+  if (!message.id.trim()) return null
   const provenance = decodeKeeperChatDeliveryProvenance(delivery_key, transcript_slot)
   return {
     ...message,

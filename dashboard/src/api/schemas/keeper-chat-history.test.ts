@@ -7,6 +7,7 @@ import {
 
 function validMessage(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
+    id: 'msg-current-1',
     role: 'user',
     content: 'hello keeper',
     ts: 1_712_000_000.25,
@@ -317,10 +318,13 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.id).toBe('msg-0001700000000000-0')
   })
 
-  it('accepts rows without an id (pre-R3 backend during the deploy window)', () => {
-    const out = safeParseKeeperChatHistoryMessage(validMessage())
-    expect(out).not.toBeNull()
-    expect(out?.id).toBeUndefined()
+  it('rejects rows without a current producer id', () => {
+    const { id: _, ...withoutId } = validMessage()
+    expect(safeParseKeeperChatHistoryMessage(withoutId)).toBeNull()
+  })
+
+  it('rejects rows with a blank producer id', () => {
+    expect(safeParseKeeperChatHistoryMessage(validMessage({ id: '  ' }))).toBeNull()
   })
 
   it('composes in a filter chain — drops garbage entries silently', () => {

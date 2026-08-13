@@ -544,7 +544,8 @@ val tool_usage_of : base_path:string -> string ->
 (** Replace (or insert) a single per-tool usage entry on a registered keeper.
     Goes through the registry's CAS retry loop. Used by
     [Keeper_registry_tool_usage_persistence.restore] to replay persisted
-    counters on re-registration. *)
+    counters outside a lifecycle transaction. Launch-time replay uses the
+    exact, token-qualified update exposed to the persistence module. *)
 val set_tool_usage_entry :
   base_path:string -> name:string -> tool_name:string
   -> Keeper_types.tool_call_entry -> unit

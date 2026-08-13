@@ -1066,7 +1066,7 @@ let start_keepalive
        | Ok outcome -> outcome
       and launch_registered _intake_token launch_token reg =
       (* Restore persisted tool usage stats from previous session *)
-      Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
+      Keeper_registry_tool_usage_persistence.restore_for_lifecycle launch_token reg;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,
          grpc_close registration, live-meta bootstrap/update) must come after
          the registry FSM accepts [Fiber_started]. Starting the sidecar

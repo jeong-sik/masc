@@ -14,6 +14,7 @@ module Tool_result = Tool_result
 module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity
 module Keeper_registry = Masc.Keeper_registry
+module Keeper_lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Masc_log = Log
 
 let () =
@@ -2177,7 +2178,39 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
             (persisted |> member "tools" |> index 0 |> member "deferred" |> to_int);
           Keeper_registry.For_testing.unregister ~base_path keeper_name;
           ignore (Keeper_registry.For_testing.register ~base_path keeper_name keeper_meta);
-          Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
+          let registered =
+            Keeper_registry.get ~base_path keeper_name
+            |> Option.get
+          in
+          let launch_token =
+            match
+              Keeper_lifecycle_reservation.acquire
+                ~base_path
+                ~keeper_name
+                ~expected_generation:registered.transition_seq
+                ~purpose:Keepalive_launch
+            with
+            | Ok token -> token
+            | Error _ -> Alcotest.fail "failed to reserve keeper launch lifecycle"
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              ignore (Keeper_lifecycle_reservation.release launch_token))
+            (fun () ->
+              (* The ordinary replay is fenced while launch owns the key. The
+                 launch path must carry its exact mutation authority instead of
+                 silently dropping the persisted counters. *)
+              Masc.Keeper_registry_tool_usage_persistence.restore
+                ~base_path
+                keeper_name;
+              Alcotest.(check (list string))
+                "unqualified restore is fenced"
+                []
+                (Keeper_registry.tool_usage_of ~base_path keeper_name
+                 |> List.map fst);
+              Masc.Keeper_registry_tool_usage_persistence.restore_for_lifecycle
+                launch_token
+                registered);
           let restored =
             List.assoc_opt
               "masc_status"

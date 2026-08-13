@@ -20,6 +20,17 @@ let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
     ]
 ;;
 
+let failure_effect_disposition_to_json = function
+  | None -> `Null
+  | Some disposition ->
+    `String (Tool_result.failure_effect_disposition_to_string disposition)
+;;
+
+let deferred_kind_to_json = function
+  | None -> `Null
+  | Some kind -> `String (Keeper_tool_execution.deferred_kind_to_string kind)
+;;
+
 let node_result_to_json (result : Executor.node_result) =
   `Assoc
     [ "node_id", `String (Keeper_tool_plan.Node_id.to_string result.node_id)
@@ -27,6 +38,9 @@ let node_result_to_json (result : Executor.node_result) =
     ; "input", result.input
     ; "schedule", schedule_to_json result.schedule
     ; "result", Tool_result.to_json result.result
+    ; ( "failure_effect_disposition"
+      , failure_effect_disposition_to_json result.failure_effect_disposition )
+    ; "deferred_kind", deferred_kind_to_json result.deferred_kind
     ]
 ;;
 
@@ -327,23 +341,15 @@ let make_tools
                  ?on_failed
                  ()
              in
-             (match completion, execution with
-              | ( Agent_core.Tool_contract.Terminal_after_success _
-                , Error failure )
-                when failure.effect_disposition <> Tool_result.Proven_pre_effect
-                     && not
-                          (match failure.cause with
-                           | Executor.Tool_did_not_complete
-                               { result = Tool_result.Deferred _; _ } ->
-                             true
-                           | Executor.Tool_did_not_complete
-                               { result =
-                                   (Tool_result.Completed _ | Tool_result.Failed _)
-                               ; _
-                               }
-                           | Executor.Plan_execution_failed _
-                           | Executor.Outer_completion_mismatch _ ->
-                             false) ->
+             (match execution with
+              | Error failure
+                when failure.effect_disposition <> Tool_result.Proven_pre_effect ->
+                (* The aggregate is computed from every settled sibling and all
+                   earlier batches.  It is the boundary authority: a selected
+                   Deferred cause must not hide an earlier committed write or
+                   a sibling's unknown/post-effect failure.  Composition
+                   execution has no persisted cursor, so only an entirely
+                   proven-pre-effect defer may remain resumable. *)
                 Option.iter
                   (fun mark_failed ->
                      let diagnostic =
@@ -356,13 +362,11 @@ let make_tools
                        ; diagnostic
                        })
                   on_failed
-              | Agent_core.Tool_contract.Continue_after_success, _
-              | Agent_core.Tool_contract.Terminal_after_success _, Ok _
-              | ( Agent_core.Tool_contract.Terminal_after_success _
-                , Error
-                    { Executor.effect_disposition = Tool_result.Proven_pre_effect
-                    ; _
-                    } ) ->
+              | Ok _
+              | Error
+                  { Executor.effect_disposition = Tool_result.Proven_pre_effect
+                  ; _
+                  } ->
                 ());
              result_of_execution ~tool_name ~start_time execution)))
 ;;

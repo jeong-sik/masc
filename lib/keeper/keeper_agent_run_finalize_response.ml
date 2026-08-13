@@ -68,7 +68,6 @@ let finalize
       ()
   in
   let ( let* ) = Result.bind in
-  in
   receipt_response_text_present_ref := raw_response_text_present;
   let assistant_msg =
     Keeper_replay_checkpoint.consume_replay_response

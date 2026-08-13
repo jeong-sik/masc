@@ -30,7 +30,6 @@ val completion_contract_result
   :  t
   -> Keeper_execution_receipt.completion_contract_result
 
-val delivery_intent : t -> Keeper_continuation_delivery_intent.t option
 val terminal : t -> terminal
 val is_autonomous : t -> bool
 

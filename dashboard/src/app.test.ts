@@ -146,6 +146,17 @@ describe('App v2 header chrome', () => {
     expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
   })
 
+  it('keeps a missing shell Keeper count unavailable instead of inventing zero fibers', () => {
+    shellCounts.value = { agents: 2, tasks: 7 }
+
+    renderApp()
+
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 Keeper Fiber')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
+  })
+
   it('labels fresh runtime health as executable capacity when rows are stale', () => {
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }

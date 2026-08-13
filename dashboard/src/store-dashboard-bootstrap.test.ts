@@ -351,6 +351,35 @@ describe('refreshDashboard bootstrap', () => {
 })
 
 describe('refreshKeeperRuntimeStatus', () => {
+  it('preserves omitted shell Keeper and configured counts as missing', async () => {
+    apiMocks.fetchDashboardShell.mockResolvedValue({
+      generated_at: '2026-06-25T12:00:00Z',
+      status: { project: 'me' },
+      counts: { agents: 2, tasks: 7 },
+      auth: null,
+      config_resolution: null,
+      runtime_resolution: null,
+    })
+    apiMocks.fetchDashboardExecution.mockResolvedValue({
+      generated_at: '2026-06-25T12:00:00Z',
+      status: { project: 'me' },
+      agents: [],
+      tasks: [],
+      messages: [],
+      keepers: [],
+      execution_queue: [],
+      worker_support_briefs: [],
+      continuity_briefs: [],
+    })
+
+    const store = await import('./store')
+    await store.refreshKeeperRuntimeStatus({ force: true })
+
+    expect(store.shellCounts.value?.keepers).toBeUndefined()
+    expect(store.shellCounts.value?.total_runtimes).toBeUndefined()
+    expect(store.shellCounts.value?.configured_keepers).toBeUndefined()
+  })
+
   it('force-refreshes post-action runtime status by default', async () => {
     apiMocks.fetchDashboardShell.mockResolvedValue({
       generated_at: '2026-06-25T12:00:00Z',

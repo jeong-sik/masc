@@ -74,11 +74,11 @@ import {
 // --- Shell counts (lightweight fallback from /dashboard/shell) ---
 
 interface ShellCounts {
-  agents: number
-  tasks: number
-  keepers: number
-  total_runtimes: number
-  configured_keepers: number
+  agents?: number
+  tasks?: number
+  keepers?: number
+  total_runtimes?: number
+  configured_keepers?: number
 }
 
 export const shellCounts = signal<ShellCounts | null>(null)
@@ -824,12 +824,18 @@ export function hydrateShellSnapshot(
     serverStatus.value = mergeServerStatus(serverStatus.value, normalizedStatus)
   }
   if (data.counts) {
+    const agents = data.counts.agents
+    const keepers = data.counts.keepers
+    const totalRuntimes = data.counts.total_runtimes
+      ?? (agents != null && keepers != null ? agents + keepers : undefined)
     shellCounts.value = {
-      agents: data.counts.agents ?? 0,
-      tasks: data.counts.tasks ?? 0,
-      keepers: data.counts.keepers ?? 0,
-      total_runtimes: data.counts.total_runtimes ?? ((data.counts.agents ?? 0) + (data.counts.keepers ?? 0)),
-      configured_keepers: data.configured_keepers ?? 0,
+      ...(agents != null ? { agents } : {}),
+      ...(data.counts.tasks != null ? { tasks: data.counts.tasks } : {}),
+      ...(keepers != null ? { keepers } : {}),
+      ...(totalRuntimes != null ? { total_runtimes: totalRuntimes } : {}),
+      ...(data.configured_keepers != null
+        ? { configured_keepers: data.configured_keepers }
+        : {}),
     }
   }
   if (!preserveAuth) {

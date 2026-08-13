@@ -458,6 +458,24 @@ let publication_recovery_registry env sw config =
     fail
       (Fs_compat.Publication_recovery.registry_error_to_string error)
 
+(* Production installs the keeper owner inventory during server bootstrap, so a
+   case that materializes or creates a keeper needs it too -- without it
+   create_keeper stops at "Keeper owner inventory is not installed for BasePath
+   ...". Kept out of [keeper_runtime_context]: that builds a record, and a
+   constructor that also mutates a global registry would surprise every caller
+   that only wants the context (#28131). *)
+let install_owner_inventory ~sw config =
+  match
+    Masc.Keeper_owner_registry.install_from_store
+      ~sw
+      ~operation_runner:None
+      ~on_turn_slot_released:None
+      config
+  with
+  | Ok _ -> ()
+  | Error err ->
+    fail ("install_owner_inventory: " ^ Masc.Keeper_owner_registry.install_error_to_string err)
+
 let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
   { config
   ; agent_name = supervisor_agent_name
@@ -490,6 +508,7 @@ let test_declarative_boot_materializes_instructions () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  install_owner_inventory ~sw config;
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
@@ -518,6 +537,7 @@ let test_declarative_boot_allows_empty_goal_links () =
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
   let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  install_owner_inventory ~sw config;
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)

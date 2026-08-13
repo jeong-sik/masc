@@ -670,6 +670,12 @@ let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
 let workspaceMessagesRefreshController: AbortController | null = null
 let workspaceMessagesRefreshGeneration = 0
 let workspaceMessagesRefreshInvalidated = false
+// Once the dedicated workspace endpoint has committed a snapshot, execution
+// payload messages are only a lower-fidelity fallback: they do not carry the
+// producer request id or durable mention-delivery status.  Letting a later
+// execution snapshot merge them back creates a second seq-identical row and
+// can make an accepted delivery look pending again.
+let workspaceMessagesDurableAuthority: { project: string | null } | null = null
 let lastShellRefreshAt = 0
 
 export function refreshDashboardWorkspaceMessages(
@@ -706,6 +712,7 @@ export function refreshDashboardWorkspaceMessages(
           // execution-derived cache instead of merging rows that the light
           // execution response intentionally omits.
           messages.value = nextMessages
+          workspaceMessagesDurableAuthority = { project: expectedProject }
         }
         settled = true
       }
@@ -975,7 +982,10 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
-  if (workspaceChanged) cancelDashboardWorkspaceMessagesRefresh()
+  if (workspaceChanged) {
+    cancelDashboardWorkspaceMessagesRefresh()
+    workspaceMessagesDurableAuthority = null
+  }
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)
@@ -990,7 +1000,14 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)
-  messages.value = workspaceChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
+  const currentProject = serverStatus.value?.project ?? null
+  const durableMessagesOwnCurrentProject =
+    workspaceMessagesDurableAuthority?.project === currentProject
+  if (!durableMessagesOwnCurrentProject) {
+    messages.value = workspaceChanged
+      ? executionMessages
+      : mergeMessages(messages.value, executionMessages)
+  }
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)

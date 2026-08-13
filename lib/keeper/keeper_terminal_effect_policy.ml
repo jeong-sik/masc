@@ -1,11 +1,8 @@
 type criticality =
-  | Product_critical
   | Durability_critical
   | Best_effort
 
 type terminal_effect =
-  | Continuation_delivery_outbox
-  | Continuation_delivery_projection
   | Checkpoint_store
   | Execution_receipt
   | Owner_meta
@@ -18,9 +15,7 @@ type terminal_effect =
   | Terminal_fsm_projection
 
 let all =
-  [ Continuation_delivery_outbox
-  ; Continuation_delivery_projection
-  ; Checkpoint_store
+  [ Checkpoint_store
   ; Execution_receipt
   ; Owner_meta
   ; Lifecycle_projection
@@ -34,12 +29,10 @@ let all =
 ;;
 
 let criticality = function
-  | Continuation_delivery_outbox -> Product_critical
   | Checkpoint_store
   | Execution_receipt
   | Owner_meta ->
     Durability_critical
-  | Continuation_delivery_projection
   | Lifecycle_projection
   | Metrics_snapshot
   | Activity_graph
@@ -51,8 +44,6 @@ let criticality = function
 ;;
 
 let effect_label = function
-  | Continuation_delivery_outbox -> "continuation_delivery_outbox"
-  | Continuation_delivery_projection -> "continuation_delivery_projection"
   | Checkpoint_store -> "checkpoint_store"
   | Execution_receipt -> "execution_receipt"
   | Owner_meta -> "owner_meta"
@@ -66,20 +57,19 @@ let effect_label = function
 ;;
 
 let criticality_label = function
-  | Product_critical -> "product_critical"
   | Durability_critical -> "durability_critical"
   | Best_effort -> "best_effort"
 ;;
 
 let failure_blocks_product_success terminal_effect =
   match criticality terminal_effect with
-  | Product_critical | Durability_critical -> true
+  | Durability_critical -> true
   | Best_effort -> false
 ;;
 
 let run_best_effort ~terminal_effect ~on_error f =
   match criticality terminal_effect with
-  | Product_critical | Durability_critical ->
+  | Durability_critical ->
     invalid_arg
       (Printf.sprintf
          "Keeper_terminal_effect_policy.run_best_effort: %s is %s"

@@ -122,15 +122,22 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
     Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
+type continuation_route_disposition =
+  | Continuation_route_addressed
+  | Continuation_route_not_addressed
+
 type turn_success =
-  | Turn_completed of keeper_meta
+  | Turn_completed of
+      { meta : keeper_meta
+      ; continuation_route : continuation_route_disposition
+      }
   | Turn_checkpointed of keeper_meta
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
-let turn_success_of_stop_reason ~meta = function
-  | Runtime_agent.Completed -> Turn_completed meta
+let turn_success_of_stop_reason ~meta ~continuation_route = function
+  | Runtime_agent.Completed -> Turn_completed { meta; continuation_route }
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
@@ -1129,9 +1136,25 @@ let run_keeper_cycle
                        { turn_state with cycle_completed = true }
                      in
                      post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
+                     let continuation_route =
+                       match
+                         ( continuation_channel_of_wake wake
+                         , result.Keeper_agent_run.terminal_effect_receipt )
+                       with
+                       | ( Some channel
+                         , Some
+                             (Keeper_tool_execution.Surface_post_completed
+                                target) )
+                         when Keeper_surface_post.matches_continuation_route
+                                target
+                                channel ->
+                         Continuation_route_addressed
+                       | _ -> Continuation_route_not_addressed
+                     in
                      Ok
                        (turn_success_of_stop_reason
                           ~meta:updated_meta
+                          ~continuation_route
                           result.Keeper_agent_run.stop_reason),
                      turn_state))))
                      )

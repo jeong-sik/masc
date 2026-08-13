@@ -140,8 +140,18 @@ type turn_failure =
     The heartbeat queue transitions from this value; it must not reconstruct a
     possibly rotated runtime from Keeper meta. *)
 
+type continuation_route_disposition =
+  | Continuation_route_addressed
+  | Continuation_route_not_addressed
+(** Whether the turn's completed terminal surface post landed on the exact
+    channel that woke it. The connector-attention ledger maps addressed to a
+    resolved mention and not-addressed to an ignored one. *)
+
 type turn_success =
-  | Turn_completed of Keeper_meta_contract.keeper_meta
+  | Turn_completed of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; continuation_route : continuation_route_disposition
+      }
   | Turn_checkpointed of Keeper_meta_contract.keeper_meta
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
@@ -155,6 +165,7 @@ type turn_success =
 
 val turn_success_of_stop_reason
   :  meta:Keeper_meta_contract.keeper_meta
+  -> continuation_route:continuation_route_disposition
   -> Runtime_agent.stop_reason
   -> turn_success
 (** Total typed projection used at the successful runtime boundary. *)

@@ -896,7 +896,6 @@ let () =
     in
     { response_text = "completed"
     ; turn_outcome = Masc.Keeper_turn_outcome.Visible_reply
-    ; continuation_delivery_intent = None
     ; terminal_effect_receipt = None
     ; model_used = "test-model"
     ; runtime_id = "test-runtime"
@@ -1056,14 +1055,6 @@ let () =
 
 let () =
   check
-    "delivery outbox failure blocks durable settlement"
-    (KTP.failure_blocks_product_success KTP.Continuation_delivery_outbox);
-  check
-    "connector projection failure cannot rewrite committed execution"
-    (not
-       (KTP.failure_blocks_product_success
-          KTP.Continuation_delivery_projection));
-  check
     "checkpoint failure blocks product success"
     (KTP.failure_blocks_product_success KTP.Checkpoint_store);
   check
@@ -1084,7 +1075,7 @@ let () =
   let critical_rejected =
     try
       KTP.run_best_effort
-        ~terminal_effect:KTP.Continuation_delivery_outbox
+        ~terminal_effect:KTP.Checkpoint_store
         ~on_error:(fun _ -> ())
         (fun () -> ());
       false

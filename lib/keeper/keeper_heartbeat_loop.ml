@@ -240,27 +240,12 @@ let mark_connector_attention_resolved_after_delivery ~base_path ~keeper_name eve
 type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
-  | Attention_left_open
 
-let connector_attention_outcome_of_delivery
-    (delivery : Keeper_unified_turn.continuation_delivery_completion) =
-  match delivery with
-  | Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post
-  | Keeper_unified_turn.Continuation_delivery_committed
-      { delivery_state = Keeper_unified_turn.Delivery_delivered; _ } ->
-    Attention_resolved
-  | Keeper_unified_turn.Continuation_delivery_committed
-      { delivery_state =
-          ( Keeper_unified_turn.Delivery_ambiguous
-          | Keeper_unified_turn.Delivery_recovery_pending )
-      ; _
-      } ->
-    Attention_left_open
-  | Keeper_unified_turn.Continuation_delivery_committed
-      { delivery_state = Keeper_unified_turn.Delivery_failed; _ }
-  | Keeper_unified_turn.Continuation_delivery_not_required
-  | Keeper_unified_turn.Continuation_delivery_quarantined _ ->
-    Attention_ignored
+let connector_attention_outcome_of_route
+    (route : Keeper_unified_turn.continuation_route_disposition) =
+  match route with
+  | Keeper_unified_turn.Continuation_route_addressed -> Attention_resolved
+  | Keeper_unified_turn.Continuation_route_not_addressed -> Attention_ignored
 ;;
 
 (* T6 audit: record a swallowed cycle exception as a turn failure.
@@ -292,127 +277,8 @@ let manual_compaction_requested_of_stimuli = function
   | [] | [ _ ] | _ :: _ :: _ -> false
 ;;
 
-let source_requires_continuation_delivery stimuli =
-  List.exists
-    (fun (stimulus : Keeper_event_queue.stimulus) ->
-       match stimulus.payload with
-       | Keeper_event_queue.Fusion_completed completion ->
-         Keeper_continuation_channel.is_routable completion.channel
-       | Keeper_event_queue.Hitl_resolved resolution ->
-         Keeper_continuation_channel.is_routable resolution.channel
-       | Keeper_event_queue.Connector_attention attention ->
-         Keeper_continuation_channel.is_routable attention.channel
-       | Keeper_event_queue.Schedule_due wake ->
-         Option.is_some wake.result_delivery
-       | Keeper_event_queue.Board_signal _
-       | Keeper_event_queue.Board_attention _
-       | Keeper_event_queue.Bootstrap
-       | Keeper_event_queue.Manual_compaction_requested
-       | Keeper_event_queue.Goal_assigned _
-       | Keeper_event_queue.Goal_reconciliation_ready _
-       | Keeper_event_queue.Completion_authority_rejected _
-       | Keeper_event_queue.Task_cancelled _ ->
-         false)
-    stimuli
-;;
 
-let continuation_delivery_origin_for_stimuli stimuli =
-  match stimuli with
-  | [ stimulus ] when source_requires_continuation_delivery [ stimulus ] ->
-    Keeper_continuation_delivery_intent.origin_of_payload
-      stimulus.Keeper_event_queue.payload
-    |> Result.map_error Keeper_continuation_delivery_intent.error_to_string
-  | [ _ ] -> Ok None
-  | [] -> Ok None
-  | stimuli ->
-    if source_requires_continuation_delivery stimuli
-    then
-      Error
-        "multiple stimuli include a continuation delivery source; inference suppressed"
-    else Ok None
-;;
 
-type continuation_source_disposition =
-  | Acknowledge_source
-  | Defer_continuation_source
-  | Retain_source
-  | Quarantine_continuation_source of { detail : string }
-
-let continuation_source_disposition ~source_requires = function
-  | Keeper_unified_turn.Continuation_delivery_settled_by_terminal_surface_post ->
-    Acknowledge_source
-  | Keeper_unified_turn.Continuation_delivery_committed
-      { delivery_state = Keeper_unified_turn.Delivery_recovery_pending; _ } ->
-    Defer_continuation_source
-  | Keeper_unified_turn.Continuation_delivery_committed
-      { delivery_state =
-          ( Keeper_unified_turn.Delivery_delivered
-          | Keeper_unified_turn.Delivery_failed
-          | Keeper_unified_turn.Delivery_ambiguous )
-      ; _
-      } ->
-    Acknowledge_source
-  | Keeper_unified_turn.Continuation_delivery_not_required ->
-    if source_requires
-    then
-      Quarantine_continuation_source
-        { detail =
-            "continuation source completed without a durable delivery obligation"
-        }
-    else Acknowledge_source
-  | Keeper_unified_turn.Continuation_delivery_quarantined { detail } ->
-    Quarantine_continuation_source { detail }
-;;
-
-let continuation_delivery_authorizes_source_ack ~source_requires completion =
-  match continuation_source_disposition ~source_requires completion with
-  | Acknowledge_source -> true
-  | Defer_continuation_source
-  | Retain_source
-  | Quarantine_continuation_source _ ->
-    false
-;;
-
-let continuation_delivery_completion_of_intent intent =
-  let delivery_state =
-    match intent.Keeper_continuation_delivery_intent.state with
-    | Keeper_continuation_delivery_intent.Delivered _ ->
-      Keeper_unified_turn.Delivery_delivered
-    | Keeper_continuation_delivery_intent.Failed _ ->
-      Keeper_unified_turn.Delivery_failed
-    | Keeper_continuation_delivery_intent.Ambiguous _ ->
-      Keeper_unified_turn.Delivery_ambiguous
-    | Keeper_continuation_delivery_intent.Pending
-    | Keeper_continuation_delivery_intent.Attempting _ ->
-      Keeper_unified_turn.Delivery_recovery_pending
-  in
-  Keeper_unified_turn.Continuation_delivery_committed
-    { intent_id = intent.intent_id; delivery_state }
-;;
-
-type failed_continuation_settlement =
-  | Failed_continuation_no_obligation
-  | Failed_continuation_committed of
-      Keeper_unified_turn.continuation_delivery_completion
-  | Failed_continuation_quarantined of { detail : string }
-
-let settle_failed_continuation_source ~config ~keeper_name ~origin =
-  match
-    Keeper_continuation_delivery_recovery.settle_existing
-      ~config
-      ~keeper_name
-      ~origin
-  with
-  | Keeper_continuation_delivery_recovery.No_obligation ->
-    Failed_continuation_no_obligation
-  | Keeper_continuation_delivery_recovery.Obligation_committed
-      { intent; recovery_detail = _ } ->
-    Failed_continuation_committed
-      (continuation_delivery_completion_of_intent intent)
-  | Keeper_continuation_delivery_recovery.Quarantine_required
-      { intent = _; detail } ->
-    Failed_continuation_quarantined { detail }
-;;
 
 let rec compaction_outcomes_of_cycle_outcome = function
   | Cycle.Manual_compaction_applied { receipt; followup } ->
@@ -482,18 +348,6 @@ let failed_source_disposition
            | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail)))
 ;;
 
-module For_testing = struct
-  type nonrec failed_continuation_settlement = failed_continuation_settlement =
-    | Failed_continuation_no_obligation
-    | Failed_continuation_committed of
-        Keeper_unified_turn.continuation_delivery_completion
-    | Failed_continuation_quarantined of { detail : string }
-
-  let settle_failed_continuation_source = settle_failed_continuation_source
-
-  let consume_deferred_runtime_lane_hint =
-    consume_deferred_runtime_lane_hint
-end
 
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
@@ -534,7 +388,6 @@ let run_keepalive_unified_turn
       ref None
     in
     let cycle_outcome_ref = ref None in
-    let source_quarantine_detail = ref None in
     let selection_acked = ref false in
     let event_queue_failed = ref false in
     let record_event_queue_failure message =
@@ -770,13 +623,6 @@ let run_keepalive_unified_turn
       Keeper_decision_audit.flush_if_needed
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name;
-      (* Keep the exact durable source identity available through post-cycle
-         disposition. A response intent may be precommitted before a later
-         finalization step fails, and that failure still has to settle the
-         matching obligation before deciding whether to ACK the source. *)
-      let continuation_delivery_origin_result =
-        continuation_delivery_origin_for_stimuli !consumed_stimuli
-      in
       let meta_after_cycle =
         if Atomic.get stop
         then meta_after_triage
@@ -803,9 +649,6 @@ let run_keepalive_unified_turn
                 | _ -> None)
               !consumed_stimuli
           in
-          (* Non-board intake consumes exactly one stimulus per turn. Preserve
-             the producer identity together with its exact reply route; a
-             route alone cannot prove which durable source may be ACKed. *)
           (* The event intake is the exact turn input. Keep its attribution in
              the existing wake record even when the cadence, rather than a
              direct wake signal, discovered it. An empty [Woken] still means a
@@ -821,14 +664,13 @@ let run_keepalive_unified_turn
             | [], true -> Keeper_registry.Woken []
             | [], false -> Keeper_registry.Proactive_tick
           in
-          let run_fresh_cycle continuation_delivery_origin =
+          let run_fresh_cycle () =
             run_keeper_cycle
               ~admission_token
               ?deferred_runtime_lane
               ~on_deferred_runtime_consumed
               ?event_bus
               ?hitl_resolution
-              ?continuation_delivery_origin
               ~ctx
               ~meta_after_triage
               ~stop
@@ -839,55 +681,7 @@ let run_keepalive_unified_turn
               ~manual_compaction_requested
               ()
           in
-          let run_cycle () =
-            match continuation_delivery_origin_result with
-            | Error detail ->
-              Log.Keeper.warn
-                ~keeper_name:meta_after_triage.name
-                "continuation delivery admission blocked: %s"
-                detail;
-              source_quarantine_detail := Some detail;
-              Cycle.Skipped meta_after_triage
-            | Ok None -> run_fresh_cycle None
-            | Ok (Some origin) ->
-              (match
-                 Keeper_continuation_delivery_recovery.settle_existing
-                   ~config:ctx.config
-                   ~keeper_name:meta_after_triage.name
-                   ~origin
-               with
-               | Keeper_continuation_delivery_recovery.No_obligation ->
-                 run_fresh_cycle (Some origin)
-               | Keeper_continuation_delivery_recovery.Obligation_committed
-                   { intent; recovery_detail } ->
-                 Log.Keeper.info
-                   ~keeper_name:meta_after_triage.name
-                   "continuation delivery obligation recovered before inference: intent_id=%s state=%s%s"
-                   (Keeper_continuation_delivery_intent.Intent_id.to_string
-                      intent.intent_id)
-                   (Keeper_continuation_delivery_intent.state_label intent.state)
-                   (match recovery_detail with
-                    | None -> ""
-                    | Some detail -> "; recovery deferred: " ^ detail);
-                 Cycle.Completed
-                   { meta = meta_after_triage
-                   ; continuation_delivery =
-                       continuation_delivery_completion_of_intent intent
-                   }
-               | Keeper_continuation_delivery_recovery.Quarantine_required
-                   { intent; detail } ->
-                 Log.Keeper.warn
-                   ~keeper_name:meta_after_triage.name
-                   "continuation source quarantined before fresh inference: intent_id=%s detail=%s"
-                   (match intent with
-                    | None -> "unknown"
-                    | Some intent ->
-                      Keeper_continuation_delivery_intent.Intent_id.to_string
-                        intent.intent_id)
-                   detail;
-                 source_quarantine_detail := Some detail;
-                 Cycle.Skipped meta_after_triage)
-          in
+          let run_cycle () = run_fresh_cycle () in
           let cycle_outcome = run_cycle () in
           Option.iter
             record_deferred_runtime_lane
@@ -1047,82 +841,19 @@ let run_keepalive_unified_turn
                  mark_connector_attention_ignored_after_turn
                    ~base_path:ctx.config.base_path
                    ~keeper_name:meta_after_triage.name
-                   event_ids
-               | Attention_left_open -> ())
+                   event_ids)
            in
            match !cycle_outcome_ref with
            | Some (Cycle.Completed completion) ->
-             let source_requires =
-               source_requires_continuation_delivery !consumed_stimuli
-             in
-             (match
-                continuation_source_disposition
-                  ~source_requires
-                  completion.continuation_delivery
-              with
-              | Acknowledge_source ->
-                remove_completed_selection
-                  ~connector_attention_outcome:
-                    (connector_attention_outcome_of_delivery
-                       completion.continuation_delivery)
-              | Defer_continuation_source ->
-                (* The source is now a durable recovery token, not fresh model
-                   input. Moving it behind peer work preserves fleet liveness;
-                   [settle_existing] resolves its exact intent before inference
-                   when the source is selected again. *)
-                defer_selection_to_queue_tail
-                  ~selection
-                  ~reason:"continuation_delivery_recovery_pending"
-              | Retain_source -> ()
-              | Quarantine_continuation_source { detail } ->
-                terminalize_failed_selection ~selection ~detail)
+             remove_completed_selection
+               ~connector_attention_outcome:
+                 (connector_attention_outcome_of_route
+                    completion.continuation_route)
            | Some (Cycle.Manual_compaction_applied _) ->
              remove_completed_selection
                ~connector_attention_outcome:Attention_ignored
            | Some (Cycle.Failed { failure; _ }) ->
-             let source_requires =
-               source_requires_continuation_delivery !consumed_stimuli
-             in
-             let recovered_after_failure =
-               if not source_requires
-               then false
-               else
-                 match continuation_delivery_origin_result with
-                 | Error _ | Ok None -> false
-                 | Ok (Some origin) ->
-                   (match
-                      settle_failed_continuation_source
-                        ~config:ctx.config
-                        ~keeper_name:meta_after_triage.name
-                        ~origin
-                    with
-                    | Failed_continuation_no_obligation -> false
-                    | Failed_continuation_quarantined { detail } ->
-                      terminalize_failed_selection ~selection ~detail;
-                      true
-                    | Failed_continuation_committed completion ->
-                      (match
-                         continuation_source_disposition
-                           ~source_requires:true
-                           completion
-                       with
-                       | Acknowledge_source ->
-                         remove_completed_selection
-                           ~connector_attention_outcome:
-                             (connector_attention_outcome_of_delivery completion)
-                       | Defer_continuation_source ->
-                         defer_selection_to_queue_tail
-                           ~selection
-                           ~reason:
-                             "continuation_delivery_recovered_after_turn_failure"
-                       | Retain_source -> ()
-                       | Quarantine_continuation_source { detail } ->
-                         terminalize_failed_selection ~selection ~detail);
-                      true)
-             in
-             if not recovered_after_failure
-             then
-               (match failed_source_disposition failure with
+             (match failed_source_disposition failure with
                 | Quarantine_source { detail } ->
                   terminalize_failed_selection ~selection ~detail
                 | Defer_to_queue_tail ->
@@ -1147,10 +878,7 @@ let run_keepalive_unified_turn
                | Cycle.Input_required _
                | Cycle.Cancelled _ ) ->
              ()
-           | Some (Cycle.Skipped _) ->
-             Option.iter
-               (fun detail -> terminalize_failed_selection ~selection ~detail)
-               !source_quarantine_detail
+           | Some (Cycle.Skipped _) -> ()
            | None ->
              ());
       (let compaction_outcomes =

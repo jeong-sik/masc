@@ -1,21 +1,15 @@
 (** Failure semantics for post-provider terminal effects.
 
     The classification is command policy, not a dashboard interpretation:
-    product- and durability-critical failures prevent terminal product success;
+    durability-critical failures prevent terminal product success;
     best-effort projection failures are observed but never rewrite a committed
-    turn into an execution failure. Continuation delivery deliberately has two
-    boundaries: failing to create its durable outbox obligation is
-    product-critical for that work item, while connector projection after the
-    commit is isolated and must not stop the Keeper or regenerate inference. *)
+    turn into an execution failure. *)
 
 type criticality =
-  | Product_critical
   | Durability_critical
   | Best_effort
 
 type terminal_effect =
-  | Continuation_delivery_outbox
-  | Continuation_delivery_projection
   | Checkpoint_store
   | Execution_receipt
   | Owner_meta

@@ -206,43 +206,6 @@ export interface DashboardScheduledAutomationSignal {
   payload_kind?: string | null
 }
 
-export interface DashboardScheduledAutomationResultDelivery {
-  schema?: 'masc.dashboard.schedule_result_delivery.v1'
-  policy: 'none' | 'reply_to_origin' | 'invalid'
-  required: boolean
-  status:
-    | 'not_required'
-    | 'awaiting_occurrence'
-    | 'awaiting_dispatch_receipt'
-    | 'execution_pending'
-    | 'pending'
-    | 'attempting'
-    | 'delivered'
-    | 'failed'
-    | 'ambiguous'
-    | 'invalid_policy'
-    | 'unrecognized_dispatch_receipt'
-    | 'read_error'
-    | 'destination_conflict'
-    | 'identity_conflict'
-  destination?: Record<string, unknown>
-  occurrence_id?: string
-  keeper_name?: string
-  intent_id?: string
-  response_sha256?: string
-  attempt_started_at?: number
-  attempt_started_at_iso?: string
-  idempotency_key?: string
-  completed_at?: number
-  completed_at_iso?: string
-  detected_at?: number
-  detected_at_iso?: string
-  connector_message_id?: string | null
-  failure_kind?: string
-  detail?: string
-  record_failures?: Array<{ path: string; detail: string }>
-}
-
 export interface DashboardScheduledAutomationRequest {
   schedule_id: string
   status: 'scheduled' | 'due' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'expired'
@@ -277,7 +240,6 @@ export interface DashboardScheduledAutomationRequest {
   recurrence_summary?: string | null
   last_wake?: DashboardScheduledAutomationWakeReceipt | null
   dispatch_receipt?: DashboardScheduledAutomationDispatchReceipt | null
-  result_delivery?: DashboardScheduledAutomationResultDelivery
   keeper_queue_evidence?: DashboardScheduledAutomationKeeperQueueEvidence | null
   keeper_reaction_evidence?: DashboardScheduledAutomationKeeperReactionEvidence | null
 }

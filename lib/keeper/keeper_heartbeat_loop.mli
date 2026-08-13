@@ -163,54 +163,16 @@ val failed_source_disposition :
     source, transient failures move it behind independent work, and deterministic
     failures quarantine that source with its durable receipt. *)
 
-val source_requires_continuation_delivery :
-  Keeper_event_queue.stimulus list -> bool
-
-val continuation_delivery_origin_for_stimuli :
-  Keeper_event_queue.stimulus list ->
-  (Keeper_continuation_delivery_intent.origin option, string) result
-(** Resolve the exact singleton continuation source before inference. A source
-    that claims delivery but has no valid routable origin, or a batch that
-    mixes continuation work, fails closed instead of regenerating responses. *)
-
-type continuation_source_disposition =
-  | Acknowledge_source
-  | Defer_continuation_source
-  | Retain_source
-  | Quarantine_continuation_source of { detail : string }
-
-val continuation_source_disposition :
-  source_requires:bool ->
-  Keeper_unified_turn.continuation_delivery_completion ->
-  continuation_source_disposition
-(** Producer-specific active-queue policy. A terminal delivery settlement ACKs
-    the source. A durable but recovery-pending obligation moves the source to
-    the queue tail as a recovery token: it releases the active head and never
-    regenerates inference, but remains durable until connector settlement is
-    terminal. Missing delivery proof retains non-delivery work and quarantines
-    a required continuation source. *)
-
-val continuation_delivery_authorizes_source_ack :
-  source_requires:bool ->
-  Keeper_unified_turn.continuation_delivery_completion ->
-  bool
-(** Boolean compatibility projection of {!continuation_source_disposition}. *)
-
 type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
-  | Attention_left_open
 
-val connector_attention_outcome_of_delivery :
-  Keeper_unified_turn.continuation_delivery_completion ->
+val connector_attention_outcome_of_route :
+  Keeper_unified_turn.continuation_route_disposition ->
   connector_attention_outcome
-(** Attention-ledger terminal for a completed connector-attention turn. A
-    delivered reply resolves the item; a failed/absent/quarantined delivery
-    ignores it; a sent-but-unsettled delivery ([Delivery_ambiguous]) or one
-    pending recovery is left open, since it is neither proven delivered nor
-    ignored. The connector-attention stimulus is edge-triggered, so an open
-    item does not re-drive a turn — it surfaces as pending until recovery
-    settles it. *)
+(** Attention-ledger terminal for a completed connector-attention turn: an
+    addressed continuation route resolves the item, an unaddressed one
+    ignores it. The stimulus is edge-triggered either way. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
@@ -277,23 +239,3 @@ val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
-module For_testing : sig
-  type failed_continuation_settlement =
-    | Failed_continuation_no_obligation
-    | Failed_continuation_committed of
-        Keeper_unified_turn.continuation_delivery_completion
-    | Failed_continuation_quarantined of { detail : string }
-
-  val settle_failed_continuation_source :
-    config:Workspace.config ->
-    keeper_name:string ->
-    origin:Keeper_continuation_delivery_intent.origin ->
-    failed_continuation_settlement
-  (** Recover a delivery obligation precommitted before a later turn-finalization
-      failure. Test-only exposure of the production failure-path helper. *)
-
-  val consume_deferred_runtime_lane_hint :
-    Keeper_turn_driver.deferred_runtime_lane option ref ->
-    Keeper_turn_driver.deferred_runtime_lane ->
-    bool
-end

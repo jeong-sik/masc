@@ -174,12 +174,6 @@ type keeper_persistence_report =
       ( Fusion_delivery_projector.recovery_report
       , Fusion_delivery_obligation.error )
         result
-  ; continuation_staging_cleanup :
-      ( string
-        * ( Fs_compat.atomic_orphan_cleanup_report
-          , Keeper_continuation_delivery_store.error )
-            result )
-        list
   }
 
 type keeper_persistence_failure_phase =
@@ -476,38 +470,11 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
        Log.Keeper.warn
          "fusion_delivery: startup recovery examined=%d projected=%d pending=%d"
        report.examined report.projected report.pending);
-  let continuation_staging_cleanup =
-    Keeper_meta_store.keeper_names config
-    |> List.map (fun keeper_name ->
-      let cleanup =
-        Keeper_continuation_delivery_store.cleanup_staging_for_startup
-          ~config
-          ~keeper_name
-      in
-      (match cleanup with
-       | Error error ->
-         Log.Keeper.error
-           ~keeper_name
-           "continuation_delivery: startup staging cleanup unavailable error=%s"
-           (Keeper_continuation_delivery_store.error_to_string error)
-       | Ok report ->
-         if report.inspected > 0 || report.failures <> []
-         then
-           Log.Keeper.warn
-             ~keeper_name
-             "continuation_delivery: startup staging inspected=%d deleted=%d preserved=%d failures=%d"
-             report.inspected
-             report.deleted
-             report.preserved
-             (List.length report.failures));
-      keeper_name, cleanup)
-  in
   let prepared =
     { base_path = base_path_identity
     ; report =
       { shutdown
         ; fusion_delivery = fusion_delivery_recovery
-        ; continuation_staging_cleanup
         }
     }
   in

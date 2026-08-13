@@ -1091,18 +1091,32 @@ let start_keepalive
             "fiber_start_rejected: %s"
             (Keeper_state_machine.transition_error_to_string err)
         in
-        Keeper_registry.set_failure_reason
-          ~base_path:ctx.config.base_path
-          m.name
-          (Some (Keeper_registry.Exception reason));
-        Keeper_registry.record_crash
-          ~base_path:ctx.config.base_path
-          m.name
-          (Time_compat.now ())
-          reason;
-        Keeper_registry_error_recording.record
-          ~base_path:ctx.config.base_path
-          m.name
+        ignore
+          (Keeper_registry.update_entry_exact_for_lifecycle
+             launch_token
+             reg
+             (fun current ->
+                { current with
+                  last_failure_reason = Some (Keeper_registry.Exception reason)
+                })
+           |> Keeper_registry.exact_update_succeeded
+                reg
+                ~site:"keepalive_launch_rejected.failure_reason");
+        ignore
+          (Keeper_registry.update_entry_exact_for_lifecycle
+             launch_token
+             reg
+             (fun current ->
+                Keeper_registry_error_tracking.record_crash_entry
+                  current
+                  (Time_compat.now ())
+                  reason)
+           |> Keeper_registry.exact_update_succeeded
+                reg
+                ~site:"keepalive_launch_rejected.crash_log");
+        Keeper_registry_error_recording.record_exact_for_lifecycle
+          launch_token
+          reg
           reason;
         if resolve_registry_done reg ~source:"keepalive_launch_rejected" (`Crashed reason)
         then

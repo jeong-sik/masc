@@ -77,7 +77,7 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
     (match
        Ide_bridge.list_events
          ~base_path:base_dir
-         ~partition:(Ide_paths.By_url "github.com_owner_repo")
+         ~codebase:("github.com_owner_repo")
          ~kind:Ide_bridge.Tool
          ~limit:1
          ()
@@ -89,7 +89,7 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
     match
       Ide_bridge.list_cursors
         ~base_path:base_dir
-        ~partition:(Ide_paths.By_url "github.com_owner_repo")
+        ~codebase:("github.com_owner_repo")
         ()
     with
     | [ cursor ] ->
@@ -129,7 +129,7 @@ let test_write_region_observation_reaches_ide_storage () =
     match
       Ide_region_tracker.read_regions
         ~base_dir
-        ~partition:(Ide_paths.By_url "github.com_owner_repo")
+        ~codebase:("github.com_owner_repo")
         ()
     with
     | [ region ] ->
@@ -209,7 +209,7 @@ let test_annotation_request_reaches_ide_storage () =
       (match
          Ide_annotations.list
            ~base_dir
-           ~partition:(Ide_paths.By_url "github.com_owner_repo")
+           ~codebase:("github.com_owner_repo")
            ~filter
            ()
        with

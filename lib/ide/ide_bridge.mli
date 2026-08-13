@@ -1,5 +1,5 @@
 (** IDE Bridge — collects Keeper activity events and surfaces them in
-    the [.masc-ide/] partition structure for IDE consumption. *)
+    the per-codebase [.masc-ide/] store layout for IDE consumption. *)
 
 
 type event_kind =
@@ -78,8 +78,8 @@ val ingest_tool_event :
   timestamp_ms:int64 ->
   unit ->
   unit
-(** Low-level writer: the caller names the storage partition and the
-    file path explicitly. Producers go through
+(** Low-level writer: the caller names the codebase and the file
+    path explicitly. Producers go through
     {!ingest_tool_event_from_hook}, which projects both from the fact's
     attribution. *)
 

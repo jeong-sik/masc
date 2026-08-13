@@ -83,7 +83,7 @@ let test_owner_probe_round_trip () =
     (match
        Ide_annotations.list
          ~base_dir:base_path
-         ~partition:(Ide_paths.By_url probe_slug)
+         ~codebase:(probe_slug)
          ~filter
          ()
      with
@@ -99,7 +99,7 @@ let test_owner_probe_round_trip () =
       (List.length
          (Ide_annotations.list
             ~base_dir:base_path
-            ~partition:Ide_paths.Legacy_default
+            ~codebase:"github.com_test_legacy"
             ~filter:{ file_path = None; keeper_id = None; goal_id = None; task_id = None }
             ())))
 ;;

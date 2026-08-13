@@ -1,15 +1,14 @@
 (** LSP Overlay Provider — inject MASC annotations into LSP protocol responses.
 
     Public interface for [Lsp_overlay_provider]. Internal JSON construction
-    helpers ([codelens_to_json], [inlay_hint_to_json]) are intentionally
-    not exposed.
+    helpers ([codelens_to_json]) are intentionally not exposed.
 
-    [partition] names the [.masc-ide/] store being read and is explicit on
-    every entry point: annotations live in per-codebase partitions, so a
-    reader that does not name one addresses the wrong rows. [None] means the
-    caller addresses no store — an LSP connection opened without an IDE
-    scope — and yields the empty overlay. It is never coerced to a default
-    partition.
+    [codebase] names the [.masc-ide/] store directory being read and is
+    explicit on every entry point: annotations live in per-codebase
+    stores, so a reader that does not name one addresses the wrong rows.
+    [None] means the caller addresses no store — an LSP connection opened
+    without an IDE scope — and yields the empty overlay. It is never
+    coerced to a default store.
 
     [base_dir] is the directory that holds [.masc-ide/]. [document_root] is
     the absolute root a stored annotation's relative [file_path] hangs off,

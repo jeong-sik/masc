@@ -9,12 +9,12 @@ module String_set = Set.Make (String)
 
 let store_path ~base_dir = Ide_paths.store_path ~base_dir
 
-let partition_dir ~base_dir codebase =
+let codebase_dir ~base_dir codebase =
   Ide_paths.code_store_dir ~base_dir ~codebase
 ;;
 
 let annotations_file_for ~base_dir codebase =
-  Filename.concat (partition_dir ~base_dir codebase) "annotations.jsonl"
+  Filename.concat (codebase_dir ~base_dir codebase) "annotations.jsonl"
 ;;
 
 let store_file ~base_dir ~codebase () =
@@ -37,7 +37,7 @@ let compact_seq = ref 0
 let ensure_dir = Fs_compat.mkdir_p
 
 let ensure_store ~base_dir ~codebase () =
-  ensure_dir (partition_dir ~base_dir codebase)
+  ensure_dir (codebase_dir ~base_dir codebase)
 ;;
 
 let now_ms () =
@@ -212,7 +212,7 @@ let rec apply_log_record ?(capture = true) annotations tombstoned active = funct
   | Ignored -> ()
 ;;
 
-let load_all_partition ?stop_before_compact_begin_id ~base_dir codebase =
+let load_all_for_codebase ?stop_before_compact_begin_id ~base_dir codebase =
   let path = annotations_file_for ~base_dir codebase in
   if not (Sys.file_exists path)
   then []
@@ -321,7 +321,7 @@ let create
 
 let list ~base_dir ~codebase ~filter () =
   ensure_store ~base_dir ~codebase ();
-  let all : annotation list = load_all_partition ~base_dir codebase in
+  let all : annotation list = load_all_for_codebase ~base_dir codebase in
   let by_file =
     match filter.file_path with
     | Some fp -> List.filter (fun (a : annotation) -> a.file_path = fp) all
@@ -364,14 +364,14 @@ let compact ~base_dir ~codebase () =
     let id = next_compaction_id () in
     Fs_compat.append_jsonl path (compact_begin_json id);
     let snapshot =
-      load_all_partition ~stop_before_compact_begin_id:id ~base_dir codebase
+      load_all_for_codebase ~stop_before_compact_begin_id:id ~base_dir codebase
     in
     Fs_compat.append_jsonl path (compact_end_json id snapshot))
 ;;
 
 let delete ~base_dir ~codebase ~id ~keeper_id ?expected_version () =
   ensure_store ~base_dir ~codebase ();
-  let all = load_all_partition ~base_dir codebase in
+  let all = load_all_for_codebase ~base_dir codebase in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with
   | None -> Error "annotation not found or keeper mismatch"
   | Some found ->

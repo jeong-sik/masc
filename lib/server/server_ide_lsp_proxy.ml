@@ -239,21 +239,21 @@ let overlay_codebase cs = Option.map Server_ide_scope.codebase_of_ide_scope cs.s
 ;;
 
 (* What this connection addresses, read from its URL before the socket is
-   upgraded. Two independent axes: the overlay store partition comes from
-   the IDE scope ([codebase]/[keeper_lane], resolved by the same
-   [Server_ide_scope] the REST routes use, so the two surfaces share one
-   vocabulary), and the workspace tree that document paths are relative to
+   upgraded. Two independent axes: the overlay store directory comes from
+   the IDE scope ([codebase], resolved by the same [Server_ide_scope]
+   the REST routes use, so the two surfaces share one vocabulary), and
+   the workspace tree that document paths are relative to
    comes from the workspace axis parameters ([repo_id]/[keeper]) resolved
    by [resolve_workspace_base]. RFC-0378 §5.3b: the scope carries the
-   slug itself — the old full-URL spelling that could name a partition
+   slug itself — the old full-URL spelling that could name a store
    without a tree died with that vocabulary. *)
 let lsp_connection_addressing ~state ~uri =
   match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
   | Error err -> Error err
   | Ok scope ->
-    (* RFC-0378 §5.3b: the scope names the overlay partition; the workspace
+    (* RFC-0378 §5.3b: the scope names the overlay store; the workspace
        tree anchor is the separate workspace axis, resolved from its own
-       parameters. The old full-URL scope that could name a partition
+       parameters. The old full-URL scope that could name a store
        without a tree died with that spelling. *)
     let anchor, _source =
       Server_routes_http_routes_workspace.resolve_workspace_base ~state ~uri
@@ -1151,7 +1151,7 @@ let dispatch_message cs msg =
               | _ -> cs.base_path
             in
             (* A scope declared on the connection URL is authoritative: it
-               already fixed both the partition and the tree document paths
+               already fixed both the store and the tree document paths
                are relative to. Letting [rootUri] move the anchor afterwards
                would decouple the two again, which is how document keys came
                to be expressed against one root and stored against another.

@@ -1,8 +1,8 @@
 (** The join between a keeper's annotation write and the IDE's LSP read.
 
     [test_ide_canonical_url_join.ml] pins the resolver that decides a write's
-    partition and repo-relative path. Nothing pinned that the LSP reader
-    addresses the partition the write landed in — so the reader read
+    codebase and repo-relative path. Nothing pinned that the LSP reader
+    addresses the codebase the write landed in — so the reader read
     [_orphan/] while keeper writes accumulated under [by-url/<slug>/], and
     every overlay came back empty. These cases pin the reader's half of that
     join. *)
@@ -14,7 +14,7 @@ module Types = Ide_annotation_types
 module Lsp = Lsp_overlay_provider
 
 let slug = "github.com_jeong-sik_masc"
-let repo_partition = Ide_paths.By_url slug
+let repo_partition = slug
 let file_path = "lib/keeper/keeper_tool_ide_runtime.ml"
 
 (* The overlay cache is guarded by an [Eio.Mutex], so every case runs inside
@@ -30,11 +30,11 @@ let with_temp_dir f =
       (fun () -> f dir))
 ;;
 
-let create_annotation ~base_dir ~partition ~keeper_id ~content ~line =
+let create_annotation ~base_dir ~codebase ~keeper_id ~content ~line =
   match
     Store.create
       ~base_dir
-      ~partition
+      ~codebase
       ~keeper_id
       ~file_path
       ~line_start:line
@@ -47,8 +47,8 @@ let create_annotation ~base_dir ~partition ~keeper_id ~content ~line =
   | Error msg -> failf "annotation write failed: %s" msg
 ;;
 
-let codelens_titles ~base_dir ~partition =
-  Lsp.codelenses ~base_dir ~partition ~file_path
+let codelens_titles ~base_dir ~codebase =
+  Lsp.codelenses ~base_dir ~codebase ~file_path
   |> List.filter_map (fun lens ->
     match lens with
     | `Assoc fields ->
@@ -61,8 +61,8 @@ let codelens_titles ~base_dir ~partition =
     | _ -> None)
 ;;
 
-(* The defect this file exists for: the write names a by-URL partition and the
-   read has to name the same one. A reader that omits the partition (the old
+(* The defect this file exists for: the write names a by-URL codebase and the
+   read has to name the same one. A reader that omits the codebase (the old
    behaviour, which defaulted to [Legacy_default]) sees nothing. *)
 let test_by_url_write_is_read_under_its_partition () =
   with_temp_dir (fun base_dir ->
@@ -70,25 +70,25 @@ let test_by_url_write_is_read_under_its_partition () =
     ignore
       (create_annotation
          ~base_dir
-         ~partition:repo_partition
+         ~codebase:repo_partition
          ~keeper_id:"analyst"
          ~content:"picked Eio.Mutex over Lazy here"
          ~line:12);
     check
       (list string)
-      "the addressed partition yields the keeper's annotation"
+      "the addressed codebase yields the keeper's annotation"
       [ "[Decision] picked Eio.Mutex over Lazy here" ]
-      (codelens_titles ~base_dir ~partition:(Some repo_partition));
+      (codelens_titles ~base_dir ~codebase:(Some repo_partition));
     check
       (list string)
-      "the orphan partition does not"
+      "the orphan codebase does not"
       []
-      (codelens_titles ~base_dir ~partition:(Some Ide_paths.Legacy_default))
+      (codelens_titles ~base_dir ~codebase:(Some "github.com_test_legacy"))
   )
 ;;
 
 (* A reader that names no store must read as empty, not as some default
-   partition's rows: an LSP connection opened without an IDE scope has not
+   codebase's rows: an LSP connection opened without an IDE scope has not
    said which codebase it is looking at. *)
 let test_unaddressed_store_reads_empty () =
   with_temp_dir (fun base_dir ->
@@ -96,20 +96,20 @@ let test_unaddressed_store_reads_empty () =
     ignore
       (create_annotation
          ~base_dir
-         ~partition:Ide_paths.Legacy_default
+         ~codebase:"github.com_test_legacy"
          ~keeper_id:"analyst"
          ~content:"orphan lane row"
          ~line:3);
     check
       (list string)
-      "no partition named, no rows served"
+      "no codebase named, no rows served"
       []
-      (codelens_titles ~base_dir ~partition:None)
+      (codelens_titles ~base_dir ~codebase:None)
   )
 ;;
 
 (* Two partitions hold the same repo-relative path. A cache keyed on
-   [base_dir + file_path] alone served one partition's rows for the other's
+   [base_dir + file_path] alone served one codebase's rows for the other's
    request. *)
 let test_partitions_do_not_share_cache_entries () =
   with_temp_dir (fun base_dir ->
@@ -117,28 +117,28 @@ let test_partitions_do_not_share_cache_entries () =
     ignore
       (create_annotation
          ~base_dir
-         ~partition:repo_partition
+         ~codebase:repo_partition
          ~keeper_id:"analyst"
          ~content:"by-url row"
          ~line:5);
     ignore
       (create_annotation
          ~base_dir
-         ~partition:Ide_paths.Legacy_default
+         ~codebase:"github.com_test_legacy"
          ~keeper_id:"sangsu"
          ~content:"orphan row"
          ~line:5);
-    (* Read the by-URL partition first so its rows are the cached ones. *)
+    (* Read the by-URL codebase first so its rows are the cached ones. *)
     check
       (list string)
-      "by-url partition serves its own row"
+      "by-url codebase serves its own row"
       [ "[Decision] by-url row" ]
-      (codelens_titles ~base_dir ~partition:(Some repo_partition));
+      (codelens_titles ~base_dir ~codebase:(Some repo_partition));
     check
       (list string)
-      "orphan partition is not served the by-url row"
+      "orphan codebase is not served the by-url row"
       [ "[Decision] orphan row" ]
-      (codelens_titles ~base_dir ~partition:(Some Ide_paths.Legacy_default))
+      (codelens_titles ~base_dir ~codebase:(Some "github.com_test_legacy"))
   )
 ;;
 
@@ -152,11 +152,11 @@ let test_write_after_first_read_becomes_visible () =
       (list string)
       "empty store reads empty"
       []
-      (codelens_titles ~base_dir ~partition:(Some repo_partition));
+      (codelens_titles ~base_dir ~codebase:(Some repo_partition));
     ignore
       (create_annotation
          ~base_dir
-         ~partition:repo_partition
+         ~codebase:repo_partition
          ~keeper_id:"analyst"
          ~content:"written after the reader cached the empty store"
          ~line:9);
@@ -164,16 +164,16 @@ let test_write_after_first_read_becomes_visible () =
       (list string)
       "the later write is visible without an explicit invalidation"
       [ "[Decision] written after the reader cached the empty store" ]
-      (codelens_titles ~base_dir ~partition:(Some repo_partition))
+      (codelens_titles ~base_dir ~codebase:(Some repo_partition))
   )
 ;;
 
 let () =
   run
     "ide_lsp_join_key"
-    [ ( "partition addressing"
+    [ ( "codebase addressing"
       , [ test_case
-            "by-url write reads under its partition"
+            "by-url write reads under its codebase"
             `Quick
             test_by_url_write_is_read_under_its_partition
         ; test_case

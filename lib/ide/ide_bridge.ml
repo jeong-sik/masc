@@ -683,10 +683,10 @@ let ingest_tool_event_from_hook
     ~output_text
     ~(input : Yojson.Safe.t)
   =
-  (* The attribution arrives minted (RFC-0378 §5.1); storage partition and
+  (* The attribution arrives minted (RFC-0378 §5.1); store directory and
      file path are both projections of it. Re-deriving the path from
      [input] here is what put absolute host paths, sandbox-rooted
-     [repos/<id>/…] paths, and repo-relative paths in one partition, none
+     [repos/<id>/…] paths, and repo-relative paths in one store, none
      of which a reader can join against the region and annotation rows
      the same resolver produced (masc#28582).
 
@@ -799,7 +799,7 @@ let install_agent_observation_sinks () =
       match attribution with
       | Agent_observation.Unaddressed { reason; attempted_path } ->
         (* RFC-0378 §5.3: an annotation that fails attribution is a typed
-           reject, never an ok:true burial in a partition no repo-scoped
+           reject, never an ok:true burial in a directory no codebase-scoped
            read can see. *)
         Error
           (Printf.sprintf

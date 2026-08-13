@@ -12,7 +12,7 @@ let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
 (* The scope vocabulary is shared with the LSP proxy; both surfaces resolve
-   through [Server_ide_scope] so a reader cannot address one partition here
+   through [Server_ide_scope] so a reader cannot address one store here
    and a different one there. Equality re-declaration keeps this module's
    existing field access on [ide_error] unchanged. *)
 type ide_error = Server_ide_scope.ide_error =
@@ -460,7 +460,7 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
@@ -522,7 +522,7 @@ let add_routes router =
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
@@ -659,7 +659,7 @@ let add_routes router =
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes
@@ -733,7 +733,7 @@ let add_routes router =
     with_public_read
       (fun state _req reqd ->
          let uri = Uri.of_string request.target in
-         (* RFC-0128 §4.2 PR-8: partition storage lives under the
+         (* RFC-0378 §5.2: the IDE store lives under the
             *server* base_path (single .masc-ide/ tree), not the
             workspace tree returned by [resolve_workspace_base]. The
             latter exists for /api/v1/workspace/{tree,file} routes

@@ -108,7 +108,7 @@ let canonical_url_of_remote raw =
 (* RFC-0378 §5.1: a code fact's address, minted once where the write is
    attributed and carried as a parsed value from then on. Consumers never
    re-derive either half from tool input or store layout — [v] is the only
-   way in, and it rejects every shape the partitioned store cannot join on
+   way in, and it rejects every shape the per-codebase store cannot join on
    instead of repairing it. *)
 module Code_address = struct
   type t =
@@ -169,7 +169,7 @@ end
 
 (* Typed reasons a write's file path failed attribution to a codebase.
    RFC-0378 §5.1: attribution failure is a fact kind, not a store
-   partition — the reason rides the fact as a queryable field.
+   location — the reason rides the fact as a queryable field.
    RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
    once attribution moves to git observation. *)
 module Unattributed = struct
@@ -228,7 +228,7 @@ type tool_event =
     (* RFC-0378 §5.1: the address is minted where the write is attributed
        and carried as a parsed value. Producers must not hand consumers a
        raw tool argument — a consumer re-deriving the path from [input]
-       produced three incompatible shapes in one partition (masc#28582). *)
+       produced three incompatible shapes in one store (masc#28582). *)
   ; tool_name : string
   ; keeper_id : string
   ; turn_id : string

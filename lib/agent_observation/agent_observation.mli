@@ -12,7 +12,7 @@ val canonical_url_of_remote : string -> string option
 module Code_address : sig
   type t
   (** A code fact's address: [(codebase, path)] where [codebase] is a
-      canonical host_path slug (the partitioned store's directory name,
+      canonical host_path slug (the store's per-codebase directory name,
       {!canonical_url_of_remote} output) and [path] is the file's
       repo-root-relative path.
 
@@ -58,7 +58,7 @@ module Unattributed : sig
   (** Typed reasons a write's file path failed attribution to a codebase.
 
       RFC-0378 §5.1: attribution failure is a fact kind, not a store
-      partition — the reason rides the fact as a queryable field.
+      location — the reason rides the fact as a queryable field.
       RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
       once attribution moves to git observation. *)
 
@@ -112,7 +112,7 @@ type tool_event =
             hand consumers the raw tool argument — the resolver is the
             only thing that knows which root the argument was relative
             to, and a consumer re-deriving the path from [input] produced
-            three incompatible shapes in one partition (masc#28582). *)
+            three incompatible shapes in one store (masc#28582). *)
   ; tool_name : string
   ; keeper_id : string
   ; turn_id : string

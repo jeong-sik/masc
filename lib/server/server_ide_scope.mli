@@ -1,8 +1,8 @@
 (** IDE observation scope — the addressing vocabulary shared by every IDE
     read surface.
 
-    A [.masc-ide/] store is partitioned, so any reader has to say which
-    partition it is addressing before it can name a document. The REST
+    A [.masc-ide/] store is laid out per codebase, so any reader has to
+    say which codebase it is addressing before it can name a document. The REST
     routes take that decision from query parameters; the LSP proxy takes it
     from the same parameters on its WebSocket URL. Both resolve through this
     module so the two surfaces cannot drift into separate vocabularies —
@@ -48,4 +48,4 @@ val resolve_optional_ide_scope_for_query
     This exists for the LSP proxy, whose connection may legitimately want
     only language-server passthrough and no MASC overlay. [Ok None] means
     "this connection addresses no store"; it must not be collapsed into a
-    default partition. A malformed scope is still [Error]. *)
+    default store. A malformed scope is still [Error]. *)

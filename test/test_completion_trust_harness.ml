@@ -397,6 +397,13 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after approved retry")
 
+(* Historical shape: keeper_task_done used to consult the reviewer inline and
+   an unavailable evaluator rejected the call. The tool now only files
+   evidence (submit_for_verification); the terminal verdict belongs to the
+   completion authority, and with the evaluator unavailable none is issued —
+   the run_completion_review error arm logs "task remains nonterminal" and
+   emits no verdict. Fail-closed moved from the submission to the verdict:
+   what must never happen is the task reaching Done without one. *)
 let test_unavailable_evaluator_keeps_task_active () =
   with_ws "completion_llm_unavailable"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -422,14 +429,26 @@ let test_unavailable_evaluator_keeps_task_active () =
         ~evidence_refs:[]
         ()
     in
-    check string "unavailable evaluator rejects" "failure"
+    check string "evidence submission succeeds without an inline verdict"
+      "success"
       (outcome_label result.KTE.disposition);
-    check bool "typed evaluator failure is visible" true
-      (String_util.contains_substring result.KTE.raw_output "evaluator unavailable");
-    match assignee_of config "task-001" with
-    | Some assignee ->
-      check string "only task remains active" meta.agent_name assignee
-    | None -> fail "task must remain Claimed/InProgress")
+    match
+      List.find_opt
+        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
+        (Workspace.get_tasks_raw config)
+    with
+    | None -> fail "task-001 missing after submit"
+    | Some { task_status = Masc_domain.Done _; _ } ->
+      fail
+        "an unavailable evaluator must never let the task complete (fail-open)"
+    | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
+      ->
+      check string "submitter identity is preserved for the retry"
+        meta.agent_name assignee
+    | Some { task_status; _ } ->
+      fail
+        ("task must park awaiting verification, got "
+         ^ Masc_domain.task_status_to_string task_status))
 
 
 (* Positive lifecycle control: a keeper claiming its own backlog task is

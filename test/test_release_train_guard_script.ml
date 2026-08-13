@@ -220,6 +220,28 @@ let test_pending_bootstrap_series_blocks_next_train_until_tagged () =
         (String_util.contains_substring stderr
            "publish/tag v0.2.0 before widening the release train"))
 
+let test_older_base_allows_exact_published_tag_repair () =
+  with_temp_dir "release-train-repair" (fun dir ->
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+      commit_version ~dir ~version:"0.21.2" ~message:"stale package version";
+      git_ok ~cwd:dir [ "tag"; "v0.22.0" ];
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"repair-version-truth" ~version:"0.22.0"
+           ~message:"repair package version");
+      let code, stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "repair-version-truth" |]
+      in
+      if code <> 0 then
+        failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "allows exact published tag repair" true
+        (String_util.contains_substring stdout
+           "Release train guard OK (repair): base=0.21.2 head=0.22.0 latest_tag_ref=v0.22.0 latest_tag_version=0.22.0"))
+
 let () =
   run "release_train_guard_script"
     [
@@ -237,5 +259,7 @@ let () =
             test_pending_bootstrap_series_warns_without_blocking_same_version;
           test_case "pending bootstrap series blocks next train" `Quick
             test_pending_bootstrap_series_blocks_next_train_until_tagged;
+          test_case "older base allows exact published tag repair" `Quick
+            test_older_base_allows_exact_published_tag_repair;
         ] );
     ]

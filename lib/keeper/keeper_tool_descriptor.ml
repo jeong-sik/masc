@@ -935,6 +935,27 @@ let surface_post_schema =
         "Bound Discord or Slack channel id. Required only when more than one \
          channel is bound for the selected surface; must be one of those \
          bindings."
+    ; property
+        "thread_ts"
+        "string"
+        "Slack timestamp of an existing thread's root message (from \
+         keeper_surface_read). Posts this message as a reply inside that \
+         thread. Slack surface only; when both this and a continuation \
+         thread exist, this value wins."
+    ; ( "blocks"
+      , `Assoc
+          [ "type", `String "array"
+          ; "items", `Assoc [ "type", `String "object" ]
+          ; "maxItems", `Int Keeper_surface_post.max_rich_blocks
+          ; ( "description"
+            , `String
+                "Slack Block Kit blocks for chat.postMessage (at most 50, \
+                 each a block object with a \"type\" member). Slack surface \
+                 only. content stays the notification fallback text; when \
+                 omitted, content renders as one markdown block. Rendering \
+                 mentions inside custom blocks is the author's \
+                 responsibility; mention_user_ids are still roster-validated." )
+          ] )
     ; ( "mention_user_ids"
       , `Assoc
           [ "type", `String "array"

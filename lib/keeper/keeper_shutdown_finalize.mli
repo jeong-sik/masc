@@ -39,29 +39,17 @@ val run :
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, error) result
 
-(** [admission_already_released_by_removal ~config operation error] holds when
-    [error] says the Keeper owner is absent from the registry and the keeper's
-    metadata is gone from the store: the keeper was removed outright, so the
-    admission fence this operation wants to release no longer exists — the
-    removal itself achieved the release. Logs one info line when true. A
-    leftover meta without its owner keeps the error, mirroring the
-    [remove_meta_file] cross-check. *)
+(** [admission_already_released_by_removal ~config operation error] holds only
+    for a [Remove_meta] operation when [error] says the Keeper owner is absent
+    from the registry and the keeper's metadata is gone from the store. In
+    that state the owner-local fence disappeared with the removed Keeper. The
+    caller remains responsible for releasing the exact process-local intake
+    fence after any pending completion receipt is durably settled. Logs one
+    info line when true. Retain-meta intents and leftover metadata keep the
+    error. *)
 val admission_already_released_by_removal :
      config:Workspace.config
   -> Keeper_shutdown_types.t
-  -> Keeper_owner_registry.command_error
-  -> bool
-
-(** Same judgement stated over the identity alone, for the boot restore pass:
-    it reaches this condition holding only a keeper name and an operation id
-    (a corrupt owner fence carries no operation record). Both the restore pass
-    and the recovery pass must ask it — settling only the latter leaves boot
-    recovery aborting on a keeper removed between [complete_cleanup] and its
-    completion receipt. *)
-val admission_already_released_by_removal_for :
-     config:Workspace.config
-  -> keeper_name:string
-  -> operation_id:Keeper_shutdown_types.Operation_id.t
   -> Keeper_owner_registry.command_error
   -> bool
 

@@ -46,6 +46,8 @@ let with_workspace f =
          ~finally:(fun () ->
            Keeper_shutdown_finalize.For_testing
            .reset_remove_pending_confirms_by_target ();
+           Keeper_shutdown_finalize.For_testing.reset_completion_handler ();
+           Keeper_shutdown_intake_fence.For_testing.reset ();
            Fs_compat.clear_fs ())
          (fun () ->
             let config = Workspace.default_config base in
@@ -151,6 +153,36 @@ let check_settled label ~config operation =
   | Error detail -> failf "%s: recovery still fails: %s" label detail
 ;;
 
+let check_intake_fenced label ~config operation =
+  check
+    bool
+    (label ^ ": exact intake fence remains installed")
+    true
+    (match
+       Keeper_shutdown_intake_fence.shutdown_operation_id
+         ~base_path:config.Workspace.base_path
+         ~keeper_name:operation.keeper_name
+     with
+     | Some existing -> Operation_id.equal existing operation.operation_id
+     | None -> false)
+;;
+
+let check_create_meta_rejected label ~config operation =
+  match
+    Keeper_owner_registry.create_meta
+      ~base_path:config.Workspace.base_path
+      (fixture_meta_exn operation.keeper_name)
+  with
+  | Ok _ -> failf "%s: same-name Keeper was recreated through a shutdown fence" label
+  | Error _ ->
+    check
+      int
+      (label ^ ": rejected creation did not install an empty Owner")
+      0
+      (Keeper_owner_registry.For_testing.installed_owner_count
+         ~base_path:config.base_path)
+;;
+
 (* A finalized operation for a keeper whose owner and metadata are both gone
    — the [full-cycle-probe] shape: finalization already removed the meta and
    session, the keeper deletion took the owner, and only the admission
@@ -170,9 +202,10 @@ let test_finalized_operation_settles_when_keeper_removed () =
     check_settled "finalized" ~config operation)
 ;;
 
-(* A superseded operation for the same removed keeper settles at the
-   shutdown transition instead: no fence exists to transition away from. *)
-let test_superseded_operation_settles_when_keeper_removed () =
+(* A retain-meta supersession cannot use owner absence as removal evidence.
+   Its durable contract says metadata remains, so losing both owner and meta
+   is an inconsistency that recovery must surface. *)
+let test_retain_meta_supersession_does_not_fast_path () =
   with_workspace (fun ~config ->
     let operation =
       make_operation
@@ -182,7 +215,14 @@ let test_superseded_operation_settles_when_keeper_removed () =
           { reason = Operator_stop_retain_meta; remove_session = false }
     in
     persist_exn ~config operation;
-    check_settled "superseded" ~config operation)
+    match recover_fence ~config operation with
+    | Ok _ -> fail "retain-meta supersession was mistaken for a removed Keeper"
+    | Error detail ->
+      check
+        bool
+        "retain-meta inconsistency preserves Owner_not_found"
+        true
+        (String_util.contains_substring detail "Keeper owner not found"))
 ;;
 
 (* Metadata that outlived its owner is an inconsistent state, not a removal:
@@ -237,6 +277,35 @@ let test_predicate_rejects_other_lookup_errors () =
             Keeper_owner_registry.Inventory_stopping)))
 ;;
 
+(* Owner absence plus missing metadata is only terminal removal evidence when
+   the operation itself promised [Remove_meta]. Retain-meta operations must
+   keep surfacing the inconsistency. *)
+let test_predicate_rejects_retain_meta_intents () =
+  with_workspace (fun ~config ->
+    let owner_not_found name =
+      Keeper_owner_registry.Command_lookup_failed
+        (Keeper_owner_registry.Owner_not_found name)
+    in
+    let check_reason label reason =
+      let operation =
+        make_operation
+          ~keeper_name:label
+          ~phase:(Blocked { stage = Meta_remove; detail = "fixture" })
+          ~cleanup_intent:{ reason; remove_session = false }
+      in
+      check
+        bool
+        (label ^ ": retain-meta intent is not removal evidence")
+        false
+        (Keeper_shutdown_finalize.admission_already_released_by_removal
+           ~config
+           operation
+           (owner_not_found label))
+    in
+    check_reason "ownerless-retain-operator" Operator_stop_retain_meta;
+    check_reason "ownerless-retain-tombstone" Dead_tombstone_cleanup)
+;;
+
 (* The cases above enter through [recover_operation_with_corrupt_owner_fence].
    Boot does not start there: [recover_at_boot] runs [restore_inventory_admission]
    first, and only operations that still want a fence go through it. Every
@@ -249,27 +318,77 @@ let test_predicate_rejects_other_lookup_errors () =
    phase [Finalized { completion = Completion_pending _ }]. Boot must settle it
    rather than abort, or the crash window this suite exists to close stays open
    one gate earlier. *)
+let test_boot_recovery_keeps_blocked_ownerless_cleanup_fenced () =
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation
+        ~keeper_name:"ownerless-blocked-cleanup"
+        ~phase:
+          (Blocked
+             { stage = Session_remove
+             ; detail = "remove_session_dir failed after remove_meta_file"
+             })
+        ~cleanup_intent:
+          { reason = Operator_stop_remove_meta; remove_session = true }
+    in
+    persist_exn ~config operation;
+    (match Keeper_shutdown_runtime.recover_at_boot ~config with
+     | [ Ok recovered ] ->
+       check
+         bool
+         "blocked cleanup remains blocked"
+         true
+         (match recovered.phase with
+          | Blocked _ -> true
+          | _ -> false)
+     | [ Error detail ] -> failf "blocked cleanup recovery failed: %s" detail
+     | outcomes -> failf "unexpected blocked cleanup outcome count: %d" (List.length outcomes));
+    check_intake_fenced "blocked cleanup" ~config operation;
+    check_create_meta_rejected "blocked cleanup" ~config operation)
+;;
+
+let pending_completion_operation name =
+  let evidence = finalized_after_removal_evidence name in
+  make_operation
+    ~keeper_name:name
+    ~phase:
+      (Finalized
+         { evidence with completion = Completion_pending Dashboard_keeper_purged })
+    ~cleanup_intent:
+      { reason = Dashboard_keeper_purge { requested_name = name; agent_name = name }
+      ; remove_session = true
+      }
+;;
+
+let test_boot_recovery_keeps_failed_pending_completion_fenced () =
+  with_workspace (fun ~config ->
+    let operation = pending_completion_operation "ownerless-pending-failed" in
+    Keeper_shutdown_finalize.register_completion_handler
+      (fun _config _operation _action -> Error "completion unavailable");
+    persist_exn ~config operation;
+    (match Keeper_shutdown_runtime.recover_at_boot ~config with
+     | [ Error detail ] ->
+       check
+         bool
+         "pending completion failure is reported"
+         true
+         (String_util.contains_substring detail "completion unavailable")
+     | [ Ok _ ] -> fail "failed pending completion was reported as recovered"
+     | outcomes ->
+       failf "unexpected pending completion outcome count: %d" (List.length outcomes));
+    check_intake_fenced "failed pending completion" ~config operation;
+    check_create_meta_rejected "failed pending completion" ~config operation)
+;;
+
 let test_boot_recovery_settles_pending_completion_after_removal () =
   with_workspace (fun ~config ->
     let name = "ownerless-pending-completion" in
-    let evidence = finalized_after_removal_evidence name in
     (* [Completion_pending Dashboard_keeper_purged] is only a valid record next
        to a [Dashboard_keeper_purge] intent — the store rejects any other
        pairing (Finalized_completion_mismatch). That pairing is also exactly
        the reported scenario: a dashboard purge that crashed before its
        receipt. *)
-    let operation =
-      make_operation
-        ~keeper_name:name
-        ~phase:
-          (Finalized
-             { evidence with completion = Completion_pending Dashboard_keeper_purged })
-        ~cleanup_intent:
-          { reason =
-              Dashboard_keeper_purge { requested_name = name; agent_name = name }
-          ; remove_session = true
-          }
-    in
+    let operation = pending_completion_operation name in
     check
       bool
       "fixture must be one the restore pass actually fences"
@@ -301,7 +420,15 @@ let test_boot_recovery_settles_pending_completion_after_removal () =
         [ name, "dashboard_keeper_purged" ]
         (List.rev_map
            (fun (keeper, action) -> keeper, completion_action_to_string action)
-           !delivered))
+           !delivered);
+      check
+        bool
+        "delivered receipt releases the exact intake fence"
+        true
+        (Option.is_none
+           (Keeper_shutdown_intake_fence.shutdown_operation_id
+              ~base_path:config.base_path
+              ~keeper_name:name)))
 ;;
 
 let () =
@@ -313,13 +440,21 @@ let () =
             `Quick
             test_finalized_operation_settles_when_keeper_removed
         ; Alcotest.test_case
+            "blocked ownerless cleanup keeps admission fenced"
+            `Quick
+            test_boot_recovery_keeps_blocked_ownerless_cleanup_fenced
+        ; Alcotest.test_case
+            "failed pending completion keeps admission fenced"
+            `Quick
+            test_boot_recovery_keeps_failed_pending_completion_fenced
+        ; Alcotest.test_case
             "boot recovery settles a pending completion after removal"
             `Quick
             test_boot_recovery_settles_pending_completion_after_removal
         ; Alcotest.test_case
-            "superseded operation settles when keeper removed"
+            "retain-meta supersession does not fast-path removal"
             `Quick
-            test_superseded_operation_settles_when_keeper_removed
+            test_retain_meta_supersession_does_not_fast_path
         ; Alcotest.test_case
             "meta without owner still fails"
             `Quick
@@ -328,6 +463,10 @@ let () =
             "predicate rejects other lookup errors"
             `Quick
             test_predicate_rejects_other_lookup_errors
+        ; Alcotest.test_case
+            "predicate rejects retain-meta intents"
+            `Quick
+            test_predicate_rejects_retain_meta_intents
         ] )
     ]
 ;;

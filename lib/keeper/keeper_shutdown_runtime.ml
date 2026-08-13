@@ -67,19 +67,34 @@ let restore_admission ~config ~keeper_name ~operation_id =
          keeper_name
          (Operation_id.to_string operation_id)
          (Operation_id.to_string existing))
-  | Error error ->
-    (* A keeper removed between [complete_cleanup] and its completion receipt
-       leaves a fenced operation whose owner is gone. The restore pass runs
-       before recovery, so without this the boot aborts here and the recovery
-       pass never gets to settle it -- the same crash window, one gate earlier. *)
-    if
-      Keeper_shutdown_finalize.admission_already_released_by_removal_for
-        ~config
-        ~keeper_name
-        ~operation_id
-        error
-    then Ok ()
-    else Error (Keeper_owner_registry.command_error_to_string error)
+  | Error
+      (Keeper_owner_registry.Command_lookup_failed
+         (Keeper_owner_registry.Owner_not_found _)) ->
+    (* [complete_cleanup] can remove both metadata and its Owner before a
+       blocked cleanup or pending completion is settled. The Owner-local
+       fence is gone in that state, but the independent intake fence must
+       remain until recovery reaches a durable non-fenced phase. *)
+    (match
+       Keeper_shutdown_intake_fence.restore_shutdown
+         ~base_path:config.Workspace.base_path
+         ~keeper_name
+         ~operation_id
+     with
+     | Keeper_shutdown_intake_fence.Restored
+     | Keeper_shutdown_intake_fence.Already_restored ->
+       Log.Keeper.info
+         "restored ownerless shutdown intake fence: keeper=%s operation=%s"
+         keeper_name
+         (Operation_id.to_string operation_id);
+       Ok ()
+     | Keeper_shutdown_intake_fence.Restore_conflict existing ->
+       Error
+         (Printf.sprintf
+            "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
+            keeper_name
+            (Operation_id.to_string operation_id)
+            (Operation_id.to_string existing)))
+  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let restore_inventory_admission ~config inventory =

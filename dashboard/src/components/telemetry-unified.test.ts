@@ -14,6 +14,7 @@ const baseTelemetry: TelemetryResponse = {
   source: 'telemetry_unified',
   query: { source: 'tool_metric', n: 100 },
   count: 1,
+  offset: 0,
   entries: [
     {
       source: 'tool_metric',

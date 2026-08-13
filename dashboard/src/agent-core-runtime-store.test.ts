@@ -392,6 +392,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 0,
       total_matching_entries: 1200,
       truncated: true,
       entries: [
@@ -430,6 +431,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 0,
       total_matching_entries: 1200,
       truncated: true,
       entries: [
@@ -484,6 +486,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 0,
       total_matching_entries: 3,
       has_more: true,
       entries: [entry(1)],
@@ -501,6 +504,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 1,
       total_matching_entries: 3,
       has_more: true,
       entries: [entry(2)],
@@ -544,6 +548,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 2,
+      offset: 0,
       total_matching_entries: 1200,
       truncated: true,
       entries: [entry(1), entry(2)],
@@ -556,6 +561,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 2,
+      offset: 2,
       total_matching_entries: 1200,
       truncated: true,
       entries: [entry(3), entry(4)],
@@ -573,6 +579,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 0,
       total_matching_entries: 2,
       has_more: true,
       entries: [{
@@ -590,6 +597,7 @@ describe('agent-core-runtime-store', () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 1,
       total_matching_entries: 2,
       has_more: false,
       entries: [{
@@ -643,6 +651,8 @@ describe('agent-core-runtime-store', () => {
     })
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(5499)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(true)
+    expect(agentCoreHealthSummary.value.hasMore).toBe(false)
     expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
   })
 })

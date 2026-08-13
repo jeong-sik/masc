@@ -1492,6 +1492,7 @@ describe('fetchTelemetrySummary', () => {
       retention: { window_days: 7 },
       query: { source: 'tool_metric', n: 100 },
       count: 1,
+      offset: 0,
       total_matching_entries: 2,
       truncated: true,
       entries: [
@@ -1518,6 +1519,7 @@ describe('fetchTelemetrySummary', () => {
     expect(result.source).toBe('telemetry_unified')
     expect(result.retention).toMatchObject({ window_days: 7 })
     expect(result.query).toMatchObject({ source: 'tool_metric', n: 100 })
+    expect(result.offset).toBe(0)
     expect(result.total_matching_entries).toBe(2)
     expect(result.truncated).toBe(true)
   })

@@ -79,6 +79,8 @@ version_gt() {
 
 head_package_version="$(version_from_ref "$head_ref")"
 [[ -n "$head_package_version" ]] || fail "missing package version in $head_ref:dune-project"
+[[ "$head_package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || fail "head ref $head_ref uses non-canonical package version $head_package_version; expected X.Y.Z"
 head_major="$(major_from_version "$head_package_version")"
 
 if [[ -z "$base_ref" ]]; then
@@ -97,10 +99,15 @@ fi
 
 base_package_version="$(version_from_ref "$base_ref")"
 [[ -n "$base_package_version" ]] || fail "missing package version in $base_ref:dune-project"
+[[ "$base_package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || fail "base ref $base_ref uses non-canonical package version $base_package_version; expected X.Y.Z"
 base_major="$(major_from_version "$base_package_version")"
 latest_tag="$(latest_tag_for_major "$base_major")"
 
 if [[ "$head_major" != "$base_major" ]]; then
+  if [[ "$base_major" == "0" || "$head_major" != "0" ]]; then
+    fail "head ref $head_ref crosses from active package major $base_major to unsupported major $head_major; only a legacy-to-0.x reset is allowed"
+  fi
   head_latest_tag="$(latest_tag_for_major "$head_major")"
   if [[ -n "$head_latest_tag" ]]; then
     head_latest_tag_version="$(package_version_from_tag "$head_latest_tag")"

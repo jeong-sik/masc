@@ -284,6 +284,85 @@ let test_prerelease_suffix_does_not_authorize_final_repair () =
         (String_util.contains_substring stderr
            "with no published v0.* tag"))
 
+let test_published_base_rejects_prerelease_head_version () =
+  with_temp_dir "release-train-prerelease-head" (fun dir ->
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+      commit_version ~dir ~version:"0.22.0" ~message:"published package version";
+      git_ok ~cwd:dir [ "tag"; "v0.22.0" ];
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"prerelease-head" ~version:"0.22.0-rc1"
+           ~message:"prerelease package version");
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "prerelease-head" |]
+      in
+      check bool "command fails" true (code <> 0);
+      check bool "requires canonical package version" true
+        (String_util.contains_substring stderr
+           "uses non-canonical package version 0.22.0-rc1; expected X.Y.Z"))
+
+let test_published_base_rejects_numeric_suffix_head_version () =
+  with_temp_dir "release-train-numeric-head" (fun dir ->
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+      commit_version ~dir ~version:"0.22.0" ~message:"published package version";
+      git_ok ~cwd:dir [ "tag"; "v0.22.0" ];
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"numeric-head" ~version:"0.22.0-505"
+           ~message:"numeric package suffix");
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "numeric-head" |]
+      in
+      check bool "command fails" true (code <> 0);
+      check bool "keeps train suffixes out of package truth" true
+        (String_util.contains_substring stderr
+           "uses non-canonical package version 0.22.0-505; expected X.Y.Z"))
+
+let test_active_zero_line_rejects_legacy_major_head () =
+  with_temp_dir "release-train-legacy-reentry" (fun dir ->
+      init_repo_with_release_tags dir;
+      let script = install_script_under_test dir in
+      git_ok ~cwd:dir [ "checkout"; "seed/zero-series" ];
+      ignore
+        (commit_on_branch ~dir ~branch:"legacy-reentry" ~version:"2.263.0"
+           ~message:"reenter legacy major");
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "seed/zero-series"; "--head"; "legacy-reentry" |]
+      in
+      check bool "command fails" true (code <> 0);
+      check bool "keeps active zero line" true
+        (String_util.contains_substring stderr
+           "crosses from active package major 0 to unsupported major 2"))
+
+let test_tag_selection_skips_higher_prerelease_for_latest_final () =
+  with_temp_dir "release-train-tag-selection" (fun dir ->
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+      commit_version ~dir ~version:"0.21.2" ~message:"published package version";
+      git_ok ~cwd:dir [ "tag"; "v0.21.2" ];
+      git_ok ~cwd:dir [ "tag"; "v0.22.0-rc1" ];
+      let script = install_script_under_test dir in
+      let code, stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "main" |]
+      in
+      if code <> 0 then
+        failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
+      check bool "uses latest accepted final tag" true
+        (String_util.contains_substring stdout
+           "latest_tag_ref=v0.21.2 latest_tag_version=0.21.2"))
+
 let () =
   run "release_train_guard_script"
     [
@@ -307,5 +386,13 @@ let () =
             test_published_base_rejects_same_major_downgrade;
           test_case "prerelease suffix does not authorize final repair" `Quick
             test_prerelease_suffix_does_not_authorize_final_repair;
+          test_case "published base rejects prerelease package head" `Quick
+            test_published_base_rejects_prerelease_head_version;
+          test_case "published base rejects numeric suffix package head" `Quick
+            test_published_base_rejects_numeric_suffix_head_version;
+          test_case "active zero line rejects legacy major head" `Quick
+            test_active_zero_line_rejects_legacy_major_head;
+          test_case "tag selection skips higher prerelease" `Quick
+            test_tag_selection_skips_higher_prerelease_for_latest_final;
         ] );
     ]

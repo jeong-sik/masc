@@ -82,6 +82,11 @@
     <p><strong>기능 기반은 넓지만 제품 목표는 아직 완료가 아니다.</strong> 현재 라이브 증거는 자율 턴·24h span·tool turn·board reaction·scheduled cycle 5축에 집중되어 있다. Task/Goal/Fusion/Judge/Connector/Memory 관계 회상/멀티모달/Failover/Async·Batch의 동일 canary 기반 end-to-end 증거와 브라우저 캡처가 빠져 있다.</p>
   </article>
 
+  <article class="card notice">
+    <h3>Board 브라우저 검증에서 드러난 실제 결함</h3>
+    <p><code>board-interaction-matrix.mjs</code>는 첫 post에서 20초 timeout으로 멈췄고 screenshot은 생성되지 않았다. timeout을 늘리지 않고 고유 canary로 다시 계측하자 durable post는 저장됐지만 HTTP 201이 <strong>46.836초</strong> 뒤에 왔다. 직후 Board read는 92.007초, exact-id cleanup은 27.081초였다. 즉 Board 기능을 통과로 올릴 근거가 아니라, durable mutation receipt가 후속 Keeper·surface effect에 붙잡히는 결함의 E4 증거다. 원본은 <a href="../evidence/keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json">Board latency evidence</a>에 보존했다.</p>
+  </article>
+
   <h2>1. 완료 판정 모델</h2>
   <div class="flow" aria-label="evidence progression">
     <span class="node">E0 사용자 시나리오</span><span class="arrow">→</span>
@@ -109,7 +114,7 @@
       <thead><tr><th>도메인</th><th>기능</th><th>현재</th><th>Keeper / Runtime 범위</th><th>10T · 1h · 2h · 4h · 24h</th><th>Source / 설정</th><th>실증</th><th>빠진 일</th><th>필수 축</th></tr></thead>
       <tbody>
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Task</td><td><span class="badge"></span></td><td>Fleet 범위 미측정</td><td class="axis">10T — · 1/2/4/24h —</td><td><code>workspace_task_*</code>, verification transition</td><td>typed store와 feature tests.</td><td>create→claim→work→verification→terminal을 같은 task_id로 live/browser 대조.</td><td>E1·E2·E4·E5</td></tr>
-        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live"><td>Coordination</td><td class="feature">Board</td><td><span class="badge"></span></td><td>13 Keeper 중 8에 reactive counter</td><td class="axis">구간 미측정</td><td><code>board_tool_registry</code>, projection</td><td>8/13 board-reactive snapshot.</td><td>post→mention→reaction을 같은 event_id로 Browser까지 대조.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live" data-blocked="true"><td>Coordination</td><td class="feature">Board</td><td><span class="badge"></span></td><td>13 Keeper 중 8에 reactive counter</td><td class="axis">구간 미측정</td><td><code>board_tool_registry</code>, post-commit hooks</td><td>고유 post 저장·삭제 확인; 201 receipt 46.836초. Browser 첫 단계 timeout.</td><td>discoverable producer fan-out 수리 exact-head CI→live 재배포 후 동일 matrix 전부 재실행.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Comment</td><td><span class="badge"></span></td><td>Keeper별 범위 미측정</td><td class="axis">미측정</td><td>board comment tools/read model</td><td>source/tests; live comment receipt 미동결.</td><td>mention→comment→consumer cursor를 동일 ID로 저장.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Karma / Vote</td><td><span class="badge"></span></td><td>Keeper별 범위 미측정</td><td class="axis">미측정</td><td>karma ledger, vote projection</td><td>source/tests; live vote receipt 미동결.</td><td>다른 Keeper 글 vote→ledger→UI를 같은 event_id로 대조.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Goal</td><td><span class="badge"></span></td><td>Fleet 범위 미측정</td><td class="axis">미측정</td><td>goal index/reconciliation, Dashboard tree</td><td>source와 UI tests.</td><td>Goal→Task→progress→completion reconciliation canary.</td><td>E1·E2·E4·E5</td></tr>
@@ -164,6 +169,7 @@
     <article class="card lane"><div class="step"><strong>A →</strong><h3>#28470 / #28488 재검증</h3><p>둘 다 새 main <code>f473c0e8bf</code> 위로 재배치했다. 새 head는 각각 <code>2da9e2ad7a</code>, <code>7b1b921c53</code>이며 CI가 시작됐다.</p></div></article>
     <article class="card lane"><div class="step"><strong>Track B</strong><h3>Discord 출력 경계</h3><p>#28574는 exact-head 3개 gate 성공 후 <code>0d2609fa9b</code>로 병합됐다. #28596은 새 head <code>e9a300ed0c</code>의 CI와 live 침묵·명시 post·무발화 시나리오가 남았다.</p></div></article>
     <article class="card lane block"><div class="step"><strong>Track C</strong><h3>Evidence campaign preflight</h3><p>카탈로그는 16 mission/29 assertion 검증을 통과했다. 다만 live는 <code>binary_commit</code>이 없고 current source에 존재하는 operator tool 5개를 노출하지 않아 mutation 전 preflight에서 멈췄다. exact SHA로 재빌드·재기동한 뒤 다시 시작한다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>C0</strong><h3>Board producer 경계 · #28620</h3><p>실 browser matrix는 첫 post에서 멈췄다. 고유 canary는 저장 성공과 46.836초 receipt 지연을 분리해 증명했고 fixture는 exact id로 삭제했다. timeout 상향이나 전역 hard gate 없이, 등록·초기화된 lane의 discoverable fan-out만 durable owner cursor로 돌리고 zero-cursor lane은 기존 candidate 기록을 보존한다. 첫 CI가 독립 test stanza의 <code>modules</code> 누락을 잡아 배선을 고쳤고, Draft head <code>2bc6849b58</code>는 Build and Test·CI Regression Gate·Keeper Real-World Gate·CI Gate를 통과했다. 배포 후 browser 재검증은 아직이며, Keeper가 registry에 등록되기 전 post는 기존부터 남은 별도 lifecycle gap이다.</p></div></article>
     <article class="card lane"><div class="step"><strong>C1</strong><h3>Memory 관계 회상</h3><p>화자·대상·관계·행동·시간·근거를 N→N+3과 session restart에서 확인하며 추측된 관계는 저장하지 않는다.</p></div></article>
     <article class="card lane"><div class="step"><strong>C2</strong><h3>Scenario campaigns</h3><p>협업 코드, 연구/논문, 연작 글, 반론·변론을 Goal/Task/Board/Fusion/Verification/Memory 조합으로 실행하고 10-turn과 장기 구간을 수집한다.</p></div></article>
   </div>
@@ -195,6 +201,7 @@
     <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — 이전 snapshot. live 수치 변화와 재기동 이후 구간을 비교할 때만 사용한다.</li>
     <li><a href="../evidence/keeper-multi-collaboration-preflight-2026-08-13T133813Z.json"><code>keeper-multi-collaboration-preflight-2026-08-13T133813Z.json</code></a> — mutation 없이 검증한 16 mission catalog와 live preflight blocker.</li>
     <li><a href="../evidence/keeper-pr-transition-2026-08-13T134218Z.json"><code>keeper-pr-transition-2026-08-13T134218Z.json</code></a> — #28574/#28597 병합 및 #28470/#28488 재배치 exact head.</li>
+    <li><a href="../evidence/keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json"><code>keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json</code></a> — browser 20초 실패, 46.836초 delayed 201, 92.007초 read, exact-id cleanup을 한 canary로 동결.</li>
     <li><code>/health?full=1</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — live 원본 route. 동결 JSON 이후의 현재값은 새 캡처 없이는 주장하지 않는다.</li>
     <li>#28597 exact head <code>abe0e09c2b4cd43398f14533858b24913f06371b</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704177944">31704177944</a>.</li>
     <li>#28574 exact head <code>c9df777b836477c9a60ecf89fe9e3b3e70e4a770</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704238533">31704238533</a>.</li>

@@ -441,6 +441,7 @@ export function applyKeeperOperationTurnEvent(
     && matched.delivery !== 'queued'
     && matched.delivery !== 'sending'
     && matched.delivery !== 'streaming'
+    && matched.delivery !== 'interrupted'
   ) {
     return null
   }

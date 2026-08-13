@@ -53,6 +53,7 @@ import {
   normalizeStatusDetail,
   removeThreadEntries,
   liveSendOwnsRequest,
+  markLiveSendRequestAccepted,
   releaseLiveSendRequest,
   setActiveStream,
   setRecordValue,
@@ -982,6 +983,7 @@ export async function sendKeeperThreadMessage(
             throw new Error('Keeper operation acceptance identity mismatch')
           }
           requestId = acceptedOperationId
+          markLiveSendRequestAccepted(acceptedOperationId)
           stampPlaceholderRequestId(
             keeperName,
             [localId, assistantId],

@@ -63,11 +63,6 @@ val resolve_runtime_providers_for_turn :
 (** {!resolve_runtime_providers} with the runtime's inference seed applied, i.e.
     the config a keeper turn would dispatch with.
 
-    Resolving without the seed is not merely a lost hint. An absent
-    [enable_thinking] makes {!Llm_provider.Backend_ollama} omit the wire [think]
-    field entirely, handing the decision to the model's chat template — whose
-    default is thinking-on for reasoning models. [ollama.agentworld-35b-a3b]
-    declares [thinking-support = false]; probed without the seed it spent ~900
-    output tokens reasoning and emitted its tool call as bare JSON, which Ollama
-    could not parse into [tool_calls], so it scored 0/12 as though it could not
-    call tools at all. It called them every time (masc#28473). *)
+    The runtime catalog owns provider-specific inference fields. Applying that
+    seed prevents a provider or model default from silently replacing the
+    operator's declared thinking and tool-call behavior. *)

@@ -219,6 +219,31 @@ describe('Keeper operation stream projection', () => {
     expect(entry?.text).toBe('')
   })
 
+  it('lets the observer resume an interrupted pre-acceptance placeholder', () => {
+    appendThreadEntry('sangsu', {
+      id: 'reply-interrupted',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: null,
+      requestId: 'kmsg-interrupted',
+      delivery: 'interrupted',
+      streamState: null,
+      details: null,
+    })
+
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-interrupted',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'observer recovered' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-interrupted')
+    expect(entry?.text).toBe('observer recovered')
+    expect(entry?.delivery).toBe('streaming')
+  })
+
   it('accepts observer events immediately after the direct owner exits', () => {
     directlyStreamingBubble()
     setActiveStream(

@@ -572,6 +572,27 @@ describe('sendKeeperThreadMessage operation stream', () => {
     expect(cancelKeeperChatOperation).toHaveBeenCalledWith('echo', acceptedOperationId)
   })
 
+  it('aborts locally without server cancel before operation acceptance', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { signal: AbortSignal },
+    ) => new Promise<{ terminal: boolean }>((_resolve, reject) => {
+      opts.signal.addEventListener('abort', () => {
+        const error = new Error('Aborted')
+        error.name = 'AbortError'
+        reject(error)
+      }, { once: true })
+    }))
+
+    const send = sendKeeperThreadMessage('echo', 'cancel before accept').catch(() => undefined)
+    await Promise.resolve()
+    await cancelActiveKeeperThreadMessage('echo')
+    await send
+
+    expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
+  })
+
   it('streams thinking, tool use, and final text after operation acceptance', async () => {
     streamKeeperMessage.mockImplementation(async (
       _name: string,

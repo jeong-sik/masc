@@ -68,6 +68,11 @@ const keeperActiveStreams = new Map<string, Map<string, KeeperActiveStream>>()
 // Module state, so it survives unmount/remount exactly like the controller
 // maps above; a full page reload resets it, leaving cold-start resume intact.
 const liveSendRequestOwners = new Map<string, string>()
+// A locally minted id is owned before the POST starts so observer broadcasts
+// cannot race the direct stream. Server-side mutation is safe only after the
+// direct stream has observed KEEPER_CHAT_OPERATION_ACCEPTED, so keep that
+// stronger fact independently.
+const acceptedLiveSendRequestIds = new Set<string>()
 
 export function _resetActiveKeeperStreamsForTests(): void {
   keeperActiveStreams.clear()
@@ -1623,13 +1628,14 @@ export function getStreamController(name: string): AbortController | undefined {
 
 export function setActiveStreamRequestId(name: string, requestId: string): void {
   claimLiveSendRequest(requestId, name)
+  markLiveSendRequestAccepted(requestId)
 }
 
 export function activeStreamRequestId(name: string): string | null {
   const keeperName = name.trim()
   if (!keeperName) return null
   for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName) return requestId
+    if (owner === keeperName && acceptedLiveSendRequestIds.has(requestId)) return requestId
   }
   return null
 }
@@ -1638,7 +1644,10 @@ export function clearActiveStreamRequestId(name: string): void {
   const keeperName = name.trim()
   if (!keeperName) return
   for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName) liveSendRequestOwners.delete(requestId)
+    if (owner === keeperName) {
+      liveSendRequestOwners.delete(requestId)
+      acceptedLiveSendRequestIds.delete(requestId)
+    }
   }
 }
 
@@ -1649,6 +1658,7 @@ export function clearActiveStreamRequestId(name: string): void {
 export function releaseActiveStreamRequestId(requestId: string): boolean {
   const id = requestId.trim()
   if (!id) return false
+  acceptedLiveSendRequestIds.delete(id)
   return liveSendRequestOwners.delete(id)
 }
 
@@ -1661,8 +1671,15 @@ export function claimLiveSendRequest(requestId: string, name: string): void {
   liveSendRequestOwners.set(id, keeperName)
 }
 
+export function markLiveSendRequestAccepted(requestId: string): void {
+  const id = requestId.trim()
+  if (liveSendRequestOwners.has(id)) acceptedLiveSendRequestIds.add(id)
+}
+
 export function releaseLiveSendRequest(requestId: string): void {
-  liveSendRequestOwners.delete(requestId.trim())
+  const id = requestId.trim()
+  liveSendRequestOwners.delete(id)
+  acceptedLiveSendRequestIds.delete(id)
 }
 
 export function liveSendOwnsRequest(requestId: string): boolean {
@@ -1671,4 +1688,5 @@ export function liveSendOwnsRequest(requestId: string): boolean {
 
 export function _resetLiveSendRequestOwnersForTests(): void {
   liveSendRequestOwners.clear()
+  acceptedLiveSendRequestIds.clear()
 }

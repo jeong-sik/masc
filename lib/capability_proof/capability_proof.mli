@@ -168,10 +168,8 @@ type failure_kind =
   | Gate_settlement_failure
   | Domain_receipt_failure
 
-type runtime_role_policy = Agentworld_runtime_librarian_only
-
 type unsupported_reason =
-  | Runtime_role_policy of runtime_role_policy
+  | Runtime_role_not_declared of proof_role
   | Protocol_not_supported of protocol
   | Capability_not_declared of capability_case
 

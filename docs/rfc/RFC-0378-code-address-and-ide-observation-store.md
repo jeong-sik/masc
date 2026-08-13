@@ -146,10 +146,21 @@ type fact =
 
 `keeper_ide_annotate`(및 향후 anchored reply)의 입력은 **IDE 가 keeper 에게 준 바로 그 어휘**다: `(canonical slug, repo-root 상대 경로, line range)`.
 
-- **repo *이름*이 아니라 slug 다.** 현행 co-view 는 `repo: masc` 처럼 이름을 보내는데, 이름은 slug 와 별개인 또 하나의 문자열 별칭이라 계약 안에 어휘 분열을 재생산한다 (원칙 10). IDE 는 이미 자기 scope 의 slug 로 질의하고 있으므로 co-view 도 slug 를 싣는다. 그러면 annotate 의 서버 측 카탈로그 홉(이름→url→slug)이 통째로 사라진다 — 왕복의 두 절반과 read path 셋이 문자 그대로 같은 key 를 쓴다.
+- **repo *이름*이 아니라 slug 다.** 현행 co-view 는 `repo: masc` 처럼 이름을 보내는데, 이름은 slug 와 별개인 또 하나의 문자열 별칭이라 계약 안에 어휘 분열을 재생산한다 (원칙 10). §5.3b 의 단일 wire key 아래에서 co-view 도 slug 를 싣고, annotate 의 서버 측 카탈로그 홉(이름→url→slug)은 통째로 사라진다 — 왕복의 두 절반과 read path 가 문자 그대로 같은 key 를 쓴다.
 - keeper 가 자기 마운트 레이아웃(`repos/<id>/…`)을 알아야 앵커를 되돌려줄 수 있는 현행 계약(#23469 의 sandbox-root 앵커링)은 삭제한다. keeper 는 받은 것을 그대로 돌려주면 된다.
 - 도구 스키마와 keeper 프롬프트가 이 계약을 서술한다 (프롬프트 변경은 원칙 22 로 허용).
 - acceptance: §2.1 owner probe 의 **정확한 재실행**이 green — 같은 (repo, path, line) 에 마커가 뜬다.
+
+### 5.3b 하나의 wire key — slug
+
+경로 어휘만 4종이 아니다. **codebase 를 지칭하는 철자도 wire 에 4종** 있다: REST scope 는 `canonical_url=<full URL>` 또는 `repo_id`, store 디렉터리는 slug, co-view 는 repo *이름*, dashboard 선택 상태는 repository id. 주소의 한 축(경로)을 통일하면서 다른 축(codebase key)의 분열을 방치하면 같은 병이 재발한다.
+
+계약: **파싱 이후의 codebase key 는 slug 하나다.**
+
+- full URL 은 귀속 시점(git remote → `canonical_url_of_remote`)에만 존재하는 raw 입력.
+- repo 표시 이름·카탈로그 repo_id 는 projection 라벨 — wire key 로 쓰지 않는다.
+- REST 질의는 `codebase=<slug>`, co-view 는 slug, annotate 는 slug, viewer 지속 상태도 slug. 전부 문자 그대로 store 디렉터리 이름과 같은 값.
+- `keeper_lane` scope 는 codebase 철자가 아니라 별개 축("이 keeper 가 만진 것")이므로 유지.
 
 ### 5.4 Scope — 추측하지 않는다
 
@@ -170,6 +181,7 @@ type fact =
 | LSP InlayHint (route-context) | 사용 증거 0 | 삭제 후보 — Open Q1 |
 | cursor_events·pr_events store/라우트/오버레이 | 마지막 기록 07-04/06-12, orphan 한정 | 라이브 여부 실측 후 삭제 — Open Q2 |
 | `selectPreferredIdeRepositoryId` 휴리스틱 | 추측의 답이 빈 파티션 | 삭제 → §5.4 |
+| wire 의 codebase 철자 혼용 (`canonical_url=<full URL>`·`repo_id` scope param, co-view repo 이름) | codebase key 4종 분열 (§5.3b) | 단일 `codebase=<slug>` 로 — C(co-view)·D(REST) 에서 교체 |
 | annotate sandbox-root 앵커링 | owner probe 2건 매장 | 계약 교체로 소멸 (§5.3) |
 | "IDE Observation Plane v2" 죽은 포인터 | repo 에 문서 부재 | 주석에서 제거 |
 

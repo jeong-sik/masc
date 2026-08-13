@@ -318,6 +318,17 @@ val terminal_latch_pause_violation : keeper_meta -> string option
 val effective_meta_result :
   base_path:string -> keeper_meta -> (keeper_meta, string) result
 
+(** The overlay alone, over defaults the caller already holds.
+
+    {!effective_meta_result} loads the profile and applies it in one step,
+    which is right for a one-shot status read. A turn that overlays more than
+    once must not re-read the profile between them, or two reads of the same
+    turn can disagree; it loads once and applies with this. *)
+val effective_meta_of_profile_defaults :
+     Keeper_types_profile.keeper_profile_defaults
+  -> keeper_meta
+  -> (keeper_meta, string) result
+
 val missing_required_sandbox_profile_error :
   keeper_name:string ->
   Keeper_types_profile.keeper_profile_defaults ->

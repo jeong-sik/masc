@@ -13,7 +13,13 @@ open Alcotest
    aliases reappeared in the split files, where this test could not see them —
    it stayed green with 5 of the 7 forbidden names alive. Globbing the prefix
    keeps the guard honest across the next split too. *)
-let dir = "lib/server"
+let source_root =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+;;
+
+let dir = Filename.concat source_root "lib/server"
 
 let files =
   Sys.readdir dir
@@ -25,12 +31,17 @@ let files =
   |> List.map (Filename.concat dir)
 ;;
 
-let renamed_identifiers =
+(* The positive name is the current semantic owner, not necessarily the first
+   post-RFC spelling.  #28167 intentionally replaced the two raw mutable refs
+   with Atomic broadcaster cells; requiring the intermediate [*_ref] names
+   made this ratchet reject that concurrency hardening while the forbidden
+   underscore aliases were still absent. *)
+let forbidden_and_current_identifiers =
   [ "_shell_warmed", "shell_warmed"
   ; "_shell_warming", "shell_warming"
   ; "_last_good_shell", "last_good_shell"
-  ; "_operator_snapshot_broadcast_ref", "operator_snapshot_broadcast_ref"
-  ; "_operator_digest_broadcast_ref", "operator_digest_broadcast_ref"
+  ; "_operator_snapshot_broadcast_ref", "operator_snapshot_broadcaster"
+  ; "_operator_digest_broadcast_ref", "operator_digest_broadcaster"
   ; "_operator_digest_cache", "operator_digest_cache"
   ; "_mission_cache", "mission_cache"
   ]
@@ -49,7 +60,7 @@ let test_old_underscore_names_gone () =
           in
           check int msg 0 n)
         files)
-    renamed_identifiers
+    forbidden_and_current_identifiers
 ;;
 
 let test_new_names_present () =
@@ -63,7 +74,7 @@ let test_new_names_present () =
       in
       let msg = Printf.sprintf "renamed binding %s must exist" new_name in
       if n < 1 then failf "%s — count=%d" msg n)
-    renamed_identifiers
+    forbidden_and_current_identifiers
 ;;
 
 let () =

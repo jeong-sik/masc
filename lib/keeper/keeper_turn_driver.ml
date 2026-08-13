@@ -874,6 +874,7 @@ let run_named
             ~raw_trace
             ~on_event
             ~config
+            ()
         in
         let codex_attempt =
           match provider_config_transform, agent_core_checkpoint with
@@ -953,6 +954,7 @@ let run_named
             ~raw_trace
             ~on_event
             ~config
+            ()
         in
         let run_antigravity_with_history () =
           run_antigravity ~initial_messages ()
@@ -1030,6 +1032,7 @@ let run_named
             ~raw_trace
             ~on_event
             ~config
+            ()
         in
         let claude_attempt =
           match provider_config_transform, agent_core_checkpoint with

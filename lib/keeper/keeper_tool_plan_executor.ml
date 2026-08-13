@@ -239,7 +239,7 @@ let execute_one ~plan ~run_id ~outputs ~dispatch scheduled =
 ;;
 
 let execute ~plan ~run_id ~dispatch () =
-  let node_effect_disposition result =
+  let node_effect_disposition (result : node_result) =
     match result.result with
     | Tool_result.Deferred _ -> Tool_result.Proven_pre_effect
     | Tool_result.Failed _ ->

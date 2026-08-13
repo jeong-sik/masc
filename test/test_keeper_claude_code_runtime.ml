@@ -1122,7 +1122,8 @@ let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
                     ~event_bus:None
                     ~raw_trace:None
                     ~on_event:None
-                    ~config)))))
+                    ~config
+                    ())))))
 ;;
 
 let check_pre_dispatch_attempt label attempt =

@@ -54,7 +54,8 @@ val get_branches :
   repository:repository -> (string list, string) result
 (** [get_branches ~repository] returns all local and remote branch names. *)
 
-val get_origin_url : ?timeout_sec:float -> local_path:string -> (string, string) result
+val get_origin_url :
+  ?timeout_sec:float -> local_path:string -> unit -> (string, string) result
 (** [get_origin_url ~local_path] returns the configured [origin] remote URL
     for the repository at [local_path]. *)
 
@@ -70,7 +71,7 @@ val origin_head_branch : local_path:string -> (string, string) result
     surface [Error _] to the operator instead of inventing a default branch. *)
 
 val current_branch :
-  ?timeout_sec:float -> repository:repository -> (string, string) result
+  ?timeout_sec:float -> repository:repository -> unit -> (string, string) result
 (** [current_branch ~repository] returns the short name of the checked-out
     branch via [git rev-parse --abbrev-ref HEAD]. A detached HEAD returns
     ["HEAD"]. Read-only ([GIT_OPTIONAL_LOCKS=0]) with a bounded timeout. *)
@@ -79,6 +80,7 @@ val ahead_behind :
   ?timeout_sec:float ->
   repository:repository ->
   target_ref:string ->
+  unit ->
   (int * int, string) result
 (** [ahead_behind ~repository ~target_ref] returns [(behind, ahead)]:
     [behind] counts commits reachable from [target_ref] but not from HEAD,
@@ -92,7 +94,7 @@ val get_recent_commits :
     [limit] commits on [branch] as ["HASH subject"] lines. *)
 
 val status_summary :
-  ?timeout_sec:float -> repository:repository -> (status_summary, string) result
+  ?timeout_sec:float -> repository:repository -> unit -> (status_summary, string) result
 (** [status_summary ~repository] returns a read-only dirty-tree summary using
     [git --no-optional-locks status --porcelain=v1] with
     [GIT_OPTIONAL_LOCKS=0]. It returns [Error _] instead of inventing a clean

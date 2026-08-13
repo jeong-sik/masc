@@ -49,11 +49,14 @@ module Inspection_budget = struct
     Mtime.Span.to_float_ns (Mtime.span budget.started_at (Mtime_clock.now ())) /. 1e9
   ;;
 
-  let remaining_timeout budget =
+  (* [open Repo_manager_types] above brings [repository_status]'s [Error of
+     string] into scope, shadowing the result constructor. This budget answers
+     with a result, so name the type and qualify the constructors. *)
+  let remaining_timeout budget : (float, string) Stdlib.result =
     let remaining = budget.timeout_sec -. elapsed_sec budget in
     if Float.compare remaining 0.0 <= 0
-    then Error "git inspection request budget exhausted"
-    else Ok (min inspection_timeout_sec remaining)
+    then Stdlib.Error "git inspection request budget exhausted"
+    else Stdlib.Ok (min inspection_timeout_sec remaining)
   ;;
 
   let is_exhausted budget = Result.is_error (remaining_timeout budget)
@@ -225,7 +228,7 @@ let get_branches ~repository =
 
    [read_only_git_env] adds GIT_OPTIONAL_LOCKS=0 so an inspection never takes
    a lock that a keeper's own git command then waits on. *)
-let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path =
+let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path () =
   match
     run_git
       ~cwd:local_path
@@ -288,7 +291,7 @@ let origin_head_branch ~local_path =
   | Ok [] -> Stdlib.Error "git symbolic-ref refs/remotes/origin/HEAD returned no output"
   | Error msg -> Stdlib.Error msg
 
-let current_branch ?(timeout_sec = inspection_timeout_sec) ~repository =
+let current_branch ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
       ~timeout_sec
@@ -302,6 +305,7 @@ let ahead_behind
     ?(timeout_sec = inspection_timeout_sec)
     ~repository
     ~target_ref
+    ()
     : (int * int, string) result
   =
   match
@@ -338,7 +342,7 @@ let get_recent_commits ~repository ~branch ~limit =
   | Ok lines -> Ok lines
   | Error msg -> Error msg
 
-let status_summary ?(timeout_sec = inspection_timeout_sec) ~repository =
+let status_summary ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
       ~timeout_sec

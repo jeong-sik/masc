@@ -319,7 +319,7 @@ let first_git_line ~budget ~cwd args =
 let dirty_state ~budget ~repository =
   match
     with_inspection_budget budget (fun timeout_sec ->
-      Repo_git.status_summary ~timeout_sec ~repository)
+      Repo_git.status_summary ~timeout_sec ~repository ())
   with
   | Ok summary -> Ok (summary.Repo_git.changed_files > 0, summary.changed_files)
   | Error _ as error -> error
@@ -337,7 +337,7 @@ let freshness_of_catalog ~budget ~repository = function
      | Ok upstream_head ->
        (match
           with_inspection_budget budget (fun timeout_sec ->
-            Repo_git.ahead_behind ~timeout_sec ~repository ~target_ref)
+            Repo_git.ahead_behind ~timeout_sec ~repository ~target_ref ())
         with
         | Error error -> Freshness_unavailable error
         | Ok (0, 0) -> Current { target_ref; upstream_head }
@@ -395,7 +395,7 @@ let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.check
   let name = checkout.name in
   let origin =
     with_inspection_budget budget (fun timeout_sec ->
-      Repo_git.get_origin_url ~timeout_sec ~local_path:checkout_abs)
+      Repo_git.get_origin_url ~timeout_sec ~local_path:checkout_abs ())
   in
   let catalog_resolution =
     match origin with
@@ -412,7 +412,7 @@ let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.check
   in
   let branch =
     with_inspection_budget budget (fun timeout_sec ->
-      Repo_git.current_branch ~timeout_sec ~repository)
+      Repo_git.current_branch ~timeout_sec ~repository ())
   in
   let head = first_git_line ~budget ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
   let dirty = dirty_state ~budget ~repository in

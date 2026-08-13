@@ -485,7 +485,7 @@ let discover_repositories_with_budget ~origin_budget_sec ~base_path =
                   inspected)
            | Ok timeout_sec ->
              (match
-                Repo_git.get_origin_url ~timeout_sec ~local_path:abs_repo_dir
+                Repo_git.get_origin_url ~timeout_sec ~local_path:abs_repo_dir ()
               with
               | Ok url ->
               let name = Filename.basename abs_repo_dir in

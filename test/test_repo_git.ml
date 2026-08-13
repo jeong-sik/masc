@@ -141,7 +141,7 @@ let test_get_origin_url () =
        with
        | Ok () -> ()
        | Error e -> Alcotest.fail ("git remote add failed: " ^ e));
-      match Repo_git.get_origin_url ~local_path:source with
+      match Repo_git.get_origin_url ~local_path:source () with
       | Ok url ->
           Alcotest.(check string)
             "origin URL"
@@ -162,7 +162,7 @@ let test_get_origin_url_times_out_on_stalled_config () =
         (fun () ->
           Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
           let started_at = Unix.gettimeofday () in
-          match Repo_git.get_origin_url ~local_path:tmp with
+          match Repo_git.get_origin_url ~local_path:tmp () with
           | Ok url -> Alcotest.failf "expected timeout, got origin %s" url
           | Error error ->
               let elapsed = Unix.gettimeofday () -. started_at in
@@ -191,7 +191,7 @@ let test_get_origin_url_uses_read_only_git_env () =
       ~finally:(fun () -> Exec_tap.disable ())
       (fun () ->
          Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
-         match Repo_git.get_origin_url ~local_path:source with
+         match Repo_git.get_origin_url ~local_path:source () with
          | Error e -> Alcotest.fail ("origin failed: " ^ e)
          | Ok _ ->
            let joined = String.concat "\n" (List.rev !captured) in
@@ -248,13 +248,13 @@ let test_status_summary_counts_porcelain_rows () =
       | Ok () -> ()
       | Error e -> Alcotest.fail ("git commit tracked failed: " ^ e));
       let repo = sample_repo ~url:source source in
-      (match Repo_git.status_summary ~repository:repo with
+      (match Repo_git.status_summary ~repository:repo () with
       | Error e -> Alcotest.fail ("clean status failed: " ^ e)
       | Ok summary ->
           Alcotest.(check int) "clean changed" 0 summary.changed_files);
       write_file tracked "modified\n";
       write_file (Filename.concat source "untracked.txt") "new\n";
-      (match Repo_git.status_summary ~repository:repo with
+      (match Repo_git.status_summary ~repository:repo () with
       | Error e -> Alcotest.fail ("dirty status failed: " ^ e)
       | Ok summary ->
           Alcotest.(check int) "dirty changed" 2 summary.changed_files;
@@ -264,7 +264,7 @@ let test_status_summary_counts_porcelain_rows () =
       (match run_cmd ~cwd:source ["git"; "add"; "tracked.txt"] with
       | Ok () -> ()
       | Error e -> Alcotest.fail ("git add modified failed: " ^ e));
-      match Repo_git.status_summary ~repository:repo with
+      match Repo_git.status_summary ~repository:repo () with
       | Error e -> Alcotest.fail ("staged status failed: " ^ e)
       | Ok summary ->
           Alcotest.(check int) "staged changed" 2 summary.changed_files;
@@ -282,7 +282,7 @@ let test_status_summary_uses_read_only_git_conventions () =
         ~finally:(fun () -> Exec_tap.disable ())
         (fun () ->
           Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
-          match Repo_git.status_summary ~repository:repo with
+          match Repo_git.status_summary ~repository:repo () with
           | Error e -> Alcotest.fail ("status failed: " ^ e)
           | Ok _ ->
               let joined = String.concat "\n" (List.rev !captured) in

@@ -250,6 +250,45 @@ let test_repository_checkout_projection_ignores_symlinked_directory () =
   Alcotest.(check int) "symlink checkout excluded" 0 (List.length entries)
 ;;
 
+let test_repository_checkout_projection_shares_inspection_budget () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let fake_bin = Filename.concat playground "fake-bin" in
+  ensure_dir fake_bin;
+  let fake_git = Filename.concat fake_bin "git" in
+  write_file fake_git "#!/bin/sh\nsleep 30\n";
+  Unix.chmod fake_git 0o755;
+  List.iter
+    (fun name ->
+       ensure_dir (Filename.concat playground ("repos/" ^ name ^ "/.git")))
+    [ "stalled-a"; "stalled-b" ];
+  let old_path = Sys.getenv "PATH" in
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "PATH" old_path)
+    (fun () ->
+       Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+       let started_at = Unix.gettimeofday () in
+       let projection =
+         Keeper_sandbox_control.For_testing.repository_checkouts_json_with_budget
+           ~inspection_budget_sec:0.2
+           ~config
+           ~meta
+       in
+       let elapsed = Unix.gettimeofday () -. started_at in
+       Alcotest.(check string)
+         "projection reports the exhausted request budget"
+         "inspection_budget_exhausted"
+         (projection |> Json.member "state" |> Json.to_string);
+       Alcotest.(check int)
+         "both checkout identities remain visible"
+         2
+         (projection |> Json.member "entries" |> Json.to_list |> List.length);
+       Alcotest.(check bool)
+         "two stalled checkouts share one wall-clock budget"
+         true
+         (elapsed < 1.0))
+;;
+
 let test_visible_scratch_read_resolves_to_private_storage () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
@@ -577,6 +616,10 @@ let () =
             "ignores symlinked checkout directories"
             `Quick
             test_repository_checkout_projection_ignores_symlinked_directory
+        ; Alcotest.test_case
+            "shares one inspection budget across checkouts"
+            `Quick
+            test_repository_checkout_projection_shares_inspection_budget
         ] )
     ]
 ;;

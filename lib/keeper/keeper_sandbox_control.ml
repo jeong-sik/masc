@@ -301,24 +301,44 @@ let resolve_catalog ~catalog ~origin =
        | [] -> Unregistered
        | repos -> Ambiguous (List.map (fun repo -> repo.Repo_manager_types.id) repos))
 
-let first_git_line ~cwd args =
-  match Repo_git.run_git ~cwd args with
+let with_inspection_budget budget inspect =
+  match Repo_git.Inspection_budget.remaining_timeout budget with
+  | Error _ as error -> error
+  | Ok timeout_sec -> inspect timeout_sec
+;;
+
+let first_git_line ~budget ~cwd args =
+  match
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.run_git ~cwd ~timeout_sec args)
+  with
   | Ok (line :: _) -> Ok line
   | Ok [] -> Error (Printf.sprintf "git %s returned no output" (String.concat " " args))
   | Error _ as error -> error
 
-let dirty_state ~repository =
-  match Repo_git.status_summary ~repository with
+let dirty_state ~budget ~repository =
+  match
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.status_summary ~timeout_sec ~repository)
+  with
   | Ok summary -> Ok (summary.Repo_git.changed_files > 0, summary.changed_files)
   | Error _ as error -> error
 
-let freshness_of_catalog ~repository = function
+let freshness_of_catalog ~budget ~repository = function
   | Registered catalog_repo ->
     let target_ref = "origin/" ^ catalog_repo.default_branch in
-    (match first_git_line ~cwd:repository.Repo_manager_types.local_path [ "rev-parse"; target_ref ] with
+    (match
+       first_git_line
+         ~budget
+         ~cwd:repository.Repo_manager_types.local_path
+         [ "rev-parse"; target_ref ]
+     with
      | Error error -> Freshness_unavailable error
      | Ok upstream_head ->
-       (match Repo_git.ahead_behind ~repository ~target_ref with
+       (match
+          with_inspection_budget budget (fun timeout_sec ->
+            Repo_git.ahead_behind ~timeout_sec ~repository ~target_ref)
+        with
         | Error error -> Freshness_unavailable error
         | Ok (0, 0) -> Current { target_ref; upstream_head }
         | Ok (0, ahead) -> Ahead { target_ref; upstream_head; ahead }
@@ -366,14 +386,17 @@ let freshness_json = function
   | Freshness_unavailable error ->
     `Assoc [ "state", `String "unavailable"; "error", `String error ]
 
-let checkout_json ~catalog (checkout : Keeper_playground_checkouts.checkout) =
+let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.checkout) =
   (* The checkout's own path, as discovered. Previously this reassembled
      [sandbox_abs/repos/<name>], which meant any checkout found outside that
      one shape was inspected at a path that does not exist — every git call
      below would fail and the entry would render as "unavailable". *)
   let checkout_abs = checkout.absolute_path in
   let name = checkout.name in
-  let origin = Repo_git.get_origin_url ~local_path:checkout_abs in
+  let origin =
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.get_origin_url ~timeout_sec ~local_path:checkout_abs)
+  in
   let catalog_resolution =
     match origin with
     | Ok origin -> resolve_catalog ~catalog ~origin
@@ -387,9 +410,12 @@ let checkout_json ~catalog (checkout : Keeper_playground_checkouts.checkout) =
       ; default_branch = ""; keepers = []; status = Active; auto_sync = false
       ; sync_interval = 0; created_at = 0L; updated_at = 0L }
   in
-  let branch = Repo_git.current_branch ~repository in
-  let head = first_git_line ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
-  let dirty = dirty_state ~repository in
+  let branch =
+    with_inspection_budget budget (fun timeout_sec ->
+      Repo_git.current_branch ~timeout_sec ~repository)
+  in
+  let head = first_git_line ~budget ~cwd:checkout_abs [ "rev-parse"; "HEAD" ] in
+  let dirty = dirty_state ~budget ~repository in
   let inspection_errors =
     [ (match branch with Error error -> Some ("branch: " ^ error) | Ok _ -> None)
     ; (match head with Error error -> Some ("head: " ^ error) | Ok _ -> None)
@@ -417,10 +443,19 @@ let checkout_json ~catalog (checkout : Keeper_playground_checkouts.checkout) =
     ; "changed_files", (match dirty with Ok (_, value) -> `Int value | Error _ -> `Null)
     ; "inspection_state", `String (if inspection_errors = [] then "available" else "unavailable")
     ; "inspection_errors", `List (List.map (fun error -> `String error) inspection_errors)
-    ; "freshness", freshness_json (freshness_of_catalog ~repository catalog_resolution)
+    ; ( "freshness"
+      , freshness_json
+          (freshness_of_catalog ~budget ~repository catalog_resolution) )
     ]
 
-let repository_checkouts_json ~(config : Workspace.config) ~(meta : keeper_meta) =
+let repository_checkouts_json_with_budget
+    ~inspection_budget_sec
+    ~(config : Workspace.config)
+    ~(meta : keeper_meta)
+  =
+  let inspection_budget =
+    Repo_git.Inspection_budget.create ~timeout_sec:inspection_budget_sec ()
+  in
   let sandbox_abs =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
@@ -432,13 +467,15 @@ let repository_checkouts_json ~(config : Workspace.config) ~(meta : keeper_meta)
     match scan with
     | Ok discovery ->
       Keeper_playground_checkouts.found discovery
-      |> List.map (checkout_json ~catalog)
+      |> List.map (checkout_json ~budget:inspection_budget ~catalog)
     | Error _ -> []
   in
   `Assoc
     [ ( "state"
       , `String
           (match catalog, scan with
+           | Ok _, Ok _ when Repo_git.Inspection_budget.is_exhausted inspection_budget ->
+             "inspection_budget_exhausted"
            | Ok _, Ok _ -> "available"
            | Error _, _ -> "catalog_unavailable"
            (* A failed scan and an empty playground used to be the same empty
@@ -451,6 +488,17 @@ let repository_checkouts_json ~(config : Workspace.config) ~(meta : keeper_meta)
     ; "entries", `List entries
     ; "error", (match catalog with Ok _ -> `Null | Error error -> `String error)
     ]
+
+let repository_checkouts_json ~config ~meta =
+  repository_checkouts_json_with_budget
+    ~inspection_budget_sec:Repo_git.inspection_timeout_sec
+    ~config
+    ~meta
+;;
+
+module For_testing = struct
+  let repository_checkouts_json_with_budget = repository_checkouts_json_with_budget
+end
 
 let preflight_status_json ~timeout_sec =
   Keeper_sandbox_runtime.docker_preflight ~timeout_sec ()

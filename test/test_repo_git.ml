@@ -175,6 +175,31 @@ let test_get_origin_url_times_out_on_stalled_config () =
                 true
                 (elapsed >= 4.0 && elapsed < 10.0)))
 
+let test_get_origin_url_uses_read_only_git_env () =
+  with_temp_dir (fun tmp ->
+    let source = Filename.concat tmp "source" in
+    init_local_repo source;
+    (match
+       run_cmd
+         ~cwd:source
+         [ "git"; "remote"; "add"; "origin"; "https://example.test/owner/repo.git" ]
+     with
+     | Ok () -> ()
+     | Error e -> Alcotest.fail ("git remote add failed: " ^ e));
+    let captured = ref [] in
+    Fun.protect
+      ~finally:(fun () -> Exec_tap.disable ())
+      (fun () ->
+         Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
+         match Repo_git.get_origin_url ~local_path:source with
+         | Error e -> Alcotest.fail ("origin failed: " ^ e)
+         | Ok _ ->
+           let joined = String.concat "\n" (List.rev !captured) in
+           Alcotest.(check bool)
+             "sets GIT_OPTIONAL_LOCKS env key"
+             true
+             (String_util.contains_substring joined "\"GIT_OPTIONAL_LOCKS\"")))
+
 let test_fetch () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -313,6 +338,10 @@ let () =
             "times out on stalled config"
             `Slow
             test_get_origin_url_times_out_on_stalled_config
+        ; Alcotest.test_case
+            "uses read-only git environment"
+            `Quick
+            test_get_origin_url_uses_read_only_git_env
         ] );
       ( "fetch", [ Alcotest.test_case "returns remotes" `Quick test_fetch ] );
       ( "get_recent_commits",

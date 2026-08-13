@@ -529,6 +529,52 @@ let test_discover_skips_registered () =
                 Alcotest.(check int) "skips already registered" 0
                   (List.length repos)))
 
+let test_discover_origin_budget_is_cumulative () =
+  with_temp_base_path (fun base_path ->
+    let fake_bin = Filename.concat base_path "fake-bin" in
+    Unix.mkdir fake_bin 0o755;
+    let fake_git = Filename.concat fake_bin "git" in
+    write_file fake_git "#!/bin/sh\nsleep 30\n";
+    Unix.chmod fake_git 0o755;
+    List.iter
+      (fun name ->
+         let repo = Filename.concat base_path name in
+         Unix.mkdir repo 0o755;
+         Unix.mkdir (Filename.concat repo ".git") 0o755)
+      [ "stalled-a"; "stalled-b" ];
+    let old_path = Sys.getenv "PATH" in
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "PATH" old_path)
+      (fun () ->
+         Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+         let started_at = Unix.gettimeofday () in
+         let result =
+           Repo_store.For_testing.discover_repositories_with_budget
+             ~origin_budget_sec:0.2
+             ~base_path
+         in
+         let elapsed = Unix.gettimeofday () -. started_at in
+         (match result with
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "exhausted discovery budget returned a partial success");
+         Alcotest.(check bool)
+           "two stalled repositories share one request budget"
+           true
+           (elapsed < 1.0)))
+;;
+
+let test_discovery_warning_escapes_untrusted_fields () =
+  let line =
+    Repo_store.For_testing.discovery_skip_log_line
+      ~abs_repo_dir:"/tmp/repo\nforged"
+      ~detail:"fatal:\027[31mred"
+  in
+  Alcotest.(check string)
+    "newline and terminal escape are rendered as quoted escapes"
+    "repo discovery skipped \"/tmp/repo\\nforged\": origin unavailable (\"fatal:\\027[31mred\")"
+    line
+;;
+
 let test_register_discovered_auto_adds () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -801,6 +847,10 @@ let () =
           Alcotest.test_case "relative base path keeps visible repos" `Quick
             test_discover_relative_base_path_keeps_visible_repos;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
+          Alcotest.test_case "shares one origin inspection budget" `Quick
+            test_discover_origin_budget_is_cumulative;
+          Alcotest.test_case "escapes discovery warning fields" `Quick
+            test_discovery_warning_escapes_untrusted_fields;
         ] );
       ( "registration",
         [

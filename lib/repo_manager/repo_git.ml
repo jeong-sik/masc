@@ -31,7 +31,33 @@ let non_interactive_git_env =
 
 let read_only_git_env = ("GIT_OPTIONAL_LOCKS", "0") :: non_interactive_git_env
 
-let status_summary_timeout_sec = 5.0
+let inspection_timeout_sec = 5.0
+
+module Inspection_budget = struct
+  type t =
+    { started_at : Mtime.t
+    ; timeout_sec : float
+    }
+
+  let create ?(timeout_sec = inspection_timeout_sec) () =
+    if not (Float.is_finite timeout_sec && Float.compare timeout_sec 0.0 > 0)
+    then invalid_arg "Repo_git.Inspection_budget.create: timeout_sec must be finite and positive";
+    { started_at = Mtime_clock.now (); timeout_sec }
+  ;;
+
+  let elapsed_sec budget =
+    Mtime.Span.to_float_ns (Mtime.span budget.started_at (Mtime_clock.now ())) /. 1e9
+  ;;
+
+  let remaining_timeout budget =
+    let remaining = budget.timeout_sec -. elapsed_sec budget in
+    if Float.compare remaining 0.0 <= 0
+    then Error "git inspection request budget exhausted"
+    else Ok (min inspection_timeout_sec remaining)
+  ;;
+
+  let is_exhausted budget = Result.is_error (remaining_timeout budget)
+end
 
 let split_lines text =
   if text = "" then []
@@ -199,12 +225,12 @@ let get_branches ~repository =
 
    [read_only_git_env] adds GIT_OPTIONAL_LOCKS=0 so an inspection never takes
    a lock that a keeper's own git command then waits on. *)
-let get_origin_url ~local_path =
+let get_origin_url ?(timeout_sec = inspection_timeout_sec) ~local_path =
   match
     run_git
       ~cwd:local_path
       ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
+      ~timeout_sec
       [ "remote"; "get-url"; "origin" ]
   with
   | Ok (url :: _) -> Ok url
@@ -216,7 +242,7 @@ let worktree_root ~local_path =
     run_git
       ~cwd:local_path
       ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
+      ~timeout_sec:inspection_timeout_sec
       [ "rev-parse"; "--show-toplevel" ]
   with
   | Ok (root :: _) ->
@@ -255,29 +281,32 @@ let origin_head_branch ~local_path =
     run_git
       ~cwd:local_path
       ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
+      ~timeout_sec:inspection_timeout_sec
       [ "symbolic-ref"; "-q"; "refs/remotes/origin/HEAD" ]
   with
   | Ok (refname :: _) -> branch_of_origin_head_ref refname
   | Ok [] -> Stdlib.Error "git symbolic-ref refs/remotes/origin/HEAD returned no output"
   | Error msg -> Stdlib.Error msg
 
-let inspect_timeout_sec = status_summary_timeout_sec
-
-let current_branch ~repository =
+let current_branch ?(timeout_sec = inspection_timeout_sec) ~repository =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec:inspect_timeout_sec
+      ~timeout_sec
       [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
   with
   | Ok (name :: _) -> Ok name
   | Ok [] -> Error "git rev-parse --abbrev-ref HEAD returned no output"
   | Error msg -> Error msg
 
-let ahead_behind ~repository ~target_ref : (int * int, string) result =
+let ahead_behind
+    ?(timeout_sec = inspection_timeout_sec)
+    ~repository
+    ~target_ref
+    : (int * int, string) result
+  =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec:inspect_timeout_sec
+      ~timeout_sec
       [ "rev-list"; "--left-right"; "--count"; target_ref ^ "...HEAD" ]
   with
   | Stdlib.Error msg -> Stdlib.Error msg
@@ -309,10 +338,10 @@ let get_recent_commits ~repository ~branch ~limit =
   | Ok lines -> Ok lines
   | Error msg -> Error msg
 
-let status_summary ~repository =
+let status_summary ?(timeout_sec = inspection_timeout_sec) ~repository =
   match
     run_git ~cwd:repository.local_path ~env:read_only_git_env
-      ~timeout_sec:status_summary_timeout_sec
+      ~timeout_sec
       ["--no-optional-locks"; "status"; "--porcelain=v1"; "--untracked-files=normal"]
   with
   | Stdlib.Error msg -> Stdlib.Error msg

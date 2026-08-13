@@ -4,8 +4,10 @@
     layers 1-3 plus [[runtime].default] into a self-standing
     {!Runtime_schema.config}. Reserved top-level namespaces: providers,
     models, runtime, web_search. Dropped routing namespaces system, routes, and
-    profiles are rejected rather than ignored. Any other top-level table is a provider table, with
-    sub-tables as model bindings.
+    profiles are rejected rather than ignored. A top-level table whose name
+    [\[providers\]] declares carries that provider's model bindings as
+    sub-tables; every other top-level table belongs to a different parser and is
+    left alone.
 
     Routing layers are intentionally NOT parsed (see {!Runtime_toml} mli):
     Layer 4 aliases, Layer 5 routes/system/profiles, and the
@@ -1189,16 +1191,35 @@ let parse_provider_table (provider_id : string) (tbl : Otoml.t)
        entries)
 ;;
 
+(* Top-level table names that own a binding group, taken from the [\[providers\]]
+   keys as written rather than from successfully parsed providers: a malformed
+   provider row must be reported as a provider error, not silently reclassify its
+   bindings as some other namespace. *)
+let declared_provider_ids (toml : Otoml.t) : string list =
+  match Otoml.find_opt toml Fun.id [ "providers" ] with
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) -> List.map fst entries
+  | Some _ | None -> []
+;;
+
 let parse_bindings (toml : Otoml.t)
   : (Runtime_schema.binding list, parse_error list) result
   =
   let top_entries = Otoml.get_table toml in
-  (* Only top-level tables can describe a provider; scalar / array entries
-     (e.g. an operator-authored ["comment = ..."]) would crash
-     [Otoml.get_table] in [parse_provider_table]. *)
+  let declared = declared_provider_ids toml in
+  (* A top-level table describes a provider's bindings only when [\[providers\]]
+     declares that provider. The namespace used to be defined by exclusion —
+     anything not on the reserved list — which made every unrelated config
+     section a phantom binding group: [\[voice.tts\]] and [\[fusion.presets\]]
+     each parsed as a binding whose provider did not exist, and the loader had to
+     drop unresolved bindings quietly for boot to survive them. That silence is
+     what hid a real dangling reference (masc#28403). Naming the namespace
+     positively lets {!Runtime.load_list} treat an unresolved binding as the typo
+     it is. Scalar / array entries are still excluded because
+     [parse_provider_table] would crash on them. *)
   let provider_tables =
     List.filter
-      (fun (name, value) -> (not (is_reserved name)) && is_toml_table value)
+      (fun (name, value) ->
+        (not (is_reserved name)) && is_toml_table value && List.mem name declared)
       top_entries
   in
   Result.map

@@ -22,7 +22,25 @@ type t =
   }
 
 val id_of_binding : binding -> string
-val of_binding : config -> binding -> (t, string) result
+
+type drop_reason =
+  | Binding_disabled
+  | Provider_disabled of string
+  | Provider_not_declared of string
+  | Model_not_declared of string
+  | Execution_unbuildable of string
+      (** Why a binding did not become a runtime. Closed so consumers decide per
+          case instead of matching the rendered text: the [*_not_declared] pair
+          is a dangling reference (an operator typo, fatal at
+          {!load_list}), while a disabled binding or provider is a choice the
+          operator wrote down and [Execution_unbuildable] is an adapter
+          capability limit — both non-fatal, per RFC-0206 §2.1. *)
+
+val string_of_drop_reason : drop_reason -> string
+(** Operator-facing rendering. Single source for the wording, so a reason read
+    from a runtime message and one read from a load error cannot drift. *)
+
+val of_binding : config -> binding -> (t, drop_reason) result
 (** Materialize one binding while preserving failure information. [Error reason]
     when the binding is disabled, its provider/model id is unresolved, or the
     provider transport/protocol cannot be materialized into a

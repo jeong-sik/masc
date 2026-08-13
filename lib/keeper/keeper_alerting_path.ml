@@ -785,9 +785,14 @@ let sandbox_path_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   Keeper_sandbox.allowed_root_rel_of_meta ~meta
 ;;
 
+(* The workspace root, and nothing under it. A [repos/] directory used to be
+   created here, which outlived every other trace of that convention: a keeper
+   listing its root would find an empty [repos/] and infer the rule the prompts
+   no longer teach. The system creates the root; the keeper decides what goes
+   in it. *)
 let sandbox_bundle_paths_of_meta ~(meta : Keeper_meta_contract.keeper_meta) =
   let root = sandbox_path_of_meta ~meta |> strip_trailing_slashes in
-  [ root ^ "/"; root ^ "/repos/" ]
+  [ root ^ "/" ]
 ;;
 
 let ensure_sandbox_bundle ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
@@ -809,7 +814,7 @@ let ensure_sandbox_bundle_for_profile
   let sandbox_root =
     Keeper_sandbox.host_root_rel_of_profile sandbox_profile name |> strip_trailing_slashes
   in
-  [ sandbox_root ^ "/"; sandbox_root ^ "/repos/" ]
+  [ sandbox_root ^ "/" ]
   |> List.map (Filename.concat root)
   |> List.map Keeper_fs.ensure_dir
 ;;

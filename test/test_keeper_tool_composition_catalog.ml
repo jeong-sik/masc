@@ -7,6 +7,7 @@ let valid_catalog =
   {|[[compositions]]
 name = "time-memory-query"
 description = "Feed the exact clock result into memory search."
+execution = "inline"
 
 [[compositions.nodes]]
 id = "time"
@@ -94,6 +95,7 @@ let test_catalog_rejects_unknown_fields () =
   let document =
     {|[[compositions]]
 name = "bad"
+execution = "inline"
 guess = true
 [[compositions.nodes]]
 id = "time"
@@ -112,6 +114,7 @@ let test_catalog_rejects_malformed_output_pointer () =
   let document =
     {|[[compositions]]
 name = "bad-pointer"
+execution = "inline"
 [[compositions.nodes]]
 id = "time"
 tool = "keeper_time_now"
@@ -142,6 +145,7 @@ let one_node_composition name =
   Printf.sprintf
     {|[[compositions]]
 name = %S
+execution = "inline"
 [[compositions.nodes]]
 id = "time"
 tool = "keeper_time_now"
@@ -150,6 +154,86 @@ kind = "literal"
 value = {}
 |}
     name
+;;
+
+let one_node_async_composition name =
+  Printf.sprintf
+    {|[[compositions]]
+name = %S
+execution = "async"
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+    name
+;;
+
+let test_catalog_requires_explicit_execution_mode () =
+  let document =
+    {|[[compositions]]
+name = "missing-execution"
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+  in
+  match Catalog.parse document with
+  | Error
+      (Catalog.Missing_field
+        { path = [ "compositions"; "0" ]; field = "execution" }) ->
+    ()
+  | Error _ | Ok _ -> fail "composition execution mode was inferred"
+;;
+
+let test_catalog_accepts_async_only_for_statically_read_only_tools () =
+  let catalog =
+    match Catalog.parse (one_node_async_composition "clock-background") with
+    | Ok catalog -> catalog
+    | Error error -> fail (Catalog.error_to_string error)
+  in
+  let entry =
+    match Catalog.find catalog "clock-background" with
+    | Some entry -> entry
+    | None -> fail "async composition lookup failed"
+  in
+  (match entry.execution with
+   | Catalog.Async -> ()
+   | Catalog.Inline -> fail "async execution mode was rewritten");
+  check
+    (list string)
+    "async model surface includes exact controls"
+    [ "keeper_compose_clock-background"
+    ; "keeper_composition_status"
+    ; "keeper_composition_cancel"
+    ]
+    (Catalog.model_tool_names catalog)
+;;
+
+let test_catalog_rejects_async_effectful_tool () =
+  let document =
+    {|[[compositions]]
+name = "write-background"
+execution = "async"
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "not admitted", content = "effectful async" }
+|}
+  in
+  match Catalog.parse document with
+  | Error
+      (Catalog.Async_tool_not_statically_read_only
+        { name = "write-background"; node_id; tool_name = "keeper_memory_write" }) ->
+    check string "rejected node" "write" (Plan.Node_id.to_string node_id)
+  | Error _ | Ok _ -> fail "effectful async composition was admitted"
 ;;
 
 let test_catalog_projects_stable_tool_name_and_path () =
@@ -198,6 +282,7 @@ let test_catalog_rejects_unknown_tool_through_plan_authority () =
   let document =
     {|[[compositions]]
 name = "unknown-tool"
+execution = "inline"
 [[compositions.nodes]]
 id = "unknown"
 tool = "invented_tool"
@@ -294,6 +379,18 @@ let () =
             "rejects duplicate names"
             `Quick
             test_catalog_rejects_duplicate_composition_names
+        ; test_case
+            "requires explicit execution mode"
+            `Quick
+            test_catalog_requires_explicit_execution_mode
+        ; test_case
+            "accepts async statically read-only plan"
+            `Quick
+            test_catalog_accepts_async_only_for_statically_read_only_tools
+        ; test_case
+            "rejects async effectful tool"
+            `Quick
+            test_catalog_rejects_async_effectful_tool
         ; test_case
             "projects stable tool name and path"
             `Quick

@@ -4652,6 +4652,7 @@ let one_node_clock_composition =
   {|[[compositions]]
 name = "clock"
 description = "Read the exact Keeper clock."
+execution = "inline"
 
 [[compositions.nodes]]
 id = "time"
@@ -4665,6 +4666,7 @@ value = {}
 let one_node_terminal_composition =
   {|[[compositions]]
 name = "surface"
+execution = "inline"
 
 [[compositions.nodes]]
 id = "post"
@@ -4678,6 +4680,7 @@ value = { surface = "dashboard", content = "composition terminal" }
 let invalid_clock_input_composition =
   {|[[compositions]]
 name = "invalid-clock-input"
+execution = "inline"
 
 [[compositions.nodes]]
 id = "time"
@@ -4691,6 +4694,7 @@ value = { unsupported = true }
 let post_effect_terminal_failure_composition =
   {|[[compositions]]
 name = "write-then-invalid-post"
+execution = "inline"
 
 [[compositions.nodes]]
 id = "write"
@@ -4712,6 +4716,7 @@ value = {}
 let unknown_effect_terminal_failure_composition =
   {|[[compositions]]
 name = "unknown-write-before-post"
+execution = "inline"
 
 [[compositions.nodes]]
 id = "write"
@@ -4734,6 +4739,7 @@ let write_then_unchanged_board_composition ~revision =
   Printf.sprintf
     {|[[compositions]]
 name = "write-then-durable-wait"
+execution = "inline"
 
 [[compositions.nodes]]
 id = "write"
@@ -4751,6 +4757,20 @@ kind = "literal"
 value = { if_revision = %S }
 |}
     revision
+;;
+
+let one_node_async_clock_composition =
+  {|[[compositions]]
+name = "clock-background"
+execution = "async"
+
+[[compositions.nodes]]
+id = "time"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
 ;;
 
 let test_composition_catalog_materializes_and_executes_first_class_tool () =
@@ -5246,6 +5266,120 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
               fail "official-client provider loop remained retryable after post-effect defer"))
 ;;
 
+let test_async_composition_uses_durable_request_status_surface () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "composition-async-durable-status"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse
+             one_node_async_clock_composition
+         with
+         | Ok catalog -> catalog
+         | Error error ->
+           fail (Masc.Keeper_tool_composition_catalog.error_to_string error)
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog:catalog
+           ()
+       in
+       let async_tool =
+         match find_tool_by_name tools "keeper_compose_clock-background" with
+         | Some tool -> tool
+         | None -> fail "async composition tool was not materialized"
+       in
+       let status_tool =
+         match find_tool_by_name tools "keeper_composition_status" with
+         | Some tool -> tool
+         | None -> fail "async composition status tool was not materialized"
+       in
+       (match Agent_core.Tool.execution_mode status_tool with
+        | Agent_core.Tool_contract.Concurrent -> ()
+        | Agent_core.Tool_contract.Serial -> fail "status tool lost read-only concurrency");
+       let request_id =
+         match
+           Agent_core.Tool.execute
+             ~invocation:
+               (composition_invocation
+                  ~completion:Agent_core.Tool_contract.Continue_after_success)
+             async_tool
+             (`Assoc [])
+         with
+         | Error error -> fail error.Agent_core.Types.message
+         | Ok output ->
+           let payload = parse_json output.content in
+           check string
+             "async acceptance mode"
+             "async"
+             Yojson.Safe.Util.(member "execution" payload |> to_string);
+           Yojson.Safe.Util.(member "request_id" payload |> to_string)
+       in
+       let rec await_terminal () =
+         match
+           Masc.Keeper_msg_async.poll
+             ~base_path:config.base_path
+             ~caller:meta.name
+             request_id
+         with
+         | Masc.Keeper_msg_async.Found
+             ({ status = Masc.Keeper_msg_async.Done _; _ } as entry) ->
+           entry
+         | Masc.Keeper_msg_async.Found
+             { status =
+                 ( Masc.Keeper_msg_async.Queued
+                 | Masc.Keeper_msg_async.Running
+                 | Masc.Keeper_msg_async.Cancelling _ )
+             ; _
+             } ->
+           Eio.Fiber.yield ();
+           await_terminal ()
+         | Masc.Keeper_msg_async.Found
+             { status =
+                 ( Masc.Keeper_msg_async.Lost _
+                 | Masc.Keeper_msg_async.Cancelled _
+                 | Masc.Keeper_msg_async.Persistence_failed _ )
+             ; _
+             } ->
+           fail "async read-only composition did not complete"
+         | Masc.Keeper_msg_async.Absent -> fail "durable async request disappeared"
+         | Masc.Keeper_msg_async.Unreadable reason -> fail reason
+         | Masc.Keeper_msg_async.Rejected _ -> fail "async request access was rejected"
+       in
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some clock -> clock
+         | None -> fail "async composition test lost its bound Eio clock"
+       in
+       ignore
+         (Eio.Time.with_timeout_exn clock 5.0 await_terminal
+           : Masc.Keeper_msg_async.entry);
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           status_tool
+           (`Assoc [ "request_id", `String request_id ])
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.content in
+         check string
+           "durable terminal status"
+           "done"
+           Yojson.Safe.Util.(member "status" payload |> to_string);
+         check string
+           "durable structured composition result"
+           "keeper_compose_clock-background"
+           Yojson.Safe.Util.(member "result" payload |> member "composition_tool" |> to_string))
+;;
+
 let test_composition_runtime_uses_canonical_descriptor () =
   with_exec_fixture "composition-canonical-descriptor"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -5446,6 +5580,8 @@ let () =
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
       test_case "post-effect deferred composition closes without resume" `Quick
         test_terminal_composition_post_effect_defer_closes_without_resume;
+      test_case "async composition exposes durable status" `Quick
+        test_async_composition_uses_durable_request_status_surface;
       test_case "terminal composition requires terminal outer invocation" `Quick
         test_composition_terminal_requires_terminal_outer_invocation;
     ]);

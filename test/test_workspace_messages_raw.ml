@@ -69,7 +69,7 @@ let test_repeated_mention_delivers_each_canonical_event () =
     let previous_activity = Atomic.get Workspace_hooks.activity_emit_fn in
     let previous_wake =
       Workspace_broadcast.For_testing.replace_on_broadcast_mention
-        (fun _mention -> ())
+        (fun _mention -> Workspace_broadcast.Passive)
     in
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw (fun () ->
@@ -95,7 +95,9 @@ let test_repeated_mention_delivers_each_canonical_event () =
         in
         activities := (kind, subject) :: !activities);
     Workspace_broadcast.set_on_broadcast_mention
-      (fun delivery -> wakes := delivery.mention :: !wakes);
+      (fun delivery ->
+        wakes := delivery.mention :: !wakes;
+        Workspace_broadcast.Accepted);
     let content = "@gemini review the canonical event" in
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
@@ -154,7 +156,8 @@ let test_failed_authoritative_write_suppresses_fanout () =
       Atomic.get Workspace_hooks.workspace_broadcast_observed_fn
     in
     let previous_mention =
-      Workspace_broadcast.For_testing.replace_on_broadcast_mention ignore
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _ ->
+        Workspace_broadcast.Passive)
     in
     let previous_write =
       Workspace_broadcast.For_testing.replace_write_json_commit
@@ -195,7 +198,9 @@ let test_failed_authoritative_write_suppresses_fanout () =
             incr activities);
         Atomic.set Workspace_hooks.workspace_broadcast_observed_fn
           (fun ~msg_type:_ ~elapsed_s:_ -> incr observations);
-        Workspace_broadcast.set_on_broadcast_mention (fun _ -> incr mentions);
+        Workspace_broadcast.set_on_broadcast_mention (fun _ ->
+          incr mentions;
+          Workspace_broadcast.Accepted);
         (match
            Workspace.broadcast
              config

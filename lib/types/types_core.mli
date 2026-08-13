@@ -271,12 +271,23 @@ val task_claim_next_action :
 val task_claim_next_action_is_claimable :
   task -> bool
 
+type message_mention_delivery =
+  | Mention_passive
+  | Mention_pending
+  | Mention_accepted
+  | Mention_rejected
+[@@deriving yojson, show]
+
+val message_mention_delivery_to_string : message_mention_delivery -> string
+
 type message =
-  { seq : int
+  { request_id : string
+  ; seq : int
   ; from_agent : string [@key "from"]
   ; msg_type : string [@key "type"] [@default "broadcast"]
   ; content : string
   ; mention : string option [@default None]
+  ; mention_delivery : message_mention_delivery
   ; timestamp : string
   ; trace_context : string option [@default None]
   ; expires_at : float option [@default None]

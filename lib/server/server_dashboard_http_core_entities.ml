@@ -38,7 +38,11 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
 
 let dashboard_message_json (message : Masc_domain.message) =
   `Assoc
-    [ "from", `String message.from_agent
+    [ "request_id", `String message.request_id
+    ; ( "mention_delivery"
+      , `String
+          (Masc_domain.message_mention_delivery_to_string message.mention_delivery) )
+    ; "from", `String message.from_agent
     ; "type", `String message.msg_type
     ; "content", `String message.content
     ; "mention", Json_util.string_opt_to_json message.mention

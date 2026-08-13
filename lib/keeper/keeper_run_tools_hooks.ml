@@ -107,37 +107,49 @@ let non_empty_string_member name input =
    relative shape therefore anchors at [sandbox_root]; absolute paths pass
    through untouched, and a pathless tool call stays a keeper-timeline fact
    at [base_path]. *)
-let observation_file_path_from_tool_input ~base_path ~sandbox_root input =
+let observation_file_path_from_tool_input ~sandbox_root input =
   let under_sandbox p = Filename.concat sandbox_root p in
   match Tool_input_path.tool_input_file_path input with
-  | None -> base_path
+  | None -> None
   | Some p when Filename.is_relative p ->
-    if sandbox_rooted_relative_path p
-    then under_sandbox p
-    else (
-      match non_empty_string_member "cwd" input with
-      | Some cwd when Filename.is_relative cwd ->
-        under_sandbox (Filename.concat cwd p)
-      | Some cwd -> Filename.concat cwd p
-      | None -> under_sandbox p)
-  | Some p -> p
+    Some
+      (if sandbox_rooted_relative_path p
+       then under_sandbox p
+       else (
+         match non_empty_string_member "cwd" input with
+         | Some cwd when Filename.is_relative cwd ->
+           under_sandbox (Filename.concat cwd p)
+         | Some cwd -> Filename.concat cwd p
+         | None -> under_sandbox p))
+  | Some p -> Some p
 ;;
 
+(* Returns the partition the observation belongs to and the file path as the
+   resolver named it. A tool call that names no file still has a partition —
+   it is a keeper-timeline fact, attributed through the project root the way
+   turn events are — but it has no document, so the path is [None] rather than
+   the project root standing in for one. *)
 let observation_partition_for_tool_input ~config ~meta ~kind input =
   let base_dir = Keeper_alerting_path.project_root_of_config config in
   let sandbox_root =
     Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta
   in
-  let file_path =
-    observation_file_path_from_tool_input ~base_path:base_dir ~sandbox_root input
-    |> Keeper_tool_shared_runtime.keeper_observation_host_path_of_visible_path
-         ~config
-         ~meta
+  let resolve file_path =
+    Keeper_tool_filesystem_runtime.resolve_partition_for_write ~base_dir ~kind ~file_path
   in
-  Keeper_tool_filesystem_runtime.resolve_partition_for_write
-    ~base_dir
-    ~kind
-    ~file_path
+  match observation_file_path_from_tool_input ~sandbox_root input with
+  | None ->
+    let partition, _ = resolve base_dir in
+    (partition, None)
+  | Some visible ->
+    let host_path =
+      Keeper_tool_shared_runtime.keeper_observation_host_path_of_visible_path
+        ~config
+        ~meta
+        visible
+    in
+    let partition, resolved = resolve host_path in
+    (partition, Some resolved)
 ;;
 
 let assemble_hooks
@@ -276,7 +288,7 @@ let assemble_hooks
               for relative paths), not from the [.masc] runtime root.
               #23469: relative shapes anchor at this keeper's playground
               sandbox root, matching the file tools' own resolution. *)
-           let partition, _ =
+           let partition, observed_file_path =
              observation_partition_for_tool_input
                ~config
                ~meta:acc.meta
@@ -286,6 +298,7 @@ let assemble_hooks
            Agent_observation.emit_tool_event
              { base_path = config.base_path
              ; partition
+             ; file_path = observed_file_path
              ; tool_name
              ; keeper_id = acc.meta.name
              ; turn_id

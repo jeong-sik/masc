@@ -25,6 +25,19 @@ type codebase_partition =
 type tool_event =
   { base_path : string
   ; partition : codebase_partition
+  ; file_path : string option
+        (** The edited file as the partition resolver named it: relative to the
+            codebase the [partition] identifies, or the original absolute path
+            when the resolver could not attribute it. [None] is a tool call that
+            names no file at all (coordination, board, memory) — a
+            keeper-timeline fact with no document.
+
+            Producers must not hand consumers the raw tool argument instead.
+            The resolver is the only thing that knows which root the argument
+            was relative to, so a consumer re-deriving the path from [input]
+            produced a different vocabulary than the one the same resolver
+            stored in [regions]/[annotations] — three incompatible shapes in a
+            single partition (masc#28582). *)
   ; tool_name : string
   ; keeper_id : string
   ; turn_id : string

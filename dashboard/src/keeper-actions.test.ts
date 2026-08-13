@@ -355,6 +355,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
     keeperStreamLastEventAt.value = {}
+    _resetChatHydrationForTests()
     _clearTrackedKeeperChatOperationsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()

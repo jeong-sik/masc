@@ -12,17 +12,56 @@
 # MASC_BASE_PATH.
 set -euo pipefail
 
-STORE="${1:-}"
+usage() {
+  echo "usage: $0 [<store-root>] [--execute]" >&2
+  echo "       (or set MASC_BASE_PATH and omit <store-root>)" >&2
+}
+
+STORE=""
+MODE="dry-run"
+case "$#" in
+  0) ;;
+  1)
+    if [ "$1" = "--execute" ]; then
+      MODE="--execute"
+    else
+      STORE="$1"
+    fi
+    ;;
+  2)
+    STORE="$1"
+    MODE="$2"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac
+
+if [ "${MODE}" != "dry-run" ] && [ "${MODE}" != "--execute" ]; then
+  echo "unsupported mode: ${MODE}" >&2
+  usage
+  exit 2
+fi
+
 if [ -z "${STORE}" ]; then
   if [ -z "${MASC_BASE_PATH:-}" ]; then
-    echo "usage: $0 <store-root> [--execute]" >&2
-    echo "       (or set MASC_BASE_PATH and omit <store-root>)" >&2
+    usage
     exit 2
   fi
   STORE="$(dirname "${MASC_BASE_PATH}")/.masc-ide"
 fi
 
-MODE="${2:-dry-run}"
+STORE="${STORE%/}"
+if [ -z "${STORE}" ] || [ "$(basename "${STORE}")" != ".masc-ide" ]; then
+  echo "refusing non-.masc-ide store target: ${STORE:-<empty>}" >&2
+  exit 2
+fi
+
+if [ -L "${STORE}" ]; then
+  echo "refusing symlink store target: ${STORE}" >&2
+  exit 2
+fi
 
 if [ ! -d "${STORE}" ]; then
   echo "store not found: ${STORE}" >&2
@@ -31,6 +70,11 @@ fi
 
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ARCHIVE="${STORE%/}-pre-cut-${STAMP}.tar.gz"
+
+if [ -e "${ARCHIVE}" ]; then
+  echo "archive already exists: ${ARCHIVE}" >&2
+  exit 1
+fi
 
 echo "== RFC-0378 ide store cut (${MODE}) =="
 echo "store:    ${STORE}"
@@ -50,6 +94,7 @@ if [ "${MODE}" != "--execute" ]; then
 fi
 
 tar -czf "${ARCHIVE}" -C "$(dirname "${STORE}")" "$(basename "${STORE}")"
+tar -tzf "${ARCHIVE}" >/dev/null
 echo "archived: ${ARCHIVE} ($(du -sh "${ARCHIVE}" | cut -f1))"
 rm -rf "${STORE}"
 echo "deleted:  ${STORE}"

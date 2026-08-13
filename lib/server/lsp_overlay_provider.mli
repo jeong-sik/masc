@@ -54,4 +54,3 @@ val code_actions :
 val folding_ranges : base_dir:string -> codebase:string option -> file_path:string -> Yojson.Safe.t list
 (** Generate FoldingRange[] for consecutive annotation blocks.
     Used by textDocument/foldingRange. *)
-

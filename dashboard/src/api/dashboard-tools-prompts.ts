@@ -571,6 +571,9 @@ export interface DashboardKeeperEventQueueHealth {
 
 export interface DashboardFullHealthResponse {
   health_detail?: string
+  overall_status?: string | null
+  operator_action_required?: boolean | null
+  operator_action_reasons?: string[]
   schedule_runner?: DashboardScheduleRunnerStatus | null
   keeper_event_queue?: DashboardKeeperEventQueueHealth | null
 }
@@ -804,6 +807,12 @@ export function normalizeFullHealthResponse(
   const keeperEventQueue = normalizeKeeperEventQueueHealth(raw.keeper_event_queue)
   return {
     ...raw,
+    overall_status: typeof raw.overall_status === 'string' ? raw.overall_status : null,
+    operator_action_required:
+      typeof raw.operator_action_required === 'boolean' ? raw.operator_action_required : null,
+    operator_action_reasons: Array.isArray(raw.operator_action_reasons)
+      ? raw.operator_action_reasons.filter((value): value is string => typeof value === 'string')
+      : [],
     ...(scheduleRunner ? { schedule_runner: scheduleRunner } : {}),
     ...(keeperEventQueue ? { keeper_event_queue: keeperEventQueue } : {}),
   }

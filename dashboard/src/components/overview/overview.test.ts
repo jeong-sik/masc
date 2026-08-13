@@ -32,6 +32,10 @@ import type {
 } from '../../api/dashboard'
 import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolution } from '../../store'
 import type { Goal } from '../../types/core'
+import {
+  LIVE_OVERVIEW_COMPOSITE_HEALTH,
+  LIVE_OVERVIEW_HEALTH_CONTRADICTION,
+} from '../../testing/dashboard-composite-health-fixture'
 
 const overviewMocks = vi.hoisted(() => ({
   scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
@@ -1069,6 +1073,41 @@ describe('Overview prototype surface', () => {
 
     keepers.value = []
     shellRuntimeResolution.value = null
+  })
+
+  it('shows the live 8-roster/7-executable composite health contradiction consistently', async () => {
+    const previousKeepers = keepers.value
+    const previousResolution = shellRuntimeResolution.value
+    const previousFetch = global.fetch
+    keepers.value = Array.from({ length: 8 }, (_, index) => makeKeeper({ name: `keeper-${index + 1}` }))
+    shellRuntimeResolution.value = {
+      fleet_safety: LIVE_OVERVIEW_HEALTH_CONTRADICTION,
+    } as never
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.includes('/health?full=1') ? LIVE_OVERVIEW_COMPOSITE_HEALTH : {}
+      return Promise.resolve(new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+    }))
+
+    try {
+      const { container } = render(h(Overview, null))
+
+      await waitFor(() => {
+        expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('7 / 8')
+        expect(container.querySelector('[data-testid="kpi-att"] .ov-kpi-v')?.textContent).toBe('1')
+        expect(container.querySelector('[data-testid="overview-attention"] .ov-count')?.textContent).toBe('1')
+        expect(container.querySelector('[data-testid="overview-attention"]')?.textContent).not.toContain('모든 keeper 정상')
+        expect(container.querySelector('[data-testid="attention-row-runtime-health"]')?.textContent).toContain('Runtime health degraded')
+        expect(container.querySelector('[data-testid="attention-row-runtime-health"]')?.textContent).toContain('keeper_reaction_ledger')
+      })
+    } finally {
+      keepers.value = previousKeepers
+      shellRuntimeResolution.value = previousResolution
+      if (previousFetch) vi.stubGlobal('fetch', previousFetch)
+    }
   })
 
   it('shows no keeper execution count when the fleet projection is missing', () => {

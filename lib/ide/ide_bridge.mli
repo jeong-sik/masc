@@ -97,6 +97,7 @@ val ingest_turn_event :
 val ingest_tool_event_from_hook :
   base_path:string ->
   partition:Ide_paths.partition ->
+  file_path:string option ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->

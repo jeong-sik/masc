@@ -43,6 +43,7 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
     Agent_observation.emit_tool_event
       { base_path = base_dir
       ; partition = Agent_observation.Legacy_default
+      ; file_path = None
       ; tool_name = "keeper_ide_annotate"
       ; keeper_id = "keeper-alpha"
       ; turn_id = "turn-9"
@@ -253,6 +254,7 @@ let test_snapshot_reset_clears_accumulated_observations () =
   Agent_observation.emit_tool_event
     { base_path = "/tmp/masc"
     ; partition = Agent_observation.Legacy_default
+    ; file_path = None
     ; tool_name = "execute"
     ; keeper_id = "keeper-snapshot"
     ; turn_id = "turn-1"

@@ -586,6 +586,7 @@ let test_hook_cursors_broadcast_ws_invalidation () =
         Ide_bridge.ingest_tool_event_from_hook
           ~base_path
           ~partition:Ide_paths.Legacy_default
+          ~file_path:(Some "lib/a.ml")
           ~tool_name:"keeper_ide_annotate"
           ~keeper_id:"alice"
           ~turn_id:"turn-7"

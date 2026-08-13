@@ -102,6 +102,12 @@ let json_string key json =
   Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_string
 ;;
 
+let json_field_is_null key json =
+  match Yojson.Safe.Util.member key json with
+  | `Null -> true
+  | _ -> false
+;;
+
 let json_intlit key json =
   match Yojson.Safe.Util.member key json with
   | `Int i -> Int64.of_int i
@@ -198,6 +204,70 @@ let test_list_events_merges_kinds_newest_first () =
       (List.map (json_intlit "timestamp_ms") events))
 ;;
 
+(* masc#28582: the row carries the path the partition resolver named, not the
+   argument the keeper typed. The two differ whenever the keeper addressed a
+   file through its sandbox — which is the normal case — and a consumer that
+   joins on [file_path] can only match one of them. Both the event and the
+   cursor derived from the same call have to carry the resolved one. *)
+let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
+  with_temp_dir (fun base_dir ->
+    let raw_argument =
+      "/base/.masc/playground/analyst/repos/masc/lib/keeper/keeper_approval_queue.ml"
+    in
+    let resolved = "lib/keeper/keeper_approval_queue.ml" in
+    let input =
+      `Assoc
+        [ "path", `String raw_argument
+        ; "line_start", `Int 5
+        ; "focus_mode", `String "editing"
+        ]
+    in
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
+      ~file_path:(Some resolved)
+      ~tool_name:"edit_file"
+      ~keeper_id:"analyst"
+      ~turn_id:"turn-3"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:4.0
+      ~output_text:"edited"
+      ~input;
+    (match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool () with
+     | [ event ] ->
+       check string "event carries the resolved path" resolved (json_string "file_path" event)
+     | events -> Alcotest.failf "expected one tool event, got %d" (List.length events));
+    match Ide_bridge.list_cursors ~base_path:base_dir () with
+    | [ cursor ] ->
+      check string "cursor carries the same resolved path" resolved (json_string "file_path" cursor)
+    | cursors -> Alcotest.failf "expected one cursor, got %d" (List.length cursors))
+;;
+
+(* A tool call that names no file produces no cursor and stores no document:
+   the row is a keeper-timeline fact. *)
+let test_pathless_hook_stores_no_document () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.ingest_tool_event_from_hook
+      ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
+      ~file_path:None
+      ~tool_name:"masc_broadcast"
+      ~keeper_id:"analyst"
+      ~turn_id:"turn-4"
+      ~outcome:"ok"
+      ~typed_outcome_str:"progress"
+      ~duration_ms:1.0
+      ~output_text:"sent"
+      ~input:(`Assoc [ "message", `String "hello"; "focus_mode", `String "editing" ]);
+    (match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool () with
+     | [ event ] ->
+       check bool "no document on the row" true (json_field_is_null "file_path" event)
+     | events -> Alcotest.failf "expected one tool event, got %d" (List.length events));
+    check int "no cursor" 0 (List.length (Ide_bridge.list_cursors ~base_path:base_dir ()))
+  )
+;;
+
 let test_cursor_from_hook_uses_real_file_and_line () =
   with_temp_dir (fun base_dir ->
     let input =
@@ -212,6 +282,7 @@ let test_cursor_from_hook_uses_real_file_and_line () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
+      ~file_path:(Some "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -246,6 +317,7 @@ let test_cursor_from_hook_notifies_after_persist () =
         Ide_bridge.ingest_tool_event_from_hook
           ~base_path:base_dir
           ~partition:Ide_paths.Legacy_default
+          ~file_path:(Some "lib/test.ml")
           ~tool_name:"keeper_ide_annotate"
           ~keeper_id:"k1"
           ~turn_id:"turn-7"
@@ -285,6 +357,7 @@ let test_cursor_notifications_reraise_cancellation () =
             Ide_bridge.ingest_tool_event_from_hook
               ~base_path:base_dir
               ~partition:Ide_paths.Legacy_default
+              ~file_path:(Some "lib/test.ml")
               ~tool_name:"keeper_ide_annotate"
               ~keeper_id:"k1"
               ~turn_id:"turn-7"
@@ -320,6 +393,7 @@ let test_cursor_from_hook_skips_missing_line () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
+      ~file_path:(Some "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -340,6 +414,7 @@ let test_cursor_from_hook_skips_missing_focus_mode () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
+      ~file_path:(Some "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -352,167 +427,10 @@ let test_cursor_from_hook_skips_missing_focus_mode () =
       (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
 ;;
 
-let test_hook_extracts_file_path_from_path_key () =
-  with_temp_dir (fun base_dir ->
-    let input = `Assoc [ "path", `String "lib/test.ml"; "content", `String "hello" ] in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_write"
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:100.0
-      ~output_text:"wrote 10 lines"
-      ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "tool_events.jsonl" in
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let fp = Yojson.Safe.Util.member "file_path" json in
-    check string "file_path" "lib/test.ml" (Yojson.Safe.Util.to_string fp))
-;;
 
-let test_hook_extracts_file_path_from_file_path_key () =
-  with_temp_dir (fun base_dir ->
-    let input = `Assoc [ "file_path", `String "src/main.ml" ] in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "tool_events.jsonl" in
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let fp = Yojson.Safe.Util.member "file_path" json in
-    check string "file_path" "src/main.ml" (Yojson.Safe.Util.to_string fp))
-;;
 
-let test_hook_and_cursor_share_path_priority () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc
-        [ "path", `String "lib/from-path.ml"
-        ; "file_path", `String "lib/from-file-path.ml"
-        ; "line", `Int 9
-        ; "focus_mode", `String "editing"
-        ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-9"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let events = Ide_bridge.list_events ~base_path:base_dir () in
-    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
-    match events, cursors with
-    | event :: _, [ cursor ] ->
-      check
-        string
-        "tool event path priority"
-        "lib/from-path.ml"
-        (json_string "file_path" event);
-      check
-        string
-        "cursor path priority"
-        "lib/from-path.ml"
-        (json_string "file_path" cursor)
-    | _ -> fail "expected one tool event and one cursor")
-;;
 
-let test_hook_and_cursor_share_blank_path_fallback () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc
-        [ "path", `String " "
-        ; "file_path", `String "lib/from-file-path.ml"
-        ; "line", `Int 9
-        ; "focus_mode", `String "editing"
-        ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-9"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let events = Ide_bridge.list_events ~base_path:base_dir () in
-    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
-    match events, cursors with
-    | event :: _, [ cursor ] ->
-      check
-        string
-        "tool event blank path fallback"
-        "lib/from-file-path.ml"
-        (json_string "file_path" event);
-      check
-        string
-        "cursor blank path fallback"
-        "lib/from-file-path.ml"
-        (json_string "file_path" cursor)
-    | _ -> fail "expected one tool event and one cursor")
-;;
 
-let test_hook_and_cursor_share_nested_arguments_path () =
-  with_temp_dir (fun base_dir ->
-    let input =
-      `Assoc
-        [ ( "arguments"
-          , `Assoc [ "file_path", `String "lib/from-arguments.ml" ] )
-        ; "line", `Int 9
-        ; "focus_mode", `String "editing"
-        ]
-    in
-    Ide_bridge.ingest_tool_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~tool_name:"fs_edit"
-      ~keeper_id:"k1"
-      ~turn_id:"turn-9"
-      ~outcome:"ok"
-      ~typed_outcome_str:"progress"
-      ~duration_ms:50.0
-      ~output_text:"edited"
-      ~input;
-    let events = Ide_bridge.list_events ~base_path:base_dir () in
-    let cursors = Ide_bridge.list_cursors ~base_path:base_dir () in
-    match events, cursors with
-    | event :: _, [ cursor ] ->
-      check
-        string
-        "tool event nested arguments path"
-        "lib/from-arguments.ml"
-        (json_string "file_path" event);
-      check
-        string
-        "cursor nested arguments path"
-        "lib/from-arguments.ml"
-        (json_string "file_path" cursor)
-    | _ -> fail "expected one tool event and one cursor")
-;;
 
 let test_hook_no_file_path () =
   with_temp_dir (fun base_dir ->
@@ -520,6 +438,7 @@ let test_hook_no_file_path () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
+      ~file_path:None
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -545,6 +464,7 @@ let test_hook_summary_truncation () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
+      ~file_path:None
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -569,6 +489,7 @@ let test_hook_typed_outcome_mapping () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
+      ~file_path:None
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -869,6 +790,7 @@ let test_partition_routes_tool_event_and_cursor_by_url () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:by_url
+      ~file_path:(Some "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-1"
@@ -919,6 +841,7 @@ let test_partition_legacy_default_isolated_from_by_url () =
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
+      ~file_path:(Some "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-1"
@@ -977,6 +900,16 @@ let () =
         ; test_case "drops oldest at capacity" `Quick test_queue_drop_oldest
         ; test_case "writer drains queue" `Quick test_queue_writer_drains
         ] )
+    ; ( "document identity"
+      , [ test_case
+            "row carries the resolved path, not the raw argument"
+            `Quick
+            test_hook_row_carries_the_resolved_path_not_the_raw_argument
+        ; test_case
+            "pathless call stores no document"
+            `Quick
+            test_pathless_hook_stores_no_document
+        ] )
     ; ( "cursor"
       , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line
         ; test_case
@@ -994,21 +927,7 @@ let () =
             test_cursor_from_hook_skips_missing_focus_mode
         ] )
     ; ( "hook_extract"
-      , [ test_case "file_path from path key" `Quick test_hook_extracts_file_path_from_path_key
-        ; test_case "file_path from file_path key" `Quick test_hook_extracts_file_path_from_file_path_key
-        ; test_case
-            "tool event and cursor share path priority"
-            `Quick
-            test_hook_and_cursor_share_path_priority
-        ; test_case
-            "tool event and cursor share blank path fallback"
-            `Quick
-            test_hook_and_cursor_share_blank_path_fallback
-        ; test_case
-            "tool event and cursor share nested arguments path"
-            `Quick
-            test_hook_and_cursor_share_nested_arguments_path
-        ; test_case "no file_path (execute)" `Quick test_hook_no_file_path
+      , [ test_case "no file_path (execute)" `Quick test_hook_no_file_path
         ; test_case "summary truncation" `Quick test_hook_summary_truncation
         ; test_case "typed_outcome mapping" `Quick test_hook_typed_outcome_mapping
         ] )

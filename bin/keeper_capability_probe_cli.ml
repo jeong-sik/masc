@@ -32,9 +32,23 @@ projected is reported and never dispatched: spending a turn on it would
 measure the projection policy, not the runtime.
 |}
 
+(* The second sentence exists because tool descriptions carry workflow
+   preconditions and the model obeys them over a vaguer prompt. [masc_board_vote]
+   reads "only after the post_id is visible from ... masc_board_list", so a
+   compliant model calls masc_board_list instead and the probe scores a miss --
+   35% of board-write attempts across the two deepseek runtimes.
+
+   Nothing here is executed: [probe_invocation] reads the ToolUse block's name
+   and discards the arguments, so an invented id measures the same thing a real
+   one does. Saying so is the whole fix; the earlier framing of this as a missing
+   precondition-resolution step assumed a dispatch that does not happen
+   (masc#28475). *)
 let default_prompt =
-  "Call the tool named {tool} exactly once, with any arguments that satisfy \
-   its schema. Reply with the tool call only — no explanation, no preamble."
+  "Call the tool named {tool} exactly once. Invent any argument values you need, \
+   including ids that look real — this is a capability check and the call is not \
+   executed, so you do not need to look anything up first, even if the tool's \
+   description says to. Reply with the tool call only — no explanation, no \
+   preamble."
 
 type config =
   { runtimes : string list

@@ -17,7 +17,7 @@ let annotations_file_for ~base_dir partition =
   Filename.concat (partition_dir ~base_dir partition) "annotations.jsonl"
 ;;
 
-let store_file ~base_dir ?(partition = Ide_paths.Legacy_default) () =
+let store_file ~base_dir ~partition () =
   annotations_file_for ~base_dir partition
 ;;
 
@@ -36,7 +36,7 @@ let compact_seq = ref 0
    filesystem SSOT instead of carrying a local recursive mkdir copy. *)
 let ensure_dir = Fs_compat.mkdir_p
 
-let ensure_store ~base_dir ?(partition = Ide_paths.Legacy_default) () =
+let ensure_store ~base_dir ~partition () =
   ensure_dir (partition_dir ~base_dir partition)
 ;;
 
@@ -319,7 +319,7 @@ let create
     Ok annotation
 ;;
 
-let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =
+let list ~base_dir ~partition ~filter () =
   ensure_store ~base_dir ~partition ();
   let all : annotation list = load_all_partition ~base_dir partition in
   let by_file =
@@ -357,7 +357,7 @@ let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 ;;
 
-let compact ~base_dir ?(partition = Ide_paths.Legacy_default) () =
+let compact ~base_dir ~partition () =
   ensure_store ~base_dir ~partition ();
   let path = annotations_file_for ~base_dir partition in
   File_lock_eio.with_lock path (fun () ->
@@ -369,7 +369,7 @@ let compact ~base_dir ?(partition = Ide_paths.Legacy_default) () =
     Fs_compat.append_jsonl path (compact_end_json id snapshot))
 ;;
 
-let delete ~base_dir ?(partition = Ide_paths.Legacy_default) ~id ~keeper_id ?expected_version () =
+let delete ~base_dir ~partition ~id ~keeper_id ?expected_version () =
   ensure_store ~base_dir ~partition ();
   let all = load_all_partition ~base_dir partition in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with

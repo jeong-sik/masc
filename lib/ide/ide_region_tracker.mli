@@ -37,7 +37,7 @@ val extract_region_from_full_file :
 
 val regions_file
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> partition:Ide_paths.partition
   -> unit
   -> string
 (** Append-only region store path under the chosen
@@ -66,7 +66,7 @@ val ingest_tool_call
 
 val read_regions
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> partition:Ide_paths.partition
   -> ?file_path:string
   -> unit
   -> code_region list

@@ -70,7 +70,8 @@ let load_regions_from path =
   |> List.rev
 ;;
 
-let load_regions base_dir = load_regions_from (Region.regions_file ~base_dir ())
+let load_regions base_dir =
+  load_regions_from (Region.regions_file ~base_dir ~partition:Ide_paths.Legacy_default ())
 
 let contains ~needle haystack =
   let needle_len = String.length needle in
@@ -152,7 +153,7 @@ let test_create_lists_route_context () =
         ; task_id = None
         }
       in
-      (match Store.list ~base_dir ~filter () with
+      (match Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter () with
        | [ listed ] ->
          check string "id" created.id listed.id;
          check yojson "listed references"
@@ -245,7 +246,7 @@ let test_region_tracker_writes_fixed_regions_file () =
               ; "content", `String "let x = 1\n"
               ] )
         ]);
-    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ()));
+    check bool "fixed regions file exists" true (Sys.file_exists (Region.regions_file ~base_dir ~partition:Ide_paths.Legacy_default ()));
     match load_regions base_dir with
     | [ region ] ->
       check string "file path" "lib/a.ml" region.Types.file_path;
@@ -301,7 +302,7 @@ let test_create_by_url_isolates_from_legacy () =
         ~filter:(make_filter ())
         ()
     in
-    let orphan = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let orphan = Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) () in
     check int "by-url count" 1 (List.length by_url);
     check int "orphan is empty" 0 (List.length orphan))
 ;;
@@ -366,7 +367,7 @@ let test_legacy_default_is_unchanged () =
         "annotations.jsonl"
     in
     check bool "orphan file exists" true (Sys.file_exists legacy_path);
-    let orphan = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let orphan = Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) () in
     check int "orphan count" 1 (List.length orphan))
 ;;
 
@@ -421,7 +422,7 @@ let test_region_append_by_url_isolates_from_legacy () =
     in
     Region.append_region ~base_dir ~partition:(Ide_paths.By_url slug) region;
     let by_url_path = Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) () in
-    let legacy_path = Region.regions_file ~base_dir () in
+    let legacy_path = Region.regions_file ~base_dir ~partition:Ide_paths.Legacy_default () in
     check bool "by-url regions exists" true (Sys.file_exists by_url_path);
     check bool "orphan regions absent" false (Sys.file_exists legacy_path))
 ;;
@@ -516,7 +517,7 @@ let test_ingest_no_double_write () =
     let by_url_path =
       Region.regions_file ~base_dir ~partition:(Ide_paths.By_url slug) ()
     in
-    let legacy_path = Region.regions_file ~base_dir () in
+    let legacy_path = Region.regions_file ~base_dir ~partition:Ide_paths.Legacy_default () in
     check int "by-url has one region" 1 (count_lines by_url_path);
     check int "orphan has zero regions" 0 (count_lines legacy_path))
 ;;
@@ -746,11 +747,11 @@ let test_compact_preserves_annotations () =
     in
     let a1 = mk "first" in
     let a2 = mk "second" in
-    Store.compact ~base_dir ();
+    Store.compact ~base_dir ~partition:Ide_paths.Legacy_default ();
     let filter =
       { Types.file_path = None; keeper_id = None; goal_id = None; task_id = None }
     in
-    let listed = Store.list ~base_dir ~filter () in
+    let listed = Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter () in
     check int "compact preserves count" 2 (List.length listed);
     let ids =
       List.map (fun (a : Types.annotation) -> a.id) listed
@@ -795,7 +796,7 @@ let make_alice_annotation base_dir =
 let test_delete_rejects_other_keeper () =
   with_temp_dir (fun base_dir ->
     let created = make_alice_annotation base_dir in
-    match Store.delete ~base_dir ~id:created.id ~keeper_id:"bob" () with
+    match Store.delete ~base_dir ~partition:Ide_paths.Legacy_default ~id:created.id ~keeper_id:"bob" () with
     | Ok () -> fail "bob must not delete alice's annotation"
     | Error _ -> ())
 ;;
@@ -803,7 +804,7 @@ let test_delete_rejects_other_keeper () =
 let test_delete_allows_owner () =
   with_temp_dir (fun base_dir ->
     let created = make_alice_annotation base_dir in
-    match Store.delete ~base_dir ~id:created.id ~keeper_id:"alice" () with
+    match Store.delete ~base_dir ~partition:Ide_paths.Legacy_default ~id:created.id ~keeper_id:"alice" () with
     | Ok () -> ()
     | Error msg -> failf "owner delete failed: %s" msg)
 ;;
@@ -840,10 +841,10 @@ let test_list_excludes_soft_deleted_without_compaction () =
         create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
     in
     let victim = List.hd notes in
-    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~partition:Ide_paths.Legacy_default ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) () in
     check int "list excludes the tombstoned annotation" 5 (List.length listed);
     check
       bool
@@ -856,10 +857,10 @@ let test_list_keeps_sibling_after_delete () =
   with_temp_dir (fun base_dir ->
     let victim = create_note ~base_dir ~keeper_id:"alice" ~content:"to delete" () in
     let survivor = create_note ~base_dir ~keeper_id:"alice" ~content:"to keep" () in
-    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~partition:Ide_paths.Legacy_default ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) () in
     check
       bool
       "deleted sibling absent"
@@ -875,7 +876,7 @@ let test_list_keeps_sibling_after_delete () =
 let test_list_returns_live_annotation () =
   with_temp_dir (fun base_dir ->
     let note = create_note ~base_dir ~keeper_id:"alice" ~content:"live" () in
-    match Store.list ~base_dir ~filter:(make_filter ()) () with
+    match Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) () with
     | [ only ] -> check string "live annotation returned unchanged" note.id only.id
     | rows -> failf "expected one live annotation, got %d" (List.length rows))
 ;;
@@ -887,10 +888,10 @@ let test_compact_drops_tombstoned () =
         create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
     in
     let victim = List.hd notes in
-    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+    (match Store.delete ~base_dir ~partition:Ide_paths.Legacy_default ~id:victim.id ~keeper_id:"alice" () with
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
-    Store.compact ~base_dir ();
+    Store.compact ~base_dir ~partition:Ide_paths.Legacy_default ();
     let path =
       Filename.concat
         (Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default)
@@ -908,7 +909,7 @@ let test_compact_drops_tombstoned () =
         path
     in
     check int "compact writes one end marker" 1 compact_end_markers;
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) () in
     check int "list count after compact" 5 (List.length listed);
     check
       bool
@@ -939,7 +940,7 @@ let make_cas_annotation base_dir =
    count stays exact without a partition-wide writer lock. *)
 let test_concurrent_create_compact_no_loss () =
   with_temp_dir (fun base_dir ->
-    Store.ensure_store ~base_dir ();
+    Store.ensure_store ~base_dir ~partition:Ide_paths.Legacy_default ();
     let n_writers = 4 in
     let per_writer = 25 in
     let writers =
@@ -965,12 +966,12 @@ let test_concurrent_create_compact_no_loss () =
     let compactor =
       Domain.spawn (fun () ->
         for _ = 1 to 50 do
-          Store.compact ~base_dir ()
+          Store.compact ~base_dir ~partition:Ide_paths.Legacy_default ()
         done)
     in
     List.iter Domain.join writers;
     Domain.join compactor;
-    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    let listed = Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) () in
     check
       int
       "no annotation lost to concurrent compaction"
@@ -985,6 +986,7 @@ let test_cas_rejects_version_mismatch () =
     (match
        Store.delete
          ~base_dir
+         ~partition:Ide_paths.Legacy_default
          ~id:created.id
          ~keeper_id:"alice"
          ~expected_version:wrong_version
@@ -996,13 +998,14 @@ let test_cas_rejects_version_mismatch () =
     let still_there =
       List.exists
         (fun (a : Types.annotation) -> a.id = created.id)
-        (Store.list ~base_dir ~filter:(make_filter ()) ())
+        (Store.list ~base_dir ~partition:Ide_paths.Legacy_default ~filter:(make_filter ()) ())
     in
     check bool "annotation survives rejected CAS delete" true still_there;
     (* The correct version deletes. *)
     match
       Store.delete
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~id:created.id
         ~keeper_id:"alice"
         ~expected_version:created.updated_at_ms
@@ -1016,7 +1019,7 @@ let test_cas_absent_version_is_legacy () =
   with_temp_dir (fun base_dir ->
     let created = make_cas_annotation base_dir in
     (* No expected_version → legacy delete-by-id contract. *)
-    match Store.delete ~base_dir ~id:created.id ~keeper_id:"alice" () with
+    match Store.delete ~base_dir ~partition:Ide_paths.Legacy_default ~id:created.id ~keeper_id:"alice" () with
     | Ok () -> ()
     | Error msg -> failf "legacy delete without version must succeed: %s" msg)
 ;;

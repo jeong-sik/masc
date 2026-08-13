@@ -105,7 +105,7 @@ let extract_region_from_full_file ~keeper_id ~file_path ~turn ~tool_name ~conten
 let is_file_write_tool name =
   name = "write_file" || name = "edit_file" || name = "apply_patch"
 
-let regions_file ~base_dir ?(partition = Ide_paths.Legacy_default) () =
+let regions_file ~base_dir ~partition () =
   Filename.concat (Ide_paths.partition_store_dir ~base_dir partition) "regions.jsonl"
 
 let rec ensure_dir path =
@@ -140,7 +140,7 @@ let load_regions_from_path ?file_path path =
     |> List.rev
 
 
-let read_regions ~base_dir ?(partition = Ide_paths.Legacy_default) ?file_path () =
+let read_regions ~base_dir ~partition ?file_path () =
   load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
 
 let ingest_tool_call ~base_dir ~partition ~keeper_id ~turn json =

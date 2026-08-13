@@ -162,6 +162,10 @@ val record_assistant_block
   -> block_index:int
   -> Types.content_block
   -> (unit, Error.t) result
+(** Persist observable assistant blocks verbatim. Thinking,
+    ReasoningDetails, and RedactedThinking persist typed metadata with
+    [content = null]; hidden reasoning bytes and signatures never cross the
+    raw-trace writer boundary. *)
 
 val record_tool_execution_started
   :  active_run

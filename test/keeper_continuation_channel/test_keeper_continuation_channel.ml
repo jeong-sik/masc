@@ -3,7 +3,8 @@
    Covers the closed-variant contract:
      - codec round-trips for every constructor,
      - fail-closed parsing (unknown kind / missing or malformed field / legacy alias -> Error),
-     - the routing helpers (is_routable, kind_label, same_route). *)
+     - the routing helpers (is_routable, kind_label, same_route,
+       same_conversation). *)
 
 open Keeper_continuation_channel
 
@@ -284,6 +285,111 @@ let test_same_route () =
   (* two Unrouted values never share a route (no destination to share) *)
   assert (not (same_route (unrouted "a") (unrouted "a")))
 
+(* RFC-0377: [same_conversation] batches pending Connector_attention
+   stimuli by "same channel/thread location", deliberately looser than
+   [same_route] (which requires the full per-message coordinate, including
+   [reply_to_message_id]/[thread_ts], to match). *)
+let test_same_conversation () =
+  (* same location, differing per-message coordinates -> same conversation
+     (this is the entire point: two pending ambient messages never share a
+     [reply_to_message_id], so [same_route] alone could never batch them). *)
+  assert (
+    same_conversation
+      (discord_channel
+         ~guild_id:(Some "g")
+         ~channel_id:"c"
+         ~parent_channel_id:(Some "p")
+         ~thread_id:(Some "t")
+         ~reply_to_message_id:"message-1"
+         ~user_id:"user-a"
+         ())
+      (discord_channel
+         ~guild_id:(Some "g")
+         ~channel_id:"c"
+         ~parent_channel_id:None
+         ~thread_id:None
+         ~reply_to_message_id:"message-2"
+         ~user_id:"user-b"
+         ()));
+  (* P2-3: Discord channel ids are Discord-global-unique snowflakes, so
+     [guild_id] is redundant with [channel_id], not an additional
+     precision — None vs Some for the same [channel_id] must still be the
+     same conversation. *)
+  assert (
+    same_conversation
+      (discord_channel
+         ~guild_id:None
+         ~channel_id:"c"
+         ~parent_channel_id:None
+         ~thread_id:None
+         ~user_id:"user-a"
+         ())
+      (discord_channel
+         ~guild_id:(Some "some-guild")
+         ~channel_id:"c"
+         ~parent_channel_id:None
+         ~thread_id:None
+         ~user_id:"user-b"
+         ()));
+  (* different channel -> different conversation *)
+  assert (
+    not
+      (same_conversation
+         (discord_channel
+            ~guild_id:(Some "g")
+            ~channel_id:"c1"
+            ~parent_channel_id:None
+            ~thread_id:None
+            ~user_id:"u"
+            ())
+         (discord_channel
+            ~guild_id:(Some "g")
+            ~channel_id:"c2"
+            ~parent_channel_id:None
+            ~thread_id:None
+            ~user_id:"u"
+            ())));
+  (* Slack: same channel, differing per-message thread_ts/team_id/user_id ->
+     same conversation (channel_id alone is the coordinate, matching the
+     existing [slack_conversation_id] precedent). *)
+  assert (
+    same_conversation
+      (slack_channel
+         ~team_id:(Some "team-1")
+         ~channel_id:"general"
+         ~thread_ts:(Some "1.000001")
+         ~user_id:"user-a")
+      (slack_channel
+         ~team_id:None
+         ~channel_id:"general"
+         ~thread_ts:(Some "2.000002")
+         ~user_id:"user-b"));
+  assert (
+    not
+      (same_conversation
+         (slack_channel
+            ~team_id:(Some "team-1")
+            ~channel_id:"general"
+            ~thread_ts:None
+            ~user_id:"u")
+         (slack_channel
+            ~team_id:(Some "team-1")
+            ~channel_id:"random"
+            ~thread_ts:None
+            ~user_id:"u")));
+  (* Dashboard: thread_id is the whole coordinate, no per-message field to
+     strip. *)
+  assert (same_conversation (dashboard_channel "t1") (dashboard_channel "t1"));
+  assert (not (same_conversation (dashboard_channel "t1") (dashboard_channel "t2")));
+  (* different constructor -> never the same conversation *)
+  assert (
+    not
+      (same_conversation
+         (dashboard_channel "t")
+         (slack_channel ~team_id:None ~channel_id:"c" ~thread_ts:None ~user_id:"u")));
+  (* two Unrouted values never share a conversation, matching [same_route] *)
+  assert (not (same_conversation (unrouted "a") (unrouted "a")))
+
 let test_discord_thread_parent_preserves_thread_target () =
   let channel =
     discord_channel
@@ -325,5 +431,6 @@ let () =
   test_is_routable ();
   test_kind_label ();
   test_same_route ();
+  test_same_conversation ();
   test_discord_thread_parent_preserves_thread_target ();
   print_endline "Keeper_continuation_channel: all tests passed"

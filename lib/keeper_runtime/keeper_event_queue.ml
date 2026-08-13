@@ -362,6 +362,18 @@ let is_board_signal = function
   | Task_cancelled _ ->
     false
 
+(* RFC-0377: the batch-intake predicate needs the routed channel without
+   repeating the payload match at every call site. Exhaustive on purpose,
+   like [is_board_signal] above: a new payload kind must decide here at
+   compile time whether it carries a conversation channel. *)
+let connector_attention_channel = function
+  | Connector_attention { channel; _ } -> Some channel
+  | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+  | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
+  | Goal_assigned _ | Goal_reconciliation_ready _
+  | Completion_authority_rejected _ | Task_cancelled _ ->
+    None
+
 let drain_board_all (queue : t) : stimulus list * t =
   let board, rest =
     List.partition (fun s -> is_board_signal s.payload) (to_list queue)

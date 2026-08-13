@@ -52,6 +52,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_event_queue_state.pending_selection option;
+  consumed_selections : Keeper_event_queue_state.pending_selection list;
   event_queue_intake_error : Stimulus_intake.event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -340,6 +341,59 @@ let failed_source_disposition
            | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail)))
 ;;
 
+(* RFC-0377 batch disposition: the queue action a turn outcome implies for
+   every stimulus admitted into that turn (the primary plus any
+   Connector_attention companions), extracted as a pure function of
+   [cycle_outcome] alone. Before this extraction the decision lived inline
+   in [run_keepalive_turn]'s closure, reachable only through the full Eio
+   ctx + durable-registry harness, so a regression from "ack the whole
+   batch" back to "ack only the primary" would still pass every existing
+   test (nothing exercised the decision directly — see
+   test_keeper_connector_attention_batch_disposition.ml). One turn always
+   produces one disposition applied uniformly to every admitted selection:
+   the outcome is a property of the turn, not of any individual stimulus. *)
+type batch_disposition =
+  | Batch_ack_completed of
+      { connector_attention_outcome : connector_attention_outcome }
+  | Batch_quarantine of { detail : string }
+  | Batch_defer of { reason : string }
+  | Batch_no_action
+
+let batch_disposition_of_cycle_outcome
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : batch_disposition
+  =
+  match cycle_outcome with
+  | Some (Cycle.Completed completion) ->
+    Batch_ack_completed
+      { connector_attention_outcome =
+          connector_attention_outcome_of_route completion.continuation_route
+      }
+  | Some (Cycle.Manual_compaction_applied _) ->
+    Batch_ack_completed { connector_attention_outcome = Attention_ignored }
+  | Some (Cycle.Failed { failure; _ }) ->
+    (match failed_source_disposition failure with
+     | Quarantine_source { detail } -> Batch_quarantine { detail }
+     | Defer_to_queue_tail -> Batch_defer { reason = "transient_turn_failure" }
+     | Preserve_for_deferred_runtime | Pause_keeper_for_integrity _ ->
+       Batch_no_action)
+  | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
+    Batch_quarantine { detail = Keeper_manual_compaction.failure_to_string failure }
+  | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
+    Batch_quarantine
+      { detail =
+          Keeper_post_turn.compaction_recovery_error_to_string
+            (Keeper_post_turn.No_compaction no_compaction)
+      }
+  | Some
+      ( Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None ->
+    Batch_no_action
+;;
+
 
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
@@ -378,6 +432,19 @@ let run_keepalive_unified_turn
       : Keeper_event_queue_state.pending_selection option ref
       =
       ref None
+    in
+    (* RFC-0377: [pending_selection] above stays the single primary entry
+       (transient-board-withdrawal reporting and pre-dispatch validation are
+       unchanged by batching). [consumed_selections] is the full admitted
+       batch — [[]], a singleton mirroring [pending_selection], or the
+       primary plus every same-conversation Connector_attention companion.
+       Turn completion/failure disposition acks or defers every entry in
+       this list, not just the primary, so a companion is never left
+       durably stuck once its turn has already run. *)
+    let consumed_selections
+      : Keeper_event_queue_state.pending_selection list ref
+      =
+      ref []
     in
     let cycle_outcome_ref = ref None in
     let selection_acked = ref false in
@@ -432,6 +499,7 @@ let run_keepalive_unified_turn
       in
       consumed_stimuli := event_intake.consumed_stimuli;
       pending_selection := event_intake.pending_selection;
+      consumed_selections := event_intake.consumed_selections;
       let selected_source_authority () =
         match
           Keeper_meta_store.read_effective_meta
@@ -444,13 +512,28 @@ let run_keepalive_unified_turn
         | Ok (Some current) when current.paused ->
           Error "keeper paused before dispatch"
         | Ok (Some _) ->
-          (match !pending_selection with
-           | None -> Ok ()
-           | Some selection ->
-             Keeper_registry_event_queue.validate_pending_selection_result
-               ~base_path:ctx.config.base_path
-               meta_after_triage.name
-               ~selection)
+          (* Batch case: validate every admitted selection, not only the
+             primary, so a companion whose durable entry changed out from
+             under this turn is caught before dispatch instead of only at
+             ack time. Falls back to the pre-batch single [pending_selection]
+             when nothing was consumed as a batch (e.g. the transient-board
+             withdrawal case, which never populates [consumed_selections]). *)
+          let selections_to_validate =
+            match !consumed_selections with
+            | [] -> Option.to_list !pending_selection
+            | (_ :: _) as selections -> selections
+          in
+          List.fold_left
+            (fun result selection ->
+               match result with
+               | Error _ as error -> error
+               | Ok () ->
+                 Keeper_registry_event_queue.validate_pending_selection_result
+                   ~base_path:ctx.config.base_path
+                   meta_after_triage.name
+                   ~selection)
+            (Ok ())
+            selections_to_validate
       in
       (match
          Keeper_turn_dispatch_authority.install
@@ -814,11 +897,21 @@ let run_keepalive_unified_turn
            | Cycle.Manual_compaction_not_applied _ )
        | None ->
          ());
-      (match !pending_selection with
-       | None -> ()
-       | Some selection ->
-           let remove_completed_selection ~connector_attention_outcome =
-             if terminalize_completed_selection ~selection
+      (* RFC-0377: every entry admitted into this turn (the primary plus any
+         Connector_attention batch companions) shares the turn's outcome. A
+         turn completion acks all of them; a turn failure applies the same
+         quarantine/defer/preserve disposition to all of them, so a
+         companion is never silently left un-acked while the primary is. *)
+      (match !consumed_selections with
+       | [] -> ()
+       | (_ :: _) as selections ->
+           let remove_completed_selections ~connector_attention_outcome =
+             let all_acked =
+               List.for_all
+                 (fun selection -> terminalize_completed_selection ~selection)
+                 selections
+             in
+             if all_acked
              then (
                let event_ids =
                  connector_attention_event_ids_of_stimuli !consumed_stimuli
@@ -835,44 +928,18 @@ let run_keepalive_unified_turn
                    ~keeper_name:meta_after_triage.name
                    event_ids)
            in
-           match !cycle_outcome_ref with
-           | Some (Cycle.Completed completion) ->
-             remove_completed_selection
-               ~connector_attention_outcome:
-                 (connector_attention_outcome_of_route
-                    completion.continuation_route)
-           | Some (Cycle.Manual_compaction_applied _) ->
-             remove_completed_selection
-               ~connector_attention_outcome:Attention_ignored
-           | Some (Cycle.Failed { failure; _ }) ->
-             (match failed_source_disposition failure with
-                | Quarantine_source { detail } ->
-                  terminalize_failed_selection ~selection ~detail
-                | Defer_to_queue_tail ->
-                  defer_selection_to_queue_tail
-                    ~selection
-                    ~reason:"transient_turn_failure"
-                | Preserve_for_deferred_runtime
-                | Pause_keeper_for_integrity _ ->
-                  ())
-           | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
-             terminalize_failed_selection
-               ~selection
-               ~detail:(Keeper_manual_compaction.failure_to_string failure)
-           | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
-             terminalize_failed_selection
-               ~selection
-               ~detail:
-                 (Keeper_post_turn.compaction_recovery_error_to_string
-                    (Keeper_post_turn.No_compaction no_compaction))
-           | Some
-               ( Cycle.Checkpointed _
-               | Cycle.Input_required _
-               | Cycle.Cancelled _ ) ->
-             ()
-           | Some (Cycle.Skipped _) -> ()
-           | None ->
-             ());
+           match batch_disposition_of_cycle_outcome !cycle_outcome_ref with
+           | Batch_ack_completed { connector_attention_outcome } ->
+             remove_completed_selections ~connector_attention_outcome
+           | Batch_quarantine { detail } ->
+             List.iter
+               (fun selection -> terminalize_failed_selection ~selection ~detail)
+               selections
+           | Batch_defer { reason } ->
+             List.iter
+               (fun selection -> defer_selection_to_queue_tail ~selection ~reason)
+               selections
+           | Batch_no_action -> ());
       (let compaction_outcomes =
          match !cycle_outcome_ref with
          | Some outcome -> compaction_outcomes_of_cycle_outcome outcome

@@ -89,6 +89,7 @@ let observe_node_result
       ~output_text:(Tool_result.message result.result)
       ~success:(Tool_result.is_success result.result)
       ~duration_ms:(Tool_result.duration_ms result.result)
+      ~model:(Keeper_hooks_agent_core_types.current_keeper_model meta)
       ?agent_name:context.agent_name
       ?lane:context.lane
       ?tool_choice:context.tool_choice

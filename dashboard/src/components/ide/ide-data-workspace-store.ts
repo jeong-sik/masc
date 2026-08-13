@@ -474,7 +474,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // IDE observations have one address: the server-issued codebase slug.
     // A keeper-only workspace still loads its tree, but does not invent an
     // observation store when no repository is selected.
-    const ideOpts = { keeper: keeperParam, repoId, codebase, signal }
+    const ideOpts = { keeper: keeperParam, codebase, signal }
     publishLspScope({ repoId: repoId ?? null, codebase, keeper: keeperParam ?? null })
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath: requestedFilePath,

@@ -772,7 +772,6 @@ describe('workspace fetch diagnostics', () => {
           'lib/scheduler/round.ml',
           expect.objectContaining({
             keeper: 'sangsu',
-            repoId: null,
             codebase: null,
           }),
         )

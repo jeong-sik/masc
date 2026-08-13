@@ -233,3 +233,13 @@ val run_heartbeat_loop :
   proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
   wakeup:bool Atomic.t -> cadence_sleeping:bool Atomic.t -> unit
 
+module For_testing : sig
+  (** Deferred runtime lane hints have nothing to do with continuation
+      delivery; they only shared this module with it. The implementation and
+      its live caller both remain, so the export stays too. *)
+  val consume_deferred_runtime_lane_hint :
+    Keeper_turn_driver.deferred_runtime_lane option ref ->
+    Keeper_turn_driver.deferred_runtime_lane ->
+    bool
+end
+

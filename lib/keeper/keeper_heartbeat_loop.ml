@@ -1340,3 +1340,7 @@ let run_heartbeat_loop
   in
   loop ()
 ;;
+
+module For_testing = struct
+  let consume_deferred_runtime_lane_hint = consume_deferred_runtime_lane_hint
+end

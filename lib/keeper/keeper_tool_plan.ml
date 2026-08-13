@@ -279,6 +279,14 @@ module Run_id = struct
   let equal = Int.equal
 end
 
+module Composition_run_id = struct
+  type t = string
+
+  let fresh = Random_id.uuid_v7
+  let to_string value = value
+  let equal = String.equal
+end
+
 type json_type =
   | Null_type
   | Boolean_type

@@ -239,6 +239,7 @@ let prepare_agent_setup
       ~gate_context
       ?hitl_resolution
       ?composition_catalog
+      ~turn_ctx_cell
       ()
   in
   let replay_delivery =

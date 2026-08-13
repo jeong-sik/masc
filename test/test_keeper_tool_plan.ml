@@ -429,12 +429,25 @@ let test_composable_output_registry_is_closed () =
     json_names
 ;;
 
+let test_composition_run_id_is_uuid_v7_identity () =
+  let first = Plan.Composition_run_id.fresh () in
+  let second = Plan.Composition_run_id.fresh () in
+  check bool "fresh composition identities differ" false (Plan.Composition_run_id.equal first second);
+  List.iter
+    (fun value ->
+       match Random_id.parse_uuid_v7 (Plan.Composition_run_id.to_string value) with
+       | Ok _ -> ()
+       | Error error -> failf "composition run id is not UUIDv7: %s" error)
+    [ first; second ]
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
     "keeper_tool_plan"
     [ ( "typed-values"
       , [ test_case "node id" `Quick test_node_id_rejects_empty
+        ; test_case "composition run UUID" `Quick test_composition_run_id_is_uuid_v7_identity
         ; test_case "JSON pointer" `Quick test_json_pointer_is_exact_rfc6901_navigation
         ; test_case "JSON template" `Quick test_json_template_preserves_declared_structure
         ] )

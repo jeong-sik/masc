@@ -8,6 +8,8 @@ open Alcotest
 
 module Probe = Masc.Keeper_capability_probe
 module Descriptor = Masc.Keeper_tool_descriptor
+module Runner = Runtime_agent_core_runner
+module Turn_driver = Masc.Keeper_turn_driver
 
 let verdict = testable (Fmt.of_to_string Probe.verdict_to_string) ( = )
 
@@ -272,6 +274,119 @@ let test_lane_guard_refuses_an_official_client_runtime () =
       | Error e -> failf "expected Not_agent_core_lane, got: %s" (Probe.invocation_error_to_string e))
 ;;
 
+(* The seed overlay is what makes the probe's request match a keeper turn's.
+   Without it agentworld-35b-a3b scored 0/12 while actually calling the tool
+   every time: an absent enable_thinking makes Backend_ollama omit the wire
+   [think] field, the model's chat template defaults to thinking-on, and the
+   call arrives as prose past the budget (masc#28473).
+
+   Built from a bare provider config so removing the overlay in the probe would
+   leave these red -- asserting against Runtime_inference output would make the
+   expectation a restatement of the function under test. *)
+let bare_config () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Ollama
+    ~model_id:"agentworld:UD-Q4_K_XL"
+    ~base_url:"http://127.0.0.1:11434"
+    ()
+;;
+
+let show_bool_opt = function
+  | None -> "None"
+  | Some b -> Printf.sprintf "Some %b" b
+;;
+
+let bool_opt = testable (Fmt.of_to_string show_bool_opt) ( = )
+
+(* Any id that resolves no declared seed: the agreement under test is between
+   the two functions, and a runtime whose seed came from config would make the
+   loop assert the same triple three times. *)
+let bool_opts = [ Some true; Some false; None ]
+
+let test_declared_thinking_off_reaches_the_config () =
+  let seed =
+    { Runtime_inference.thinking_budget = None
+    ; thinking_enabled = Some false
+    ; preserve_thinking = None
+    }
+  in
+  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  (* Some false, not None: None is what omits the wire field. *)
+  check bool_opt "declared thinking-off reaches the request" (Some false) out.enable_thinking
+;;
+
+let test_declared_thinking_on_reaches_the_config () =
+  let seed =
+    { Runtime_inference.thinking_budget = None
+    ; thinking_enabled = Some true
+    ; preserve_thinking = Some true
+    }
+  in
+  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  check bool_opt "declared thinking-on reaches the request" (Some true) out.enable_thinking;
+  check bool_opt "preserve_thinking rides along" (Some true) out.preserve_thinking
+;;
+
+let test_undeclared_seed_leaves_the_binding_alone () =
+  let seed =
+    { Runtime_inference.thinking_budget = None
+    ; thinking_enabled = None
+    ; preserve_thinking = None
+    }
+  in
+  let base = { (bare_config ()) with Llm_provider.Provider_config.enable_thinking = Some true } in
+  let out = Runner.apply_inference_seed ~seed base in
+  check bool_opt "an absent seed does not clear the binding" (Some true) out.enable_thinking
+;;
+
+(* The pin the review asked for (#28530): seed application now exists twice —
+   [Runner.apply_inference_seed] on the probe path and
+   [Keeper_turn_driver.For_testing.attempt_inference_policy] on the turn path.
+   Two implementations of "what does this runtime actually send" is the shape of
+   the defect this PR fixes, so their agreement is asserted rather than assumed.
+
+   Both are driven from the same runtime id, because the turn path resolves the
+   seed itself — handing the probe a synthetic seed the turn path never sees
+   would compare two different questions. The binding is what varies, over every
+   declaration combination, which is also where the disagreement lives: an
+   undeclared seed axis leaves the turn path writing [None] and the probe path
+   keeping the binding's value. *)
+let seed_free_runtime_id = "masc-test-no-such-runtime"
+
+let test_probe_and_turn_agree_on_the_seed () =
+  let seed = Runtime_inference.for_runtime ~name:seed_free_runtime_id in
+  List.iter
+    (fun binding_enable ->
+      List.iter
+        (fun binding_preserve ->
+          let binding =
+            { (bare_config ()) with
+              Llm_provider.Provider_config.enable_thinking = binding_enable
+            ; preserve_thinking = binding_preserve
+            }
+          in
+          let probe = Runner.apply_inference_seed ~seed binding in
+          let turn =
+            Turn_driver.For_testing.attempt_inference_policy
+              ~runtime_id:seed_free_runtime_id
+              ~fallback_enable_thinking:binding_enable
+              ()
+          in
+          let label field =
+            Printf.sprintf
+              "%s: binding(enable=%s preserve=%s)"
+              field
+              (show_bool_opt binding_enable)
+              (show_bool_opt binding_preserve)
+          in
+          check bool_opt (label "enable_thinking")
+            turn.attempt_enable_thinking probe.enable_thinking;
+          check bool_opt (label "preserve_thinking")
+            turn.attempt_preserve_thinking probe.preserve_thinking)
+        bool_opts)
+    bool_opts
+;;
+
 (* Antigravity is the lane the official-client probe still cannot answer, and
    the refusal has to name why: its entry point takes no tool list, so its
    surface exists only once the per-turn MCP bridge is up. Answering from the
@@ -452,6 +567,13 @@ let () =
       , [ test_case "operator-only costs no turn" `Quick test_operator_only_costs_no_turn
         ; test_case "unknown runtime is named" `Quick test_unknown_runtime_is_named
         ; test_case "lane guard refuses an official-client runtime" `Quick test_lane_guard_refuses_an_official_client_runtime
+        ] )
+    ; ( "inference seed overlay"
+      , [ test_case "declared thinking-off reaches the request" `Quick test_declared_thinking_off_reaches_the_config
+        ; test_case "declared thinking-on reaches the request" `Quick test_declared_thinking_on_reaches_the_config
+        ; test_case "absent seed leaves the binding alone" `Quick test_undeclared_seed_leaves_the_binding_alone
+        ; test_case "probe and turn agree on every declaration combination" `Quick
+            test_probe_and_turn_agree_on_the_seed
         ] )
     ; ( "probe_official_client_invocation (offline)"
       , [ test_case "antigravity is refused with its reason" `Quick

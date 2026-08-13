@@ -6,7 +6,7 @@ import { render } from 'preact'
 import { html } from 'htm/preact'
 import type { ToolCallEntry } from '../api/dashboard'
 import { ChatTranscript } from '../components/chat/primitives'
-import { keeperClientObservedSseStreamContract } from '../keeper-state'
+import { keeperStreamContract } from '../keeper-stream-contract'
 import {
   recordToolCallOutputs,
   resetToolCallOutputs,
@@ -67,7 +67,7 @@ export const interleaveEntries: KeeperConversationEntry[] = [
     turnRef: 'trace-interleave#9',
     delivery: 'delivered',
     streamState: null,
-    streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+    streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
       eventName: 'RUN_FINISHED',
       turnRef: 'trace-interleave#9',
       reason: 'live terminal event observed by dashboard SSE client',

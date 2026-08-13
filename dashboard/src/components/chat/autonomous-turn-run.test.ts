@@ -10,7 +10,7 @@ import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { html } from 'htm/preact'
 import type { KeeperConversationEntry } from '../../types'
-import { ChatTranscript } from './primitives'
+import { autonomousRunWindow, ChatTranscript } from './primitives'
 
 const wake = (id: string, timestamp: string): KeeperConversationEntry =>
   ({
@@ -135,5 +135,85 @@ describe('ChatTranscript — folded autonomous runs', () => {
     // The second run begins at the first unseen turn, so the line sits
     // immediately before it rather than after the whole block.
     expect(divider?.nextElementSibling).toBe(runs[1])
+  })
+
+  const openFirstRun = () => {
+    act(() => {
+      runHeaders()[0]?.click()
+    })
+  }
+
+  const nestedTurns = (): Element[] => [
+    ...container.querySelectorAll('.chat-auto-run-turns > .chat-block-trace'),
+  ]
+
+  const moreControl = (): HTMLElement | null =>
+    container.querySelector('.chat-auto-run-more')
+
+  it('draws only the two ends of a long run, with the middle behind one control', () => {
+    // Opening a 30-turn run must not trade the wall of headers the fold
+    // removed for a wall of rows.
+    draw(wakesFrom('a', DAY_ONE, 30))
+    openFirstRun()
+    expect(nestedTurns().length).toBe(6)
+    expect(moreControl()?.textContent?.trim()).toBe('가운데 24개 더 보기')
+  })
+
+  it('draws the run whole when the control would stand for a single turn', () => {
+    // 7 turns is head(3) + tail(3) + 1: a press to save one row is a worse
+    // trade than the row, so no control belongs in the output.
+    draw(wakesFrom('a', DAY_ONE, 7))
+    openFirstRun()
+    expect(nestedTurns().length).toBe(7)
+    expect(moreControl()).toBeNull()
+  })
+
+  it('reveals a step of turns per press and reports what is still hidden', () => {
+    draw(wakesFrom('a', DAY_ONE, 30))
+    openFirstRun()
+    act(() => {
+      moreControl()?.click()
+    })
+    // head 3 -> 13, tail 3, so 16 rows drawn and 14 still behind the control.
+    expect(nestedTurns().length).toBe(16)
+    expect(moreControl()?.textContent?.trim()).toBe('가운데 14개 더 보기')
+  })
+
+  it('retires the control once every turn is drawn', () => {
+    draw(wakesFrom('a', DAY_ONE, 20))
+    openFirstRun()
+    act(() => {
+      moreControl()?.click()
+    })
+    act(() => {
+      moreControl()?.click()
+    })
+    // head reaches 23 >= 20, so the window degenerates to the whole run.
+    expect(nestedTurns().length).toBe(20)
+    expect(moreControl()).toBeNull()
+  })
+})
+
+describe('autonomousRunWindow', () => {
+  it('draws a run whole up to the point where hiding saves more than one turn', () => {
+    // 0..7 inclusive: the window never hides a single turn behind a press.
+    for (const total of [0, 1, 5, 6, 7]) {
+      expect(autonomousRunWindow(total, 3)).toEqual({ head: total, tail: 0, hidden: 0 })
+    }
+  })
+
+  it('splits into both ends once the middle is worth a control', () => {
+    expect(autonomousRunWindow(8, 3)).toEqual({ head: 3, tail: 3, hidden: 2 })
+    expect(autonomousRunWindow(200, 3)).toEqual({ head: 3, tail: 3, hidden: 194 })
+  })
+
+  it('closes the window as the head walks down, never overlapping the tail', () => {
+    // The head grows by presses; the sum of drawn ends can never exceed the run.
+    for (const head of [3, 13, 23, 33]) {
+      const w = autonomousRunWindow(30, head)
+      expect(w.head + w.tail + w.hidden).toBe(30)
+      expect(w.hidden).toBeGreaterThanOrEqual(0)
+    }
+    expect(autonomousRunWindow(30, 33)).toEqual({ head: 30, tail: 0, hidden: 0 })
   })
 })

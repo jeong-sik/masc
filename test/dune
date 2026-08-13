@@ -100,6 +100,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_server_dashboard_http_keeper_api_trace
+  test_server_dashboard_http_keeper_chat_page
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_running_reconcile_attempt
@@ -397,6 +398,7 @@
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os_current
   test_server_dashboard_http_keeper_api_trace
+  test_server_dashboard_http_keeper_chat_page
   test_keeper_paused_work_resume_surface
   eval_memory_os_value
   test_keeper_running_reconcile_attempt

@@ -9,16 +9,6 @@ val normalize_path : string -> string
 val playground_root_no_create :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> string
 
-val candidate_repo_roots_no_create :
-  base_path:string ->
-  keeper_id:string ->
-  repository_id:string ->
-  string list
-(** Candidate host-side sandbox repo roots for [repository_id] under
-    [keeper_id]'s known sandbox backends. Returns [[]] when [repository_id] is
-    not a safe single path component. This performs no filesystem mutation and
-    does not require the keeper registry. *)
-
 val execution_location_json :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

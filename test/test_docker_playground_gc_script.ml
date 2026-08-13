@@ -378,6 +378,10 @@ let test_apply_skips_dirty_worktree () =
     check bool "dirty listed" true (String_util.contains_substring stdout "DIRTY");
     check bool "dirty worktree retained" true (Sys.file_exists wt_path))
 
+(* "Broken" means a worktree whose gitdir is gone, not any directory that
+   happens to sit under a worktree path. A directory with no .git was never a
+   worktree, and removing one would put this script outside what it owns —
+   which is what the fixture used to assert. *)
 let test_include_broken_removes_old_non_git_directory () =
   with_temp_dir "docker-playground-gc-broken" (fun dir ->
     let root = Filename.concat dir ".masc/playground/docker" in
@@ -385,6 +389,9 @@ let test_include_broken_removes_old_non_git_directory () =
       Filename.concat root "keeper-a/repos/masc/.worktrees/broken-task"
     in
     mkdir_p broken_path;
+    write_file
+      (Filename.concat broken_path ".git")
+      "gitdir: /nonexistent/masc/.git/worktrees/broken-task\n";
     write_file (Filename.concat broken_path "note.txt") "orphan\n";
     mark_path_old ~cwd:dir broken_path;
     let dry_stdout, _ =
@@ -395,8 +402,10 @@ let test_include_broken_removes_old_non_git_directory () =
           root;
           "--days";
           "1";
-          "--repo";
-          "masc";
+          (* No --repo here: that filter now reads the repository name from the
+             primary checkout's git metadata, and a worktree whose gitdir is
+             gone has none. Passing a name would exclude exactly the entries
+             this case is about. *)
           "--include-broken";
         |]
     in
@@ -411,8 +420,6 @@ let test_include_broken_removes_old_non_git_directory () =
           root;
           "--days";
           "1";
-          "--repo";
-          "masc";
           "--include-broken";
           "--apply";
         |]

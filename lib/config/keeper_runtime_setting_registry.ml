@@ -260,22 +260,34 @@ let all =
       ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture" ]
       ~category:"diagnostics"
       "Enable diagnostic provider wire capture"
-  ; setting
+  ; (* Sized in TOML beside the switch that turns the feature on. These two were
+       [Env_only] while [wire_capture.enabled] was [Toml_and_env], so the table
+       accepted one key and made its siblings a boot FATAL: [wire_capture] is an
+       owned namespace, so [max_bytes] resolved to no setting and was rejected
+       as unknown. An operator who enabled capture in TOML and then tried to
+       size it there took the server down, and the recovery was to comment the
+       keys out and reach for env vars instead.
+
+       Both are bounded diagnostic budgets — the range below is enforced on
+       either path — and the consequential switch, whether raw provider payloads
+       are captured at all, was already operator-editable here. The asymmetry
+       was in how the three were declared, not in what they do. *)
+    setting
       ~range:(int_range ~min:1 ~max:30 ())
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS"
-      ~exposure:Env_only
+      ~exposure:(Toml_and_env "wire_capture.retention_days")
       ~value_kind:Integer
       ~default:"3"
-      ~consumers:[ "Keeper wire capture retention" ]
+      ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture retention" ]
       ~category:"diagnostics"
       "Wire-capture retention in days"
   ; setting
       ~range:(int_range ~min:1 ~max:1073741824 ())
       ~env_name:"MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES"
-      ~exposure:Env_only
+      ~exposure:(Toml_and_env "wire_capture.max_bytes")
       ~value_kind:Integer
       ~default:"67108864"
-      ~consumers:[ "Keeper wire capture retention" ]
+      ~consumers:[ "Env_config_keeper.KeeperWireCapture"; "Keeper wire capture retention" ]
       ~category:"diagnostics"
       "Maximum active and retained wire-capture bytes"
   ; setting

@@ -379,7 +379,7 @@ let test_turn_context_fields_stored () =
       true
       (String_util.contains_substring
          Yojson.Safe.Util.(member "execute_path_basis" path_resolution |> to_string)
-         "do not repeat the repo prefix");
+         "do not repeat the cwd prefix");
     Alcotest.(check bool)
       "runtime contract points .masc state at task/context tools"
       true

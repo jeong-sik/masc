@@ -11,7 +11,7 @@ val add_routes :
 module For_testing : sig
   val resolve_relative : base:string -> string -> string option
   val workspace_root_for_initialize : base_path:string -> string -> string
-  val initialize_result_json : unit -> Yojson.Safe.t
+  val initialize_result_json : workspace_root:string -> unit -> Yojson.Safe.t
   (** Fixed size of the inbound LSP dispatch worker pool
       ([Lsp_proxy_limits.inbound_dispatch_worker_count]); >1 keeps slow LSP
       init off the socket read path. *)
@@ -42,7 +42,7 @@ module For_testing : sig
       typed errors rather than becoming [""] paths, and malformed/negative
       positions stay [None] rather than [-1]. *)
   val resolve_document_request :
-    base:string ->
+    anchor:string ->
     Yojson.Safe.t ->
     (resolved_document_request, document_request_error) result
 

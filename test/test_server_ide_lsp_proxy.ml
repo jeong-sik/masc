@@ -9,7 +9,9 @@ let member key = function
 ;;
 
 let test_initialize_handshake_is_read_only () =
-  let result = Lsp.initialize_result_json () in
+  (* The handshake also has to hand the client the tree its document URIs
+     resolve against; a browser client cannot know the host path otherwise. *)
+  let result = Lsp.initialize_result_json ~workspace_root:"/workspace/masc" () in
   let capabilities =
     match member "capabilities" result with
     | Some (`Assoc fields) -> fields
@@ -131,7 +133,7 @@ let document_params ~uri line =
 let test_document_request_is_resolved_once () =
   let base = "/workspace/masc" in
   let uri = "file:///workspace/masc/lib/server.ml" in
-  match Lsp.resolve_document_request ~base (document_params ~uri (`Int 7)) with
+  match Lsp.resolve_document_request ~anchor:base (document_params ~uri (`Int 7)) with
   | Error _ -> fail "expected an in-workspace document request"
   | Ok request ->
     check string "URI retained" uri request.uri;
@@ -146,21 +148,21 @@ let test_document_request_is_resolved_once () =
 let test_document_request_keeps_decode_failures_typed () =
   let base = "/workspace/masc" in
   let missing_uri = `Assoc [ "position", `Assoc [ "line", `Int 1 ] ] in
-  (match Lsp.resolve_document_request ~base missing_uri with
+  (match Lsp.resolve_document_request ~anchor:base missing_uri with
    | Error Lsp.Missing_document_uri -> ()
    | Error Lsp.Document_uri_outside_workspace ->
      fail "missing URI must not be classified as an out-of-workspace path"
    | Ok _ -> fail "missing URI must fail decoding");
   let outside_uri = "file:///tmp/outside.ml" in
   (match
-     Lsp.resolve_document_request ~base (document_params ~uri:outside_uri (`Int 1))
+     Lsp.resolve_document_request ~anchor:base (document_params ~uri:outside_uri (`Int 1))
    with
    | Error Lsp.Document_uri_outside_workspace -> ()
    | Error Lsp.Missing_document_uri ->
      fail "outside URI must not be classified as missing"
    | Ok _ -> fail "outside URI must fail decoding");
   let inside_uri = "file:///workspace/masc/lib/server.ml" in
-  match Lsp.resolve_document_request ~base (document_params ~uri:inside_uri (`Int (-1))) with
+  match Lsp.resolve_document_request ~anchor:base (document_params ~uri:inside_uri (`Int (-1))) with
   | Error _ -> fail "negative line must not invalidate a document path"
   | Ok request -> check (option int) "negative line is absent" None request.line
 ;;
@@ -419,6 +421,7 @@ let test_code_actions_have_no_workspace_edit () =
          let actions =
            Lsp_overlay_provider.code_actions
              ~base_dir
+             ~partition:(Some Ide_paths.Legacy_default)
              ~file_path:"a.ml"
              ~line:0
              ~diagnostics:[]

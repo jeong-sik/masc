@@ -4,6 +4,12 @@ module Types = Ide_annotation_types
 module Store = Ide_annotations
 module Region = Ide_region_tracker
 module Lsp = Lsp_overlay_provider
+
+(* The overlay reader has to name the store it addresses. These cases write
+   through [Store.create]'s default partition, so they read that same one;
+   the by-URL producer/reader join is covered in
+   [test_ide_lsp_join_key.ml]. *)
+let legacy_partition = Some Ide_paths.Legacy_default
 let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
@@ -175,7 +181,7 @@ let test_lsp_overlay_exposes_route_context () =
     | Ok _ ->
       Lsp.clear_cache ();
       let codelenses =
-        Lsp.codelenses ~base_dir ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
+        Lsp.codelenses ~base_dir ~partition:legacy_partition ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
       in
       (match codelenses with
        | [ codelens ] ->
@@ -184,7 +190,7 @@ let test_lsp_overlay_exposes_route_context () =
          check_contains "codelens carries evidence reference" "evidence:turn-9" title
        | rows -> failf "expected one codelens, got %d" (List.length rows));
       let inlay_hints =
-        Lsp.inlay_hints ~base_dir ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
+        Lsp.inlay_hints ~base_dir ~partition:legacy_partition ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
       in
       (match inlay_hints with
        | [ hint ] ->
@@ -197,6 +203,7 @@ let test_lsp_overlay_exposes_route_context () =
       let diagnostics =
         Lsp.diagnostics
           ~base_dir
+          ~partition:legacy_partition
           ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~lsp_diagnostics:[]
       in
@@ -208,6 +215,7 @@ let test_lsp_overlay_exposes_route_context () =
       let hover =
         Lsp.enrich_hover
           ~base_dir
+          ~partition:legacy_partition
           ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
           ~line:11
           (`Assoc
@@ -526,7 +534,7 @@ let test_definition_links_at_line () =
     | Error msg -> fail msg
     | Ok _ ->
       Lsp.clear_cache ();
-      let links = Lsp.definition_links ~base_dir ~file_path:"lib/test.ml" ~line:10 in
+      let links = Lsp.definition_links ~base_dir ~partition:legacy_partition ~document_root:base_dir ~file_path:"lib/test.ml" ~line:10 in
       (match links with
        | [ link ] ->
          let uri = Option.value ~default:"" (string_field "uri" link) in
@@ -538,7 +546,7 @@ let test_definition_links_empty () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
-    let links = Lsp.definition_links ~base_dir ~file_path:"lib/empty.ml" ~line:5 in
+    let links = Lsp.definition_links ~base_dir ~partition:legacy_partition ~document_root:base_dir ~file_path:"lib/empty.ml" ~line:5 in
     check int "empty links" 0 (List.length links)))
 ;;
 
@@ -576,7 +584,7 @@ let test_reference_locations_related () =
          Lsp.clear_cache ();
          let refs =
            Lsp.reference_locations
-             ~base_dir ~file_path:"lib/a.ml" ~line:4 ~include_declaration:true
+             ~base_dir ~partition:legacy_partition ~document_root:base_dir ~file_path:"lib/a.ml" ~line:4 ~include_declaration:true
          in
          check int "two related refs" 2 (List.length refs))))
 ;;
@@ -585,7 +593,7 @@ let test_completion_items_kinds () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
-    let items = Lsp.completion_items ~base_dir ~file_path:"lib/test.ml" ~line:0 in
+    let items = Lsp.completion_items ~base_dir ~partition:legacy_partition ~file_path:"lib/test.ml" ~line:0 in
     check int "four completion items" 4 (List.length items);
     let labels = List.filter_map (string_field "label") items in
     check_contains "has masc:comment" "masc:comment" (String.concat "," labels);
@@ -596,7 +604,7 @@ let test_code_actions_create () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
-    let actions = Lsp.code_actions ~base_dir ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
+    let actions = Lsp.code_actions ~base_dir ~partition:legacy_partition ~file_path:"lib/test.ml" ~line:5 ~diagnostics:[] in
     check bool "has create action" true (List.length actions >= 1);
     let title = Option.value ~default:"" (string_field "title" (List.hd actions)) in
     check string "first action is create" "Create MASC Annotation" title))
@@ -619,7 +627,7 @@ let test_document_symbols_lists () =
     | Error msg -> fail msg
     | Ok _ ->
       Lsp.clear_cache ();
-      let syms = Lsp.document_symbols ~base_dir ~file_path:"lib/test.ml" in
+      let syms = Lsp.document_symbols ~base_dir ~partition:legacy_partition ~file_path:"lib/test.ml" in
       (match syms with
        | [ sym ] ->
          let name = Option.value ~default:"" (string_field "name" sym) in
@@ -658,7 +666,7 @@ let test_folding_ranges_groups () =
        | Error msg -> fail msg
        | Ok _ ->
          Lsp.clear_cache ();
-         let ranges = Lsp.folding_ranges ~base_dir ~file_path:"lib/test.ml" in
+         let ranges = Lsp.folding_ranges ~base_dir ~partition:legacy_partition ~file_path:"lib/test.ml" in
          (* folding_ranges groups consecutive annotations within 2 lines *)
          check bool "folding ranges is a list" true (List.length ranges >= 0))))
 ;;
@@ -696,7 +704,7 @@ let test_document_highlights_related () =
        | Ok _ ->
          Lsp.clear_cache ();
          let highlights =
-           Lsp.document_highlights ~base_dir ~file_path:"lib/test.ml" ~line:4
+           Lsp.document_highlights ~base_dir ~partition:legacy_partition ~file_path:"lib/test.ml" ~line:4
          in
          check int "two highlights" 2 (List.length highlights))))
 ;;

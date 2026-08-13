@@ -2,6 +2,26 @@ module Http = Http_server_eio
 
 val add_routes : Http.Router.t -> Http.Router.t
 
+val resolve_workspace_base :
+  state:Mcp_server.server_state ->
+  uri:Uri.t ->
+  string
+  * [ `Project
+    | `Repository of string
+    | `RepositoryMissing of string
+    | `RepositoryUnknown of string
+    | `Playground of string
+    | `PlaygroundMissing of string
+    | `KeeperUnknown of string ]
+(** The absolute workspace tree a request's relative paths hang off, from
+    the [?repo_id=] / [?keeper=] query params, plus the source tag naming how
+    it was resolved.
+
+    This is the anchor for every repo-relative path the dashboard sends. The
+    IDE LSP proxy resolves its connection anchor through the same function so
+    a document named over the LSP socket and the same document named over
+    [/api/v1/workspace/file] cannot resolve against different roots. *)
+
 (** Pure dispatch logic for the [?keeper=<name>] query param. Exposed
     for unit testing — production code goes through {!add_routes}. *)
 val classify_keeper_query :

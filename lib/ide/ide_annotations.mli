@@ -17,6 +17,13 @@ val store_path : base_dir:string -> string
     flat directory). For partition-aware paths see
     {!Ide_paths.partition_store_dir}. *)
 
+val store_file : base_dir:string -> ?partition:Ide_paths.partition -> unit -> string
+(** [store_file ~base_dir ~partition ()] is the append-only
+    [annotations.jsonl] inside the partition's directory. Exposed so a
+    reader can observe the store's revision (its byte length, since every
+    mutation is an append) without restating the file name. Default
+    [partition] is {!Ide_paths.Legacy_default}. *)
+
 val ensure_store : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
 (** Create the partition's directory if absent. Idempotent. Default
     [partition] is {!Ide_paths.Legacy_default}. *)

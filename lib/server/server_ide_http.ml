@@ -11,12 +11,16 @@ module Http = Http_server_eio
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let extract_path_param = Server_utils.extract_path_param
 
-type ide_error =
+(* The scope vocabulary is shared with the LSP proxy; both surfaces resolve
+   through [Server_ide_scope] so a reader cannot address one partition here
+   and a different one there. Equality re-declaration keeps this module's
+   existing field access on [ide_error] unchanged. *)
+type ide_error = Server_ide_scope.ide_error =
   { code : string
   ; message : string
   }
 
-let ide_error code message = { code; message }
+let ide_error = Server_ide_scope.ide_error
 
 let json_error ?code message =
   let fields = [ "ok", `Bool false; "error", `String message ] in
@@ -36,15 +40,9 @@ let respond_ide_error ~status ~request err reqd =
     reqd
 ;;
 
-let nonempty_query_param uri key =
-  match Uri.get_query_param uri key with
-  | Some raw ->
-    let value = String.trim raw in
-    if String.equal value "" then None else Some value
-  | None -> None
-;;
+let nonempty_query_param = Server_ide_scope.nonempty_query_param
 
-type ide_scope =
+type ide_scope = Server_ide_scope.ide_scope =
   | Scope_canonical_url of
       { raw : string
       ; slug : string
@@ -55,61 +53,8 @@ type ide_scope =
       }
   | Scope_keeper_lane of { keeper_id : string }
 
-(* Keeper-lane reads address the repo-unattributed observation bucket
-   ([_orphan/] on disk). A keeper turn is a keeper-timeline fact, not a
-   repo fact: turn events and coordination tool events carry no file, so
-   they are written without a [By_url] partition. Before this scope
-   existed, read routes could only address [By_url] partitions, which made
-   that data unreachable from any API while it kept accumulating — the
-   read/write split-brain from the 2026-07-07 IDE observation audit. *)
-let partition_of_ide_scope = function
-  | Scope_canonical_url { slug; _ } | Scope_repo_id { slug; _ } ->
-    Ide_paths.By_url slug
-  | Scope_keeper_lane _ -> Ide_paths.Legacy_default
-;;
-
-let resolve_ide_scope_for_query ~state ~uri =
-  let project_base = base_path_of_state state in
-  match
-    ( nonempty_query_param uri "canonical_url"
-    , nonempty_query_param uri "repo_id"
-    , nonempty_query_param uri "keeper_lane" )
-  with
-  | None, None, None ->
-    Error
-      (ide_error
-         "missing_ide_scope"
-         "IDE scope is required; pass repo_id, canonical_url, or keeper_lane")
-  | Some _, Some _, _ | Some _, _, Some _ | _, Some _, Some _ ->
-    Error
-      (ide_error
-         "conflicting_ide_scope"
-         "IDE scope must specify exactly one of repo_id, canonical_url, or keeper_lane")
-  | Some raw, None, None ->
-    (match Ide_paths.canonical_url_of_remote raw with
-     | Some slug -> Ok (Scope_canonical_url { raw; slug })
-     | None -> Error (ide_error "invalid_canonical_url" "canonical_url is invalid"))
-  | None, Some repo_id, None ->
-    (match Repo_store.find_url_by_id ~base_path:project_base repo_id with
-     | Error message ->
-       Error (ide_error "repository_catalog_unavailable" message)
-     | Ok None -> Error (ide_error "unmatched_repo_id" "repo_id does not match a configured repository")
-     | Ok (Some url) ->
-       (match Ide_paths.canonical_url_of_remote url with
-        | Some slug -> Ok (Scope_repo_id { repo_id; slug })
-        | None ->
-          Error
-            (ide_error
-               "no_canonical_url"
-               "repo_id has no valid canonical URL")))
-  | None, None, Some keeper_id ->
-    (* [keeper_id] is a filter value compared against stored event fields,
-       never a filesystem path, so no registry lookup gates it: validating
-       against currently-active keepers would hide the history of any
-       keeper that is offline or renamed. An unknown id returns an
-       explicitly keeper_lane-scoped empty result. *)
-    Ok (Scope_keeper_lane { keeper_id })
-;;
+let partition_of_ide_scope = Server_ide_scope.partition_of_ide_scope
+let resolve_ide_scope_for_query = Server_ide_scope.resolve_ide_scope_for_query
 
 (* Mutations stay repo-scoped: an observation write without repo identity
    is exactly the orphan-bucket growth the keeper-lane read scope exists

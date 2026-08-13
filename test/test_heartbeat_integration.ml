@@ -40,6 +40,7 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_owner_registry = Masc.Keeper_owner_registry
+module Keeper_lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_fs = Masc.Keeper_fs
 module Lifecycle_hooks = Masc.Keeper_lifecycle_hooks
@@ -2414,9 +2415,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
       install_owner_inventory_exn ~sw config;
       let name = "shutdown-idle-lane" in
       let meta = make_meta name in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config meta;
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
       Memory_lane.init ~sw:parent_sw;
       let never_p, _never_r = Eio.Promise.create () in
@@ -2729,6 +2728,7 @@ let test_keeper_shutdown_blocks_join_replay_after_record_failure () =
 let test_keeper_shutdown_prepare_joins_not_started_lane () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir "shutdown-prepare-not-started" in
   Fun.protect
     ~finally:(fun () ->
@@ -2739,11 +2739,10 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
       let (_init_message : string) =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
+      install_owner_inventory_exn ~sw config;
       let name = "shutdown-not-started-lane" in
       let meta = make_meta name in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+      create_owner_meta_exn config meta;
       let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let operation =
         match

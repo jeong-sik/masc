@@ -30,6 +30,7 @@ import {
   keeperThreads,
   keeperSending,
   keeperStreamStartedAt,
+  liveSendOwnsRequest,
   setRecordValue,
 } from './keeper-state'
 import { isRecord, asNumber, asString } from './components/common/normalize'
@@ -417,6 +418,19 @@ export function applyKeeperOperationTurnEvent(
   const keeperName = name.trim()
   const operationId = operation.operationId.trim()
   if (!keeperName || !operationId) return null
+
+  // The server broadcasts every operation event to every session, including the
+  // one that issued the send and is already applying the same turn off its own
+  // response stream. [delivery] cannot tell the two apart: the direct stream
+  // stamps the accepted operation id onto the bubble it is streaming into
+  // (keeper-actions [stampPlaceholderRequestId]) and leaves it in 'streaming',
+  // which is exactly the state this function treats as "still open, keep
+  // writing". Applying both transports to one bubble does not overwrite, it
+  // interleaves -- the two chunk the same text at different boundaries, so the
+  // operator sees every fragment twice ("오퍼레이터가 비" + "레이터가 비유/").
+  // Live-send ownership already records which request this session is
+  // streaming itself, so consult that rather than inferring it from state.
+  if (liveSendOwnsRequest(operationId)) return null
 
   const entries = keeperThreads.value[keeperName] ?? []
   const matched = [...entries].reverse().find(

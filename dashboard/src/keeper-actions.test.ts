@@ -44,6 +44,7 @@ import {
   keeperStatusDetails,
   keeperStreamLastEventAt,
   keeperThreads,
+  liveSendOwnsRequest,
 } from './keeper-state'
 import {
   _resetCancelledKeeperThreadRequestsForTests,
@@ -487,6 +488,39 @@ describe('sendKeeperThreadMessage operation stream', () => {
       state: { kind: 'cancelled', completedAt: 1 },
     })
     await Promise.allSettled([first, second])
+  })
+
+  it('releases only the pre-acceptance stream that ended', async () => {
+    const streams: Array<{
+      requestId: string
+      resolve: (value: { terminal: boolean }) => void
+    }> = []
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: { requestId: string },
+    ) => new Promise<{ terminal: boolean }>(resolve => {
+      streams.push({ requestId: opts.requestId, resolve })
+    }))
+
+    const first = sendKeeperThreadMessage('echo', 'first')
+    await Promise.resolve()
+    const second = sendKeeperThreadMessage('echo', 'second')
+    await Promise.resolve()
+
+    const firstId = streams[0]?.requestId ?? ''
+    const secondId = streams[1]?.requestId ?? ''
+    expect(liveSendOwnsRequest(firstId)).toBe(true)
+    expect(liveSendOwnsRequest(secondId)).toBe(true)
+
+    streams[0]?.resolve({ terminal: false })
+    await first
+
+    expect(liveSendOwnsRequest(firstId)).toBe(false)
+    expect(liveSendOwnsRequest(secondId)).toBe(true)
+
+    streams[1]?.resolve({ terminal: false })
+    await second
   })
 
   it('cancels the FIFO-head operation by exact operation id', async () => {

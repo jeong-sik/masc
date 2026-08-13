@@ -811,7 +811,7 @@ let test_capacity_windows_history_to_tail () =
             tail_of_history))
 ;;
 
-let test_capacity_composes_source_projection_after_window () =
+let test_capacity_bounds_an_appending_source_projection () =
   let history =
     List.init 10 (fun index ->
       plain_user_message
@@ -832,11 +832,25 @@ let test_capacity_composes_source_projection_after_window () =
     (match project history with
      | Error detail -> fail detail
      | Ok projected ->
+       let projected_bytes =
+         List.fold_left
+           (fun total (message : Agent_core.Types.message) ->
+             total
+             + String.length
+                 (Keeper_official_client_host.encode_history_message message))
+           0
+           projected
+       in
+       check
+         bool
+         "appended material is inside the declared capacity"
+         true
+         (projected_bytes <= 8192);
        (match List.rev projected with
         | last :: _ ->
           check
             bool
-            "source projection runs after the window"
+            "the appended newest material survives the window"
             true
             (last.Agent_core.Types.content = marker.content)
         | [] -> fail "projection emptied the history"))
@@ -897,9 +911,9 @@ let () =
               `Quick
               test_capacity_windows_history_to_tail
           ; test_case
-              "source projection composes after the window"
+              "an appending source projection stays inside the window"
               `Quick
-              test_capacity_composes_source_projection_after_window
+              test_capacity_bounds_an_appending_source_projection
           ; test_case
               "oversized fixed sections are refused"
               `Quick

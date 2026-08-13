@@ -105,35 +105,48 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
    declared capacity is therefore this runtime's admission contract, not a
    second authority over a provider-owned window.
 
-   [prompt_section_framing_reserved_bytes] covers the constant section labels
-   [prompt_for_turn] adds ("SYSTEM INSTRUCTIONS:\n", "CURRENT GOAL:\n",
-   separators). Per-message role prefixes are not measured; the declared
-   capacity is expected to sit well under the client's observed input cliff
-   (~185KB), so the deployment margin absorbs that slack. *)
-let prompt_section_framing_reserved_bytes = 64
+   [prompt_section_framing_reserved_bytes] is derived from the actual label
+   literals [prompt_for_turn] concatenates, so a label change cannot silently
+   outgrow the reserve. Per-message role prefixes are not measured; the
+   declared capacity is expected to sit well under the client's observed
+   input cliff (~185KB), so the deployment margin absorbs that slack. *)
+let system_instructions_label = "SYSTEM INSTRUCTIONS:\n"
+let current_goal_label = "CURRENT GOAL:\n"
+let prompt_section_separator = "\n\n"
 
+let prompt_section_framing_reserved_bytes =
+  String.length system_instructions_label
+  + String.length current_goal_label
+  + (2 * String.length prompt_section_separator)
+;;
+
+(* The source projection runs first: the one production source appends a
+   bounded typed Gate replay reference (keeper_agent_run.ml), and on this
+   lane the window is the only authority over the transmitted bytes — there
+   is no provider refusal to catch an append that lands after the cut, so
+   the window must see everything that ships. The appended reference is the
+   newest material and survives the tail window. *)
 let bounded_history_projection ~capacity_bytes ~reserved_bytes source_projection
   : Agent_core.Agent.model_input_projection
   =
   fun messages ->
-  let windowed =
-    Domain_pool_ref.submit_cpu_or_inline (fun () ->
-      match
-        Runtime_model_input_tail_window.project
-          ~allow_empty_history:true
-          ~measure_message_bytes:measure_model_input_message_bytes
-          ~capacity_bytes
-          ~reserved_bytes
-          messages
-      with
-      | Ok projected -> Ok projected
-      | Error error ->
-        Error (Runtime_model_input_tail_window.budget_error_to_string error))
+  let* messages =
+    match source_projection with
+    | None -> Ok messages
+    | Some project -> project messages
   in
-  match windowed, source_projection with
-  | (Error _ as error), _ -> error
-  | Ok windowed, None -> Ok windowed
-  | Ok windowed, Some project -> project windowed
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    match
+      Runtime_model_input_tail_window.project
+        ~allow_empty_history:true
+        ~measure_message_bytes:measure_model_input_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        messages
+    with
+    | Ok projected -> Ok projected
+    | Error error ->
+      Error (Runtime_model_input_tail_window.budget_error_to_string error))
 ;;
 
 let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
@@ -178,17 +191,17 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
     in
     match String_util.trim_to_option context with
     | None -> Ok goal
-    | Some context -> Ok (context ^ "\n\n" ^ goal))
+    | Some context -> Ok (context ^ prompt_section_separator ^ goal))
   else
     let* history = render_messages prepared.messages in
     Ok
       ([ String_util.trim_to_option prepared.system_prompt
-         |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
+         |> Option.map (fun value -> system_instructions_label ^ value)
       ; String_util.trim_to_option history
-      ; Some ("CURRENT GOAL:\n" ^ goal)
+      ; Some (current_goal_label ^ goal)
       ]
       |> List.filter_map Fun.id
-      |> String.concat "\n\n")
+      |> String.concat prompt_section_separator)
 ;;
 
 let tool_spec (tool : Host.dynamic_tool) =

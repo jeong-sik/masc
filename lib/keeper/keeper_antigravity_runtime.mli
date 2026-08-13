@@ -36,9 +36,11 @@ module For_testing : sig
     -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
   (** The admission contract over the provider-bound history. [None] declared
       capacity passes the source projection through unchanged. A declared
-      capacity returns a projection that windows history to the capacity
-      minus the bytes the fixed prompt sections always occupy, and refuses
-      with a typed config error when those fixed sections alone leave no
-      room. agy truncates oversized stdin prompts silently instead of
-      refusing them, so this is the only bound the turn gets. *)
+      capacity returns a projection that runs the source projection first
+      (the production source appends a bounded typed Gate replay reference)
+      and then windows the result to the capacity minus the bytes the fixed
+      prompt sections always occupy, refusing with a typed config error when
+      those fixed sections alone leave no room. agy truncates oversized stdin
+      prompts silently instead of refusing them, so this window is the only
+      bound the turn gets. *)
 end

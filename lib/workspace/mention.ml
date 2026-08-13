@@ -65,15 +65,13 @@ let parse content =
   match Re.exec_opt broadcast_re content with
   | Some g -> Broadcast (Re.Group.get g 1)
   | None ->
-    let mentions =
-      Re.all mention_re content |> List.map (fun group -> Re.Group.get group 1)
-    in
-    (match List.find_opt (fun mention -> String.contains mention '-') mentions with
-     | Some stateful -> Stateful stateful
-     | None ->
-       (match mentions with
-        | stateless :: _ -> Stateless stateless
-        | [] -> None))
+    (match Re.exec_opt mention_re content with
+     | Some group ->
+       let mention = Re.Group.get group 1 in
+       if String.contains mention '-'
+       then Stateful mention
+       else Stateless mention
+     | None -> None)
 
 (** Extract raw mention target (backward-compatible with old extract_mention) *)
 let extract content =

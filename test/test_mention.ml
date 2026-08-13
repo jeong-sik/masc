@@ -175,6 +175,15 @@ let test_multiple_mentions () =
       "First mention should be extracted: got %s"
       (Mention.mode_to_string result))
 
+let test_first_mention_wins_across_classifications () =
+  let content = "@ollama please ask @canary-feature-20260813-202635" in
+  let result = Mention.parse content in
+  if not (mention_mode_equal result (Mention.Stateless "ollama")) then
+    Alcotest.fail
+      (Printf.sprintf
+         "Later hyphenated mention replaced the first target: got %s"
+         (Mention.mode_to_string result))
+
 (* ===== Target Resolution Tests ===== *)
 
 let test_resolve_stateless () =
@@ -262,6 +271,8 @@ let () =
     "edge_cases", [
       test_case "korean" `Quick test_korean_message;
       test_case "multiple" `Quick test_multiple_mentions;
+      test_case "first mention wins across classifications" `Quick
+        test_first_mention_wins_across_classifications;
     ];
     "resolution", [
       test_case "stateless" `Quick test_resolve_stateless;

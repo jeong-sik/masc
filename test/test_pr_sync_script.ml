@@ -112,6 +112,32 @@ let with_stale_feature_and_merge_result f =
       let script = install_script_under_test repo in
       f ~repo ~script ~feature_sha)
 
+let with_current_base_downgrade_merge_result f =
+  with_temp_dir "pr-sync-downgrade" (fun root ->
+      let repo = Filename.concat root "repo" in
+      let remote = Filename.concat root "remote.git" in
+      Unix.mkdir repo 0o755;
+      git_ok ~cwd:repo [ "init"; "-q" ];
+      git_ok ~cwd:repo [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:repo [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:repo [ "checkout"; "-qb"; "main" ];
+      write_dune_project ~dir:repo ~version:"0.22.0";
+      commit_all ~dir:repo ~message:"current package floor";
+      git_ok ~cwd:repo [ "checkout"; "-qb"; "stale-feature" ];
+      write_dune_project ~dir:repo ~version:"0.21.2";
+      commit_all ~dir:repo ~message:"downgrade package";
+      let feature_sha = git_output ~cwd:repo [ "rev-parse"; "HEAD" ] in
+      git_ok ~cwd:repo [ "checkout"; "main" ];
+      write_file (Filename.concat repo "base.txt") "new base work\n";
+      commit_all ~dir:repo ~message:"advance base";
+      git_ok ~cwd:repo [ "checkout"; "-qb"; "merge-result" ];
+      git_ok ~cwd:repo [ "merge"; "--no-edit"; "stale-feature" ];
+      git_ok ~cwd:root [ "init"; "--bare"; "-q"; remote ];
+      git_ok ~cwd:repo [ "remote"; "add"; "origin"; remote ];
+      git_ok ~cwd:repo [ "push"; "-q"; "origin"; "stale-feature" ];
+      let script = install_script_under_test repo in
+      f ~repo ~script ~feature_sha)
+
 let run_guard ~repo ~script ~feature_sha extra_args =
   run_process ~cwd:repo script
     (Array.of_list
@@ -129,15 +155,28 @@ let run_guard ~repo ~script ~feature_sha extra_args =
 let test_merge_result_inherits_current_base_version () =
   with_stale_feature_and_merge_result (fun ~repo ~script ~feature_sha ->
       let code, stdout, stderr =
-        run_guard ~repo ~script ~feature_sha [ "--version-ref"; "merge-result" ]
+        run_guard ~repo ~script ~feature_sha [ "--version-ref"; "HEAD" ]
       in
       if code <> 0 then
         failf "guard failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout stderr;
       check bool "keeps exact remote head identity" true
         (String_util.contains_substring stdout
            ("expected_head_sha=" ^ feature_sha));
-      check bool "evaluates merge result" true
-        (String_util.contains_substring stdout "version_ref=merge-result"))
+      check bool "evaluates checked-out merge result" true
+        (String_util.contains_substring stdout "version_ref=HEAD"))
+
+let test_merge_result_preserves_explicit_downgrade_failure () =
+  with_current_base_downgrade_merge_result (fun ~repo ~script ~feature_sha ->
+      let code, stdout, _stderr =
+        run_guard ~repo ~script ~feature_sha [ "--version-ref"; "HEAD" ]
+      in
+      check bool "downgrade in merge result fails" true (code <> 0);
+      check bool "evaluates checked-out merge result" true
+        (String_util.contains_substring stdout "version_ref=HEAD");
+      check bool "reports current base package floor" true
+        (String_util.contains_substring stdout "package 0.22.0");
+      check bool "reports downgraded merge-result version" true
+        (String_util.contains_substring stdout "0.21.2"))
 
 let test_default_version_ref_still_checks_exact_head () =
   with_stale_feature_and_merge_result (fun ~repo ~script ~feature_sha ->
@@ -157,6 +196,8 @@ let () =
         [
           test_case "merge result inherits current base package version" `Quick
             test_merge_result_inherits_current_base_version;
+          test_case "merge result preserves explicit downgrade failure" `Quick
+            test_merge_result_preserves_explicit_downgrade_failure;
           test_case "default version ref checks exact head" `Quick
             test_default_version_ref_still_checks_exact_head;
         ] );

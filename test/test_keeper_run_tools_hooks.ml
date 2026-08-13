@@ -235,6 +235,18 @@ let resolve_partition ~config ~meta fields =
    #23469 regression this case pins: before the sandbox anchor, this
    input re-anchored at the server base path and only matched because
    the same repo happened to be registered at [repos/masc] there. *)
+(* A coordination tool names no file, so the observation has a partition but
+   no document. The helper used to answer the project root here, which the
+   consumer then stored as the edited file — a broadcast claiming a document
+   it never touched (masc#28582). *)
+let test_partition_resolution_leaves_pathless_calls_without_a_document () =
+  with_partition_fixture (fun ~config ~meta ->
+    let _partition, rel_path =
+      resolve_partition ~config ~meta [ "message", `String "fixing: CI" ]
+    in
+    check (option string) "pathless call names no document" None rel_path)
+;;
+
 let test_partition_resolution_uses_project_root_for_masc_base_path () =
   with_partition_fixture (fun ~config ~meta ->
     let partition, rel_path =
@@ -633,6 +645,10 @@ let () =
         ] )
     ; ( "observation_partition"
       , [ test_case
+            "pathless call names no document"
+            `Quick
+            test_partition_resolution_leaves_pathless_calls_without_a_document
+        ; test_case
             "uses project root when config base is .masc"
             `Quick
             test_partition_resolution_uses_project_root_for_masc_base_path

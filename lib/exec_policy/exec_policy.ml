@@ -25,13 +25,13 @@ let block_reason_to_string = function
   | Chain_or_redirect ->
     "Blocked: chaining (&&/||/;) and redirects (|/>) are not allowed. Run ONE command \
      per call. To change directory, use the `cwd` argument instead of `cd` - Good: \
-     cwd='repos/project', cmd='ls'. Bad: cmd='cd repos/project && ls'. For pipelines \
+     cwd='<dir>', cmd='ls'. Bad: cmd='cd <dir> && ls'. For pipelines \
      like `rg foo | wc -l`, run the primary command and process \
      output at the LLM layer. To write files, use Write."
   | Injection ->
     "Shell injection syntax (;, &&, standalone &, `, $) not allowed. Run ONE command per \
-     call. To change directory, use the `cwd` argument - Good: cwd='repos/masc', \
-     cmd='ls'. Bad: cmd='cd repos/masc && ls' or cmd='cmd1 ; cmd2'. \
+     call. To change directory, use the `cwd` argument - Good: cwd='<dir>', \
+     cmd='ls'. Bad: cmd='cd <dir> && ls' or cmd='cmd1 ; cmd2'. \
      Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
      use Edit or Write."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."

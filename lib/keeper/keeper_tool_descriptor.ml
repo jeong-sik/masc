@@ -313,15 +313,14 @@ let read_file_schema =
         "file_path"
         "string"
         "Existing file path to read. Relative paths resolve against cwd when cwd is \
-         provided, otherwise against the keeper sandbox. Read does not inherit Execute \
-         cwd implicitly; pass cwd explicitly or use a sandbox-relative repos/<repo>/... \
-         path."
+         provided, otherwise against your workspace root. Read does not inherit Execute \
+         cwd implicitly; pass cwd explicitly or give a path relative to the workspace \
+         root."
     ; property
         "cwd"
         "string"
-        "Optional sandbox-relative directory to resolve file_path from, e.g. \
-         repos/masc. This is explicit only; Read never inherits the previous \
-         Execute cwd."
+        "Optional directory, relative to your workspace root, to resolve file_path \
+         from. This is explicit only; Read never inherits the previous Execute cwd."
     ; property
         "offset"
         "integer"

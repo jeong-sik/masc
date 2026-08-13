@@ -71,11 +71,21 @@ let relative_path_has_segment_prefix prefix raw =
   String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
 ;;
 
+(* "scratch" is gone: no code ever created that directory, and the tool schema
+   that taught it ('repos/X' or 'scratch/X') is removed in this change. It only
+   ever mattered for a path a model invented from that sentence.
+
+   "repos" stays for now. Removing it changes how {file_path; cwd} pairs anchor
+   — the enclosing function decides whether a relative path is already
+   workspace-rooted or is relative to cwd, and it can only decide that from a
+   fixed vocabulary. That is the same layout assumption this work removes
+   elsewhere, so it needs the resolver the tools themselves use rather than a
+   shorter list. Separate change. *)
 let sandbox_rooted_relative_path raw =
   Filename.is_relative raw
   && List.exists
        (fun prefix -> relative_path_has_segment_prefix prefix raw)
-       [ "repos"; "scratch"; Common.masc_dirname; "playground" ]
+       [ "repos"; Common.masc_dirname; "playground" ]
 ;;
 
 let non_empty_string_member name input =

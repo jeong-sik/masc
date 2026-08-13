@@ -43,7 +43,7 @@ let event_kind_of_event = function
   | Turn_event _ -> Turn
 ;;
 
-(* ── Segment rotation + tail-read (IDE Observation Plane v2 A2/A3) ───────
+(* ── Segment rotation + tail-read ────────────────────────────────────────
    The event store was a single append-only [<kind>_events.jsonl] with no
    rotation, so it grew without bound (~4.2 MB/day) and every read folded
    the whole file (a live 143 MB tool_events.jsonl stalled the main Eio

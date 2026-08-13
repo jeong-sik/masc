@@ -609,7 +609,7 @@ let test_compact_preserves_annotations () =
       ids)
 ;;
 
-(* task-1736 (IDE Observation Plane v2, axis B3) — store-level ownership
+(* task-1736 — store-level ownership
    enforcement.
 
    The HTTP layer now resolves the acting keeper_id from the token-bound

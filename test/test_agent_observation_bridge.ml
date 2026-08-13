@@ -43,7 +43,9 @@ let test_tool_observation_reaches_ide_storage_and_cursor () =
     Agent_observation.emit_tool_event
       { base_path = base_dir
       ; partition = Agent_observation.Legacy_default
-      ; file_path = None
+        (* The producer resolves this alongside the partition; the raw
+           [input] below still carries the argument the keeper typed. *)
+      ; file_path = Some "lib/test.ml"
       ; tool_name = "keeper_ide_annotate"
       ; keeper_id = "keeper-alpha"
       ; turn_id = "turn-9"

@@ -200,16 +200,15 @@ let test_crash_log_empty_for_unknown () =
 let test_should_cleanup_dead_true () =
   Reg.For_testing.clear ();
   let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead1"
-      (let json = `Assoc [
-        ("name", `String "dead1");
-        ("agent_name", `String "agent-dead1");
-        ("trace_id", `String "trace-dead1");
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
-      ] in
-      match Keeper_meta_json_parse.meta_of_json json with
-      | Ok meta -> meta
-      | Error err -> fail err)
+      (match
+         Masc_test_deps.meta_of_json_fixture
+           (`Assoc
+             [ ("name", `String "dead1")
+             ; ("trace_id", `String "trace-dead1")
+             ])
+       with
+       | Ok meta -> meta
+       | Error err -> fail err)
   in
   Reg.mark_dead ~base_path:"/tmp" "dead1" ~at:10.0;
   let entry = Option.get (Reg.get ~base_path:"/tmp" "dead1") in
@@ -219,16 +218,15 @@ let test_should_cleanup_dead_true () =
 let test_should_cleanup_dead_false_when_recent () =
   Reg.For_testing.clear ();
   let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead2"
-      (let json = `Assoc [
-        ("name", `String "dead2");
-        ("agent_name", `String "agent-dead2");
-        ("trace_id", `String "trace-dead2");
-        ("sandbox_profile", `String "local");
-        ("network_mode", `String "inherit");
-      ] in
-      match Keeper_meta_json_parse.meta_of_json json with
-      | Ok meta -> meta
-      | Error err -> fail err)
+      (match
+         Masc_test_deps.meta_of_json_fixture
+           (`Assoc
+             [ ("name", `String "dead2")
+             ; ("trace_id", `String "trace-dead2")
+             ])
+       with
+       | Ok meta -> meta
+       | Error err -> fail err)
   in
   Reg.mark_dead ~base_path:"/tmp" "dead2" ~at:100.0;
   let entry = Option.get (Reg.get ~base_path:"/tmp" "dead2") in
@@ -283,15 +281,21 @@ let test_done_signal_maps_registry_result () =
 (* Shared pure supervisor fixtures. *)
 
 let bp = "/tmp/test-supervisor-prop"
+(* sandbox_profile and network_mode left the meta JSON wire schema -- they
+   arrive from keeper.toml now, and meta_of_json rejects a document that still
+   carries them ("fields outside the current schema ... runtime reset
+   required"). This fixture only ever set them to the record defaults
+   ("local" / "inherit"), so dropping them changes nothing these cases assert.
+   test_keeper_keepalive_helpers made the same edit; this suite was outside CI,
+   so its copy kept the old shape (#28131). *)
 let make_meta name =
-  let json = `Assoc [
-    ("name", `String name);
-    ("agent_name", `String ("agent-" ^ name));
-    ("trace_id", `String ("trace-" ^ name));
-    ("sandbox_profile", `String "local");
-    ("network_mode", `String "inherit");
-  ] in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ ("name", `String name)
+        ; ("trace_id", `String ("trace-" ^ name))
+        ])
+  with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 

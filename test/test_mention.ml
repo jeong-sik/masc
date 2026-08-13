@@ -43,6 +43,46 @@ let test_stateless_with_underscore () =
 
 (* ===== Stateful Mode Tests ===== *)
 
+(* The live regression: a broadcast to @canary-feature-20260813-202635 stored
+   only the prefix, so the mention never named the keeper it was addressed to.
+   The parser is the cheapest layer to pin this at — the input is fixed text,
+   not a natural-language judgement — so pin the whole target, digits and all. *)
+let test_stateful_preserves_full_hyphenated_target () =
+  let content = "@canary-feature-20260813-202635 please ack" in
+  let expected = Mention.Stateful "canary-feature-20260813-202635" in
+  let result = Mention.parse content in
+  if not (mention_mode_equal result expected) then
+    Alcotest.fail (Printf.sprintf
+      "hyphenated target truncated: '%s' => got %s, expected %s"
+      content (Mention.mode_to_string result) (Mention.mode_to_string expected))
+
+(* A hyphen-free name parses as Stateless. That is a lexical split, not a
+   semantic one: the workspace layer cannot see the keeper registry, so the
+   parser has no way to ask whether a name is a real keeper.
+
+   It stays harmless because nothing routes on the distinction — [extract]
+   collapses Stateless/Stateful/Broadcast to the same string, and that is the
+   only form production reads ([workspace_broadcast.ml:78],
+   [mcp_tool_runtime_board.ml:325,393]). [parse] and [resolve_targets] have no
+   production consumer at all.
+
+   Pin the classification so the day something does route on it, this case is
+   the place that says the split is lexical. *)
+let test_hyphenless_target_is_lexically_stateless () =
+  let content = "@albini status?" in
+  let expected = Mention.Stateless "albini" in
+  let result = Mention.parse content in
+  if not (mention_mode_equal result expected) then
+    Alcotest.fail (Printf.sprintf
+      "hyphen-free classification changed: '%s' => got %s, expected %s"
+      content (Mention.mode_to_string result) (Mention.mode_to_string expected));
+  (* Both modes reach production as the same string, which is why the split
+     costs nothing today. *)
+  Alcotest.(check (option string))
+    "extract collapses the mode"
+    (Some "albini")
+    (Mention.extract content)
+
 let test_stateful_nickname () =
   let cases = [
     ("@ollama-gentle-gecko", Mention.Stateful "ollama-gentle-gecko");
@@ -214,6 +254,10 @@ let () =
     "priority", [
       test_case "broadcast_over_stateless" `Quick test_broadcast_priority;
       test_case "stateful_detection" `Quick test_stateful_priority;
+      test_case "full hyphenated target survives" `Quick
+        test_stateful_preserves_full_hyphenated_target;
+      test_case "hyphen-free target is lexically stateless" `Quick
+        test_hyphenless_target_is_lexically_stateless;
     ];
     "edge_cases", [
       test_case "korean" `Quick test_korean_message;

@@ -53,6 +53,7 @@ let supervise_keepalive
          event:Keeper_lifecycle_events.lifecycle_event ->
          string -> string -> unit -> unit)
       ~(launch_supervised_fiber :
+         intake_token:Keeper_shutdown_intake_fence.intake_token ->
          lifecycle_token:Keeper_lifecycle_reservation.token ->
          proactive_warmup_sec:int ->
          _ context ->
@@ -114,7 +115,7 @@ let supervise_keepalive
         meta.name
         (Keeper_owner_registry.command_error_to_string error)
   in
-  let launch_registered lifecycle_token reg =
+  let launch_registered intake_token lifecycle_token reg =
     (try
        if not (Workspace_utils.is_initialized ctx.config)
        then (
@@ -130,6 +131,7 @@ let supervise_keepalive
        Log.Keeper.error "supervisor workspace init failed: %s" (Printexc.to_string exn));
     match
       launch_supervised_fiber
+        ~intake_token
         ~lifecycle_token
         ~proactive_warmup_sec
         ctx
@@ -139,15 +141,25 @@ let supervise_keepalive
     | Error _ -> ()
     | Ok () ->
       wake_queued_owner_operations ();
-      publish_lifecycle
-        ~event:
-          (Keeper_lifecycle_events.Custom_event
-             { verb = Keeper_lifecycle_events.Started
-             ; phase = Some Keeper_state_machine.Running
-             })
-        meta.name
-        "supervised"
-        ()
+      (try
+         publish_lifecycle
+           ~event:
+             (Keeper_lifecycle_events.Custom_event
+                { verb = Keeper_lifecycle_events.Started
+                ; phase = Some Keeper_state_machine.Running
+                })
+           meta.name
+           "supervised"
+           ()
+       with
+       | exn ->
+         (* The lane crossed its start boundary successfully. Observation
+            failure must not escape into launch rollback and detach it from
+            the registry. *)
+         Log.Keeper.error
+           "supervisor launch lifecycle publication failed keeper=%s: %s"
+           meta.name
+           (Printexc.to_string exn))
   in
   let log_transaction_error = function
     | Keeper_keepalive_launch_transaction.Reservation_unavailable owner ->
@@ -229,7 +241,7 @@ let supervise_keepalive
             meta.name
             meta
           |> Result.map_error (fun error -> `Registration error))
-      ~rollback:Keeper_keepalive_launch_transaction.rollback_remove_registered
+      ~rollback:Keeper_keepalive_launch_transaction.Remove_registered
   in
   match execution_truth with
   | Keeper_activation_readiness.Unknown detail ->
@@ -277,7 +289,7 @@ let supervise_keepalive
                 Ok current
               | Some current -> Error (`Occupied current)
               | None -> Error (`Occupied reg))
-            ~rollback:Keeper_keepalive_launch_transaction.rollback_retain_registered
+            ~rollback:Keeper_keepalive_launch_transaction.Retain_registered
         | Keeper_state_machine.Running
         | Keeper_state_machine.Failing
         | Keeper_state_machine.Overflowed

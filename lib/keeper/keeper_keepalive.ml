@@ -959,7 +959,7 @@ let start_keepalive
                  m.name
                  m
                |> Result.map_error (fun error -> `Registration error))
-           ~rollback:Keeper_keepalive_launch_transaction.rollback_remove_registered
+           ~rollback:Keeper_keepalive_launch_transaction.Remove_registered
            launch_registered
        with
        | Error (Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id) ->
@@ -1064,7 +1064,7 @@ let start_keepalive
          Log.Keeper.error ~keeper_name:m.name "%s" detail;
          Keepalive_launch_callback_failed detail
        | Ok outcome -> outcome
-      and launch_registered launch_token reg =
+      and launch_registered _intake_token launch_token reg =
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,

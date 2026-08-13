@@ -18,6 +18,11 @@ type 'registration_error error =
       ; rollback_error : string option
       }
 
+type rollback =
+  | Remove_registered
+  | Restore_previous of Keeper_registry.registry_entry
+  | Retain_registered
+
 val run
   :  ?lifecycle_token:Keeper_lifecycle_reservation.token
   -> ?intake_token:Keeper_shutdown_intake_fence.intake_token
@@ -28,11 +33,9 @@ val run
        (Keeper_lifecycle_reservation.token ->
         Keeper_shutdown_intake_fence.intake_token ->
         (Keeper_registry.registry_entry, 'registration_error) result)
-  -> rollback:
-       (Keeper_lifecycle_reservation.token ->
-        Keeper_registry.registry_entry ->
-        (unit, string) result)
-  -> (Keeper_lifecycle_reservation.token ->
+  -> rollback:rollback
+  -> (Keeper_shutdown_intake_fence.intake_token ->
+      Keeper_lifecycle_reservation.token ->
       Keeper_registry.registry_entry ->
       'a)
   -> ('a, 'registration_error error) result
@@ -43,28 +46,18 @@ val run
 
     Acquire launch ownership unless the caller already owns a lifecycle token,
     then commit the supplied registry admission. A failed lifecycle open runs
-    the exact supplied rollback while the same tokens still own the key. A
-    non-cancellation launch exception aborts the opened Librarian lifecycle,
-    rolls the registry back, and returns [Launch_failed]; cancellation performs
-    the same protected cleanup and is re-raised. Borrowed lifecycle tokens are
-    never released here; lifecycle tokens acquired by this function are always
-    released. *)
+    the exact supplied rollback while the same tokens still own the key.
+    The launch callback receives the active intake token so nested durable
+    mutations remain inside the same intake epoch instead of reacquiring its
+    non-reentrant lock.
 
-val rollback_remove_registered
-  :  Keeper_lifecycle_reservation.token
-  -> Keeper_registry.registry_entry
-  -> (unit, string) result
-
-val rollback_restore_previous
-  :  previous:Keeper_registry.registry_entry
-  -> Keeper_lifecycle_reservation.token
-  -> Keeper_registry.registry_entry
-  -> (unit, string) result
-
-val rollback_retain_registered
-  :  Keeper_lifecycle_reservation.token
-  -> Keeper_registry.registry_entry
-  -> (unit, string) result
+    A launch exception rolls back only while the lane can still be atomically
+    rejected before start. Once the lane has started, its registry and
+    Librarian ownership are retained for the lane's terminal cleanup rather
+    than detached by rollback. Cancellation follows the same protected
+    cleanup decision and is re-raised. Borrowed lifecycle tokens are never
+    released here; lifecycle tokens acquired by this function are always
+    released outside cancellation. *)
 
 type exit_boundary =
   | Graceful

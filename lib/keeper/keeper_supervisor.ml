@@ -291,9 +291,8 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                 | Some current -> Error (`Replaced current)
                 | None -> Error `Missing)
               ~rollback:
-                (Keeper_keepalive_launch_transaction.rollback_restore_previous
-                   ~previous:old_entry)
-              (fun token reg ->
+                (Keeper_keepalive_launch_transaction.Restore_previous old_entry)
+              (fun intake_token token reg ->
                 ignore
                   (Keeper_registry.update_entry_exact_for_lifecycle
                      token
@@ -308,6 +307,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
                         })
                     : Keeper_registry.exact_update_result);
                 launch_supervised_fiber
+                  ~intake_token
                   ~lifecycle_token:token
                   ~proactive_warmup_sec:0
                   ctx

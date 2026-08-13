@@ -15,7 +15,8 @@ val supervise_keepalive :
      unit ->
      unit) ->
   launch_supervised_fiber:
-    (lifecycle_token:Keeper_lifecycle_reservation.token ->
+    (intake_token:Keeper_shutdown_intake_fence.intake_token ->
+     lifecycle_token:Keeper_lifecycle_reservation.token ->
      proactive_warmup_sec:int ->
      'a Keeper_types_profile.context ->
      Keeper_meta_contract.keeper_meta ->

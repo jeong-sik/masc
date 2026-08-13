@@ -61,6 +61,7 @@ let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enable
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
 
 let launch_supervised_fiber_body
+      ?intake_token
       ~lifecycle_token
       ~proactive_warmup_sec
       ctx
@@ -93,7 +94,11 @@ let launch_supervised_fiber_body
       ; payload = Keeper_event_queue.Bootstrap
       }
     in
-    Keeper_registry_event_queue.enqueue ~base_path meta.name bootstrap_signal;
+    Keeper_registry_event_queue.enqueue
+      ?intake_token
+      ~base_path
+      meta.name
+      bootstrap_signal;
     let fork_body body =
       match
         Keeper_lane.fork
@@ -624,6 +629,7 @@ let launch_supervised_fiber_body
     case nothing was forked, no [Started]/[Running] event may be published
     by the caller, and [done_p] has been resolved through the crash path. *)
 let launch_supervised_fiber
+      ?intake_token
       ~lifecycle_token
       ~proactive_warmup_sec
   ctx
@@ -679,6 +685,7 @@ let launch_supervised_fiber
        [Error] here so the caller suppresses the Started/Running lifecycle
        for a keeper whose lane was never forked. *)
     launch_supervised_fiber_body
+      ?intake_token
       ~lifecycle_token
       ~proactive_warmup_sec
       ctx
@@ -689,7 +696,8 @@ let launch_supervised_fiber
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
   Keeper_supervisor_supervise_keepalive.supervise_keepalive
     ~publish_lifecycle
-    ~launch_supervised_fiber
+    ~launch_supervised_fiber:(fun ~intake_token ->
+      launch_supervised_fiber ~intake_token)
     ~proactive_warmup_sec
     ctx
     meta

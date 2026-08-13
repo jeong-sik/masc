@@ -901,6 +901,7 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
   let launched = ref [] in
   let publish_lifecycle ~event:_ _name _detail () = () in
   let launch_supervised_fiber
+        ~intake_token:_
         ~lifecycle_token:_
         ~proactive_warmup_sec:_
         _ctx
@@ -1078,6 +1079,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
        let ctx = keeper_runtime_context env sw config in
        let publish_lifecycle ~event:_ _name _detail () = () in
        let launch_supervised_fiber
+             ~intake_token:_
              ~lifecycle_token:_
              ~proactive_warmup_sec:_
              _ctx
@@ -2555,10 +2557,15 @@ let test_active_librarian_abort_defers_then_retries_restart () =
            ~base_path:config.base_path
            ~keeper_name:name
            ~expected_generation:previous.transition_seq
-           ~register:(fun token ->
-             Reg.register_restarting_for_lifecycle token ~base_path:config.base_path name meta)
-           ~rollback:(Launch_transaction.rollback_restore_previous ~previous)
-           (fun _token replacement -> replacement)
+           ~register:(fun token intake_token ->
+             Reg.register_restarting_for_lifecycle
+               ~intake_token
+               token
+               ~base_path:config.base_path
+               name
+               meta)
+           ~rollback:(Launch_transaction.Restore_previous previous)
+           (fun _intake_token _token replacement -> replacement)
        in
        (match run_restart crashed with
         | Error (Launch_transaction.Lifecycle_open_failed _) -> ()
@@ -2592,6 +2599,303 @@ let test_active_librarian_abort_defers_then_retries_restart () =
            : (Memory_lane.librarian_drain_outcome,
               Memory_lane.librarian_drain_error)
                result))
+
+let crashed_restart_fixture ~base_path name meta =
+  let initial = Reg.For_testing.register ~base_path name meta in
+  (match
+     Reg.dispatch_event_exact
+       initial
+       (KSM.Fiber_terminated
+          { outcome = "fixture crash"; provider_id = None; http_status = None })
+   with
+   | Ok _ -> ()
+   | Error error -> fail (KSM.transition_error_to_string error));
+  match Reg.get ~base_path name with
+  | Some entry -> entry
+  | None -> fail "crashed restart fixture disappeared"
+;;
+
+let register_restart ~base_path ~name ~meta token intake_token =
+  Reg.register_restarting_for_lifecycle
+    ~intake_token
+    token
+    ~base_path
+    name
+    meta
+;;
+
+let test_launch_callback_failure_rolls_back_restart_transaction () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "librarian-launch-exception-rollback" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       (match
+          Launch_transaction.run
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~expected_generation:crashed.transition_seq
+            ~register:(register_restart ~base_path:config.base_path ~name ~meta)
+            ~rollback:(Launch_transaction.Restore_previous crashed)
+            (fun _intake_token _token _replacement ->
+              failwith "injected launch callback failure")
+        with
+        | Error
+            (Launch_transaction.Launch_failed
+               { librarian_abort_error = None; rollback_error = None; _ }) -> ()
+        | Error _ -> fail "launch exception produced the wrong transaction outcome"
+        | Ok _ -> fail "launch exception unexpectedly committed");
+       (match Reg.get ~base_path:config.base_path name with
+        | Some current ->
+          check bool "launch exception restores exact crashed authority" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
+        | None -> fail "launch exception removed the durable restart authority");
+       (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+        | Memory_lane.Rejected_draining -> ()
+        | _ -> fail "failed launch left Librarian admission open");
+       match
+         Launch_transaction.run
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~expected_generation:crashed.transition_seq
+           ~register:(register_restart ~base_path:config.base_path ~name ~meta)
+           ~rollback:(Launch_transaction.Restore_previous crashed)
+           (fun _intake_token _token replacement -> replacement)
+       with
+       | Ok replacement ->
+         check bool "retry installs a fresh restart lane" false
+           (Lane.Id.equal (Lane.id replacement.lane) (Lane.id crashed.lane))
+       | Error _ -> fail "retry did not reopen the rolled-back Librarian lifecycle")
+;;
+
+let test_launch_callback_cancellation_rolls_back_restart_transaction () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "librarian-launch-cancellation-rollback" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+       let launch_entered, resolve_launch_entered = Eio.Promise.create () in
+       let cancelled, resolve_cancelled = Eio.Promise.create () in
+       let never, _resolve_never = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let saw_cancellation =
+           try
+             Eio.Cancel.sub (fun context ->
+               Eio.Promise.resolve resolve_cancel_context context;
+               ignore
+                 (Launch_transaction.run
+                    ~base_path:config.base_path
+                    ~keeper_name:name
+                    ~expected_generation:crashed.transition_seq
+                    ~register:
+                      (register_restart ~base_path:config.base_path ~name ~meta)
+                    ~rollback:(Launch_transaction.Restore_previous crashed)
+                    (fun _intake_token _token _replacement ->
+                       Eio.Promise.resolve resolve_launch_entered ();
+                       Eio.Promise.await never)
+                   : (_, _) result);
+               false)
+           with
+           | Eio.Cancel.Cancelled _ -> true
+         in
+         Eio.Promise.resolve resolve_cancelled saw_cancellation);
+       let context = Eio.Promise.await cancel_context in
+       Eio.Promise.await launch_entered;
+       Eio.Cancel.cancel context (Failure "cancel injected launch callback");
+       check bool "launch cancellation propagates after rollback" true
+         (Eio.Promise.await cancelled);
+       (match Reg.get ~base_path:config.base_path name with
+        | Some current ->
+          check bool "launch cancellation restores exact crashed authority" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane))
+        | None -> fail "launch cancellation removed the durable restart authority");
+       (match
+          Lifecycle_reservation.current
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | None -> ()
+        | Some owner ->
+          fail
+            ("launch cancellation leaked lifecycle reservation: "
+             ^ Lifecycle_reservation.snapshot_to_string owner));
+       match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+       | Memory_lane.Rejected_draining -> ()
+       | _ -> fail "cancelled launch left Librarian admission open")
+;;
+
+let test_started_launch_exception_retains_registered_lane () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       let name = "started-launch-exception-retained" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let started = ref None in
+       (match
+          Launch_transaction.run
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~expected_generation:crashed.transition_seq
+            ~register:(register_restart ~base_path:config.base_path ~name ~meta)
+            ~rollback:(Launch_transaction.Restore_previous crashed)
+            (fun _intake_token _token replacement ->
+               (match
+                  Lane.fork
+                    ~sw
+                    replacement.lane
+                    ~run:(fun _ -> ())
+                    ~cleanup:(fun _ -> Ok ())
+                with
+                | Ok () -> started := Some replacement
+                | Error error -> fail (Lane.start_error_to_string error));
+               failwith "post-fork observation failure")
+        with
+        | Error (Launch_transaction.Launch_failed { rollback_error = Some _; _ }) -> ()
+        | Error _ -> fail "started launch failure lost its retention evidence"
+        | Ok _ -> fail "started launch exception unexpectedly committed");
+       let expected = Option.get !started in
+       match Reg.get ~base_path:config.base_path name with
+       | Some current ->
+         check bool "started lane remains registry-owned" true
+           (Lane.Id.equal (Lane.id current.lane) (Lane.id expected.lane))
+       | None -> fail "started launch exception detached the live lane")
+;;
+
+let test_restart_intake_epoch_survives_shutdown_overlap () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "restart-intake-shutdown-overlap" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let registered, resolve_registered = Eio.Promise.create () in
+       let continue_launch, resolve_continue_launch = Eio.Promise.create () in
+       let finished, resolve_finished = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           Launch_transaction.run
+             ~base_path:config.base_path
+             ~keeper_name:name
+             ~expected_generation:crashed.transition_seq
+             ~register:(fun token intake_token ->
+               match
+                 register_restart
+                   ~base_path:config.base_path
+                   ~name
+                   ~meta
+                   token
+                   intake_token
+               with
+               | Error _ as error -> error
+               | Ok replacement as ok ->
+                 Eio.Promise.resolve resolve_registered replacement;
+                 Eio.Promise.await continue_launch;
+                 ok)
+             ~rollback:(Launch_transaction.Restore_previous crashed)
+             (fun intake_token _token replacement ->
+               let bootstrap : Keeper_event_queue.stimulus =
+                 { post_id = "restart-intake-token-bootstrap"
+                 ; urgency = Keeper_event_queue.Normal
+                 ; arrived_at = Unix.gettimeofday ()
+                 ; payload = Keeper_event_queue.Bootstrap
+                 }
+               in
+               Masc.Keeper_registry_event_queue.enqueue
+                 ~intake_token
+                 ~base_path:config.base_path
+                 name
+                 bootstrap;
+               replacement)
+         in
+         Eio.Promise.resolve resolve_finished result);
+       let registered_entry = Eio.Promise.await registered in
+       let operation_id = Shutdown_types.Operation_id.generate () in
+       (match
+          Masc.Keeper_shutdown_intake_fence.begin_shutdown
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~operation_id
+        with
+        | Masc.Keeper_shutdown_intake_fence.Reserved _ -> ()
+        | Masc.Keeper_shutdown_intake_fence.Already_reserved _ ->
+          fail "fresh shutdown operation was already reserved");
+       Eio.Promise.resolve resolve_continue_launch ();
+       (match Eio.Promise.await finished with
+        | Ok launched ->
+          check bool "same registered lane crosses Librarian and launch handoff" true
+            (Lane.Id.equal (Lane.id launched.lane) (Lane.id registered_entry.lane))
+        | Error _ -> fail "create-wins restart epoch was rejected after registration");
+       (match
+          Masc.Keeper_shutdown_intake_fence.shutdown_operation_id
+            ~base_path:config.base_path
+            ~keeper_name:name
+        with
+        | Some actual ->
+          check bool "launch does not erase the later shutdown owner" true
+            (Shutdown_types.Operation_id.equal operation_id actual)
+        | None -> fail "launch erased the later shutdown reservation");
+       ignore
+         (Masc.Keeper_shutdown_intake_fence.rollback_shutdown
+            ~base_path:config.base_path
+            ~keeper_name:name
+            ~operation_id
+          : Masc.Keeper_shutdown_intake_fence.rollback_result))
+;;
 
 let () =
   run "keeper_supervisor" [
@@ -2673,6 +2977,14 @@ let () =
         test_restart_denies_persisted_dead_tombstone;
       test_case "active Librarian abort defers then retries restart" `Quick
         test_active_librarian_abort_defers_then_retries_restart;
+      test_case "launch callback failure rolls back restart transaction" `Quick
+        test_launch_callback_failure_rolls_back_restart_transaction;
+      test_case "launch callback cancellation rolls back restart transaction" `Quick
+        test_launch_callback_cancellation_rolls_back_restart_transaction;
+      test_case "started launch exception retains registered lane" `Quick
+        test_started_launch_exception_retains_registered_lane;
+      test_case "restart intake epoch survives shutdown overlap" `Quick
+        test_restart_intake_epoch_survives_shutdown_overlap;
     ];
     "dead_state_alert", [
       test_case "sweep cleanup fires Tombstone_reaped hook" `Quick

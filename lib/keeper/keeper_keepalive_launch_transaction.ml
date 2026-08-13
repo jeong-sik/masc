@@ -1,10 +1,22 @@
 type 'registration_error error =
+  | Shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Intake_token_not_live
   | Reservation_unavailable of Keeper_lifecycle_reservation.snapshot
   | Registration_failed of 'registration_error
   | Lifecycle_open_failed of
       { error : Keeper_memory_lane.lifecycle_open_error
       ; rollback_error : string option
       }
+  | Launch_failed of
+      { exception_detail : string
+      ; librarian_abort_error : string option
+      ; rollback_error : string option
+      }
+
+type rollback =
+  | Remove_registered
+  | Restore_previous of Keeper_registry.registry_entry
+  | Retain_registered
 
 let release_owned token =
   match Keeper_lifecycle_reservation.release token with
@@ -15,62 +27,17 @@ let release_owned token =
       (Keeper_lifecycle_reservation.release_outcome_to_string outcome)
 ;;
 
-let run
-      ?lifecycle_token
-      ~base_path
-      ~keeper_name
-      ~expected_generation
-      ~register
-      ~rollback
-      launch
-  =
-  let ownership =
-    match lifecycle_token with
-    | Some token -> Ok (token, false)
-    | None ->
-      (match
-         Keeper_lifecycle_reservation.acquire
-           ~base_path
-           ~keeper_name
-           ~expected_generation
-           ~purpose:Keeper_lifecycle_reservation.Keepalive_launch
-       with
-       | Ok token -> Ok (token, true)
-       | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-         Error (Reservation_unavailable owner))
-  in
-  match ownership with
-  | Error _ as error -> error
-  | Ok (token, owns_token) ->
-    Fun.protect
-      ~finally:(fun () -> if owns_token then release_owned token)
-      (fun () ->
-         match register token with
-         | Error error -> Error (Registration_failed error)
-         | Ok reg ->
-           (match
-              Keeper_memory_lane.begin_librarian_lifecycle
-                ~base_path
-                ~keeper_name
-            with
-            | Ok () -> Ok (launch token reg)
-            | Error error ->
-              let rollback_error =
-                match rollback token reg with
-                | Ok () -> None
-                | Error detail -> Some detail
-              in
-              Error (Lifecycle_open_failed { error; rollback_error })))
-;;
-
-let reject_before_start reg =
+let reject_for_rollback reg =
   match
     Keeper_lane.reject_before_start
       reg.Keeper_registry.lane
       ~reason:(Failure "keepalive launch transaction rolled back")
   with
   | Ok () -> Ok ()
-  | Error error -> Error (Keeper_lane.start_error_to_string error)
+  | Error error ->
+    Error
+      ("launch rollback retained a lane that crossed the start boundary: "
+       ^ Keeper_lane.start_error_to_string error)
 ;;
 
 let unregister token reg =
@@ -85,33 +52,142 @@ let unregister token reg =
        ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
-let rollback_remove_registered token reg =
-  let lane_result = reject_before_start reg in
-  let registry_result = unregister token reg in
-  match lane_result, registry_result with
-  | Ok (), Ok () -> Ok ()
-  | Error detail, Ok () | Ok (), Error detail -> Error detail
-  | Error lane_detail, Error registry_detail ->
-    Error (lane_detail ^ "; " ^ registry_detail)
+let rollback_registry rollback token reg =
+  match rollback with
+  | Retain_registered -> Ok ()
+  | Remove_registered -> unregister token reg
+  | Restore_previous previous ->
+    (match unregister token reg with
+     | Error _ as error -> error
+     | Ok () ->
+       (match Keeper_registry.restore_entry_if_absent_for_lifecycle token previous with
+        | Keeper_registry.Entry_restored -> Ok ()
+        | Keeper_registry.Entry_restore_occupied _ ->
+          Error "restart rollback found an occupied registry key"
+        | Keeper_registry.Entry_restore_invalid error ->
+          Error (Keeper_registry.registry_entry_validation_error_to_string error)
+        | Keeper_registry.Entry_restore_lifecycle_reserved owner ->
+          Error
+            ("restart rollback lost lifecycle ownership: "
+             ^ Keeper_lifecycle_reservation.snapshot_to_string owner)))
 ;;
 
-let rollback_restore_previous ~previous token reg =
-  match rollback_remove_registered token reg with
-  | Error _ as error -> error
-  | Ok () ->
-    (match Keeper_registry.restore_entry_if_absent_for_lifecycle token previous with
-     | Keeper_registry.Entry_restored -> Ok ()
-     | Keeper_registry.Entry_restore_occupied _ ->
-       Error "restart rollback found an occupied registry key"
-     | Keeper_registry.Entry_restore_invalid error ->
-       Error (Keeper_registry.registry_entry_validation_error_to_string error)
-     | Keeper_registry.Entry_restore_lifecycle_reserved owner ->
-       Error
-         ("restart rollback lost lifecycle ownership: "
-          ^ Keeper_lifecycle_reservation.snapshot_to_string owner))
+let run
+      ?lifecycle_token
+      ?intake_token
+      ~base_path
+      ~keeper_name
+      ~expected_generation
+      ~register
+      ~rollback
+      launch
+  =
+  let abort_open_lifecycle () =
+    match Keeper_memory_lane.abort_librarian ~base_path ~keeper_name with
+    | Ok Keeper_memory_lane.Librarian_abort_idle
+    | Ok Keeper_memory_lane.Librarian_abort_requested
+    | Ok Keeper_memory_lane.Librarian_abort_already_in_progress
+    | Ok (Keeper_memory_lane.Librarian_abort_already_exited _) -> None
+    | Ok (Keeper_memory_lane.Librarian_abort_committed_with_failure exn) ->
+      Some
+        ("Librarian cancellation committed with callback failure: "
+         ^ Printexc.to_string exn)
+    | Error error ->
+      Some (Keeper_memory_lane.librarian_abort_error_to_string error)
+  in
+  let run_admitted intake_token =
+    let ownership =
+      match lifecycle_token with
+      | Some token -> Ok (token, false)
+      | None ->
+        (match
+           Keeper_lifecycle_reservation.acquire
+             ~base_path
+             ~keeper_name
+             ~expected_generation
+             ~purpose:Keeper_lifecycle_reservation.Keepalive_launch
+         with
+         | Ok token -> Ok (token, true)
+         | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+           Error (Reservation_unavailable owner))
+    in
+    match ownership with
+    | Error _ as error -> error
+    | Ok (token, owns_token) ->
+      Fun.protect
+        ~finally:(fun () ->
+          if owns_token then Eio.Cancel.protect (fun () -> release_owned token))
+        (fun () ->
+           match register token intake_token with
+           | Error error -> Error (Registration_failed error)
+           | Ok reg ->
+             (match
+                Keeper_memory_lane.begin_librarian_lifecycle
+                  ~base_path
+                  ~keeper_name
+              with
+              | Error error ->
+                let rollback_error =
+                  match rollback with
+                  | Retain_registered -> None
+                  | Remove_registered | Restore_previous _ ->
+                    (match reject_for_rollback reg with
+                     | Error detail -> Some detail
+                     | Ok () ->
+                       (match rollback_registry rollback token reg with
+                        | Ok () -> None
+                        | Error detail -> Some detail))
+                in
+                Error (Lifecycle_open_failed { error; rollback_error })
+              | Ok () ->
+                (try
+                   Ok (launch intake_token token reg)
+                 with
+                 | exn ->
+                   let exception_detail = Printexc.to_string exn in
+                   let librarian_abort_error, rollback_error =
+                     Eio.Cancel.protect (fun () ->
+                       match reject_for_rollback reg with
+                       | Error detail -> None, Some detail
+                       | Ok () ->
+                         let librarian_abort_error = abort_open_lifecycle () in
+                         let rollback_error =
+                           match rollback_registry rollback token reg with
+                           | Ok () -> None
+                           | Error detail -> Some detail
+                         in
+                         librarian_abort_error, rollback_error)
+                   in
+                   (match exn with
+                    | Eio.Cancel.Cancelled _ -> raise exn
+                    | _ ->
+                      Error
+                        (Launch_failed
+                           { exception_detail
+                           ; librarian_abort_error
+                           ; rollback_error
+                           })))))
+  in
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_shutdown_intake_fence.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name
+    then run_admitted token
+    else Error Intake_token_not_live
+  | None ->
+    (match
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name
+         run_admitted
+     with
+     | Keeper_shutdown_intake_fence.Intake_committed result -> result
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
+       Error (Shutdown_reserved operation_id))
 ;;
-
-let rollback_retain_registered _token _reg = Ok ()
 
 type exit_boundary =
   | Graceful

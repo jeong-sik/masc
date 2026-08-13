@@ -138,6 +138,10 @@ let supervise_keepalive
         "supervisor launch skipped %s because shutdown operation %s owns admission"
         meta.name
         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+    | Error Keeper_registry.Registration_intake_token_not_live ->
+      Log.Keeper.error
+        "supervisor launch rejected an unexpected inactive durable-intake token for %s"
+        meta.name
     | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
       Log.Keeper.warn
         "supervisor launch skipped %s because lifecycle transaction owns admission: %s"

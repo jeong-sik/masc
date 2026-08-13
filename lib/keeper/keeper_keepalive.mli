@@ -113,10 +113,12 @@ val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
 
 (** Launch one keeper lane and return the exact typed admission/launch
     outcome. Rejections remain logged and observable, but are never collapsed
-    into [unit]; lifecycle transactions use the result to commit or roll back. *)
+    into [unit]; lifecycle transactions use the result to commit or roll back.
+    [intake_token] keeps a create transaction live through registry handoff. *)
 val start_keepalive :
   ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   'a context ->
   keeper_meta ->
   start_keepalive_outcome

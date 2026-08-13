@@ -27,6 +27,7 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
 
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_intake_token_not_live
   | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Registration_invalid of registry_entry_validation_error
   | Registration_event_queue_unavailable of
@@ -36,14 +37,18 @@ type registration_error =
 
 (** Production registration gate: the final registry CAS is serialized with
     Keeper shutdown reservation. Event-queue loading remains outside the
-    non-yielding fence critical section. *)
+    non-yielding fence critical section. A live [intake_token] preserves an
+    already-open create transaction through registry installation without
+    reacquiring the same per-Keeper intake mutex. *)
 val register_offline_if_admitted :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->
   string ->
   keeper_meta ->
   (registry_entry, registration_error) result
 
 val register_offline_if_admitted_for_lifecycle :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   Keeper_lifecycle_reservation.token ->
   base_path:string ->
   string ->

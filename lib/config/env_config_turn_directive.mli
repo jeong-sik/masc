@@ -38,6 +38,8 @@ val of_key : string -> t option
 val env_name : t -> string
 (** Environment variable overriding this directive, derived from {!key}. *)
 
+val of_env_name : string -> t option
+
 val toml_key : t -> string
 (** Full TOML key, e.g. ["turn_directive.gate_replay.applied"]. *)
 
@@ -65,3 +67,12 @@ val text : t -> string
     keeper process outlives module-load time.
 
     @raise Env_config_core.Config_error if an override is set but invalid. *)
+
+val text_result : t -> (string, string) result
+(** The same effective value as {!text}, with malformed overrides returned as
+    [Error] for operator projections and effect-sensitive consumers. *)
+
+val text_or_default : t -> string
+(** Effective text with a logged fallback to {!default} for an invalid
+    override. This accessor never raises and is required after an external
+    effect may already have been applied. *)

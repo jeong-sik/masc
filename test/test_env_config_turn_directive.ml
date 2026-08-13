@@ -24,6 +24,12 @@ module D = Env_config_turn_directive
 
 let check_string label expected actual = Alcotest.(check string) label expected actual
 
+let empty_doc () =
+  match Keeper_toml_loader.parse_toml "" with
+  | Ok doc -> doc
+  | Error reason -> Alcotest.failf "empty runtime TOML did not parse: %s" reason
+;;
+
 (* The literals as they stood in Keeper_gate_replay.replay_evidence_fragment
    and the authorization-consumed branch before this module existed. *)
 let previous_wording = function
@@ -164,6 +170,67 @@ let test_invalid_override_raises () =
     | exception Env_config_core.Config_error _ -> ())
 ;;
 
+let test_invalid_override_is_reported_but_cannot_break_effect_delivery () =
+  let directive = D.Gate_replay_applied in
+  let name = D.env_name directive in
+  let finally () = Unix.putenv name (D.default directive) in
+  Fun.protect ~finally (fun () ->
+    Unix.putenv name "   ";
+    check_string
+      "effect-sensitive reader falls back to the reviewed default"
+      (D.default directive)
+      (D.text_or_default directive);
+    let open Yojson.Safe.Util in
+    let row =
+      Keeper_runtime_config.settings_projection_to_yojson (empty_doc ())
+      |> to_list
+      |> List.find (fun row -> String.equal name (row |> member "env" |> to_string))
+    in
+    Alcotest.(check bool)
+      "invalid directive is not presented as an effective value"
+      true
+      (row |> member "effective_value" = `Null);
+    Alcotest.(check bool)
+      "operator projection reports the malformed override"
+      true
+      (String_util.contains_substring
+         (row |> member "effective_error" |> to_string)
+         "must not be blank"))
+;;
+
+let test_gate_replay_uses_the_non_raising_boundary () =
+  let directive = D.Gate_replay_failed in
+  let name = D.env_name directive in
+  let finally () = Unix.putenv name (D.default directive) in
+  Fun.protect ~finally (fun () ->
+    Unix.putenv name "   ";
+    let detail_ref =
+      match
+        Tool_output.make_artifact_ref
+          ~sha256:(String.make 64 'a')
+          ~bytes:12
+          ~preview:""
+          ~mime:"text/plain"
+      with
+      | Ok value -> value
+      | Error error -> Alcotest.fail (Tool_output.make_error_to_string error)
+    in
+    let message =
+      Keeper_gate_replay.append_model_evidence
+        ~approval_id:"approval-after-effect"
+        ~user_message:"continue"
+        (Keeper_gate_replay.Failed
+           { operation = "filesystem_write"
+           ; detail_ref
+           ; journal = Keeper_gate_replay.Replay_journal_recorded
+           })
+    in
+    Alcotest.(check bool)
+      "durable replay outcome still reaches the model"
+      true
+      (String_util.contains_substring message.text (D.default directive)))
+;;
+
 let () =
   Alcotest.run
     "env_config_turn_directive"
@@ -182,6 +249,14 @@ let () =
     ; ( "override"
       , [ Alcotest.test_case "override reaches text" `Quick test_override_reaches_text
         ; Alcotest.test_case "invalid override raises" `Quick test_invalid_override_raises
+        ; Alcotest.test_case
+            "invalid override is reported without breaking effect delivery"
+            `Quick
+            test_invalid_override_is_reported_but_cannot_break_effect_delivery
+        ; Alcotest.test_case
+            "Gate replay uses the non-raising boundary"
+            `Quick
+            test_gate_replay_uses_the_non_raising_boundary
         ] )
     ]
 ;;

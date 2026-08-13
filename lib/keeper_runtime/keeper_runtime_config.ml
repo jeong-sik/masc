@@ -602,9 +602,15 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
        | "MASC_WEB_SEARCH_CACHE_TTL_SEC" ->
          display_float (Env_config_runtime.Tools.web_search_cache_ttl_sec ())
        | unsupported ->
-         raise
-           (Env_config_core.Config_error
-              ("no typed effective-value projector for " ^ unsupported)))
+         (match Env_config_turn_directive.of_env_name unsupported with
+          | Some directive ->
+            (match Env_config_turn_directive.text_result directive with
+             | Ok value -> value
+             | Error reason -> raise (Env_config_core.Config_error reason))
+          | None ->
+            raise
+              (Env_config_core.Config_error
+                 ("no typed effective-value projector for " ^ unsupported))))
   with
   | Env_config_core.Config_error message -> Result.Error message
 ;;

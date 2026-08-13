@@ -41,6 +41,10 @@ let env_name t =
       (String.map (function '.' -> '_' | c -> c) (key t))
 ;;
 
+let of_env_name name =
+  List.find_opt (fun directive -> String.equal name (env_name directive)) all
+;;
+
 (* The wording each directive carries when no override is set. Emission sites
    read [text] instead of restating these, so the registry default shown to an
    operator and the sentence the model receives are the same string. *)
@@ -104,14 +108,30 @@ let validate raw =
   else Ok trimmed
 ;;
 
-let text t =
+let text_result t =
   let name = env_name t in
   match Env_config_core.raw_value_opt name with
-  | None -> default t
+  | None -> Ok (default t)
   | Some raw ->
     (match validate raw with
-     | Ok value -> value
-     | Error reason ->
-       raise
-         (Env_config_core.Config_error (Printf.sprintf "%s: %s" name reason)))
+     | Ok value -> Ok value
+     | Error reason -> Error (Printf.sprintf "%s: %s" name reason))
+;;
+
+let text t =
+  match text_result t with
+  | Ok value -> value
+  | Error reason -> raise (Env_config_core.Config_error reason)
+;;
+
+let text_or_default t =
+  match text_result t with
+  | Ok value -> value
+  | Error reason ->
+    (* Gate replay calls this after the authorized effect may already have
+       happened. Configuration must not interrupt delivery of that durable
+       outcome, so the invalid override stays visible in the settings
+       projection while this boundary falls back to the reviewed default. *)
+    Log.Keeper.warn "%s; using the built-in turn directive" reason;
+    default t
 ;;

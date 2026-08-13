@@ -473,7 +473,9 @@ let replay_evidence_fragment evidence =
   in
   String.concat
     "\n"
-    [ Env_config_turn_directive.text directive; replay_evidence_json evidence ]
+    [ Env_config_turn_directive.text_or_default directive
+    ; replay_evidence_json evidence
+    ]
   |> Inference_utils.sanitize_text_utf8
 ;;
 
@@ -644,7 +646,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
             ; Printf.sprintf "- approval_id: %s" approval_id
             ; Printf.sprintf "- operation: %s" request.tool_name
             ; "- state: authorization consumed, replay outcome unavailable"
-            ; Env_config_turn_directive.text
+            ; Env_config_turn_directive.text_or_default
                 Env_config_turn_directive.Gate_replay_authorization_consumed
             ])
      | Ok

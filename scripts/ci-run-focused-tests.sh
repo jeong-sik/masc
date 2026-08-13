@@ -196,6 +196,7 @@ normal_targets=(
   @test/runtest-test_keeper_approval_resolved_history
   @test/runtest-test_keeper_gate_effect_coverage
   @test/runtest-test_keeper_gate_replay
+  @test/runtest-test_env_config_turn_directive
   @test/runtest-test_workspace
   @test/runtest-test_http_server_eio
   @test/runtest-test_verification

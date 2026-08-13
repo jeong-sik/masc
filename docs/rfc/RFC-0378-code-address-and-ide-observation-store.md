@@ -180,7 +180,7 @@ ide store 의 keeper-fact 절반은 **더 약한 스키마의 중복 투영**이
 - full URL 은 귀속 시점(git remote → `canonical_url_of_remote`)에만 존재하는 raw 입력.
 - repo 표시 이름·카탈로그 repo_id 는 projection 라벨 — wire key 로 쓰지 않는다.
 - REST 질의는 `codebase=<slug>`, co-view 는 slug, annotate 는 slug, viewer 지속 상태도 slug. 전부 문자 그대로 store 디렉터리 이름과 같은 값.
-- `keeper_lane` scope 는 codebase 철자가 아니라 별개 축("이 keeper 가 만진 것")이므로 유지. scope 간 상호배타(정확히 하나)는 서버가 이미 패턴매치로 강제하고 있고(`server_ide_scope.ml` `resolve_declared_scope` 의 `conflicting_ide_scope` 거부) 그 계약은 파라미터 개명 후에도 그대로다.
+- scope 는 `codebase=<slug>` 단일 variant 다. keeper-lane scope 는 §5.2 정정대로 E 에서 orphan 데이터와 함께 소멸했고 (그 scope 가 읽을 store 가 없다), 그와 함께 scope 상호배타 검사(`conflicting_ide_scope`)도 대상이 사라져 죽었다 — 파라미터가 하나뿐인 resolver 에 배타 계약은 공집합 위 명제다. keeper 타임라인은 turn-records/tool_calls 위 기존 keeper 대시보드가 담당한다.
 - 알려진 한계: `canonical_url_of_remote` 는 입력 전체를 소문자화하므로, 대소문자를 구분하는 self-hosted 호스트에서 실제로 다른 두 저장소가 같은 slug 로 충돌할 수 있다. GitHub 중심 카탈로그인 현재는 저위험 — 충돌이 실측되면 slug drift(§9 Q5)와 같은 축에서 다룬다.
 
 ### 5.4 Scope — 추측하지 않는다
@@ -245,11 +245,12 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 
 | PR | 내용 | 성격 |
 |---|---|---|
-| A | `Code_address` + fact 이분 타입 + producer 컴파일 낙진 (필요시 A1/A2 분할) | 최대 낙진, 행동 불변 |
-| B | sink 를 Addressed-only 영속으로 전환 + turn_events 방출 사슬 삭제 (§5.2) | 쓰기 전환 |
-| C | annotate/anchor 계약 + keeper 프롬프트 + owner-probe feature test. **cursor REST POST 포함** — `ingest_cursor_event` 는 게시된 file_path 에서 attribution 을 아직 해석하지 않는다고 자인하는 defer 주석을 갖고 있고(§5.3 "사람 쪽 절반도 같은 생성자"의 미이행 지점), C 에서 같은 생성자로 흡수한다 | N2 왕복 완성 |
-| D | read path 잔존분 + dashboard scope 명시화 + empty state | N1 가시화 |
-| E | kill list 집행 + 구 테스트 삭제 + 데이터 cut (dry-run 선행) | 청소 |
+| A1 [#28649](https://github.com/jeong-sik/masc/pull/28649) | `Code_address` smart constructor + 수용/거부 테스트 (CI 배선) | 타입 신설, 행동 불변 |
+| A2 [#28664](https://github.com/jeong-sik/masc/pull/28664) | `resolve_write_attribution` resolver + producer 이행 + sink 라우팅 | 최대 낙진, 행동 불변 |
+| B [#28671](https://github.com/jeong-sik/masc/pull/28671) | sink 를 Addressed-only 영속으로 전환 + turn_events 방출 사슬 삭제 (§5.2) | 쓰기 전환 |
+| C [#28676](https://github.com/jeong-sik/masc/pull/28676) | annotate/anchor 계약 + keeper 프롬프트 + owner-probe feature test + cursor REST POST 의 생성자 흡수 (§5.3) | N2 왕복 완성 |
+| D [#28682](https://github.com/jeong-sik/masc/pull/28682) | read path 잔존분 + dashboard scope 명시화(선택 지속·휴리스틱 삭제) + empty state | N1 가시화 |
+| E [#28684](https://github.com/jeong-sik/masc/pull/28684) | kill list 집행 (overlay 5표면 절제·타입/어휘 숙청·keeper-lane scope 와 dashboard `IdeScope` 미러 동반 소멸) + 구 테스트 삭제 + 데이터 cut (dry-run 선행) | 청소 |
 
 **착륙 계약 — 단계별 rollout 은 없다.** A~E 는 review 와 충돌 반경을 줄이기 위한
 stacked branch 단위일 뿐, 어느 중간 rung 도 main 에 독립적으로 merge 하지 않는다.

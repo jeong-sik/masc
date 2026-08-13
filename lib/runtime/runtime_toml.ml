@@ -1354,6 +1354,10 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
            | "exact_output_lanes" ->
              (* Parsed separately as raw AGENT_CORE target references. *)
              section, errs
+           | "role_policies" ->
+             (* Parsed separately. Policy eligibility does not participate in
+                provider/runtime registration. *)
+             section, errs
            | _ when is_toml_table value ->
              (* [runtime.<profile>] tables are reserved for runtime profiles and
                 intentionally ignored by this parser layer. *)
@@ -1367,7 +1371,8 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                       "unknown [runtime] key %S; expected default, \
                        cross_verifier, \
                        media_failover, [runtime.lanes], \
-                       [runtime.exact_output_lanes], [runtime.assignments], or a \
+                       [runtime.exact_output_lanes], [runtime.role_policies], \
+                       [runtime.assignments], or a \
                        table-valued [runtime.<profile>]"
                       key) )
         )
@@ -1522,6 +1527,53 @@ let parse_exact_output_lanes (toml : Otoml.t)
          "[runtime.exact_output_lanes] must be a table of lane tables")
 ;;
 
+let runtime_role_policy_of_string ~path = function
+  | "unrestricted" -> Ok Runtime_schema.Unrestricted
+  | "librarian-only" -> Ok Runtime_schema.Librarian_only
+  | value ->
+    Error
+      (error
+         path
+         (Printf.sprintf
+            "unknown runtime role policy %S; expected unrestricted or librarian-only"
+            value))
+;;
+
+(* [[runtime.role_policies]] constrains an opaque target reference without
+   materializing it. In particular, a successfully parsed policy row is not a
+   statement that the target is registered, credentialed, healthy, or able to
+   complete a request. Those are separate admission/probe boundaries. *)
+let parse_runtime_role_policies (toml : Otoml.t)
+  : (Runtime_schema.runtime_role_policy_decl list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ "runtime"; "role_policies" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (target_ref, value) ->
+            let path = Printf.sprintf "runtime.role_policies.%s" target_ref in
+            if String.equal (String.trim target_ref) ""
+            then Error (error path "runtime role policy target must not be blank")
+            else
+              match value with
+              | Otoml.TomlString policy ->
+                Result.map
+                  (fun policy -> { Runtime_schema.target_ref; policy })
+                  (runtime_role_policy_of_string ~path policy)
+              | _ ->
+                Error
+                  (error
+                     path
+                     "runtime role policy must be a string policy name"))
+         entries)
+  | Some _ ->
+    Error
+      (error
+         "runtime.role_policies"
+         "[runtime.role_policies] must be a table of target = policy")
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let obsolete_namespaces_result = reject_obsolete_top_level_namespaces toml in
   let providers_result = parse_providers toml in
@@ -1531,6 +1583,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
   let exact_output_lanes_result = parse_exact_output_lanes toml in
+  let runtime_role_policies_result = parse_runtime_role_policies toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs obsolete_namespaces_result
@@ -1541,6 +1594,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs bindings_result
     @ errs lanes_result
     @ errs exact_output_lanes_result
+    @ errs runtime_role_policies_result
   in
   if all_errors <> []
   then Error all_errors
@@ -1566,6 +1620,11 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
         ~label:"exact_output_lanes"
         exact_output_lanes_result
     in
+    let runtime_role_policy_decls =
+      extract_after_all_errors_guard
+        ~label:"runtime_role_policies"
+        runtime_role_policies_result
+    in
     Ok
       { Runtime_schema.providers
       ; models
@@ -1576,6 +1635,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; media_failover = runtime_section.media_failover
       ; lane_decls
       ; exact_output_lane_decls
+      ; runtime_role_policy_decls
       })
 ;;
 

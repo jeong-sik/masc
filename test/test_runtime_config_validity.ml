@@ -942,6 +942,73 @@ let test_exact_output_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
 
+let test_runtime_role_policy_is_typed_and_does_not_register_target () =
+  let target_ref = "local.canary" in
+  let content =
+    "[runtime.role_policies]\n\
+     \"local.canary\" = \"librarian-only\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errors ->
+    failf
+      "librarian-only role policy must parse: %s"
+      (String.concat "; " (List.map Runtime_toml.show_parse_error errors))
+  | Ok config ->
+    check int "policy parsing does not materialize a runtime binding" 0
+      (List.length config.bindings);
+    (match config.runtime_role_policy_decls with
+     | [ { target_ref = parsed_target; policy = Runtime_schema.Librarian_only } ] ->
+       check string "opaque target reference is preserved" target_ref parsed_target
+     | policies ->
+       failf
+         "expected one librarian-only policy, got %d"
+         (List.length policies));
+    (match
+     Runtime.runtime_role_eligibility config ~target_ref ~role:Runtime.Librarian
+     with
+     | Runtime.Eligible -> ()
+     | Runtime.Unsupported _ -> fail "policy target must be eligible for librarian");
+    List.iter
+      (fun role ->
+         match Runtime.runtime_role_eligibility config ~target_ref ~role with
+         | Runtime.Unsupported { target_ref = rejected; policy; requested_role } ->
+           check string "unsupported result carries target" target_ref rejected;
+           check bool "unsupported result carries closed policy" true
+             (Runtime_schema.equal_runtime_role_policy
+                policy
+                Runtime_schema.Librarian_only);
+           check bool "unsupported result carries requested role" true
+             (Runtime.equal_runtime_role requested_role role)
+         | Runtime.Eligible ->
+           failf
+             "policy target must be unsupported for %s"
+             (Runtime.runtime_role_to_string role))
+      [ Runtime.Keeper_turn
+      ; Runtime.Cross_verification
+      ; Runtime.Media_failover
+      ; Runtime.Compaction
+      ; Runtime.Hitl_auto_judge
+      ; Runtime.Board_attention
+      ; Runtime.Other_exact_output_lane "future-role"
+      ]
+
+let test_runtime_role_policy_rejects_unknown_policy () =
+  match
+    Runtime_toml.parse_string
+      "[runtime.role_policies]\n\
+       \"local.canary\" = \"probably-librarian\"\n"
+  with
+  | Ok _ -> fail "an unknown role policy must be rejected"
+  | Error errors ->
+    check bool "policy error names the exact target path" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal
+              error.path
+              "runtime.role_policies.local.canary"
+            && String_util.contains_substring error.message "unknown runtime role policy")
+         errors)
+
 let test_retired_native_streaming_capability_is_rejected () =
   let config =
     "[models.sample]\n\
@@ -982,6 +1049,10 @@ let test_repo_runtime_toml_loads () =
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
+       check int
+         "public seed does not require an environment-specific role policy"
+         0
+         (List.length config.runtime_role_policy_decls);
 let lane_signatures =
   config.exact_output_lane_decls
   |> List.map (fun (lane : Runtime_schema.exact_output_lane_decl) ->
@@ -2183,6 +2254,81 @@ let with_temp_runtime_toml content f =
        )
     (fun () -> f path)
 
+let runtime_role_policy_fixture ?cross_verifier ?(exact_lane = "librarian_exact") () =
+  let cross_verifier =
+    Option.fold ~none:"" ~some:(Printf.sprintf "cross_verifier = %S\n") cross_verifier
+  in
+  Printf.sprintf
+    "[providers.local]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.canary]\n\
+     api-name = \"fixture-model-v1\"\n\
+     max-context = 2048\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.canary]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n\
+     %s\n\
+     [runtime.role_policies]\n\
+     \"local.canary\" = \"librarian-only\"\n\
+     \n\
+     [runtime.lanes.cross_verifier_lane]\n\
+     strategy = \"ordered\"\n\
+     candidates = [\"local.canary\"]\n\
+     \n\
+     [runtime.exact_output_lanes.%s]\n\
+     slots = [\"local.canary\"]\n"
+    cross_verifier
+    exact_lane
+
+let test_materialized_runtime_stays_librarian_only_at_config_resolution () =
+  let target_ref = "local.canary" in
+  with_temp_runtime_toml (runtime_role_policy_fixture ()) (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error message ->
+      failf "a materialized librarian-only target must load: %s" message
+    | Ok (runtimes, _, _, _, _, _) ->
+      check bool "runtime binding materializes independently" true
+        (List.exists
+           (fun (runtime : Runtime.t) -> String.equal runtime.id target_ref)
+           runtimes));
+  with_temp_runtime_toml
+    (runtime_role_policy_fixture ~cross_verifier:"cross_verifier_lane" ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ ->
+         fail "materialization must not make the target eligible for cross-verification"
+       | Error message ->
+         check bool "config-resolution rejection names role" true
+           (String_util.contains_substring message "cross-verification");
+         check bool "config-resolution rejection proves lane expansion" true
+           (String_util.contains_substring
+              message
+              "via [runtime.lanes.cross_verifier_lane]");
+         check bool "config-resolution rejection names target" true
+           (String_util.contains_substring message target_ref);
+         check bool "config-resolution rejection names policy" true
+           (String_util.contains_substring message "librarian-only"));
+  with_temp_runtime_toml
+    (runtime_role_policy_fixture ~exact_lane:"compaction_exact" ())
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ -> fail "the policy target must not enter the compaction exact-output role"
+       | Error message ->
+         check bool "exact-output rejection names lane" true
+           (String_util.contains_substring message "compaction_exact");
+         check bool "exact-output rejection names role" true
+           (String_util.contains_substring message "compaction"))
+
 let with_fake_runtime_model_catalog f =
   let content =
     "[[models]]\n\
@@ -2671,6 +2817,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
+    ; runtime_role_policy_decls = []
     }
   in
   let binding =
@@ -4088,6 +4235,16 @@ let () =
             test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
           test_case "exact-output lane rejects unknown keys" `Quick
             test_exact_output_lane_rejects_unknown_key;
+          test_case
+            "runtime role policy is typed and does not register its target"
+            `Quick
+            test_runtime_role_policy_is_typed_and_does_not_register_target;
+          test_case "runtime role policy rejects an unknown policy" `Quick
+            test_runtime_role_policy_rejects_unknown_policy;
+          test_case
+            "materialized runtime stays librarian-only at config resolution"
+            `Quick
+            test_materialized_runtime_stays_librarian_only_at_config_resolution;
           test_case "retired native-streaming capability is rejected" `Quick
             test_retired_native_streaming_capability_is_rejected;
           test_case "repo runtime.toml loads through runtime parser" `Quick

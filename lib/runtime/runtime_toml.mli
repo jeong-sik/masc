@@ -1,13 +1,16 @@
 (** Declarative Runtime TOML parser (RFC-0206, runtime→Runtime rebirth).
 
     Re-homed from the deleted [Runtime_declarative_parser]. Parses only
-    RFC-0058 layers 1-3 plus [\[runtime\].default] into a self-standing
+    RFC-0058 layers 1-3 plus [\[runtime\].default] and declarative role
+    eligibility policies into a self-standing
     {!Runtime_schema.config}:
 
     - [\[providers.*\]] — Layer 1
     - [\[models.*\]] — Layer 2
     - [<provider>.<model>] binding tables — Layer 3
     - [\[runtime\].default] — the default Runtime id ([provider.model])
+    - [\[runtime.role_policies\]] — target eligibility policy (never an
+      availability or registration declaration)
 
     The routing layers are intentionally NOT parsed: Layer 4 aliases
     ([<p>.<m>.<a>]), Layer 5 [\[routes\]]/[\[system\]]/[\[profiles\]], and the

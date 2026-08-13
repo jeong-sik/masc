@@ -2,9 +2,12 @@
 
 type replay_suffix_prune_reason =
   | Canonical_success_replay
+  | Suppressed_terminal_effect_response
 
 let replay_suffix_prune_reason_to_string = function
   | Canonical_success_replay -> "canonical_success_replay"
+  | Suppressed_terminal_effect_response ->
+    "suppressed_terminal_effect_response"
 ;;
 
 let replay_response_text_for_persistence ~suppress_visible_response ~response_text =
@@ -84,10 +87,22 @@ let drop_trailing_blank_assistants messages =
   drop false (List.rev messages)
 ;;
 
+let drop_trailing_assistants messages =
+  let rec drop dropped = function
+    | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :
+        Agent_core.Types.message)
+      :: rest ->
+      drop true rest
+    | reversed -> List.rev reversed, dropped
+  in
+  drop false (List.rev messages)
+;;
+
 let canonical_success_replay_checkpoint
       ~(history_messages : Agent_core.Types.message list)
       ~(session_id : string)
       ~(response_text : string)
+      ~suppress_visible_response
       (checkpoint : Agent_core.Checkpoint.t)
   =
   match
@@ -98,21 +113,35 @@ let canonical_success_replay_checkpoint
   | Ok current_suffix ->
        (* A blank visible response is not authority to erase typed replay. The
           suffix may contain an actual user input, ToolUse/ToolResult pair,
-          thinking, or media whose effect has already happened. Remove only an
-          inert trailing Assistant shell; the typed skipped-wake rule above owns
-          the autonomous marker independently. *)
-       let current_suffix, blank_assistant_dropped =
-         if String.trim response_text = ""
-         then drop_trailing_blank_assistants current_suffix
-         else current_suffix, false
-       in
-       let replay_suffix_pruned =
-         if blank_assistant_dropped
-         then Some Canonical_success_replay
-         else None
+          thinking, or media whose effect has already happened. Ordinary blank
+          completion removes only an inert trailing Assistant shell. A typed
+          terminal-effect receipt is stronger: the external post is already the
+          visible result, so its trailing provider Assistant response is not
+          durable conversation. Both paths preserve every preceding typed
+          replay node. *)
+       let current_suffix, replay_suffix_pruned =
+         if suppress_visible_response
+         then
+           let current_suffix, assistant_dropped =
+             drop_trailing_assistants current_suffix
+           in
+           ( current_suffix
+           , if assistant_dropped
+             then Some Suppressed_terminal_effect_response
+             else None )
+         else if String.trim response_text = ""
+         then
+           let current_suffix, blank_assistant_dropped =
+             drop_trailing_blank_assistants current_suffix
+           in
+           ( current_suffix
+           , if blank_assistant_dropped
+             then Some Canonical_success_replay
+             else None )
+         else current_suffix, None
        in
        let checkpoint =
-         if String.trim response_text = ""
+         if suppress_visible_response || String.trim response_text = ""
          then
            { checkpoint with
              Agent_core.Checkpoint.session_id
@@ -178,6 +207,7 @@ let checkpoint_for_replay_persistence
       ~(history_messages : Agent_core.Types.message list)
       ~(session_id : string)
       ~(response_text : string)
+      ?(suppress_visible_response = false)
       ?(stop_reason = Runtime_agent.Completed)
       (checkpoint : Agent_core.Checkpoint.t)
   =
@@ -217,6 +247,7 @@ let checkpoint_for_replay_persistence
       ~history_messages
       ~session_id
       ~response_text
+      ~suppress_visible_response
       checkpoint
 ;;
 

@@ -176,6 +176,7 @@ let finalize
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
+          ~suppress_visible_response
           ~stop_reason:result.stop_reason
           checkpoint
       in

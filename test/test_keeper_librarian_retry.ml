@@ -386,6 +386,41 @@ let test_prompt_carries_keeper_instructions () =
     (List.assoc "keeper_instructions" (Librarian.prompt_variables blank))
 ;;
 
+let test_external_speaker_attribution_reaches_conversation_history () =
+  let external_message =
+    Masc.Gate_keeper_backend.contextualize_message
+      ~channel:"discord"
+      ~channel_user_id:"speaker-42"
+      ~channel_user_name:"A Changeable Name"
+      ~channel_workspace_id:"guild-7"
+      ~metadata:[]
+      ~content:"I prefer concise status updates."
+  in
+  let attributed =
+    { (input ()) with
+      messages =
+        [ Agent_core.Types.make_message
+            ~role:Agent_core.Types.User
+            [ Agent_core.Types.Text external_message ]
+        ]
+    }
+  in
+  let history =
+    List.assoc "conversation_history" (Librarian.prompt_variables attributed)
+  in
+  check bool "connector label survives" true
+    (String_util.contains_substring history "channel: discord");
+  check bool "workspace identity survives" true
+    (String_util.contains_substring history "workspace_id: guild-7");
+  check bool "stable speaker identity survives" true
+    (String_util.contains_substring history "user_id: speaker-42");
+  check bool "display label survives" true
+    (String_util.contains_substring history "user_name: A Changeable Name");
+  check bool "speaker statement survives" true
+    (String_util.contains_substring history
+       "I prefer concise status updates.")
+;;
+
 let user_text_of_messages messages =
   messages
   |> List.filter_map (fun (m : Agent_core.Types.message) ->
@@ -604,6 +639,37 @@ let test_repo_template_renders_keeper_instructions () =
          "[no keeper instructions]")
 ;;
 
+let test_repo_template_carries_counterpart_memory_contract () =
+  match Runtime.messages_for_librarian (input ()) with
+  | Error detail -> failf "librarian render failed: %s" detail
+  | Ok messages ->
+    let user_text = user_text_of_messages messages in
+    check bool "counterpart section is rendered" true
+      (String_util.contains_substring user_text
+         "Counterpart and relationship memory:");
+    check bool "stable external actor tuple is rendered" true
+      (String_util.contains_substring user_text
+         "channel + workspace_id + user_id");
+    check bool "display names are not identity" true
+      (String_util.contains_substring user_text
+         "never by display name alone");
+    check bool "personality inference is refused" true
+      (String_util.contains_substring user_text
+         "Do not turn one exchange into a personality verdict");
+    check bool "third-party hearsay stays attributed" true
+      (String_util.contains_substring user_text
+         "remains \"actor X said Y\"");
+    check bool "speaker preference stays actor scoped" true
+      (String_util.contains_substring user_text
+         "guides later interaction with that actor only");
+    check bool "relationship memory cannot grant authority" true
+      (String_util.contains_substring user_text
+         "never grant an external speaker operator authority");
+    check bool "relationship corrections use existing operations" true
+      (String_util.contains_substring user_text
+         "drop the superseded claim and add the corrected claim")
+;;
+
 let test_cadence_fresh_then_periodic () =
   check (pair int bool) "fresh due"
     (3, true)
@@ -673,6 +739,8 @@ let () =
             test_prompt_contains_exact_current_selection
         ; test_case "prompt carries Keeper instructions" `Quick
             test_prompt_carries_keeper_instructions
+        ; test_case "external speaker attribution reaches history" `Quick
+            test_external_speaker_attribution_reaches_conversation_history
         ; test_case "prompt carries recall byte budget" `Quick
             test_prompt_carries_recall_fact_byte_budget
         ; test_case "prompt omits tool payload and stays single-message" `Quick
@@ -683,6 +751,8 @@ let () =
             test_prompt_input_and_rendered_prompt_share_the_same_window
         ; test_case "repo template renders Keeper instructions" `Quick
             test_repo_template_renders_keeper_instructions
+        ; test_case "repo template carries counterpart memory contract" `Quick
+            test_repo_template_carries_counterpart_memory_contract
         ; test_case "constraint category excludes self-imposed scope" `Quick
             test_constraint_category_excludes_self_imposed_scope
         ] )

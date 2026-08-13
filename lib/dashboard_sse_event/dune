@@ -5,5 +5,5 @@
  (public_name masc.dashboard_sse_event)
  (wrapped false)
  (flags
-  (:standard -w +4 -w +33))
+  (:standard -w +4 -w +33 -warn-error +8))
  (libraries yojson))

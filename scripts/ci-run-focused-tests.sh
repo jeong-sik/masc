@@ -38,6 +38,50 @@ paused_targets=(
 
 normal_targets=(
   @test/runtest-test_board_dispatch
+  @test/runtest-test_cancel_safe
+  @test/runtest-test_cancel_wall_bucket
+  @test/runtest-test_cap_blocker_structured_error
+  @test/runtest-test_capability_registry
+  @test/runtest-test_channel_gate
+  @test/runtest-test_channel_gate_binding_store
+  @test/runtest-test_channel_gate_connector_routes
+  @test/runtest-test_channel_gate_discord_state
+  @test/runtest-test_channel_gate_imessage_state
+  @test/runtest-test_channel_gate_metrics
+  @test/runtest-test_client_registry_eio
+  @test/runtest-test_code_navigation_eio
+  @test/runtest-test_common
+  @test/runtest-test_compaction_exact_output_entrypoint_clockless
+  @test/runtest-test_compaction_llm_summarizer
+  @test/runtest-test_compression
+  @test/runtest-test_concurrency_stress
+  @test/runtest-test_config_coverage
+  @test/runtest-test_config_dir_resolver
+  @test/runtest-test_console_sink
+  @test/runtest-test_context_max_observed_9953
+  @test/runtest-test_cost_token_decouple
+  @test/runtest-test_cost_usd_source_attribution_10318
+  @test/runtest-test_credential_alias_10440
+  @test/runtest-test_cross_context_mutex
+  @test/runtest-test_dashboard_agent_core_bridge
+  @test/runtest-test_dashboard_attribution
+  @test/runtest-test_dashboard_briefing_sections
+  @test/runtest-test_dashboard_cache
+  @test/runtest-test_dashboard_continuity_briefs
+  @test/runtest-test_dashboard_coverage
+  @test/runtest-test_dashboard_execute_output
+  @test/runtest-test_dashboard_feature_health
+  @test/runtest-test_dashboard_gate_metrics
+  @test/runtest-test_dashboard_goal_id_projection
+  @test/runtest-test_dashboard_k2_feeds
+  @test/runtest-test_dashboard_keeper_cost_aggregates
+  @test/runtest-test_dashboard_keeper_metrics_10286
+  @test/runtest-test_dashboard_labels
+  @test/runtest-test_dashboard_librarian_metric
+  @test/runtest-test_dashboard_link_preview
+  @test/runtest-test_dashboard_nav_event
+  @test/runtest-test_dashboard_perf
+  @test/runtest-test_dashboard_recent_terminal_tasks
   @test/runtest-test_auth_ambiguous_lookup_9786
   @test/runtest-test_auth_credential_hash_collision
   @test/runtest-test_auth_load_credential_of

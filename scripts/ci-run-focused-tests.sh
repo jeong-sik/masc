@@ -38,6 +38,11 @@ paused_targets=(
 
 normal_targets=(
   @test/runtest-test_board_dispatch
+  @test/runtest-test_auth_ambiguous_lookup_9786
+  @test/runtest-test_auth_credential_hash_collision
+  @test/runtest-test_auth_load_credential_of
+  @test/runtest-test_auth_token_uniqueness_audit
+  @test/runtest-test_grpc_workspace
   @test/runtest-test_activity_graph
   @test/runtest-test_adaptive_cache_ttl
   @test/runtest-test_agent_card_action_mirror

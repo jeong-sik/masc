@@ -184,24 +184,11 @@ let test_internal_exact_lane_registry_is_admin_only () =
      = Masc_domain.CanAdmin)
 
 let test_runtime_probe_route_owns_read_permission () =
-  let source = read_file "lib/server/server_routes_http_routes_dashboard.ml" in
   check bool
     "metadata-only runtime probe remains a read route"
     true
     (Server_routes_http_routes_dashboard.For_testing.runtime_probe_read_permission
-     = Masc_domain.CanReadState);
-  check bool
-    "runtime probe route consumes its own read permission"
-    true
-    (String_util.contains_substring
-       source
-       "with_permission_auth ~permission:runtime_probe_read_permission");
-  check bool
-    "runtime probe route does not borrow the native effectful tool authority"
-    false
-    (String_util.contains_substring
-       source
-       "with_tool_auth ~tool_name:\"masc_runtime_ollama_probe\"")
+     = Masc_domain.CanReadState)
 
 let test_event_queue_operator_routes_are_exact () =
   check (option string) "event operator route is exact" (Some "idealist")

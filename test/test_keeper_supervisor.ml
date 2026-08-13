@@ -148,8 +148,9 @@ instructions = "%s"
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
 
 let write_empty_keeper_toml config_dir ~name =
+  let keepers_dir = Filename.concat config_dir "keepers" in
   write_file
-    (Filename.concat (Filename.concat config_dir "keepers") (name ^ ".toml"))
+    (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
        {|
 [keeper]
@@ -158,6 +159,15 @@ sandbox_profile = "local"
 proactive_enabled = false
 |}
        name);
+  (* This fixture omits [keeper.instructions] on purpose -- the case it serves
+     is about empty goal links -- and a TOML without it resolves instructions
+     from the AGENT.md sibling instead. Without the file the profile fails to
+     load ("profile dependency .../AGENT.md failed: File not found") before the
+     case reaches what it asserts. *)
+  mkdir_p (Filename.concat keepers_dir name);
+  write_file
+    (Filename.concat (Filename.concat keepers_dir name) "AGENT.md")
+    "test keeper";
   Keeper_types_profile.invalidate_keeper_profile_defaults_cache name
 
 let with_restart_launch_noop f =
@@ -1574,6 +1584,7 @@ let with_reap_ready_dead_keeper name f =
       let run_sweep () =
         Eio.Switch.run @@ fun sw ->
         Sup.set_global_switch sw;
+        install_owner_inventory ~sw config;
         let ctx : _ Keeper_types_profile.context =
           { config
           ; agent_name = supervisor_agent_name

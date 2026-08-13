@@ -122,33 +122,22 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
     Keeper_runtime_failure_route.Agent_core_execution
 ;;
 
-type continuation_delivery_state =
-  | Delivery_delivered
-  | Delivery_failed
-  | Delivery_ambiguous
-  | Delivery_recovery_pending
-
-type continuation_delivery_completion =
-  | Continuation_delivery_not_required
-  | Continuation_delivery_settled_by_terminal_surface_post
-  | Continuation_delivery_committed of
-      { intent_id : Keeper_continuation_delivery_intent.Intent_id.t
-      ; delivery_state : continuation_delivery_state
-      }
-  | Continuation_delivery_quarantined of { detail : string }
+type continuation_route_disposition =
+  | Continuation_route_addressed
+  | Continuation_route_not_addressed
 
 type turn_success =
   | Turn_completed of
       { meta : keeper_meta
-      ; continuation_delivery : continuation_delivery_completion
+      ; continuation_route : continuation_route_disposition
       }
   | Turn_checkpointed of keeper_meta
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
-let turn_success_of_stop_reason ~meta ~continuation_delivery = function
-  | Runtime_agent.Completed -> Turn_completed { meta; continuation_delivery }
+let turn_success_of_stop_reason ~meta ~continuation_route = function
+  | Runtime_agent.Completed -> Turn_completed { meta; continuation_route }
   | Runtime_agent.Yielded_to_operation_queued _
   | Runtime_agent.Yielded_to_durable_stimulus _
   | Runtime_agent.Awaiting_external_effect _
@@ -295,29 +284,16 @@ let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
     fun () -> autonomous_yield_request ~base_path ~keeper_name
 ;;
 
-let continuation_delivery_origin_of_wake ~admitted_channel wake =
-  match admitted_channel with
-  | None -> Ok None
-  | Some channel when not (Keeper_continuation_channel.is_routable channel) ->
-    Error "continuation delivery admitted an unroutable channel"
-  | Some channel ->
-    (match wake with
-     | Keeper_registry.Woken [ payload ] ->
-       (match Keeper_continuation_delivery_intent.origin_of_payload payload with
-        | Error error ->
-          Error (Keeper_continuation_delivery_intent.error_to_string error)
-        | Ok None ->
-          Error
-            "continuation delivery channel has no singleton typed source"
-        | Ok (Some origin) ->
-          if Keeper_continuation_channel.same_route origin.channel channel
-          then Ok (Some origin)
-          else Error "continuation delivery source and admitted route differ")
-     | Keeper_registry.Woken []
-     | Keeper_registry.Woken (_ :: _ :: _)
-     | Keeper_registry.Proactive_tick
-     | Keeper_registry.Chat_request ->
-       Error "continuation delivery route requires one exact wake source")
+let continuation_channel_of_wake = function
+  | Keeper_registry.Woken [ payload ] ->
+    (match Keeper_event_queue.continuation_channel_of_payload payload with
+     | Some channel when Keeper_continuation_channel.is_routable channel ->
+       Some channel
+     | Some _ | None -> None)
+  | Keeper_registry.Woken []
+  | Keeper_registry.Woken (_ :: _ :: _)
+  | Keeper_registry.Proactive_tick
+  | Keeper_registry.Chat_request -> None
 ;;
 
 
@@ -336,7 +312,6 @@ let run_keeper_cycle
       ?shared_context
       ?event_bus
       ?hitl_resolution
-      ?continuation_delivery_origin
       ()
   : (turn_success, turn_failure) result
   =
@@ -798,7 +773,7 @@ let run_keeper_cycle
                            ; base_dir
                            ; build_turn_prompt
                            ; channel
-                           ; continuation_delivery_origin
+                           ; continuation_channel = continuation_channel_of_wake wake
                            ; hitl_resolution
                            ; cleanup
                            ; config
@@ -1127,133 +1102,6 @@ let run_keeper_cycle
                    with
                    | Error missing_err -> Error missing_err, turn_state
                    | Ok final_execution ->
-                     let committed_delivery intent delivery_state =
-                       Continuation_delivery_committed
-                         { intent_id = intent.Keeper_continuation_delivery_intent.intent_id
-                         ; delivery_state
-                         }
-                     in
-                     let committed_delivery_of_recovered_intent intent =
-                       let delivery_state =
-                         match intent.Keeper_continuation_delivery_intent.state with
-                         | Keeper_continuation_delivery_intent.Delivered _ ->
-                           Delivery_delivered
-                         | Keeper_continuation_delivery_intent.Failed _ ->
-                           Delivery_failed
-                         | Keeper_continuation_delivery_intent.Ambiguous _ ->
-                           Delivery_ambiguous
-                         | Keeper_continuation_delivery_intent.Pending
-                         | Keeper_continuation_delivery_intent.Attempting _ ->
-                           Delivery_recovery_pending
-                       in
-                       committed_delivery intent delivery_state
-                     in
-                     let delivery_settlement =
-                       match
-                         ( continuation_delivery_origin
-                         , result.Keeper_agent_run.continuation_delivery_intent
-                         , result.Keeper_agent_run.turn_outcome
-                         , result.Keeper_agent_run.stop_reason
-                         , result.Keeper_agent_run.terminal_effect_receipt )
-                       with
-                       | ( Some origin
-                         , None
-                         , Keeper_turn_outcome.External_effect_completed
-                         , Runtime_agent.Completed
-                         , Some
-                             (Keeper_tool_execution.Surface_post_completed target) )
-                         when Keeper_surface_post.matches_continuation_route
-                                target
-                                origin.channel ->
-                         Continuation_delivery_settled_by_terminal_surface_post
-                       | Some _, None, _, Runtime_agent.Completed, _ ->
-                         Continuation_delivery_quarantined
-                           { detail =
-                               "routable continuation completed without a visible delivery intent"
-                           }
-                       | _, None, _, _, _ -> Continuation_delivery_not_required
-                       | _, Some intent, _, _, _ ->
-                         (match Keeper_continuation_delivery_store.persist ~config intent with
-                          | Error
-                              (Keeper_continuation_delivery_store.Persistence_failed
-                                { publication =
-                                    Keeper_continuation_delivery_store.Published_indeterminate
-                                ; detail
-                                }) ->
-                            (* Atomic rename made the publication outcome
-                               indeterminate.  Re-read the deterministic final
-                               path before classifying the source: the intent
-                               may already be the durable recovery token. *)
-                            (match
-                               Keeper_continuation_delivery_recovery.settle_existing
-                                 ~config
-                                 ~keeper_name:meta.name
-                                 ~origin:intent.origin
-                             with
-                             | Keeper_continuation_delivery_recovery.Obligation_committed
-                                 { intent = recovered; recovery_detail } ->
-                               Log.Keeper.warn
-                                 ~keeper_name:meta.name
-                                 "continuation outbox commit was indeterminate but the exact final record was recovered: intent_id=%s detail=%s%s"
-                                 (Keeper_continuation_delivery_intent.Intent_id.to_string
-                                    recovered.intent_id)
-                                 detail
-                                 (match recovery_detail with
-                                  | None -> ""
-                                  | Some recovery -> "; recovery: " ^ recovery);
-                               committed_delivery_of_recovered_intent recovered
-                             | Keeper_continuation_delivery_recovery.No_obligation ->
-                               Continuation_delivery_quarantined
-                                 { detail =
-                                     "continuation outbox commit was indeterminate and the final record is absent: "
-                                     ^ detail
-                                 }
-                             | Keeper_continuation_delivery_recovery.Quarantine_required
-                                 { detail = recovery; _ } ->
-                               Continuation_delivery_quarantined
-                                 { detail =
-                                     "continuation outbox commit was indeterminate and exact recovery failed: "
-                                     ^ detail
-                                     ^ "; recovery: "
-                                     ^ recovery
-                                 })
-                          | Error error ->
-                            Continuation_delivery_quarantined
-                              { detail =
-                                  "continuation outbox commit failed: "
-                                  ^ Keeper_continuation_delivery_store.error_to_string
-                                      error
-                              }
-                          | Ok _ ->
-                            (match
-                               Keeper_continuation_delivery_publisher.publish
-                                 ~config
-                                 intent
-                             with
-                             | Ok
-                                 (Keeper_continuation_delivery_publisher.Delivered
-                                    terminal) ->
-                               committed_delivery terminal Delivery_delivered
-                             | Ok
-                                 (Keeper_continuation_delivery_publisher.Failed
-                                    terminal) ->
-                               committed_delivery terminal Delivery_failed
-                             | Ok
-                                 (Keeper_continuation_delivery_publisher.Ambiguous
-                                    terminal) ->
-                               committed_delivery terminal Delivery_ambiguous
-                             | Error error ->
-                               Log.Keeper.warn
-                                 ~keeper_name:meta.name
-                                 "continuation delivery projection deferred after durable outbox commit: intent_id=%s detail=%s"
-                                 (Keeper_continuation_delivery_intent.Intent_id.to_string
-                                    intent.intent_id)
-                                 (Keeper_continuation_delivery_publisher.error_to_string
-                                    error);
-                               committed_delivery
-                                 intent
-                                 Delivery_recovery_pending))
-                     in
                      finalize_trajectory_acc
                           ~config
                           ~keeper_name:meta.name
@@ -1288,10 +1136,25 @@ let run_keeper_cycle
                        { turn_state with cycle_completed = true }
                      in
                      post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
+                     let continuation_route =
+                       match
+                         ( continuation_channel_of_wake wake
+                         , result.Keeper_agent_run.terminal_effect_receipt )
+                       with
+                       | ( Some channel
+                         , Some
+                             (Keeper_tool_execution.Surface_post_completed
+                                target) )
+                         when Keeper_surface_post.matches_continuation_route
+                                target
+                                channel ->
+                         Continuation_route_addressed
+                       | _ -> Continuation_route_not_addressed
+                     in
                      Ok
                        (turn_success_of_stop_reason
                           ~meta:updated_meta
-                          ~continuation_delivery:delivery_settlement
+                          ~continuation_route
                           result.Keeper_agent_run.stop_reason),
                      turn_state))))
                      )

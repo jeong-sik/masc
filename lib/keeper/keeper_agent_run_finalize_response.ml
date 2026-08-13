@@ -9,48 +9,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_agent_result
 
-let precommit_continuation_delivery_intent ~config = function
-  | None -> Ok None
-  | Some intent ->
-    (match Keeper_continuation_delivery_store.persist ~config intent with
-     | Ok _ -> Ok (Some intent)
-     | Error
-         (Keeper_continuation_delivery_store.Persistence_failed
-           { publication = Keeper_continuation_delivery_store.Published_indeterminate
-           ; detail
-           }) ->
-       (* A durable rename may have completed even though its directory fsync
-          did not.  Accept only an exact final record; a missing, unreadable,
-          or conflicting record remains an explicit precommit failure. *)
-       (match
-          Keeper_continuation_delivery_store.load
-            ~config
-            ~keeper_name:intent.keeper_name
-            ~intent_id:intent.intent_id
-        with
-        | Ok recovered
-          when Yojson.Safe.equal
-                 (Keeper_continuation_delivery_intent.to_yojson recovered)
-                 (Keeper_continuation_delivery_intent.to_yojson intent) ->
-          Ok (Some recovered)
-        | Ok _ ->
-          Error
-            (Keeper_continuation_delivery_store.Identity_conflict
-               "indeterminate precommit recovered different immutable content")
-        | Error recovery_error ->
-          Error
-            (Keeper_continuation_delivery_store.Persistence_failed
-               { publication =
-                   Keeper_continuation_delivery_store.Published_indeterminate
-               ; detail =
-                   detail
-                   ^ "; exact precommit recovery failed: "
-                   ^ Keeper_continuation_delivery_store.error_to_string
-                       recovery_error
-               }))
-     | Error error -> Error error)
-;;
-
 let finalize
     ~config
     ~meta
@@ -83,7 +41,6 @@ let finalize
     ~terminal_effect_receipt
     ~capture_replay_response
     ?continuation_channel
-    ?continuation_delivery_origin
     () =
   let completion_contract_result = acc.receipt_completion_contract_result in
   let control_checkpoint =
@@ -120,32 +77,6 @@ let finalize
       ()
   in
   let ( let* ) = Result.bind in
-  let* continuation_delivery_intent =
-    continuation_delivery_intent_for_result
-      ~keeper_name:meta.name
-      ~keeper_turn_id:manifest_keeper_turn_id
-      ~origin:continuation_delivery_origin
-      ~response_text
-      ~turn_outcome
-    |> Result.map_error (fun error ->
-      Agent_core.Error.Internal
-        ("continuation delivery intent construction failed: "
-         ^ Keeper_continuation_delivery_intent.error_to_string error))
-  in
-  (* The source remains replay-visible until the unified turn commits its
-     delivery settlement.  Commit the deterministic Pending outbox record
-     before assistant history or checkpoint finalization, so a crash at any
-     later boundary is recovered by [settle_existing] instead of rerunning
-     inference and tool effects for the same source. *)
-  let* continuation_delivery_intent =
-    precommit_continuation_delivery_intent
-      ~config
-      continuation_delivery_intent
-    |> Result.map_error (fun error ->
-      Agent_core.Error.Internal
-        ("continuation delivery outbox precommit failed before response finalization: "
-         ^ Keeper_continuation_delivery_store.error_to_string error))
-  in
   receipt_response_text_present_ref := raw_response_text_present;
   let assistant_msg =
     Keeper_replay_checkpoint.consume_replay_response
@@ -320,7 +251,6 @@ let finalize
     Ok
       { response_text
       ; turn_outcome
-      ; continuation_delivery_intent
       ; terminal_effect_receipt
       ; model_used = model
       ; runtime_id = runtime_id_string

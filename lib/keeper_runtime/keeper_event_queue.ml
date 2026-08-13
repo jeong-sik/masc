@@ -927,3 +927,18 @@ let queue_of_yojson json =
     let* items_json = required_field ~context "items" fields in
     let* items = list_of_json ~context:"keeper event queue snapshot.items" stimulus_of_yojson items_json in
     Ok (of_list items))
+
+let continuation_channel_of_payload = function
+  | Fusion_completed completion -> Some completion.channel
+  | Hitl_resolved resolution -> Some resolution.channel
+  | Connector_attention attention -> Some attention.channel
+  | Schedule_due wake -> wake.result_delivery
+  | Board_signal _
+  | Board_attention _
+  | Bootstrap
+  | Manual_compaction_requested
+  | Goal_assigned _
+  | Goal_reconciliation_ready _
+  | Completion_authority_rejected _
+  | Task_cancelled _ -> None
+;;

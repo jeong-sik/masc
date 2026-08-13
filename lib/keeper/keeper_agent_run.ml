@@ -417,7 +417,6 @@ let run_turn
       ?event_bus
       ?trace_link
       ?continuation_channel
-      ?continuation_delivery_origin
       ?hitl_resolution
       ?autonomous_yield_requested
       ?on_checkpoint_stage
@@ -1126,7 +1125,6 @@ let run_turn
                              ~turn_outcome
                              ~terminal_effect_receipt
                              ?continuation_channel
-                             ?continuation_delivery_origin
                              ~capture_replay_response:
                                (fun ~response_text ->
                                  (* Phase O observability: capture the exact

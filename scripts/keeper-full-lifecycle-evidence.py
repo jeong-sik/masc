@@ -128,28 +128,6 @@ SCENARIOS = [
         ],
     },
     {
-        "id": "V12",
-        "name": "continuation_delivery",
-        "authority_transition": "source -> turn -> durable intent -> Delivered|Failed|Ambiguous",
-        "user_outcome": (
-            "routable producer families deliver once or expose failed/ambiguous "
-            "settlement without blocking later Keeper work"
-        ),
-        "evidence": [
-            "source_identity",
-            "turn_id",
-            "response_digest",
-            "delivery_receipt",
-        ],
-        "targets": [
-            "@test/keeper_continuation_delivery_intent/runtest-test_keeper_continuation_delivery_intent",
-            "@test/keeper_continuation_delivery_intent/runtest-test_keeper_continuation_delivery_origin",
-            "@test/keeper_continuation_delivery_publisher/runtest-test_keeper_continuation_delivery_publisher",
-            "@test/keeper_continuation_delivery_publisher/runtest-test_keeper_continuation_delivery_conformance",
-            "@test/keeper_continuation_delivery_store/runtest-test_keeper_continuation_delivery_store",
-        ],
-    },
-    {
         "id": "V13",
         "name": "config_application_boundary",
         "authority_transition": "raw save -> per-key startup/fiber/turn application state",
@@ -197,7 +175,6 @@ SCENARIOS = [
         "targets": [
             "@test/runtest-test_keeper_failed_selection_disposition",
             "@test/runtest-test_keeper_event_queue",
-            "@test/keeper_continuation_delivery_publisher/runtest-test_keeper_continuation_delivery_conformance",
         ],
     },
 ]

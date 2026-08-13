@@ -37,9 +37,6 @@ let completion_contract_result t =
   t.result.Keeper_agent_run.completion_contract_result
 ;;
 
-let delivery_intent t =
-  t.result.Keeper_agent_run.continuation_delivery_intent
-;;
 
 let terminal t = t.terminal
 

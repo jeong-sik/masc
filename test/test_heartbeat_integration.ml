@@ -4084,7 +4084,7 @@ let test_librarian_rejection_unregisters_with_lifecycle_authority () =
           Keeper_lifecycle_reservation.acquire
             ~base_path:config.base_path
             ~keeper_name
-            ~expected_generation:meta.generation
+            ~expected_generation:meta.runtime.nonce
             ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
         with
         | Ok token -> token

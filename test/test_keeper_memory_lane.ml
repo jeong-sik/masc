@@ -573,6 +573,47 @@ let test_finished_switch_drops_without_leak () =
   | None -> Alcotest.fail "keeper entry missing after finished switch submit"
 ;;
 
+let test_accepting_reopen_clears_exited_owner_receipt () =
+  Lane.For_testing.reset ();
+  let finished_sw = ref None in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      finished_sw := Some sw));
+  let sw =
+    match !finished_sw with
+    | Some sw -> sw
+    | None -> Alcotest.fail "missing captured switch"
+  in
+  Lane.init ~sw;
+  (match Lane.submit ~base_path ~keeper_name:"accepting-reopen" (fun () -> raise Test_boom) with
+   | Lane.Dropped -> ()
+   | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline
+   | Lane.Rejected_draining ->
+     Alcotest.fail "finished executor did not drop the Librarian unit");
+  (* Reopen before a drain can change [Accepting] to [Draining]. This exact
+     ordering used to carry the prior failed receipt into the new lifecycle. *)
+  (match
+     Lane.begin_librarian_lifecycle
+       ~base_path
+       ~keeper_name:"accepting-reopen"
+   with
+   | Ok () -> ()
+   | Error error -> Alcotest.fail (Lane.lifecycle_open_error_to_string error));
+  match
+    Lane.drain_and_join_librarian
+      ~base_path
+      ~keeper_name:"accepting-reopen"
+  with
+  | Ok Lane.No_librarian_work -> ()
+  | Ok Lane.Librarian_drained ->
+    Alcotest.fail "reopened lifecycle inherited completed prior work"
+  | Error error ->
+    Alcotest.failf
+      "reopened accepting lifecycle inherited stale owner receipt: %s"
+      (Lane.librarian_drain_error_to_string error)
+;;
+
 (* The Librarian setting is live while lane work is asynchronous. The
    post-turn entrypoint must reject OFF/INVALID before submission, then fence
    an already queued ON unit again before snapshot I/O when the setting changes
@@ -734,6 +775,10 @@ let () =
             "finished switch drops without leak"
             `Quick
             test_finished_switch_drops_without_leak
+        ; Alcotest.test_case
+            "accepting reopen clears exited owner receipt"
+            `Quick
+            test_accepting_reopen_clears_exited_owner_receipt
         ; Alcotest.test_case
             "post-turn Librarian live config boundaries"
             `Quick

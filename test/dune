@@ -2577,3 +2577,8 @@
  (name test_code_address)
  (modules test_code_address)
  (libraries alcotest masc_agent_observation))
+
+(test
+ (name test_keeper_ide_annotate_contract)
+ (modules test_keeper_ide_annotate_contract)
+ (libraries alcotest yojson masc masc_test_deps))

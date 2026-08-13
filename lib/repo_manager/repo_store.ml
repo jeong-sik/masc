@@ -418,7 +418,11 @@ let discovery_skip_log_line ~abs_repo_dir ~detail =
     detail
 ;;
 
-let discover_repositories_with_budget ~origin_budget_sec ~base_path =
+let discover_repositories_with_budget_impl
+    ~before_origin_inspection
+    ~origin_budget_sec
+    ~base_path
+  =
   (* Issue #13188 + #13217 review: [find <base_path>] echoes the
      search-path prefix in every result, and a relative base_path
      (e.g. ["workspace"]) used to duplicate via [Filename.concat
@@ -430,7 +434,6 @@ let discover_repositories_with_budget ~origin_budget_sec ~base_path =
      [base_path] to its canonical absolute form (symlinks + ".."
      + redundant "." collapsed) before invoking [find] so every
      downstream comparison sees a single normalized representation. *)
-  let budget = Repo_git.Inspection_budget.create ~timeout_sec:origin_budget_sec () in
   let abs_base_path = canonical_path base_path in
   let* repositories = load_all ~base_path in
   let existing_paths =
@@ -440,6 +443,8 @@ let discover_repositories_with_budget ~origin_budget_sec ~base_path =
       repositories
   in
   let git_dirs = discover_git_dirs ~base_path:abs_base_path in
+  before_origin_inspection ();
+  let budget = Repo_git.Inspection_budget.create ~timeout_sec:origin_budget_sec () in
   let has_hidden_segment_under_base path =
     if String.equal path abs_base_path then false
     else
@@ -525,6 +530,13 @@ let discover_repositories_with_budget ~origin_budget_sec ~base_path =
   collect_candidates 0 [] git_dirs
 ;;
 
+let discover_repositories_with_budget ~origin_budget_sec ~base_path =
+  discover_repositories_with_budget_impl
+    ~before_origin_inspection:(fun () -> ())
+    ~origin_budget_sec
+    ~base_path
+;;
+
 let discover_repositories ~base_path =
   discover_repositories_with_budget
     ~origin_budget_sec:Repo_git.inspection_timeout_sec
@@ -533,6 +545,17 @@ let discover_repositories ~base_path =
 
 module For_testing = struct
   let discover_repositories_with_budget = discover_repositories_with_budget
+  let discover_repositories_with_budget_after_scan
+      ~before_origin_inspection
+      ~origin_budget_sec
+      ~base_path
+    =
+    discover_repositories_with_budget_impl
+      ~before_origin_inspection
+      ~origin_budget_sec
+      ~base_path
+  ;;
+
   let discovery_skip_log_line = discovery_skip_log_line
 end
 

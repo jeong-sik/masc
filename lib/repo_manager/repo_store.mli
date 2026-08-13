@@ -59,6 +59,12 @@ module For_testing : sig
     base_path:string ->
     (repository list, string) result
 
+  val discover_repositories_with_budget_after_scan :
+    before_origin_inspection:(unit -> unit) ->
+    origin_budget_sec:float ->
+    base_path:string ->
+    (repository list, string) result
+
   val discovery_skip_log_line :
     abs_repo_dir:string -> detail:string -> string
 end

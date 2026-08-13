@@ -563,6 +563,25 @@ let test_discover_origin_budget_is_cumulative () =
            (elapsed < 1.0)))
 ;;
 
+let test_discover_origin_budget_starts_after_filesystem_scan () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+      let repo = Filename.concat base_path "fast-origin" in
+      Unix.mkdir repo 0o755;
+      init_git_repo repo "https://github.com/test/fast-origin";
+      match
+        Repo_store.For_testing.discover_repositories_with_budget_after_scan
+          ~before_origin_inspection:(fun () -> Unix.sleepf 0.25)
+          ~origin_budget_sec:0.2
+          ~base_path
+      with
+      | Error detail ->
+        Alcotest.fail ("filesystem discovery consumed origin budget: " ^ detail)
+      | Ok repos ->
+        Alcotest.(check int) "fast origin remains inspectable" 1 (List.length repos))
+;;
+
 let test_discovery_warning_escapes_untrusted_fields () =
   let line =
     Repo_store.For_testing.discovery_skip_log_line
@@ -849,6 +868,8 @@ let () =
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
           Alcotest.test_case "shares one origin inspection budget" `Quick
             test_discover_origin_budget_is_cumulative;
+          Alcotest.test_case "starts origin budget after filesystem scan" `Quick
+            test_discover_origin_budget_starts_after_filesystem_scan;
           Alcotest.test_case "escapes discovery warning fields" `Quick
             test_discovery_warning_escapes_untrusted_fields;
         ] );

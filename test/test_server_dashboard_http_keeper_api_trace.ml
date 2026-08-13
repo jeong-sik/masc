@@ -8,41 +8,44 @@ module Runtime_lens_scan = Server_dashboard_http_keeper_runtime_manifest_scan
 module Runtime_lens_swimlane = Server_dashboard_http_keeper_runtime_lens_swimlane
 module T = Trajectory
 
-let mk_thinking_with_turn ~turn ~ts ~redacted ~content =
+let mk_thinking_with_turn ?(block_index = 0) ~turn ~ts ~redacted ~content =
   T.Thinking
     { ts
     ; ts_iso = "2026-06-29T00:00:00Z"
     ; turn
-    ; content
-    ; content_length = String.length content
-    ; redacted
+    ; identity = T.Trajectory_block { block_index }
+    ; observation =
+        if redacted then T.Withheld_redacted_thinking
+        else T.Withheld_thinking { char_count = String.length content }
     }
 ;;
 
-let mk_thinking ~ts ~redacted ~content =
-  mk_thinking_with_turn ~turn:1 ~ts ~redacted ~content
+let mk_thinking ?block_index ~ts ~redacted ~content =
+  mk_thinking_with_turn ?block_index ~turn:1 ~ts ~redacted ~content
 ;;
 
 let test_dedupe_preserves_first_order () =
   let t1 = mk_thinking ~ts:1.0 ~redacted:false ~content:"A" in
-  let t2 = mk_thinking ~ts:2.0 ~redacted:false ~content:"B" in
+  let t2 = mk_thinking ~block_index:1 ~ts:2.0 ~redacted:false ~content:"B" in
   let t1_dup = mk_thinking ~ts:1.0 ~redacted:false ~content:"A" in
   let input = [ t1; t2; t1_dup ] in
   let result = Trace.dedupe_thinking_lines input in
   check int "length" 2 (List.length result);
   match result with
   | [ T.Thinking a; T.Thinking b ] ->
-    check string "first" "A" a.content;
-    check string "second" "B" b.content
+    (match a.observation, b.observation with
+     | T.Withheld_thinking { char_count = 1 },
+       T.Withheld_thinking { char_count = 1 } -> ()
+     | _ -> fail "expected metadata-only thinking observations")
   | _ -> fail "expected two thinking lines"
 ;;
 
-let test_dedupe_precision () =
+let test_dedupe_uses_producer_identity () =
   let t1 = mk_thinking ~ts:1.1234561 ~redacted:false ~content:"A" in
-  let t2 = mk_thinking ~ts:1.1234562 ~redacted:false ~content:"A" in
+  let t2 = mk_thinking ~block_index:1 ~ts:1.1234561 ~redacted:false ~content:"A" in
   let input = [ t1; t2 ] in
   let result = Trace.dedupe_thinking_lines input in
-  (* Without the fix, Printf.sprintf "%.6f" would truncate both to 1.123456 and drop t2 *)
+  (* Same timestamp and metadata are distinct when the producer block identity differs. *)
   check int "length" 2 (List.length result)
 ;;
 
@@ -75,19 +78,21 @@ let test_read_invalid_json_skips () =
        invalid line (missing ts/timestamp), 1 valid line. *)
     Printf.fprintf
       oc
-      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"A\"}],\"ts_unix\":1.0}\n\
-       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"B\"}]}\n\
-       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"C\"}],\"ts_unix\":3.0}\n";
+      "{\"id\":\"msg-a\",\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"A\"}],\"ts_unix\":1.0}\n\
+       {\"id\":\"msg-b\",\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"B\"}]}\n\
+       {\"id\":\"msg-c\",\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"C\"}],\"ts_unix\":3.0}\n";
     close_out oc;
     let result = Trace.read_internal_history_lines ~config ~trace_id:"test_trace" in
     (* Should skip the invalid line ("B") without failing *)
     check int "length" 2 (List.length result);
     match result with
     | [ T.Thinking a; T.Thinking c ] ->
-      check string "first" "A" a.content;
       check (float 0.0) "first_ts" 1.0 a.ts;
-      check string "second" "C" c.content;
-      check (float 0.0) "second_ts" 3.0 c.ts
+      check (float 0.0) "second_ts" 3.0 c.ts;
+      (match a.observation, c.observation with
+       | T.Withheld_thinking { char_count = 1 },
+         T.Withheld_thinking { char_count = 1 } -> ()
+       | _ -> fail "expected withheld internal history metadata")
     | _ -> fail "expected two valid thinking lines")
 ;;
 
@@ -99,12 +104,14 @@ let test_converter_decodes_content_blocks () =
      trace row" WARNs/day) and invisible in the dashboard trace. *)
   let json =
     Yojson.Safe.from_string
-      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"hello world\"}],\"ts_unix\":2.0}"
+      "{\"id\":\"msg-hello\",\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"hello world\"}],\"ts_unix\":2.0}"
   in
   match Types.internal_history_json_to_trajectory_line json with
   | Some (T.Thinking entry) ->
-    check string "content" "hello world" entry.content;
-    check int "content_length" (String.length "hello world") entry.content_length;
+    (match entry.observation with
+     | T.Withheld_thinking { char_count } ->
+       check int "char_count" (String.length "hello world") char_count
+     | _ -> fail "expected withheld thinking metadata");
     check (float 0.0) "ts" 2.0 entry.ts
   | Some (T.Tool_call _) -> fail "expected Thinking, got Tool_call"
   | None -> fail "content_blocks row must decode to a Thinking line"
@@ -173,9 +180,8 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
       { ts = 1.0
       ; ts_iso = "2026-07-01T00:00:01Z"
       ; turn = 1
-      ; content = "current turn"
-      ; content_length = String.length "current turn"
-      ; redacted = false
+      ; identity = T.Trajectory_block { block_index = 0 }
+      ; observation = T.Withheld_thinking { char_count = String.length "current turn" }
       };
     T.append_thinking
       ~masc_root
@@ -184,9 +190,8 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
       { ts = 2.0
       ; ts_iso = "2026-07-01T00:00:02Z"
       ; turn = 42
-      ; content = "old turn"
-      ; content_length = String.length "old turn"
-      ; redacted = false
+      ; identity = T.Trajectory_block { block_index = 0 }
+      ; observation = T.Withheld_thinking { char_count = String.length "old turn" }
       };
     let trace_block_by_turn_ref =
       Trace.chat_trace_block_by_turn_ref
@@ -200,7 +205,11 @@ let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
     (match trace_block_by_turn_ref old_ref with
      | Some
          (Keeper_chat_blocks.Trace
-           { trace = [ Keeper_chat_blocks.Trace_think { text = "old turn"; _ } ] })
+           { trace =
+               [ Keeper_chat_blocks.Trace_think
+                   { text = ""; content_withheld = true; _ }
+               ]
+           })
        -> ()
      | Some _ -> fail "old trace_id returned unexpected trace block"
      | None -> fail "old trace_id from trace_history should enrich");
@@ -771,7 +780,7 @@ let () =
     "Server_dashboard_http_keeper_api_trace"
     [ ( "dedupe_thinking_lines"
       , [ test_case "preserves first order" `Quick test_dedupe_preserves_first_order
-        ; test_case "preserves sub-microsecond precision" `Quick test_dedupe_precision
+        ; test_case "uses producer identity" `Quick test_dedupe_uses_producer_identity
         ] )
     ; ( "read_internal_history_lines"
       , [ test_case "skips invalid jsonl rows" `Quick test_read_invalid_json_skips

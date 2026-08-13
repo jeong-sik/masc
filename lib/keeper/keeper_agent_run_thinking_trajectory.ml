@@ -27,16 +27,16 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
   | Some acc ->
     let now = Time_compat.now () in
     let now_iso = Masc_domain.now_iso () in
-    List.iter
-      (function
+    List.iteri
+      (fun block_index -> function
         | Agent_core.Types.Thinking { content; _ } ->
           let entry : Trajectory.thinking_entry =
             { ts = now
             ; ts_iso = now_iso
             ; turn
-            ; content
-            ; content_length = String.length content
-            ; redacted = false
+            ; identity = Trajectory.Trajectory_block { block_index }
+            ; observation =
+                Trajectory.Withheld_thinking { char_count = String.length content }
             }
           in
           append_entry ~keeper_name ~failure_label:"thinking" acc entry
@@ -49,9 +49,10 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
               { ts = now
               ; ts_iso = now_iso
               ; turn
-              ; content
-              ; content_length = String.length content
-              ; redacted = false
+              ; identity = Trajectory.Trajectory_block { block_index }
+              ; observation =
+                  Trajectory.Withheld_reasoning_details
+                    { char_count = String.length content }
               }
             in
             append_entry ~keeper_name ~failure_label:"reasoning details" acc entry
@@ -60,9 +61,8 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
             { ts = now
             ; ts_iso = now_iso
             ; turn
-            ; content = "[redacted]"
-            ; content_length = 0
-            ; redacted = true
+            ; identity = Trajectory.Trajectory_block { block_index }
+            ; observation = Trajectory.Withheld_redacted_thinking
             }
           in
           append_entry ~keeper_name ~failure_label:"redacted thinking" acc entry

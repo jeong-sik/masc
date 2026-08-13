@@ -190,8 +190,8 @@ val claim_scope_summary_absent : Yojson.Safe.t
 val internal_history_json_to_trajectory_line :
   Yojson.Safe.t -> Trajectory.trajectory_line option
 (** Pure: decode one [internal_assistant] history JSON line into a
-    [Trajectory.Thinking] record. Returns [None] when the line is missing
-    required fields or originates from a non-internal source. *)
+    metadata-only [Trajectory.Thinking] record. Returns [None] when the line
+    is missing required fields or originates from a non-internal source. *)
 
 val runtime_manifest_public_json :
   Keeper_runtime_manifest.t -> Yojson.Safe.t

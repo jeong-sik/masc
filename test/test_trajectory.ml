@@ -591,6 +591,18 @@ let test_summary_row_not_counted_as_malformed () =
   Alcotest.(check int) "skipped count counts only malformed" 1 skipped;
   Alcotest.(check int) "total rows processed" 3 total
 
+let test_raw_thinking_content_is_rejected () =
+  let legacy_raw_content =
+    {|{"type":"thinking","ts":1.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"content":"PRIVATE_REASONING","content_length":17,"redacted":false}|}
+  in
+  let parsed, skipped, total =
+    Trajectory.trajectory_lines_of_jsonl_lines ~trace_id:"strict-current"
+      [ legacy_raw_content ]
+  in
+  Alcotest.(check int) "raw content never decodes" 0 (List.length parsed);
+  Alcotest.(check int) "raw content counted as incompatible" 1 skipped;
+  Alcotest.(check int) "one row inspected" 1 total
+
 (* ================================================================ *)
 (* Test: next_round tail-read hydration                              *)
 (* ================================================================ *)
@@ -783,20 +795,25 @@ let test_next_round_evicts_past_turn_keys () =
     in
     Alcotest.(check int) "turn 5 after eviction stays monotonic" 5 r5c)
 
-let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
+let thinking_line ?(ts = 1000.0) ?(block_index = 0) ?(redacted = false) content =
   Trajectory.Thinking
     {
       ts;
       ts_iso = "2026-06-29T00:00:00Z";
       turn = 1;
-      content;
-      content_length = String.length content;
-      redacted;
+      identity = Trajectory.Trajectory_block { block_index };
+      observation =
+        if redacted then Trajectory.Withheld_redacted_thinking
+        else Trajectory.Withheld_thinking { char_count = String.length content };
     }
 
-let check_thinking_content label expected = function
+let check_thinking_count label expected = function
   | Trajectory.Thinking entry ->
-      Alcotest.(check string) label expected entry.Trajectory.content
+      (match entry.Trajectory.observation with
+       | Trajectory.Withheld_thinking { char_count }
+       | Trajectory.Withheld_reasoning_details { char_count } ->
+         Alcotest.(check int) label expected char_count
+       | Trajectory.Withheld_redacted_thinking -> Alcotest.fail (label ^ ": redacted"))
   | Trajectory.Tool_call _ -> Alcotest.fail (label ^ ": expected thinking line")
 
 let check_tool_call label expected = function
@@ -814,21 +831,23 @@ let test_dedupe_thinking_lines_uses_structural_key () =
       thinking_line ~ts:1000.0 "same";
       tool_call;
       thinking_line ~ts:1000.0 "same";
-      thinking_line ~ts:1001.0 "same";
-      thinking_line ~ts:1000.0 ~redacted:true "same";
+      thinking_line ~ts:1001.0 ~block_index:1 "same";
+      thinking_line ~ts:1000.0 ~block_index:2 ~redacted:true "same";
     ]
   in
   let deduped =
     Server_dashboard_http_keeper_api_trace.dedupe_thinking_lines lines
   in
   Alcotest.(check int) "one exact duplicate removed" 4 (List.length deduped);
-  check_thinking_content "first thinking preserved" "same" (List.nth deduped 0);
+  check_thinking_count "first thinking preserved" 4 (List.nth deduped 0);
   check_tool_call "tool call preserved" "tool_execute" (List.nth deduped 1);
-  check_thinking_content "same content at a new timestamp preserved" "same"
+  check_thinking_count "same size at a new timestamp preserved" 4
     (List.nth deduped 2);
   (match List.nth deduped 3 with
    | Trajectory.Thinking entry ->
-       Alcotest.(check bool) "redacted variant preserved" true entry.Trajectory.redacted
+       (match entry.Trajectory.observation with
+        | Trajectory.Withheld_redacted_thinking -> ()
+        | _ -> Alcotest.fail "redacted variant was not preserved")
    | Trajectory.Tool_call _ -> Alcotest.fail "expected redacted thinking line")
 
 (* ================================================================ *)
@@ -836,7 +855,7 @@ let test_dedupe_thinking_lines_uses_structural_key () =
 (* ================================================================ *)
 
 (* ================================================================ *)
-(* Test: thinking trajectory — full untruncated text, per-turn        *)
+(* Test: thinking trajectory — metadata only, per-turn               *)
 (* ================================================================ *)
 
 let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
@@ -854,13 +873,13 @@ let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
       loop [])
   end
 
-(* append_thinking must persist the FULL text, not the legacy 2000-byte cap. *)
-let test_append_thinking_persists_untruncated () =
+let test_append_thinking_withholds_content () =
   with_tmpdir (fun dir ->
-    let big = String.make 9000 'x' in
+    let secret = String.make 9000 'x' in
     let entry : Trajectory.thinking_entry = {
       ts = 1000.0; ts_iso = "2026-06-09T00:00:00Z"; turn = 4;
-      content = big; content_length = String.length big; redacted = false;
+      identity = Trajectory.Trajectory_block { block_index = 0 };
+      observation = Trajectory.Withheld_thinking { char_count = String.length secret };
     } in
     Trajectory.append_thinking ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" entry;
     let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" in
@@ -868,14 +887,16 @@ let test_append_thinking_persists_untruncated () =
     let open Yojson.Safe.Util in
     let row = List.hd lines in
     Alcotest.(check string) "type=thinking" "thinking" (row |> member "type" |> to_string);
-    Alcotest.(check int) "content untruncated (9000B, not 2000 cap)" 9000
-      (row |> member "content" |> to_string |> String.length);
-    Alcotest.(check int) "content_length records true length" 9000
-      (row |> member "content_length" |> to_int))
+    Alcotest.(check bool) "content is withheld" true (row |> member "content" = `Null);
+    Alcotest.(check int) "char_count records true length" 9000
+      (row |> member "char_count" |> to_int);
+    Alcotest.(check bool) "secret absent from JSONL" false
+      (String_util.string_contains_substring ~needle:secret
+         ~haystack:(Yojson.Safe.to_string row)))
 
 (* persist_response_content stamps every block with the hook's ~turn (not
    acc.turn) and writes one line per thinking block, untruncated. *)
-let test_persist_response_content_per_turn_full () =
+let test_persist_response_content_per_turn_metadata () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~generation:0 () in
@@ -893,8 +914,10 @@ let test_persist_response_content_per_turn_full () =
     List.iter (fun row ->
       Alcotest.(check int) "turn stamped from hook (11), not acc.turn (0)" 11
         (row |> member "turn" |> to_int)) lines;
-    Alcotest.(check int) "first block untruncated (5000B)" 5000
-      (List.hd lines |> member "content" |> to_string |> String.length))
+    Alcotest.(check int) "first block character count" 5000
+      (List.hd lines |> member "char_count" |> to_int);
+    List.iter (fun row ->
+      Alcotest.(check bool) "content null" true (row |> member "content" = `Null)) lines)
 
 let () =
   Alcotest.run "Trajectory" [
@@ -971,15 +994,17 @@ let () =
         test_read_recent_lines_skips_malformed_rows;
       Alcotest.test_case "summary row not counted as malformed" `Quick
         test_summary_row_not_counted_as_malformed;
+      Alcotest.test_case "raw thinking content is rejected" `Quick
+        test_raw_thinking_content_is_rejected;
     ]);
     ("keeper_trace", [
       Alcotest.test_case "dedupe_thinking_lines uses structural key" `Quick
         test_dedupe_thinking_lines_uses_structural_key;
     ]);
     ("thinking_trajectory", [
-      Alcotest.test_case "append_thinking persists full untruncated text" `Quick
-        test_append_thinking_persists_untruncated;
-      Alcotest.test_case "persist_response_content stamps hook turn, all blocks" `Quick
-        test_persist_response_content_per_turn_full;
+      Alcotest.test_case "append_thinking withholds content" `Quick
+        test_append_thinking_withholds_content;
+      Alcotest.test_case "persist_response_content stamps hook turn metadata" `Quick
+        test_persist_response_content_per_turn_metadata;
     ]);
   ]

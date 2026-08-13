@@ -57,18 +57,27 @@ type trajectory = {
   task_id : string option;
 }
 
-(** {1 Thinking entries}
+(** {1 Thinking observations}
 
-    Thinking blocks from LLM responses, persisted alongside tool call entries
-    in the same JSONL file with [type = "thinking"]. *)
+    Hidden reasoning is never trajectory data. These variants preserve only
+    the kind and size needed for observability; no variant can carry content
+    or a replay signature. *)
+
+type thinking_observation =
+  | Withheld_thinking of { char_count : int }
+  | Withheld_reasoning_details of { char_count : int }
+  | Withheld_redacted_thinking
+
+type thinking_identity =
+  | Trajectory_block of { block_index : int }
+  | Internal_history_message of { message_id : string }
 
 type thinking_entry = {
   ts : float;
   ts_iso : string;
   turn : int;
-  content : string;
-  content_length : int;
-  redacted : bool;
+  identity : thinking_identity;
+  observation : thinking_observation;
 }
 
 (** Tagged union for reading mixed JSONL (tool calls + thinking). *)
@@ -86,7 +95,6 @@ val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val default_result_truncation : int
-val default_thinking_truncation : int
 val entry_to_json :
   ?result_max_len:int ->
   ?runtime_contract:Yojson.Safe.t ->
@@ -101,8 +109,8 @@ val tool_call_entry_of_json :
     JSON. The [bool] is true when the gate field parsed from a
     persisted value rather than the legacy default. Exposed for
     RFC-0233 consumers that join rows on [execution_id]. *)
-val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
-val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
+val thinking_entry_to_json : thinking_entry -> Yojson.Safe.t
+val trajectory_line_to_json : ?result_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
 (** {1 Persistence} *)

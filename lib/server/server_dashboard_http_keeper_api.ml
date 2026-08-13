@@ -2407,11 +2407,6 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:2000
            |> max 0 |> min 10000
          in
-         let content_max_len =
-           Server_utils.int_query_param req "content_max_len"
-             ~default:Trajectory.default_thinking_truncation
-           |> max 0 |> min 50000
-         in
          let include_thinking =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
@@ -2422,13 +2417,12 @@ let handle_keeper_get_subroutes state req request reqd =
          in
          let cache_key =
            Printf.sprintf
-             "keeper:trajectory:%s:%s:%s:%d:%d:%d:%b:%d"
+             "keeper:trajectory:%s:%s:%s:%d:%d:%b:%d"
              (Workspace.masc_root_dir config)
              name
              trace_id
              limit
              result_max_len
-             content_max_len
              include_thinking
              tail_scan_lines
          in
@@ -2467,7 +2461,7 @@ let handle_keeper_get_subroutes state req request reqd =
                  ("total_entries", `Int total);
                  ("showing", `Int (List.length recent));
                  ("entries", `List (List.map
-                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
+                   (Trajectory.trajectory_line_to_json ~result_max_len) recent));
                ]))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)

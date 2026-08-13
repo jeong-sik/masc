@@ -6,16 +6,9 @@ let line_ts = function
 ;;
 
 module Thinking_key = struct
-  type t = float * bool * string
+  type t = int * Trajectory.thinking_identity
 
-  let compare (ts1, r1, c1) (ts2, r2, c2) =
-    let c_ts = Float.compare ts1 ts2 in
-    if c_ts <> 0
-    then c_ts
-    else
-      let c_r = Bool.compare r1 r2 in
-      if c_r <> 0 then c_r else String.compare c1 c2
-  ;;
+  let compare = Stdlib.compare
 end
 
 module Thinking_set = Set.Make (Thinking_key)
@@ -29,7 +22,7 @@ let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
          match line with
          | Trajectory.Tool_call _ -> seen, line :: acc
          | Trajectory.Thinking entry ->
-           let key = entry.ts, entry.redacted, entry.content in
+           let key = entry.turn, entry.identity in
            if Thinking_set.mem key seen
            then seen, acc
            else Thinking_set.add key seen, line :: acc)
@@ -155,8 +148,8 @@ let trajectory_line_to_chat_trace_step = function
   | Trajectory.Thinking entry ->
     Some
       (Keeper_chat_blocks.Trace_think
-         { text = entry.content
-         ; content_withheld = false
+         { text = ""
+         ; content_withheld = true
          ; ts = Some entry.ts_iso
          ; agent_core_block_index = None
          })

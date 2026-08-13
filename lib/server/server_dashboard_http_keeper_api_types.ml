@@ -365,6 +365,7 @@ let claim_scope_summary_absent =
 let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
     : Trajectory.trajectory_line option =
   let source = Safe_ops.json_string ~default:"" "source" json in
+  let message_id = Safe_ops.json_string ~default:"" "id" json in
   (* History rows persist message text as typed [content_blocks], not a flat
      [content] string (Keeper_context_core_message_json: "Structured
      content_blocks is the only supported message-content shape"). Reading a
@@ -373,7 +374,11 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
      dashboard trace. Use the SSOT extractor (shared with history routing /
      memory recall) so content_blocks rows decode to their text. *)
   let content = Keeper_context_core.text_of_history_jsonl_json json in
-  if source <> "internal_assistant" || String.trim content = "" then None
+  if
+    source <> "internal_assistant"
+    || String.trim content = ""
+    || String.trim message_id = ""
+  then None
   else
     let ts =
       match Safe_ops.json_float_opt "ts_unix" json with
@@ -399,9 +404,9 @@ let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
              ts;
              ts_iso;
              turn = Safe_ops.json_int ~default:0 "turn" json;
-             content;
-             content_length = String.length content;
-             redacted = Safe_ops.json_bool ~default:false "redacted" json;
+             identity = Trajectory.Internal_history_message { message_id };
+             observation =
+               Trajectory.Withheld_thinking { char_count = String.length content };
            })
 
 let runtime_manifest_public_json row =

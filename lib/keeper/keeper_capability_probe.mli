@@ -21,7 +21,20 @@
     probed one, [initialize] and [tools/list] both answered, and the models
     still reported no masc tool present. So [Projected] means a turn is worth
     spending, and nothing more. Only observing an actual call establishes
-    reachability, which is [probe_invocation]'s job (not yet implemented).
+    reachability, which is {!probe_invocation}'s job.
+
+    {1 Which lanes this covers}
+
+    {!probe_invocation} answers for Agent Core runtimes, where a request
+    carries no session and writing nothing is the default. It does not answer
+    for the official-client lanes (claude_code, codex_app_server,
+    antigravity_cli): those own a durable session keyed by keeper name, so a
+    probe there would land in the transcript the module exists to stay out of.
+    It returns [Not_agent_core_lane] rather than approximating.
+
+    So the loop masc#28414 describes is closed for Agent Core lanes and open
+    for official-client ones — which is where it was observed. Measuring those
+    still costs a real turn.
 
     @since 0.21.3 *)
 

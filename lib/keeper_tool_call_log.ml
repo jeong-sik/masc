@@ -14,22 +14,39 @@
 
 let max_output_len = 4000
 
-(** Pre-truncation info, keyed by the exact Agent Core invocation.
-    Set by the tool handler wrapper (keeper_tools_agent_core), consumed by the
-    AGENT_CORE on_tool_result hook (keeper_hooks_agent_core). *)
-let pending_truncation : ((string * string), int * int option) Hashtbl.t =
+(** The provider call id is not an occurrence identity: it may be blank or
+    repeated. Agent Core scopes one occurrence by turn and planned index, so
+    keep those typed fields in the pending-observation key as well. *)
+type invocation_key =
+  { keeper_name : string
+  ; tool_use_id : string
+  ; turn : int
+  ; planned_index : int
+  }
+
+let invocation_key ~keeper_name invocation =
+  { keeper_name
+  ; tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation
+  ; turn = Agent_core.Tool_contract.Invocation.turn invocation
+  ; planned_index = Agent_core.Tool_contract.Invocation.planned_index invocation
+  }
+;;
+
+(** Pre-truncation info, keyed by the exact Agent Core occurrence. Set by the
+    tool handler wrapper and consumed by the on-tool-result hook. *)
+let pending_truncation : (invocation_key, int * int option) Hashtbl.t =
   Hashtbl.create 8
 ;;
 
-let set_truncation_info ~keeper_name ~tool_use_id ~original_bytes ?truncated_to () =
+let set_truncation_info ~keeper_name ~invocation ~original_bytes ?truncated_to () =
   Hashtbl.replace
     pending_truncation
-    (keeper_name, tool_use_id)
+    (invocation_key ~keeper_name invocation)
     (original_bytes, truncated_to)
 ;;
 
-let consume_truncation_info ~keeper_name ~tool_use_id () =
-  let key = keeper_name, tool_use_id in
+let consume_truncation_info ~keeper_name ~invocation () =
+  let key = invocation_key ~keeper_name invocation in
   match Hashtbl.find_opt pending_truncation key with
   | Some info ->
     Hashtbl.remove pending_truncation key;

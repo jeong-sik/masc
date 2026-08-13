@@ -460,7 +460,7 @@ let make_hooks
         let original_bytes, truncated_to =
           Keeper_tool_call_log.consume_truncation_info
             ~keeper_name:(!meta_ref).name
-            ~tool_use_id
+            ~invocation
             ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in

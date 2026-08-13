@@ -43,7 +43,7 @@ let execute_with_observers
       (fun invocation ->
          Keeper_tool_call_log.set_truncation_info
            ~keeper_name:meta.name
-           ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+           ~invocation
            ~original_bytes
            ())
       agent_core_invocation

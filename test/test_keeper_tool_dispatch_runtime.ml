@@ -4907,6 +4907,12 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
                  "committed nested row is immediately readable"
                  (Some "time")
                  (Safe_ops.json_string_opt "composition_node_id" row);
+               check
+                 (option string)
+                 "committed nested row preserves the runtime model bucket"
+                 (Some
+                    (Masc.Keeper_hooks_agent_core_types.current_keeper_model meta))
+                 (Safe_ops.json_string_opt "model" row);
                row
               | _ -> fail "expected one synchronously committed nested action row"
             in

@@ -222,6 +222,22 @@ type effect_outcome =
   | Effect_failed of string
   | Effect_indeterminate of string
 
+type replay_execution =
+  { outcome : outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
+  }
+
+let replay_execution ?terminal_effect_receipt outcome =
+  { outcome; terminal_effect_receipt }
+;;
+
+let applied_terminal_effect_receipt replay_effect receipt =
+  match replay_effect with
+  | Effect_applied _ | Effect_applied_with_warning _ -> receipt
+  | Effect_failed _ | Effect_indeterminate _ -> None
+;;
+
 let replay_artifact_identity artifact_ref =
   Tool_output.with_preview artifact_ref ""
 ;;
@@ -258,6 +274,8 @@ module Repair_map = Map.Make (String)
 type pending_repair =
   { operation : string
   ; replay_effect : effect_outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
   }
 
 (* A Keeper turn already owns the per-Keeper admission mutex before replay
@@ -352,35 +370,52 @@ let replay_journal_status ~base_path ~approval_id replay_outcome =
     Error (Keeper_approval_queue.grant_error_to_string error)
 ;;
 
-let replayed_outcome ~base_path ~approval_id ~operation replay_effect =
+let replayed_outcome
+      ~base_path
+      ~approval_id
+      ~operation
+      ?terminal_effect_receipt
+      replay_effect
+  =
+  let terminal_effect_receipt =
+    applied_terminal_effect_receipt replay_effect terminal_effect_receipt
+  in
   remember_pending_repair
     ~base_path
     ~approval_id
-    { operation; replay_effect };
+    { operation; replay_effect; terminal_effect_receipt };
   match persist_replay_effect ~base_path replay_effect with
   | Error detail ->
-    Repair_required { operation; stage = Evidence_storage; detail }
+    replay_execution
+      ?terminal_effect_receipt
+      (Repair_required { operation; stage = Evidence_storage; detail })
   | Ok replay_outcome ->
     (match replay_journal_status ~base_path ~approval_id replay_outcome with
      | Error detail ->
-       Repair_required { operation; stage = Replay_journal; detail }
+       replay_execution
+         ?terminal_effect_receipt
+         (Repair_required { operation; stage = Replay_journal; detail })
      | Ok journal ->
        forget_pending_repair ~base_path ~approval_id;
-       (match replay_outcome with
-        | Keeper_approval_queue.Replay_applied output_ref ->
-          Applied { operation; output_ref; journal }
-        | Keeper_approval_queue.Replay_applied_with_warning detail_ref ->
-          Applied_with_warning { operation; detail_ref; journal }
-        | Keeper_approval_queue.Replay_failed detail_ref ->
-          Failed { operation; detail_ref; journal }
-        | Keeper_approval_queue.Replay_indeterminate detail_ref ->
-          Indeterminate { operation; detail_ref; journal }))
+       let outcome =
+         match replay_outcome with
+         | Keeper_approval_queue.Replay_applied output_ref ->
+           Applied { operation; output_ref; journal }
+         | Keeper_approval_queue.Replay_applied_with_warning detail_ref ->
+           Applied_with_warning { operation; detail_ref; journal }
+         | Keeper_approval_queue.Replay_failed detail_ref ->
+           Failed { operation; detail_ref; journal }
+         | Keeper_approval_queue.Replay_indeterminate detail_ref ->
+           Indeterminate { operation; detail_ref; journal }
+       in
+       replay_execution ?terminal_effect_receipt outcome)
 ;;
 
-let durable_replay_outcome
+let durable_replay_execution
       ~base_path
       ~operation
       ~journal
+      ?terminal_effect_receipt
       replay_outcome
   =
   let verified =
@@ -402,15 +437,27 @@ let durable_replay_outcome
         (fun _ -> `Indeterminate detail_ref)
         (retrieve_replay_artifact ~base_path detail_ref)
   in
-  match verified with
-  | Ok (`Applied output_ref) -> Applied { operation; output_ref; journal }
-  | Ok (`Applied_with_warning detail_ref) ->
-    Applied_with_warning { operation; detail_ref; journal }
-  | Ok (`Failed detail_ref) -> Failed { operation; detail_ref; journal }
-  | Ok (`Indeterminate detail_ref) ->
-    Indeterminate { operation; detail_ref; journal }
-  | Error detail ->
-    Repair_required { operation; stage = Evidence_retrieval; detail }
+  let outcome =
+    match verified with
+    | Ok (`Applied output_ref) -> Applied { operation; output_ref; journal }
+    | Ok (`Applied_with_warning detail_ref) ->
+      Applied_with_warning { operation; detail_ref; journal }
+    | Ok (`Failed detail_ref) -> Failed { operation; detail_ref; journal }
+    | Ok (`Indeterminate detail_ref) ->
+      Indeterminate { operation; detail_ref; journal }
+    | Error detail ->
+      Repair_required { operation; stage = Evidence_retrieval; detail }
+  in
+  replay_execution ?terminal_effect_receipt outcome
+;;
+
+let durable_replay_outcome ~base_path ~operation ~journal replay_outcome =
+  (durable_replay_execution
+     ~base_path
+     ~operation
+     ~journal
+     replay_outcome)
+    .outcome
 ;;
 
 type replay_evidence_effect =
@@ -724,7 +771,36 @@ let compose_model_message
       hitl_resolution
 ;;
 
-let replay_approved_effect
+let connector_post_terminal_effect_receipt connector_post =
+  Keeper_tool_execution.Surface_post_completed
+    (Keeper_tool_in_process_runtime.connector_post_replay_target connector_post)
+;;
+
+let terminal_effect_receipt_of_durable_replay request replay_outcome =
+  match
+    replayable_of_operation request.Keeper_approval_queue.tool_name,
+    replay_outcome
+  with
+  | ( Some Replay_connector_post
+    , ( Keeper_approval_queue.Replay_applied _
+      | Keeper_approval_queue.Replay_applied_with_warning _ ) ) ->
+    Result.map
+      (fun connector_post ->
+         Some (connector_post_terminal_effect_receipt connector_post))
+      (connector_post_of_gate_input request.input)
+  | ( ( Some Replay_write
+      | Some Replay_execute
+      | Some Replay_network_read
+      | Some Replay_memory_write
+      | None )
+    , _ )
+  | Some Replay_connector_post,
+    ( Keeper_approval_queue.Replay_failed _
+    | Keeper_approval_queue.Replay_indeterminate _ ) ->
+    Ok None
+;;
+
+let replay_approved_effect_with_receipt
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -747,29 +823,41 @@ let replay_approved_effect
          ~base_path:config.base_path
          ~approval_id
      with
-     | Some { operation; replay_effect } ->
+     | Some { operation; replay_effect; terminal_effect_receipt } ->
        replayed_outcome
          ~base_path:config.base_path
          ~approval_id
          ~operation
+         ?terminal_effect_receipt
          replay_effect
      | None ->
-       Repair_required
-         { operation = "unknown"
-         ; detail = Keeper_approval_queue.grant_error_to_string error
-         ; stage = Resolution_lookup
-         })
+       replay_execution
+         (Repair_required
+            { operation = "unknown"
+            ; detail = Keeper_approval_queue.grant_error_to_string error
+            ; stage = Resolution_lookup
+            }))
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_consumed
       ; replay_outcome = Some replay_outcome
       } ->
     forget_pending_repair ~base_path:config.base_path ~approval_id;
-    durable_replay_outcome
-      ~base_path:config.base_path
-      ~operation:request.tool_name
-      ~journal:Replay_journal_already_recorded
-      replay_outcome
+    (match terminal_effect_receipt_of_durable_replay request replay_outcome with
+     | Error detail ->
+       replay_execution
+         (Repair_required
+            { operation = request.tool_name
+            ; stage = Request_decode
+            ; detail
+            })
+     | Ok terminal_effect_receipt ->
+       durable_replay_execution
+         ~base_path:config.base_path
+         ~operation:request.tool_name
+         ~journal:Replay_journal_already_recorded
+         ?terminal_effect_receipt
+         replay_outcome)
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_consumed
@@ -780,11 +868,12 @@ let replay_approved_effect
          ~base_path:config.base_path
          ~approval_id
      with
-     | Some { operation; replay_effect } ->
+     | Some { operation; replay_effect; terminal_effect_receipt } ->
        replayed_outcome
          ~base_path:config.base_path
          ~approval_id
          ~operation
+         ?terminal_effect_receipt
          replay_effect
      | None ->
        replayed_outcome
@@ -798,17 +887,18 @@ let replay_approved_effect
       ; state = Keeper_approval_queue.Resolution_unconsumed
       ; replay_outcome = Some _
       } ->
-    Repair_required
-      { operation = request.tool_name
-      ; stage = Invalid_resolution_state
-      ; detail = "replay outcome exists before grant consumption"
-      }
+    replay_execution
+      (Repair_required
+         { operation = request.tool_name
+         ; stage = Invalid_resolution_state
+         ; detail = "replay outcome exists before grant consumption"
+         })
   | Ok
       { request
       ; state = Keeper_approval_queue.Resolution_unconsumed
       ; replay_outcome = None
       } ->
-    let run_effect operation run =
+    let run_effect ?terminal_effect_receipt operation run =
       let execution =
         try Ok (run ()) with
         | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -835,11 +925,12 @@ let replay_approved_effect
              request
          with
          | Error detail ->
-           Repair_required
-             { operation
-             ; stage = Stale_grant_retirement
-             ; detail
-             }
+           replay_execution
+             (Repair_required
+                { operation
+                ; stage = Stale_grant_retirement
+                ; detail
+                })
          | Ok () ->
            replayed_outcome
              ~base_path:config.base_path
@@ -851,16 +942,24 @@ let replay_approved_effect
           ~base_path:config.base_path
           ~approval_id
           ~operation
+          ?terminal_effect_receipt
           (summarize_execution ~operation execution)
     in
-    let replay operation decode run =
+    let replay ?terminal_effect_receipt_of_args operation decode run =
       match decode request.input with
       | Error detail ->
-        Repair_required { operation; stage = Request_decode; detail }
-      | Ok args -> run_effect operation (fun () -> run args)
+        replay_execution
+          (Repair_required { operation; stage = Request_decode; detail })
+      | Ok args ->
+        let terminal_effect_receipt =
+          Option.map
+            (fun make_receipt -> make_receipt args)
+            terminal_effect_receipt_of_args
+        in
+        run_effect ?terminal_effect_receipt operation (fun () -> run args)
     in
     (match replayable_of_operation request.tool_name with
-     | None -> Not_applicable
+     | None -> replay_execution Not_applicable
      | Some Replay_write ->
        replay write_operation write_args_of_gate_input (fun args ->
          Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
@@ -887,11 +986,12 @@ let replay_approved_effect
      | Some Replay_network_read ->
        (match network_read_of_gate_input request.input with
         | Error detail ->
-          Repair_required
-            { operation = network_read_operation
-            ; stage = Request_decode
-            ; detail
-            }
+          replay_execution
+            (Repair_required
+               { operation = network_read_operation
+               ; stage = Request_decode
+               ; detail
+               })
         | Ok (Keeper_tool_in_process_runtime.Replay_web_search args) ->
           run_effect network_read_operation (fun () ->
             Keeper_tool_in_process_runtime.handle_web_search_with_outcome
@@ -914,6 +1014,7 @@ let replay_approved_effect
               ()))
      | Some Replay_connector_post ->
        replay
+         ~terminal_effect_receipt_of_args:connector_post_terminal_effect_receipt
          connector_post_operation
          connector_post_of_gate_input
          (fun connector_post ->
@@ -934,6 +1035,30 @@ let replay_approved_effect
            ~gate_grant:grant
            ~args
            ()))
+;;
+
+let replay_approved_effect
+      ~config
+      ~meta
+      ~publication_recovery
+      ~turn_sandbox_factory
+      ?continuation_channel
+      ?gate_context
+      ~grant
+      ~approval_id
+      ()
+  =
+  (replay_approved_effect_with_receipt
+     ~config
+     ~meta
+     ~publication_recovery
+     ~turn_sandbox_factory
+     ?continuation_channel
+     ?gate_context
+     ~grant
+     ~approval_id
+     ())
+    .outcome
 ;;
 
 module For_testing = struct

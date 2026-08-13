@@ -83,6 +83,7 @@ KNOWN_ASSERTIONS = {
     "composition_async_observed",
     "composition_turn_context_observed",
     "composition_dashboard_browser_observed",
+    "persistence_tiers_dashboard_projection_observed",
 }
 
 
@@ -144,6 +145,101 @@ def sha256_file(path: pathlib.Path) -> str:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def validate_persistence_browser_evidence(
+    proof: Any,
+    screenshot_path: pathlib.Path,
+    expected_keepers: set[str],
+) -> tuple[bool, str]:
+    errors: list[str] = []
+    if not isinstance(proof, dict):
+        return False, "persistence browser proof is not an object"
+    if proof.get("schema") != "masc.keeper_persistence_browser_evidence.v1":
+        errors.append("schema mismatch")
+    generated_at = proof.get("generated_at")
+    if not isinstance(generated_at, str) or not generated_at:
+        errors.append("generated_at is absent")
+    else:
+        try:
+            dt.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        except ValueError:
+            errors.append("generated_at is invalid")
+    if proof.get("interaction") != "manual_refresh":
+        errors.append("manual refresh was not observed")
+    if not expected_keepers:
+        errors.append("expected Keeper fleet is absent")
+    tiers = proof.get("tiers")
+    if not isinstance(tiers, list) or len(tiers) != 4:
+        errors.append("duration tiers must be an exact four-element list")
+        tiers = []
+    if all(isinstance(tier, dict) for tier in tiers):
+        if [tier.get("id") for tier in tiers] != ["1h", "2h", "4h", "24h"]:
+            errors.append("duration tier ids are not exact and ordered")
+        previous_observed: set[str] | None = None
+        previous_missing: set[str] | None = None
+        for tier in tiers:
+            status = tier.get("status")
+            evidence_kind = tier.get("evidence_kind")
+            observed_count = tier.get("observed_count")
+            keeper_count = tier.get("keeper_count")
+            missing_count = tier.get("missing_count")
+            observed_names = tier.get("observed_keepers")
+            missing_names = tier.get("missing_keepers")
+            if status not in {"pass", "warn", "fail"}:
+                errors.append(f"tier {tier.get('id')} status is invalid")
+            if evidence_kind != "durable_turn_span":
+                errors.append(f"tier {tier.get('id')} evidence kind is invalid")
+            counts = (observed_count, keeper_count, missing_count)
+            if not all(type(value) is int and value >= 0 for value in counts):
+                errors.append(f"tier {tier.get('id')} counts are invalid")
+                continue
+            if not isinstance(observed_names, list) or not isinstance(missing_names, list):
+                errors.append(f"tier {tier.get('id')} Keeper identities are absent")
+                continue
+            if not all(isinstance(name, str) and bool(name.strip()) for name in observed_names + missing_names):
+                errors.append(f"tier {tier.get('id')} Keeper identities are invalid")
+                continue
+            observed = set(observed_names)
+            missing = set(missing_names)
+            if len(observed) != len(observed_names) or len(missing) != len(missing_names):
+                errors.append(f"tier {tier.get('id')} Keeper identities contain duplicates")
+            if observed & missing or observed | missing != expected_keepers:
+                errors.append(f"tier {tier.get('id')} does not describe the exact run fleet")
+            if len(observed) != observed_count or len(missing) != missing_count:
+                errors.append(f"tier {tier.get('id')} counts do not match identities")
+            if observed_count + missing_count != keeper_count or keeper_count != len(expected_keepers):
+                errors.append(f"tier {tier.get('id')} Keeper total is inconsistent")
+            derived_status = (
+                "fail"
+                if keeper_count == 0 or observed_count == 0
+                else "pass"
+                if observed_count == keeper_count
+                else "warn"
+            )
+            if status != derived_status:
+                errors.append(f"tier {tier.get('id')} status disagrees with counts")
+            if previous_observed is not None and previous_missing is not None and (
+                not observed <= previous_observed or not missing >= previous_missing
+            ):
+                errors.append(f"tier {tier.get('id')} violates duration monotonicity")
+            previous_observed = observed
+            previous_missing = missing
+    elif tiers:
+        errors.append("duration tiers contain non-object values")
+    screenshot_digest = proof.get("screenshot_sha256")
+    if proof.get("screenshot_file") != "keeper-persistence-proof.png":
+        errors.append("screenshot filename is invalid")
+    if not isinstance(screenshot_digest, str) or re.fullmatch(r"[0-9a-f]{64}", screenshot_digest) is None:
+        errors.append("screenshot digest is invalid")
+    elif not screenshot_path.is_file():
+        errors.append("screenshot is absent")
+    else:
+        if sha256_file(screenshot_path) != screenshot_digest:
+            errors.append("screenshot digest mismatch")
+        if proof.get("screenshot_bytes") != screenshot_path.stat().st_size:
+            errors.append("screenshot byte count mismatch")
+    return not errors, "; ".join(errors) if errors else "exact refreshed persistence projection and screenshot verified"
 
 
 def source_sha() -> str:
@@ -367,12 +463,12 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
-    if not isinstance(missions, list) or len(missions) != 18:
-        raise AcceptanceError("mission catalog must contain exactly 18 missions")
+    if not isinstance(missions, list) or len(missions) != 19:
+        raise AcceptanceError("mission catalog must contain exactly 19 missions")
     ids = [mission.get("id") for mission in missions]
-    expected_ids = [f"RW{index:02d}" for index in range(1, 19)]
+    expected_ids = [f"RW{index:02d}" for index in range(1, 20)]
     if ids != expected_ids:
-        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW18")
+        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW19")
     roles = catalog.get("roles")
     if not isinstance(roles, list) or set(roles) != EXPECTED_ROLES:
         raise AcceptanceError("catalog must define the exact five collaboration roles")
@@ -543,6 +639,7 @@ class MissionRun:
         self.observations: dict[str, ToolObservation] = {}
         self.tool_call_rows: dict[str, list[dict[str, Any]]] = {}
         self.browser_proof: dict[str, Any] = {}
+        self.persistence_browser_proof: dict[str, Any] = {}
 
     def call(self, label: str, tool: str, arguments: dict[str, Any]) -> ToolObservation:
         observation = self.client.call_tool(tool, arguments)
@@ -925,14 +1022,25 @@ class MissionRun:
                 "composition browser proof failed: "
                 + (completed.stderr.strip() or completed.stdout.strip())
             )
-        measurement_path = browser_dir / "keeper-composition-inspector.json"
-        try:
-            measurement = json.loads(measurement_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise AcceptanceError(f"invalid browser proof measurement: {error}") from error
-        if not isinstance(measurement, dict):
-            raise AcceptanceError("browser proof measurement must be an object")
-        self.browser_proof = measurement
+
+        def read_measurement(filename: str) -> dict[str, Any]:
+            measurement_path = browser_dir / filename
+            try:
+                measurement = json.loads(measurement_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise AcceptanceError(
+                    f"invalid browser proof measurement {filename}: {error}"
+                ) from error
+            if not isinstance(measurement, dict):
+                raise AcceptanceError(
+                    f"browser proof measurement {filename} must be an object"
+                )
+            return measurement
+
+        self.browser_proof = read_measurement("keeper-composition-inspector.json")
+        self.persistence_browser_proof = read_measurement(
+            "keeper-persistence-proof.json"
+        )
 
     def run_contention(self, post_id: str) -> None:
         prompts = {
@@ -1460,6 +1568,16 @@ class MissionRun:
         browser_screenshot = (
             self.writer.output_dir / "browser" / "keeper-composition-inspector.png"
         )
+        persistence_browser_screenshot = (
+            self.writer.output_dir / "browser" / "keeper-persistence-proof.png"
+        )
+        persistence_projection_passed, persistence_projection_detail = (
+            validate_persistence_browser_evidence(
+                self.persistence_browser_proof,
+                persistence_browser_screenshot,
+                set(self.roles.values()),
+            )
+        )
         parallel_events = sorted(
             [
                 (turn.started_epoch_seconds, 1)
@@ -1780,6 +1898,10 @@ class MissionRun:
                 == self.browser_proof["screenshot_sha256"],
                 "actual dashboard inspector renders one complete typed run with expanded input/output",
             ),
+            "persistence_tiers_dashboard_projection_observed": (
+                persistence_projection_passed,
+                persistence_projection_detail,
+            ),
         }
         malformed = [
             name
@@ -2006,6 +2128,36 @@ def verify_bundle(
                 errors.append(
                     f"missing catalog evidence for {mission['id']}: {pattern}"
                 )
+    persistence_proof_path = output_dir / "browser" / "keeper-persistence-proof.json"
+    persistence_screenshot_path = output_dir / "browser" / "keeper-persistence-proof.png"
+    try:
+        persistence_proof = json.loads(
+            persistence_proof_path.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as error:
+        errors.append(f"persistence browser proof is unreadable: {error}")
+    else:
+        resources = bundle.get("resources")
+        keepers = resources.get("keepers") if isinstance(resources, dict) else None
+        exact_role_map = (
+            isinstance(keepers, dict)
+            and set(keepers) == EXPECTED_ROLES
+            and all(
+                isinstance(value, str) and bool(value.strip())
+                for value in keepers.values()
+            )
+            and len(set(keepers.values())) == len(EXPECTED_ROLES)
+        )
+        if not exact_role_map:
+            errors.append("bundle resources do not name five distinct exact role Keepers")
+        expected_keepers = set(keepers.values()) if exact_role_map else set()
+        persistence_valid, persistence_detail = validate_persistence_browser_evidence(
+            persistence_proof,
+            persistence_screenshot_path,
+            expected_keepers,
+        )
+        if not persistence_valid:
+            errors.append(f"persistence browser proof is invalid: {persistence_detail}")
     seed = {
         "source_sha": bundle.get("source_sha"),
         "runner_source_sha": bundle.get("runner_source_sha"),

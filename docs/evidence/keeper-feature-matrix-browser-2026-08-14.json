@@ -1,6 +1,6 @@
 {
   "schema": "masc.keeper_feature_matrix.browser_render_evidence.v1",
-  "captured_at": "2026-08-14T03:23:00+09:00",
+  "captured_at": "2026-08-14T03:28:00+09:00",
   "browser": "chromium",
   "viewport": {
     "width": 1440,
@@ -26,9 +26,9 @@
   },
   "screenshot": {
     "path": "/Users/dancer/me/reports/masc-keeper-feature-state-matrix-20260814.png",
-    "sha256": "a0c11f2b8362e5228c3acb90d3ef2f47c55033c8ef1a1faf85738ca997efa666",
+    "sha256": "3028805e76a0c965c44061543650b26637208f080a16b119889ce89e1d7c2a4e",
     "pixel_width": 1440,
-    "pixel_height": 8887
+    "pixel_height": 8931
   },
   "verdict": "pass"
 }

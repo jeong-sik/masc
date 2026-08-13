@@ -56,12 +56,19 @@ major_from_version() {
 
 latest_tag_for_major() {
   local major="$1"
-  git tag --list "v${major}.*" --sort=-v:refname | head -n1
+  local tag
+  while IFS= read -r tag; do
+    if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+)?$ ]]; then
+      printf '%s\n' "$tag"
+      return 0
+    fi
+  done < <(git tag --list "v${major}.*" --sort=-v:refname)
 }
 
 package_version_from_tag() {
   local tag_version="${1#v}"
-  printf '%s\n' "$tag_version" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)([-+].*)?$/\1/'
+  printf '%s\n' "$tag_version" \
+    | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)(-[0-9]+)?$/\1/'
 }
 
 version_gt() {
@@ -116,6 +123,12 @@ if [[ -z "$latest_tag" ]]; then
 fi
 
 latest_tag_version="$(package_version_from_tag "$latest_tag")"
+
+if [[ "$head_major" == "$base_major" ]] \
+  && version_gt "$base_package_version" "$head_package_version"
+then
+  fail "head ref $head_ref downgrades package version from base $base_package_version to $head_package_version in major $base_major"
+fi
 
 if [[ "$base_package_version" == "$latest_tag_version" ]]; then
   printf 'Release train guard OK: base=%s head=%s latest_tag_ref=%s latest_tag_version=%s\n' \

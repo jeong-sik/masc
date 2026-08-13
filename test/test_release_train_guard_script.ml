@@ -242,6 +242,48 @@ let test_older_base_allows_exact_published_tag_repair () =
         (String_util.contains_substring stdout
            "Release train guard OK (repair): base=0.21.2 head=0.22.0 latest_tag_ref=v0.22.0 latest_tag_version=0.22.0"))
 
+let test_published_base_rejects_same_major_downgrade () =
+  with_temp_dir "release-train-downgrade" (fun dir ->
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+      commit_version ~dir ~version:"0.22.0" ~message:"published package version";
+      git_ok ~cwd:dir [ "tag"; "v0.22.0" ];
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"downgrade" ~version:"0.21.2"
+           ~message:"downgrade package version");
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "downgrade" |]
+      in
+      check bool "command fails" true (code <> 0);
+      check bool "reports same-major downgrade" true
+        (String_util.contains_substring stderr
+           "downgrades package version from base 0.22.0 to 0.21.2 in major 0"))
+
+let test_prerelease_suffix_does_not_authorize_final_repair () =
+  with_temp_dir "release-train-prerelease" (fun dir ->
+      git_ok ~cwd:dir [ "init"; "-q" ];
+      git_ok ~cwd:dir [ "config"; "user.email"; "test@example.com" ];
+      git_ok ~cwd:dir [ "config"; "user.name"; "tester" ];
+      git_ok ~cwd:dir [ "checkout"; "-qb"; "main" ];
+      commit_version ~dir ~version:"0.21.2" ~message:"stale package version";
+      git_ok ~cwd:dir [ "tag"; "v0.22.0-rc1" ];
+      let script = install_script_under_test dir in
+      ignore
+        (commit_on_branch ~dir ~branch:"premature-final" ~version:"0.22.0"
+           ~message:"premature final version");
+      let code, _stdout, stderr =
+        run_process ~cwd:dir script
+          [| script; "--base"; "main"; "--head"; "premature-final" |]
+      in
+      check bool "command fails" true (code <> 0);
+      check bool "does not treat prerelease as final tag" true
+        (String_util.contains_substring stderr
+           "with no published v0.* tag"))
+
 let () =
   run "release_train_guard_script"
     [
@@ -261,5 +303,9 @@ let () =
             test_pending_bootstrap_series_blocks_next_train_until_tagged;
           test_case "older base allows exact published tag repair" `Quick
             test_older_base_allows_exact_published_tag_repair;
+          test_case "published base rejects same-major downgrade" `Quick
+            test_published_base_rejects_same_major_downgrade;
+          test_case "prerelease suffix does not authorize final repair" `Quick
+            test_prerelease_suffix_does_not_authorize_final_repair;
         ] );
     ]

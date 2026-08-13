@@ -88,9 +88,16 @@ let with_active_raw_trace body =
          body ~path ~active))
 ;;
 
-let one_dynamic_tool ~active handler =
+let one_dynamic_tool
+      ?descriptor
+      ?(terminal_effect_state = fun () ->
+        Masc.Keeper_tools_agent_core.Terminal_effect_open)
+      ~active
+      handler
+  =
   let tool =
     Agent_core.Tool.create
+      ?descriptor
       ~name:"effect"
       ~description:"test effect"
       ~parameters:[]
@@ -107,6 +114,7 @@ let one_dynamic_tool ~active handler =
       ~event_bus:None
       ~context_injector:None
       ~context:(Some (Agent_core.Context.create_sync ()))
+      ~terminal_effect_state
       ~terminal_error
       ~raw_trace_run:(Some active)
   in
@@ -252,6 +260,8 @@ let test_repeated_exact_dynamic_tool_call_aborts_the_turn () =
           to the hand-built stop below, which never goes through the host. *)
        check string "repeated tool" "effect" tool_name;
        check int "repeat count" 3 repeated_count
+     | Some (Terminal_tool_boundary _) ->
+       fail "ordinary repeated tool produced a terminal-tool stop"
      | None -> fail "reordered object did not produce a typed host stop");
     check (option string) "host stop is not a terminal error" None !terminal_error)
 ;;
@@ -287,12 +297,16 @@ let test_dynamic_tool_progress_does_not_trip_the_repeat_guard () =
 
 let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
   let result =
-    Host.repeated_tool_call_result
-      ~model:"official-client-model"
-      ~session_id:"session-1"
-      ~turn_id:"turn-2"
-      ~turns_used:2
-      (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
+    match
+      Host.host_stop_result
+        ~model:"official-client-model"
+        ~session_id:"session-1"
+        ~turn_id:"turn-2"
+        ~turns_used:2
+        (Repeated_tool_call { tool_name = "masc_probe"; repeated_count = 3 })
+    with
+    | Ok result -> result
+    | Error error -> fail (Agent_core.Error.to_string error)
   in
   check string "session" "session-1" result.session_id;
   check int "turns" 2 result.turns;
@@ -305,6 +319,176 @@ let test_repeated_tool_host_stop_is_a_checkpoint_yield () =
     check string "typed tool" "masc_probe" tool_name;
     check int "typed count" 3 repeated_count
   | _ -> fail "host stop was not projected as a repeated-tool checkpoint yield"
+;;
+
+let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let state = ref Masc.Keeper_tools_agent_core.Terminal_effect_open in
+    let tool, _terminal_error =
+      one_dynamic_tool
+        ~descriptor:
+          (Agent_core.Tool.terminal_descriptor
+             Agent_core.Tool_contract.Effect_outcome_unknown)
+        ~terminal_effect_state:(fun () -> !state)
+        ~active
+        (fun _input ->
+           state :=
+             Masc.Keeper_tools_agent_core.Terminal_effect_failed
+               { failure_class = Tool_result.Runtime_failure
+               ; effect_disposition = Tool_result.Proven_post_effect
+               ; diagnostic = "prior composition action committed"
+               };
+           Error
+             { Agent_core.Types.message = "terminal node rejected"
+             ; recoverable = false
+             ; error_class = Some Agent_core.Types.Deterministic
+             })
+    in
+    let result = tool.call ~call_id:"terminal-post-effect" (`Assoc []) in
+    match result.abort_turn with
+    | Some
+        (Terminal_tool_boundary
+          { tool_name
+          ; outcome = Terminal_failed { effect_disposition; _ }
+          }) ->
+      check string
+        "typed failure effect"
+        "proven_post_effect"
+        (Tool_result.failure_effect_disposition_to_string effect_disposition);
+      check string "terminal tool" "effect" tool_name
+    | Some
+        (Terminal_tool_boundary
+          { outcome =
+              ( Terminal_completed
+              | Durable_stimulus_deferred
+              | External_effect_deferred )
+          ; _
+          })
+    | Some (Repeated_tool_call _)
+    | None ->
+      fail "post-effect terminal failure did not close the official-client loop")
+;;
+
+let test_terminal_pre_effect_failure_remains_correction_capable () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let tool, _terminal_error =
+      one_dynamic_tool
+        ~descriptor:
+          (Agent_core.Tool.terminal_descriptor
+             Agent_core.Tool_contract.Effect_outcome_unknown)
+        ~active
+        (fun _input ->
+           Error
+             { Agent_core.Types.message = "validation rejected before effect"
+             ; recoverable = false
+             ; error_class = Some Agent_core.Types.Deterministic
+             })
+    in
+    let result = tool.call ~call_id:"terminal-pre-effect" (`Assoc []) in
+    check bool
+      "pre-effect failure allows provider correction"
+      true
+      (Option.is_none result.abort_turn))
+;;
+
+let test_terminal_external_deferral_keeps_pending_stop () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let state = ref Masc.Keeper_tools_agent_core.Terminal_effect_open in
+    let tool, _terminal_error =
+      one_dynamic_tool
+        ~descriptor:
+          (Agent_core.Tool.terminal_descriptor
+             Agent_core.Tool_contract.Effect_outcome_unknown)
+        ~terminal_effect_state:(fun () -> !state)
+        ~active
+        (fun _input ->
+           state := Masc.Keeper_tools_agent_core.External_effect_deferred;
+           Error
+             { Agent_core.Types.message = "waiting for durable approval"
+             ; recoverable = true
+             ; error_class = Some Agent_core.Types.Transient
+             })
+    in
+    let result = tool.call ~call_id:"terminal-deferred" (`Assoc []) in
+    match result.abort_turn with
+    | Some
+        (Terminal_tool_boundary
+          { outcome = External_effect_deferred; tool_name = "effect" }) ->
+      ()
+    | Some (Terminal_tool_boundary _)
+    | Some (Repeated_tool_call _)
+    | None ->
+      fail "external deferral did not retain its pending terminal stop")
+;;
+
+let test_terminal_generic_deferral_keeps_durable_stimulus_stop () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let state = ref Masc.Keeper_tools_agent_core.Terminal_effect_open in
+    let tool, _terminal_error =
+      one_dynamic_tool
+        ~descriptor:
+          (Agent_core.Tool.terminal_descriptor
+             Agent_core.Tool_contract.Effect_outcome_unknown)
+        ~terminal_effect_state:(fun () -> !state)
+        ~active
+        (fun _input ->
+           state := Masc.Keeper_tools_agent_core.Deferred_tool_result;
+           Error
+             { Agent_core.Types.message = "waiting for durable stimulus"
+             ; recoverable = true
+             ; error_class = Some Agent_core.Types.Transient
+             })
+    in
+    let result = tool.call ~call_id:"terminal-generic-deferred" (`Assoc []) in
+    match result.abort_turn with
+    | Some
+        (Terminal_tool_boundary
+          { outcome = Durable_stimulus_deferred; tool_name = "effect" }) ->
+      ()
+    | Some (Terminal_tool_boundary _)
+    | Some (Repeated_tool_call _)
+    | None ->
+      fail "generic deferral did not retain its durable-stimulus terminal stop")
+;;
+
+let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
+  let project outcome =
+    Host.host_stop_result
+      ~model:"official-client-model"
+      ~session_id:"session-terminal"
+      ~turn_id:"turn-terminal"
+      ~turns_used:4
+      (Terminal_tool_boundary { tool_name = "terminal"; outcome })
+  in
+  (match project Terminal_completed with
+   | Ok { Runtime_agent.stop_reason = Runtime_agent.Completed; _ } -> ()
+   | Ok _ | Error _ -> fail "terminal completion changed outcome");
+  (match project Durable_stimulus_deferred with
+   | Ok
+       { Runtime_agent.stop_reason =
+           Runtime_agent.Yielded_to_durable_stimulus { turns_used = 4 }
+       ; _
+       } ->
+     ()
+   | Ok _ | Error _ -> fail "generic deferral changed outcome");
+  (match project External_effect_deferred with
+   | Ok
+       { Runtime_agent.stop_reason =
+           Runtime_agent.Awaiting_external_effect { turns_used = 4 }
+       ; _
+       } ->
+     ()
+   | Ok _ | Error _ -> fail "external deferral changed outcome");
+  match
+    project
+      (Terminal_failed
+         { failure_class = Tool_result.Runtime_failure
+         ; effect_disposition = Tool_result.Effect_outcome_unknown
+         ; diagnostic = "terminal uncertainty"
+         })
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "terminal failure became a completed host stop"
 ;;
 
 let msg role content : Agent_core.Types.message =
@@ -737,6 +921,26 @@ let () =
             "repeated host stop is a checkpoint yield"
             `Quick
             test_repeated_tool_host_stop_is_a_checkpoint_yield
+        ; test_case
+            "terminal post-effect failure aborts official-client turn"
+            `Quick
+            test_terminal_post_effect_failure_aborts_the_official_client_turn
+        ; test_case
+            "terminal pre-effect failure stays correction-capable"
+            `Quick
+            test_terminal_pre_effect_failure_remains_correction_capable
+        ; test_case
+            "terminal external deferral keeps pending stop"
+            `Quick
+            test_terminal_external_deferral_keeps_pending_stop
+        ; test_case
+            "terminal generic deferral keeps durable-stimulus stop"
+            `Quick
+            test_terminal_generic_deferral_keeps_durable_stimulus_stop
+        ; test_case
+            "terminal host stop preserves exact outcome"
+            `Quick
+            test_terminal_host_stop_preserves_completed_deferred_and_failed
         ] )
     ; ( "history encoding"
       , [ test_case

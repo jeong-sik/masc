@@ -20,10 +20,24 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | External_effect_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; diagnostic : string
+      }
+
 type host_stop = Runtime_official_client_tool.host_stop =
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
       }
 
 type dynamic_tool_result = Runtime_official_client_tool.dynamic_tool_result =
@@ -162,6 +176,7 @@ val dynamic_tools :
   event_bus:Agent_core.Event_bus.t option ->
   context_injector:Agent_core.Hooks.context_injector option ->
   context:Agent_core.Context.t option ->
+  terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   terminal_error:string option ref ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
   (dynamic_tool list, Agent_core.Error.t) result
@@ -180,13 +195,13 @@ val with_run_lifecycle_events :
     Official clients own their internal model loop, so this host boundary is
     the single MASC owner for those events. *)
 
-val repeated_tool_call_result :
+val host_stop_result :
   model:string ->
   session_id:string ->
   turn_id:string ->
   turns_used:int ->
   host_stop ->
-  Runtime_agent.run_result
+  (Runtime_agent.run_result, Agent_core.Error.t) result
 (** Build the provider-neutral checkpoint terminal after an official-client
     adapter stops its vendor-owned loop. The external client session is the
     durable continuation owner, so no Agent Core checkpoint is synthesized. *)

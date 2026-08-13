@@ -4688,6 +4688,79 @@ value = { unsupported = true }
 |}
 ;;
 
+let post_effect_terminal_failure_composition =
+  {|[[compositions]]
+name = "write-then-invalid-post"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition effect", content = "must execute exactly once" }
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+|}
+;;
+
+let unknown_effect_terminal_failure_composition =
+  {|[[compositions]]
+name = "unknown-write-before-post"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition unknown", content = "do not retry an uncertain write" }
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = { surface = "dashboard", content = "must not be reached" }
+|}
+;;
+
+let write_then_unchanged_board_then_terminal_composition ~revision =
+  Printf.sprintf
+    {|[[compositions]]
+name = "write-then-durable-wait"
+
+[[compositions.nodes]]
+id = "write"
+tool = "keeper_memory_write"
+[compositions.nodes.input]
+kind = "literal"
+value = { title = "composition before wait", content = "must execute exactly once before yielding" }
+
+[[compositions.nodes]]
+id = "wait"
+tool = "masc_board_list"
+after = ["write"]
+[compositions.nodes.input]
+kind = "literal"
+value = { if_revision = %S }
+
+[[compositions.nodes]]
+id = "post"
+tool = "keeper_surface_post"
+after = ["wait"]
+[compositions.nodes.input]
+kind = "literal"
+value = { surface = "dashboard", content = "must not be reached" }
+|}
+    revision
+;;
+
 let test_composition_catalog_materializes_and_executes_first_class_tool () =
   with_exec_fixture "composition-first-class-tool"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4842,6 +4915,308 @@ let test_composition_plan_failure_exposes_typed_cause () =
            Yojson.Safe.Util.(member "error" cause |> member "kind" |> to_string))
 ;;
 
+let test_terminal_composition_post_effect_failure_closes_official_client_loop () =
+  with_exec_fixture "composition-post-effect-terminal-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse
+             post_effect_terminal_failure_composition
+         with
+         | Ok catalog -> catalog
+         | Error error ->
+           fail (Masc.Keeper_tool_composition_catalog.error_to_string error)
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog:catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:7
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_write-then-invalid-post")
+              |> function
+              | Some tool -> tool
+              | None -> fail "terminal composition was not projected"
+            in
+            let result = tool.call ~call_id:"post-effect-composition" (`Assoc []) in
+            check bool "terminal node failure is visible" false result.success;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check string
+                 "aggregate effect disposition"
+                 "proven_post_effect"
+                 (Tool_result.failure_effect_disposition_to_string
+                    failure.effect_disposition)
+             | _ -> fail "prior memory effect did not terminalize the bundle");
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Proven_post_effect; _ }
+                  }) ->
+              check string
+                "official-client terminal tool"
+                "keeper_compose_write-then-invalid-post"
+                tool_name
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "official-client provider loop remained open after prior effect"))
+;;
+
+let test_terminal_composition_unknown_write_failure_closes_official_client_loop () =
+  with_exec_fixture "composition-unknown-effect-terminal-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let keepers_dir =
+         Config_dir_resolver.keepers_dir_for_base_path
+           ~base_path:config.base_path
+       in
+       let snapshot_path =
+         Masc.Keeper_memory_os_current.path_for_keepers_dir
+           ~keepers_dir
+           ~keeper_id:meta.name
+       in
+       (* A directory at the canonical snapshot path forces the writable
+          producer to report its exact unknown-effect persistence failure. *)
+       Fs_compat.mkdir_p snapshot_path;
+       let catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse
+             unknown_effect_terminal_failure_composition
+         with
+         | Ok catalog -> catalog
+         | Error error ->
+           fail (Masc.Keeper_tool_composition_catalog.error_to_string error)
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog:catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:8
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_unknown-write-before-post")
+              |> function
+              | Some tool -> tool
+              | None -> fail "unknown-effect composition was not projected"
+            in
+            let result = tool.call ~call_id:"unknown-effect-composition" (`Assoc []) in
+            check bool "ordinary writable failure is visible" false result.success;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check string
+                 "producer-owned unknown disposition"
+                 "effect_outcome_unknown"
+                 (Tool_result.failure_effect_disposition_to_string
+                    failure.effect_disposition)
+             | _ -> fail "unknown writable failure did not terminalize the bundle");
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Effect_outcome_unknown; _ }
+                  }) ->
+              check string
+                "official-client unknown-effect terminal tool"
+                "keeper_compose_unknown-write-before-post"
+                tool_name
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "official-client provider loop remained open after unknown effect"))
+;;
+
+let test_terminal_composition_generic_defer_yields_to_durable_stimulus () =
+  with_exec_fixture "composition-generic-defer-terminal-boundary"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       (match
+          Masc.Keeper_gate_mode.set
+            config
+            ~actor:"composition-test"
+            Masc.Keeper_gate_mode.Always_allow
+        with
+        | Ok _ -> ()
+        | Error detail -> fail ("failed to allow composition effect: " ^ detail));
+       let direct_bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       let revision =
+         Fun.protect
+           ~finally:direct_bundle.cleanup
+           (fun () ->
+              let board_list =
+                match find_tool_by_name direct_bundle.tools "masc_board_list" with
+                | Some tool -> tool
+                | None -> fail "masc_board_list missing from Keeper tool bundle"
+              in
+              match Agent_core.Tool.execute board_list (`Assoc []) with
+              | Error error -> fail error.Agent_core.Types.message
+              | Ok output ->
+                Yojson.Safe.Util.
+                  (parse_json output.content |> member "revision" |> to_string))
+       in
+       let catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse
+             (write_then_unchanged_board_then_terminal_composition ~revision)
+         with
+         | Ok catalog -> catalog
+         | Error error ->
+           fail (Masc.Keeper_tool_composition_catalog.error_to_string error)
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog:catalog
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:9
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let tool =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal
+                        tool.name
+                        "keeper_compose_write-then-durable-wait")
+              |> function
+              | Some tool -> tool
+              | None -> fail "generic-deferred composition was not projected"
+            in
+            let result = tool.call ~call_id:"generic-deferred-composition" (`Assoc []) in
+            check bool "generic-deferred composition is incomplete" false result.success;
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Deferred_tool_result -> ()
+             | _ -> fail "generic deferred node did not retain its typed bundle state");
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Durable_stimulus_deferred
+                  }) ->
+              check string
+                "official-client durable-stimulus terminal tool"
+                "keeper_compose_write-then-durable-wait"
+                tool_name
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "official-client provider loop remained open after durable wait"))
+;;
+
 let test_composition_runtime_uses_canonical_descriptor () =
   with_exec_fixture "composition-canonical-descriptor"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4930,6 +5305,7 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
                        Agent_core.Tool_contract.Effect_outcome_unknown
                  ; actual = Agent_core.Tool_contract.Continue_after_success
                  }
+           ; effect_disposition = Tool_result.Proven_pre_effect
            } -> ()
        | Error _ | Ok _ ->
          fail "terminal composition accepted an ordinary outer invocation")
@@ -5035,6 +5411,12 @@ let () =
         test_terminal_composition_materializes_terminal_completion;
       test_case "composition failure exposes typed plan cause" `Quick
         test_composition_plan_failure_exposes_typed_cause;
+      test_case "post-effect composition closes official-client loop" `Quick
+        test_terminal_composition_post_effect_failure_closes_official_client_loop;
+      test_case "unknown-effect composition closes official-client loop" `Quick
+        test_terminal_composition_unknown_write_failure_closes_official_client_loop;
+      test_case "generic-deferred composition yields to durable stimulus" `Quick
+        test_terminal_composition_generic_defer_yields_to_durable_stimulus;
       test_case "terminal composition requires terminal outer invocation" `Quick
         test_composition_terminal_requires_terminal_outer_invocation;
     ]);

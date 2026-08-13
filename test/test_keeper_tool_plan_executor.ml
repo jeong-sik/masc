@@ -112,7 +112,8 @@ let test_schedule_and_parallel_dataflow () =
       check string "parallel input" "{}" (Yojson.Safe.to_string input);
       if Atomic.fetch_and_add sibling_count 1 = 1 then Eio.Promise.resolve release ();
       Eio.Promise.await both_started);
-    completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node)
+    Executor.dispatch_result
+      (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
   in
   match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
   | Error _ -> fail "valid parallel plan stopped"
@@ -134,13 +135,16 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
     called := !called @ [ name ];
     if String.equal name "left"
     then
-      Tool_result.make_err
-        ~tool_name:name
-        ~class_:Tool_result.Workflow_rejection
-        ~start_time:0.0
-        "left rejected"
+      Executor.dispatch_result
+        ~failure_effect_disposition:Tool_result.Proven_pre_effect
+        (Tool_result.make_err
+           ~tool_name:name
+           ~class_:Tool_result.Workflow_rejection
+           ~start_time:0.0
+           "left rejected")
     else
-      completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node)
+      Executor.dispatch_result
+        (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
   in
   match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
   | Ok _ -> fail "failed sibling did not stop the plan"
@@ -172,7 +176,8 @@ let test_malformed_declared_output_stops_before_consumer () =
   let called = ref [] in
   let dispatch ~node ~descriptor:_ ~schedule:_ ~input:_ =
     called := node_name node :: !called;
-    completed ~tool_name:node.tool_name ~data:(`Assoc [ "now_iso", `Int 7 ])
+    Executor.dispatch_result
+      (completed ~tool_name:node.tool_name ~data:(`Assoc [ "now_iso", `Int 7 ]))
   in
   match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
   | Ok _ -> fail "malformed producer output was accepted"

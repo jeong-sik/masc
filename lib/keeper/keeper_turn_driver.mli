@@ -121,6 +121,7 @@ val run_named :
   ?checkpoint_sink:Agent_core.Agent.checkpoint_sink ->
   ?context_injector:Agent_core.Hooks.context_injector ->
   ?context:Agent_core.Context.t ->
+  ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->

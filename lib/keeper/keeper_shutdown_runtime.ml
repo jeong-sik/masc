@@ -51,7 +51,11 @@ let operation_requires_fence (operation : Keeper_shutdown_types.t) =
   Keeper_shutdown_types.requires_admission_fence operation
 ;;
 
-let restore_admission ~config ~keeper_name ~operation_id =
+type ownerless_restore_policy =
+  | Require_removal_evidence of Keeper_shutdown_types.t
+  | Restore_corrupt_fence
+
+let restore_admission ~config ~ownerless_policy ~keeper_name ~operation_id =
   match
     Keeper_owner_registry.restore_shutdown
       ~base_path:config.Workspace.base_path
@@ -69,31 +73,44 @@ let restore_admission ~config ~keeper_name ~operation_id =
          (Operation_id.to_string existing))
   | Error
       (Keeper_owner_registry.Command_lookup_failed
-         (Keeper_owner_registry.Owner_not_found _)) ->
-    (* [complete_cleanup] can remove both metadata and its Owner before a
-       blocked cleanup or pending completion is settled. The Owner-local
-       fence is gone in that state, but the independent intake fence must
-       remain until recovery reaches a durable non-fenced phase. *)
-    (match
-       Keeper_shutdown_intake_fence.restore_shutdown
-         ~base_path:config.Workspace.base_path
-         ~keeper_name
-         ~operation_id
-     with
-     | Keeper_shutdown_intake_fence.Restored
-     | Keeper_shutdown_intake_fence.Already_restored ->
-       Log.Keeper.info
-         "restored ownerless shutdown intake fence: keeper=%s operation=%s"
-         keeper_name
-         (Operation_id.to_string operation_id);
-       Ok ()
-     | Keeper_shutdown_intake_fence.Restore_conflict existing ->
-       Error
-         (Printf.sprintf
-            "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
-            keeper_name
-            (Operation_id.to_string operation_id)
-            (Operation_id.to_string existing)))
+         (Keeper_owner_registry.Owner_not_found _) as error) ->
+    let may_restore_ownerless =
+      match ownerless_policy with
+      | Restore_corrupt_fence -> true
+      | Require_removal_evidence operation ->
+        Keeper_shutdown_finalize.admission_already_released_by_removal
+          ~config
+          operation
+          error
+    in
+    if not may_restore_ownerless
+    then Error (Keeper_owner_registry.command_error_to_string error)
+    else
+      (* [complete_cleanup] can remove both metadata and its Owner before a
+         remove-meta cleanup or pending completion is settled. The Owner-local
+         fence is gone in that state, but the independent intake fence must
+         remain until recovery reaches a durable non-fenced phase. Corrupt
+         records also remain fail-closed without readable intent evidence. *)
+      (match
+         Keeper_shutdown_intake_fence.restore_shutdown
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           ~operation_id
+       with
+       | Keeper_shutdown_intake_fence.Restored
+       | Keeper_shutdown_intake_fence.Already_restored ->
+         Log.Keeper.info
+           "restored ownerless shutdown intake fence: keeper=%s operation=%s"
+           keeper_name
+           (Operation_id.to_string operation_id);
+         Ok ()
+       | Keeper_shutdown_intake_fence.Restore_conflict existing ->
+         Error
+           (Printf.sprintf
+              "shutdown admission restore conflict: keeper=%s durable=%s existing=%s"
+              keeper_name
+              (Operation_id.to_string operation_id)
+              (Operation_id.to_string existing)))
   | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
 ;;
 
@@ -156,7 +173,13 @@ let restore_inventory_admission ~config inventory =
           | Some current -> current
           | None -> operation_id
         in
-        (match restore_admission ~config ~keeper_name ~operation_id with
+        (match
+           restore_admission
+             ~config
+             ~ownerless_policy:Restore_corrupt_fence
+             ~keeper_name
+             ~operation_id
+         with
          | Error _ as error -> error
          | Ok () -> restore_corrupt_fences (keeper_name :: blocked) rest)
     in
@@ -179,6 +202,7 @@ let restore_inventory_admission ~config inventory =
           (match
              restore_admission
                ~config
+               ~ownerless_policy:(Require_removal_evidence operation)
                ~keeper_name:operation.keeper_name
                ~operation_id:operation.operation_id
            with

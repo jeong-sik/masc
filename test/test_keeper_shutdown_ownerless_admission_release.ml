@@ -391,6 +391,42 @@ let test_boot_recovery_keeps_blocked_ownerless_cleanup_fenced () =
     check_create_meta_rejected "blocked cleanup" ~config operation)
 ;;
 
+let check_boot_recovery_rejects_ownerless_retain_intent label reason =
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation
+        ~keeper_name:label
+        ~phase:(Blocked { stage = Meta_remove; detail = "fixture" })
+        ~cleanup_intent:{ reason; remove_session = false }
+    in
+    persist_exn ~config operation;
+    (match Keeper_shutdown_runtime.recover_at_boot ~config with
+     | [ Error _ ] -> ()
+     | [ Ok _ ] -> fail "ownerless retain-meta operation was reported as recovered"
+     | outcomes ->
+       failf "unexpected retain-meta recovery outcome count: %d" (List.length outcomes));
+    check
+      bool
+      "inconsistent retain-meta state does not install an ownerless fence"
+      true
+      (Option.is_none
+         (Keeper_shutdown_intake_fence.shutdown_operation_id
+            ~base_path:config.base_path
+            ~keeper_name:operation.keeper_name)))
+;;
+
+let test_boot_recovery_rejects_ownerless_operator_retain () =
+  check_boot_recovery_rejects_ownerless_retain_intent
+    "ownerless-blocked-operator-retain"
+    Operator_stop_retain_meta
+;;
+
+let test_boot_recovery_rejects_ownerless_dead_tombstone () =
+  check_boot_recovery_rejects_ownerless_retain_intent
+    "ownerless-blocked-dead-tombstone"
+    Dead_tombstone_cleanup
+;;
+
 let pending_completion_operation name =
   let evidence = finalized_after_removal_evidence name in
   make_operation
@@ -487,6 +523,14 @@ let () =
             "blocked ownerless cleanup keeps admission fenced"
             `Quick
             test_boot_recovery_keeps_blocked_ownerless_cleanup_fenced
+        ; Alcotest.test_case
+            "ownerless operator-retain inconsistency fails boot recovery"
+            `Quick
+            test_boot_recovery_rejects_ownerless_operator_retain
+        ; Alcotest.test_case
+            "ownerless dead-tombstone inconsistency fails boot recovery"
+            `Quick
+            test_boot_recovery_rejects_ownerless_dead_tombstone
         ; Alcotest.test_case
             "failed pending completion keeps admission fenced"
             `Quick

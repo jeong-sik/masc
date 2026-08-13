@@ -374,18 +374,27 @@ let test_turn_context_fields_stored () =
     let path_resolution =
       Yojson.Safe.Util.member "path_resolution" runtime_contract
     in
+    (* Guidance fields are prose written for a model to read, so their wording
+       is a prompt-engineering choice that must stay free to change. Pinning a
+       phrase from them made rewording a test failure: #28533 changed "repo
+       prefix" to "cwd prefix" and turned main red for ninety minutes without
+       touching a single line of behaviour.
+
+       What the log actually owes its reader is that the fields are wired and
+       carry something -- absent or empty is the regression worth catching. *)
+    let carries_guidance field =
+      match Yojson.Safe.Util.member field path_resolution with
+      | `String text -> String.trim text <> ""
+      | _ -> false
+    in
     Alcotest.(check bool)
-      "runtime contract explains Execute repo cwd path basis"
+      "path_resolution carries execute_path_basis guidance"
       true
-      (String_util.contains_substring
-         Yojson.Safe.Util.(member "execute_path_basis" path_resolution |> to_string)
-         "do not repeat the cwd prefix");
+      (carries_guidance "execute_path_basis");
     Alcotest.(check bool)
-      "runtime contract points .masc state at task/context tools"
+      "path_resolution carries masc_state_basis guidance"
       true
-      (String_util.contains_substring
-         Yojson.Safe.Util.(member "masc_state_basis" path_resolution |> to_string)
-         "Use keeper task/context tools");
+      (carries_guidance "masc_state_basis");
     let omits_field name =
       match runtime_contract with
       | `Assoc fields -> not (List.mem_assoc name fields)

@@ -103,6 +103,7 @@ blocking_lints() {
   run_lint "No inline error-envelope literals" bash scripts/lint/no-inline-error-envelope.sh
   run_lint "No inline json_kind_name" bash scripts/lint/no-inline-json-kind-name.sh
   run_lint "No yojson 3.0 dead arms" bash scripts/lint/no-yojson-3-dead-arms.sh
+  run_lint "No model-prose substring tests" bash scripts/lint/no-model-prose-substring-tests.sh
   run_lint "Workflow YAML syntax" bash scripts/lint/yaml-syntax.sh
   run_lint "Board SLO extractor fixture" bash scripts/test-board-slo-extractor.sh
   run_lint "Branch protection fail-closed fixture" bash scripts/test-main-branch-protection-fail-closed.sh

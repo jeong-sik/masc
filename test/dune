@@ -1737,6 +1737,8 @@
 
 (include stanzas/test_env_config_sidecar_timeouts.inc)
 
+(include stanzas/test_env_config_turn_directive.inc)
+
 (include stanzas/test_env_config_voice_bridge_timeouts.inc)
 
 (include stanzas/test_event_kind.inc)

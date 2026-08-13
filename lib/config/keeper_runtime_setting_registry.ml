@@ -81,6 +81,27 @@ let setting
 
 let retired ?replacement reason = Retired { reason; replacement }
 
+(* Turn directives are generated from their closed variant rather than listed
+   by hand, so a directive added there is reported here without a second edit.
+   [Env_only]: the override is read from the environment alone.  A keeper TOML
+   key would imply per-keeper wording for what is a fleet-wide Gate contract,
+   and declaring one without a reader is the failure the [Retired] rows below
+   record. *)
+let turn_directive_settings =
+  List.map
+    (fun directive ->
+       setting
+         ~env_name:(Env_config_turn_directive.env_name directive)
+         ~exposure:Env_only
+         ~value_kind:String
+         ~default:(Env_config_turn_directive.default directive)
+         ~reload_class:Next_turn
+         ~consumers:[ "Keeper_gate_replay" ]
+         ~category:"turn"
+         (Env_config_turn_directive.description directive))
+    Env_config_turn_directive.all
+;;
+
 (* Keep rows grouped by operator-facing category and TOML namespace.  Entries
    whose TOML contract was removed remain here as [Retired] so boot/save
    validation can explain the removal instead of treating a stale key as a
@@ -604,6 +625,7 @@ let all =
       ~category:"web_search"
       "Web-search result cache TTL in seconds"
   ]
+  @ turn_directive_settings
 ;;
 
 let is_active = function

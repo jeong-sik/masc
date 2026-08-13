@@ -206,6 +206,40 @@ let write_file path contents =
   close_out oc
 ;;
 
+let probe_antigravity_offline ~runtime_id ~tool =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Probe.probe_antigravity_invocation
+        ~sw
+        ~net:(Eio.Stdenv.net env)
+        ~secure_random:(Eio.Stdenv.secure_random env)
+        ~mgr:(Eio.Stdenv.process_mgr env)
+        ~clock:(Eio.Stdenv.clock env)
+        ~fs:(Eio.Stdenv.fs env)
+        ~base_path:(Sys.getcwd ())
+        ~now:dummy_now
+        ~runtime_id
+        ~tool
+        ~prompt:"probe"
+        ()))
+;;
+
+(* Same shape as [probe_offline]: every case below is refused before the vendor
+   client would be spawned, so [mgr]/[cwd] are real handles that stay unused. *)
+let probe_official_client_offline ~runtime_id ~tool =
+  Eio_main.run (fun env ->
+    Probe.probe_official_client_invocation
+      ~mgr:(Eio.Stdenv.process_mgr env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~fs:(Eio.Stdenv.fs env)
+      ~base_path:(Sys.getcwd ())
+      ~now:dummy_now
+      ~runtime_id
+      ~tool
+      ~prompt:"probe"
+      ())
+;;
+
 let test_lane_guard_refuses_an_official_client_runtime () =
   let base = Filename.temp_file "probe-lane" ".d" in
   Sys.remove base;
@@ -238,6 +272,167 @@ let test_lane_guard_refuses_an_official_client_runtime () =
       | Error e -> failf "expected Not_agent_core_lane, got: %s" (Probe.invocation_error_to_string e))
 ;;
 
+(* Antigravity is the lane the official-client probe still cannot answer, and
+   the refusal has to name why: its entry point takes no tool list, so its
+   surface exists only once the per-turn MCP bridge is up. Answering from the
+   descriptor table instead would report advertisement as consumption, which is
+   the exact mistake F1 of the 2026-08-12 audit was. *)
+let test_official_client_probe_refuses_antigravity () =
+  let base = Filename.temp_file "probe-agy" ".d" in
+  Sys.remove base;
+  Unix.mkdir base 0o700;
+  let cli_path = Filename.concat base "fake-cli" in
+  write_file cli_path "#!/bin/sh\nexit 0\n";
+  Unix.chmod cli_path 0o700;
+  let oauth_source = Filename.concat base "oauth-token" in
+  write_file oauth_source "operator-oauth-fixture";
+  Unix.chmod oauth_source 0o600;
+  let runtime_path = Filename.concat base "runtime.toml" in
+  write_file runtime_path (official_client_runtime_toml ~cli_path ~oauth_source);
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error e -> failf "fixture config rejected: %s" e);
+      (* Control: without this the test would pass on a fixture that never
+         produced an antigravity lane at all. *)
+      (match Runtime.get_runtime_by_id "antigravity.gemini" with
+       | Some { execution = Runtime_execution.Antigravity_cli _; _ } -> ()
+       | Some rt ->
+         failf
+           "fixture resolved the wrong lane: %s"
+           (Runtime_execution.label rt.Runtime.execution)
+       | None -> fail "fixture runtime did not resolve");
+      match
+        probe_official_client_offline
+          ~runtime_id:"antigravity.gemini"
+          ~tool:"masc_board_list"
+      with
+      | Error (Probe.Tools_only_via_mcp_bridge label) ->
+        check bool "names the lane it redirected" true (String.length label > 0);
+        check bool "points at the probe that publishes the bridge" true
+          (String_util.contains_substring
+             (Probe.invocation_error_to_string
+                (Probe.Tools_only_via_mcp_bridge label))
+             "probe_antigravity_invocation")
+      | Ok inv ->
+        failf
+          "antigravity was probed without its MCP bridge: %s"
+          (Probe.invocation_to_string inv)
+      | Error e ->
+        failf
+          "expected Tools_only_via_mcp_bridge, got: %s"
+          (Probe.invocation_error_to_string e))
+;;
+
+(* The mirror of the existing lane guard. Two entry points that spawn different
+   machinery must each refuse the other's lane, or a caller reaching for the
+   wrong one gets a plausible answer to a question it did not ask. *)
+let test_official_client_probe_refuses_an_agent_core_runtime () =
+  let base = Filename.temp_file "probe-ac" ".d" in
+  Sys.remove base;
+  Unix.mkdir base 0o700;
+  let runtime_path = Filename.concat base "runtime.toml" in
+  write_file
+    runtime_path
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n";
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error e -> failf "fixture config rejected: %s" e);
+      (match Runtime.get_runtime_by_id "local.sample" with
+       | Some { execution = Runtime_execution.Agent_core _; _ } -> ()
+       | Some rt ->
+         failf
+           "fixture resolved the wrong lane: %s"
+           (Runtime_execution.label rt.Runtime.execution)
+       | None -> fail "fixture runtime did not resolve");
+      match
+        probe_official_client_offline ~runtime_id:"local.sample" ~tool:"masc_board_list"
+      with
+      | Error (Probe.Not_official_client_lane _) -> ()
+      | Ok inv ->
+        failf
+          "an Agent Core runtime was probed by spawning a client: %s"
+          (Probe.invocation_to_string inv)
+      | Error e ->
+        failf
+          "expected Not_official_client_lane, got: %s"
+          (Probe.invocation_error_to_string e))
+;;
+
+(* The antigravity entry point publishes an MCP bridge and copies credentials
+   into a HOME, so pointing it at a lane that declares its tools directly would
+   do that work for a question it cannot answer. Guarded before any of it. *)
+let test_antigravity_probe_refuses_a_direct_tool_lane () =
+  let base = Filename.temp_file "probe-agy-guard" ".d" in
+  Sys.remove base;
+  Unix.mkdir base 0o700;
+  let runtime_path = Filename.concat base "runtime.toml" in
+  write_file
+    runtime_path
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n";
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error e -> failf "fixture config rejected: %s" e);
+      match
+        probe_antigravity_offline ~runtime_id:"local.sample" ~tool:"masc_board_list"
+      with
+      | Error (Probe.Not_antigravity_lane _) -> ()
+      | Ok inv ->
+        failf
+          "a direct-tool lane went through the bridge probe: %s"
+          (Probe.invocation_to_string inv)
+      | Error e ->
+        failf
+          "expected Not_antigravity_lane, got: %s"
+          (Probe.invocation_error_to_string e))
+;;
+
+(* A tool the surface withholds costs no spawn on this lane either. *)
+let test_official_client_probe_declines_an_operator_only_tool () =
+  match
+    probe_official_client_offline ~runtime_id:"anything" ~tool:"keeper_operator_note"
+  with
+  | Error (Probe.Not_on_surface _) -> ()
+  | Ok inv -> failf "an operator-only tool spawned a client: %s" (Probe.invocation_to_string inv)
+  | Error e ->
+    failf "expected Not_on_surface, got: %s" (Probe.invocation_error_to_string e)
+;;
+
 let () =
   run
     "keeper_capability_probe"
@@ -257,6 +452,18 @@ let () =
       , [ test_case "operator-only costs no turn" `Quick test_operator_only_costs_no_turn
         ; test_case "unknown runtime is named" `Quick test_unknown_runtime_is_named
         ; test_case "lane guard refuses an official-client runtime" `Quick test_lane_guard_refuses_an_official_client_runtime
+        ] )
+    ; ( "probe_official_client_invocation (offline)"
+      , [ test_case "antigravity is refused with its reason" `Quick
+            test_official_client_probe_refuses_antigravity
+        ; test_case "lane guard refuses an Agent Core runtime" `Quick
+            test_official_client_probe_refuses_an_agent_core_runtime
+        ; test_case "operator-only costs no spawn" `Quick
+            test_official_client_probe_declines_an_operator_only_tool
+        ] )
+    ; ( "probe_antigravity_invocation (offline)"
+      , [ test_case "lane guard refuses a direct-tool lane" `Quick
+            test_antigravity_probe_refuses_a_direct_tool_lane
         ] )
     ]
 ;;

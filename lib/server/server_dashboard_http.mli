@@ -49,6 +49,17 @@ val approval_resolve_decision_required_message : string
 
 (** {1 Board / memory / Gate HTTP entries} *)
 
+val repository_observation_snapshot_json :
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  config:Workspace.config ->
+  (Yojson.Safe.t, string) result
+(** Git observation across the configured repositories, for
+    [GET /api/v1/dashboard/repository-observation-snapshot].
+
+    The snapshot itself is cached; failing to enumerate the repositories is
+    not, so a transient store error is not held for a TTL after it clears.
+    Exposed so the cache policy can be exercised without an HTTP round trip. *)
+
 val handle_repository_observation_snapshot :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

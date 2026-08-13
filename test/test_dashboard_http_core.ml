@@ -1478,6 +1478,67 @@ let test_agent_activity_keys_on_its_window () =
       check (float 0.001) "the computed window is the one asked for" 1.0
         (other |> member "hours" |> to_float))
 
+(* The most expensive route on the server per request before this: 722.9 ms
+   cold, 681.4 ms warm, for 2.9 KB — two git subprocesses per configured
+   repository, on every request. *)
+let test_repository_observation_reads_its_cache_key () =
+  with_test_env @@ fun ~env ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let cache_key =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key
+          config
+          "repository_observation_snapshot"
+          []
+      in
+      seed_cache cache_key;
+      match
+        Server_dashboard_http.repository_observation_snapshot_json
+          ~clock:(Eio.Stdenv.clock env)
+          ~config
+      with
+      | Error detail -> fail detail
+      | Ok snapshot ->
+        check
+          (of_pp Yojson.Safe.pp)
+          "the snapshot is served from its cache key"
+          (cache_sentinel cache_key)
+          snapshot)
+
+(* Enumerating the repositories is the step that can fail transiently. Caching
+   that failure would hold it for a TTL after the cause cleared, so the cache
+   sits inside the Ok branch and an Error must leave the key untouched. *)
+let test_repository_observation_does_not_cache_a_store_failure () =
+  with_test_env @@ fun ~env ~sw:_ ~config ->
+  Fun.protect
+    ~finally:Dashboard_cache.invalidate_all
+    (fun () ->
+      Dashboard_cache.invalidate_all ();
+      let cache_key =
+        Server_dashboard_http_core_cache.dashboard_query_cache_key
+          config
+          "repository_observation_snapshot"
+          []
+      in
+      (* [Repo_store.load_all] parses repositories.toml, so malformed TOML is
+         the failure it actually reports — an absent file is Ok []. *)
+      let repos_toml =
+        Config_dir_resolver.repositories_toml_path ~base_path:config.base_path
+      in
+      Fs_compat.mkdir_p (Filename.dirname repos_toml);
+      Fs_compat.save_file repos_toml "[repository\nname = \"unterminated";
+      (match
+         Server_dashboard_http.repository_observation_snapshot_json
+           ~clock:(Eio.Stdenv.clock env)
+           ~config
+       with
+       | Ok _ -> fail "malformed repositories.toml should not produce a snapshot"
+       | Error _ -> ());
+      check bool "a failed enumeration leaves the cache key empty" true
+        (Option.is_none (Dashboard_cache.peek cache_key)))
+
 let test_dashboard_proof_http_json_surfaces_submission_index () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let module V = Lib.Verification in
@@ -3645,6 +3706,10 @@ let () =
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick
             test_scheduled_automation_reads_its_cache_key;
+          test_case "repository observation reads its cache key" `Quick
+            test_repository_observation_reads_its_cache_key;
+          test_case "repository observation does not cache a store failure"
+            `Quick test_repository_observation_does_not_cache_a_store_failure;
           test_case "agent-activity keys on its window" `Quick
             test_agent_activity_keys_on_its_window;
           test_case "execution trust uses narrow Keeper projection" `Quick

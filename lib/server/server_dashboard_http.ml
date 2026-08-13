@@ -11,11 +11,67 @@ let dashboard_projection_cache_ttl_s =
   Server_dashboard_http_core_cache.dashboard_projection_cache_ttl_s
 ;;
 
-(* Repository observation snapshot handler *)
+(* Repository observation snapshot handler.
+
+   This route was the most expensive on the server per request: 722.9 ms cold
+   and 681.4 ms warm for a 2.9 KB response, measured twice back to back. The
+   second pass costing the same as the first is what an absent cache looks like
+   from outside — every request re-ran two git subprocesses per configured
+   repository (5 repositories, 10 spawns).
+
+   The comment below claimed the fan-out makes the snapshot cost the slowest
+   repository rather than the sum. Timed individually the repositories sum to
+   745 ms and the slowest is 252 ms, and the endpoint measures 681-723 ms.
+   Sampling the process table during a request does show concurrent git
+   children, so the fan-out is real; ten git processes contending on one disk
+   just do not scale down to the slowest one. Corrected rather than removed,
+   because the fan-out is still why this is 745 ms and not several seconds.
+
+   Only [Repo_store.load_all] succeeding is cached. A failure to enumerate the
+   repositories is a transient condition and caching it would hold the error
+   for a TTL after the cause cleared. *)
+let repository_observation_snapshot_json ~clock ~(config : Workspace.config) =
+  let base_path = config.base_path in
+  match Repo_store.load_all ~base_path with
+  | Error error -> Error error
+  | Ok repos ->
+    let cache_key =
+      Server_dashboard_http_core_cache.dashboard_query_cache_key
+        config
+        "repository_observation_snapshot"
+        []
+    in
+    (* [shell_surface_cache_ttl_s] is the 60 s tier documented for state that
+       "changes more frequently than deep surfaces". A working tree does, and
+       the trade-off is explicit: a cached snapshot reports a tree as it stood
+       up to one TTL ago. Uncached, every poll paid 681 ms of subprocess work
+       to say the same thing. *)
+    Ok
+      (Dashboard_cache.get_or_compute
+         cache_key
+         ~ttl:Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
+         (fun () ->
+           let repo_list =
+             Eio.Fiber.List.map
+               (Server_routes_http_routes_repositories.repository_observation_json
+                  ~base_path)
+               repos
+           in
+           `Assoc
+             [ "ok", `Bool true
+             ; "timestamp", `Float (Eio.Time.now clock)
+             ; "repository_count", `Int (List.length repos)
+             ; "repositories", `List repo_list
+             ]))
+;;
+
 let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
   Server_auth.with_public_read (fun state req inner_reqd ->
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    match Repo_store.load_all ~base_path with
+    match
+      repository_observation_snapshot_json
+        ~clock
+        ~config:(Mcp_server.workspace_config state)
+    with
     | Error error ->
       Http_server_eio.Response.json_value
         ~status:`Internal_server_error
@@ -23,25 +79,7 @@ let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
         ~request:req
         (`Assoc [ "ok", `Bool false; "error", `String error ])
         inner_reqd
-    | Ok repos ->
-      (* Each repository's observation is two git subprocesses, and they do not
-         depend on one another, so the snapshot costs the slowest repository
-         rather than the sum of all of them. Sequentially this was 1.4-2.2 s for
-         2.9 KB. *)
-      let repo_list =
-        Eio.Fiber.List.map
-          (Server_routes_http_routes_repositories.repository_observation_json
-             ~base_path)
-          repos
-      in
-      let snapshot =
-        `Assoc
-          [ "ok", `Bool true
-          ; "timestamp", `Float (Eio.Time.now clock)
-          ; "repository_count", `Int (List.length repos)
-          ; "repositories", `List repo_list
-          ]
-      in
+    | Ok snapshot ->
       Http_server_eio.Response.json_value
         ~compress:true
         ~request:req

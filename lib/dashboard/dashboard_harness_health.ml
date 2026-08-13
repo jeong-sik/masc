@@ -181,18 +181,19 @@ let date_bounds ?since ?until () =
 
    [read_range_recent] is the bounded reader for a date range and takes the
    same cap the unfiltered branch already uses. *)
-let read_store_records store ?since ?until () =
+let read_store_records store ?since ?until ~f () =
   let since, until = date_bounds ?since ?until () in
   if since = "" && until = ""
-  then Dated_jsonl.read_recent store max_signal_scan
+  then Dated_jsonl.filter_map_recent store max_signal_scan ~f
   else (
     let start_date = if since = "" then "2020-01-01" else since in
     let end_date = if until = "" then "2099-12-31" else until in
-    Dated_jsonl.read_range_recent
+    Dated_jsonl.filter_map_range_recent
       store
       ~since:start_date
       ~until:end_date
-      max_signal_scan)
+      max_signal_scan
+      ~f)
 ;;
 
 let has_any_records store = Dated_jsonl.read_recent store 1 <> []
@@ -465,9 +466,13 @@ let wake_payload_record_identity json =
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
   : harness_verdict_item list
   =
-  let records = read_store_records (Eval_calibration.get_store ()) ?since ?until () in
   let verdicts : harness_verdict_item list =
-    records |> List.filter_map verdict_item_of_json
+    read_store_records
+      (Eval_calibration.get_store ())
+      ?since
+      ?until
+      ~f:verdict_item_of_json
+      ()
   in
   let verdicts =
     List.sort
@@ -493,10 +498,13 @@ let read_recent_verdicts_for_agents
   then []
   else (
     let is_wanted name = List.exists (String.equal name) wanted in
-    let records = read_store_records (Eval_calibration.get_store ()) ?since ?until () in
     let verdicts : harness_verdict_item list =
-      records
-      |> List.filter_map verdict_item_of_json
+      read_store_records
+        (Eval_calibration.get_store ())
+        ?since
+        ?until
+        ~f:verdict_item_of_json
+        ()
       |> List.filter (fun verdict -> is_wanted verdict.agent_name)
     in
     let verdicts =
@@ -509,9 +517,13 @@ let read_recent_verdicts_for_agents
 ;;
 
 let read_pre_compact_events ?since ?until () =
-  let records = read_store_records (get_pre_compact_store ()) ?since ?until () in
   let events : pre_compact_event list =
-    records |> List.filter_map pre_compact_event_of_json
+    read_store_records
+      (get_pre_compact_store ())
+      ?since
+      ?until
+      ~f:pre_compact_event_of_json
+      ()
   in
   List.sort
     (fun (left : pre_compact_event) (right : pre_compact_event) ->
@@ -520,20 +532,25 @@ let read_pre_compact_events ?since ?until () =
 ;;
 
 let read_wake_payload_events ?since ?until () =
-  let records = read_store_records (get_wake_payload_store ()) ?since ?until () in
   let events : wake_payload_event list =
-    records
-    |> List.filter_map (fun json ->
-      match wake_payload_event_of_json json with
-      | Ok event -> Some event
-      | Error detail ->
-        let keeper_name, trace_id = wake_payload_record_identity json in
-        Log.Harness.warn
-          "[wake_payload] rejected persisted record keeper=%s trace=%s: %s"
-          keeper_name
-          trace_id
-          detail;
-        None)
+    read_store_records
+      (get_wake_payload_store ())
+      ?since
+      ?until
+      ~f:(fun json ->
+        match wake_payload_event_of_json json with
+        | Ok event -> Some event
+        | Error detail ->
+          let keeper_name, trace_id = wake_payload_record_identity json in
+          (* Unconditional per-row warn: no quota and no early stop, so it does
+             not care that the reader calls this newest-first. *)
+          Log.Harness.warn
+            "[wake_payload] rejected persisted record keeper=%s trace=%s: %s"
+            keeper_name
+            trace_id
+            detail;
+          None)
+      ()
   in
   List.sort
     (fun (left : wake_payload_event) (right : wake_payload_event) ->

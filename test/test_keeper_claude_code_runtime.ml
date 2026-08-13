@@ -721,11 +721,14 @@ let test_tools_support_false_omits_mcp_bridge () =
                (keeper_response_text turn)))
 ;;
 
-let load_state base_path =
+(* The keeper name must match the runner that produced the state:
+   [run_client_attempt]-style flows persist as "claude-fixture", while
+   [run_direct_attempt] runs as "claude-pre-dispatch". Test 14 paired the
+   direct runner with the fixture name and therefore always read an absent
+   store (#28485, born red in #28347). *)
+let load_state ?(keeper_name = "claude-fixture") base_path =
   match
-    Keeper_official_client_session_store.load
-      ~base_path
-      ~keeper_name:"claude-fixture"
+    Keeper_official_client_session_store.load ~base_path ~keeper_name
   with
   | Error detail -> fail detail
   | Ok None -> fail "Claude Code current-owner state disappeared"
@@ -1235,7 +1238,7 @@ let test_repeated_tool_stop_records_pre_result_turn_identity () =
                check string "repeated tool" "masc_probe" tool_name;
                check int "repeat threshold" 3 repeated_count
              | _ -> fail "repeated Claude tool call was not a checkpoint yield"));
-         match (load_state base_path).phase with
+         match (load_state ~keeper_name:"claude-pre-dispatch" base_path).phase with
          | Settled { session_id; turn_id; _ } ->
            check
              string

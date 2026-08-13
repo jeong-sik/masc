@@ -7,6 +7,7 @@ vi.mock('./api/dashboard', () => ({
 import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
 import {
   applyAgentCoreRuntimeEvent,
+  appendAgentCoreRuntimeFromTelemetryEntries,
   hydrateAgentCoreRuntimeFromTelemetryEntries,
   replayAgentCoreRuntimeTelemetry,
   loadMoreAgentCoreEvents,
@@ -609,5 +610,39 @@ describe('agent-core-runtime-store', () => {
     })
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
+  })
+
+  it('stops at the telemetry offset cap without replaying a clamped page', async () => {
+    const entry = (seq: number): TelemetryEntry => ({
+      source: 'agent_core_event',
+      type: 'agent_core:masc:trust_updated',
+      event_id: `evt-cap-${seq}`,
+      run_id: 'run-cap',
+      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+    }) as TelemetryEntry
+
+    hydrateAgentCoreRuntimeFromTelemetryEntries([entry(1)])
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      total_matching_entries: 6000,
+      offset: 5000,
+      has_more: true,
+      entries: [entry(2)],
+    })
+
+    // Simulate the first request beyond the server's 5000 offset cap.
+    appendAgentCoreRuntimeFromTelemetryEntries([], 5499)
+    await loadMoreAgentCoreEvents()
+
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 5499,
+      signal: undefined,
+    })
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(5499)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
   })
 })

@@ -568,7 +568,10 @@ export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEn
   })
 }
 
-export function appendAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEntry[]): void {
+export function appendAgentCoreRuntimeFromTelemetryEntries(
+  entries: TelemetryEntry[],
+  replayOffset = replayFetchedAgentCoreEventCount,
+): void {
   const ordered = [...entries].sort((a, b) => {
     const left = coerceAgentCoreRuntimeEnvelope(a)
     const right = coerceAgentCoreRuntimeEnvelope(b)
@@ -577,7 +580,7 @@ export function appendAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEnt
   for (const entry of ordered) {
     applyAgentCoreRuntimeEvent(entry, { origin: 'replay' })
   }
-  replayFetchedAgentCoreEventCount += entries.length
+  replayFetchedAgentCoreEventCount = replayOffset + entries.length
 }
 
 export async function replayAgentCoreRuntimeTelemetry(signal?: AbortSignal): Promise<void> {
@@ -616,7 +619,20 @@ export async function loadMoreAgentCoreEvents(signal?: AbortSignal): Promise<voi
     offset: currentOffset,
     signal,
   })
-  appendAgentCoreRuntimeFromTelemetryEntries(response.entries)
+  const responseOffset = response.offset ?? currentOffset
+  // The server caps telemetry offsets. Once it reports an earlier offset than
+  // requested, this is a replay of a page we already consumed: do not project
+  // it again or advance the cursor beyond reachable history.
+  if (responseOffset < currentOffset) {
+    noteAgentCoreReplayWindow({
+      loadedEvents: replayFetchedAgentCoreEventCount,
+      totalMatchingEvents: response.total_matching_entries ?? response.count,
+      truncated: false,
+      observedTotalEvents: agentCoreTotalEvents.value,
+    })
+    return
+  }
+  appendAgentCoreRuntimeFromTelemetryEntries(response.entries, responseOffset)
   noteAgentCoreReplayWindow({
     loadedEvents: replayFetchedAgentCoreEventCount,
     totalMatchingEvents: response.total_matching_entries ?? response.count,

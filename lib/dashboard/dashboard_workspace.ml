@@ -215,6 +215,15 @@ let compute_json ~config ?me ~limit () =
    compute on a worker domain via Domain_pool. *)
 let cache_ttl_sec = 5.0
 
+let install_persistence_cache_invalidation () =
+  Atomic.set Workspace_hooks.workspace_message_persisted_fn (fun config ->
+    let base_path = config.Workspace.base_path in
+    Dashboard_cache.invalidate_prefix
+      (Printf.sprintf "dashboard.workspace:%s;" base_path);
+    Dashboard_cache.invalidate_prefix
+      (Printf.sprintf "workspace:%s:" base_path))
+;;
+
 let json ~config ?me ~limit () =
   let key =
     Printf.sprintf

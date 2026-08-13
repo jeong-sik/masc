@@ -146,7 +146,17 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
     Filename.concat (messages_dir config)
       (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
   in
-  write_json config msg_file (message_to_yojson msg);
+  (match write_json_commit_result config msg_file (message_to_yojson msg) with
+   | Ok { mirror_error } ->
+     Option.iter
+       (fun message -> Log.Misc.warn "workspace message mirror write failed: %s" message)
+       mirror_error;
+     (try (Atomic.get Workspace_hooks.workspace_message_persisted_fn) config
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Log.Misc.warn "workspace message projection invalidation failed: %s"
+          (Printexc.to_string exn))
+   | Error message ->
+     Log.Misc.warn "write_json failed for %s: %s" msg_file message);
   (match backend_publish config ~channel:(broadcast_channel config)
       ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
    | Ok _ -> ()

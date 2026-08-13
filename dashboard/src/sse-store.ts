@@ -146,6 +146,14 @@ export function registerActivityRefresh(fn: () => void): () => void {
   }
 }
 
+const _refreshWorkspaceMessageFns = new Set<() => void>()
+export function registerWorkspaceMessagesRefresh(fn: () => void): () => void {
+  _refreshWorkspaceMessageFns.add(fn)
+  return () => {
+    _refreshWorkspaceMessageFns.delete(fn)
+  }
+}
+
 const _refreshInternalAgentFns = new Set<() => void>()
 export function registerInternalAgentRefresh(fn: () => void): () => void {
   _refreshInternalAgentFns.add(fn)
@@ -626,6 +634,11 @@ export function routeServerPushEvent(event: SSEEvent): void {
   }
 
   const routedType = normalizeSSEDispatchType(event.type)
+  if (normalizeMascEventType(routedType) === 'broadcast') {
+    scheduleRefresh('workspace-messages', () => {
+      for (const refresh of _refreshWorkspaceMessageFns) refresh()
+    })
+  }
   const simpleRoute = SIMPLE_ROUTES[routedType]
   if (simpleRoute) {
     const refreshFn =

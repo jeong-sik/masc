@@ -149,6 +149,7 @@ export function normalizeMessage(raw: unknown): Message | null {
     timestamp,
     type: asString(raw.type),
     workspace,
+    mentions: Array.isArray(raw.mentions) ? asStringArray(raw.mentions) : undefined,
   }
 }
 

@@ -102,6 +102,12 @@ val tool_assigned_fn : (agent_id:string ->
 val workspace_broadcast_observed_fn :
   (msg_type:string -> elapsed_s:float -> unit) Atomic.t
 
+(** Fires immediately after a broadcast message is durably written. Runtime
+    wiring uses this ownership boundary to invalidate read projections without
+    introducing a workspace-to-dashboard dependency. *)
+val workspace_message_persisted_fn :
+  (Workspace_utils_backend_setup.config -> unit) Atomic.t
+
 val cache_desync_cleared_fn :
   (Workspace_utils_backend_setup.config ->
    module_name:string -> task_id:string -> status:string -> unit) Atomic.t

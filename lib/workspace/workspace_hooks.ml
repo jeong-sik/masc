@@ -217,6 +217,10 @@ let workspace_broadcast_observed_fn
   : (msg_type:string -> elapsed_s:float -> unit) Atomic.t
   = Atomic.make (fun ~msg_type:_ ~elapsed_s:_ -> ())
 
+let workspace_message_persisted_fn
+  : (Workspace_utils_backend_setup.config -> unit) Atomic.t
+  = Atomic.make (fun _config -> ())
+
 (** #13460: stale task-state cache emission observability.
     Workspace sub-modules fire this when they replace a stale active-task
     broadcast/mention with a cache invalidation message. [lib/workspace.ml]

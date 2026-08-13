@@ -101,6 +101,7 @@ export interface Message {
   timestamp?: string
   type?: string
   workspace?: string
+  mentions?: string[]
 }
 
 // --- Board ---

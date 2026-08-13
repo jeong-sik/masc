@@ -29,6 +29,7 @@ import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-ho
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
+import { isAbortError } from './lib/async-state'
 import {
   keeperFreshnessTs,
   normalizeKeepers,
@@ -91,6 +92,8 @@ export const shellRuntimeResolution = signal<DashboardRuntimeResolution | null>(
 export const agents = signal<Agent[]>([])
 export const tasks = signal<Task[]>([])
 export const messages = signal<Message[]>([])
+export const workspaceMessagesLoading = signal(false)
+export const workspaceMessagesError = signal<string | null>(null)
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 // Authoritative backlog size from the execution payload's `task_counts.total`.
@@ -652,7 +655,76 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 let inflightDashboardRefresh: Promise<void> | null = null
 let inflightShellRefresh: Promise<boolean> | null = null
 let inflightShellRefreshLight = false
+let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
+let workspaceMessagesRefreshController: AbortController | null = null
+let workspaceMessagesRefreshGeneration = 0
+let workspaceMessagesRefreshInvalidated = false
 let lastShellRefreshAt = 0
+
+export function refreshDashboardWorkspaceMessages(
+  expectedProject = serverStatus.value?.project ?? null,
+): Promise<void> {
+  if (inflightWorkspaceMessagesRefresh) {
+    workspaceMessagesRefreshInvalidated = true
+    return inflightWorkspaceMessagesRefresh
+  }
+
+  workspaceMessagesLoading.value = true
+  workspaceMessagesError.value = null
+  workspaceMessagesRefreshInvalidated = false
+  const generation = ++workspaceMessagesRefreshGeneration
+  const controller = new AbortController()
+  workspaceMessagesRefreshController = controller
+  inflightWorkspaceMessagesRefresh = (async () => {
+    try {
+      const { fetchDashboardWorkspaceMessages } = await import('./api/dashboard-workspace')
+      let settled = false
+      while (!settled && generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesRefreshInvalidated = false
+        const nextMessages = await fetchDashboardWorkspaceMessages({
+          signal: controller.signal,
+        })
+        if (generation !== workspaceMessagesRefreshGeneration || controller.signal.aborted) {
+          return
+        }
+        if (workspaceMessagesRefreshInvalidated) {
+          continue
+        }
+        if ((serverStatus.value?.project ?? null) === expectedProject) {
+          // This endpoint is the durable Workspace message SSOT. Replace the
+          // execution-derived cache instead of merging rows that the light
+          // execution response intentionally omits.
+          messages.value = nextMessages
+        }
+        settled = true
+      }
+    } catch (error) {
+      if (generation === workspaceMessagesRefreshGeneration && !isAbortError(error)) {
+        workspaceMessagesError.value = errorMessageOr(
+          error,
+          'Workspace messages failed to load',
+        )
+        console.warn('[Workspace messages] fetch error:', error)
+      }
+    } finally {
+      if (generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesLoading.value = false
+        workspaceMessagesRefreshController = null
+        inflightWorkspaceMessagesRefresh = null
+      }
+    }
+  })()
+  return inflightWorkspaceMessagesRefresh
+}
+
+export function cancelDashboardWorkspaceMessagesRefresh(): void {
+  workspaceMessagesRefreshGeneration += 1
+  workspaceMessagesRefreshInvalidated = false
+  workspaceMessagesRefreshController?.abort()
+  workspaceMessagesRefreshController = null
+  inflightWorkspaceMessagesRefresh = null
+  workspaceMessagesLoading.value = false
+}
 
 export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
@@ -892,6 +964,7 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
+  if (workspaceChanged) cancelDashboardWorkspaceMessagesRefresh()
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)

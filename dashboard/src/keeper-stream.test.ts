@@ -17,6 +17,10 @@ import {
   applyKeeperStreamEvent,
 } from './keeper-stream'
 import { parseSSEMessage } from './schemas/sse'
+import {
+  operationDeliveryProvenance,
+  isOperationDeliveryProvenance,
+} from './keeper-delivery-provenance'
 
 function assistantEntry(): void {
   appendThreadEntry('sangsu', {
@@ -116,7 +120,9 @@ describe('Keeper operation stream projection', () => {
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('queued')
-    expect(entry?.requestId).toBe('kmsg-operation-1')
+    expect(entry?.deliveryProvenance).toEqual(
+      operationDeliveryProvenance('kmsg-operation-1', 'terminal_assistant'),
+    )
   })
 
   it('routes server-pushed events by exact operation id', () => {
@@ -129,7 +135,10 @@ describe('Keeper operation stream projection', () => {
         text: '',
         rawText: '',
         timestamp: null,
-        requestId: operationId,
+        deliveryProvenance: operationDeliveryProvenance(
+          operationId,
+          'terminal_assistant',
+        ),
         delivery: 'queued',
         streamState: null,
         details: null,
@@ -142,8 +151,16 @@ describe('Keeper operation stream projection', () => {
     })
 
     const entries = keeperThreads.value.sangsu ?? []
-    expect(entries.find(entry => entry.requestId === 'kmsg-operation-1')?.text).toBe('')
-    expect(entries.find(entry => entry.requestId === 'kmsg-operation-2')?.text).toBe('second')
+    expect(entries.find(entry => isOperationDeliveryProvenance(
+      entry.deliveryProvenance,
+      'kmsg-operation-1',
+      'terminal_assistant',
+    ))?.text).toBe('')
+    expect(entries.find(entry => isOperationDeliveryProvenance(
+      entry.deliveryProvenance,
+      'kmsg-operation-2',
+      'terminal_assistant',
+    ))?.text).toBe('second')
   })
 
   // The direct send stamps the accepted operation id onto the bubble it is

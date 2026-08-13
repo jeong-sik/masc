@@ -1,5 +1,10 @@
 import { keeperStreamContract } from './keeper-stream-contract'
 import {
+  operationDeliveryProvenance,
+  isOperationDeliveryProvenance,
+  toolCallDeliveryProvenance,
+} from './keeper-delivery-provenance'
+import {
   formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
@@ -434,7 +439,12 @@ export function applyKeeperOperationTurnEvent(
 
   const entries = keeperThreads.value[keeperName] ?? []
   const matched = [...entries].reverse().find(
-    entry => entry.role === 'assistant' && entry.requestId === operationId,
+    entry => entry.role === 'assistant'
+      && isOperationDeliveryProvenance(
+        entry.deliveryProvenance,
+        operationId,
+        'terminal_assistant',
+      ),
   )
   if (
     matched
@@ -456,7 +466,7 @@ export function applyKeeperOperationTurnEvent(
       text: '',
       rawText: null,
       timestamp: null,
-      requestId: operationId,
+      deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant'),
       delivery: 'sending',
       streamState: 'opening',
       streamContract: keeperStreamContract(
@@ -608,6 +618,16 @@ export function applyKeeperStreamEvent(
       promoteAssistantTextToProgress(keeperName, assistantEntryId, {
         agentCoreBlockIndex: takeAgentCoreTextBlockIndex(keeperName, assistantEntryId),
       })
+      const assistantEntry = (keeperThreads.value[keeperName] ?? [])
+        .find(entry => entry.id === assistantEntryId)
+      const toolSteps = assistantEntry?.traceSteps?.filter(step => step.kind === 'tool') ?? []
+      const existingOrdinal = toolSteps.findIndex(step => step.toolCallId === toolCallId)
+      const toolOrdinal = existingOrdinal >= 0 ? existingOrdinal : toolSteps.length
+      const deliveryProvenance = toolCallDeliveryProvenance(
+        assistantEntry?.deliveryProvenance,
+        toolCallId,
+        toolOrdinal,
+      )
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
         name: toolName,
@@ -623,6 +643,7 @@ export function applyKeeperStreamEvent(
         text: '',
         rawText: '',
         timestamp: new Date().toISOString(),
+        deliveryProvenance,
         delivery: 'streaming',
         streamState: 'streaming',
         streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_START' }),
@@ -707,7 +728,10 @@ export function applyKeeperStreamEvent(
         const queued = event.value.state === 'Queued'
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
-          requestId: operationId,
+          deliveryProvenance: operationDeliveryProvenance(
+            operationId,
+            'terminal_assistant',
+          ),
           text: queued ? 'Queued' : entry.text,
           rawText: queued ? 'Queued' : entry.rawText,
           delivery: queued ? 'queued' : 'sending',
@@ -983,7 +1007,13 @@ export function applyKeeperStreamEvent(
       clearTextMessageStreamState(keeperName, assistantEntryId)
       if (source.kind !== 'operation') return null
       updateThreadEntry(keeperName, assistantEntryId, entry => {
-        if (entry.requestId !== source.operationId) return entry
+        if (!isOperationDeliveryProvenance(
+          entry.deliveryProvenance,
+          source.operationId,
+          'terminal_assistant',
+        )) {
+          return entry
+        }
         const delivery =
           entry.delivery === 'no_reply'
             || (entry.delivery === 'queued'

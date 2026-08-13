@@ -1,5 +1,7 @@
 // MASC Dashboard — Core entity types (Agent, Task, Message, Board, Keeper)
 
+import type { KeeperChatDeliveryProvenance } from '../keeper-delivery-provenance'
+
 // --- Shared options ---
 
 export interface RefreshOptions {
@@ -924,13 +926,12 @@ export interface KeeperConversationEntry {
   text: string
   rawText?: string | null
   timestamp?: string | null
-  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" join key. Carries the
-  // chat message's originating turn so turn consumers can prefer exact matching
-  // over timestamp-window fallback.
+  // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" correlation key.
+  // Carries the originating turn for trace attachment; it is not row identity.
   turnRef?: string | null
-  // Direct/async delivery identity for history reconciliation. Local
-  // placeholders carry the backend-minted request id once it is observed.
-  requestId?: string | null
+  // Exact append-once identity for history reconciliation. This preserves the
+  // backend SSOT pair instead of flattening it into a role-qualified request id.
+  deliveryProvenance?: KeeperChatDeliveryProvenance | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   streamContract?: KeeperConversationStreamContract | null

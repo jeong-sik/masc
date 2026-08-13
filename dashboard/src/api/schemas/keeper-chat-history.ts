@@ -31,6 +31,13 @@ import {
   unknown,
   type InferOutput,
 } from 'valibot'
+import {
+  decodeKeeperChatDeliveryProvenance,
+} from './keeper-chat-delivery-provenance'
+import type {
+  KeeperChatDeliveryProvenance,
+  KeeperChatDeliveryProvenanceDecode,
+} from '../../keeper-delivery-provenance'
 
 // Attachment row shape persisted by keeper_chat_store.ml (to_json_array
 // :848-861): snake_case mime_type and an open `type` string. Normalized to
@@ -311,12 +318,13 @@ export const KeeperChatHistoryMessageSchema = object({
   // :848-861). Without decoding these, a user's upload appears live but
   // vanishes on reload even though it is on disk.
   attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
-  // Turn identity stamped by the backend on every dashboard-originated row
-  // (keeper_chat_store.ml delivery_key, e.g.
-  // `{"kind":"operation","operation_id":"kmsg-..."}`). Accepted as
-  // `unknown` so a shape drift never drops the row; the consumer extracts
-  // `operation_id` tolerantly (absent/malformed -> undefined).
+  // The raw provenance pair is decoded together immediately after this
+  // row-level tolerant schema succeeds. Keeping the two raw fields unknown at
+  // this first pass lets a malformed identity degrade to a visible but
+  // non-reconcilable row instead of deleting the message. Unknown does not
+  // escape this module; callers receive the closed delivery_provenance ADT.
   delivery_key: optional(unknown()),
+  transcript_slot: optional(unknown()),
   // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
   // reloads preserve the structured render instead of re-parsing plain text.
   blocks: optional(array(KeeperChatBlockSchema)),
@@ -332,11 +340,26 @@ export const KeeperChatHistoryMessageSchema = object({
   autonomous_turn: optional(KeeperAutonomousTurnSchema),
 })
 
-export type KeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>
+type RawKeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>
+
+export type KeeperChatHistoryMessage = Omit<
+  RawKeeperChatHistoryMessage,
+  'delivery_key' | 'transcript_slot'
+> & {
+  delivery_provenance: KeeperChatDeliveryProvenance | null
+  delivery_provenance_status: KeeperChatDeliveryProvenanceDecode['status']
+}
 
 export function safeParseKeeperChatHistoryMessage(
   data: unknown,
 ): KeeperChatHistoryMessage | null {
   const result = safeParse(KeeperChatHistoryMessageSchema, data)
-  return result.success ? result.output : null
+  if (!result.success) return null
+  const { delivery_key, transcript_slot, ...message } = result.output
+  const provenance = decodeKeeperChatDeliveryProvenance(delivery_key, transcript_slot)
+  return {
+    ...message,
+    delivery_provenance: provenance.value,
+    delivery_provenance_status: provenance.status,
+  }
 }

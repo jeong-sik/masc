@@ -6,6 +6,11 @@ import { isRecord, asString, asNumber, asBoolean, toIsoTimestamp } from './compo
 import { asStrictStringArray, withoutUndefined } from './lib/json-coerce'
 import { keeperStreamContract, normalizeStreamContract } from './keeper-stream-contract'
 import {
+  sameDeliveryProvenance,
+  type KeeperChatDeliveryProvenance,
+  type KeeperChatDeliveryProvenanceDecode,
+} from './keeper-delivery-provenance'
+import {
   nonBlankToolCallId,
   toolEntryIdFromCallId,
 } from './tool-call-output-store'
@@ -761,38 +766,25 @@ export function normalizeKeeperRecoverResult(raw: unknown): KeeperRecoverResult 
 
 // --- Thread state management ---
 
-// Stable fallback id for a message whose backend predates R3 and so
-// carries no producer-assigned id. Derived from the content (not the merge
-// index) so it does not shift when history pages are merged.
-function fallbackHistoryEntryId(
-  role: string,
-  timestamp: string | null | undefined,
-  text: string,
-): string {
-  let hash = 5381
-  for (let i = 0; i < text.length; i += 1) {
-    hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0
+function deliveryProvenanceFromRaw(raw: Record<string, unknown>): KeeperChatDeliveryProvenanceDecode {
+  if (raw.delivery_provenance_status === 'invalid') {
+    return { status: 'invalid', value: null }
   }
-  return `${role}-${timestamp ?? 'entry'}-${(hash >>> 0).toString(36)}`
-}
-
-interface DeliveryIdentity {
-  requestId: string | null
-}
-
-// Typed delivery identity carried on persisted history rows. Unknown or
-// malformed shapes fail closed for reconciliation without dropping the row.
-function deliveryIdentityFromKey(raw: unknown): DeliveryIdentity {
-  if (!isRecord(raw)) return { requestId: null }
-  const kind = asString(raw.kind)
-  if (kind === 'operation') {
-    // keeper_chat_delivery_identity.ml serializes Operation as
-    // {kind:"operation", operation_id:"kmsg-..."} — the same id the live
-    // stream stamps as requestId (keeper-actions.ts request.operationId).
-    const requestId = asString(raw.operation_id)?.trim() ?? ''
-    return { requestId: requestId || null }
+  if (raw.delivery_provenance_status === 'valid') {
+    return isRecord(raw.delivery_provenance)
+      ? {
+          status: 'valid',
+          value: raw.delivery_provenance as unknown as KeeperChatDeliveryProvenance,
+        }
+      : { status: 'invalid', value: null }
   }
-  return { requestId: null }
+  if (raw.delivery_key !== undefined || raw.transcript_slot !== undefined) {
+    // Raw wire provenance must be decoded at the lazy API schema boundary.
+    // Failing closed here prevents an accidental direct caller from making
+    // malformed identity reconcilable.
+    return { status: 'invalid', value: null }
+  }
+  return { status: 'absent', value: null }
 }
 
 function normalizeHistoryEntry(
@@ -801,6 +793,8 @@ function normalizeHistoryEntry(
   previousSource: KeeperConversationSource | null = null,
 ): KeeperConversationEntry | null {
   if (!isRecord(raw)) return null
+  const id = asString(raw.id)?.trim() ?? ''
+  if (!id) return null
   const role = normalizeRole(raw.role)
   const rawText = asString(raw.content) ?? asString(raw.preview) ?? ''
   const attachments = normalizeAttachments(raw.attachments)
@@ -824,7 +818,7 @@ function normalizeHistoryEntry(
   const speakerAuthority = asString(raw.speaker_authority) ?? null
   // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
-  const deliveryIdentity = deliveryIdentityFromKey(raw.delivery_key)
+  const deliveryProvenance = deliveryProvenanceFromRaw(raw)
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Preserve that writer-declared provenance as its
@@ -836,16 +830,16 @@ function normalizeHistoryEntry(
     ?? ((role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)
       : undefined)
-  const streamContract = normalizeStreamContract(raw.stream_contract)
-    ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
-      reason: 'history rows do not carry stream lifecycle events',
-    })
+  const streamContract = deliveryProvenance.status === 'invalid'
+    ? keeperStreamContract('rest_history', 'contract_gap', {
+        reason: 'history row carries malformed or incomplete delivery provenance',
+      })
+    : normalizeStreamContract(raw.stream_contract)
+      ?? keeperStreamContract('rest_history', 'history_without_stream_events', {
+        reason: 'history rows do not carry stream lifecycle events',
+      })
   return {
-    // R3: key off the producer-assigned server id when present so the
-    // render key is stable across history-page merges (the former
-    // `${role}-${ts}-${index}` shifted with the merge index and remounted
-    // bubbles). Pre-R3 rows fall back to a stable content-derived id.
-    id: asString(raw.id) ?? fallbackHistoryEntryId(role, timestamp, rawText),
+    id,
     role,
     source,
     label,
@@ -853,7 +847,7 @@ function normalizeHistoryEntry(
     rawText,
     timestamp,
     turnRef,
-    requestId: deliveryIdentity.requestId,
+    deliveryProvenance: deliveryProvenance.value,
     delivery,
     error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
@@ -1260,28 +1254,22 @@ export function finalizeAssistantEntry(
   })
 }
 
-// Dedup key for merging server history with locally-appended entries.
-// Server ids win when both sides have already converged. User/assistant
-// rows converge through exact producer identities only: operation id first,
-// then turn_ref when neither side carries an operation identity. Conflicting
-// identities fail closed. Role+text is not an identity because it collapses
-// distinct same-text turns. Tool rows only dedup by their explicit
-// `tool-<tool_call_id>` id.
+// Dedup key for merging server history with locally-appended entries. Server
+// ids win when both sides already name the same row. Otherwise the atomic
+// append-once provenance pair is the sole convergence authority. Role, text,
+// timestamp, and turn_ref are projections/correlation data, never row identity.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
   if (left.id === right.id) return true
-  if (left.role === 'tool' || right.role === 'tool') return false
-  if (left.role !== right.role) return false
-  const leftRequestId = left.requestId?.trim()
-  const rightRequestId = right.requestId?.trim()
-  if (leftRequestId && rightRequestId) return leftRequestId === rightRequestId
-  if (leftRequestId || rightRequestId) return false
-
-  const leftTurnRef = left.turnRef?.trim()
-  const rightTurnRef = right.turnRef?.trim()
-  return Boolean(leftTurnRef && rightTurnRef && leftTurnRef === rightTurnRef)
+  const leftProvenance = left.deliveryProvenance
+  const rightProvenance = right.deliveryProvenance
+  return Boolean(
+    leftProvenance
+    && rightProvenance
+    && sameDeliveryProvenance(leftProvenance, rightProvenance),
+  )
 }
 
 // Entries with no parseable timestamp (live placeholders, still-streaming
@@ -1297,36 +1285,35 @@ function mergeLocalAssistantTraceSteps(
   historyEntry: KeeperConversationEntry,
   localEntries: KeeperConversationEntry[],
   // Tracks local trace sources already claimed by an earlier history row.
-  // Join order: requestId (backend-stamped turn identity) first, then
-  // turn_ref when Agent Core/MASC provides it on both the live reply details and
-  // the persisted history row. There is no text-based fallback: a local
+  // Join order: exact delivery provenance first, then turn_ref only for trace
+  // correlation when neither row has provenance. There is no text fallback: a local
   // trace source that shares neither key with the history row stays
-  // unmerged (and is dropped by the same requestId rule in replaceThread
-  // once its turn converges). `consumed` keeps every match 1:1 instead of
+  // unmerged (and is dropped by exact provenance in replaceThread once its
+  // turn converges). `consumed` keeps every match 1:1 instead of
   // letting duplicate assistant text reuse the first local trace source
   // (#21748).
   consumed: Set<string>,
 ): KeeperConversationEntry {
   if (historyEntry.role !== 'assistant') return historyEntry
-  // requestId join first: a placeholder whose stream died before REPLY_DETAILS
-  // has no turnRef and possibly no text, but it does carry the request id.
-  const historyRequestId = historyEntry.requestId?.trim()
-  const localTraceSourceByRequestId = historyRequestId
+  const historyProvenance = historyEntry.deliveryProvenance
+  const localTraceSourceByProvenance = historyProvenance
     ? localEntries.find(
         entry =>
           entry.role === 'assistant'
           && (entry.traceSteps?.length ?? 0) > 0
           && !consumed.has(entry.id)
-          && entry.requestId?.trim() === historyRequestId,
+          && entry.deliveryProvenance != null
+          && sameDeliveryProvenance(entry.deliveryProvenance, historyProvenance),
       )
     : undefined
-  if (localTraceSourceByRequestId?.traceSteps?.length) {
-    consumed.add(localTraceSourceByRequestId.id)
+  if (localTraceSourceByProvenance?.traceSteps?.length) {
+    consumed.add(localTraceSourceByProvenance.id)
     return {
       ...historyEntry,
-      traceSteps: localTraceSourceByRequestId.traceSteps,
+      traceSteps: localTraceSourceByProvenance.traceSteps,
     }
   }
+  if (historyProvenance) return historyEntry
   const historyTurnRef = historyEntry.turnRef?.trim()
   const localTraceSourceByTurnRef = historyTurnRef
     ? localEntries.find(
@@ -1334,6 +1321,7 @@ function mergeLocalAssistantTraceSteps(
           entry.role === 'assistant'
           && (entry.traceSteps?.length ?? 0) > 0
           && !consumed.has(entry.id)
+          && entry.deliveryProvenance == null
           && entry.turnRef?.trim() === historyTurnRef,
       )
     : undefined
@@ -1417,7 +1405,7 @@ export function mergeServerHistoryEntries(
 }
 
 interface RestChatHistoryMessage {
-  id?: string
+  id: string
   role: string
   content: string | null
   ts: number
@@ -1432,9 +1420,11 @@ interface RestChatHistoryMessage {
   speaker_authority?: string
   // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
   turn_ref?: string | null
-  // Backend-stamped delivery identity: direct/async request id or queue
-  // receipt ids. Unknown shapes are ignored without dropping the row.
-  delivery_key?: unknown
+  // Canonical append-once identity decoded at the HTTP boundary. Direct
+  // normalizeStatusDetail callers may still supply the raw sibling fields;
+  // normalizeHistoryEntry runs the same closed decoder for that path.
+  delivery_provenance?: KeeperChatDeliveryProvenance | null
+  delivery_provenance_status?: KeeperChatDeliveryProvenanceDecode['status']
   audio?: unknown
   // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
   // KeeperConversationAttachment at consume time so reload keeps the cards.
@@ -1503,6 +1493,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
   const toolCallId = nonBlankToolCallId(message.tool_call_id)
   const toolCallName = message.tool_call_name?.trim()
   if (!toolCallId || !toolCallName || typeof message.content !== 'string') return null
+  const deliveryProvenance = message.delivery_provenance ?? null
   return {
     id: toolEntryIdFromCallId(toolCallId),
     role: 'tool',
@@ -1526,6 +1517,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     // Tool rows share the same untrusted REST boundary; reject malformed
     // turn_ref values here too so this path matches normalizeHistoryEntry.
     turnRef: asString(message.turn_ref) ?? null,
+    deliveryProvenance,
   }
 }
 
@@ -1539,6 +1531,7 @@ export function chatHistoryEntriesFromRest(
   let previousSource: KeeperConversationSource | null = null
   const entries: KeeperConversationEntry[] = []
   messages.forEach((message) => {
+    if (!message.id.trim()) return
     if (message.autonomous_turn !== undefined) {
       // Nobody addressed the keeper, so this row must not advance the
       // user/assistant source chain that infers direct-conversation roles.
@@ -1571,7 +1564,8 @@ export function chatHistoryEntriesFromRest(
         kind: message.kind,
         blocks: message.blocks,
         turn_ref: message.turn_ref,
-        delivery_key: message.delivery_key,
+        delivery_provenance: message.delivery_provenance,
+        delivery_provenance_status: message.delivery_provenance_status,
         stream_contract: message.stream_contract,
       },
       keeperName,
@@ -1614,7 +1608,7 @@ export function clearActiveStream(name: string, operationId: string): void {
   const streams = keeperActiveStreams.get(name)
   streams?.delete(operationId)
   if (streams?.size === 0) keeperActiveStreams.delete(name)
-  releaseActiveStreamRequestId(operationId)
+  releaseLiveSendRequest(operationId)
 }
 
 export function activeStreamEntryId(name: string): string | null {
@@ -1629,40 +1623,11 @@ export function getStreamController(name: string): AbortController | undefined {
   return keeperActiveStreams.get(name)?.values().next().value?.controller
 }
 
-export function setActiveStreamRequestId(name: string, requestId: string): void {
-  claimLiveSendRequest(requestId, name)
-  markLiveSendRequestAccepted(requestId)
-}
-
 export function activeStreamRequestId(name: string): string | null {
-  const keeperName = name.trim()
-  if (!keeperName) return null
-  for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName && acceptedLiveSendRequestIds.has(requestId)) return requestId
-  }
-  return null
-}
-
-export function clearActiveStreamRequestId(name: string): void {
-  const keeperName = name.trim()
-  if (!keeperName) return
-  for (const [requestId, owner] of liveSendRequestOwners) {
-    if (owner === keeperName) {
-      liveSendRequestOwners.delete(requestId)
-      acceptedLiveSendRequestIds.delete(requestId)
-    }
-  }
-}
-
-/** Release a specific request id from live-send ownership. Returns true if
- *  the id was owned. Use this for race-free cleanup after a confirmed server
- *  cancel so a stale cleanup cannot wipe a newer request id claimed for the
- *  same keeper. */
-export function releaseActiveStreamRequestId(requestId: string): boolean {
-  const id = requestId.trim()
-  if (!id) return false
-  acceptedLiveSendRequestIds.delete(id)
-  return liveSendRequestOwners.delete(id)
+  const operationId = activeStreamOperationId(name)
+  return operationId && acceptedLiveSendRequestIds.has(operationId)
+    ? operationId
+    : null
 }
 
 // --- Live send ownership (in-session, requestId-keyed) ---

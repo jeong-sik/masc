@@ -238,23 +238,43 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.turn_ref).toBeUndefined()
   })
 
-  it('passes delivery_key through without dropping the row, whatever its shape', () => {
+  it('decodes the complete operation provenance pair', () => {
     const out = safeParseKeeperChatHistoryMessage(
-      validMessage({ delivery_key: { kind: 'operation', operation_id: 'kmsg-1' } }),
+      validMessage({
+        delivery_key: { kind: 'operation', operation_id: 'kmsg-1' },
+        transcript_slot: { kind: 'accepted_user' },
+      }),
     )
     expect(out).not.toBeNull()
-    expect(out?.delivery_key).toEqual({ kind: 'operation', operation_id: 'kmsg-1' })
-    // Malformed / unexpected shapes are tolerated too: the consumer extracts
-    // operation_id tolerantly, so the row must survive.
-    expect(
-      safeParseKeeperChatHistoryMessage(validMessage({ delivery_key: 'kmsg-1' })),
-    ).not.toBeNull()
-    expect(
-      safeParseKeeperChatHistoryMessage(validMessage({ delivery_key: 42 })),
-    ).not.toBeNull()
-    expect(
-      safeParseKeeperChatHistoryMessage(validMessage())?.delivery_key,
-    ).toBeUndefined()
+    expect(out?.delivery_provenance).toEqual({
+      delivery_key: { kind: 'operation', operation_id: 'kmsg-1' },
+      transcript_slot: { kind: 'accepted_user' },
+    })
+    expect(out?.delivery_provenance_status).toBe('valid')
+    expect(out).not.toHaveProperty('delivery_key')
+    expect(out).not.toHaveProperty('transcript_slot')
+  })
+
+  it('keeps malformed or half provenance visible but non-reconcilable', () => {
+    for (const raw of [
+      validMessage({ delivery_key: { kind: 'operation', operation_id: 'kmsg-1' } }),
+      validMessage({
+        delivery_key: { kind: 'operation', request_id: 'kmsg-1' },
+        transcript_slot: { kind: 'accepted_user' },
+      }),
+      validMessage({ delivery_key: 'kmsg-1', transcript_slot: { kind: 'accepted_user' } }),
+    ]) {
+      const out = safeParseKeeperChatHistoryMessage(raw)
+      expect(out).not.toBeNull()
+      expect(out?.delivery_provenance).toBeNull()
+      expect(out?.delivery_provenance_status).toBe('invalid')
+    }
+  })
+
+  it('marks a row without provenance as absent', () => {
+    const out = safeParseKeeperChatHistoryMessage(validMessage())
+    expect(out?.delivery_provenance).toBeNull()
+    expect(out?.delivery_provenance_status).toBe('absent')
   })
 
   it('returns null when turn_ref has the wrong type', () => {

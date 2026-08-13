@@ -5,6 +5,10 @@ module Runtime = Masc.Keeper_librarian_runtime
 module Memory = Masc.Keeper_memory_os_types
 module Budget = Masc.Keeper_memory_os_budget
 module Post_turn_memory = Masc.Keeper_agent_run_post_turn_memory
+module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_counterpart_observation = Masc.Keeper_counterpart_observation
+module Keeper_external_attention = Masc.Keeper_external_attention
+module Surface_ref = Masc.Surface_ref
 
 (* Render tests resolve the real repo templates so template <-> code
    variable drift fails here instead of as a live [Prompt_render_failed]
@@ -539,7 +543,6 @@ let test_counterpart_observations_keep_direct_and_attention_fallback () =
          ~surface
          ~conversation_id
          ~external_message_id
-         ~workspace_id:"guild-fallback"
          ~speaker:
            { speaker_id = item.actor.actor_id
            ; speaker_name = item.actor.display_name

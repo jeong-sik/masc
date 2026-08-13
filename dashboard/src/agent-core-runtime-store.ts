@@ -48,6 +48,7 @@ const seenAgentCoreEventKeys = new Set<string>()
 let unidentifiedAgentCoreEventSequence = 0
 let replayGeneration = 0
 let initialReplayPromise: Promise<void> | null = null
+let replayLoadedAgentCoreEventCount = 0
 
 function emptyEvidenceRefSets(): EvidenceRefSets {
   return {
@@ -554,6 +555,7 @@ export function applyAgentCoreRuntimeEvent(raw: unknown, opts?: IngestOptions): 
     runtimeEventKey(event)
   }
   ingestRuntimeProjection(event, opts)
+  if (opts?.origin === 'replay') replayLoadedAgentCoreEventCount += 1
   // A live arrival is news the replay window never counted, so it belongs
   // above the server's total. A replayed row is not: it is already inside
   // that total, and counting it again is what made "load more" claim 1700
@@ -562,24 +564,11 @@ export function applyAgentCoreRuntimeEvent(raw: unknown, opts?: IngestOptions): 
   return true
 }
 
-/** How many distinct events this store has actually loaded.
- *
- *  Separate from `agentCoreTotalEvents`, which `noteAgentCoreReplayWindow`
- *  assigns the server's total-matching count — feeding that number back as
- *  `loadedEvents` makes loaded and total equal by construction, which reads
- *  as "fully loaded" however little was fetched.
- *
- *  Both halves are already tracked: stable identities cannot double-count
- *  because the set rejects repeats, and unidentified events are numbered as
- *  they are keyed. */
-function loadedAgentCoreEventCount(): number {
-  return seenAgentCoreEventKeys.size + unidentifiedAgentCoreEventSequence
-}
-
 export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEntry[]): void {
   resetAgentCoreRuntimeSignals()
   seenAgentCoreEventKeys.clear()
   unidentifiedAgentCoreEventSequence = 0
+  replayLoadedAgentCoreEventCount = 0
   const ordered = [...entries].sort((a, b) => {
     const left = coerceAgentCoreRuntimeEnvelope(a)
     const right = coerceAgentCoreRuntimeEnvelope(b)
@@ -589,8 +578,8 @@ export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEn
     applyAgentCoreRuntimeEvent(entry, { origin: 'replay' })
   }
   noteAgentCoreReplayWindow({
-    loadedEvents: loadedAgentCoreEventCount(),
-    totalMatchingEvents: loadedAgentCoreEventCount(),
+    loadedEvents: replayLoadedAgentCoreEventCount,
+    totalMatchingEvents: replayLoadedAgentCoreEventCount,
     truncated: false,
   })
 }
@@ -616,7 +605,7 @@ export async function replayAgentCoreRuntimeTelemetry(signal?: AbortSignal): Pro
   if (generation !== replayGeneration) return
   hydrateAgentCoreRuntimeFromTelemetryEntries(response.entries)
   noteAgentCoreReplayWindow({
-    loadedEvents: loadedAgentCoreEventCount(),
+    loadedEvents: replayLoadedAgentCoreEventCount,
     totalMatchingEvents: response.total_matching_entries ?? response.count,
     truncated: response.has_more ?? response.truncated ?? false,
   })
@@ -644,7 +633,7 @@ export async function loadMoreAgentCoreEvents(signal?: AbortSignal): Promise<voi
   })
   appendAgentCoreRuntimeFromTelemetryEntries(response.entries)
   noteAgentCoreReplayWindow({
-    loadedEvents: loadedAgentCoreEventCount(),
+    loadedEvents: replayLoadedAgentCoreEventCount,
     totalMatchingEvents: response.total_matching_entries ?? response.count,
     truncated: response.has_more ?? response.truncated ?? false,
   })

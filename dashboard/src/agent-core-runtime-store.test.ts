@@ -469,6 +469,48 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
   })
 
+  it('keeps live arrivals out of the replay-loaded page count', async () => {
+    const entry = (seq: number): TelemetryEntry => ({
+      source: 'agent_core_event',
+      type: 'agent_core:masc:trust_updated',
+      ts_unix: 700 + seq,
+      correlation_id: `corr-replay-${seq}`,
+      run_id: 'run-replay-pages',
+      seq,
+      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+    }) as TelemetryEntry
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [entry(1)],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    expect(applyAgentCoreRuntimeEvent({
+      type: 'agent_core:masc:trust_updated',
+      ts_unix: 999,
+      correlation_id: 'corr-live-between-pages',
+      run_id: 'run-live-between-pages',
+      payload: { agent_a: 'live', agent_b: 'peer', trust_score: 0.6 },
+    })).toBe(true)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [entry(2)],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(3)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+  })
+
   it('keeps loading more from retiring hasMore before the window is exhausted', async () => {
     // A replayed row sits inside the server's total-matching count. Counting
     // it again made loaded exceed total, and noteAgentCoreReplayWindow reads

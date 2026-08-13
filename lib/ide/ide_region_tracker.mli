@@ -46,7 +46,7 @@ val regions_file
 
 val append_region
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> partition:Ide_paths.partition
   -> code_region
   -> unit
 (** Append one region to the chosen partition's [regions.jsonl].
@@ -54,7 +54,7 @@ val append_region
 
 val ingest_tool_call
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> partition:Ide_paths.partition
   -> keeper_id:string
   -> turn:int
   -> Yojson.Safe.t

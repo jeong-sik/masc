@@ -30,7 +30,7 @@ val ensure_store : base_dir:string -> ?partition:Ide_paths.partition -> unit -> 
 
 val create
   :  base_dir:string
-  -> ?partition:Ide_paths.partition
+  -> partition:Ide_paths.partition
   -> keeper_id:string
   -> file_path:string
   -> line_start:int

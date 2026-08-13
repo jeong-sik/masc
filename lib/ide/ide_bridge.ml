@@ -5,6 +5,34 @@ open Ide_event_types
 
 let default_partition = Ide_paths.Legacy_default
 
+(* RFC-0378 A rung: storage routing from attribution with the layout
+   unchanged — an addressed fact goes to its by-url partition, anything
+   else to the orphan directory. The directory split for keeper facts
+   ([keeper/<id>/]) is the B rung. *)
+let storage_partition_of_file_attribution = function
+  | Agent_observation.Addressed { address; _ } ->
+    Ide_paths.By_url (Agent_observation.Code_address.codebase address)
+  | Agent_observation.Unaddressed _ -> default_partition
+;;
+
+let storage_partition_of_attribution = function
+  | Agent_observation.File file_attribution ->
+    storage_partition_of_file_attribution file_attribution
+  | Agent_observation.Pathless -> default_partition
+;;
+
+let file_path_of_file_attribution = function
+  | Agent_observation.Addressed { address; _ } ->
+    Agent_observation.Code_address.path address
+  | Agent_observation.Unaddressed { attempted_path; _ } -> attempted_path
+;;
+
+let file_path_of_attribution = function
+  | Agent_observation.File file_attribution ->
+    Some (file_path_of_file_attribution file_attribution)
+  | Agent_observation.Pathless -> None
+;;
+
 type event_kind =
   | Tool
   | Turn
@@ -429,7 +457,7 @@ let list_events
 
 let ingest_tool_event
     ~base_path
-    ?(partition = default_partition)
+    ~partition
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -471,7 +499,6 @@ let ingest_tool_event
 
 let ingest_turn_event
     ~base_path
-    ~partition
     ~turn_id
     ~keeper_id
     ~phase
@@ -481,13 +508,11 @@ let ingest_turn_event
     ~duration_ms
     ~timestamp_ms
   =
-  (* DEFER (task-1733): the turn-event emit (keeper_agent_run.ml) resolves only
-     [config.base_path] because a turn carries no edited file_path, and no
-     keeper->active-repo/canonical_url mapping exists today. So [partition]
-     forwarded here is typically the coarse orphan partition. Forwarding it
-     (instead of hardcoding [default_partition]) removes the silent hardcode and
-     lets a future keeper->repo source flow through unchanged. Real per-turn
-     attribution requires that new source — tracked as task-1733 follow-up. *)
+  (* RFC-0378: a turn is a keeper-timeline fact — it can touch any number
+     of codebases, so it carries no attribution and the per-codebase
+     timeline is a join on [turn_id]. Routed to the shared orphan
+     directory until the B rung gives keeper facts their own store. *)
+  let partition = default_partition in
   let event =
     Turn_event
       { turn_id
@@ -703,8 +728,7 @@ let ingest_cursor_event
     Separated for direct testability. *)
 let ingest_tool_event_from_hook
     ~base_path
-    ~partition
-    ~file_path
+    ~attribution
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -714,11 +738,14 @@ let ingest_tool_event_from_hook
     ~output_text
     ~(input : Yojson.Safe.t)
   =
-  (* [file_path] arrives resolved, from the same helper that decided
-     [partition]. Re-deriving it from [input] here is what put absolute host
-     paths, sandbox-rooted [repos/<id>/…] paths, and repo-relative paths in one
-     partition, none of which a reader can join against the region and
-     annotation rows the same resolver produced (masc#28582). *)
+  (* The attribution arrives minted (RFC-0378 §5.1); storage partition and
+     file path are both projections of it. Re-deriving the path from
+     [input] here is what put absolute host paths, sandbox-rooted
+     [repos/<id>/…] paths, and repo-relative paths in one partition, none
+     of which a reader can join against the region and annotation rows
+     the same resolver produced (masc#28582). *)
+  let partition = storage_partition_of_attribution attribution in
+  let file_path = file_path_of_attribution attribution in
   let summary =
     String_util.utf8_safe ~max_bytes:200 ~suffix:"" output_text
     |> String_util.to_string
@@ -771,8 +798,7 @@ let install_agent_observation_sinks () =
       Ide_ingest_queue.submit (fun () ->
         ingest_tool_event_from_hook
           ~base_path:event.base_path
-          ~partition:event.partition
-          ~file_path:event.file_path
+          ~attribution:event.attribution
           ~tool_name:event.tool_name
           ~keeper_id:event.keeper_id
           ~turn_id:event.turn_id
@@ -784,11 +810,8 @@ let install_agent_observation_sinks () =
   Agent_observation.register_turn_event_sink
     (fun (event : Agent_observation.turn_event) ->
       Ide_ingest_queue.submit (fun () ->
-        (* turn: forward event.partition (coarse today — see ingest_turn_event
-           DEFER note; keeper->repo mapping is task-1733 follow-up). *)
         ingest_turn_event
           ~base_path:event.base_path
-          ~partition:event.partition
           ~turn_id:event.turn_id
           ~keeper_id:event.keeper_id
           ~phase:event.phase
@@ -802,7 +825,7 @@ let install_agent_observation_sinks () =
       try
         Ide_region_tracker.ingest_tool_call
           ~base_dir:event.base_path
-          ~partition:event.partition
+          ~partition:(storage_partition_of_file_attribution event.attribution)
           ~keeper_id:event.keeper_id
           ~turn:event.turn
           event.tool_call_json;
@@ -816,9 +839,8 @@ let install_agent_observation_sinks () =
         Error Agent_observation.Write_region_sink_failed);
   Agent_observation.register_annotation_sink
     (fun ({ base_path
-           ; partition
+           ; attribution
            ; keeper_id
-           ; file_path
            ; line_start
            ; line_end
            ; kind
@@ -831,9 +853,9 @@ let install_agent_observation_sinks () =
       match
         Ide_annotations.create
           ~base_dir:base_path
-          ~partition
+          ~partition:(storage_partition_of_file_attribution attribution)
           ~keeper_id
-          ~file_path
+          ~file_path:(file_path_of_file_attribution attribution)
           ~line_start
           ~line_end
           ~kind

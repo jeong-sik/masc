@@ -116,7 +116,7 @@ let rec ensure_dir path =
     try Unix.mkdir path 0o755 with
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 
-let append_region ~base_dir ?(partition = Ide_paths.Legacy_default) region =
+let append_region ~base_dir ~partition region =
   let path = regions_file ~base_dir ~partition () in
   ensure_dir (Filename.dirname path);
   Fs_compat.append_jsonl path (region_to_json region)
@@ -143,7 +143,7 @@ let load_regions_from_path ?file_path path =
 let read_regions ~base_dir ?(partition = Ide_paths.Legacy_default) ?file_path () =
   load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
 
-let ingest_tool_call ~base_dir ?(partition = Ide_paths.Legacy_default) ~keeper_id ~turn json =
+let ingest_tool_call ~base_dir ~partition ~keeper_id ~turn json =
   let tool_name =
     match json with
     | `Assoc fields -> (

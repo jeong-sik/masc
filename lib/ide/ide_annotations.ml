@@ -263,7 +263,7 @@ let load_all_partition ?stop_before_compact_begin_id ~base_dir partition =
 
 let create
       ~base_dir
-      ?(partition = Ide_paths.Legacy_default)
+      ~partition
       ~keeper_id
       ~file_path
       ~line_start

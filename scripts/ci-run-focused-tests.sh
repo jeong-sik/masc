@@ -227,6 +227,7 @@ normal_targets=(
   @test/runtest-test_keeper_surface_presence_prompt
   @test/runtest-test_keeper_board_attention_partition
   @test/runtest-test_keeper_board_attention_candidate
+  @test/runtest-test_keeper_board_discoverable_cursor
   @test/runtest-test_keeper_lifecycle_global_gate
   @test/runtest-test_tool_blob_store
   @test/runtest-test_keeper_tool_call_log

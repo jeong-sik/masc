@@ -135,6 +135,10 @@ val wakeup_keeper :
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
+(** Route typed immediate audiences to durable Keeper stimulus queues.
+    Discoverable posts have no immediate recipient, so their durable Board
+    record is consumed by each Keeper owner's cursor instead of performing a
+    fleet-wide metadata/candidate write on the Board producer fiber. *)
 
 (** Test hook (#25600): force the next [count] board-signal relevance
     computations to report a transient store read failure, exercising the

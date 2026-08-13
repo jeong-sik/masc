@@ -74,6 +74,7 @@ type t =
   | CrashPersistenceFailures
   | KeepaliveSignalFailures
   | BoardSignalRoutedTotal
+  | BoardSignalCursorDeferredTotal
   | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
@@ -281,6 +282,8 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
   | BoardSignalRoutedTotal -> "masc_keeper_board_signal_routed_total"
+  | BoardSignalCursorDeferredTotal ->
+    "masc_keeper_board_signal_cursor_deferred_total"
   | BoardSignalDeliveryTotal -> "masc_keeper_board_signal_delivery_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | BoardSignalAttentionCandidateTotal ->

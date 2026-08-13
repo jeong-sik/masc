@@ -1007,7 +1007,23 @@ let collect_board_events_with_cursor_policy
                           ~base_path
                           candidate
                       with
-                      | Ok _ -> ()
+                      | Ok acceptance ->
+                        let persistence =
+                          match acceptance.persistence with
+                          | Keeper_board_attention_candidate.Candidate_recorded ->
+                            "recorded"
+                          | Keeper_board_attention_candidate.Candidate_already_present ->
+                            "duplicate"
+                        in
+                        Otel_metric_store.inc_counter
+                          Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
+                          ~labels:
+                            [ "keeper", meta.name
+                            ; "kind", "post_created"
+                            ; "audience", Board_audience.label audience
+                            ; "persistence", persistence
+                            ]
+                          ()
                       | Error detail ->
                         raise
                           (Keeper_board_attention_candidate.Candidate_unavailable

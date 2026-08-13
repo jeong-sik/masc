@@ -87,7 +87,7 @@ afterEach(() => {
   mockSockets.length = 0
   // The published scope is process-wide, so a case that declares one must not
   // decide what the next case connects with.
-  publishLspScope({ repoId: null, keeper: null })
+  publishLspScope({ repoId: null, codebase: null, keeper: null })
 })
 
 describe('resolveLspDiagnosticFilePath', () => {
@@ -379,16 +379,22 @@ describe('LspConnection', () => {
   // server had to guess, and read the wrong store.
   it('declares the repository scope on the connection URL', () => {
     installWebSocketMock()
-    publishLspScope({ repoId: 'masc', keeper: null })
+    publishLspScope({
+      repoId: 'masc',
+      codebase: 'github.com_jeong-sik_masc',
+      keeper: null,
+    })
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
-    expect(mockSockets[0]!.url).toContain('/api/v1/ide/lsp?repo_id=masc')
+    const url = new URL(mockSockets[0]!.url)
+    expect(url.searchParams.get('repo_id')).toBe('masc')
+    expect(url.searchParams.get('codebase')).toBe('github.com_jeong-sik_masc')
     conn.dispose()
   })
 
   it('declares a keeper lane as both the partition and the tree', () => {
     installWebSocketMock()
-    publishLspScope({ repoId: null, keeper: 'analyst' })
+    publishLspScope({ repoId: null, codebase: null, keeper: 'analyst' })
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
     const url = mockSockets[0]!.url
@@ -399,7 +405,7 @@ describe('LspConnection', () => {
 
   it('declares no scope when none is published', () => {
     installWebSocketMock()
-    publishLspScope({ repoId: null, keeper: null })
+    publishLspScope({ repoId: null, codebase: null, keeper: null })
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
     expect(mockSockets[0]!.url).toMatch(/\/api\/v1\/ide\/lsp$/)
@@ -411,7 +417,11 @@ describe('LspConnection', () => {
   // document as outside its workspace and answered empty.
   it('names documents with an absolute URI under the advertised root', async () => {
     installWebSocketMock()
-    publishLspScope({ repoId: 'masc', keeper: null })
+    publishLspScope({
+      repoId: 'masc',
+      codebase: 'github.com_jeong-sik_masc',
+      keeper: null,
+    })
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
     const socket = mockSockets[0]!

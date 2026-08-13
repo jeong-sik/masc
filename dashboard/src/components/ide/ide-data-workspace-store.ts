@@ -46,6 +46,7 @@ import {
 import {
   fetchIdeAnnotations,
   ideScopeFromKeeperLane,
+  type IdeApiOptions,
   type IdeAnnotation,
 } from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
@@ -474,11 +475,10 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // IDE observation routes require one explicit scope. Repository scope is
     // authoritative when configured; otherwise a selected keeper can read its
     // own orphan observation lane without fabricating a repository identity.
-    const ideOpts = repoId
-      ? { keeper: keeperParam, repoId, signal }
+    const ideOpts: IdeApiOptions = repoId
+      ? { keeper: keeperParam, codebase: selectedCodebase, signal }
       : {
           keeper: keeperParam,
-          repoId,
           scope: ideScopeFromKeeperLane(keeperParam),
           signal,
         }
@@ -486,7 +486,11 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // partition the overlay reads and the tree our repo-relative document
     // paths resolve against. Publishing it here keeps the socket addressing
     // the rows these REST reads address.
-    publishLspScope({ repoId: repoId ?? null, keeper: keeperParam ?? null })
+    publishLspScope({
+      repoId: repoId ?? null,
+      codebase: selectedCodebase,
+      keeper: keeperParam ?? null,
+    })
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath: requestedFilePath,
       keeper: keeperParam ?? null,
@@ -526,6 +530,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           unreachableRepoIds,
         )
         if (nextId !== repoId) {
+          persistRepositoryId(nextId)
           activeRepositoryIdSignal.value = nextId
           return  // effect will re-fire with the new selection (or none)
         }

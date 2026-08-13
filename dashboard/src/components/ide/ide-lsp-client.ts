@@ -36,17 +36,18 @@ import { DEFAULT_LANGUAGE_ID } from './ide-language'
  * paths hang off. A connection that declares neither gets language-server
  * passthrough with no MASC overlay — never a guessed default partition.
  *
- * `repoId` is authoritative when a repository is selected; otherwise a
- * selected keeper reads its own orphan observation lane. This mirrors the
- * scope the workspace store already sends to the IDE REST routes, so the
- * two surfaces address the same rows.
+ * `repoId` anchors the workspace tree while `codebase` names the overlay
+ * partition. Otherwise a selected keeper reads its own orphan observation
+ * lane. This mirrors the scope the workspace store sends to the IDE REST
+ * routes, so the two surfaces address the same rows.
  */
 export interface LspScope {
   readonly repoId: string | null
+  readonly codebase: string | null
   readonly keeper: string | null
 }
 
-const EMPTY_LSP_SCOPE: LspScope = { repoId: null, keeper: null }
+const EMPTY_LSP_SCOPE: LspScope = { repoId: null, codebase: null, keeper: null }
 
 /**
  * Deliberately a plain cell, not a signal. The publisher writes it from
@@ -69,6 +70,7 @@ function lspScopeQuery(scope: LspScope): string {
   const params = new URLSearchParams()
   if (scope.repoId) {
     params.set('repo_id', scope.repoId)
+    if (scope.codebase) params.set('codebase', scope.codebase)
   } else if (scope.keeper) {
     // `keeper_lane` picks the partition; `keeper` picks the tree. The server
     // resolves them with two different resolvers and both need naming.
@@ -596,6 +598,7 @@ export class LspConnection {
     const scope = lspScopeSnapshot()
     if (
       scope.repoId === this.connectedScope.repoId
+      && scope.codebase === this.connectedScope.codebase
       && scope.keeper === this.connectedScope.keeper
     ) return
     const previous = this.ws

@@ -58,12 +58,13 @@ function repo(
   id: string,
   localPath: string,
   name = id,
+  codebase: string | null = null,
 ): Repository {
   return {
     id,
     name,
     url: '',
-    codebase: null,
+    codebase,
     local_path: localPath,
     default_branch: 'main',
     status: 'active',
@@ -222,6 +223,68 @@ describe('resolveActiveIdeRepositoryId', () => {
 })
 
 describe('IDE focus workspace provenance', () => {
+  it('addresses repository observation reads with the canonical codebase slug', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
+    repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
+      repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_test_repo-a'),
+    ])
+    workspaceApiMocks.fetchWorkspaceTree.mockResolvedValue(
+      repositoryTree('repo-a', [changedFile('lib/a.ml')]),
+    )
+    workspaceApiMocks.fetchWorkspaceFile.mockResolvedValue(
+      workspaceFile('let codebase = "github.com_test_repo-a"\n'),
+    )
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      await vi.waitFor(() => {
+        expect(store.activeRepositoryId()).toBe('repo-a')
+        expect(ideApiMocks.fetchIdeAnnotations).toHaveBeenCalled()
+      })
+      const options = ideApiMocks.fetchIdeAnnotations.mock.calls.at(-1)?.[1]
+      expect(options).toEqual(expect.objectContaining({
+        codebase: 'github.com_test_repo-a',
+        signal: expect.any(AbortSignal),
+      }))
+      expect(options).not.toHaveProperty('repoId')
+    } finally {
+      store.dispose()
+    }
+  })
+
+  it('clears an unreachable persisted repository instead of retrying it on reload', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
+    repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
+      repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_test_repo-a'),
+    ])
+    workspaceApiMocks.fetchWorkspaceTree.mockImplementation(
+      (_depth: number, opts: { repoId?: string | null }) =>
+        opts.repoId === 'repo-a'
+          ? Promise.resolve({
+              nodes: [],
+              source: { kind: 'repository_missing' as const, repoId: 'repo-a' },
+              basePath: '/workspace/project',
+            })
+          : Promise.resolve(projectTree([])),
+    )
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      await vi.waitFor(() => {
+        expect(workspaceApiMocks.fetchWorkspaceTree).toHaveBeenCalledWith(
+          2,
+          expect.objectContaining({ repoId: 'repo-a' }),
+        )
+      })
+      await vi.waitFor(() => {
+        expect(store.activeRepositoryId()).toBeNull()
+        expect(window.localStorage.getItem('masc.ide.activeRepositoryId')).toBeNull()
+      })
+    } finally {
+      store.dispose()
+    }
+  })
+
   it('keeps the newest repository refresh when the startup list resolves late', async () => {
     // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
     window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-b')
@@ -710,7 +773,7 @@ describe('workspace fetch diagnostics', () => {
         expect(ideApiMocks.fetchIdeRegions).toHaveBeenCalledWith(
           'lib/scheduler/round.ml',
           expect.objectContaining({
-            repoId: null,
+            keeper: 'sangsu',
             scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
           }),
         )

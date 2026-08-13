@@ -525,3 +525,217 @@ let result_error_to_string = function
   | Failure_without_evidence -> "failure_without_evidence"
   | Blank_blocker_ref -> "blank_blocker_ref"
 ;;
+
+type case_json_error =
+  | Expected_object
+  | Unknown_field of string
+  | Missing_field of string
+  | Duplicate_field of string
+  | Expected_string of string
+  | Expected_nullable_string of string
+  | Unknown_variant of string * string
+  | Invalid_case_field of create_error
+  | Case_id_mismatch of
+      { encoded : string
+      ; derived : string
+      }
+
+let case_wire_fields =
+  [ "case_id"
+  ; "runtime_id"
+  ; "model_id"
+  ; "role"
+  ; "capability"
+  ; "scenario"
+  ; "protocol"
+  ; "build_commit"
+  ; "config_revision"
+  ]
+;;
+
+let option_to_json = function
+  | None -> `Null
+  | Some value -> `String value
+;;
+
+let case_to_json case =
+  `Assoc
+    [ "case_id", `String (case_id case |> case_id_to_string)
+    ; "runtime_id", `String (runtime_id case)
+    ; "model_id", option_to_json (model_id case)
+    ; "role", `String (proof_role_to_string (role case))
+    ; "capability", `String (capability_case_to_string (capability case))
+    ; "scenario", `String (scenario_to_string (scenario case))
+    ; "protocol", `String (protocol_to_string (protocol case))
+    ; "build_commit", option_to_json (build_commit case)
+    ; "config_revision", option_to_json (config_revision case)
+    ]
+;;
+
+let exact_lane_of_string = function
+  | "librarian" -> Some Librarian
+  | "hitl_auto_judge" -> Some Hitl_auto_judge
+  | "board_attention" -> Some Board_attention
+  | "compaction" -> Some Compaction
+  | _ -> None
+;;
+
+let proof_role_of_string = function
+  | "autonomous_keeper" -> Some Autonomous_keeper
+  | "completion_authority" -> Some Completion_authority
+  | "verification" -> Some Verification
+  | "cross_verifier" -> Some Cross_verifier
+  | "fusion_panel" -> Some Fusion_panel
+  | "fusion_judge" -> Some Fusion_judge
+  | "fusion_meta_judge" -> Some Fusion_meta_judge
+  | value ->
+    let prefix = "exact_lane:" in
+    let prefix_length = String.length prefix in
+    if String.length value > prefix_length
+       && String.sub value 0 prefix_length = prefix
+    then
+      String.sub value prefix_length (String.length value - prefix_length)
+      |> exact_lane_of_string
+      |> Option.map (fun lane -> Exact_lane lane)
+    else None
+;;
+
+let capability_case_of_string = function
+  | "provider_probe" -> Some Provider_probe
+  | "autonomous_turn" -> Some Autonomous_turn
+  | "verification_run" -> Some Verification_run
+  | "cross_verification" -> Some Cross_verification
+  | "librarian_run" -> Some Librarian_run
+  | "hitl_auto_judge_run" -> Some Hitl_auto_judge_run
+  | "board_attention_run" -> Some Board_attention_run
+  | "compaction_run" -> Some Compaction_run
+  | "fusion_panel_run" -> Some Fusion_panel_run
+  | "fusion_judge_run" -> Some Fusion_judge_run
+  | "fusion_meta_judge_run" -> Some Fusion_meta_judge_run
+  | "queue_fifo" -> Some Queue_fifo
+  | "scheduler_occurrence" -> Some Scheduler_occurrence
+  | "board_comment" -> Some Board_comment
+  | "task_lifecycle" -> Some Task_lifecycle
+  | "goal_lifecycle" -> Some Goal_lifecycle
+  | "tool_serial" -> Some Tool_serial
+  | "tool_parallel" -> Some Tool_parallel
+  | "tool_batch" -> Some Tool_batch
+  | "async_lifecycle" -> Some Async_lifecycle
+  | "sandbox_containment" -> Some Sandbox_containment
+  | "broadcast_turn" -> Some Broadcast_turn
+  | "stream_replay" -> Some Stream_replay
+  | "restart_succession" -> Some Restart_succession
+  | _ -> None
+;;
+
+let scenario_of_string = function
+  | "nominal" -> Some Nominal
+  | "invalid_input" -> Some Invalid_input
+  | "provider_rejected" -> Some Provider_rejected
+  | "effect_denied" -> Some Effect_denied
+  | "effect_deferred" -> Some Effect_deferred
+  | "cancelled" -> Some Cancelled
+  | "restart_recovery" -> Some Restart_recovery
+  | "outcome_unknown" -> Some Outcome_unknown
+  | "duplicate_delivery" -> Some Duplicate_delivery
+  | "blocked_head" -> Some Blocked_head
+  | _ -> None
+;;
+
+let protocol_of_string = function
+  | "agent_core_http" -> Some Agent_core_http
+  | "official_client" -> Some Official_client
+  | "mcp" -> Some Mcp
+  | "dashboard_http" -> Some Dashboard_http
+  | "sse" -> Some Sse
+  | "websocket" -> Some Websocket
+  | "browser" -> Some Browser
+  | "durable_store" -> Some Durable_store
+  | "domain_api" -> Some Domain_api
+  | _ -> None
+;;
+
+let decode_unique fields name =
+  match List.filter (fun (field, _) -> String.equal field name) fields with
+  | [] -> Error (Missing_field name)
+  | [ (_, value) ] -> Ok value
+  | _ -> Error (Duplicate_field name)
+;;
+
+let decode_string fields name =
+  let* value = decode_unique fields name in
+  match value with
+  | `String value -> Ok value
+  | _ -> Error (Expected_string name)
+;;
+
+let decode_nullable_string fields name =
+  let* value = decode_unique fields name in
+  match value with
+  | `Null -> Ok None
+  | `String value -> Ok (Some value)
+  | _ -> Error (Expected_nullable_string name)
+;;
+
+let decode_variant fields name decode =
+  let* encoded = decode_string fields name in
+  match decode encoded with
+  | Some value -> Ok value
+  | None -> Error (Unknown_variant (name, encoded))
+;;
+
+let case_of_json = function
+  | `Assoc fields ->
+    (match
+       List.find_opt
+         (fun (name, _) -> not (List.mem name case_wire_fields))
+         fields
+     with
+     | Some (name, _) -> Error (Unknown_field name)
+     | None ->
+       let* encoded_case_id = decode_string fields "case_id" in
+       let* runtime_id = decode_string fields "runtime_id" in
+       let* model_id = decode_nullable_string fields "model_id" in
+       let* role = decode_variant fields "role" proof_role_of_string in
+       let* capability =
+         decode_variant fields "capability" capability_case_of_string
+       in
+       let* scenario = decode_variant fields "scenario" scenario_of_string in
+       let* protocol = decode_variant fields "protocol" protocol_of_string in
+       let* build_commit = decode_nullable_string fields "build_commit" in
+       let* config_revision = decode_nullable_string fields "config_revision" in
+       (match
+          create
+            ~runtime_id
+            ~model_id
+            ~role
+            ~capability
+            ~scenario
+            ~protocol
+            ~build_commit
+            ~config_revision
+        with
+        | Error error -> Error (Invalid_case_field error)
+        | Ok case ->
+          let derived_case_id = case_id case |> case_id_to_string in
+          if String.equal encoded_case_id derived_case_id
+          then Ok case
+          else
+            Error
+              (Case_id_mismatch
+                 { encoded = encoded_case_id; derived = derived_case_id })))
+  | _ -> Error Expected_object
+;;
+
+let case_json_error_to_string = function
+  | Expected_object -> "expected_object"
+  | Unknown_field name -> "unknown_field:" ^ name
+  | Missing_field name -> "missing_field:" ^ name
+  | Duplicate_field name -> "duplicate_field:" ^ name
+  | Expected_string name -> "expected_string:" ^ name
+  | Expected_nullable_string name -> "expected_nullable_string:" ^ name
+  | Unknown_variant (name, value) -> "unknown_variant:" ^ name ^ ":" ^ value
+  | Invalid_case_field error -> "invalid_case_field:" ^ create_error_to_string error
+  | Case_id_mismatch { encoded; derived } ->
+    Printf.sprintf "case_id_mismatch:encoded=%s:derived=%s" encoded derived
+;;

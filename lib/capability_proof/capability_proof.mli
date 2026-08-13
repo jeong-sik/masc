@@ -195,3 +195,26 @@ val blocked : string -> (proof_result, result_error) result
 val failure_kind_to_string : failure_kind -> string
 val proof_result_to_string : proof_result -> string
 val result_error_to_string : result_error -> string
+
+type case_json_error =
+  | Expected_object
+  | Unknown_field of string
+  | Missing_field of string
+  | Duplicate_field of string
+  | Expected_string of string
+  | Expected_nullable_string of string
+  | Unknown_variant of string * string
+  | Invalid_case_field of create_error
+  | Case_id_mismatch of
+      { encoded : string
+      ; derived : string
+      }
+
+val case_to_json : t -> Yojson.Safe.t
+val case_of_json : Yojson.Safe.t -> (t, case_json_error) result
+(** Strict current-only codec for one matrix case. Unknown, duplicate,
+    missing, malformed, or identity-inconsistent fields are rejected. Optional
+    provenance is represented only as JSON [null]; no historical shape or
+    placeholder value is inferred. *)
+
+val case_json_error_to_string : case_json_error -> string

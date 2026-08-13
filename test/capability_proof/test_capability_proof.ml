@@ -162,6 +162,102 @@ let test_blank_blocker_is_rejected () =
   | Ok result -> failf "blank blocker accepted as %s" (proof_result_to_string result)
 ;;
 
+let fixture_case () =
+  match
+    create
+      ~model_id:None
+      ~role:(Exact_lane Librarian)
+      ~capability:Librarian_run
+      ~scenario:Restart_recovery
+      ~protocol:Durable_store
+      ~build_commit:None
+      ()
+  with
+  | Ok case -> case
+  | Error error -> failf "unexpected case error: %s" (create_error_to_string error)
+;;
+
+let test_case_json_round_trip_preserves_absence () =
+  let original = fixture_case () in
+  match case_of_json (case_to_json original) with
+  | Error error -> failf "unexpected codec error: %s" (case_json_error_to_string error)
+  | Ok decoded ->
+    check
+      string
+      "identity round trips"
+      (original |> case_id |> case_id_to_string)
+      (decoded |> case_id |> case_id_to_string);
+    check (option string) "model remains null" None (model_id decoded);
+    check (option string) "build remains null" None (build_commit decoded)
+;;
+
+let add_field name value = function
+  | `Assoc fields -> `Assoc ((name, value) :: fields)
+  | _ -> fail "case_to_json must emit an object"
+;;
+
+let replace_field name replacement = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (field, value) ->
+           if String.equal field name then field, replacement else field, value)
+         fields)
+  | _ -> fail "case_to_json must emit an object"
+;;
+
+let remove_field name = function
+  | `Assoc fields -> `Assoc (List.filter (fun (field, _) -> not (String.equal field name)) fields)
+  | _ -> fail "case_to_json must emit an object"
+;;
+
+let test_case_json_rejects_unknown_duplicate_and_missing_fields () =
+  let json = case_to_json (fixture_case ()) in
+  let cases =
+    [ Unknown_field "future", add_field "future" `Null json
+    ; Duplicate_field "runtime_id", add_field "runtime_id" (`String "duplicate") json
+    ; Missing_field "protocol", remove_field "protocol" json
+    ]
+  in
+  List.iter
+    (fun (expected, json) ->
+      match case_of_json json with
+      | Error error ->
+        check
+          string
+          "strict structural error"
+          (case_json_error_to_string expected)
+          (case_json_error_to_string error)
+      | Ok decoded ->
+        failf "malformed JSON produced %s" (decoded |> case_id |> case_id_to_string))
+    cases
+;;
+
+let test_case_json_rejects_unknown_variant () =
+  match case_to_json (fixture_case ()) |> replace_field "role" (`String "keeper-ish") |> case_of_json with
+  | Error (Unknown_variant ("role", "keeper-ish")) -> ()
+  | Error error -> failf "unexpected codec error: %s" (case_json_error_to_string error)
+  | Ok _ -> fail "unknown role was accepted"
+;;
+
+let test_case_json_rejects_wrong_nullability () =
+  match case_to_json (fixture_case ()) |> replace_field "runtime_id" `Null |> case_of_json with
+  | Error (Expected_string "runtime_id") -> ()
+  | Error error -> failf "unexpected codec error: %s" (case_json_error_to_string error)
+  | Ok _ -> fail "null runtime_id was accepted"
+;;
+
+let test_case_json_rejects_identity_mismatch () =
+  match
+    case_to_json (fixture_case ())
+    |> replace_field "case_id" (`String "cpc_wrong")
+    |> case_of_json
+  with
+  | Error (Case_id_mismatch { encoded = "cpc_wrong"; _ }) -> ()
+  | Error error -> failf "unexpected codec error: %s" (case_json_error_to_string error)
+  | Ok _ -> fail "mismatched case id was accepted"
+;;
+
 let () =
   run
     "capability proof identity"
@@ -180,6 +276,13 @@ let () =
         ; test_case "failure needs evidence" `Quick test_failed_requires_evidence
         ; test_case "unsupported is typed" `Quick test_unsupported_policy_is_not_a_failure
         ; test_case "blocker nonblank" `Quick test_blank_blocker_is_rejected
+        ] )
+    ; ( "case JSON"
+      , [ test_case "round trip" `Quick test_case_json_round_trip_preserves_absence
+        ; test_case "strict fields" `Quick test_case_json_rejects_unknown_duplicate_and_missing_fields
+        ; test_case "closed variants" `Quick test_case_json_rejects_unknown_variant
+        ; test_case "nullability" `Quick test_case_json_rejects_wrong_nullability
+        ; test_case "identity" `Quick test_case_json_rejects_identity_mismatch
         ] )
     ]
 ;;

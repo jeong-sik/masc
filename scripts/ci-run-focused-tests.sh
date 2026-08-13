@@ -37,6 +37,34 @@ paused_targets=(
 )
 
 normal_targets=(
+  @test/runtest-test_board_dispatch
+  @test/runtest-test_activity_graph
+  @test/runtest-test_adaptive_cache_ttl
+  @test/runtest-test_agent_card_action_mirror
+  @test/runtest-test_agent_core_adapters
+  @test/runtest-test_agent_core_empty_response_diagnostic
+  @test/runtest-test_agent_observation_bridge
+  @test/runtest-test_anti_rationalization_empty_reject
+  @test/runtest-test_artifacts_endpoint
+  @test/runtest-test_attempt_state
+  @test/runtest-test_attribution
+  @test/runtest-test_audit_projection
+  @test/runtest-test_auth_bearer_mismatch_9786
+  @test/runtest-test_auth_credential_index_cache
+  @test/runtest-test_auth_error_kind
+  @test/runtest-test_auth_error_kind_dashboard_fallback
+  @test/runtest-test_auth_login
+  @test/runtest-test_auth_rotate_shared_tokens_10304
+  @test/runtest-test_auth_strict_mode
+  @test/runtest-test_backend
+  @test/runtest-test_backend_coverage
+  @test/runtest-test_blocker_class_exhaustiveness
+  @test/runtest-test_board_author_identity_10297
+  @test/runtest-test_board_collect_pause_gate
+  @test/runtest-test_board_context_inference_resolution
+  @test/runtest-test_board_core_payload
+  @test/runtest-test_transport_integration
+  @test/runtest-test_keeper_playground_checkout_discovery
   @test/runtest-test_keeper_autonomous_turn_source
   @test/runtest-test_keeper_autoboot_single_owner
   @test/runtest-test_keeper_meta_current_schema
@@ -138,6 +166,7 @@ normal_targets=(
   @test/runtest-test_keeper_secret_redaction
   @test/runtest-test_keeper_sandbox_docker_route
   @test/runtest-test_dashboard_dev_token_host_gate
+  @test/runtest-test_dashboard_harness_health
   @test/runtest-test_telemetry_unified_keeper_fan_in
   @test/runtest-test_dated_jsonl
   @test/runtest-test_audit_log

@@ -1171,7 +1171,10 @@ let runtime_or_fail ?(provider = runpod_provider) () =
   in
   match Runtime.of_binding cfg runpod_binding with
   | Ok runtime -> runtime
-  | Error reason -> failf "expected runtime binding to materialize: %s" reason
+  | Error reason ->
+    failf
+      "expected runtime binding to materialize: %s"
+      (Runtime.string_of_drop_reason reason)
 
 let test_runtime_of_binding_preserves_failure_reason () =
   let cfg =
@@ -1188,9 +1191,14 @@ let test_runtime_of_binding_preserves_failure_reason () =
   in
   match Runtime.of_binding cfg { runpod_binding with enabled = false } with
   | Ok _ -> fail "expected disabled binding materialization to fail"
-  | Error reason ->
+  | Error Runtime.Binding_disabled ->
     check string "disabled binding reason"
-      "binding is disabled by runtime.toml" reason
+      "binding is disabled by runtime.toml"
+      (Runtime.string_of_drop_reason Runtime.Binding_disabled)
+  | Error other ->
+    failf
+      "expected Binding_disabled, got %s"
+      (Runtime.string_of_drop_reason other)
 
 let with_dashboard_probe_http_get hook f =
   Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests

@@ -881,9 +881,58 @@ let test_turn_slot_release_signals_availability () =
     "a handoff claimed by chat owes no availability signal"
     0
     !released;
+  (* Only a lane that asked and was refused is owed the signal. Nothing has
+     been refused yet, so make the autonomous lane lose the slot to the chat
+     turn now holding it. *)
+  (match Owner.run_autonomous_if_idle owner (fun () -> ()) with
+   | Ok (`Busy (Owner.Turn_busy _)) -> ()
+   | Ok (`Busy other) ->
+     fail ("autonomous lost the slot for the wrong reason: "
+           ^ Owner.autonomous_block_to_string other)
+   | Ok (`Ran ()) -> fail "autonomous ran while the chat lane held the slot"
+   | Error error -> fail (Owner.error_to_string error));
   Eio.Promise.resolve resolve_release_chat ();
   ignore (await_terminal owner (operation_id "kmsg-slot-release") 1_000);
-  check int "the slot left unclaimed signals once" 1 !released
+  check int "the slot left unclaimed signals the refused lane once" 1 !released
+;;
+
+(* Regression guard for the wake storm of 2026-08-12: the notification used to
+   fire on every turn end, and a woken keeper starts its next turn at once, so
+   each turn scheduled the next one and the fleet ran 13x its measured turn
+   rate. A turn that nobody was waiting behind owes no signal. *)
+let test_uncontested_turn_end_signals_nothing () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let released = ref 0 in
+  let path = Filename.temp_file "keeper-owner-uncontested-" ".sqlite3" in
+  Unix.unlink path;
+  Eio.Switch.on_release sw (fun () ->
+    if Sys.file_exists path then Unix.unlink path);
+  let owner =
+    owner_ok
+      (Owner.start
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_store_path:path
+         ~now:(fun () -> 42.0)
+         ~operation_runner:None
+         ~on_turn_slot_released:(Some (fun () -> incr released))
+         ~keeper_name:"uncontested"
+         ~initial_meta:(Some (make_meta "uncontested")))
+  in
+  List.iter
+    (fun turn ->
+      match Owner.run_autonomous_if_idle owner (fun () -> ()) with
+      | Ok (`Ran ()) -> ()
+      | Ok (`Busy block) ->
+        fail
+          (Printf.sprintf
+             "turn %d found the slot busy on an idle owner: %s"
+             turn
+             (Owner.autonomous_block_to_string block))
+      | Error error -> fail (Owner.error_to_string error))
+    [ 1; 2; 3 ];
+  check int "an uncontested turn end signals nothing" 0 !released
 ;;
 
 let test_chat_lane_holder_blocks_autonomous_admission () =
@@ -2436,6 +2485,10 @@ let () =
             "turn slot release signals availability"
             `Quick
             test_turn_slot_release_signals_availability
+        ; test_case
+            "uncontested turn end signals nothing"
+            `Quick
+            test_uncontested_turn_end_signals_nothing
         ; test_case
             "operation lifecycle is durable and projected"
             `Quick

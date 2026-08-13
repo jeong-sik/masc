@@ -159,6 +159,24 @@ val read_range : t -> since:string -> until:string -> Yojson.Safe.t list
     within [[since, until]] (inclusive, format ["YYYY-MM-DD"]).
     Result is in chronological order. *)
 
+val filter_map_range_recent
+  :  ?offset:int
+  -> t
+  -> since:string
+  -> until:string
+  -> int
+  -> f:(Yojson.Safe.t -> 'a option)
+  -> 'a list
+(** Range counterpart to {!filter_map_recent}: [List.filter_map f
+    (read_range_recent ?offset t ~since ~until n)] without ever holding the
+    intermediate [Yojson.Safe.t list].
+
+    Same contract as {!filter_map_recent} in every respect that matters —
+    [n] and [offset] count parsed rows rather than selected ones, the returned
+    list is chronological, and {b [f] is called newest-first}, so a projection
+    whose side effects depend on call order is not interchangeable with the
+    [read_range_recent |> List.filter_map] form. *)
+
 val read_range_recent
   :  ?offset:int
   -> t

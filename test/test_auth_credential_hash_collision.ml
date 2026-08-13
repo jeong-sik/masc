@@ -77,25 +77,21 @@ let with_temp_base f =
     (fun () -> f base)
 
 let write_cred ~base ~agent_name ~role ~token_hash =
-  let agents_dir = Filename.concat base ".masc/auth/agents" in
-  let rec mkdirs p =
-    if Sys.file_exists p then ()
-    else begin
-      mkdirs (Filename.dirname p);
-      try Unix.mkdir p 0o755 with Unix.Unix_error _ -> ()
-    end
+  (* Write through the production writer so a credential schema change breaks
+     this fixture at compile time instead of at [of_yojson] runtime. The
+     hand-written JSON this replaces omitted [id]/[agent_id]/[expires_at], which
+     the decoder requires as keys even where the record type defaults them. *)
+  let cred : Masc_domain.agent_credential =
+    { id = None
+    ; agent_id = None
+    ; agent_name
+    ; token = token_hash
+    ; role = role
+    ; created_at = "2026-06-24T00:00:00Z"
+    ; expires_at = None
+    }
   in
-  mkdirs agents_dir;
-  let path = Filename.concat agents_dir (agent_name ^ ".json") in
-  let role_str = Masc_domain.agent_role_to_string role in
-  let json =
-    Printf.sprintf
-      "{\"agent_name\":%S,\"token\":%S,\"role\":%S,\"created_at\":\"2026-06-24T00:00:00Z\"}"
-      agent_name token_hash role_str
-  in
-  let oc = open_out path in
-  output_string oc json;
-  close_out oc
+  Auth.save_credential base cred
 
 let test_unknown_token_is_mismatch () =
   with_temp_base (fun base ->

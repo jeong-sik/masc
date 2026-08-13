@@ -345,7 +345,24 @@ let strict_contract : Masc_domain.task_contract =
   ; verify_gate_evidence = []
   }
 
+(* [verification_submit_request_fn] defaults to an error and is filled at boot
+   by the server (`Verification_run_registry.install_global`). These two cases
+   exercise the outcome the task tool returns, not the storage boundary behind
+   it, so they stand in a persisting hook for the duration. Restored after, so
+   a case that should see the absent-hook error still does. *)
+let with_verification_persistence f =
+  let previous = Atomic.get Workspace_hooks.verification_submit_request_fn in
+  Atomic.set
+    Workspace_hooks.verification_submit_request_fn
+    (fun _config ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ -> Ok ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.verification_submit_request_fn previous)
+    f
+;;
+
 let test_strict_done_submits_for_verification () =
+  with_verification_persistence @@ fun () ->
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -387,7 +404,7 @@ let test_strict_done_submits_for_verification () =
               (`Assoc
                 [ "task_id", `String "task-001"
                 ; "result", `String "implementation complete"
-                ; "evidence_refs", `List [ `String "commit:abc123" ]
+                ; "evidence_refs", `List [ `String "note:commit abc123" ]
                 ]));
        match Masc.Workspace.get_tasks_raw config with
        | [ { task_status = Masc_domain.AwaitingVerification _;
@@ -395,12 +412,13 @@ let test_strict_done_submits_for_verification () =
          check string "result preserved as summary"
            "implementation complete" handoff.summary;
          check (list string) "evidence preserved"
-           [ "commit:abc123" ] handoff.evidence_refs
+           [ "note:commit abc123" ] handoff.evidence_refs
        | [ _ ] -> fail "completion did not enter awaiting_verification"
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
 let test_default_done_is_terminal () =
+  with_verification_persistence @@ fun () ->
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -441,7 +459,7 @@ let test_default_done_is_terminal () =
              (`Assoc
                [ "task_id", `String "task-001"
                ; "result", `String "implementation complete"
-               ; "evidence_refs", `List [ `String "commit:abc123" ]
+               ; "evidence_refs", `List [ `String "note:commit abc123" ]
                ])
        in
        (match execution.disposition with
@@ -455,7 +473,7 @@ let test_default_done_is_terminal () =
          check string "result preserved as summary"
            "implementation complete" handoff.summary;
          check (list string) "evidence preserved"
-           [ "commit:abc123" ] handoff.evidence_refs
+           [ "note:commit abc123" ] handoff.evidence_refs
        | [ _ ] -> fail "advisory/default completion was not terminal"
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))

@@ -1650,13 +1650,28 @@ let test_manifest_base_label_constructor_canonicalizes () =
 ;;
 
 let test_example_manifest_base_labels_are_canonical () =
-  let path =
+  (* The candidates are cwd-relative and the file lives at
+     [packages/agent_core/docs/]. Dune runs this suite from that directory, but
+     the executable is also driven by hand from the masc root, where none of the
+     three original candidates resolve — so that invocation reported the example
+     manifest as unparseable rather than as unlocated. The repo-root-relative
+     path covers it, and a miss now names the directory it searched from instead
+     of failing later on a path nobody chose. *)
+  let candidates =
     [ "docs/example-capability-manifest.json"
     ; "../docs/example-capability-manifest.json"
     ; "../../docs/example-capability-manifest.json"
+    ; "packages/agent_core/docs/example-capability-manifest.json"
     ]
-    |> List.find_opt Sys.file_exists
-    |> Option.value ~default:"docs/example-capability-manifest.json"
+  in
+  let path =
+    match List.find_opt Sys.file_exists candidates with
+    | Some path -> path
+    | None ->
+      failf
+        "example manifest not found from %s; tried %s"
+        (Sys.getcwd ())
+        (String.concat ", " candidates)
   in
   match Capability_manifest.load_file path with
   | Error msg -> failf "example manifest should parse: %s" msg

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { cleanup, render, screen, waitFor } from '@testing-library/preact'
+import { cleanup, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { DashboardKeeperWaitingInventory } from '../../api'
@@ -60,10 +60,14 @@ describe('KeeperLaneSection', () => {
     mocks.fetchKeeperWaitingInventory.mockResolvedValue(inventory())
     render(html`<${KeeperLaneSection} keeper=${{ name: 'kidsnote', agent_name: 'agent-kidsnote' }} />`)
 
-    // '처리 대기 중' → '대기 중': #28426 trimmed the lane-state labels but
-    // missed this assertion, which then timed out for every PR (#28443).
-    await waitFor(() => expect(screen.getByText('대기 중')).toBeTruthy())
-    expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
+    // Wait on the two things this test is named for -- the push registration and
+    // the first read -- rather than on a caption. The previous wait was for the
+    // literal '처리 대기 중', which a copy sweep renamed to '대기 중'; the test
+    // then timed out on a component that was working.
+    await waitFor(() => {
+      expect(mocks.refresh).not.toBeNull()
+      expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
+    })
 
     mocks.refresh?.('rondo')
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)

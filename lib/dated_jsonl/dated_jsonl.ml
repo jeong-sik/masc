@@ -1263,7 +1263,14 @@ let read_range t ~since ~until =
    should use this so a wide window cannot scan months of multi-MB files.
    Returns entries oldest-first within the collected set (same convention
    as [read_recent]). *)
-let read_range_recent ?(offset = 0) t ~since ~until n =
+(* Range counterpart to [filter_map_recent]: the caller's projection runs per
+   row so the parsed tree is unreachable before the next row is read, and
+   [read_range_recent] is this with an identity projection.
+
+   [f] runs outside the parse [try] for the same reason as in
+   [filter_map_recent]: the reader swallows [Yojson.Json_error] to skip
+   malformed rows and a caller's decoder must not inherit that swallow. *)
+let filter_map_range_recent ?(offset = 0) t ~since ~until n ~f =
   if n <= 0
   then []
   else (
@@ -1300,16 +1307,21 @@ let read_range_recent ?(offset = 0) t ~since ~until n =
                        List.iter
                          (fun line ->
                             if !count >= n then raise_notrace Done;
-                            try
-                              let json = Yojson.Safe.from_string line in
+                            let parsed =
+                              try Some (Yojson.Safe.from_string line)
+                              with Yojson.Json_error _ -> None
+                            in
+                            match parsed with
+                            | None -> ()
+                            | Some json ->
                               if !skip > 0
                               then decr skip
                               else begin
-                                collected := json :: !collected;
+                                (match f json with
+                                 | Some value -> collected := value :: !collected
+                                 | None -> ());
                                 incr count
-                              end
-                            with
-                            | Yojson.Json_error _ -> ())
+                              end)
                          rev_lines
                      end)
                   days
@@ -1318,6 +1330,10 @@ let read_range_recent ?(offset = 0) t ~since ~until n =
        with
        | Done -> ());
       !collected)
+
+let read_range_recent ?offset t ~since ~until n =
+  filter_map_range_recent ?offset t ~since ~until n ~f:(fun json -> Some json)
+;;
 
 let prune t ~days =
   let mutex = Atomic.get t.mutex in

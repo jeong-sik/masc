@@ -52,6 +52,7 @@ stale=0
 dirty=0
 nested=0
 active=0
+locked=0
 removed=0
 skipped=0
 
@@ -98,6 +99,13 @@ while read -r wt_path; do
     continue
   fi
 
+  if worktree_cleanup_is_locked "$wt_path"; then
+    owner="$(cat "$wt_path/.masc-lock" 2>/dev/null || true)"
+    echo "LOCKED  $wt_path — skipped (held by $owner)"
+    locked=$((locked+1))
+    continue
+  fi
+
   age_days=$(( ( $(date +%s) - last_ts ) / 86400 ))
   stale=$((stale+1))
 
@@ -117,9 +125,9 @@ done < <(git worktree list --porcelain | awk '/^worktree /{print $2}')
 if [ "$APPLY" -eq 1 ]; then
   git worktree prune
   echo ""
-  echo "Summary (--days $DAYS --apply): stale=$stale removed=$removed dirty=$dirty nested=$nested active=$active skipped=$skipped"
+  echo "Summary (--days $DAYS --apply): stale=$stale removed=$removed dirty=$dirty nested=$nested active=$active locked=$locked skipped=$skipped"
 else
   echo ""
-  echo "Summary (--days $DAYS dry-run): stale=$stale dirty=$dirty nested=$nested active=$active skipped=$skipped"
+  echo "Summary (--days $DAYS dry-run): stale=$stale dirty=$dirty nested=$nested active=$active locked=$locked skipped=$skipped"
   echo "Pass --apply to remove the listed candidates."
 fi

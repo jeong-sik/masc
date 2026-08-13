@@ -53,7 +53,14 @@ module Code_address : sig
   (** Rejects rather than repairs: the codebase must already be a
       canonical slug and the path must already be a normalized relative
       path — malformed paths (including NUL bytes), [.], [..], empty
-      segments, and absolute paths are errors, not inputs to fix. *)
+      segments, and absolute paths are errors, not inputs to fix.
+
+      Layering: the keeper write resolver lexically collapses dot
+      segments in raw tool arguments before minting, so on that path
+      these rejections guard the resolver's own invariant. Wire-facing
+      callers (RFC-0378 §5.3 — annotate and the REST annotation POST)
+      hand user input to [v] directly; that is where the rejections
+      fire as typed contract errors. *)
 
   val codebase : t -> string
   val path : t -> string

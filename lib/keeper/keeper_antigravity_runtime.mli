@@ -26,3 +26,19 @@ val run :
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.antigravity_cli ->
   attempt_outcome
+
+module For_testing : sig
+  val capacity_bounded_model_input_projection
+    :  declared_max_prompt_bytes:int option
+    -> system_prompt:string
+    -> goal:string
+    -> Agent_core.Agent.model_input_projection option
+    -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
+  (** The admission contract over the provider-bound history. [None] declared
+      capacity passes the source projection through unchanged. A declared
+      capacity returns a projection that windows history to the capacity
+      minus the bytes the fixed prompt sections always occupy, and refuses
+      with a typed config error when those fixed sections alone leave no
+      room. agy truncates oversized stdin prompts silently instead of
+      refusing them, so this is the only bound the turn gets. *)
+end

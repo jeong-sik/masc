@@ -164,6 +164,22 @@ let ensure_private_child parent leaf =
   | Ok () -> Result.map (fun () -> path) (verify_private_directory path)
 ;;
 
+(* Only the whole-tool pattern [tool(*)] matches in agy 1.1.12: a path-scoped
+   argument such as [read_file(<dir>/*)] matched neither a direct child nor a
+   nested file in either list (measured 2026-08-14), so "deny everything
+   except the client's own artifact files" is not expressible. [read_file]
+   therefore stays denied wholesale even though that also denies the client's
+   own large-MCP-output artifacts (results over ~10KB are materialized to a
+   brain file the model is told to view): the workspace masc passes as
+   [--add-dir] is the operator checkout, whose [.masc/auth] tokens a
+   workspace-wide read grant would expose. A rule denial comes back to the
+   model as a typed tool error and the turn continues; an unlisted tool would
+   instead take the review path, which auto-denies in print mode and ends the
+   turn with an empty SUCCESS response.
+
+   No [toolPermission] key: agy 1.1.12 does not read it (the client rewrites
+   this file without it and initializes toolPermission=request-review from
+   its own default). *)
 let settings_json () =
   `Assoc
     [ ( "permissions"
@@ -181,7 +197,6 @@ let settings_json () =
                    ; "unsandboxed(*)"
                    ]) )
           ] )
-    ; "toolPermission", `String "request-review"
     ]
 ;;
 

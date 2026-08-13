@@ -38,8 +38,6 @@ let mk_local_sandbox () : Keeper_sandbox.t =
   ; host_root_abs = host_root_marker ^ "/.masc/playground/test-local"
   ; container_root = None
   ; root_arg = "."
-  ; repos_arg = "repos"
-  ; task_overlay_pattern = "repos/<repo>"
   }
 
 let mk_docker_sandbox () : Keeper_sandbox.t =
@@ -53,8 +51,6 @@ let mk_docker_sandbox () : Keeper_sandbox.t =
       host_root_marker ^ "/.masc/playground/docker/test-docker"
   ; container_root = Some "/home/keeper/playground/test-docker"
   ; root_arg = "."
-  ; repos_arg = "repos"
-  ; task_overlay_pattern = "repos/<repo>"
   }
 
 let local_response ~host_cwd =

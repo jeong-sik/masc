@@ -21,8 +21,6 @@ type t = {
   host_root_abs : string;
   container_root : string option;
   root_arg : string;
-  repos_arg : string;
-  task_overlay_pattern : string;
 }
 
 (** {1 Keeper-visible paths} *)

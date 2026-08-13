@@ -1952,6 +1952,7 @@
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 
 (include stanzas/test_runtime_agent_execution_store_source.inc)
+(include stanzas/test_runtime_agent_execution_owner_source.inc)
 
 
 (include stanzas/test_runtime_model_temperature_toml.inc)

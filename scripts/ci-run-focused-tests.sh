@@ -252,6 +252,7 @@ normal_targets=(
   @test/runtest-test_server_runtime_startup_maintenance
   @test/runtest-test_runtime_per_keeper_routing
   @test/runtest-test_runtime_agent_execution_store_source
+  @test/runtest-test_runtime_agent_execution_owner_source
   @test/runtest-test_ide_bridge
   @test/runtest-test_dashboard_workspace
   @test/runtest-test_host_fd_pressure_poller

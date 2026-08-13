@@ -631,6 +631,8 @@ let startup_failure_disposition ~state_ready =
 type owner_initialization_error =
   | Runtime_config_path_unavailable
   | Run_registry_already_installed of [ `Exact_lane | `Fusion | `Verification ]
+  | Agent_core_execution_runtime_initialization_failed of Agent_core.Error.t
+  | Agent_core_execution_runtime_already_installed
   | Runtime_default_initialization_failed of Runtime.strict_init_error
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
@@ -652,6 +654,7 @@ type initialized_owner_state =
   ; path_diagnostics : Server_base_path_diagnostics.t
   ; prepared_keeper_persistence : Server_bootstrap_loops.prepared_keeper_persistence
   ; domain_pool : Domain_pool.t
+  ; agent_core_execution_runtime : Runtime_agent_execution_owner.t
   }
 
 type activated_owner_state =
@@ -669,6 +672,11 @@ let owner_initialization_error_to_string = function
     "Verification run registry already has a process owner"
   | Run_registry_already_installed `Exact_lane ->
     "Exact lane run registry already has a process owner"
+  | Agent_core_execution_runtime_initialization_failed error ->
+    "Agent Core execution runtime initialization failed: "
+    ^ Agent_core.Error.to_string error
+  | Agent_core_execution_runtime_already_installed ->
+    "Agent Core execution runtime already has a process owner"
   | Runtime_default_initialization_failed error ->
     "Runtime.init_default_degraded failed: "
     ^ Runtime.strict_init_error_to_string error
@@ -1030,7 +1038,28 @@ let initialize_owner_state_blocking
   Log.Server.info
     "Domain_pool created (%d domains) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
-  { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
+  let agent_core_execution_runtime =
+    match
+      Runtime_agent_execution_owner.create
+        ~sw
+        ~domain_mgr
+        ~domain_count:(Domain_pool.domain_count domain_pool)
+    with
+    | Ok runtime -> runtime
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Agent_core_execution_runtime_initialization_failed error))
+  in
+  Log.Server.info
+    "Agent Core execution runtime created (%d domains) for execution journals"
+    (Domain_pool.domain_count domain_pool);
+  { state
+  ; path_diagnostics
+  ; prepared_keeper_persistence
+  ; domain_pool
+  ; agent_core_execution_runtime
+  }
 
 (* Cap the per-boot file list in the sync log line; full counts are always
    logged, names are illustrative. *)
@@ -1292,6 +1321,16 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
+  (match
+     Runtime_agent_execution_owner.install
+       ~sw
+       initialized.agent_core_execution_runtime
+   with
+   | Ok () -> ()
+   | Error Runtime_agent_execution_owner.Already_installed ->
+     raise
+       (Owner_initialization_failed
+          Agent_core_execution_runtime_already_installed));
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own

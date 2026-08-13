@@ -593,19 +593,70 @@ let start_run
   active
 ;;
 
+type assistant_block_observation =
+  | Observable_block of
+      { block_kind : string
+      ; json : Yojson.Safe.t
+      }
+  | Withheld_reasoning of
+      { block_kind : string
+      ; char_count : int
+      ; redacted : bool
+      }
+
+let observe_assistant_block block =
+  match block with
+  | Thinking { content; _ } ->
+    Withheld_reasoning
+      { block_kind = "thinking"; char_count = String.length content; redacted = false }
+  | ReasoningDetails { reasoning_content; details } ->
+    let projected = Types.reasoning_details_text ~reasoning_content ~details in
+    Withheld_reasoning
+      { block_kind = "reasoning_details"
+      ; char_count = String.length projected
+      ; redacted = false
+      }
+  | RedactedThinking _ ->
+    Withheld_reasoning
+      { block_kind = "redacted_thinking"; char_count = 0; redacted = true }
+  | Text _ ->
+    Observable_block
+      { block_kind = "text"; json = Llm_provider.Api_common.content_block_to_json block }
+  | ToolUse _ ->
+    Observable_block
+      { block_kind = "tool_use"; json = Llm_provider.Api_common.content_block_to_json block }
+  | ToolResult _ ->
+    Observable_block
+      { block_kind = "tool_result"; json = Llm_provider.Api_common.content_block_to_json block }
+  | Image _ ->
+    Observable_block
+      { block_kind = "image"; json = Llm_provider.Api_common.content_block_to_json block }
+  | Document _ ->
+    Observable_block
+      { block_kind = "document"; json = Llm_provider.Api_common.content_block_to_json block }
+  | Audio _ ->
+    Observable_block
+      { block_kind = "audio"; json = Llm_provider.Api_common.content_block_to_json block }
+;;
+
+let assistant_block_observation_to_pair = function
+  | Observable_block { block_kind; json } -> block_kind, json
+  | Withheld_reasoning { block_kind; char_count; redacted } ->
+    ( block_kind
+    , `Assoc
+        [ "type", `String "reasoning_observation"
+        ; "observation", `String "withheld"
+        ; "reasoning_kind", `String block_kind
+        ; "present", `Bool true
+        ; "char_count", `Int char_count
+        ; "redacted", `Bool redacted
+        ; "content", `Null
+        ] )
+;;
+
 let record_assistant_block active ~block_index block =
-  let json = Llm_provider.Api_common.content_block_to_json block in
-  let block_kind =
-    match block with
-    | Text _ -> "text"
-    | Thinking _ -> "thinking"
-    | ReasoningDetails _ -> "reasoning_details"
-    | RedactedThinking _ -> "redacted_thinking"
-    | ToolUse _ -> "tool_use"
-    | ToolResult _ -> "tool_result"
-    | Image _ -> "image"
-    | Document _ -> "document"
-    | Audio _ -> "audio"
+  let block_kind, json =
+    observe_assistant_block block |> assistant_block_observation_to_pair
   in
   append_record
     active

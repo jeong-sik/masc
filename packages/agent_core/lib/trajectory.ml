@@ -174,6 +174,9 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
             | Some "thinking" ->
               let content =
                 match r.assistant_block with
+                | Some (`Assoc fields)
+                  when List.assoc_opt "observation" fields = Some (`String "withheld") ->
+                  ""
                 | Some json ->
                   (try Yojson.Safe.Util.(json |> member "content" |> to_string) with
                    | Yojson.Safe.Util.Type_error _ | Not_found ->

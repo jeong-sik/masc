@@ -929,6 +929,76 @@ let test_tool_result_assistant_block_summary () =
   Alcotest.(check int) "tool_result blocks" 1 summary.tool_result_block_count
 ;;
 
+let test_hidden_reasoning_is_metadata_only () =
+  Eio_main.run
+  @@ fun _env ->
+  with_temp_dir
+  @@ fun root ->
+  let sink =
+    unwrap
+      (Raw_trace.create_for_session
+         ~session_root:root
+         ~session_id:"sess-hidden-reasoning"
+         ~agent_name:"raw-worker"
+         ())
+  in
+  let active =
+    unwrap
+      (Raw_trace.start_run sink ~agent_name:"raw-worker" ~prompt:"metadata only" ())
+  in
+  let secret_thinking = "PRIVATE_THINKING_BYTES" in
+  let secret_details = "PRIVATE_REASONING_DETAILS" in
+  unwrap
+    (Raw_trace.record_assistant_block active ~block_index:0
+       (Types.Thinking
+          { content = secret_thinking; signature = Some "PRIVATE_SIGNATURE" }));
+  unwrap
+    (Raw_trace.record_assistant_block active ~block_index:1
+       (Types.ReasoningDetails
+          { reasoning_content = Some secret_details
+          ; details = [ { raw = `String "PRIVATE_RAW_DETAIL"; text = None } ]
+          }));
+  unwrap
+    (Raw_trace.record_assistant_block active ~block_index:2
+       (Types.RedactedThinking "PRIVATE_REDACTED_PAYLOAD"));
+  ignore
+    (unwrap
+       (Raw_trace.finish_run active ~final_text:None ~stop_reason:(Some "EndTurn")
+          ~error:None));
+  let raw = read_file (Raw_trace.file_path sink) in
+  List.iter
+    (fun secret ->
+       Alcotest.(check bool)
+         ("raw trace withholds " ^ secret)
+         false
+         (Util.string_contains ~needle:secret raw))
+    [ secret_thinking
+    ; secret_details
+    ; "PRIVATE_SIGNATURE"
+    ; "PRIVATE_RAW_DETAIL"
+    ; "PRIVATE_REDACTED_PAYLOAD"
+    ];
+  let records = unwrap (Raw_trace.read_all ~path:(Raw_trace.file_path sink) ()) in
+  let observations =
+    records
+    |> List.filter_map (fun (record : Raw_trace.record) ->
+      if record.record_type = Raw_trace.Assistant_block
+      then record.assistant_block
+      else None)
+  in
+  Alcotest.(check int) "three reasoning observations" 3 (List.length observations);
+  List.iter
+    (fun json ->
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "observation withheld"
+         "withheld"
+         (json |> member "observation" |> to_string);
+       Alcotest.(check bool) "reasoning present" true (json |> member "present" |> to_bool);
+       Alcotest.(check bool) "content is null" true (json |> member "content" = `Null))
+    observations
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -973,6 +1043,10 @@ let () =
             "tool_result assistant block summary"
             `Quick
             test_tool_result_assistant_block_summary
+        ; Alcotest.test_case
+            "hidden reasoning is metadata only"
+            `Quick
+            test_hidden_reasoning_is_metadata_only
         ] )
     ]
 ;;

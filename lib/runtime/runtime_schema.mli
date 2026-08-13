@@ -204,6 +204,23 @@ type exact_output_lane_decl =
   }
 [@@deriving show, eq]
 
+(** {1 Runtime role policy}
+
+    A policy constrains which role may reference a target. It is deliberately
+    independent of provider registration, credential resolution, health, and
+    completion probes: policy eligibility is not runtime availability. *)
+
+type runtime_role_policy =
+  | Unrestricted
+  | Librarian_only
+[@@deriving show, eq]
+
+type runtime_role_policy_decl =
+  { target_ref : string
+  ; policy : runtime_role_policy
+  }
+[@@deriving show, eq]
+
 (** {1 Top-level config} *)
 
 type config =
@@ -235,6 +252,10 @@ type config =
   ; exact_output_lane_decls : exact_output_lane_decl list
     (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. *)
+  ; runtime_role_policy_decls : runtime_role_policy_decl list
+    (** [\[runtime.role_policies\]] — target reference to role policy. These
+        declarations only constrain eligibility; they do not register or
+        resolve a runtime target and do not establish availability. *)
   }
 [@@deriving show, eq]
 

@@ -211,6 +211,159 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
   List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
 ;;
 
+type runtime_role =
+  | Keeper_turn
+  | Cross_verification
+  | Media_failover
+  | Librarian
+  | Compaction
+  | Hitl_auto_judge
+  | Board_attention
+  | Other_exact_output_lane of string
+[@@deriving show, eq]
+
+type runtime_role_eligibility =
+  | Eligible
+  | Unsupported of
+      { target_ref : string
+      ; policy : Runtime_schema.runtime_role_policy
+      ; requested_role : runtime_role
+      }
+[@@deriving show, eq]
+
+let runtime_role_to_string = function
+  | Keeper_turn -> "keeper-turn"
+  | Cross_verification -> "cross-verification"
+  | Media_failover -> "media-failover"
+  | Librarian -> "librarian"
+  | Compaction -> "compaction"
+  | Hitl_auto_judge -> "hitl-auto-judge"
+  | Board_attention -> "board-attention"
+  | Other_exact_output_lane lane_id -> "exact-output:" ^ lane_id
+;;
+
+let runtime_role_eligibility (cfg : config) ~target_ref ~role =
+  match
+    List.find_opt
+      (fun (decl : Runtime_schema.runtime_role_policy_decl) ->
+         String.equal decl.target_ref target_ref)
+      cfg.runtime_role_policy_decls
+  with
+  | None -> Eligible
+  | Some { policy = Runtime_schema.Unrestricted; _ } -> Eligible
+  | Some { policy = Runtime_schema.Librarian_only; _ } when equal_runtime_role role Librarian ->
+    Eligible
+  | Some { policy; _ } -> Unsupported { target_ref; policy; requested_role = role }
+;;
+
+let runtime_role_policy_to_string = function
+  | Runtime_schema.Unrestricted -> "unrestricted"
+  | Runtime_schema.Librarian_only -> "librarian-only"
+;;
+
+type runtime_role_reference =
+  { target_ref : string
+  ; role : runtime_role
+  ; site : string
+  }
+
+let exact_output_lane_role = function
+  | "librarian_exact" -> Librarian
+  | "compaction_exact" -> Compaction
+  | "hitl_auto_judge" -> Hitl_auto_judge
+  | "board_attention_exact" -> Board_attention
+  | lane_id -> Other_exact_output_lane lane_id
+;;
+
+let role_references_of_config
+    (cfg : config)
+    ~(default_runtime_id : string)
+    ~(lanes : Runtime_lane.t list)
+  =
+  let expand ~site ~role id =
+    match find_declared_lane lanes id with
+    | None -> [ { target_ref = id; role; site } ]
+    | Some lane ->
+      Runtime_lane.ordered_candidates lane
+      |> List.map (fun target_ref ->
+        { target_ref
+        ; role
+        ; site = Printf.sprintf "%s via [runtime.lanes.%s]" site id
+        })
+  in
+  let default_refs =
+    expand ~site:"[runtime].default" ~role:Keeper_turn default_runtime_id
+  in
+  let assignment_refs =
+    cfg.keeper_assignments
+    |> List.concat_map (fun (keeper_name, id) ->
+      expand
+        ~site:(Printf.sprintf "[runtime.assignments].%s" keeper_name)
+        ~role:Keeper_turn
+        id)
+  in
+  let cross_verifier_refs =
+    cfg.cross_verifier_runtime_id
+    |> Option.to_list
+    |> List.concat_map (expand ~site:"[runtime].cross_verifier" ~role:Cross_verification)
+  in
+  let media_failover_refs =
+    List.map
+      (fun target_ref ->
+         { target_ref; role = Media_failover; site = "[runtime].media_failover" })
+      cfg.media_failover
+  in
+  let exact_output_refs =
+    cfg.exact_output_lane_decls
+    |> List.concat_map
+         (fun ({ Runtime_schema.id; slot_ids } : Runtime_schema.exact_output_lane_decl) ->
+            let role = exact_output_lane_role id in
+            List.map
+              (fun target_ref ->
+                 { target_ref
+                 ; role
+                 ; site = Printf.sprintf "[runtime.exact_output_lanes.%s]" id
+                 })
+              slot_ids)
+  in
+  default_refs
+  @ assignment_refs
+  @ cross_verifier_refs
+  @ media_failover_refs
+  @ exact_output_refs
+;;
+
+(* Fail before any state publication. This judges only role eligibility. Exact
+   output targets intentionally remain opaque here and are admitted/resolved by
+   Runtime_exact_output_registry at its own boundary. *)
+let validate_runtime_role_policies
+    ~(config_path : string)
+    (cfg : config)
+    ~(default_runtime_id : string)
+    ~(lanes : Runtime_lane.t list)
+  =
+  let references = role_references_of_config cfg ~default_runtime_id ~lanes in
+  match
+    List.find_map
+      (fun ({ target_ref; role; site } : runtime_role_reference) ->
+         match runtime_role_eligibility cfg ~target_ref ~role with
+         | Eligible -> None
+         | Unsupported { target_ref; policy; requested_role } ->
+           Some (site, target_ref, policy, requested_role))
+      references
+  with
+  | None -> Ok ()
+  | Some (site, target_ref, policy, requested_role) ->
+    Error
+      (Printf.sprintf
+         "%s: %s target %S is unsupported for role %S by policy %S"
+         config_path
+         site
+         target_ref
+         (runtime_role_to_string requested_role)
+         (runtime_role_policy_to_string policy))
+;;
+
 (* Each [runtime] reference is validated under its field's admission contract:
    - [Runtime_only] requires a declared runtime id for keeper assignments and
      media_failover entries. Assignment execution may still resolve a
@@ -1121,6 +1274,13 @@ let materialize_config
       (route_references
          [ "cross_verifier", cfg.cross_verifier_runtime_id ]
       @ media_failover_references cfg.media_failover)
+  in
+  let* () =
+    validate_runtime_role_policies
+      ~config_path
+      cfg
+      ~default_runtime_id:rt.id
+      ~lanes
   in
   let* () =
     if validate_max_context

@@ -142,9 +142,44 @@ val load_list :
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
-    list; [lanes] is the ordered failover candidate lists. *)
+    list; [lanes] is the ordered failover candidate lists. It also fails when a
+    reachable route or exact-output slot violates [\[runtime.role_policies\]].
+    That check proves policy eligibility only, never target availability. *)
 
 val runtime_ids : t list -> string list
+
+(** {1 Role eligibility}
+
+    This admission axis is intentionally distinct from registration and live
+    availability. [Eligible] means only that the declarative role policy permits
+    the reference. *)
+
+type runtime_role =
+  | Keeper_turn
+  | Cross_verification
+  | Media_failover
+  | Librarian
+  | Compaction
+  | Hitl_auto_judge
+  | Board_attention
+  | Other_exact_output_lane of string
+[@@deriving show, eq]
+
+type runtime_role_eligibility =
+  | Eligible
+  | Unsupported of
+      { target_ref : string
+      ; policy : Runtime_schema.runtime_role_policy
+      ; requested_role : runtime_role
+      }
+[@@deriving show, eq]
+
+val runtime_role_to_string : runtime_role -> string
+
+val runtime_role_eligibility :
+  config -> target_ref:string -> role:runtime_role -> runtime_role_eligibility
+(** Pure policy lookup. It does not materialize the target, consult credentials,
+    probe health, or assert completion capability. *)
 
 type request_body_cap_error = Missing_or_non_positive_request_body_cap of
   { runtime_id : string

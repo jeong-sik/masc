@@ -959,6 +959,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
+    ; runtime_role_policy_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -992,6 +993,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
+    ; runtime_role_policy_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -1026,6 +1028,7 @@ let provider_cfg () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
+    ; runtime_role_policy_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -1167,6 +1170,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
+    ; runtime_role_policy_decls = []
     }
   in
   match Runtime.of_binding cfg runpod_binding with
@@ -1187,6 +1191,7 @@ let test_runtime_of_binding_preserves_failure_reason () =
     ; media_failover = []
     ; lane_decls = []
     ; exact_output_lane_decls = []
+    ; runtime_role_policy_decls = []
     }
   in
   match Runtime.of_binding cfg { runpod_binding with enabled = false } with

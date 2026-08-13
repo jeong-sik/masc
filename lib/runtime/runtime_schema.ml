@@ -295,6 +295,21 @@ type exact_output_lane_decl =
   }
 [@@deriving show, eq]
 
+(** Role eligibility policy is separate from runtime/provider admission. A
+    declaration can name an opaque exact-output target that is not a
+    materialized Runtime, and therefore cannot imply registration or
+    availability. *)
+type runtime_role_policy =
+  | Unrestricted
+  | Librarian_only
+[@@deriving show, eq]
+
+type runtime_role_policy_decl =
+  { target_ref : string
+  ; policy : runtime_role_policy
+  }
+[@@deriving show, eq]
+
 (** {1 Top-level config}
 
     Routes/aliases/profiles/system_targets/strategy from the deleted
@@ -332,6 +347,9 @@ type config =
     (** Raw ordered AGENT_CORE target references from
         [\[runtime.exact_output_lanes.<id>\]]. MASC does not interpret them as
         provider/model runtime bindings. *)
+  ; runtime_role_policy_decls : runtime_role_policy_decl list
+    (** Role restrictions from [\[runtime.role_policies\]]. Policy admission is
+        orthogonal to target registration, resolution, and liveness. *)
   }
 [@@deriving show, eq]
 

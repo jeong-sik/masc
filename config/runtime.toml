@@ -16,6 +16,13 @@ default = "ollama_cloud.deepseek-v4-flash"
 # this explicit smart lane.
 cross_verifier = "deepseek.deepseek-v4-pro"
 
+# Local AgentWorld is permitted only as a librarian target. This row is an
+# eligibility restriction, not a runtime registration or availability claim:
+# provider/model declarations, credentials, health, and completion probes stay
+# at their existing independent boundaries.
+[runtime.role_policies]
+"ollama.agentworld-35b-a3b" = "librarian-only"
+
 # Existing workspaces are not overwritten by this seed. Copy the required lane
 # declarations into the live runtime.toml before enabling their consumers.
 # Providers and individual provider.model bindings default to `enabled = true`.

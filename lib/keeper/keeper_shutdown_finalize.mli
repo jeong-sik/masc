@@ -52,6 +52,19 @@ val admission_already_released_by_removal :
   -> Keeper_owner_registry.command_error
   -> bool
 
+(** Same judgement stated over the identity alone, for the boot restore pass:
+    it reaches this condition holding only a keeper name and an operation id
+    (a corrupt owner fence carries no operation record). Both the restore pass
+    and the recovery pass must ask it — settling only the latter leaves boot
+    recovery aborting on a keeper removed between [complete_cleanup] and its
+    completion receipt. *)
+val admission_already_released_by_removal_for :
+     config:Workspace.config
+  -> keeper_name:string
+  -> operation_id:Keeper_shutdown_types.Operation_id.t
+  -> Keeper_owner_registry.command_error
+  -> bool
+
 module For_testing : sig
   val paused_meta :
     Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta

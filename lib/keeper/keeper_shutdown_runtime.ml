@@ -67,7 +67,19 @@ let restore_admission ~config ~keeper_name ~operation_id =
          keeper_name
          (Operation_id.to_string operation_id)
          (Operation_id.to_string existing))
-  | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
+  | Error error ->
+    (* A keeper removed between [complete_cleanup] and its completion receipt
+       leaves a fenced operation whose owner is gone. The restore pass runs
+       before recovery, so without this the boot aborts here and the recovery
+       pass never gets to settle it -- the same crash window, one gate earlier. *)
+    if
+      Keeper_shutdown_finalize.admission_already_released_by_removal_for
+        ~config
+        ~keeper_name
+        ~operation_id
+        error
+    then Ok ()
+    else Error (Keeper_owner_registry.command_error_to_string error)
 ;;
 
 let restore_inventory_admission ~config inventory =

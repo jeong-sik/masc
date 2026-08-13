@@ -513,24 +513,39 @@ let remove_meta_file ~config operation cleanup =
    against it would fail every boot forever. A leftover meta without its
    owner is an inconsistent state and stays an error, mirroring
    [remove_meta_file]. Logs one info line when true so the terminal
-   disposition stays observable in boot logs. *)
-let admission_already_released_by_removal
+   disposition stays observable in boot logs.
+
+   Stated over [keeper_name] / [operation_id] rather than a whole operation
+   because the boot restore pass reaches the same condition holding only those
+   two: a corrupt owner fence carries no operation record. Both gates must ask
+   this question -- settling it after [recover_operation] alone leaves the
+   restore pass aborting on the very crash window this exists to close. *)
+let admission_already_released_by_removal_for
   ~(config : Workspace.config)
-  operation
+  ~keeper_name
+  ~operation_id
   error
   =
   match error with
   | Keeper_owner_registry.Command_lookup_failed
       (Keeper_owner_registry.Owner_not_found _) ->
-    (match Keeper_meta_store.read_meta config operation.keeper_name with
+    (match Keeper_meta_store.read_meta config keeper_name with
      | Ok None ->
        Log.Keeper.info
          "shutdown admission already released by Keeper removal: keeper=%s operation=%s"
-         operation.keeper_name
-         (Operation_id.to_string operation.operation_id);
+         keeper_name
+         (Operation_id.to_string operation_id);
        true
      | Ok (Some _) | Error _ -> false)
   | _ -> false
+;;
+
+let admission_already_released_by_removal ~(config : Workspace.config) operation error =
+  admission_already_released_by_removal_for
+    ~config
+    ~keeper_name:operation.keeper_name
+    ~operation_id:operation.operation_id
+    error
 ;;
 
 let remove_session_dir ~config operation =

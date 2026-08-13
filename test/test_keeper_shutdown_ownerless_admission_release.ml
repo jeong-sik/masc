@@ -237,6 +237,73 @@ let test_predicate_rejects_other_lookup_errors () =
             Keeper_owner_registry.Inventory_stopping)))
 ;;
 
+(* The cases above enter through [recover_operation_with_corrupt_owner_fence].
+   Boot does not start there: [recover_at_boot] runs [restore_inventory_admission]
+   first, and only operations that still want a fence go through it. Every
+   fixture above finalizes with [Completion_not_requested], which
+   [requires_admission_fence] answers false for — so none of them ever reached
+   the restore pass, and the gate there went unexercised.
+
+   A dashboard purge that crashed between [complete_cleanup] and its completion
+   receipt leaves exactly the state that does want a fence: meta and owner gone,
+   phase [Finalized { completion = Completion_pending _ }]. Boot must settle it
+   rather than abort, or the crash window this suite exists to close stays open
+   one gate earlier. *)
+let test_boot_recovery_settles_pending_completion_after_removal () =
+  with_workspace (fun ~config ->
+    let name = "ownerless-pending-completion" in
+    let evidence = finalized_after_removal_evidence name in
+    (* [Completion_pending Dashboard_keeper_purged] is only a valid record next
+       to a [Dashboard_keeper_purge] intent — the store rejects any other
+       pairing (Finalized_completion_mismatch). That pairing is also exactly
+       the reported scenario: a dashboard purge that crashed before its
+       receipt. *)
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:
+          (Finalized
+             { evidence with completion = Completion_pending Dashboard_keeper_purged })
+        ~cleanup_intent:
+          { reason =
+              Dashboard_keeper_purge { requested_name = name; agent_name = name }
+          ; remove_session = true
+          }
+    in
+    check
+      bool
+      "fixture must be one the restore pass actually fences"
+      true
+      (requires_admission_fence operation);
+    (* Settling the fence is only half of this boot: the pending receipt is then
+       delivered, and without a registered handler that step fails for a reason
+       unrelated to the gate under test. Record the delivery so the assertion
+       below is about recovery reaching the end, not about harness wiring. *)
+    let delivered = ref [] in
+    Keeper_shutdown_finalize.register_completion_handler
+      (fun _config delivered_operation action ->
+         delivered := (delivered_operation.keeper_name, action) :: !delivered;
+         Ok ());
+    persist_exn ~config operation;
+    match Keeper_shutdown_runtime.recover_at_boot ~config with
+    | [] -> failf "boot recovery returned no outcome for %s" name
+    | outcomes ->
+      List.iter
+        (function
+          | Ok _ -> ()
+          | Error detail -> failf "boot recovery still fails: %s" detail)
+        outcomes;
+      (* The receipt the crash lost is what recovery owes: settling the fence
+         without delivering it would leave the purge half-finished. *)
+      check
+        (list (pair string string))
+        "boot delivers the pending completion it recovered"
+        [ name, "dashboard_keeper_purged" ]
+        (List.rev_map
+           (fun (keeper, action) -> keeper, completion_action_to_string action)
+           !delivered))
+;;
+
 let () =
   Alcotest.run
     "keeper_shutdown_ownerless_admission_release"
@@ -245,6 +312,10 @@ let () =
             "finalized operation settles when keeper removed"
             `Quick
             test_finalized_operation_settles_when_keeper_removed
+        ; Alcotest.test_case
+            "boot recovery settles a pending completion after removal"
+            `Quick
+            test_boot_recovery_settles_pending_completion_after_removal
         ; Alcotest.test_case
             "superseded operation settles when keeper removed"
             `Quick

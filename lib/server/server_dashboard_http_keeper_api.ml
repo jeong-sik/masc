@@ -1304,27 +1304,29 @@ let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
      @ trace_fields)
 ;;
 
+let keeper_chat_trace_blocks config name =
+  match Keeper_meta_store.read_meta config name with
+  | Ok (Some m) ->
+    Some
+      (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
+         ~max_lines:trajectory_max_limit
+         ~max_internal_lines:trajectory_max_limit
+         ~config
+         ~keeper_name:name
+         ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
+  | Ok None -> None
+  | Error err ->
+    Log.Keeper.warn
+      "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
+      name
+      err;
+    None
+;;
+
 let keeper_chat_history_json config name =
   let base_dir = (config : Workspace.config).base_path in
   let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
-  let trace_block_by_turn_ref =
-    match Keeper_meta_store.read_meta config name with
-    | Ok (Some m) ->
-      Some
-        (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
-           ~max_lines:trajectory_max_limit
-           ~max_internal_lines:trajectory_max_limit
-           ~config
-           ~keeper_name:name
-           ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
-    | Ok None -> None
-    | Error err ->
-      Log.Keeper.warn
-        "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
-        name
-        err;
-      None
-  in
+  let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
   let chat_rows = Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages in
   (* Appended, not merged by timestamp: the client already sorts the whole
      transcript by [ts] and breaks ties by original index, and rows the chat
@@ -1344,6 +1346,54 @@ let keeper_chat_history_json config name =
       name
       (List.length autonomous_rows);
     other
+;;
+
+(* Direct-conversation rows older than [before], one [Keeper_chat_store] window
+   at a time. Separate from [keeper_chat_history_json] rather than a mode of it,
+   because the two answer different questions:
+
+   - /chat/history is the transcript: the tail window plus every autonomous turn
+     the retention root still holds ([Keeper_raw_trace_retention.history_limit]).
+   - this is the walk backwards through direct rows the tail window evicted.
+     Autonomous turns are excluded on purpose -- they are bounded by retention,
+     not by this window, so the first transcript fetch already carried every one
+     that exists. Repeating them per page would duplicate rows the client holds.
+
+   [next_before] is the cursor for the following page, computed here so the
+   caller does not reimplement the rule: the oldest [ts] among the returned
+   rows, or [null] for an empty page. The fold tolerates a row carrying no [ts]
+   by skipping it, which today cannot happen -- [Keeper_chat_store.parse_line]
+   maps an absent [ts] to [Some 0.0] rather than [None] (see the store's own
+   [quiet_line_ts], which maps the same absence to [None]). That disagreement
+   is tracked separately; this fold is written against the documented type so
+   it stays correct when the store's decoder is repaired.
+
+   Uncached: pages are user-initiated and [load_page] is already bounded I/O
+   (binary-search probes plus one window slice). A cache keyed by cursor would
+   add entries per click without a measured hot path asking for it. *)
+let keeper_chat_history_page_json config name ~before =
+  let base_dir = (config : Workspace.config).base_path in
+  let { Keeper_chat_store.messages; has_more } =
+    Keeper_chat_store.load_page ~base_dir ~keeper_name:name ?before ()
+  in
+  let trace_block_by_turn_ref = keeper_chat_trace_blocks config name in
+  let next_before =
+    List.fold_left
+      (fun acc ({ ts; _ } : Keeper_chat_store.chat_message) ->
+        match ts, acc with
+        | None, _ -> acc
+        | Some t, None -> Some t
+        | Some t, Some a -> Some (Float.min a t))
+      None
+      messages
+  in
+  `Assoc
+    [ "schema", `String "masc.keeper_chat_history.page.v1"
+    ; ( "messages"
+      , Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages )
+    ; "has_more", `Bool has_more
+    ; "next_before", (match next_before with Some t -> `Float t | None -> `Null)
+    ]
 ;;
 
 let cached_keeper_chat_history_json config name =
@@ -1567,6 +1617,33 @@ let handle_keeper_get_subroutes state req request reqd =
            in
            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
              (Keeper_catchup_digest.to_json digest)))
+  else if ends_with "/chat/history/page" then
+    (* Checked before "/chat/history": [ends_with] would not confuse the two,
+       but keeping the longer suffix first means adding a third sub-route later
+       cannot silently shadow this one. *)
+    let name = extract_name "/chat/history/page" in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else if not (Keeper_config.validate_name name) then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
+    else (
+      (* Absent [before] means the newest window -- the same rows /chat/history
+         serves, minus the autonomous turns. Present but unparseable is a client
+         bug, not a request for the newest page, so it is rejected rather than
+         silently treated as absent. *)
+      match Server_utils.query_param req "before" with
+      | Some raw when float_of_string_opt (String.trim raw) = None ->
+        Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json "before must be a unix-seconds float")
+      | before_raw ->
+        let before =
+          Option.bind before_raw (fun raw -> float_of_string_opt (String.trim raw))
+        in
+        let config = Mcp_server.workspace_config state in
+        Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+          (keeper_chat_history_page_json config name ~before))
   else if ends_with "/chat/history" then
     let name = extract_name "/chat/history" in
     if name = "" then

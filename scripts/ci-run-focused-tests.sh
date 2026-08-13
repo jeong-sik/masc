@@ -92,6 +92,7 @@ normal_targets=(
   @test/runtest-test_file_kind_vocabulary
   @test/runtest-test_http_auth_strict_flag
   @test/runtest-test_keeper_chat_broadcast
+  @test/runtest-test_server_dashboard_http_keeper_chat_page
   @test/runtest-test_keeper_codex_effort_clamp
   @test/runtest-test_keeper_codex_error_carriage
   @test/runtest-test_keeper_persistence_span_history

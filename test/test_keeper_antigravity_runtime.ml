@@ -832,20 +832,21 @@ let test_capacity_bounds_an_appending_source_projection () =
     (match project history with
      | Error detail -> fail detail
      | Ok projected ->
-       let projected_bytes =
-         List.fold_left
-           (fun total (message : Agent_core.Types.message) ->
-             total
-             + String.length
-                 (Keeper_official_client_host.encode_history_message message))
-           0
-           projected
+       let prompt_bytes =
+         match
+           Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+             ~system_prompt:"system"
+             ~goal:"goal"
+             projected
+         with
+         | Ok bytes -> bytes
+         | Error detail -> fail detail
        in
        check
          bool
-         "appended material is inside the declared capacity"
+         "actual rendered prompt is inside the declared capacity"
          true
-         (projected_bytes <= 8192);
+         (prompt_bytes <= 8192);
        (match List.rev projected with
         | last :: _ ->
           check
@@ -854,6 +855,37 @@ let test_capacity_bounds_an_appending_source_projection () =
             true
             (last.Agent_core.Types.content = marker.content)
         | [] -> fail "projection emptied the history"))
+;;
+
+let test_capacity_counts_rendered_role_framing () =
+  let history = List.init 100 (fun _ -> plain_user_message "") in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 256)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error detail -> fail detail
+     | Ok projected ->
+       check bool "role framing forces a history cut" true
+         (List.length projected < List.length history);
+       let prompt_bytes =
+         match
+           Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+             ~system_prompt:"system"
+             ~goal:"goal"
+             projected
+         with
+         | Ok bytes -> bytes
+         | Error detail -> fail detail
+       in
+       check bool "role-framed prompt stays inside capacity" true
+         (prompt_bytes <= 256))
 ;;
 
 let test_capacity_refuses_oversized_fixed_sections () =
@@ -914,6 +946,10 @@ let () =
               "an appending source projection stays inside the window"
               `Quick
               test_capacity_bounds_an_appending_source_projection
+          ; test_case
+              "role framing is charged to the prompt capacity"
+              `Quick
+              test_capacity_counts_rendered_role_framing
           ; test_case
               "oversized fixed sections are refused"
               `Quick

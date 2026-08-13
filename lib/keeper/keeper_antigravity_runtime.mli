@@ -43,4 +43,12 @@ module For_testing : sig
       those fixed sections alone leave no room. agy truncates oversized stdin
       prompts silently instead of refusing them, so this window is the only
       bound the turn gets. *)
+
+  val start_prompt_bytes :
+    system_prompt:string ->
+    goal:string ->
+    Agent_core.Types.message list ->
+    (int, string) result
+  (** Render through the production start-turn formatter and return the exact
+      transmitted prompt byte count. *)
 end

@@ -59,13 +59,15 @@ let home_error_to_core_error error =
     (Runtime_antigravity_home.error_to_string error)
 ;;
 
+let history_role_label = function
+  | Agent_core.Types.System -> "SYSTEM:\n"
+  | Agent_core.Types.User -> "USER:\n"
+  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
+  | Agent_core.Types.Tool -> "TOOL:\n"
+;;
+
 let render_message (message : Agent_core.Types.message) =
-  let text = Host.encode_history_message message in
-  match message.role with
-  | Agent_core.Types.System -> Ok ("SYSTEM:\n" ^ text)
-  | Agent_core.Types.User -> Ok ("USER:\n" ^ text)
-  | Agent_core.Types.Assistant -> Ok ("ASSISTANT:\n" ^ text)
-  | Agent_core.Types.Tool -> Ok ("TOOL:\n" ^ text)
+  Ok (history_role_label message.role ^ Host.encode_history_message message)
 ;;
 
 let render_messages messages =
@@ -86,8 +88,14 @@ let extra_system_context_messages messages =
     messages
 ;;
 
+let system_instructions_label = "SYSTEM INSTRUCTIONS:\n"
+let current_goal_label = "CURRENT GOAL:\n"
+let prompt_section_separator = "\n\n"
+
 let measure_model_input_message_bytes (message : Agent_core.Types.message) =
-  String.length (Host.encode_history_message message)
+  String.length (history_role_label message.role)
+  + String.length (Host.encode_history_message message)
+  + String.length prompt_section_separator
 ;;
 
 (* The declared per-model [max-prompt-bytes] is the only authority that can
@@ -107,13 +115,10 @@ let measure_model_input_message_bytes (message : Agent_core.Types.message) =
 
    [prompt_section_framing_reserved_bytes] is derived from the actual label
    literals [prompt_for_turn] concatenates, so a label change cannot silently
-   outgrow the reserve. Per-message role prefixes are not measured; the
-   declared capacity is expected to sit well under the client's observed
-   input cliff (~185KB), so the deployment margin absorbs that slack. *)
-let system_instructions_label = "SYSTEM INSTRUCTIONS:\n"
-let current_goal_label = "CURRENT GOAL:\n"
-let prompt_section_separator = "\n\n"
-
+   outgrow the reserve. Each history message is charged its actual role label
+   plus one separator; charging a separator for the last message too is a
+   deliberate conservative byte that keeps the rendered prompt within the
+   declared cap without depending on deployment margin. *)
 let prompt_section_framing_reserved_bytes =
   String.length system_instructions_label
   + String.length current_goal_label
@@ -922,5 +927,12 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
 module For_testing = struct
   let capacity_bounded_model_input_projection =
     capacity_bounded_model_input_projection
+  ;;
+
+  let start_prompt_bytes ~system_prompt ~goal messages =
+    let prepared : Host.prepared_turn =
+      { messages; system_prompt; tools = []; reasoning_effort = None }
+    in
+    Result.map String.length (prompt_for_turn ~is_resume:false ~goal prepared)
   ;;
 end

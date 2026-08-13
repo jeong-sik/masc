@@ -49,6 +49,7 @@ let make_tool_bundle_for_descriptors
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?composition_catalog
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
@@ -317,7 +318,38 @@ let make_tool_bundle_for_descriptors
                    input)))
       descriptors
   in
-  { tools = descriptor_tools
+  let composition_tools =
+    match composition_catalog with
+    | None -> []
+    | Some catalog ->
+      Keeper_tool_composition_surface.make_tools
+        ~catalog
+        ~config
+        ~meta
+        ~publication_recovery
+        ~ctx_snapshot
+        ?turn_sandbox_factory
+        ?clock
+        ?continuation_channel
+        ?gate_context:gate_context_provider
+        ?gate_grant
+        ?record_gate_result
+        ~on_completed:(function
+          | Some receipt -> mark_terminal_effect_completed receipt
+          | None ->
+            mark_terminal_effect_failed
+              { failure_class = Tool_result.Runtime_failure
+              ; effect_disposition = Tool_result.Effect_outcome_unknown
+              ; diagnostic =
+                  "terminal composition completed without a typed target receipt"
+              })
+        ~on_deferred:mark_deferred_tool_result
+        ~on_external_effect_deferred:mark_external_effect_deferred
+        ~on_failed:mark_terminal_effect_failed
+        ~on_externalization_error:mark_completed_terminal_externalization_failed
+        ()
+  in
+  { tools = descriptor_tools @ composition_tools
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
@@ -336,6 +368,7 @@ let make_tool_bundle
       ?continuation_channel
       ?gate_context
       ?hitl_resolution
+      ?composition_catalog
       ()
   =
   make_tool_bundle_for_descriptors
@@ -347,6 +380,7 @@ let make_tool_bundle
     ?continuation_channel
     ?gate_context
     ?hitl_resolution
+    ?composition_catalog
     ~descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     ()
 ;;
@@ -358,6 +392,7 @@ let make_tools
           Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
+      ?composition_catalog
       ()
   : Agent_core.Tool.t list
   =
@@ -367,6 +402,7 @@ let make_tools
      ~publication_recovery
      ~ctx_snapshot
      ?clock
+     ?composition_catalog
      ())
     .tools
 ;;

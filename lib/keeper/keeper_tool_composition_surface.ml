@@ -258,7 +258,7 @@ let result_of_execution ~tool_name ~start_time = function
 
 let make_tools
       ~catalog
-      ~config
+      ~(config : Workspace.config)
       ~meta
       ~publication_recovery
       ~ctx_snapshot
@@ -342,8 +342,12 @@ let make_tools
                  ()
              in
              (match execution with
-              | Error failure
-                when failure.effect_disposition <> Tool_result.Proven_pre_effect ->
+              | Error
+                  ({ Executor.effect_disposition =
+                       ( Tool_result.Proven_post_effect
+                       | Tool_result.Effect_outcome_unknown )
+                   ; _
+                   } as failure) ->
                 (* The aggregate is computed from every settled sibling and all
                    earlier batches.  It is the boundary authority: a selected
                    Deferred cause must not hide an earlier committed write or

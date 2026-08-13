@@ -913,7 +913,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
-    ~event_bus ~raw_trace ~on_event ~config =
+    ~event_bus ~raw_trace ~on_event ~config () =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in

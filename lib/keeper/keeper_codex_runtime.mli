@@ -33,6 +33,7 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.codex_app_server ->
+  unit ->
   attempt_outcome
 
 module For_testing : sig

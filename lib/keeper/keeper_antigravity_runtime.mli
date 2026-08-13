@@ -27,6 +27,7 @@ val run :
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.antigravity_cli ->
+  unit ->
   attempt_outcome
 
 module For_testing : sig

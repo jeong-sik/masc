@@ -976,7 +976,11 @@ let start_keepalive
               "start_keepalive: failed to close lane after Librarian lifecycle rejection keeper=%s error=%s"
               m.name
               (Keeper_lane.start_error_to_string lane_error));
-         (match Keeper_registry.unregister_exact reg with
+         (match
+            match lifecycle_token with
+            | None -> Keeper_registry.unregister_exact reg
+            | Some token -> Keeper_registry.unregister_exact_for_lifecycle token reg
+          with
           | Keeper_registry.Exact_unregistered
           | Keeper_registry.Exact_entry_missing -> ()
           | Keeper_registry.Exact_entry_replaced ->
@@ -1165,26 +1169,67 @@ let start_keepalive
            invokes it only after the child-owning switch and all children
            finish. *)
         let cleanup_tracking outcome =
-          let librarian_join_result =
-            match
-              Keeper_memory_lane.drain_and_join_librarian
-                ~base_path:ctx.config.Workspace.base_path
-                ~keeper_name:live_meta.name
-            with
-            | Ok Keeper_memory_lane.No_librarian_work
-            | Ok Keeper_memory_lane.Librarian_drained -> Ok ()
-            | Error error ->
-              Error (Keeper_memory_lane.librarian_drain_error_to_string error)
+          let graceful_librarian_boundary =
+            match outcome with
+            | Keeper_lane.Completed
+            | Keeper_lane.Shutdown_before_start
+            | Keeper_lane.Shutdown_requested -> true
+            | Keeper_lane.Cancelled_by_parent _ ->
+              Atomic.get stop || Shutdown.is_shutting_down_global ()
+            | Keeper_lane.Shutdown_cancel_failed _
+            | Keeper_lane.Failed _ -> false
           in
-          let terminal_result =
-            match librarian_join_result with
-            | Error _ as error -> error
-            | Ok () ->
-              (try
-                 terminalize_lane outcome;
-                 Ok ()
-               with
-               | exn -> Error (Printexc.to_string exn))
+          let terminalize () =
+            try
+              terminalize_lane outcome;
+              Ok ()
+            with
+            | exn -> Error (Printexc.to_string exn)
+          in
+          let handle_librarian () =
+            if graceful_librarian_boundary
+            then
+              match
+                Keeper_memory_lane.drain_and_join_librarian
+                  ~base_path:ctx.config.Workspace.base_path
+                  ~keeper_name:live_meta.name
+              with
+              | Ok Keeper_memory_lane.No_librarian_work
+              | Ok Keeper_memory_lane.Librarian_drained -> Ok ()
+              | Error error ->
+                Error (Keeper_memory_lane.librarian_drain_error_to_string error)
+            else
+              match
+                Keeper_memory_lane.abort_librarian
+                  ~base_path:ctx.config.Workspace.base_path
+                  ~keeper_name:live_meta.name
+              with
+              | Ok Keeper_memory_lane.Librarian_abort_idle
+              | Ok Keeper_memory_lane.Librarian_abort_requested
+              | Ok Keeper_memory_lane.Librarian_abort_already_in_progress
+              | Ok (Keeper_memory_lane.Librarian_abort_already_exited _) -> Ok ()
+              | Ok (Keeper_memory_lane.Librarian_abort_committed_with_failure exn) ->
+                Error
+                  ("Librarian cancellation committed with callback failure: "
+                   ^ Printexc.to_string exn)
+              | Error error ->
+                Error (Keeper_memory_lane.librarian_abort_error_to_string error)
+          in
+          let terminal_result, librarian_result =
+            if graceful_librarian_boundary
+            then (
+              let librarian_result = handle_librarian () in
+              let terminal_result =
+                match librarian_result with
+                | Ok () -> terminalize ()
+                | Error _ -> Ok ()
+              in
+              terminal_result, librarian_result)
+            else (
+              (* Crash publication must not wait behind root-scoped provider
+                 work. Record the lane outcome first, then fence and cancel the
+                 detached owner without joining it. *)
+              terminalize (), handle_librarian ())
           in
           let tracking_result =
           try
@@ -1222,15 +1267,19 @@ let start_keepalive
                  detail);
             Error detail
           in
-          match terminal_result, tracking_result with
-          | Ok (), Ok () -> Ok ()
-          | Error detail, Ok () | Ok (), Error detail -> Error detail
-          | Error terminal_detail, Error tracking_detail ->
-            Error
-              (Printf.sprintf
-                 "terminal cleanup failed: %s; tracking cleanup failed: %s"
-                 terminal_detail
-                 tracking_detail)
+          let errors =
+            [ "terminal cleanup", terminal_result
+            ; "Librarian cleanup", librarian_result
+            ; "tracking cleanup", tracking_result
+            ]
+            |> List.filter_map (fun (label, result) ->
+              match result with
+              | Ok () -> None
+              | Error detail -> Some (label ^ " failed: " ^ detail))
+          in
+          match errors with
+          | [] -> Ok ()
+          | errors -> Error (String.concat "; " errors)
         in
         publish_keeper_started ~live_meta;
         (match

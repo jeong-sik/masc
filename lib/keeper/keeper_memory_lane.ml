@@ -185,13 +185,12 @@ let begin_librarian_lifecycle ~base_path ~keeper_name =
     | None, Some owner_lane when Option.is_none (Keeper_lane.peek_exit owner_lane) ->
       Error Librarian_drain_still_active
     | None, (None | Some _) ->
-      (* A closed prior lifecycle has no active work, so its terminal receipt
-         is no longer relevant. Reopening an already accepting lifecycle is a
-         no-op. Do not clear the receipt during lane cleanup: shutdown may begin
-         only after a failed/cancelled owner has already exited. *)
-      (match entry.lifecycle with
-       | Draining -> entry.last_owner_lane <- None
-       | Accepting -> ());
+      (* A new admitted Keeper lifecycle owns no work from the prior one. Keep
+         terminal receipts until this boundary so shutdown can still observe a
+         failed/cancelled owner, then clear them even if that owner exited while
+         the entry was still [Accepting] (for example, a pre-fork executor
+         drop). *)
+      entry.last_owner_lane <- None;
       entry.lifecycle <- Accepting;
       Ok ())
 ;;
@@ -430,6 +429,17 @@ type librarian_drain_error =
   | Librarian_interrupted of Keeper_lane.outcome
   | Librarian_cleanup_failed of string
 
+type librarian_abort_outcome =
+  | Librarian_abort_idle
+  | Librarian_abort_requested
+  | Librarian_abort_already_in_progress
+  | Librarian_abort_already_exited of Keeper_lane.exit
+  | Librarian_abort_committed_with_failure of exn
+
+type librarian_abort_error =
+  | Librarian_abort_wrong_domain
+  | Librarian_abort_not_committed of exn
+
 let librarian_lane_outcome_to_string = function
   | Keeper_lane.Completed -> "completed"
   | Keeper_lane.Shutdown_before_start -> "shutdown_before_start"
@@ -446,6 +456,40 @@ let librarian_drain_error_to_string = function
     "Librarian drain ended without completion: "
     ^ librarian_lane_outcome_to_string outcome
   | Librarian_cleanup_failed detail -> "Librarian cleanup failed: " ^ detail
+;;
+
+let librarian_abort_error_to_string = function
+  | Librarian_abort_wrong_domain ->
+    "Librarian cancellation was requested from a non-owner domain"
+  | Librarian_abort_not_committed exn ->
+    "Librarian cancellation was not committed: " ^ Printexc.to_string exn
+;;
+
+let abort_librarian ~base_path ~keeper_name =
+  let entry = entry_for ~base_path ~keeper_name in
+  let owner_lane =
+    Stdlib.Mutex.protect entry.state_mu (fun () ->
+      entry.lifecycle <- Draining;
+      match entry.librarian_drain with
+      | Some drain -> Some drain.owner_lane
+      | None -> entry.last_owner_lane)
+  in
+  match owner_lane with
+  | None -> Ok Librarian_abort_idle
+  | Some owner_lane ->
+    (match Keeper_lane.peek_exit owner_lane with
+     | Some exit -> Ok (Librarian_abort_already_exited exit)
+     | None ->
+       (match Keeper_lane.request_cancel owner_lane with
+        | Keeper_lane.Cancel_requested -> Ok Librarian_abort_requested
+        | Keeper_lane.Cancel_already_requested
+        | Keeper_lane.Cancel_already_exiting ->
+          Ok Librarian_abort_already_in_progress
+        | Keeper_lane.Cancel_committed_with_failure exn ->
+          Ok (Librarian_abort_committed_with_failure exn)
+        | Keeper_lane.Cancel_wrong_domain -> Error Librarian_abort_wrong_domain
+        | Keeper_lane.Cancel_not_committed exn ->
+          Error (Librarian_abort_not_committed exn)))
 ;;
 
 let drain_and_join_librarian ~base_path ~keeper_name =

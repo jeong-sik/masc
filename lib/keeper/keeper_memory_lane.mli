@@ -79,6 +79,29 @@ type librarian_drain_error =
 
 val librarian_drain_error_to_string : librarian_drain_error -> string
 
+type librarian_abort_outcome =
+  | Librarian_abort_idle
+  | Librarian_abort_requested
+  | Librarian_abort_already_in_progress
+  | Librarian_abort_already_exited of Keeper_lane.exit
+  | Librarian_abort_committed_with_failure of exn
+
+type librarian_abort_error =
+  | Librarian_abort_wrong_domain
+  | Librarian_abort_not_committed of exn
+
+val librarian_abort_error_to_string : librarian_abort_error -> string
+
+val abort_librarian
+  :  base_path:string
+  -> keeper_name:string
+  -> (librarian_abort_outcome, librarian_abort_error) result
+(** Fence new submissions and request cancellation of the exact Librarian
+    owner without joining it. Unexpected Keeper exits use this fail-fast path
+    so a slow provider cannot delay crash publication or registry cleanup.
+    Cancellation outcomes distinguish a committed signal from a request that
+    was not delivered; callers must not retry a committed cancellation. *)
+
 val drain_and_join_librarian
   :  base_path:string
   -> keeper_name:string

@@ -4044,6 +4044,84 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
       | Ok _ -> fail "task receipt recovery did not reach Finalized"
       | Error error -> fail (Shutdown_finalize.error_to_string error))
 
+let test_librarian_rejection_unregisters_with_lifecycle_authority () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  Memory_lane.For_testing.reset ();
+  let base_dir = temp_dir "librarian-lifecycle-rejection" in
+  let keeper_name = "librarian-lifecycle-rejection" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      Eio.Switch.run @@ fun sw ->
+      Memory_lane.init ~sw;
+      let librarian_started, resolve_librarian_started = Eio.Promise.create () in
+      let librarian_release, resolve_librarian_release = Eio.Promise.create () in
+      (match
+         Memory_lane.submit
+           ~base_path:config.base_path
+           ~keeper_name
+           (fun () ->
+              Eio.Promise.resolve resolve_librarian_started ();
+              Eio.Promise.await librarian_release)
+       with
+       | Memory_lane.Submitted -> ()
+       | Memory_lane.Coalesced
+       | Memory_lane.Ran_inline
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "Librarian lifecycle rejection fixture was not submitted");
+      Eio.Promise.await librarian_started;
+      let token =
+        match
+          Keeper_lifecycle_reservation.acquire
+            ~base_path:config.base_path
+            ~keeper_name
+            ~expected_generation:meta.generation
+            ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
+        with
+        | Ok token -> token
+        | Error _ -> fail "failed to acquire lifecycle rejection fixture token"
+      in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      (match Masc.Keeper_keepalive.start_keepalive ~lifecycle_token:token ctx meta with
+       | Masc.Keeper_keepalive.Keepalive_memory_lane_not_ready
+           Memory_lane.Librarian_drain_still_active -> ()
+       | outcome ->
+         failf
+           "Librarian rejection returned unexpected launch outcome: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      check bool
+        "lifecycle-authorized rejection removed fresh registry entry"
+        false
+        (R.is_registered ~base_path:config.base_path keeper_name);
+      (match Keeper_lifecycle_reservation.release token with
+       | Keeper_lifecycle_reservation.Released -> ()
+       | outcome ->
+         fail
+           ("failed to release lifecycle rejection fixture: "
+            ^ Keeper_lifecycle_reservation.release_outcome_to_string outcome));
+      Eio.Promise.resolve resolve_librarian_release ())
+
 let test_start_keepalive_denies_dead_tombstone_before_registration () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4499,6 +4577,8 @@ let () =
         test_unsupported_shutdown_schema_retains_exact_fence;
       test_case "dashboard purge resolution is fail closed" `Quick
         test_dashboard_purge_resolution_is_fail_closed;
+      test_case "Librarian rejection unregisters with lifecycle authority" `Quick
+        test_librarian_rejection_unregisters_with_lifecycle_authority;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown owner failure persists blocked join" `Quick

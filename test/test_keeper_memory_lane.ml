@@ -468,6 +468,55 @@ let test_drain_reports_parent_cancellation () =
         Alcotest.fail "parent-cancelled drain was reported as completed"))
 ;;
 
+let test_abort_cancels_without_joining_provider_work () =
+  Lane.For_testing.reset ();
+  let cancelled = ref false in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      let started, set_started = Eio.Promise.create () in
+      let never, _set_never = Eio.Promise.create () in
+      (match
+         Lane.submit
+           ~base_path
+           ~keeper_name:"crashed-owner"
+           (fun () ->
+              Eio.Promise.resolve set_started ();
+              try Eio.Promise.await never with
+              | Eio.Cancel.Cancelled _ as exn ->
+                cancelled := true;
+                raise exn)
+       with
+       | Lane.Submitted -> ()
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
+       | Lane.Rejected_draining ->
+         Alcotest.fail "crash-abort Librarian was not submitted");
+      Eio.Promise.await started;
+      (match Lane.abort_librarian ~base_path ~keeper_name:"crashed-owner" with
+       | Ok Lane.Librarian_abort_requested
+       | Ok Lane.Librarian_abort_already_in_progress -> ()
+       | Ok Lane.Librarian_abort_idle ->
+         Alcotest.fail "active crash-abort Librarian was reported idle"
+       | Ok (Lane.Librarian_abort_already_exited _) ->
+         Alcotest.fail "active crash-abort Librarian had already exited"
+       | Ok (Lane.Librarian_abort_committed_with_failure exn) ->
+         Alcotest.failf
+           "crash-abort cancellation callback failed: %s"
+           (Printexc.to_string exn)
+       | Error error -> Alcotest.fail (Lane.librarian_abort_error_to_string error));
+      match Lane.drain_and_join_librarian ~base_path ~keeper_name:"crashed-owner" with
+      | Error (Lane.Librarian_interrupted Keeper_lane.Shutdown_requested) ->
+        Alcotest.(check bool) "provider work was cancelled" true !cancelled
+      | Error error ->
+        Alcotest.failf
+          "unexpected crash-abort receipt: %s"
+          (Lane.librarian_drain_error_to_string error)
+      | Ok Lane.No_librarian_work ->
+        Alcotest.fail "crash-abort lost the exact owner receipt"
+      | Ok Lane.Librarian_drained ->
+        Alcotest.fail "cancelled crash-abort work was reported drained"))
+;;
+
 (* Submitting against a finished executor switch must not leak the pending
    reservation. Eio.Fiber.fork does not raise to the caller for an off switch, so
    the lane needs its own executor-switch release fallback. *)
@@ -511,7 +560,15 @@ let test_finished_switch_drops_without_leak () =
      | Error error ->
        Alcotest.fail
          ("finished-switch receipt prevented lifecycle reopen: "
-          ^ Lane.lifecycle_open_error_to_string error))
+          ^ Lane.lifecycle_open_error_to_string error));
+    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+     | Ok Lane.No_librarian_work -> ()
+     | Ok Lane.Librarian_drained ->
+       Alcotest.fail "reopened empty lifecycle retained stale completed work"
+     | Error error ->
+       Alcotest.failf
+         "reopened lifecycle retained stale owner receipt: %s"
+         (Lane.librarian_drain_error_to_string error))
   | Some n -> Alcotest.failf "pending leaked after finished switch submit: %d" n
   | None -> Alcotest.fail "keeper entry missing after finished switch submit"
 ;;
@@ -665,6 +722,10 @@ let () =
             "drain reports parent cancellation"
             `Quick
             test_drain_reports_parent_cancellation
+        ; Alcotest.test_case
+            "crash abort cancels without joining provider work"
+            `Quick
+            test_abort_cancels_without_joining_provider_work
         ; Alcotest.test_case
             "empty drain fences late submission"
             `Quick

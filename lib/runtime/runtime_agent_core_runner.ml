@@ -142,6 +142,10 @@ let apply_inference_seed
 ;;
 
 let resolve_runtime_providers_for_turn ~runtime_id () =
+  (* Normalize once for both the catalog lookup and the inference lookup. If
+     only the provider resolver trims, a padded id can resolve the binding but
+     miss the seed and silently change what reaches the model. *)
+  let runtime_id = String.trim runtime_id in
   (* The empty id documents "the default runtime", and the resolver honours that
      by going through [Runtime.get_default_runtime]. The seed lookup is keyed by
      id, so passing "" through would look up a runtime that does not exist and

@@ -1334,6 +1334,27 @@ let test_thinking_support_false_forces_off () =
       seed.Runtime_inference.thinking_enabled)
 ;;
 
+let test_turn_provider_resolution_normalizes_runtime_id_once () =
+  with_runtime_thinking (fun () ->
+    match
+      Runtime_agent_core_runner.resolve_runtime_providers_for_turn
+        ~runtime_id:"  ollama_cloud.think  "
+        ()
+    with
+    | Error msg -> Alcotest.failf "padded runtime id should resolve: %s" msg
+    | Ok [ provider ] ->
+      Alcotest.(check (option bool))
+        "trimmed id selects the thinking seed"
+        (Some true)
+        provider.Llm_provider.Provider_config.enable_thinking;
+      Alcotest.(check (option bool))
+        "trimmed id selects the preserve-thinking seed"
+        (Some true)
+        provider.Llm_provider.Provider_config.preserve_thinking
+    | Ok providers ->
+      Alcotest.failf "expected exactly one provider, got %d" (List.length providers))
+;;
+
 let test_runtime_inventory_surfaces_parameter_policy () =
   with_runtime_thinking (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
@@ -2015,6 +2036,10 @@ let () =
             "thinking-support=false forces thinking off (Some false)"
             `Quick
             test_thinking_support_false_forces_off
+        ; Alcotest.test_case
+            "turn provider resolution normalizes runtime id once"
+            `Quick
+            test_turn_provider_resolution_normalizes_runtime_id_once
         ; Alcotest.test_case
             "runtime inventory surfaces AGENT_CORE parameter policy"
             `Quick

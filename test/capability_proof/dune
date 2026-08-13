@@ -1,0 +1,4 @@
+(test
+ (name test_capability_proof)
+ (modules test_capability_proof)
+ (libraries alcotest masc.capability_proof))

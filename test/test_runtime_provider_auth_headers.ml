@@ -1094,6 +1094,57 @@ max_context_tokens = 160000
             provider-scoped row required)"
        | None -> ())
 
+let test_declared_thinking_capabilities_override_catalog () =
+  with_model_catalog
+    {|
+[[models]]
+id_prefix = "qwen"
+provider_name = "runpod_mtp"
+supports_system_prompt = true
+supports_reasoning = true
+supports_reasoning_budget = true
+thinking_control_format = "ollama_think"
+|}
+    (fun () ->
+       let runtime_caps =
+         { Runtime_schema.model_capabilities_default with
+           supports_reasoning_budget = false
+         ; thinking_control_format = Runtime_schema.No_thinking_control
+         ; declared_thinking_control_format = Some Runtime_schema.No_thinking_control
+         ; reasoning_streaming_format =
+             Some (Runtime_schema.Delta_reasoning_field "reasoning_content")
+         }
+       in
+       let model = { qwen_model with capabilities = Some runtime_caps } in
+       let cfg =
+         { Runtime_schema.providers = [ runpod_provider ]
+         ; models = [ model ]
+         ; bindings = [ runpod_binding ]
+         ; default_runtime_id = Some "runpod_mtp.qwen"
+         ; cross_verifier_runtime_id = None
+         ; keeper_assignments = []
+         ; media_failover = []
+         ; lane_decls = []
+         ; exact_output_lane_decls = []
+         }
+       in
+       let provider_cfg =
+         match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
+         | Ok provider_cfg -> provider_cfg
+         | Error msg -> failf "unexpected adapter error: %s" msg
+       in
+       match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+       | None -> fail "declared thinking capability override should resolve"
+       | Some caps ->
+         check bool "declared thinking control wins" true
+           (caps.thinking_control_format
+            = Llm_provider.Capabilities.No_thinking_control);
+         check bool "declared reasoning budget wins" false caps.supports_reasoning_budget;
+         check bool "sparse system prompt preserves catalog" true caps.supports_system_prompt;
+         check bool "declared transport stream parser wins" true
+           (caps.reasoning_streaming_format
+            = Llm_provider.Capabilities.Delta_reasoning_field "reasoning_content"))
+
 (* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
    Provider_config. Before the fix the adapter dropped both binding
    fields, so keep_alive fell back to AGENT_CORE_OLLAMA_KEEP_ALIVE / "-1" and
@@ -1965,6 +2016,10 @@ let () =
             "bare catalog row stays fail-closed for declared provider"
             `Quick
             test_bare_catalog_row_stays_fail_closed_for_declared_provider
+        ; test_case
+            "declared thinking capabilities override catalog"
+            `Quick
+            test_declared_thinking_capabilities_override_catalog
         ; test_case
             "runtime adapter carries auth in api_key only"
             `Quick

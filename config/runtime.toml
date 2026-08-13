@@ -954,8 +954,12 @@ streaming = true
 [models.ollama-cloud-qwen3-5-397b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+# ollama.com exposes this binding through its OpenAI-compatible /v1 endpoint.
+# Reasoning is inherent/default-on and no explicit thinking-control field is
+# accepted on this wire. The native provider keeps the catalog's Ollama control.
+thinking-control-format = "none"
+reasoning-streaming-format = "delta:reasoning_content"
 supports-image-input = true
 supports-multimodal-inputs = true
 

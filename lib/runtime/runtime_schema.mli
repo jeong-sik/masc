@@ -94,6 +94,14 @@ type thinking_control_format =
   | Enable_thinking
 [@@deriving show, eq]
 
+type reasoning_streaming_format =
+  Llm_provider.Capabilities.reasoning_streaming_format =
+  | Default_reasoning_streaming
+  | No_reasoning_streaming
+  | Delta_reasoning_field of string
+  | Template_reasoning_streaming
+[@@deriving show, eq]
+
 type model_capabilities =
   { max_output_tokens : int option
   ; supports_tool_choice : bool
@@ -102,7 +110,13 @@ type model_capabilities =
   ; supports_parallel_tool_calls : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool
+  ; declared_supports_reasoning_budget : bool option
+      (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
   ; thinking_control_format : thinking_control_format
+  ; declared_thinking_control_format : thinking_control_format option
+      (** Exact TOML presence. [None] preserves an Agent Core catalog value. *)
+  ; reasoning_streaming_format : reasoning_streaming_format option
+      (** Exact streaming side-channel for this transport binding. *)
   ; supports_image_input : bool
   ; supports_audio_input : bool
   ; supports_video_input : bool

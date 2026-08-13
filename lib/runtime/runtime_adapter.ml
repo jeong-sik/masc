@@ -324,7 +324,40 @@ let model_capabilities_override_of_model_spec
       ~provider_label:provider_id
       ~model_id:spec.api_name
   with
-  | Some _ -> None
+  | Some catalog_caps ->
+    (match spec.capabilities with
+     | None -> None
+     | Some runtime_caps ->
+       (match
+          runtime_caps.declared_thinking_control_format,
+          runtime_caps.declared_supports_reasoning_budget,
+          runtime_caps.reasoning_streaming_format
+        with
+        | None, None, None -> None
+        | thinking_control_format, supports_reasoning_budget, reasoning_streaming_format ->
+          let effective_reasoning_budget =
+            match thinking_control_format with
+            (* A concrete transport-control declaration owns the associated
+               budget bit as one contract. In particular, explicit [none]
+               must not retain a catalog budget that this wire cannot encode. *)
+            | Some _ -> runtime_caps.supports_reasoning_budget
+            | None ->
+              Option.value
+                supports_reasoning_budget
+                ~default:catalog_caps.supports_reasoning_budget
+          in
+          Some
+            { catalog_caps with
+              thinking_control_format =
+                (match thinking_control_format with
+                 | Some format -> agent_core_thinking_control_format format
+                 | None -> catalog_caps.thinking_control_format)
+            ; supports_reasoning_budget = effective_reasoning_budget
+            ; reasoning_streaming_format =
+                Option.value
+                  reasoning_streaming_format
+                  ~default:catalog_caps.reasoning_streaming_format
+            }))
   | None ->
     Option.map
       (fun (caps : Runtime_schema.model_capabilities) ->
@@ -342,6 +375,10 @@ let model_capabilities_override_of_model_spec
          ; supports_reasoning_budget = caps.supports_reasoning_budget
          ; thinking_control_format =
              agent_core_thinking_control_format caps.thinking_control_format
+         ; reasoning_streaming_format =
+             Option.value
+               caps.reasoning_streaming_format
+               ~default:base.reasoning_streaming_format
          ; supports_response_format_json = caps.supports_response_format_json
          ; supports_structured_output = caps.supports_structured_output
          ; supports_multimodal_inputs = caps.supports_multimodal_inputs

@@ -116,6 +116,7 @@ describe('agent-core-runtime-store', () => {
   it('dedupes a live event already present in replayed telemetry', () => {
     const liveEvent = {
       type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-live-replay',
       ts_unix: 123,
       correlation_id: 'corr-live',
       run_id: 'run-live',
@@ -271,6 +272,7 @@ describe('agent-core-runtime-store', () => {
       const driftEvent = {
         source: 'agent_core_event',
         type: 'agent_core:durable:llm_request',
+        event_id: 'evt-drift',
         correlation_id: 'corr-drift',
         run_id: 'run-drift',
         payload: {
@@ -290,6 +292,81 @@ describe('agent-core-runtime-store', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('preserves identical strings from distinct event identities', () => {
+    const event = (eventId: string) => ({
+      type: 'agent_core:masc:trust_updated',
+      event_id: eventId,
+      ts_unix: 600,
+      correlation_id: 'corr-shared',
+      run_id: 'run-shared',
+      payload: {
+        agent_a: 'same-agent',
+        agent_b: 'same-peer',
+        trust_score: 0.5,
+        timestamp: 600,
+      },
+    })
+
+    expect(applyAgentCoreRuntimeEvent(event('evt-distinct-a'))).toBe(true)
+    expect(applyAgentCoreRuntimeEvent(event('evt-distinct-b'))).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+  })
+
+  it('scopes a repeated producer event id to its run', () => {
+    const event = (runId: string) => ({
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-process-local',
+      run_id: runId,
+      payload: {
+        agent_a: 'same-agent',
+        agent_b: 'same-peer',
+        trust_score: 0.5,
+      },
+    })
+
+    expect(applyAgentCoreRuntimeEvent(event('run-a'))).toBe(true)
+    expect(applyAgentCoreRuntimeEvent(event('run-b'))).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+  })
+
+  it('preserves unidentified identical events instead of content-deduping them', () => {
+    const event = {
+      type: 'agent_core:masc:trust_updated',
+      ts_unix: 610,
+      correlation_id: 'corr-legacy',
+      run_id: 'run-legacy',
+      payload: {
+        agent_a: 'legacy-agent',
+        agent_b: 'legacy-peer',
+        trust_score: 0.4,
+        timestamp: 610,
+      },
+    }
+
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+  })
+
+  it('dedupes one stable run sequence across replay and live delivery', () => {
+    const event = {
+      type: 'agent_core:masc:trust_updated',
+      run_id: 'run-sequenced',
+      seq: 7,
+      payload: {
+        agent_a: 'sequenced-agent',
+        agent_b: 'sequenced-peer',
+        trust_score: 0.7,
+      },
+    }
+
+    hydrateAgentCoreRuntimeFromTelemetryEntries([{ source: 'agent_core_event', ...event } as TelemetryEntry])
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(false)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
   })
 
   it('replays recent Agent Core telemetry via the dashboard API', async () => {

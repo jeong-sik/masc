@@ -333,7 +333,7 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
   })
 
-  it('preserves unidentified identical events instead of content-deduping them', () => {
+  it('dedupes the current native envelope across replay and live delivery', () => {
     const event = {
       type: 'agent_core:masc:trust_updated',
       ts_unix: 610,
@@ -347,10 +347,27 @@ describe('agent-core-runtime-store', () => {
       },
     }
 
+    hydrateAgentCoreRuntimeFromTelemetryEntries([
+      { source: 'agent_core_event', ...event } as TelemetryEntry,
+    ])
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(false)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
+  })
+
+  it('preserves identical events with no producer identity', () => {
+    const event = {
+      type: 'agent_core:masc:trust_updated',
+      payload: {
+        agent_a: 'unidentified-agent',
+        agent_b: 'unidentified-peer',
+        trust_score: 0.4,
+      },
+    }
+
     expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
     expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
     expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
-    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
   })
 
   it('dedupes one stable run sequence across replay and live delivery', () => {

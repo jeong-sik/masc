@@ -226,6 +226,21 @@ function stableRuntimeEventIdentity(event: AgentCoreRuntimeEnvelope): RuntimeEve
     return { kind: 'stable', key: `run:${runId}|seq:${seq}` }
   }
 
+  // Native Event_bus envelopes currently carry no event_id/seq. The server
+  // does, however, persist and replay this exact identity tuple, so use it
+  // until the producer grows a first-class event id. Requiring every member
+  // avoids reviving the old content-based heuristic for genuinely
+  // unidentified events.
+  const correlationId =
+    asString(event.correlation_id) ?? asString(payload.correlation_id)
+  const reportedTsUnix = eventReportedUnixSeconds(event)
+  if (runId && correlationId && reportedTsUnix != null) {
+    return {
+      kind: 'stable',
+      key: `envelope:${runtimeEventType(event)}|${runId}|${correlationId}|${reportedTsUnix}`,
+    }
+  }
+
   return { kind: 'unidentified' }
 }
 

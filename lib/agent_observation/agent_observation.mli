@@ -65,6 +65,11 @@ module Code_address : sig
   val codebase : t -> string
   val path : t -> string
   val equal : t -> t -> bool
+
+  val valid_codebase : string -> bool
+  (** Whether a string is shaped like a canonical host_path slug — the
+      exact acceptance [v] applies to its [codebase] argument. Read-path
+      scope parsing shares this so the wire key has one validator. *)
 end
 
 module Unattributed : sig

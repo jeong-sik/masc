@@ -126,7 +126,7 @@ let annotation_body ~file_path =
 ;;
 
 let masc_remote = "https://github.com/jeong-sik/masc.git"
-let masc_scope_query = "canonical_url=" ^ Uri.pct_encode masc_remote
+let masc_scope_query = "codebase=github.com_jeong-sik_masc"
 
 let scoped_ide_path path =
   let separator = if String.contains path '?' then "&" else "?" in
@@ -623,14 +623,14 @@ let test_post_cursors_honors_canonical_url_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
     let scoped_path =
-      "/api/v1/ide/cursors?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
+      "/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc"
     in
     let body = {|{"file_path":"lib/a.ml","line":9,"focus_mode":"editing"}|} in
     let post_request =
       http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
     in
     let post_response = dispatch router post_request in
-    check_status "POST cursor with canonical_url scope returns 201" 201 post_response;
+    check_status "POST cursor with a codebase scope returns 201" 201 post_response;
     let unscoped_request = http_request ~meth:`GET ~path:"/api/v1/ide/cursors" () in
     let unscoped_response = dispatch router unscoped_request in
     check
@@ -667,7 +667,7 @@ let test_post_cursors_resolves_partition_from_file_path () =
         (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
     in
     let scoped_path =
-      "/api/v1/ide/cursors?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
+      "/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc"
     in
     let post_request =
       http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
@@ -699,7 +699,7 @@ let test_post_cursors_rejects_file_path_scope_mismatch () =
         (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
     in
     let scoped_path =
-      "/api/v1/ide/cursors?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
+      "/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc"
     in
     let post_request =
       http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
@@ -732,23 +732,23 @@ let test_post_annotations_accepts_matching_repo_scope () =
     let request =
       http_request
         ~meth:`POST
-        ~path:"/api/v1/ide/annotations?repo_id=masc"
+        ~path:"/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
         ~body:(annotation_body ~file_path:"lib/a.ml")
         ~token:(Some token)
         ()
     in
     let response = dispatch router request in
-    check_status "POST annotation with matching repo_id returns 201" 201 response;
+    check_status "POST annotation with a codebase scope returns 201" 201 response;
     check
       int
       "matching annotation is visible in requested partition"
       1
-      (annotation_count router "/api/v1/ide/annotations?repo_id=masc");
+      (annotation_count router "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc");
     check
       int
       "matching annotation is not written to other partition"
       0
-      (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
+      (annotation_count router "/api/v1/ide/annotations?codebase=example.com_agent-core"))
 ;;
 
 let test_post_annotations_rejects_absolute_file_path () =
@@ -761,7 +761,7 @@ let test_post_annotations_rejects_absolute_file_path () =
     let request =
       http_request
         ~meth:`POST
-        ~path:"/api/v1/ide/annotations?repo_id=masc"
+        ~path:"/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
         ~body:(annotation_body ~file_path)
         ~token:(Some token)
         ()
@@ -777,12 +777,12 @@ let test_post_annotations_rejects_absolute_file_path () =
       int
       "rejected annotation is not written to the scoped partition"
       0
-      (annotation_count router "/api/v1/ide/annotations?repo_id=masc");
+      (annotation_count router "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc");
     check
       int
       "rejected annotation is not written to any other partition"
       0
-      (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
+      (annotation_count router "/api/v1/ide/annotations?codebase=example.com_agent-core"))
 ;;
 
 let test_post_annotations_rejects_escaping_file_path () =
@@ -790,8 +790,7 @@ let test_post_annotations_rejects_escaping_file_path () =
     let _repos = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
     let scoped_path =
-      "/api/v1/ide/annotations?canonical_url="
-      ^ Uri.pct_encode "https://github.com/jeong-sik/masc.git"
+      "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc"
     in
     let request =
       http_request
@@ -833,7 +832,7 @@ let test_read_annotations_rejects_missing_scope () =
     check
       string
       "missing scope error"
-      "IDE scope is required; pass repo_id, canonical_url, or keeper_lane"
+      "IDE scope is required; pass codebase or keeper_lane"
       (error_message_of_response response);
     check
       string
@@ -842,31 +841,29 @@ let test_read_annotations_rejects_missing_scope () =
       (error_code_of_response response))
 ;;
 
-let test_read_cursors_rejects_unmatched_repo_scope () =
+let test_read_cursors_accepts_unknown_codebase_as_empty () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    (* RFC-0378 §5.4: the scope universe is store-measured, not the
+       catalog — an unknown slug is a legitimate empty partition, not a
+       registry miss. *)
     let request =
-      http_request ~meth:`GET ~path:"/api/v1/ide/cursors?repo_id=missing-repo" ()
+      http_request ~meth:`GET ~path:"/api/v1/ide/cursors?codebase=github.com_x_missing" ()
     in
     let response = dispatch router request in
-    check_status "GET cursors with unmatched repo_id returns 400" 400 response;
-    check
-      string
-      "unmatched repo error code"
-      "unmatched_repo_id"
-      (error_code_of_response response))
+    check_status "GET cursors with an unknown codebase returns 200" 200 response)
 ;;
 
 let test_get_events_rejects_invalid_canonical_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request =
-      http_request ~meth:`GET ~path:"/api/v1/ide/events?canonical_url=not-a-url" ()
+      http_request ~meth:`GET ~path:"/api/v1/ide/events?codebase=Not%%20A%%20Slug" ()
     in
     let response = dispatch router request in
-    check_status "GET events with invalid canonical_url returns 400" 400 response;
+    check_status "GET events with an invalid codebase returns 400" 400 response;
     check
       string
-      "invalid canonical_url code"
-      "invalid_canonical_url"
+      "invalid codebase code"
+      "invalid_codebase"
       (error_code_of_response response))
 ;;
 
@@ -1069,11 +1066,11 @@ let test_events_keeper_lane_conflicts_with_repo_scope () =
     let request =
       http_request
         ~meth:`GET
-        ~path:"/api/v1/ide/events?keeper_lane=alice&repo_id=masc"
+        ~path:"/api/v1/ide/events?keeper_lane=alice&codebase=github.com_jeong-sik_masc"
         ()
     in
     let response = dispatch router request in
-    check_status "keeper_lane + repo_id returns 400" 400 response;
+    check_status "keeper_lane + codebase returns 400" 400 response;
     check string "conflict code" "conflicting_ide_scope" (error_code_of_response response))
 ;;
 
@@ -1235,9 +1232,9 @@ let () =
         ; test_case
             "GET cursors rejects unmatched repo scope"
             `Quick
-            test_read_cursors_rejects_unmatched_repo_scope
+            test_read_cursors_accepts_unknown_codebase_as_empty
         ; test_case
-            "GET events rejects invalid canonical_url scope"
+            "GET events rejects an invalid codebase scope"
             `Quick
             test_get_events_rejects_invalid_canonical_scope
         ; test_case
@@ -1249,7 +1246,7 @@ let () =
             `Quick
             test_memory_response_declares_annotation_source_contract
         ; test_case
-            "GET memory honors canonical_url scope"
+            "GET memory honors the codebase scope"
             `Quick
             test_memory_response_honors_canonical_url_scope
         ] )

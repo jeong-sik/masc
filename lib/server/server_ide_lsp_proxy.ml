@@ -251,13 +251,11 @@ let overlay_partition cs =
 let lsp_connection_addressing ~state ~uri =
   match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
   | Error err -> Error err
-  | Ok (Some (Server_ide_scope.Scope_canonical_url _)) ->
-    Error
-      (Server_ide_scope.ide_error
-         "unanchored_ide_scope"
-         "LSP connections must scope by repo_id or keeper_lane: canonical_url           names a partition but not a workspace tree")
-  | Ok ((Some (Server_ide_scope.Scope_repo_id _ | Server_ide_scope.Scope_keeper_lane _) | None) as scope)
-    ->
+  | Ok scope ->
+    (* RFC-0378 §5.3b: the scope names the overlay partition; the workspace
+       tree anchor is the separate workspace axis, resolved from its own
+       parameters. The old full-URL scope that could name a partition
+       without a tree died with that spelling. *)
     let anchor, _source =
       Server_routes_http_routes_workspace.resolve_workspace_base ~state ~uri
     in

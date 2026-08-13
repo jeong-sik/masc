@@ -42,14 +42,7 @@ let respond_ide_error ~status ~request err reqd =
 
 
 type ide_scope = Server_ide_scope.ide_scope =
-  | Scope_canonical_url of
-      { raw : string
-      ; slug : string
-      }
-  | Scope_repo_id of
-      { repo_id : string
-      ; slug : string
-      }
+  | Scope_codebase of { slug : string }
   | Scope_keeper_lane of { keeper_id : string }
 
 let partition_of_ide_scope = Server_ide_scope.partition_of_ide_scope
@@ -82,12 +75,12 @@ let keeper_filter_for_scope ~scope ~requested_keeper_id =
             "keeper_lane_filter_conflict"
             "keeper_id filter must match the keeper_lane scope")
      | Some _ | None -> Ok (Some lane))
-  | Scope_canonical_url _ | Scope_repo_id _ -> Ok requested_keeper_id
+  | Scope_codebase _ -> Ok requested_keeper_id
 ;;
 
 let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
   match scope with
-  | Scope_canonical_url _ | Scope_repo_id _ -> continue ()
+  | Scope_codebase _ -> continue ()
   | Scope_keeper_lane { keeper_id = lane } ->
     let base_path = base_path_of_state state in
     (match
@@ -850,7 +843,7 @@ let add_routes router =
                  (fun (r : Ide_annotation_types.code_region) ->
                    String.equal r.keeper_id keeper_id)
                  regions
-             | Scope_canonical_url _ | Scope_repo_id _ -> regions
+             | Scope_codebase _ -> regions
            in
            let json = `List (List.map Ide_annotation_types.region_to_json regions) in
            Http.Response.json_value

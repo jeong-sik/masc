@@ -1,38 +1,6 @@
-(** Mention parsing module - Stateless/Stateful/Broadcast routing modes
-
-    @mention 문법:
-    - @@agent           → Broadcast to ALL agents of this type
-    - @agent-adj-animal → Stateful (specific agent by nickname)
-    - @agent            → Stateless (pick one available agent)
-*)
-
-(** Mention routing mode *)
-type mode =
-  | Stateless of string       (** @agent → pick one available *)
-  | Stateful of string        (** @agent-adj-animal → specific agent *)
-  | Broadcast of string       (** @@agent → all of type *)
-  | None                      (** No mention found *)
-
-(** Convert mode to string for logging *)
-let mode_to_string = function
-  | Stateless s -> Printf.sprintf "Stateless(%s)" s
-  | Stateful s -> Printf.sprintf "Stateful(%s)" s
-  | Broadcast s -> Printf.sprintf "Broadcast(%s)" s
-  | None -> "None"
-
-(** Extract agent type from mention (e.g., "local-gentle-gecko" → "local") *)
-let agent_type_of_mention mention =
-  let parts = String.split_on_char '-' mention in
-  match parts with
-  | [] -> mention
-  | base :: _ ->
-      if String.length base > 0 then base
-      else mention
-
-(** Check if a mention is a generated nickname (agent-adjective-animal pattern) *)
-let is_nickname mention =
-  let parts = String.split_on_char '-' mention in
-  List.length parts >= 3
+(** Exact mention extraction and matching. Routing policy belongs to callers;
+    this module only preserves the target bytes carried by [@target] or
+    [@@target]. *)
 
 (* The mention patterns are static. [Re.compile] runs the DFA construction once
    at module load instead of per [parse] call; on a high-broadcast workspace
@@ -41,68 +9,32 @@ let is_nickname mention =
 let broadcast_re =
   Re.(compile
         (seq [
+          alt [bos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '@'; char '_'; char '-']];
           str "@@";
           group (rep1 (alt [rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_']));
+          alt [eos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '_'; char '-']];
         ]))
 
 let mention_re =
   Re.(compile
         (seq [
+          alt [bos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '@'; char '_'; char '-']];
           char '@';
           group (rep1 (alt [
             rg 'a' 'z'; rg 'A' 'Z'; rg '0' '9'; char '_'; char '-';
           ]));
+          alt [eos; compl [rg 'A' 'Z'; rg 'a' 'z'; rg '0' '9'; char '_'; char '-']];
         ]))
 
-(** Parse @mention from message content
-
-    Priority order:
-    1. @@agent → Broadcast
-    2. any hyphenated @target → Stateful exact target
-    3. non-hyphenated @agent → Stateless
-*)
-let parse content =
+(** Extract the exact target. Fleet broadcast syntax keeps priority over a
+    direct mention, matching the historical production contract. *)
+let extract content =
   match Re.exec_opt broadcast_re content with
-  | Some g -> Broadcast (Re.Group.get g 1)
+  | Some group -> Some (Re.Group.get group 1)
   | None ->
     (match Re.exec_opt mention_re content with
-     | Some group ->
-       let mention = Re.Group.get group 1 in
-       if String.contains mention '-'
-       then Stateful mention
-       else Stateless mention
+     | Some group -> Some (Re.Group.get group 1)
      | None -> None)
-
-(** Extract raw mention target (backward-compatible with old extract_mention) *)
-let extract content =
-  match parse content with
-  | Stateless s -> Some s
-  | Stateful s -> Some s
-  | Broadcast s -> Some s
-  | None -> None
-
-(** Get target agents based on mode
-
-    Returns:
-    - Stateless: First available agent of type
-    - Stateful: Specific agent (exact match)
-    - Broadcast: All agents of type
-*)
-let resolve_targets mode ~available_agents =
-  match mode with
-  | None -> []
-  | Stateless agent_type ->
-      (* Find first agent matching type *)
-      available_agents
-      |> List.filter (fun name -> agent_type_of_mention name = agent_type)
-      |> (fun l -> match l with [] -> [] | first :: _ -> [first])
-  | Stateful nickname ->
-      (* Exact match only *)
-      if List.mem nickname available_agents then [nickname] else []
-  | Broadcast agent_type ->
-      (* All agents of type *)
-      available_agents
-      |> List.filter (fun name -> agent_type_of_mention name = agent_type)
 
 (* Target-keyed cache for [is_mentioned]'s compiled regex.
 

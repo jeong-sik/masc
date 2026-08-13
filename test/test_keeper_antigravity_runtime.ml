@@ -857,11 +857,19 @@ let test_capacity_bounds_an_appending_source_projection () =
         | [] -> fail "projection emptied the history"))
 ;;
 
+(* The tail window charges the constant synthetic User preamble before any
+   atom (it can never be cut), so the smallest workable capacity sits above
+   that constant plus the reserve. 4096 is comfortably above it and still
+   small enough that 100 framed messages must be cut. *)
 let test_capacity_counts_rendered_role_framing () =
-  let history = List.init 100 (fun _ -> plain_user_message "") in
+  let history =
+    List.init 100 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 64 'x')))
+  in
   match
     capacity_projection
-      ~declared_max_prompt_bytes:(Some 256)
+      ~declared_max_prompt_bytes:(Some 4096)
       ~system_prompt:"system"
       ~goal:"goal"
       None
@@ -885,7 +893,28 @@ let test_capacity_counts_rendered_role_framing () =
          | Error detail -> fail detail
        in
        check bool "role-framed prompt stays inside capacity" true
-         (prompt_bytes <= 256))
+         (prompt_bytes <= 4096))
+;;
+
+let test_capacity_below_preamble_constant_is_a_typed_refusal () =
+  let history = List.init 100 (fun _ -> plain_user_message "") in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 256)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error _ -> ()
+     | Ok projected ->
+       fail
+         (Printf.sprintf
+            "a capacity below the undroppable preamble constant admitted %d messages"
+            (List.length projected)))
 ;;
 
 let test_capacity_refuses_oversized_fixed_sections () =
@@ -950,6 +979,10 @@ let () =
               "role framing is charged to the prompt capacity"
               `Quick
               test_capacity_counts_rendered_role_framing
+          ; test_case
+              "a capacity below the preamble constant is refused"
+              `Quick
+              test_capacity_below_preamble_constant_is_a_typed_refusal
           ; test_case
               "oversized fixed sections are refused"
               `Quick

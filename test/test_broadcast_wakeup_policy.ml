@@ -33,6 +33,7 @@ let delivery ~target ~request_id ~seq ~content : Workspace_broadcast.broadcast_d
   ; content
   ; mention = Some target
   ; msg_type = "broadcast"
+  ; mention_delivery = Workspace_broadcast.Pending
   }
 ;;
 
@@ -80,10 +81,10 @@ let test_delivery_appends_once_before_wake () =
       delivery
   in
   (match deliver () with
-   | Server_bootstrap_loops.Broadcast_persisted_and_woken "rondo" -> ()
+   | Workspace_broadcast.Accepted -> ()
    | _ -> fail "committed delivery did not wake the running keeper");
   (match deliver () with
-   | Server_bootstrap_loops.Broadcast_persisted_and_woken "rondo" -> ()
+   | Workspace_broadcast.Already_accepted -> ()
    | _ -> fail "idempotent replay did not preserve wake eligibility");
   check int "one accepted-user row" 1
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id);
@@ -105,8 +106,7 @@ let test_stopped_keeper_persists_without_wake () =
       (delivery ~target ~request_id ~seq:2 ~content:"persist while stopped")
   in
   (match outcome with
-   | Server_bootstrap_loops.Broadcast_persisted_wake_deferred actual ->
-     check string "deferred target" target actual
+   | Workspace_broadcast.Accepted -> ()
    | _ -> fail "stopped Keeper delivery was not durably deferred");
   check int "stopped delivery persisted" 1
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id);

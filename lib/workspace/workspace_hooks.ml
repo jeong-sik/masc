@@ -137,6 +137,14 @@ let on_task_mutation_fn
   : (unit -> unit) Atomic.t
   = Atomic.make (fun () -> ())
 
+let on_workspace_message_mutation_fn
+  : (Workspace_utils_backend_setup.config ->
+     request_id:string ->
+     mention_delivery:Masc_domain.message_mention_delivery ->
+     unit)
+      Atomic.t
+  = Atomic.make (fun _config ~request_id:_ ~mention_delivery:_ -> ())
+
 let operator_pending_confirm_trace_id_fn
   : (string -> string) Atomic.t
   =

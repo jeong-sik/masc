@@ -2101,11 +2101,13 @@ let test_dashboard_execution_trust_default_route_uses_cached_surface () =
 let test_dashboard_message_json_surfaces_temporal_fields () =
   let message : Types.message =
     {
+      request_id = "wmsg-dashboard-test";
       seq = 7;
       from_agent = "operator";
       msg_type = "broadcast";
       content = "hello";
       mention = None;
+      mention_delivery = Types.Mention_passive;
       timestamp = "2026-05-07T00:00:00Z";
       trace_context = Some "traceparent";
       expires_at = Some 1_714_067_200.0;

@@ -6,6 +6,28 @@ type broadcast_error = Broadcast_not_persisted of string
 
 val broadcast_error_to_string : broadcast_error -> string
 
+type mention_delivery_deferred =
+  | Handler_unavailable
+  | Target_state_unavailable
+  | Intake_store_unavailable
+  | Workspace_status_unavailable
+  | Handler_failed
+  | Predecessor_pending
+  | Recovery_unavailable
+
+type mention_delivery_rejected =
+  | Target_not_configured
+  | Invalid_target
+  | Invalid_request
+
+type mention_delivery =
+  | Passive
+  | Pending
+  | Accepted
+  | Already_accepted
+  | Deferred of mention_delivery_deferred
+  | Rejected of mention_delivery_rejected
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -14,6 +36,19 @@ type broadcast_delivery =
   ; content : string
   ; mention : string option
   ; msg_type : string
+  ; mention_delivery : mention_delivery
+  }
+
+type reconciliation_report =
+  { outbox_rows : int
+  ; pending_rows : int
+  ; accepted : int
+  ; already_accepted : int
+  ; deferred : int
+  ; rejected : int
+  ; corrupt_rows : int
+  ; blocked_targets : string list
+  ; global_barrier : bool
   }
 
 val emit_message_activity : Workspace_utils_backend_setup.config ->
@@ -29,7 +64,20 @@ val broadcast_channel : Workspace_utils_backend_setup.config -> string
 (** Atomically replace the process-wide committed-broadcast notification
     handler. The handler runs only after the authoritative workspace message
     write commits. *)
-val set_on_broadcast_mention : (broadcast_delivery -> unit) -> unit
+val set_on_broadcast_mention :
+  (broadcast_delivery -> mention_delivery) -> unit
+
+(** Reconcile the explicit-mention pending outbox in source sequence order.
+    The authoritative backend owns enumeration, so Memory commits remain
+    visible even when their optional filesystem mirror failed. *)
+val reconcile_pending_mentions :
+  Workspace_utils_backend_setup.config ->
+  (reconciliation_report, string) result
+
+val mention_delivery_to_yojson : mention_delivery -> Yojson.Safe.t
+val mention_delivery_kind : mention_delivery -> string
+val mention_delivery_reason : mention_delivery -> string option
+val broadcast_delivery_to_yojson : broadcast_delivery -> Yojson.Safe.t
 
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
@@ -40,11 +88,11 @@ val broadcast : ?trace_context:string ->
 module For_testing : sig
   (** Replace the handler and return the prior one. Test isolation only. *)
   val replace_on_broadcast_mention :
-    (broadcast_delivery -> unit) -> broadcast_delivery -> unit
+    (broadcast_delivery -> mention_delivery) ->
+    broadcast_delivery -> mention_delivery
 
-  (** Replace the authoritative write boundary and return the prior function.
-      Tests use this to prove failure fanout without depending on filesystem
-      permission behavior. *)
+  (** Replace the authoritative workspace-row write boundary and return the
+      prior function. Test isolation only. *)
   val replace_write_json_commit :
     (Workspace_utils_backend_setup.config ->
      string ->

@@ -217,7 +217,7 @@
 
   <h2>5. 병렬 트랙과 실제 의존성</h2>
   <div class="stack">
-    <article class="card lane block"><div class="step"><strong>Track A</strong><h3>독립 merge 상태</h3><p>현재 즉시 병합 후보는 없다. #28470은 <code>status:do-not-merge</code>/<code>reviewed:adversarial-non-pass</code>, #28605·#28606·#28647은 Draft, #28625도 <code>do-not-merge</code>/<code>adversarial-non-pass</code>다. #28556은 exact-head CI green이지만 basic review만 있어 adversarial source 판정 전에는 후보로 올리지 않는다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>Track A</strong><h3>독립 merge 상태</h3><p>현재 즉시 병합 후보는 없다. #28470은 <code>status:do-not-merge</code>/<code>reviewed:adversarial-non-pass</code>, #28605·#28606·#28647은 Draft, #28625도 <code>do-not-merge</code>/<code>adversarial-non-pass</code>다. #28556은 exact-head CI green/CLEAN이지만 source P1로 보류한다. consumer는 <code>event_id</code> 또는 <code>(run_id, seq)</code>만 중복 제거하지만 현재 <code>keeper_event_bridge</code> producer는 둘 다 내보내지 않아, 실제 replay→SSE 겹침이 계속 두 번 투영된다. producer-owned identity를 먼저 wire하고 실제 직렬화 envelope 회귀 테스트를 붙여야 한다.</p></div></article>
     <article class="card lane"><div class="step"><strong>A →</strong><h3>Broadcast · #28590</h3><p>main 병합은 확인했다. full hyphen target과 first-mention ordering의 source/CI 증거는 있으나, 새 binary 배포와 하이픈 identity를 포함한 2 Keeper live 수신·중복 없음은 아직 증명하지 않았다.</p></div></article>
     <article class="card lane block"><div class="step"><strong>Track B</strong><h3>Parallel Tool · #28605 → #28606</h3><p>두 PR 모두 head가 다시 움직였다(<code>f2a3a10ddd</code> → <code>2bfafa548c</code>). #28605는 Draft/<code>adversarial-non-pass</code>이며 Build and Test 진행 중이고, #28606도 Draft로 축 CI만 확인됐다. 이전 invocation scope·trajectory ordering·census 문제를 최신 head에서 다시 닫고 실제 mixed batch의 planned order, sibling failure, cancellation, observation identity를 증명하기 전에는 병합하지 않는다.</p></div></article>
     <article class="card lane block"><div class="step"><strong>Track C</strong><h3>Exact binary identity와 재배포</h3><p>live health의 <code>a157997abf</code>는 checkout probe이고 embedded binary SHA가 아니다. Dashboard asset도 stale이다. 사용자가 재빌드·재기동한 뒤 새 process의 exact identity를 확보하고, source/merged/deployed/live/browser 축을 다시 연결한다.</p></div></article>
@@ -273,7 +273,7 @@
   </ul></details>
   <p class="muted">갱신 규칙: live 수치는 캡처 시각이 지나면 역사적 증거다. PR head가 바뀌면 이전 CI는 무효다. 기능 행의 상태는 더 강한 증거가 생길 때만 올리고, source가 사라지거나 live가 모순되면 즉시 내린다.</p>
 
-  <footer>source/PR audit <code>2026-08-14T03:20+09:00</code> · fleet/catalog snapshot <code>2026-08-13T15:32:54Z</code> · upstream <code>427b00defa</code> · #28625 <code>29c13edb15</code> · #28647 <code>b57f824f4f</code> · runtime checkout probe <code>a157997abf</code> · live binary SHA unknown · effective base <code>/Users/dancer/me</code></footer>
+  <footer>source/PR audit <code>2026-08-14T03:28+09:00</code> · fleet/catalog snapshot <code>2026-08-13T15:32:54Z</code> · upstream <code>427b00defa</code> · #28625 <code>29c13edb15</code> · #28647 <code>b57f824f4f</code> · runtime checkout probe <code>a157997abf</code> · live binary SHA unknown · effective base <code>/Users/dancer/me</code></footer>
 </main>
 <script>
   const query = document.querySelector('#query');

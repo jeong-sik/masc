@@ -159,6 +159,12 @@ obligation 경로는 그 위에 덧붙은 두 번째 경로이며, 최종 텍스
 - `lib/server/server_dashboard_schedule_projection.ml` — §4.5
 - `test/test_schedule_consumer_dispatch.ml`,
   `test/test_keeper_terminal_reason_typed.ml`
+- `dashboard/src/api/dashboard-tools-prompts.ts`,
+  `dashboard/src/components/tools/scheduled-automation-panel.{ts,test.ts}`
+
+후속 절단(별도 PR): `Keeper_chat_delivery_identity.delivery_key` 의
+`Continuation` kind. 생산자는 이 RFC 로 사라지지만 기존 chat 행의 decode 어휘로
+남아 있어, 행 decode 정책과 기존 데이터 정리를 함께 다뤄야 한다.
 
 ### 4.2 실측이 없는 두 source family
 
@@ -178,52 +184,36 @@ obligation 실측이 0건이다. 이 둘에 대해서는 "오늘 이 경로에 �
 입력으로 전달하고 Keeper 가 발화 도구로 보내는 방식으로 구현한다. 시스템이 최종
 텍스트를 대신 보내는 방식으로 되돌리지 않는다.
 
-### 4.3 turn outcome — Direct 턴 보존
+### 4.3 attention ledger 는 route 사실을 소비한다
 
-`of_result_surface` 의 프로덕션 호출은 `lib/keeper/keeper_agent_run.ml:1092` 한
-곳이며 Direct 턴과 자율턴이 이 호출을 공유한다. 그 값은
-`server_routes_http_keeper_stream.ml:1465` 에 도달해 큐잉된 사용자 메시지의 응답
-전달을 결정한다. `No_visible_reply` 는 "no visible reply was produced" 경로로
-떨어진다.
+`Turn_completed` 는 `continuation_route_disposition` 을 나른다 — 완료된 turn 의
+terminal surface post 가 자신을 깨운 채널과 route 일치하면 `addressed`, 아니면
+`not_addressed`. unified turn 이 receipt 와 wake payload 채널로 계산하는 typed
+사실이며, connector-attention ledger 가 addressed 를 resolved 로, not_addressed 를
+ignored 로 마킹한다. 삭제된 completion 타입이 하던 일 중 살아남는 것은 이
+사실뿐이다.
 
-따라서 `Completed` 를 무조건 `No_visible_reply` 로 만들면 dashboard chat 응답이
-사라진다. 그렇게 하지 않는다.
+`of_result_surface` 는 손대지 않는다. dashboard chat 의 응답 판정은 이 RFC 이전과
+동일하다.
 
-`of_result_surface` 는 `turn_kind` 를 받는다.
+### 4.4 stimulus 계약
 
-- `Direct` — 현재 판정을 그대로 유지한다.
-- `Autonomous` — `Completed` 는 `No_visible_reply` 다.
+배달 성공이 아니라 turn 완료가 stimulus 를 acknowledge 한다. disposition
+타입(`Acknowledge/Defer/Retain/Quarantine`)과 두 quarantine 지점 — unified turn 의
+"visible delivery intent 없음" arm, heartbeat 의 "durable obligation 없음" 분기 —
+은 근거가 사라지므로 함께 삭제된다. 말하지 않기로 한 turn 은 정상 완료다. turn
+자체가 실패하면 stimulus 는 기존 실패 경로대로 큐에 남는다.
 
-`turn_kind` 는 RFC-0358 이 이미 `Turn_record.t` 의 필수 필드로 소유하므로 새 상태를
-만들지 않는다.
-
-### 4.4 disposition
-
-§4.3 이후 자율턴의 intent 는 항상 없다. `keeper_unified_turn.ml:1169` 의
-
-```ocaml
-| Some _, None, _, Completed, _ -> Continuation_delivery_quarantined { ... }
-```
-
-는 그대로 두면 발화 도구를 쓰지 않은 모든 자율턴을 격리하고,
-`keeper_heartbeat_loop.ml` 의 `continuation_source_disposition` 이 그것을
-`terminalize_failed_selection` 으로 실패 종결시킨다. 오늘 정상 처리되는 턴이 대량으로
-실패 전환된다.
-
-이 arm 을 `Continuation_delivery_not_required` 로 바꾼다. 말하지 않기로 한 턴은 정상
-완료이며 stimulus 는 acknowledge 된다.
-
-`Settled_by_terminal_surface_post` arm 은 그대로 둔다 — Keeper 가 발화 도구로 지정
-채널에 보낸 경우의 종결 판정이다.
-
-stimulus 재시도는 배달 성공이 아니라 턴 성공을 기준으로 남는다. `Cycle.Failed` 경로는
-배달과 독립적이므로 턴이 실패하면 stimulus 는 계속 큐에 남는다.
+turn 이 도구 셋업에서 받는 reply 채널은 wake payload 가 직접 명명한다
+(`Keeper_event_queue.continuation_channel_of_payload`). origin 타입을 경유하던
+파생이 사라질 뿐 도구가 보는 값은 같다.
 
 ### 4.5 schedule 배달 상태 대시보드 뷰
 
-`server_dashboard_schedule_projection.ml` 의 `masc.dashboard.schedule_result_delivery.v1`
-는 obligation 의 state 를 대시보드에 노출한다. §4.1 이 그 데이터 소스를 없애므로 이
-뷰도 폐기한다.
+`masc.dashboard.schedule_result_delivery.v1` 는 obligation state 를 대시보드에
+노출한다. §4.1 이 데이터 소스를 없애므로 서버 projection 과 dashboard 컴포넌트
+(카드, 타입, 픽스처)를 함께 폐기한다. dispatch receipt 의
+`result_delivery_policy` 행은 schedule 도메인이므로 남는다.
 
 근거: `schedule_occurrence` obligation 실측 0건이므로 이 뷰가 현재 표시하는 배달
 상태가 없다. 예약 결과 관측이 필요해지면 turn record 기반으로 다시 만든다 — 그때는

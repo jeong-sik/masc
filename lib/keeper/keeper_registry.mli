@@ -372,14 +372,7 @@ val get_turn_failures : base_path:string -> string -> int
 (** Record a crash entry in the crash log (keeps last 5). *)
 val record_crash : base_path:string -> string -> float -> string -> unit
 
-(** Failure mutations scoped to the exact lane captured by [entry]. *)
-val set_failure_reason_exact :
-  registry_entry -> failure_reason option -> exact_update_result
-
 val set_last_error_exact : registry_entry -> string -> exact_update_result
-
-val record_crash_exact :
-  registry_entry -> float -> string -> exact_update_result
 
 (** Observe an exact-lane update without discarding why it did not commit.
     Returns [true] only for [Exact_updated]; all other outcomes are logged with
@@ -520,9 +513,6 @@ val restore_supervisor_state :
 
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
-
-(** Reset tracking only if [entry]'s lane still owns its registry key. *)
-val cleanup_tracking_exact : registry_entry -> exact_update_result
 
 val cleanup_tracking_exact_for_lifecycle :
   Keeper_lifecycle_reservation.token -> registry_entry -> exact_update_result

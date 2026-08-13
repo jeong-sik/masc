@@ -14,7 +14,15 @@ val consume_replay_response :
 type wire_capture_response_suppression_reason
 
 val wire_capture_response_suppression_reasons :
-  control_checkpoint:bool -> wire_capture_response_suppression_reason list
+     control_checkpoint:bool
+  -> terminal_effect_settled:bool
+  -> wire_capture_response_suppression_reason list
+(** [terminal_effect_settled] is the turn outcome saying the effect already
+    reached the reader. It is a separate question from [control_checkpoint],
+    which reads [stop_reason]: a turn whose effect a Gate replay settled before
+    the model spoke still stops at [Completed] when the model answers in plain
+    text, so only the outcome can tell that the visible text would be a second
+    message about work already delivered. *)
 
 val wire_capture_response_suppression_reason_label :
   wire_capture_response_suppression_reason -> string

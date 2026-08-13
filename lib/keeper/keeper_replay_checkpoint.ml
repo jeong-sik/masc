@@ -25,13 +25,27 @@ let consume_replay_response
 
 type wire_capture_response_suppression_reason =
   | Control_checkpoint
+  (* The turn's effect already reached the reader — an approved connector post
+     that a Gate replay settled before the model spoke. Anything the model then
+     says is a second message about work already delivered. [Control_checkpoint]
+     cannot cover this: it reads [stop_reason], and a turn that answers in plain
+     text without calling a tool stops at [Completed] like any other. *)
+  | Terminal_effect_settled
 
-let wire_capture_response_suppression_reasons ~control_checkpoint =
-  if control_checkpoint then [ Control_checkpoint ] else []
+let wire_capture_response_suppression_reasons
+      ~control_checkpoint
+      ~terminal_effect_settled
+  =
+  List.filter_map
+    (fun (applies, reason) -> if applies then Some reason else None)
+    [ control_checkpoint, Control_checkpoint
+    ; terminal_effect_settled, Terminal_effect_settled
+    ]
 ;;
 
 let wire_capture_response_suppression_reason_label = function
   | Control_checkpoint -> "control_checkpoint"
+  | Terminal_effect_settled -> "terminal_effect_settled"
 ;;
 
 let emit_wire_capture_response_suppressed_metric ~keeper_name reason =

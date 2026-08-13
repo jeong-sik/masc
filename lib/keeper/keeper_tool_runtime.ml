@@ -162,7 +162,7 @@ let handle_in_process ctx descriptor args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_time_now ->
     Some
-      (Keeper_tool_execution.success
+      (Keeper_tool_execution.success_data
          (Keeper_tool_in_process_runtime.handle_time_now ~args))
   | Tool_tools_list ->
     Some

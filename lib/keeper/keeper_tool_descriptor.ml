@@ -56,6 +56,21 @@ let execution_to_string = function
   | Terminal -> "terminal"
 ;;
 
+type composable_output =
+  | Opaque_output
+  | Json_output of { schema : Yojson.Safe.t }
+
+let composable_output_kind = function
+  | Opaque_output -> "opaque"
+  | Json_output _ -> "json"
+;;
+
+let composable_output_to_json = function
+  | Opaque_output -> `Assoc [ "kind", `String "opaque" ]
+  | Json_output { schema } ->
+    `Assoc [ "kind", `String "json"; "schema", schema ]
+;;
+
 type identity_validation =
   | Validate_once_before_translation
   | Validate_once_after_translation
@@ -129,6 +144,7 @@ type t =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; model_output_projection : Tool_output.model_projection
+  ; composable_output : composable_output
   ; execution : execution
   ; policy : policy
   ; executor : executor
@@ -511,6 +527,7 @@ let descriptor
       ~description
       ~input_schema
       ?(model_output_projection = Tool_output.default_model_projection)
+      ?(composable_output = Opaque_output)
       ?(ordinary_execution_mode = Serial)
       ~policy
       ~executor
@@ -575,6 +592,7 @@ let descriptor
     ; "sandbox", sandbox_to_string sandbox
     ; "runtime_handler", runtime_handler_to_string runtime_handler
     ; "execution", execution_to_string execution
+    ; "composable_output", composable_output_kind composable_output
     ; ( "keeper_tool_group"
       , keeper_tool_group_to_string
           (keeper_tool_group_of_runtime_handler runtime_handler) )
@@ -595,6 +613,7 @@ let descriptor
   ; description
   ; input_schema
   ; model_output_projection
+  ; composable_output
   ; execution
   ; policy
   ; executor
@@ -614,6 +633,10 @@ let with_eval_tags eval_tags descriptor =
 
 let with_model_output_projection model_output_projection descriptor =
   { descriptor with model_output_projection }
+;;
+
+let with_composable_output composable_output descriptor =
+  { descriptor with composable_output }
 ;;
 
 let public_descriptors =
@@ -1177,6 +1200,37 @@ let cluster_descriptor ?(polling_read = false) ~capability_identity
     ()
 ;;
 
+let object_output_schema ~properties ~required =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc properties
+    ; "required", `List (List.map (fun name -> `String name) required)
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let board_stats_output_schema =
+  object_output_schema
+    ~properties:
+      [ "post_count", `Assoc [ "type", `String "integer" ]
+      ; "comment_count", `Assoc [ "type", `String "integer" ]
+      ; "expired_pending", `Assoc [ "type", `String "integer" ]
+      ; "last_sweep", `Assoc [ "type", `String "number" ]
+      ; "backend", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:
+      [ "post_count"; "comment_count"; "expired_pending"; "last_sweep"; "backend" ]
+;;
+
+let time_now_output_schema =
+  object_output_schema
+    ~properties:
+      [ "now_iso", `Assoc [ "type", `String "string" ]
+      ; "now_unix", `Assoc [ "type", `String "number" ]
+      ]
+    ~required:[ "now_iso"; "now_unix" ]
+;;
+
 let masc_board_descriptor board_name =
   let canonical_schema = Board_tool_registry.schema_for_board_name board_name in
   let name = Tool_name.Board_name.to_string board_name in
@@ -1219,7 +1273,8 @@ let masc_board_descriptor board_name =
     | None ->
       Canonical_registry, canonical_schema.description, canonical_keeper_input_schema
   in
-  in_process_descriptor_with_schema_source
+  let descriptor =
+    in_process_descriptor_with_schema_source
        ~capability_identity:Internal_name_identity
        ~keeper_model_projection:Internal_name
        ~input_schema_source
@@ -1231,6 +1286,31 @@ let masc_board_descriptor board_name =
        ~policy
        ~handler:Tool_board_dispatch
        ()
+  in
+  match board_name with
+  | Tool_name.Board_name.Board_stats ->
+    descriptor
+    |> with_composable_output (Json_output { schema = board_stats_output_schema })
+  | ( Board_cleanup
+    | Board_comment
+    | Board_comment_vote
+    | Board_curation_read
+    | Board_curation_submit
+    | Board_delete
+    | Board_hearths
+    | Board_list
+    | Board_post
+    | Board_post_get
+    | Board_post_update
+    | Board_profile
+    | Board_reaction
+    | Board_search
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_get
+    | Board_sub_board_list
+    | Board_sub_board_update
+    | Board_vote ) -> descriptor
 ;;
 
 let masc_board_descriptors =
@@ -1485,7 +1565,7 @@ let masc_local_runtime_descriptors =
 
 let internal_descriptors : t list =
   [ (* ── time / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
-    in_process_descriptor
+    (in_process_descriptor
       ~keeper_model_projection:Internal_name
       ~id:"keeper.time.now"
       ~name:"keeper_time_now"
@@ -1497,6 +1577,7 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_time_now
       ()
+     |> with_composable_output (Json_output { schema = time_now_output_schema }))
   ; (in_process_descriptor
        ~keeper_model_projection:Internal_name
        ~id:"keeper.tools_list"
@@ -2016,6 +2097,7 @@ let route_evidence_json d =
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "execution", `String (execution_to_string d.execution)
+     ; "composable_output", composable_output_to_json d.composable_output
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
      ]
@@ -2051,6 +2133,7 @@ let discovery_fields d =
    ; "sandbox", `String (sandbox_to_string d.sandbox)
    ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
    ; "execution", `String (execution_to_string d.execution)
+   ; "composable_output", composable_output_to_json d.composable_output
    ; "policy", discovery_policy_json d.policy
    ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
    ]

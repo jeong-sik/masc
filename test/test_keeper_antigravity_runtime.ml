@@ -857,19 +857,26 @@ let test_capacity_bounds_an_appending_source_projection () =
         | [] -> fail "projection emptied the history"))
 ;;
 
-(* The tail window charges the constant synthetic User preamble before any
-   atom (it can never be cut), so the smallest workable capacity sits above
-   that constant plus the reserve. 4096 is comfortably above it and still
-   small enough that 100 framed messages must be cut. *)
 let test_capacity_counts_rendered_role_framing () =
-  let history =
-    List.init 100 (fun index ->
-      plain_user_message
-        (Printf.sprintf "history-%02d:%s" index (String.make 64 'x')))
+  let history = List.init 100 (fun _ -> plain_user_message "") in
+  let unprojected_prompt_bytes =
+    match
+      Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+        ~system_prompt:"system"
+        ~goal:"goal"
+        history
+    with
+    | Ok bytes -> bytes
+    | Error detail -> fail detail
   in
+  (* One byte below the exact unprojected prompt is a structural boundary:
+     retaining every message is impossible. A payload-only estimator used to
+     admit the whole history here because it omitted every rendered role label
+     and separator. *)
+  let capacity_bytes = unprojected_prompt_bytes - 1 in
   match
     capacity_projection
-      ~declared_max_prompt_bytes:(Some 4096)
+      ~declared_max_prompt_bytes:(Some capacity_bytes)
       ~system_prompt:"system"
       ~goal:"goal"
       None
@@ -893,14 +900,27 @@ let test_capacity_counts_rendered_role_framing () =
          | Error detail -> fail detail
        in
        check bool "role-framed prompt stays inside capacity" true
-         (prompt_bytes <= 4096))
+         (prompt_bytes <= capacity_bytes))
 ;;
 
 let test_capacity_below_preamble_constant_is_a_typed_refusal () =
   let history = List.init 100 (fun _ -> plain_user_message "") in
+  let fixed_prompt_bytes =
+    match
+      Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+        ~system_prompt:"system"
+        ~goal:"goal"
+        []
+    with
+    | Ok bytes -> bytes
+    | Error detail -> fail detail
+  in
+  (* Leave exactly one history byte beyond the real fixed prompt. The
+     undroppable omission preamble cannot fit in that budget. *)
+  let capacity_bytes = fixed_prompt_bytes + 1 in
   match
     capacity_projection
-      ~declared_max_prompt_bytes:(Some 256)
+      ~declared_max_prompt_bytes:(Some capacity_bytes)
       ~system_prompt:"system"
       ~goal:"goal"
       None

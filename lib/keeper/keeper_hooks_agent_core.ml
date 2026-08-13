@@ -144,7 +144,6 @@ let make_hooks
     ()
   : Agent_core.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
-  let tool_start_time = ref 0.0 in
   (* Per-turn tool call counter for SSE enrichment.
      Incremented in post_tool_use, reset in after_turn. *)
   let tool_call_count_ref = ref 0 in
@@ -156,13 +155,6 @@ let make_hooks
   in
   let hooks =
     { Agent_core.Hooks.empty with
-    pre_tool_use = Some (fun event ->
-      match event with
-      | Agent_core.Hooks.PreToolUse _ ->
-        tool_start_time := Time_compat.now ();
-        Agent_core.Hooks.Continue
-      | _event -> Agent_core.Hooks.Continue);
-
     before_turn = Some (fun event ->
       match event with
       | Agent_core.Hooks.BeforeTurn _ ->
@@ -445,14 +437,9 @@ let make_hooks
           "keeper:%s tool_call tool=%s params=[%s] input_shape=[%s] outcome=%s out_len=%d error_preview=%s"
           (!meta_ref).name tool_name input_keys input_shape outcome_s out_len
           error_preview;
-        (* Persistent tool call I/O log for dashboard inspector.
-           tool_start_time is keeper-local (one ref per make_hooks call).
-           Tool calls within Agent.run are sequential, so no race. *)
-        let duration_ms =
-          if hook_duration_ms > 0.0
-          then hook_duration_ms
-          else (Time_compat.now () -. !tool_start_time) *. ms_per_second
-        in
+        (* Agent Core measures duration per invocation. Do not reconstruct it
+           from Keeper-global mutable state: sibling calls may overlap. *)
+        let duration_ms = hook_duration_ms in
         let model =
           current_keeper_model !meta_ref
         in
@@ -469,9 +456,12 @@ let make_hooks
         (* Consume truncation info set by keeper_tools_agent_core before returning
            the (possibly truncated) result to AGENT_CORE. Falls back to out_len
            when no truncation info was set (e.g. AGENT_CORE-internal tool calls). *)
-        let (original_bytes, truncated_to) =
+        let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
+        let original_bytes, truncated_to =
           Keeper_tool_call_log.consume_truncation_info
-            ~keeper_name:(!meta_ref).name ()
+            ~keeper_name:(!meta_ref).name
+            ~tool_use_id
+            ()
         in
         let result_bytes = if original_bytes > 0 then original_bytes else out_len in
         (* Full record read: log_call no longer falls back to ambient
@@ -481,7 +471,6 @@ let make_hooks
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
-        let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
         let invocation_turn = Some (Agent_core.Tool_contract.Invocation.turn invocation) in
         (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
            the log_call row and the trajectory entry below share the value

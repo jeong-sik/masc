@@ -7,21 +7,23 @@
 
 val set_truncation_info :
   keeper_name:string ->
+  tool_use_id:string ->
   original_bytes:int ->
   ?truncated_to:int ->
   unit ->
   unit
-(** [set_truncation_info ~keeper_name ~original_bytes ?truncated_to ()]
+(** [set_truncation_info ~keeper_name ~tool_use_id ~original_bytes ?truncated_to ()]
     records pre-truncation output size for the given keeper. Called by
     the tool handler wrapper before returning the (possibly truncated)
-    result to AGENT_CORE. Per-keeper isolation prevents cross-keeper corruption
-    under concurrent tool execution. *)
+    result to AGENT_CORE. The exact invocation identity prevents sibling tool
+    results from consuming one another's state. *)
 
 val consume_truncation_info :
   keeper_name:string ->
+  tool_use_id:string ->
   unit ->
   int * int option
-(** [consume_truncation_info ~keeper_name ()] returns
+(** [consume_truncation_info ~keeper_name ~tool_use_id ()] returns
     [(original_bytes, truncated_to)] for the given keeper and clears
     the pending state. Returns [(0, None)] when no truncation info
     was set (e.g. AGENT_CORE-internal tool call that bypassed the wrapper). *)

@@ -14,22 +14,25 @@
 
 let max_output_len = 4000
 
-(** Pre-truncation info, keyed by keeper name.
+(** Pre-truncation info, keyed by the exact Agent Core invocation.
     Set by the tool handler wrapper (keeper_tools_agent_core), consumed by the
-    AGENT_CORE on_tool_result hook (keeper_hooks_agent_core).  Per-keeper isolation
-    prevents cross-keeper corruption when multiple keepers call tools
-    concurrently. Within a single keeper's Agent.run, tool calls are
-    sequential so set→consume ordering is guaranteed. *)
-let pending_truncation : (string, int * int option) Hashtbl.t = Hashtbl.create 8
-
-let set_truncation_info ~keeper_name ~original_bytes ?truncated_to () =
-  Hashtbl.replace pending_truncation keeper_name (original_bytes, truncated_to)
+    AGENT_CORE on_tool_result hook (keeper_hooks_agent_core). *)
+let pending_truncation : ((string * string), int * int option) Hashtbl.t =
+  Hashtbl.create 8
 ;;
 
-let consume_truncation_info ~keeper_name () =
-  match Hashtbl.find_opt pending_truncation keeper_name with
+let set_truncation_info ~keeper_name ~tool_use_id ~original_bytes ?truncated_to () =
+  Hashtbl.replace
+    pending_truncation
+    (keeper_name, tool_use_id)
+    (original_bytes, truncated_to)
+;;
+
+let consume_truncation_info ~keeper_name ~tool_use_id () =
+  let key = keeper_name, tool_use_id in
+  match Hashtbl.find_opt pending_truncation key with
   | Some info ->
-    Hashtbl.remove pending_truncation keeper_name;
+    Hashtbl.remove pending_truncation key;
     info
   | None -> 0, None
 ;;

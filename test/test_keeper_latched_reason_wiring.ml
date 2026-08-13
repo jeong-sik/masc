@@ -245,6 +245,54 @@ let test_pause_directive_leaves_an_existing_latch_intact () =
            (latched_reason_wire entry.meta)
        | None -> fail "expected registered keeper after pause directive")
 
+let test_reflected_operator_pause_reconciles_registry_phase () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "reflected-operator-pause" in
+       let meta =
+         { (make_meta keeper_name) with
+           paused = true
+         ; latched_reason =
+             Some
+               (Keeper_latched_reason.Operator_paused
+                  { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
+         }
+       in
+       Keeper_meta_store.replace_snapshot config meta |> Result.get_ok;
+       Keeper_owner_registry.install_from_store
+         ~sw
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         config
+       |> Result.get_ok
+       |> ignore;
+       Keeper_registry.For_testing.clear ();
+       ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper_name meta);
+       Keeper_keepalive.process_directive ~agent_name:keeper_name Keeper_directive.Pause;
+       match Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check
+           string
+           "reflected pause reconciles the registry phase"
+           "paused"
+           (Keeper_state_machine.phase_to_string entry.phase);
+         check
+           (option string)
+           "reflected pause preserves the durable latch"
+           (Some wire_grpc_directive)
+           (latched_reason_wire entry.meta)
+       | None -> fail "expected registered keeper after reflected pause")
+
 let test_keeper_down_retain_records_reason () =
   let retained =
     apply_reducer_command
@@ -317,5 +365,7 @@ let () =
             test_dead_tombstone_final_meta_records_reason
         ; test_case "reflected pause leaves an existing latch intact" `Quick
             test_pause_directive_leaves_an_existing_latch_intact
+        ; test_case "reflected operator pause reconciles registry phase" `Quick
+            test_reflected_operator_pause_reconciles_registry_phase
         ] )
     ]

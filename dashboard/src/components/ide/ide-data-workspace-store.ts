@@ -403,7 +403,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
     const task = selectedTask.value
-    const workspaceIdentity = ideWorkspaceIdentityForSelection(repoId, keeper)
+    // peek: the codebase is derived from the already-tracked repoId — reading
+    // the repository list reactively here would subscribe this fetch effect to
+    // every repositories refresh and re-fire it without a selection change.
+    const selectedCodebase =
+      repositoriesSignal.peek().find(repository => repository.id === repoId)?.codebase ?? null
+    const workspaceIdentity = ideWorkspaceIdentityForSelection(repoId, keeper, selectedCodebase)
     const workspaceIdentityChanged = !sameIdeWorkspaceIdentity(
       activeIdeWorkspaceIdentity.peek(),
       workspaceIdentity,

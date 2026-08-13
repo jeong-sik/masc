@@ -303,6 +303,46 @@ let test_generate_probe_decision_reports_typed_reasons () =
     (decision ~before_status:200 ~generate_when_unloaded:false
        ~effective_model_loaded_before:true ())
 
+let required_runtime_metadata name =
+  match Tool_catalog.registered_metadata name with
+  | Some metadata -> metadata
+  | None -> failf "missing runtime metadata for %s" name
+;;
+
+let test_runtime_tool_authority_matches_effects () =
+  let verify = required_runtime_metadata "masc_runtime_verify" in
+  check bool "verify remains Worker-readable" true
+    (verify.required_permission = Masc_domain.CanReadState);
+  check (option bool) "verify remains read-only" (Some true) verify.readonly;
+  check (option bool) "verify remains idempotent" (Some true) verify.idempotent;
+  let probe = required_runtime_metadata "masc_runtime_ollama_probe" in
+  check bool "probe requires operator authority" true
+    (probe.required_permission = Masc_domain.CanAdmin);
+  check (option bool) "probe is not read-only" (Some false) probe.readonly;
+  check (option bool) "probe is not idempotent" (Some false) probe.idempotent;
+  (match
+     Auth.authorize_tool_for_role
+       ~agent_name:"runtime-probe-worker"
+       ~role:Masc_domain.Worker
+       ~tool_name:"masc_runtime_ollama_probe"
+   with
+   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+   | Ok () -> fail "Worker must not invoke the operator runtime probe"
+   | Error error ->
+     failf "unexpected Worker authorization error: %s"
+       (Masc_domain.masc_error_to_string error));
+  match
+    Auth.authorize_tool_for_role
+      ~agent_name:"runtime-probe-admin"
+      ~role:Masc_domain.Admin
+      ~tool_name:"masc_runtime_ollama_probe"
+  with
+  | Ok () -> ()
+  | Error error ->
+    failf "Admin must retain runtime probe access: %s"
+      (Masc_domain.masc_error_to_string error)
+;;
+
 let () =
   run "tool_local_runtime_probe"
     [
@@ -352,5 +392,10 @@ let () =
             test_kv_cache_assessment_requires_two_successful_runs;
           test_case "generate probe decision reports typed reasons" `Quick
             test_generate_probe_decision_reports_typed_reasons;
+        ] );
+      ( "policy",
+        [
+          test_case "authority and execution policy match effects" `Quick
+            test_runtime_tool_authority_matches_effects;
         ] );
     ]

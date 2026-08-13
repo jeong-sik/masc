@@ -2,7 +2,7 @@
 
 open Masc_domain
 
-type operation =
+type operation = Local_runtime_tool_policy.operation =
   | Verify
   | Ollama_probe
 
@@ -11,31 +11,19 @@ type definition =
   ; schema : Masc_domain.tool_schema
   }
 
-let operation_id = function
-  | Verify -> "verify"
-  | Ollama_probe -> "ollama_probe"
-;;
+let operation_id = Local_runtime_tool_policy.operation_id
 
-(* Who the tool is for. Both operations stay registered in the catalog — the
-   dashboard route /api/v1/dashboard/runtime-probe authorizes through
-   [with_tool_auth ~tool_name:"masc_runtime_ollama_probe"], and
-   [authorize_tool_for_role] refuses any name it cannot find there. The
-   question this answers is narrower: does the autonomous Keeper model see the
-   schema in its tool list every turn. *)
-type keeper_model_exposure =
+(* Who the tool is for. Both operations stay registered in the catalog. The
+   native Ollama probe is an explicit Admin operation; the metadata-only
+   dashboard runtime probe has its own [CanReadState] route authority and does
+   not reuse this tool identity. The question this answers is narrower: does
+   the autonomous Keeper model see the schema in its tool list every turn. *)
+type keeper_model_exposure = Local_runtime_tool_policy.model_exposure =
   | Keeper_callable
   | Operator_diagnostic
 
-let keeper_model_exposure = function
-  | Verify -> Keeper_callable
-  | Ollama_probe ->
-    (* Native Ollama timing probe: repeated /api/generate calls whose output is
-       load/prompt-eval timings and a prefix-reuse inference. That is operator
-       diagnostics, and the operator reads it through the dashboard route. It
-       cost every Keeper turn 1,219 bytes of tool schema and was called 0 times
-       in the 6 days to 2026-08-06 (the workspace tool_usage store). *)
-    Operator_diagnostic
-;;
+let keeper_model_exposure = Local_runtime_tool_policy.model_exposure
+let execution_policy = Local_runtime_tool_policy.execution_policy
 
 let definitions : definition list =
   [
@@ -60,7 +48,7 @@ let definitions : definition list =
     { operation = Ollama_probe; schema = {
       name = "masc_runtime_ollama_probe";
       description =
-        "Probe native Ollama timing behavior with repeated /api/generate calls. Returns loaded models from /api/ps, per-run load/prompt-eval/generation timings, tok/sec estimates, and a timing-based repeated-prefix reuse inference. This does not expose direct KV occupancy or hit-rate.";
+        "Admin-only native Ollama timing probe with repeated /api/generate calls. It may load a model and change warm/cache state, so it is not read-only or idempotent. Returns loaded models from /api/ps, per-run load/prompt-eval/generation timings, tok/sec estimates, and a timing-based repeated-prefix reuse inference. This does not expose direct KV occupancy or hit-rate.";
       input_schema =
         `Assoc
           [

@@ -173,6 +173,9 @@ let () =
   List.iter
     (fun (definition : Tool_schemas_local_runtime.definition) ->
       let s = definition.schema in
+      let policy =
+        Tool_schemas_local_runtime.execution_policy definition.operation
+      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -180,8 +183,8 @@ let () =
            ~module_tag:Tool_dispatch.Mod_local_runtime
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:true
-           ~is_idempotent:true
+           ~is_read_only:policy.read_only
+           ~is_idempotent:policy.idempotent
            ()))
     Tool_schemas_local_runtime.definitions
 

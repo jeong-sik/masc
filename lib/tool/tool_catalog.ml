@@ -183,6 +183,14 @@ let init_tool = with_required_permission Masc_domain.CanInit mutating_tool
 let reset_tool = with_required_permission Masc_domain.CanReset mutating_tool
 let admin_tool = with_required_permission Masc_domain.CanAdmin mutating_tool
 
+let local_runtime_tool operation =
+  let policy = Local_runtime_tool_policy.execution_policy operation in
+  with_execution_policy
+    ~readonly:policy.read_only
+    ~idempotent:policy.idempotent
+    (default_metadata ~required_permission:policy.required_permission)
+;;
+
 let hidden_runtime_tool reason meta =
   {
     meta with
@@ -310,8 +318,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);
     ("masc_operator_confirm", broadcast_tool);
-    ("masc_runtime_verify", read_state_tool);
-    ("masc_runtime_ollama_probe", read_state_tool);
+    ("masc_runtime_verify", local_runtime_tool Local_runtime_tool_policy.Verify);
+    ( "masc_runtime_ollama_probe"
+    , local_runtime_tool Local_runtime_tool_policy.Ollama_probe );
     ("masc_board_hearths", read_state_tool);
     ("masc_board_search", read_state_tool);
     ("masc_board_profile", read_state_tool);

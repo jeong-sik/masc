@@ -345,12 +345,11 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_pause"
     ; "masc_resume"
       (* Native Ollama timing probe. Its output is load/prompt-eval timings and
-         a prefix-reuse inference — operator diagnostics, read through
-         /api/v1/dashboard/runtime-probe. It carried 1,219 bytes of schema into
-         every Keeper turn and was called 0 times in the 6 days to 2026-08-06.
-         Registration is unchanged: that dashboard route authorizes with
-         [with_tool_auth ~tool_name:"masc_runtime_ollama_probe"], and
-         [Auth.authorize_tool_for_role] refuses any unregistered name. *)
+         a prefix-reuse inference — an explicit Admin diagnostic, distinct from
+         [/api/v1/dashboard/runtime-probe], which reads metadata only. It carried
+         1,219 bytes of schema into every Keeper turn and was called 0 times in
+         the 6 days to 2026-08-06. Registration is unchanged; the metadata-only
+         dashboard route owns a separate [CanReadState] authority. *)
     ; "masc_runtime_ollama_probe"
     ];
   List.iter
@@ -360,6 +359,21 @@ let test_registered_cluster_model_projections_are_explicit () =
     ; "masc_library_search", "keeper_library_search"
     ; "masc_tasks", "keeper_tasks_list"
     ]
+;;
+
+let test_local_runtime_effect_policy_is_explicit () =
+  let verify = required_internal_descriptor "masc_runtime_verify" in
+  Alcotest.(check (option bool))
+    "verify is read-only"
+    (Some true)
+    verify.policy.readonly_hint;
+  Alcotest.(check bool) "verify is retryable" true verify.policy.retryable;
+  let probe = required_internal_descriptor "masc_runtime_ollama_probe" in
+  Alcotest.(check (option bool))
+    "native probe is not read-only"
+    (Some false)
+    probe.policy.readonly_hint;
+  Alcotest.(check bool) "native probe is not retryable" false probe.policy.retryable
 ;;
 
 let test_keeper_management_projection_is_explicit () =
@@ -1549,6 +1563,10 @@ let () =
             "registered cluster model projections are explicit"
             `Quick
             test_registered_cluster_model_projections_are_explicit
+        ; test_case
+            "local runtime effect policy is explicit"
+            `Quick
+            test_local_runtime_effect_policy_is_explicit
         ; test_case
             "Keeper management projection is explicit"
             `Quick

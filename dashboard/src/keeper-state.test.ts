@@ -356,10 +356,10 @@ describe('thread history merge & persistence', () => {
     }))
 
     const history = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_key: { kind: 'operation', request_id: R } },
+      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_key: { kind: 'operation', operation_id: R } },
       { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', tool_call_name: 'read_file' },
       { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', tool_call_name: 'write_file' },
-      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_key: { kind: 'operation', request_id: R } },
+      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_key: { kind: 'operation', operation_id: R } },
     ])
     mergeServerHistoryEntries('echo', history)
 

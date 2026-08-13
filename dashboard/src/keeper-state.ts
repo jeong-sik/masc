@@ -786,7 +786,10 @@ function deliveryIdentityFromKey(raw: unknown): DeliveryIdentity {
   if (!isRecord(raw)) return { requestId: null }
   const kind = asString(raw.kind)
   if (kind === 'operation') {
-    const requestId = asString(raw.request_id)?.trim() ?? ''
+    // keeper_chat_delivery_identity.ml serializes Operation as
+    // {kind:"operation", operation_id:"kmsg-..."} — the same id the live
+    // stream stamps as requestId (keeper-actions.ts request.operationId).
+    const requestId = asString(raw.operation_id)?.trim() ?? ''
     return { requestId: requestId || null }
   }
   return { requestId: null }

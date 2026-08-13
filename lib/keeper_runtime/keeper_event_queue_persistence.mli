@@ -113,6 +113,15 @@ val select_when_result :
   ready:(Keeper_event_queue.stimulus -> bool) ->
   (Keeper_event_queue_state.pending_selection option, string) result
 
+val connector_attention_conversation_batch_result :
+  base_path:string ->
+  keeper_name:string ->
+  primary:Keeper_event_queue_state.pending_selection ->
+  (Keeper_event_queue_state.pending_selection list, string) result
+(** Durable read wrapper over
+    {!Keeper_event_queue_state.connector_attention_conversation_batch}
+    (RFC-0377). *)
+
 val validate_pending_selection_result :
   base_path:string ->
   keeper_name:string ->

@@ -172,6 +172,7 @@ type heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_event_queue_state.pending_selection option;
+  consumed_selections : Keeper_event_queue_state.pending_selection list;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -533,6 +534,34 @@ let heartbeat_event_intake
            keeper_name;
          select_pending_after_spent_reconciliation ())
   in
+  (* RFC-0377: once the primary selection is a Connector_attention stimulus,
+     drain every OTHER pending stimulus for the same conversation and admit
+     the whole backlog in this turn instead of one message per turn. The
+     durable read is skipped for every other payload kind, so non-connector
+     turns pay no extra cost. *)
+  let connector_attention_batch_of_selection
+        (selection : Keeper_event_queue_state.pending_selection)
+    =
+    match
+      Keeper_event_queue.connector_attention_channel selection.source.payload
+    with
+    | None -> []
+    | Some _channel ->
+      (match
+         Keeper_registry_event_queue.connector_attention_conversation_batch_result
+           ~base_path
+           keeper_name
+           ~primary:selection
+       with
+       | Ok companions -> companions
+       | Error message ->
+         Log.Keeper.warn
+           "turn entry: connector attention conversation batch lookup \
+            failed, admitting single stimulus keeper=%s: %s"
+           keeper_name
+           message;
+         [])
+  in
   (* [first_withdrawn] keeps the first transient failure of the cycle so the
      reported error still names the entry that was actually unavailable, even
      when a later entry supplies the turn. *)
@@ -543,12 +572,12 @@ let heartbeat_event_intake
         "turn entry: event queue selection failed keeper=%s: %s"
         keeper_name
         message;
-      [], [], None, Some (Pending_selection_failed message)
+      [], [], None, [], Some (Pending_selection_failed message)
     | Ok None ->
       (match first_withdrawn with
-       | None -> [], [], None, None
+       | None -> [], [], None, [], None
        | Some (selection, unavailable) ->
-         [], [], Some selection, Some (Transient_board_read unavailable))
+         [], [], Some selection, [], Some (Transient_board_read unavailable))
     | Ok (Some selection) ->
       (match
          consume_single_heartbeat_stimulus
@@ -556,8 +585,43 @@ let heartbeat_event_intake
            ~meta_after_triage
            selection.source
        with
-       | Stimulus_consumed observations ->
-         observations, [ selection.source ], Some selection, None
+       | Stimulus_consumed primary_observations ->
+         let companions = connector_attention_batch_of_selection selection in
+         let companion_observations =
+           List.concat_map
+             (fun (companion : Keeper_event_queue_state.pending_selection) ->
+                match
+                  consume_single_heartbeat_stimulus
+                    ~ctx
+                    ~meta_after_triage
+                    companion.source
+                with
+                | Stimulus_consumed observations -> observations
+                | Stimulus_retry_later _ ->
+                  (* Unreachable in practice: [consume_single_heartbeat_stimulus]
+                     only returns [Stimulus_retry_later] for a Board/Fusion/etc.
+                     transient read, never for [Connector_attention], and every
+                     batch companion is itself a [Connector_attention] stimulus
+                     (see [connector_attention_batch_of_selection] above). Matched
+                     exhaustively rather than assumed away: treat it as "no
+                     observation from this companion" instead of dropping it
+                     from the batch, so an unforeseen future change here fails
+                     safe (companion stays consumed and acked, just contributes
+                     nothing to the turn context) instead of silently. *)
+                  [])
+             companions
+         in
+         let selections = selection :: companions in
+         let stimuli =
+           List.map
+             (fun (s : Keeper_event_queue_state.pending_selection) -> s.source)
+             selections
+         in
+         ( primary_observations @ companion_observations
+         , stimuli
+         , Some selection
+         , selections
+         , None )
        | Stimulus_retry_later unavailable ->
          withdrawn_this_cycle := selection.source :: !withdrawn_this_cycle;
          Log.Keeper.info
@@ -573,11 +637,19 @@ let heartbeat_event_intake
          in
          intake_selection first_withdrawn)
   in
-  let queued_observations, consumed_stimuli, pending_selection, event_queue_intake_error =
+  let ( queued_observations
+      , consumed_stimuli
+      , pending_selection
+      , consumed_selections
+      , event_queue_intake_error )
+    =
     intake_selection None
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
-  let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
+  let event_queue_triggers =
+    List.filter_map event_queue_trigger_of_stimulus consumed_stimuli
+    |> List.sort_uniq compare
+  in
   let pending_board_events =
     List.fold_left
       (fun acc (event : Keeper_world_observation.pending_board_event) ->
@@ -619,6 +691,7 @@ let heartbeat_event_intake
   ; consumed_stimulus_count
   ; consumed_stimuli
   ; pending_selection
+  ; consumed_selections
   ; event_queue_intake_error
   ; event_queue_triggers
   }

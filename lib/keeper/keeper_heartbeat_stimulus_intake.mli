@@ -90,6 +90,7 @@ type heartbeat_event_intake = {
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
   pending_selection : Keeper_event_queue_state.pending_selection option;
+  consumed_selections : Keeper_event_queue_state.pending_selection list;
   event_queue_intake_error : event_queue_intake_error option;
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
@@ -121,13 +122,25 @@ val reconcile_spent_selection
 
 (** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
-    peeks at most one ready Event-Layer stimulus (per RFC-0020 §3 Rule 4).
-    A pending [Manual_compaction_requested] is the sole runtime
+    peeks at most one ready Event-Layer *selection* per turn (per RFC-0020
+    §3 Rule 4). A pending [Manual_compaction_requested] is the sole runtime
     exception: it is selected ahead of data-plane stimuli so an in-flight
     source checkpoint can yield, compact, and then resume from the unchanged
-    durable queue. The selected observation is merged with the
-    [pending_board_events] already accumulated by the caller, deduplicating by
-    [post_id]. A
+    durable queue.
+
+    RFC-0377: when that selection is a [Connector_attention] stimulus, every
+    OTHER pending [Connector_attention] stimulus for the same conversation
+    (same {!Keeper_continuation_channel.same_conversation} channel) is
+    admitted into this same turn too, in arrival order — one turn sees the
+    whole backlog for that conversation instead of one message per turn.
+    [consumed_stimuli]/[consumed_selections] then hold every admitted
+    stimulus (primary first), not only the primary; [pending_selection]
+    stays the primary alone. Other conversations' stimuli, and every
+    non-[Connector_attention] payload, keep the pre-RFC-0377 single-stimulus
+    behavior.
+
+    The selected observation(s) are merged with the [pending_board_events]
+    already accumulated by the caller, deduplicating by [post_id]. A
     [Hitl_resolved] stimulus remains queued until its exact approval id has
     left the pending map, while later ready stimuli can still be selected.
     A transient Board read returns no consumed stimuli, keeps the exact

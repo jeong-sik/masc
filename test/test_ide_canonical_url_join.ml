@@ -54,12 +54,17 @@ let touch path =
   close_out oc
 ;;
 
-let partition_to_string = function
-  | Ide_paths.By_url slug -> "By_url " ^ slug
-  | Ide_paths.No_canonical_url -> "No_canonical_url"
-  | Ide_paths.Unmatched -> "Unmatched"
-  | Ide_paths.Base_unresolved -> "Base_unresolved"
-  | Ide_paths.Legacy_default -> "Legacy_default"
+let attribution_to_string = function
+  | Agent_observation.Addressed { address; _ } ->
+    "Addressed " ^ Agent_observation.Code_address.codebase address
+  | Agent_observation.Unaddressed { reason; _ } ->
+    "Unaddressed " ^ Agent_observation.Unattributed.reason_to_string reason
+;;
+
+let addressed_or_fail label = function
+  | Agent_observation.Addressed { address; _ } -> address
+  | Agent_observation.Unaddressed _ as got ->
+    failf "%s: expected Addressed, got %s" label (attribution_to_string got)
 ;;
 
 let test_sandbox_write_joins_with_worktree_read () =
@@ -100,64 +105,60 @@ let test_sandbox_write_joins_with_worktree_read () =
     (match Repo_store.save_all ~base_path:base_dir [ repo_https; repo_ssh ] with
      | Ok () -> ()
      | Error msg -> failf "save_all: %s" msg);
-    (* 3. resolve_partition_for_write at a sandbox path. *)
+    (* 3. resolve_write_attribution at a sandbox path. *)
     let sandbox_file = Filename.concat sandbox_root "lib/foo.ml" in
-    let sandbox_partition, sandbox_rel =
-      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir
-        ~kind:"region"
-        ~file_path:sandbox_file
+    let sandbox_address =
+      addressed_or_fail
+        "sandbox"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:sandbox_file)
     in
     let worktree_file = Filename.concat workspace_root "lib/foo.ml" in
-    let worktree_partition, worktree_rel =
-      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir
-        ~kind:"region"
-        ~file_path:worktree_file
+    let worktree_address =
+      addressed_or_fail
+        "worktree"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:worktree_file)
     in
-    (* 4. Invariant — both resolve to the same By_url slug. *)
-    (match sandbox_partition, worktree_partition with
-     | Ide_paths.By_url s1, Ide_paths.By_url s2 ->
-       check string "join invariant — same slug" s1 s2
-     | _ ->
-       failf
-         "expected By_url _ on both sides, got %s / %s"
-         (match sandbox_partition with
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.No_canonical_url -> "No_canonical_url"
-          | Ide_paths.Unmatched -> "Unmatched"
-          | Ide_paths.Base_unresolved -> "Base_unresolved"
-          | Ide_paths.Legacy_default -> "Legacy_default")
-         (match worktree_partition with
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.No_canonical_url -> "No_canonical_url"
-          | Ide_paths.Unmatched -> "Unmatched"
-          | Ide_paths.Base_unresolved -> "Base_unresolved"
-          | Ide_paths.Legacy_default -> "Legacy_default"));
-    (* 5. rel_path is the repo-relative remainder in both cases. *)
-    check string "sandbox rel_path stripped" "lib/foo.ml" sandbox_rel;
-    check string "worktree rel_path stripped" "lib/foo.ml" worktree_rel)
+    (* 4. Invariant — both mint the same codebase slug. *)
+    check
+      string
+      "join invariant — same slug"
+      (Agent_observation.Code_address.codebase sandbox_address)
+      (Agent_observation.Code_address.codebase worktree_address);
+    (* 5. The address path is the repo-relative remainder in both cases. *)
+    check
+      string
+      "sandbox rel_path stripped"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path sandbox_address);
+    check
+      string
+      "worktree rel_path stripped"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path worktree_address))
 ;;
 
-let test_unregistered_path_lands_in_base_unresolved () =
+let test_unregistered_path_fails_with_typed_reason () =
   with_temp_base_dir (fun base_dir ->
     (match Repo_store.save_all ~base_path:base_dir [] with
      | Ok () -> ()
      | Error msg -> failf "save_all: %s" msg);
     let elsewhere = Filename.concat base_dir "elsewhere/foo.ml" in
-    let partition, original =
-      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
+    match
+      Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
         ~base_dir
-        ~kind:"region"
         ~file_path:elsewhere
-    in
-    (match partition with
-     | Ide_paths.Base_unresolved -> ()
-     | got ->
-       failf
-         "expected Base_unresolved for unregistered path, got %s"
-         (partition_to_string got));
-    check string "rel_path passes through unchanged" elsewhere original)
+    with
+    | Agent_observation.Unaddressed
+        { reason = Agent_observation.Unattributed.Unregistered_path; attempted_path } ->
+      check string "attempted path passes through unchanged" elsewhere attempted_path
+    | got ->
+      failf
+        "expected Unaddressed Unregistered_path, got %s"
+        (attribution_to_string got))
 ;;
 
 let test_blank_url_lands_in_no_canonical_url () =
@@ -183,18 +184,18 @@ let test_blank_url_lands_in_no_canonical_url () =
      | Ok () -> ()
      | Error msg -> failf "save_all: %s" msg);
     let file = Filename.concat local "lib/foo.ml" in
-    let partition, _ =
-      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
+    match
+      Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
         ~base_dir
-        ~kind:"region"
         ~file_path:file
-    in
-    match partition with
-    | Ide_paths.No_canonical_url -> ()
+    with
+    | Agent_observation.Unaddressed
+        { reason = Agent_observation.Unattributed.Blank_remote_url; _ } ->
+      ()
     | got ->
       failf
-        "expected No_canonical_url for blank-URL repo, got %s"
-        (partition_to_string got))
+        "expected Unaddressed Blank_remote_url for blank-URL repo, got %s"
+        (attribution_to_string got))
 ;;
 
 (* RFC-0128 PR-6 — sandbox playground path resolution. Keeper writes
@@ -234,38 +235,35 @@ let test_sandbox_playground_path_joins_with_worktree () =
         ".masc/playground/sangsu/repos/masc/lib/foo.ml"
     in
     let worktree_file = Filename.concat worktree "lib/foo.ml" in
-    let sandbox_partition, sandbox_rel =
-      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir
-        ~kind:"region"
-        ~file_path:sandbox_file
+    let sandbox_address =
+      addressed_or_fail
+        "sandbox playground"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:sandbox_file)
     in
-    let worktree_partition, worktree_rel =
-      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir
-        ~kind:"region"
-        ~file_path:worktree_file
+    let worktree_address =
+      addressed_or_fail
+        "worktree"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:worktree_file)
     in
-    (match sandbox_partition, worktree_partition with
-     | Ide_paths.By_url s1, Ide_paths.By_url s2 ->
-       check string "sandbox / working-tree join via canonical_url" s1 s2
-     | _ ->
-       failf
-         "expected By_url _ on both sides, got %s / %s"
-         (match sandbox_partition with
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.No_canonical_url -> "No_canonical_url"
-          | Ide_paths.Unmatched -> "Unmatched"
-          | Ide_paths.Base_unresolved -> "Base_unresolved"
-          | Ide_paths.Legacy_default -> "Legacy_default")
-         (match worktree_partition with
-          | Ide_paths.By_url s -> "By_url " ^ s
-          | Ide_paths.No_canonical_url -> "No_canonical_url"
-          | Ide_paths.Unmatched -> "Unmatched"
-          | Ide_paths.Base_unresolved -> "Base_unresolved"
-          | Ide_paths.Legacy_default -> "Legacy_default"));
-    check string "sandbox rel stripped to repo-relative" "lib/foo.ml" sandbox_rel;
-    check string "worktree rel stripped" "lib/foo.ml" worktree_rel)
+    check
+      string
+      "sandbox / working-tree join via canonical_url"
+      (Agent_observation.Code_address.codebase sandbox_address)
+      (Agent_observation.Code_address.codebase worktree_address);
+    check
+      string
+      "sandbox rel stripped to repo-relative"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path sandbox_address);
+    check
+      string
+      "worktree rel stripped"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path worktree_address))
 ;;
 
 let test_docker_playground_path_also_resolves () =
@@ -295,16 +293,18 @@ let test_docker_playground_path_also_resolves () =
         base_dir
         ".masc/playground/docker/tech_glutton/repos/masc/lib/foo.ml"
     in
-    let partition, rel =
-      Masc.Keeper_tool_filesystem_runtime.resolve_partition_for_write
-        ~base_dir
-        ~kind:"region"
-        ~file_path:docker_file
+    let address =
+      addressed_or_fail
+        "docker sandbox"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:docker_file)
     in
-    match partition with
-    | Ide_paths.By_url _ ->
-      check string "docker sandbox rel" "lib/foo.ml" rel
-    | _ -> fail "Docker sandbox path should resolve via repo_id lookup")
+    check
+      string
+      "docker sandbox rel"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path address))
 ;;
 
 let () =
@@ -316,11 +316,11 @@ let () =
             `Quick
             test_sandbox_write_joins_with_worktree_read
         ; test_case
-            "unregistered path → Base_unresolved"
+            "unregistered path fails with its typed reason"
             `Quick
-            test_unregistered_path_lands_in_base_unresolved
+            test_unregistered_path_fails_with_typed_reason
         ; test_case
-            "blank URL → No_canonical_url"
+            "blank URL fails as Blank_remote_url"
             `Quick
             test_blank_url_lands_in_no_canonical_url
         ; test_case

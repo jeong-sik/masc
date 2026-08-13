@@ -147,11 +147,11 @@ let test_failed_requires_evidence () =
 ;;
 
 let test_unsupported_policy_is_not_a_failure () =
-  let result = unsupported (Runtime_role_policy Local_agentworld_librarian_only) in
+  let result = unsupported (Runtime_role_policy Agentworld_runtime_librarian_only) in
   check
     string
     "policy exclusion stays typed"
-    "unsupported:runtime_role_policy:local_agentworld_librarian_only"
+    "unsupported:runtime_role_policy:agentworld_runtime_librarian_only"
     (proof_result_to_string result)
 ;;
 

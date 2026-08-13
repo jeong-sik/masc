@@ -168,7 +168,7 @@ type failure_kind =
   | Gate_settlement_failure
   | Domain_receipt_failure
 
-type runtime_role_policy = Local_agentworld_librarian_only
+type runtime_role_policy = Agentworld_runtime_librarian_only
 
 type unsupported_reason =
   | Runtime_role_policy of runtime_role_policy

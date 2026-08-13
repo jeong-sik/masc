@@ -457,7 +457,7 @@ type failure_kind =
   | Gate_settlement_failure
   | Domain_receipt_failure
 
-type runtime_role_policy = Local_agentworld_librarian_only
+type runtime_role_policy = Agentworld_runtime_librarian_only
 
 type unsupported_reason =
   | Runtime_role_policy of runtime_role_policy
@@ -492,7 +492,7 @@ let failure_kind_to_string = function
 ;;
 
 let runtime_role_policy_to_string = function
-  | Local_agentworld_librarian_only -> "local_agentworld_librarian_only"
+  | Agentworld_runtime_librarian_only -> "agentworld_runtime_librarian_only"
 ;;
 
 let unsupported_reason_to_string = function

@@ -191,6 +191,12 @@ val public_descriptors : t list
     LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
 
+(** Resolve the process-owned canonical descriptor for [id]. Callers that
+    accept descriptor records from another layer must resolve through this
+    function before treating execution, schema, or policy fields as runtime
+    authority. *)
+val find_id : string -> t option
+
 (** Objective schema-shape errors that prevent model projection. Empty means
     the descriptor has a resolved object schema whose structural fields are
     well-formed. *)

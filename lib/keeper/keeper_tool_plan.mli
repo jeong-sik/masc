@@ -149,6 +149,13 @@ type schema_contract_error =
       ; field : string
       }
 
+(** Validate the closed schema language used by composable declared outputs.
+    This pure entry point is also used by configuration readers before they
+    construct any runtime plan. *)
+val validate_composable_schema
+  :  Yojson.Safe.t
+  -> (unit, schema_contract_error) result
+
 type node = private
   { id : Node_id.t
   ; tool_name : string
@@ -166,6 +173,7 @@ val node
 
 type error =
   | Empty_plan
+  | Unknown_descriptor_id of string
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
   | Unknown_tool of
@@ -191,6 +199,11 @@ type error =
       { node_id : Node_id.t
       ; tool_name : string
       ; error : schema_contract_error
+      }
+  | Multiple_terminal_nodes of Node_id.t list
+  | Terminal_node_missing_dependency of
+      { terminal_node_id : Node_id.t
+      ; node_id : Node_id.t
       }
   | Dependency_cycle of Node_id.t list
 

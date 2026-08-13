@@ -559,6 +559,8 @@ and validate_schema_array ~path schema_fields value =
     Error (Type_mismatch { path; expected = Array_type; actual = json_type other })
 ;;
 
+let validate_composable_schema schema = validate_schema_contract ~path:[] schema
+
 type node =
   { id : Node_id.t
   ; tool_name : string
@@ -570,6 +572,7 @@ let node ~id ~tool_name ?(after = []) ~input () = { id; tool_name; input; after 
 
 type error =
   | Empty_plan
+  | Unknown_descriptor_id of string
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
   | Unknown_tool of
@@ -595,6 +598,11 @@ type error =
       { node_id : Node_id.t
       ; tool_name : string
       ; error : schema_contract_error
+      }
+  | Multiple_terminal_nodes of Node_id.t list
+  | Terminal_node_missing_dependency of
+      { terminal_node_id : Node_id.t
+      ; node_id : Node_id.t
       }
   | Dependency_cycle of Node_id.t list
 
@@ -626,6 +634,17 @@ let descriptor_entries descriptors =
        Keeper_tool_descriptor.keeper_model_names descriptor
        |> List.map (fun name -> name, descriptor))
     descriptors
+;;
+
+let canonicalize_descriptors descriptors =
+  let rec canonicalize resolved = function
+    | [] -> Ok (List.rev resolved)
+    | descriptor :: rest ->
+      (match Keeper_tool_descriptor.find_id descriptor.Keeper_tool_descriptor.id with
+       | None -> Error (Unknown_descriptor_id descriptor.id)
+       | Some canonical -> canonicalize (canonical :: resolved) rest)
+  in
+  canonicalize [] descriptors
 ;;
 
 let first_duplicate equal values =
@@ -709,7 +728,7 @@ let validate_output_schemas descriptors nodes =
          (match descriptor.Keeper_tool_descriptor.composable_output with
           | Keeper_tool_descriptor.Opaque_output -> None
           | Keeper_tool_descriptor.Json_output { schema } ->
-            (match validate_schema_contract ~path:[] schema with
+            (match validate_composable_schema schema with
              | Ok () -> None
              | Error error ->
                Some
@@ -752,37 +771,88 @@ let dependency_cycle nodes =
   visit_all [] nodes
 ;;
 
+let validate_terminal_dependency_boundary descriptors nodes =
+  let terminal_nodes =
+    List.filter
+      (fun node ->
+         match descriptor_for_name descriptors node.tool_name with
+         | Some { Keeper_tool_descriptor.execution = Keeper_tool_descriptor.Terminal; _ } ->
+           true
+         | Some
+             { execution =
+                 Keeper_tool_descriptor.Ordinary
+                   (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent)
+             ; _
+             }
+         | None -> false)
+      nodes
+  in
+  match terminal_nodes with
+  | [] -> None
+  | _ :: _ :: _ -> Some (Multiple_terminal_nodes (List.map (fun node -> node.id) terminal_nodes))
+  | [ terminal ] ->
+    let rec ancestors visited node_id =
+      if List.exists (Node_id.equal node_id) visited
+      then visited
+      else
+        match node_for_id nodes node_id with
+        | None -> visited
+        | Some node ->
+          List.fold_left ancestors (node_id :: visited) (dependencies node)
+    in
+    let terminal_ancestors = ancestors [] terminal.id in
+    List.find_map
+      (fun node ->
+         if Node_id.equal node.id terminal.id
+            || List.exists (Node_id.equal node.id) terminal_ancestors
+         then None
+         else
+           Some
+             (Terminal_node_missing_dependency
+                { terminal_node_id = terminal.id; node_id = node.id }))
+      nodes
+  | _ -> assert false
+;;
+
 let create ~descriptors nodes =
   match nodes with
   | [] -> Error Empty_plan
   | _ ->
-    (match first_duplicate Node_id.equal (List.map (fun node -> node.id) nodes) with
-     | Some id -> Error (Duplicate_node_id id)
-     | None ->
-       let descriptors = descriptor_entries descriptors in
-       (match first_duplicate String.equal (List.map fst descriptors) with
-        | Some name -> Error (Duplicate_tool_name name)
+    (match canonicalize_descriptors descriptors with
+     | Error _ as error -> error
+     | Ok canonical_descriptors ->
+       (match first_duplicate Node_id.equal (List.map (fun node -> node.id) nodes) with
+        | Some id -> Error (Duplicate_node_id id)
         | None ->
-          (match validate_known_tools descriptors nodes with
-           | Some error -> Error error
+          let descriptors = descriptor_entries canonical_descriptors in
+          (match first_duplicate String.equal (List.map fst descriptors) with
+           | Some name -> Error (Duplicate_tool_name name)
            | None ->
-             (match validate_output_schemas descriptors nodes with
+             (match validate_known_tools descriptors nodes with
               | Some error -> Error error
               | None ->
-                (match validate_dependencies nodes with
+                (match validate_output_schemas descriptors nodes with
                  | Some error -> Error error
                  | None ->
-                   (match validate_output_references descriptors nodes with
+                   (match validate_dependencies nodes with
                     | Some error -> Error error
                     | None ->
-                      (match dependency_cycle nodes with
-                       | Some cycle -> Error (Dependency_cycle cycle)
+                      (match validate_output_references descriptors nodes with
+                       | Some error -> Error error
                        | None ->
-                         Ok
-                           { identity = Atomic.fetch_and_add next_plan_identity 1
-                           ; nodes
-                           ; descriptors
-                           })))))))
+                         (match dependency_cycle nodes with
+                          | Some cycle -> Error (Dependency_cycle cycle)
+                          | None ->
+                            (match
+                               validate_terminal_dependency_boundary descriptors nodes
+                             with
+                             | Some error -> Error error
+                             | None ->
+                               Ok
+                                 { identity = Atomic.fetch_and_add next_plan_identity 1
+                                 ; nodes
+                                 ; descriptors
+                                 }))))))))
 ;;
 
 let dependency_layers plan =

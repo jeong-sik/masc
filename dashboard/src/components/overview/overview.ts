@@ -1090,10 +1090,13 @@ function OverviewKpiStrip({
     : attentionCount > 0 || health.state === 'unavailable'
       ? 'bad'
       : undefined
+  const attentionTarget = health.issueCount > 0 || health.state === 'unavailable'
+    ? { section: 'fleet-health' }
+    : { section: 'agents' }
   return html`
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
       <${OverviewKpi} label="실행 Fiber" value=${fleetCountText(fleet?.running)} sub=${` / 등록 ${stats.total}`} tone=${fleet?.running != null ? 'ok' : undefined} testId="kpi-run" onClick=${() => navigate('monitoring')} />
-      <${OverviewKpi} label="주의 필요" value=${attentionValue} tone=${attentionTone} testId="kpi-att" onClick=${() => navigate('monitoring', { section: 'fleet-health' })} />
+      <${OverviewKpi} label="주의 필요" value=${attentionValue} tone=${attentionTone} testId="kpi-att" onClick=${() => navigate('monitoring', attentionTarget)} />
       ${approvalQueueState && approvalQueueState.state !== 'ready'
         ? html`<${OverviewKpi}
             label="열린 Gate"
@@ -1160,7 +1163,7 @@ function OverviewAttentionPanel({
   return html`
     <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
       <div class="ov-card-h">
-        <h3>주의 필요 · 지금 손이 필요한 것</h3>
+        <h3>${attentionCount === 0 && health.state === 'status' ? '상태 참고' : '주의 필요 · 지금 손이 필요한 것'}</h3>
         <span class="ov-count">${attentionCountLabel}</span>
       </div>
       <div class="ov-attn-list v2-overview-attention-list">
@@ -1179,7 +1182,7 @@ function OverviewAttentionPanel({
                 <button type="button" class="ov-attn-act">상태 상세 →</button>
               </div>
             `
-          : health.state === 'attention'
+          : health.state === 'attention' || health.state === 'status'
             ? health.issues.map(issue => html`
                 <div
                   key=${issue.kind}

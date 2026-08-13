@@ -8,6 +8,8 @@ export type RuntimeCountSource =
   | 'partial'
   | 'unknown'
 
+export type KeeperLiveCountMeaning = 'executable' | 'running'
+
 export type ConfiguredCountSource = 'namespace-truth' | 'shell' | 'none'
 
 export interface LiveRuntimeView {
@@ -379,6 +381,10 @@ export function runtimeCountSourceLabel(source: RuntimeCountSource): string {
     default:
       return '미수집'
   }
+}
+
+export function keeperLiveCountMeaning(source: RuntimeCountSource): KeeperLiveCountMeaning {
+  return source === 'runtime-health' ? 'executable' : 'running'
 }
 
 export function configuredCountSourceLabel(source: ConfiguredCountSource): string {

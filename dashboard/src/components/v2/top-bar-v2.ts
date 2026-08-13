@@ -14,7 +14,7 @@ import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
 import { TweaksPanelToggle } from '../tweaks-panel'
 import { StatusDot } from './primitives-v2'
 import { surfaceLabel } from './nav-rail-v2'
-import { configuredCountSourceLabel, keeperRowLooksRunning, resolveRuntimeCounts, runtimeCountSourceLabel } from '../../runtime-counts'
+import { configuredCountSourceLabel, keeperLiveCountMeaning, keeperRowLooksRunning, resolveRuntimeCounts, runtimeCountSourceLabel } from '../../runtime-counts'
 import {
   projectDashboardCompositeHealth,
   type DashboardCompositeHealthVerdict,
@@ -88,29 +88,41 @@ export function AttentionIndicatorV2() {
   }, [open])
 
   const a = computeAttention()
-  if (a.approvalQueueState && a.approvalQueueState.state !== 'ready') {
-    const state = a.approvalQueueState
-    return html`
-      <button
-        class=${`v2-statchip attn ${state.severity}`}
-        onClick=${() => navigate('approvals')}
-        title=${state.operator_detail}
-      >${state.icon} ${state.title}</button>
-    `
-  }
-  if (a.approvalQueueState?.state !== 'ready' || a.approvals === null) {
-    return html`
-      <button
-        class="v2-statchip attn warn"
-        onClick=${() => navigate('approvals')}
-        title="Gate queue state has not loaded"
-      >? 승인 큐 확인 필요</button>
-    `
-  }
-  if (!a.total && a.health.state === 'healthy') {
+  const approvalQueueUnknown = a.approvalQueueState?.state !== 'ready' || a.approvals === null
+  if (!a.total && a.health.state === 'healthy' && !approvalQueueUnknown) {
     return html`<span class="v2-statchip live" title="처리할 항목 없음">${'✓'} 정상</span>`
   }
+  if (!a.total && a.health.state === 'status' && !approvalQueueUnknown) {
+    const issue = a.health.issues[0]
+    return html`
+      <button
+        class=${`v2-statchip ${issue.severity}`}
+        onClick=${() => navigate('monitoring', { section: 'fleet-health' })}
+        title=${issue.detail}
+      >${'◌'} ${issue.label}</button>
+    `
+  }
   const rows: AttentionRow[] = []
+  if (a.approvalQueueState && a.approvalQueueState.state !== 'ready') {
+    const state = a.approvalQueueState
+    rows.push({
+      k: 'approval-queue-state',
+      n: '—',
+      lbl: `${state.icon} ${state.title}`,
+      detail: state.operator_detail,
+      sev: state.severity,
+      nav: 'approvals',
+    })
+  } else if (a.approvals === null) {
+    rows.push({
+      k: 'approval-queue-unavailable',
+      n: '—',
+      lbl: '승인 큐 미연결',
+      detail: 'Gate queue state has not loaded.',
+      sev: 'warn',
+      nav: 'approvals',
+    })
+  }
   if (a.approvals !== null && a.approvals > 0) rows.push({ k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' })
   if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' })
   if (a.dead > 0) rows.push({ k: 'dead', n: a.dead, lbl: '죽음·넘침', sev: 'bad', nav: 'monitoring' })
@@ -119,6 +131,16 @@ export function AttentionIndicatorV2() {
     rows.push(...a.health.issues.map(issue => ({
       k: issue.kind,
       n: 1,
+      lbl: issue.label,
+      detail: issue.detail,
+      sev: issue.severity,
+      nav: 'monitoring' as const,
+      params: { section: 'fleet-health' },
+    })))
+  } else if (a.health.state === 'status') {
+    rows.push(...a.health.issues.map(issue => ({
+      k: `${issue.kind}-status`,
+      n: '정보',
       lbl: issue.label,
       detail: issue.detail,
       sev: issue.severity,
@@ -136,10 +158,11 @@ export function AttentionIndicatorV2() {
       params: { section: 'fleet-health' },
     })
   }
-  const tone = a.approvals > 0 || a.dead > 0 || (a.health.state === 'attention' && a.health.severity === 'bad')
+  const tone = (a.approvals ?? 0) > 0 || a.dead > 0 || (a.health.state === 'attention' && a.health.severity === 'bad')
+    || (a.approvalQueueState?.state !== 'ready' && a.approvalQueueState?.severity === 'bad')
     ? 'bad'
     : 'warn'
-  const totalLabel = a.health.state === 'unavailable'
+  const totalLabel = a.health.state === 'unavailable' || approvalQueueUnknown
     ? a.total > 0 ? `${a.total}+?` : '?'
     : String(a.total)
   return html`
@@ -191,10 +214,12 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
     runtimeFleetSafety: shellRuntimeResolution.value?.fleet_safety ?? null,
     runtimeHealthGeneratedAt: shellRuntimeResolution.value?.generated_at ?? null,
   })
-  const running = runtimeCounts.live.keepers
+  const keeperCount = runtimeCounts.live.keepers
+  const countMeaning = keeperLiveCountMeaning(runtimeCounts.source)
+  const countLabel = countMeaning === 'executable' ? '실행 가능' : '실행 중'
   const countTitle = [
     `runtime count: ${runtimeCountSourceLabel(runtimeCounts.source)}`,
-    `running=${runtimeCounts.live.keepers}`,
+    `${countMeaning}=${runtimeCounts.live.keepers}`,
     `paused=${runtimeCounts.live.pausedKeepers}`,
     runtimeCounts.source === 'runtime-health'
       ? 'offline=0 (not derived from execution rows)'
@@ -212,7 +237,7 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
       </div>
       <div class="v2-top-spacer"></div>
       <span class="v2-statchip live" title=${countTitle}>
-        <${StatusDot} status="run" pulse=${true} />${running} 실행 가능
+        <${StatusDot} status="run" pulse=${true} />${keeperCount} ${countLabel}
       </span>
       <${AttentionIndicatorV2} />
       <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">

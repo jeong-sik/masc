@@ -15,6 +15,12 @@ export type DashboardCompositeHealthVerdict =
   | { state: 'unavailable'; issueCount: 0; issues: readonly [] }
   | { state: 'healthy'; issueCount: 0; issues: readonly [] }
   | {
+    state: 'status'
+    severity: 'warn' | 'bad'
+    issueCount: 0
+    issues: readonly [DashboardCompositeHealthIssue]
+  }
+  | {
     state: 'attention'
     severity: 'warn' | 'bad'
     issueCount: 1
@@ -23,8 +29,9 @@ export type DashboardCompositeHealthVerdict =
 
 /**
  * Projects the backend-owned /health composite verdict without reimplementing
- * its subsystem policy. One composite verdict is one operator-attention item;
- * operator_action_reasons remain evidence rather than a client-side recount.
+ * its subsystem policy. A composite verdict contributes one operator-attention
+ * item only when the backend explicitly requests action; non-ok status remains
+ * visible without being recounted as operator work.
  */
 export function projectDashboardCompositeHealth(
   health: DashboardCompositeHealthSource | null | undefined,
@@ -38,19 +45,30 @@ export function projectDashboardCompositeHealth(
     return { state: 'healthy', issueCount: 0, issues: [] }
   }
 
-  const severity = status === 'blocked' || status === 'error' ? 'bad' : 'warn'
+  const severity = status === 'blocked' || status === 'error' || status === 'timeout' ? 'bad' : 'warn'
   const reasons = health?.operator_action_reasons?.filter(reason => reason.trim() !== '') ?? []
+  const issue: DashboardCompositeHealthIssue = {
+    kind: 'runtime-health',
+    severity,
+    label: `Runtime health ${status}`,
+    detail: reasons.length > 0
+      ? `status=${status} · ${reasons.join(' · ')}`
+      : `status=${status} · operator_action_required=${requiresAction}`,
+  }
+
+  if (!requiresAction) {
+    return {
+      state: 'status',
+      severity,
+      issueCount: 0,
+      issues: [issue],
+    }
+  }
+
   return {
     state: 'attention',
     severity,
     issueCount: 1,
-    issues: [{
-      kind: 'runtime-health',
-      severity,
-      label: `Runtime health ${status}`,
-      detail: reasons.length > 0
-        ? `status=${status} · ${reasons.join(' · ')}`
-        : `status=${status} · operator_action_required=${requiresAction}`,
-    }],
+    issues: [issue],
   }
 }

@@ -38,6 +38,21 @@ paused_targets=(
 
 normal_targets=(
   @test/runtest-test_board_dispatch
+  @test/runtest-test_dedup_rules
+  @test/runtest-test_exec_command_gate_log_sink
+  @test/runtest-test_file_kind_vocabulary
+  @test/runtest-test_http_auth_strict_flag
+  @test/runtest-test_keeper_chat_broadcast
+  @test/runtest-test_keeper_codex_effort_clamp
+  @test/runtest-test_keeper_codex_error_carriage
+  @test/runtest-test_keeper_persistence_span_history
+  @test/runtest-test_keeper_rotation_eligibility_census
+  @test/runtest-test_keeper_toml_accessor_matrix
+  @test/runtest-test_keeper_turn_dispatch_authority
+  @test/runtest-test_runtime_quota_window
+  @test/runtest-test_subsystem_health_state
+  @test/runtest-test_trailing_slash_rules
+  @test/runtest-test_verification_run_registry
   @test/runtest-test_slack_user_directory
   @test/runtest-test_cancel_safe
   @test/runtest-test_cancel_wall_bucket

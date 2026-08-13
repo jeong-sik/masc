@@ -905,7 +905,6 @@ let agent_core_interleaving_event_label = function
   | _ -> None
 
 let trajectory_interleaving_label = function
-  | Trajectory.Thinking entry -> "thinking:" ^ entry.Trajectory.content
   | Trajectory.Withheld_thinking _ -> "thinking:[withheld]"
   | Trajectory.Tool_call entry -> "tool:" ^ entry.Trajectory.tool_name
 
@@ -1155,9 +1154,9 @@ let test_agent_core_interleaving_matches_masc_receipt_and_progress_facts () =
              (trajectory_entry_of_provider_call ~ts:1.3 ~turn ~round:2 second);
            Trajectory.flush_pending acc;
            check (list string) "MASC trajectory JSONL keeps interleaved facts"
-             [ "thinking:inspect board first"
+             [ "thinking:[withheld]"
              ; "tool:masc_board_list"
-             ; "thinking:complete after evidence"
+             ; "thinking:[withheld]"
              ; "tool:keeper_task_done"
              ]
              (Trajectory.read_all_lines ~masc_root:base_dir ~keeper_name

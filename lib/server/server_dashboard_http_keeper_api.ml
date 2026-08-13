@@ -1310,7 +1310,6 @@ let keeper_chat_trace_blocks config name =
     Some
       (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
          ~max_lines:trajectory_max_limit
-         ~max_internal_lines:trajectory_max_limit
          ~config
          ~keeper_name:name
          ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
@@ -2407,11 +2406,6 @@ let handle_keeper_get_subroutes state req request reqd =
              ~default:2000
            |> max 0 |> min 10000
          in
-         let content_max_len =
-           Server_utils.int_query_param req "content_max_len"
-             ~default:Trajectory.default_thinking_truncation
-           |> max 0 |> min 50000
-         in
          let include_thinking =
            Server_utils.bool_query_param req "include_thinking"
              ~default:false
@@ -2422,13 +2416,12 @@ let handle_keeper_get_subroutes state req request reqd =
          in
          let cache_key =
            Printf.sprintf
-             "keeper:trajectory:%s:%s:%s:%d:%d:%d:%b:%d"
+             "keeper:trajectory:%s:%s:%s:%d:%d:%b:%d"
              (Workspace.masc_root_dir config)
              name
              trace_id
              limit
              result_max_len
-             content_max_len
              include_thinking
              tail_scan_lines
          in
@@ -2440,18 +2433,14 @@ let handle_keeper_get_subroutes state req request reqd =
                  Trajectory.read_recent_lines ~masc_root ~keeper_name:m.name
                    ~trace_id ~max_lines:tail_scan_lines
                in
-               let all_lines =
-                 if include_thinking then
-                   merge_keeper_trace_lines ~config ~trace_id trajectory_lines
-                 else
-                   trajectory_lines
-               in
-               (* Filter out thinking entries if not requested *)
+               (* Reasoning evidence comes only from the metadata-only
+                  trajectory producer. Internal assistant history is never
+                  reclassified into this surface. *)
                let lines =
-                 if include_thinking then all_lines
+                 if include_thinking then trajectory_lines
                  else List.filter (function
                    | Trajectory.Tool_call _ -> true
-                   | Trajectory.Thinking _ | Trajectory.Withheld_thinking _ -> false) all_lines
+                   | Trajectory.Withheld_thinking _ -> false) trajectory_lines
                in
                let total = List.length lines in
                let recent =
@@ -2467,7 +2456,7 @@ let handle_keeper_get_subroutes state req request reqd =
                  ("total_entries", `Int total);
                  ("showing", `Int (List.length recent));
                  ("entries", `List (List.map
-                   (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
+                   (Trajectory.trajectory_line_to_json ~result_max_len) recent));
                ]))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd)

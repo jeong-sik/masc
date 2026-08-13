@@ -783,27 +783,21 @@ let test_next_round_evicts_past_turn_keys () =
     in
     Alcotest.(check int) "turn 5 after eviction stays monotonic" 5 r5c)
 
-let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
-  Trajectory.Thinking
-    {
-      ts;
-      ts_iso = "2026-06-29T00:00:00Z";
-      turn = 1;
-      content;
-      content_length = String.length content;
-      redacted;
+let thinking_line ?(turn = 1) ?(block_index = 0)
+    ?(reasoning_kind = Trajectory.Thinking_block) () =
+  Trajectory.Withheld_thinking
+    { ts = 1000.0
+    ; ts_iso = "2026-06-29T00:00:00Z"
+    ; turn
+    ; block_index
+    ; reasoning_kind
+    ; char_count = 12
     }
-
-let check_thinking_content label expected = function
-  | Trajectory.Thinking entry ->
-      Alcotest.(check string) label expected entry.Trajectory.content
-  | Trajectory.Tool_call _ | Trajectory.Withheld_thinking _ ->
-    Alcotest.fail (label ^ ": expected persisted thinking line")
 
 let check_tool_call label expected = function
   | Trajectory.Tool_call entry ->
       Alcotest.(check string) label expected entry.Trajectory.tool_name
-  | Trajectory.Thinking _ | Trajectory.Withheld_thinking _ ->
+  | Trajectory.Withheld_thinking _ ->
     Alcotest.fail (label ^ ": expected tool call line")
 
 let test_dedupe_thinking_lines_uses_structural_key () =
@@ -813,33 +807,36 @@ let test_dedupe_thinking_lines_uses_structural_key () =
   in
   let lines =
     [
-      thinking_line ~ts:1000.0 "same";
+      thinking_line ();
       tool_call;
-      thinking_line ~ts:1000.0 "same";
-      thinking_line ~ts:1001.0 "same";
-      thinking_line ~ts:1000.0 ~redacted:true "same";
+      thinking_line ();
+      thinking_line ~block_index:1 ();
+      thinking_line ~reasoning_kind:Trajectory.Reasoning_details ();
     ]
   in
   let deduped =
     Server_dashboard_http_keeper_api_trace.dedupe_thinking_lines lines
   in
   Alcotest.(check int) "one exact duplicate removed" 4 (List.length deduped);
-  check_thinking_content "first thinking preserved" "same" (List.nth deduped 0);
+  (match List.nth deduped 0 with
+   | Trajectory.Withheld_thinking entry ->
+     Alcotest.(check int) "first reasoning identity preserved" 0 entry.block_index
+   | Trajectory.Tool_call _ -> Alcotest.fail "expected withheld reasoning line");
   check_tool_call "tool call preserved" "tool_execute" (List.nth deduped 1);
-  check_thinking_content "same content at a new timestamp preserved" "same"
-    (List.nth deduped 2);
   (match List.nth deduped 3 with
-   | Trajectory.Thinking entry ->
-       Alcotest.(check bool) "redacted variant preserved" true entry.Trajectory.redacted
-   | Trajectory.Tool_call _ | Trajectory.Withheld_thinking _ ->
-     Alcotest.fail "expected redacted persisted thinking line")
+   | Trajectory.Withheld_thinking entry ->
+     Alcotest.(check bool)
+       "reasoning kind is part of identity"
+       true
+       (entry.reasoning_kind = Trajectory.Reasoning_details)
+   | Trajectory.Tool_call _ -> Alcotest.fail "expected withheld reasoning line")
 
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
 
 (* ================================================================ *)
-(* Test: thinking trajectory — full untruncated text, per-turn        *)
+(* Test: reasoning trajectory — metadata only, per-turn              *)
 (* ================================================================ *)
 
 let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
@@ -857,28 +854,20 @@ let read_thinking_jsonl ~masc_root ~keeper_name ~trace_id =
       loop [])
   end
 
-(* append_thinking must persist the FULL text, not the legacy 2000-byte cap. *)
-let test_append_thinking_persists_untruncated () =
-  with_tmpdir (fun dir ->
-    let big = String.make 9000 'x' in
-    let entry : Trajectory.thinking_entry = {
-      ts = 1000.0; ts_iso = "2026-06-09T00:00:00Z"; turn = 4;
-      content = big; content_length = String.length big; redacted = false;
-    } in
-    Trajectory.append_thinking ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" entry;
-    let lines = read_thinking_jsonl ~masc_root:dir ~keeper_name:"k" ~trace_id:"th1" in
-    Alcotest.(check int) "one thinking line" 1 (List.length lines);
-    let open Yojson.Safe.Util in
-    let row = List.hd lines in
-    Alcotest.(check string) "type=thinking" "thinking" (row |> member "type" |> to_string);
-    Alcotest.(check int) "content untruncated (9000B, not 2000 cap)" 9000
-      (row |> member "content" |> to_string |> String.length);
-    Alcotest.(check int) "content_length records true length" 9000
-      (row |> member "content_length" |> to_int))
+let test_content_bearing_thinking_row_is_rejected () =
+  let legacy =
+    {|{"type":"thinking","ts":1000.0,"ts_iso":"2026-06-09T00:00:00Z","turn":4,"content":"secret","content_length":6,"redacted":false}|}
+  in
+  let parsed, skipped, total =
+    Trajectory.trajectory_lines_of_jsonl_lines ~trace_id:"legacy" [ legacy ]
+  in
+  Alcotest.(check int) "legacy row is not projected" 0 (List.length parsed);
+  Alcotest.(check int) "legacy row is rejected loudly" 1 skipped;
+  Alcotest.(check int) "one row inspected" 1 total
 
-(* persist_response_content stamps every block with the hook's ~turn (not
-   acc.turn) and writes one line per thinking block, untruncated. *)
-let test_persist_response_content_per_turn_full () =
+(* persist_response_content stamps every metadata row with the hook's ~turn
+   (not acc.turn) and writes one withheld row per reasoning block. *)
+let test_persist_response_content_per_turn_withheld () =
   with_tmpdir (fun dir ->
     let acc = Trajectory.create_accumulator
       ~masc_root:dir ~keeper_name:"k" ~trace_id:"th2" ~generation:0 () in
@@ -896,8 +885,13 @@ let test_persist_response_content_per_turn_full () =
     List.iter (fun row ->
       Alcotest.(check int) "turn stamped from hook (11), not acc.turn (0)" 11
         (row |> member "turn" |> to_int)) lines;
-    Alcotest.(check int) "first block untruncated (5000B)" 5000
-      (List.hd lines |> member "content" |> to_string |> String.length))
+    List.iter
+      (fun row ->
+         Alcotest.(check bool) "content is withheld" true
+           (row |> member "content" = `Null);
+         Alcotest.(check bool) "withheld marker is explicit" true
+           (row |> member "content_withheld" |> to_bool))
+      lines)
 
 let () =
   Alcotest.run "Trajectory" [
@@ -980,9 +974,9 @@ let () =
         test_dedupe_thinking_lines_uses_structural_key;
     ]);
     ("thinking_trajectory", [
-      Alcotest.test_case "append_thinking persists full untruncated text" `Quick
-        test_append_thinking_persists_untruncated;
-      Alcotest.test_case "persist_response_content stamps hook turn, all blocks" `Quick
-        test_persist_response_content_per_turn_full;
+      Alcotest.test_case "content-bearing legacy row is rejected" `Quick
+        test_content_bearing_thinking_row_is_rejected;
+      Alcotest.test_case "persist_response_content stamps withheld block metadata" `Quick
+        test_persist_response_content_per_turn_withheld;
     ]);
   ]

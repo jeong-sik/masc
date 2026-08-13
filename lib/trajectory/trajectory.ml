@@ -77,15 +77,6 @@ type trajectory = {
 (* Thinking entries                                                  *)
 (* ================================================================ *)
 
-type thinking_entry = {
-  ts : float;
-  ts_iso : string;
-  turn : int;
-  content : string;
-  content_length : int;
-  redacted : bool;
-}
-
 type withheld_reasoning_kind =
   | Thinking_block
   | Reasoning_details
@@ -102,7 +93,6 @@ type withheld_thinking_entry = {
 
 type trajectory_line =
   | Tool_call of tool_call_entry
-  | Thinking of thinking_entry
   | Withheld_thinking of withheld_thinking_entry
 
 (* ================================================================ *)
@@ -173,26 +163,6 @@ let entry_to_json ?(result_max_len = default_result_truncation)
        | None -> [])
     @ runtime_contract_field @ action_radius_field)
 
-let default_thinking_truncation = 2000
-
-let thinking_entry_to_json ?(content_max_len = default_thinking_truncation) (e : thinking_entry) : Yojson.Safe.t =
-  let content =
-    if content_max_len > 0 then
-      String_util.utf8_safe ~max_bytes:(content_max_len + 3) ~suffix:"..."
-        e.content
-      |> String_util.to_string
-    else e.content
-  in
-  `Assoc [
-    ("type", `String "thinking");
-    ("ts", `Float e.ts);
-    ("ts_iso", `String e.ts_iso);
-    ("turn", `Int e.turn);
-    ("content", `String content);
-    ("content_length", `Int e.content_length);
-    ("redacted", `Bool e.redacted);
-  ]
-
 let withheld_reasoning_kind_to_string = function
   | Thinking_block -> "thinking"
   | Reasoning_details -> "reasoning_details"
@@ -220,10 +190,8 @@ let withheld_thinking_entry_to_json (e : withheld_thinking_entry) : Yojson.Safe.
     ]
 ;;
 
-let trajectory_line_to_json ?(result_max_len = default_result_truncation)
-    ?(content_max_len = default_thinking_truncation) = function
+let trajectory_line_to_json ?(result_max_len = default_result_truncation) = function
   | Tool_call e -> entry_to_json ~result_max_len e
-  | Thinking e -> thinking_entry_to_json ~content_max_len e
   | Withheld_thinking e -> withheld_thinking_entry_to_json e
 
 let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
@@ -511,20 +479,6 @@ let reset_round_counters_for_testing () =
   Stdlib.Mutex.protect round_counters_mu (fun () ->
     Hashtbl.reset round_counters;
     Hashtbl.reset round_high_water)
-
-(** Append a thinking block entry to the JSONL trajectory file. *)
-let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
-    (entry : thinking_entry) : unit =
-  let dir = trajectories_dir masc_root keeper_name in
-  Fs_compat.mkdir_p dir;
-  let path = trajectory_path masc_root keeper_name trace_id in
-  (* 남김없이: the thinking trajectory is the eval/audit SSOT, so persist the
-     FULL untruncated reasoning text. Truncation is a read/display concern
-     ([content_max_len] query param on the trajectory endpoint), never a
-     write-time one — truncating here destroyed reasoning before it was ever
-     stored. [content_length] still records the true length either way. *)
-  let json = thinking_entry_to_json ~content_max_len:0 entry in
-  Fs_compat.append_jsonl path json
 
 let append_withheld_thinking ~(masc_root : string) ~(keeper_name : string)
     ~(trace_id : string) (entry : withheld_thinking_entry) : unit =
@@ -959,35 +913,7 @@ let trajectory_line_of_json json =
          (match withheld_thinking_entry_of_json json with
           | Some entry -> Parsed_line (Withheld_thinking entry)
           | None -> Malformed_line)
-       | _ ->
-         Parsed_line
-           (Thinking
-              { ts =
-                  (match Json_util.assoc_member_opt "ts" json with
-                   | Some (`Float f) -> f
-                   | Some (`Int n) -> Float.of_int n
-                   | _ -> 0.0)
-              ; ts_iso =
-                  (match Json_util.assoc_member_opt "ts_iso" json with
-                   | Some (`String s) -> s
-                   | _ -> "")
-              ; turn =
-                  (match Json_util.assoc_member_opt "turn" json with
-                   | Some (`Int n) -> n
-                   | _ -> 0)
-              ; content =
-                  (match Json_util.assoc_member_opt "content" json with
-                   | Some (`String s) -> s
-                   | _ -> "")
-              ; content_length =
-                  (match Json_util.assoc_member_opt "content_length" json with
-                   | Some (`Int n) -> n
-                   | _ -> 0)
-              ; redacted =
-                  (match Json_util.assoc_member_opt "redacted" json with
-                   | Some (`Bool b) -> b
-                   | _ -> false)
-              }))
+       | _ -> Malformed_line)
   | _ ->
       (match tool_call_entry_of_json json with
        | Some (entry, _parsed_gate) -> Parsed_line (Tool_call entry)

@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Keeper 기능 상태·증거 매트릭스</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#070a10; --panel:#101722; --panel2:#151f2d; --line:#29384b;
+      --text:#edf4fb; --muted:#9fb0c1; --cyan:#64d8ff; --green:#5ee6a8;
+      --amber:#ffc857; --red:#ff7979; --violet:#ad8cff; --blue:#78a9ff;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:radial-gradient(circle at 80% -10%,#172848 0,transparent 32%),var(--bg); color:var(--text); font:14px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    main { max-width:1540px; margin:auto; padding:36px 22px 90px; }
+    h1 { max-width:900px; margin:0; font-size:clamp(30px,5vw,54px); line-height:1.06; letter-spacing:-.04em; }
+    h2 { margin:42px 0 14px; font-size:23px; }
+    h3 { margin:0 0 8px; font-size:15px; }
+    p { margin:8px 0; }
+    a { color:var(--cyan); }
+    code { color:#d8e8ff; background:#1a2636; padding:2px 5px; border-radius:4px; }
+    .eyebrow { color:var(--cyan); letter-spacing:.14em; text-transform:uppercase; font-weight:750; }
+    .lead { max-width:990px; color:#bdcad8; font-size:17px; }
+    .muted { color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+    .card { background:linear-gradient(150deg,var(--panel2),var(--panel)); border:1px solid var(--line); border-radius:13px; padding:16px; }
+    .metric { font-size:27px; font-weight:800; line-height:1.1; }
+    .good { color:var(--green); } .warn { color:var(--amber); } .bad { color:var(--red); } .info { color:var(--cyan); }
+    .notice { margin-top:18px; border-left:4px solid var(--amber); }
+    .flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .node { border:1px solid var(--line); border-radius:9px; background:var(--panel); padding:9px 12px; }
+    .arrow { color:var(--cyan); font-weight:900; }
+    .toolbar { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px; margin:0 -8px 12px; padding:10px 8px; background:rgba(7,10,16,.92); backdrop-filter:blur(12px); }
+    input,select { color:var(--text); background:#101a28; border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
+    input { flex:1; min-width:230px; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
+    table { width:100%; min-width:1250px; border-collapse:collapse; background:var(--panel); }
+    th,td { border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:10px; text-align:left; vertical-align:top; }
+    th { background:#172334; color:#dfeaf7; white-space:nowrap; }
+    tr:last-child td { border-bottom:0; } td:last-child,th:last-child { border-right:0; }
+    tbody tr:hover { background:#142033; }
+    .feature { min-width:150px; font-weight:760; }
+    .badge { display:inline-block; border:1px solid currentColor; border-radius:99px; padding:2px 8px; font-size:11px; font-weight:800; white-space:nowrap; }
+    .verified { color:var(--green); } .partial { color:var(--amber); } .source { color:var(--blue); } .missing { color:var(--red); } .blocked { color:var(--violet); }
+    .evidence { margin:4px 0 0; padding-left:17px; color:#c5d1de; }
+    .evidence li { margin:2px 0; }
+    .stack { display:grid; gap:8px; }
+    .step { display:grid; grid-template-columns:54px 180px 1fr; gap:12px; align-items:start; }
+    .step strong { color:var(--cyan); }
+    .lane { border-left:4px solid var(--blue); }
+    .lane.block { border-left-color:var(--red); }
+    .lane.next { border-left-color:var(--green); }
+    .refs li { margin:7px 0; }
+    details { border:1px solid var(--line); border-radius:10px; background:var(--panel); padding:11px 13px; }
+    summary { cursor:pointer; font-weight:750; }
+    footer { margin-top:42px; color:var(--muted); border-top:1px solid var(--line); padding-top:18px; }
+    @media (max-width:760px) { .step { grid-template-columns:46px 1fr; } .step p { grid-column:1/-1; } }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">MASC / Keeper product truth · 2026-08-13</p>
+  <h1>기능 상태·증거 매트릭스</h1>
+  <p class="lead">기능 이름이 코드에 존재하는지와 Keeper가 실제로 오래, 반복해서, 여러 Runtime에서 그 기능을 끝까지 수행하는지는 다른 사실이다. 이 문서는 source → feature test → exact-head CI → live receipt/log → Dashboard/browser → 장기 실행의 증거를 분리한다.</p>
+
+  <section class="grid">
+    <article class="card"><h3>Source 기준</h3><div class="metric info">98de04e2ec</div><p class="muted">현재 <code>main</code>. Memory counterpart wiring과 private evidence window까지 병합.</p></article>
+    <article class="card"><h3>Live binary 기준</h3><div class="metric warn">b757e98249</div><p class="muted">source보다 뒤처짐. uptime 52분, Dashboard asset도 stale.</p></article>
+    <article class="card"><h3>Feature proof</h3><div class="metric warn">2 pass / 3 warn</div><p class="muted">현재 API가 측정하는 5개 자율성 축. 전체 기능 수가 아니다.</p></article>
+    <article class="card"><h3>24h 연속성</h3><div class="metric warn">1 / 12 Keeper</div><p class="muted">analyst만 52.9h span. 다른 Keeper는 아직 24h 증거 미달.</p></article>
+    <article class="card"><h3>Queue / Scheduler</h3><div class="metric good">clean / 202</div><p class="muted">pending 0, runner 202회 성공·0회 실패. 개별 feature canary와는 별도.</p></article>
+    <article class="card"><h3>Fleet health</h3><div class="metric warn">degraded</div><p class="muted">10 fibers 중 executable 7. reaction capacity가 target보다 3 부족.</p></article>
+  </section>
+
+  <article class="card notice">
+    <h3>현재 판정</h3>
+    <p><strong>기능 기반은 넓지만 제품 목표는 아직 완료가 아니다.</strong> 현재 라이브 증거는 자율 턴·24h span·tool turn·board reaction·scheduled cycle 5축에 집중되어 있다. Task/Goal/Fusion/Judge/Connector/Memory 관계 회상/멀티모달/Failover/Async·Batch의 동일 canary 기반 end-to-end 증거와 브라우저 캡처가 빠져 있다.</p>
+  </article>
+
+  <h2>1. 완료 판정 모델</h2>
+  <div class="flow" aria-label="evidence progression">
+    <span class="node">E0 사용자 시나리오</span><span class="arrow">→</span>
+    <span class="node">E1 Source 경계</span><span class="arrow">→</span>
+    <span class="node">E2 Feature test</span><span class="arrow">→</span>
+    <span class="node">E3 exact-head CI</span><span class="arrow">→</span>
+    <span class="node">E4 Live receipt/log</span><span class="arrow">→</span>
+    <span class="node">E5 Browser/UI 대조</span><span class="arrow">→</span>
+    <span class="node">E6 10-turn / 1h / 2h / 4h / 24h</span>
+  </div>
+  <p class="muted">모든 기능에 E6를 억지로 붙이지 않는다. 다만 지속성·재개·Failover·Memory를 약속하는 기능은 E6 없이는 완료가 아니다. 개수나 비율은 관측치일 뿐 admission gate가 아니다.</p>
+
+  <h2>2. 기능별 현재 상태</h2>
+  <div class="toolbar">
+    <input id="query" type="search" placeholder="기능, 근거, 남은 일 검색" aria-label="매트릭스 검색">
+    <select id="status" aria-label="상태 필터">
+      <option value="">모든 상태</option><option value="verified">Live verified</option><option value="partial">Partial</option><option value="source">Source only</option><option value="missing">Missing proof</option><option value="blocked">Blocked</option>
+    </select>
+    <select id="domain" aria-label="도메인 필터">
+      <option value="">모든 도메인</option><option>Coordination</option><option>Autonomy</option><option>Reasoning</option><option>Memory</option><option>Execution</option><option>Surface</option><option>Operations</option>
+    </select>
+  </div>
+  <div class="table-wrap">
+    <table id="matrix">
+      <thead><tr><th>도메인</th><th>기능</th><th>현재</th><th>Source / 설정</th><th>실증</th><th>빠진 일</th><th>완료 증거</th></tr></thead>
+      <tbody>
+        <tr data-status="partial" data-domain="Coordination"><td>Coordination</td><td class="feature">Task</td><td><span class="badge partial">PARTIAL</span></td><td><code>lib/workspace/workspace_task_*</code><br>Keeper task tools + verification transition</td><td>타입·store·테스트는 광범위. 현재 live queue에 task blocker 없음.</td><td>한 canary를 create→claim→work→LLM verification→terminal까지 같은 ID로 대조.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Coordination"><td>Coordination</td><td class="feature">Board · Comment · Karma</td><td><span class="badge partial">PARTIAL</span></td><td><code>board_tool_registry</code>, keeper projection, karma ledger</td><td>board collection health ok. 8/12 Keeper에 최근 board-reactive counter.</td><td>post→mention→comment/vote→reaction ledger resolved를 canary 하나로 Browser까지 대조.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Coordination"><td>Coordination</td><td class="feature">Goal</td><td><span class="badge partial">PARTIAL</span></td><td><code>workspace_goals</code>, goal index/reconciliation, Dashboard goal tree</td><td>Source와 UI 테스트 존재. 현재 campaign live receipt 미수집.</td><td>Goal→Task assignment→progress→completion reconciliation canary.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Coordination"><td>Coordination</td><td class="feature">Broadcast</td><td><span class="badge partial">PARTIAL</span></td><td><code>workspace_broadcast</code>, broadcast wake policy</td><td>focused tests 존재. full-hyphen mention 수정 #28590은 Draft.</td><td>하이픈 identity parser 테스트 보강 후 2 Keeper 수신·중복 없음 실측.</td><td>E2·E3·E4</td></tr>
+        <tr data-status="verified" data-domain="Coordination"><td>Coordination</td><td class="feature">Drain Queue</td><td><span class="badge verified">LIVE VERIFIED</span></td><td><code>Keeper_event_queue</code> + persistence/owner lock</td><td>live pending 0, storage integrity ok, runnable backlog 0.</td><td>현재 idle clean은 통과. 장기 campaign 중 poison/head-block/restart drain을 별도 보강.</td><td>E4·E6</td></tr>
+        <tr data-status="verified" data-domain="Coordination"><td>Coordination</td><td class="feature">Schedule Job</td><td><span class="badge verified">LIVE VERIFIED</span></td><td><code>schedule_service</code>, <code>schedule_runner</code></td><td>live tick 202 success / 0 failure / 0 crash.</td><td>고유 occurrence의 create→due→wake→terminal→cancel Browser 대조.</td><td>E4·E5</td></tr>
+
+        <tr data-status="partial" data-domain="Autonomy"><td>Autonomy</td><td class="feature">Autonomous · Proactive</td><td><span class="badge partial">PARTIAL</span></td><td>heartbeat/supervisor, scheduled proactive decision log</td><td>scheduled proactive 12/12 pass; executable fleet는 7/10.</td><td>disabled canary를 fleet denominator와 분리하고, 정상 7 Keeper의 실패율·진척을 장기 추적.</td><td>E4·E6</td></tr>
+        <tr data-status="partial" data-domain="Autonomy"><td>Autonomy</td><td class="feature">MultiTurn continuity</td><td><span class="badge partial">PARTIAL</span></td><td>turn driver, checkpoint, compaction, state-machine multi-cycle test</td><td>모든 keeper 최근 turn은 있음. 24h span은 1/12.</td><td>10-turn 의미 회상 + 1/2/4/24h 동일 작업 진척·비반복 판정 campaign.</td><td>E2·E4·E6</td></tr>
+        <tr data-status="missing" data-domain="Autonomy"><td>Autonomy</td><td class="feature">Team collaboration scenarios</td><td><span class="badge missing">MISSING PROOF</span></td><td>Task/Board/Goal/Fusion 조합 가능</td><td>PoC·논문·소설·QA 100% 같은 제품 시나리오의 campaign evidence 없음.</td><td>각 시나리오를 성공 조건·역할·artifact·반론·검증 단계가 있는 manifest로 실행.</td><td>E0–E6</td></tr>
+
+        <tr data-status="partial" data-domain="Reasoning"><td>Reasoning</td><td class="feature">Fusion</td><td><span class="badge partial">PARTIAL</span></td><td><code>lib/fusion</code>, TOML presets, status/wake</td><td>configured panels/judge와 focused suites 존재; live canary 일부 존재.</td><td>panel partial/all-fail→judge→consumer receipt와 Dashboard를 동일 run_id로 저장.</td><td>E2·E3·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Reasoning"><td>Reasoning</td><td class="feature">Judge</td><td><span class="badge partial">PARTIAL</span></td><td>fusion judge + failure judge + exact-output lane</td><td>typed schema/fail-closed 경계 존재.</td><td>자유 텍스트·invalid schema·provider failure에서 typed 실패와 fallback 의미를 live 검증.</td><td>E2·E4</td></tr>
+        <tr data-status="partial" data-domain="Reasoning"><td>Reasoning</td><td class="feature">Judge of Judge</td><td><span class="badge partial">PARTIAL</span></td><td><code>quorum</code>, <code>council</code>, staged JoJ TOML</td><td>topology와 2/6 judge preset이 설정됨.</td><td>각 judge identity·stage·meta verdict·partial failure의 실제 실행 증거.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Reasoning"><td>Reasoning</td><td class="feature">Cross-Verification</td><td><span class="badge partial">PARTIAL</span></td><td>verification protocol/store/authority + Dashboard panels</td><td>source/tests 존재. 전 기능에 강제하는 전역 gate는 아님.</td><td>Task 결과가 verifier 근거와 연결되고 원 owner를 막지 않는 end-to-end canary.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Reasoning"><td>Reasoning</td><td class="feature">Thinking · CoT</td><td><span class="badge partial">PARTIAL</span></td><td>provider reasoning dialect + private checkpoint/public projection</td><td>hidden reasoning 비공개화 PR #28561/#28563은 Draft.</td><td>private continuation은 유지하고 public raw trace/trajectory에는 metadata만 남는 exact-head CI+live 검증.</td><td>E3·E4·E5</td></tr>
+
+        <tr data-status="partial" data-domain="Memory"><td>Memory</td><td class="feature">Memory OS recall</td><td><span class="badge partial">PARTIAL</span></td><td><code>*.memory-current.json</code>, recall injection, revision CAS</td><td>현재 snapshot/source와 focused tests 존재.</td><td>N→N+3 turn에서 exact remembered fact·ordering·compaction 후 재주입·오류 가시성 검증.</td><td>E2·E4·E6</td></tr>
+        <tr data-status="partial" data-domain="Memory"><td>Memory</td><td class="feature">Librarian</td><td><span class="badge partial">PARTIAL</span></td><td><code>keeper_librarian_runtime</code>, <code>librarian_exact</code></td><td>configuration fence와 journal failure tests 존재.</td><td>화자·상대·관계·행동을 content evidence에서 추출하고 다음 turn 회상에 쓰는 live chain.</td><td>E2·E4·E6</td></tr>
+        <tr data-status="partial" data-domain="Memory"><td>Memory</td><td class="feature">Counterpart relationship</td><td><span class="badge partial">PARTIAL</span></td><td>main #28592/#28598/#28600: scoped typed counterpart evidence</td><td>source는 병합됐지만 live binary는 이전 commit.</td><td>재기동 후 인물 혼동·동명이인·관계 변화·근거 창을 multi-session으로 확인.</td><td>E3·E4·E6</td></tr>
+
+        <tr data-status="source" data-domain="Execution"><td>Execution</td><td class="feature">Parallel · Batch Tool</td><td><span class="badge source">SOURCE ONLY</span></td><td>도구 호출과 Fusion 내부 병렬 실행은 있으나 제품-level batch contract가 불명확.</td><td><code>batch</code>/<code>parallel</code> 명명 source와 live proof가 거의 없음.</td><td>독립 병렬, 순서 의존, partial failure를 구분하는 typed invocation 계약부터 확정.</td><td>E0–E5</td></tr>
+        <tr data-status="partial" data-domain="Execution"><td>Execution</td><td class="feature">Async Tool · Job</td><td><span class="badge partial">PARTIAL</span></td><td><code>keeper_msg_async</code>; Fusion에는 accept/status/wake 패턴</td><td>terminal/inventory/path tests 존재. 범용 long-running Job은 RFC 수준.</td><td>accept→handle→observe/cancel→restart→terminal을 하나의 public surface로 실증.</td><td>E2·E4·E6</td></tr>
+        <tr data-status="partial" data-domain="Execution"><td>Execution</td><td class="feature">Multi Runtime · Model/Provider Free</td><td><span class="badge partial">PARTIAL</span></td><td><code>runtime.toml</code> catalog, provider capability flags, lanes</td><td>여러 Runtime 설정 존재. 이름을 제품 role policy로 쓰지 않음.</td><td>Codex/ClaudeCode/Antigravity/API provider 각각 10-turn canary와 같은 semantic contract 대조.</td><td>E2·E4·E6</td></tr>
+        <tr data-status="partial" data-domain="Execution"><td>Execution</td><td class="feature">Runtime Failover</td><td><span class="badge partial">PARTIAL</span></td><td>ordered runtime lanes, <code>test_keeper_turn_driver_failover</code></td><td>focused test는 있음. live 전환의 자연스러움·기억 보존 증거 없음.</td><td>provider A 실패→B 전환 때 tool/result 중복 없이 turn identity와 memory가 유지되는지 실측.</td><td>E2·E4·E6</td></tr>
+        <tr data-status="partial" data-domain="Execution"><td>Execution</td><td class="feature">TOML configuration</td><td><span class="badge partial">PARTIAL</span></td><td>boot_static / sweep_dynamic / request_dynamic reload classes</td><td>reload matrix와 parser/boot validation 존재.</td><td>각 class마다 edit→expected trigger→effective meta/runtime→Dashboard 표시를 table-driven canary로 증명.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Execution"><td>Execution</td><td class="feature">File System · Sandbox</td><td><span class="badge partial">PARTIAL</span></td><td>base-path resolution, Local/Docker typed sandbox</td><td>cwd/containment/route tests 존재. #28584/#28585는 아직 red.</td><td>effective TOML meta 보존 후 Docker 실패가 Host로 강등되지 않음을 CI·live로 확인.</td><td>E2·E3·E4</td></tr>
+        <tr data-status="source" data-domain="Execution"><td>Execution</td><td class="feature">MultiModal</td><td><span class="badge source">SOURCE ONLY</span></td><td><code>lib/multimodal</code>, artifacts/hydrator/vision + Dashboard</td><td>source와 UI surface는 존재. 현재 campaign live evidence 없음.</td><td>이미지 artifact→Keeper context→tool action→Dashboard provenance를 Browser로 캡처.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Execution"><td>Execution</td><td class="feature">GitHub Credential</td><td><span class="badge partial">PARTIAL</span></td><td><code>keeper_github_identity</code> + secret projection/redaction</td><td>focused identity tests 존재.</td><td>optional identity 실패가 일반 Keeper를 막지 않고 PR effect만 typed failure인지 live 확인.</td><td>E2·E4</td></tr>
+
+        <tr data-status="partial" data-domain="Surface"><td>Surface</td><td class="feature">Connector routing</td><td><span class="badge partial">PARTIAL</span></td><td><code>keeper_surface_read/post</code>, connector ingress and gate</td><td>Dashboard/Discord/Slack route source 존재.</td><td>맥락 기반 목적지 선택은 Keeper가 하고, system은 승인되지 않은 재배달을 만들지 않는 live matrix.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="blocked" data-domain="Surface"><td>Surface</td><td class="feature">Discord</td><td><span class="badge blocked">BLOCKED</span></td><td>in-process gateway alive, REST/WSS/typing/presence tests</td><td>live gateway alive. 중복 독백 제거 #28596은 CI pending. #28574 P2 코드는 head <code>c9df777b83</code>에서 대응했고 CI 판정 대기.</td><td>#28596 live 3종: 침묵, 명시 post 도달, 무발화 non-failure. #28574 exact-head CI 후 plain-text와 checkpoint 비지속 live 확인.</td><td>E3·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Surface"><td>Surface</td><td class="feature">Slack</td><td><span class="badge partial">PARTIAL</span></td><td>Socket/REST gateway, user directory, attention tests</td><td>source와 focused test는 있음. 현재 health subsystem에는 별도 live status 없음.</td><td>mention→turn→reply + no-op silence + reconnect를 실제 채널 canary로 확인.</td><td>E2·E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Surface"><td>Surface</td><td class="feature">Dashboard</td><td><span class="badge partial">PARTIAL</span></td><td>API read models + TS components/tests</td><td>feature-proof endpoint 200. assets는 binary보다 오래돼 health stale.</td><td>소스 build 후 API와 DOM을 같은 timestamp/run_id로 비교하고 screenshot 저장.</td><td>E3·E4·E5</td></tr>
+
+        <tr data-status="partial" data-domain="Operations"><td>Operations</td><td class="feature">Observability · Log</td><td><span class="badge partial">PARTIAL</span></td><td>receipts, turn records, raw trace, activity, metrics, OTel</td><td>file sink active, recent error/warn 0. OTel configured but exporter inactive.</td><td>causal ID로 request→effect→receipt→wake→UI를 탐색하고 missing projection을 명시.</td><td>E4·E5</td></tr>
+        <tr data-status="partial" data-domain="Operations"><td>Operations</td><td class="feature">Long-run performance</td><td><span class="badge partial">PARTIAL</span></td><td>health/GC/FD/queue metrics + process sweeper work</td><td>현재 uptime 52m; orphan daemon은 별도 수리 후보 #1254.</td><td>1/2/4/24h campaign에서 RSS/CPU/FD/latency/queue age/turn progress를 시계열 저장.</td><td>E4·E6</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>3. 남은 작업의 실행 순서</h2>
+  <div class="stack">
+    <article class="card lane next"><div class="step"><strong>P0-A</strong><h3>#28597 병합</h3><p>기존 Keeper hook suite를 CI에 실제 배선한다. 새 제품 gate가 아니라 관측되지 않던 feature test를 authoritative CI에 연결하는 작업. exact head green, unresolved thread 0, Draft 해제만 남음.</p></div></article>
+    <article class="card lane"><div class="step"><strong>P0-B</strong><h3>#28470 / #28488 재실행</h3><p>#28597 이후 최신 main으로 갱신. 같은 baseline failure가 사라지고 exact-head green이면 origin read timeout 보호와 dated-jsonl dotfile rule을 병합한다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>P0-C</strong><h3>Discord 출력 경계</h3><p>#28574 head <code>c9df777b83</code>의 CI와 live plain-text/checkpoint 비지속을 확인한 뒤 병합한다. 이어 #28596의 CI와 live 3종을 완료해 사용자에게 보이는 중복과 침묵 실패를 끝낸다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>P1</strong><h3>Campaign evidence index</h3><p>새 전역 실행 SSOT나 admission framework를 만들지 않는다. 기존 producer receipt/log/API의 참조만 모은 manifest를 만들고 canary ID로 E0–E6를 연결한다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>P1</strong><h3>Memory 관계 회상 campaign</h3><p>병합된 counterpart evidence를 재기동 후 검증한다. 화자·대상·관계·행동·시간·근거를 N→N+3과 session restart에서 확인하며 추측된 관계는 저장하지 않는다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>P2</strong><h3>Scenario campaigns</h3><p>협업 코드, 연구/논문, 연작 글, 반론·변론을 각각 Goal/Task/Board/Fusion/Verification/Memory 조합으로 실행하고 10-turn과 장기 구간을 수집한다.</p></div></article>
+  </div>
+
+  <h2>4. 구현 규칙</h2>
+  <div class="grid">
+    <article class="card"><h3>기능 우선</h3><p>실제 canary 실패를 먼저 재현한다. 관측 인프라가 없다는 이유로 정상 기능을 막는 전역 gate를 만들지 않는다.</p></article>
+    <article class="card"><h3>Typed boundary</h3><p><code>Raw → Resolved → Decision → Command</code>. 문자열/substring/regex가 도메인 상태를 대신하지 않는다.</p></article>
+    <article class="card"><h3>Effect outside</h3><p>pure transition에서 command를 만들고 filesystem/network/process effect는 바깥 owner가 실행한다.</p></article>
+    <article class="card"><h3>Current only</h3><p>producer/reader/writer/caller를 함께 바꾸고 old reader, dual write, fallback facade, 죽은 테스트를 남기지 않는다.</p></article>
+    <article class="card"><h3>설정 진실</h3><p>경로는 <code>&lt;base-path&gt;</code>에서 resolve한다. env를 추가하기 전에 TOML과 기존 runtime params를 확인한다.</p></article>
+    <article class="card"><h3>증거 분리</h3><p>Source, CI, merged, deployed, live, screenshot은 서로 대체하지 않는다. 동일 canary identity로 연결한다.</p></article>
+  </div>
+
+  <h2>5. 외부 구현에서 가져올 것</h2>
+  <div class="grid">
+    <article class="card"><h3>Hermes Agent</h3><p>항상 주입되는 작은 user/profile memory와 on-demand session search/procedural skills를 분리한다. MASC도 사람·관계 핵심 snapshot과 상세 사건 검색을 같은 저장소로 뭉개지 않는 편이 맞다.</p></article>
+    <article class="card"><h3>OpenClaw</h3><p>agent별 workspace·identity·user·memory·session store 분리와 runtime/provider 경계를 참고한다. bootstrap file은 context이지 실행 권한이 아니다.</p></article>
+    <article class="card"><h3>Generative Agents</h3><p>observation·reflection·planning의 분리가 장기 행동 품질에 기여한다. 관계 기억도 단순 사실 저장이 아니라 다음 계획에서 실제 사용됐는지를 평가해야 한다.</p></article>
+    <article class="card"><h3>MemGPT</h3><p>bounded active context와 external memory tier 사이 이동, interrupt 기반 control flow를 참고한다. 저장량보다 올바른 recall/reinjection과 실패 가시성이 핵심이다.</p></article>
+  </div>
+
+  <h2>6. 근거와 갱신 계약</h2>
+  <details open><summary>저장소·라이브 근거</summary><ul class="refs">
+    <li><code>docs/KEEPER-CAPABILITY-MATRIX.md</code> — Keeper가 실제 받는 typed capability family.</li>
+    <li><code>docs/TOML-RELOAD-MATRIX.md</code> — boot/sweep/request reload 구분.</li>
+    <li><code>lib/dashboard/dashboard_keeper_feature_proof.ml</code> — 현재 5개 autonomy feature proof read model.</li>
+    <li><code>/health?full=1</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — 2026-08-13 22:00 KST 전후 live snapshot.</li>
+    <li>Open PR exact-head 상태 — #28597, #28470, #28488, #28596, #28574, #28556, #28580, #28584, #28585, #28590.</li>
+  </ul></details>
+  <details><summary>외부 근거</summary><ul class="refs">
+    <li><a href="https://github.com/NousResearch/hermes-agent">NousResearch/hermes-agent</a> 및 <a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/">Persistent Memory</a>.</li>
+    <li><a href="https://github.com/openclaw/openclaw/blob/main/docs/agent-runtime-architecture.md">OpenClaw agent runtime architecture</a>와 <a href="https://github.com/openclaw/openclaw/blob/main/docs/concepts/agent.md">Agent workspace/context</a>.</li>
+    <li><a href="https://arxiv.org/abs/2304.03442">Generative Agents</a>, <a href="https://arxiv.org/abs/2310.08560">MemGPT</a>.</li>
+  </ul></details>
+  <p class="muted">갱신 규칙: live 수치는 캡처 시각이 지나면 역사적 증거다. PR head가 바뀌면 이전 CI는 무효다. 기능 행의 상태는 더 강한 증거가 생길 때만 올리고, source가 사라지거나 live가 모순되면 즉시 내린다.</p>
+
+  <footer>작성 기준: source <code>98de04e2ec</code> · live <code>b757e98249</code> · effective base <code>/Users/dancer/me</code> · MASC root <code>/Users/dancer/me/.masc</code></footer>
+</main>
+<script>
+  const query = document.querySelector('#query');
+  const status = document.querySelector('#status');
+  const domain = document.querySelector('#domain');
+  const rows = [...document.querySelectorAll('#matrix tbody tr')];
+  function filterRows() {
+    const q = query.value.trim().toLowerCase();
+    for (const row of rows) {
+      const matchesQuery = !q || row.textContent.toLowerCase().includes(q);
+      const matchesStatus = !status.value || row.dataset.status === status.value;
+      const matchesDomain = !domain.value || row.dataset.domain === domain.value;
+      row.hidden = !(matchesQuery && matchesStatus && matchesDomain);
+    }
+  }
+  query.addEventListener('input', filterRows);
+  status.addEventListener('change', filterRows);
+  domain.addEventListener('change', filterRows);
+</script>
+</body>
+</html>

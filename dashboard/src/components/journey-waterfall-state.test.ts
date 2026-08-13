@@ -156,6 +156,10 @@ describe('buildJourneyWaterfall', () => {
           duration_ms: 250,
           trace_id: 'trace-1',
           turn: 2,
+          planned_index: 3,
+          batch_index: 1,
+          batch_size: 2,
+          execution_mode: 'concurrent',
         },
       ]),
       runtimeTrace: runtimeTrace(),
@@ -170,6 +174,10 @@ describe('buildJourneyWaterfall', () => {
     expect(toolEntry?.source).toBe('trajectory+tool_call_log')
     expect(toolEntry?.toolArgs).toEqual({ file_path: '/tmp/current' })
     expect(toolEntry?.toolResult).toBe('current result')
+    expect(toolEntry?.plannedIndex).toBe(3)
+    expect(toolEntry?.batchIndex).toBe(1)
+    expect(toolEntry?.batchSize).toBe(2)
+    expect(toolEntry?.executionMode).toBe('concurrent')
   })
 
   it('keeps tool-call-log rows when trajectory is missing', () => {
@@ -187,6 +195,10 @@ describe('buildJourneyWaterfall', () => {
           duration_ms: 10,
           trace_id: 'trace-1',
           keeper_turn_id: 5,
+          planned_index: 4,
+          batch_index: 2,
+          batch_size: 1,
+          execution_mode: 'serial',
         },
       ]),
       runtimeTrace: null,
@@ -195,6 +207,10 @@ describe('buildJourneyWaterfall', () => {
     expect(model.turns).toHaveLength(1)
     expect(model.turns[0]?.turn).toBe(5)
     expect(model.turns[0]?.entries[0]?.source).toBe('tool_call_log')
+    expect(model.turns[0]?.entries[0]?.plannedIndex).toBe(4)
+    expect(model.turns[0]?.entries[0]?.batchIndex).toBe(2)
+    expect(model.turns[0]?.entries[0]?.batchSize).toBe(1)
+    expect(model.turns[0]?.entries[0]?.executionMode).toBe('serial')
     expect(model.turns[0]?.runtimeEvidence).toBeNull()
   })
 

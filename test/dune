@@ -898,7 +898,6 @@
 
 (tests
  (names
-  test_pbt_mention
   test_pbt_validation
   test_pbt_text_processing
   test_pbt_context_overflow
@@ -911,7 +910,6 @@
   test_event_priority_monotone_pbt
   test_board_metrics_labels)
  (modules
-  test_pbt_mention
   test_pbt_validation
   test_pbt_text_processing
   test_pbt_context_overflow
@@ -1549,11 +1547,6 @@
 (executable
  (name tool_call_quality_benchmark_cli)
  (modules tool_call_quality_benchmark_cli)
- (libraries masc_test_deps))
-
-(executable
- (name test_mention_monkey)
- (modules test_mention_monkey)
  (libraries masc_test_deps))
 
 (executable

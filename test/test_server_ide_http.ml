@@ -690,9 +690,9 @@ let test_post_cursors_rejects_file_path_scope_mismatch () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
-    (* POST cursor with a file_path that belongs to a different repo than the
-       requested canonical_url scope: the server must reject it (task-1733)
-       instead of silently writing to the wrong partition. *)
+    (* RFC-0378 §5.3: the scope names the codebase and the posted path is
+       repo-root-relative. An absolute path — the shape the old catalog
+       re-derivation accepted — is a typed reject at the mint. *)
     let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let body =
       Yojson.Safe.to_string
@@ -705,29 +705,35 @@ let test_post_cursors_rejects_file_path_scope_mismatch () =
       http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
     in
     let post_response = dispatch router post_request in
-    check_status "POST cursor with mismatched file_path returns 400" 400 post_response;
+    check_status "POST cursor with an absolute file_path returns 400" 400 post_response;
     check
       string
-      "file_path scope mismatch error"
-      "file_path does not belong to requested canonical_url"
-      (error_message_of_response post_response);
-    check
-      string
-      "file_path scope mismatch code"
-      "canonical_url_mismatch"
-      (error_code_of_response post_response))
+      "cursor mint reject code"
+      "invalid_file_path"
+      (error_code_of_response post_response);
+    (* The co-view vocabulary succeeds: repo-root-relative under the scope. *)
+    let ok_body =
+      Yojson.Safe.to_string (`Assoc [ "file_path", `String "lib/a.ml"; "line", `Int 9 ])
+    in
+    let ok_response =
+      dispatch
+        router
+        (http_request ~meth:`POST ~path:scoped_path ~body:ok_body ~token:(Some token) ())
+    in
+    check_status "POST cursor with a repo-relative file_path returns 201" 201 ok_response)
 ;;
 
 let test_post_annotations_accepts_matching_repo_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
+    let _masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
-    let file_path = Filename.concat masc_path "lib/a.ml" in
+    (* RFC-0378 §5.3: the posted path is repo-root-relative — the same
+       vocabulary the co-view hands out and the repo-scoped read queries. *)
     let request =
       http_request
         ~meth:`POST
         ~path:"/api/v1/ide/annotations?repo_id=masc"
-        ~body:(annotation_body ~file_path)
+        ~body:(annotation_body ~file_path:"lib/a.ml")
         ~token:(Some token)
         ()
     in
@@ -745,10 +751,12 @@ let test_post_annotations_accepts_matching_repo_scope () =
       (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
-let test_post_annotations_rejects_repo_scope_mismatch () =
+let test_post_annotations_rejects_absolute_file_path () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
+    (* RFC-0378 §5.3: an absolute path is not the co-view vocabulary —
+       typed reject at the mint, and nothing lands in any partition. *)
     let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let request =
       http_request
@@ -759,34 +767,28 @@ let test_post_annotations_rejects_repo_scope_mismatch () =
         ()
     in
     let response = dispatch router request in
-    check_status "POST annotation with mismatched repo_id returns 400" 400 response;
+    check_status "POST annotation with an absolute file_path returns 400" 400 response;
     check
       string
-      "repo scope mismatch error"
-      "file_path does not belong to requested repo_id"
-      (error_message_of_response response);
-    check
-      string
-      "repo scope mismatch code"
-      "repo_mismatch"
+      "mint reject code"
+      "invalid_file_path"
       (error_code_of_response response);
     check
       int
-      "mismatched annotation is not written to requested partition"
+      "rejected annotation is not written to the scoped partition"
       0
       (annotation_count router "/api/v1/ide/annotations?repo_id=masc");
     check
       int
-      "mismatched annotation is not written to actual partition"
+      "rejected annotation is not written to any other partition"
       0
       (annotation_count router "/api/v1/ide/annotations?repo_id=agent_core"))
 ;;
 
-let test_post_annotations_rejects_canonical_scope_mismatch () =
+let test_post_annotations_rejects_escaping_file_path () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
+    let _repos = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
-    let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let scoped_path =
       "/api/v1/ide/annotations?canonical_url="
       ^ Uri.pct_encode "https://github.com/jeong-sik/masc.git"
@@ -795,21 +797,16 @@ let test_post_annotations_rejects_canonical_scope_mismatch () =
       http_request
         ~meth:`POST
         ~path:scoped_path
-        ~body:(annotation_body ~file_path)
+        ~body:(annotation_body ~file_path:"../escape.ml")
         ~token:(Some token)
         ()
     in
     let response = dispatch router request in
-    check_status "POST annotation with mismatched canonical_url returns 400" 400 response;
+    check_status "POST annotation with an escaping file_path returns 400" 400 response;
     check
       string
-      "canonical scope mismatch error"
-      "file_path does not belong to requested canonical_url"
-      (error_message_of_response response);
-    check
-      string
-      "canonical scope mismatch code"
-      "canonical_url_mismatch"
+      "mint reject code"
+      "invalid_file_path"
       (error_code_of_response response))
 ;;
 
@@ -1299,10 +1296,10 @@ let () =
             test_post_cursors_honors_canonical_url_scope
         ; test_case "POST annotation accepts matching repo scope" `Quick
             test_post_annotations_accepts_matching_repo_scope
-        ; test_case "POST annotation rejects repo scope mismatch" `Quick
-            test_post_annotations_rejects_repo_scope_mismatch
-        ; test_case "POST annotation rejects canonical scope mismatch" `Quick
-            test_post_annotations_rejects_canonical_scope_mismatch
+        ; test_case "POST annotation rejects an absolute file_path" `Quick
+            test_post_annotations_rejects_absolute_file_path
+        ; test_case "POST annotation rejects an escaping file_path" `Quick
+            test_post_annotations_rejects_escaping_file_path
         ; test_case "POST annotation requires auth" `Quick
             test_post_annotations_requires_auth
         ; test_case "DELETE annotation requires auth" `Quick

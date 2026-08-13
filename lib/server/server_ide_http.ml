@@ -40,7 +40,6 @@ let respond_ide_error ~status ~request err reqd =
     reqd
 ;;
 
-let nonempty_query_param = Server_ide_scope.nonempty_query_param
 
 type ide_scope = Server_ide_scope.ide_scope =
   | Scope_canonical_url of
@@ -109,72 +108,31 @@ let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
          reqd)
 ;;
 
-type annotation_scope_error =
-  | File_path_repo_id_mismatch
-  | File_path_canonical_url_mismatch
-  | Repository_catalog_unavailable of string
-
-let annotation_scope_error_message = function
-  | File_path_repo_id_mismatch -> "file_path does not belong to requested repo_id"
-  | File_path_canonical_url_mismatch ->
-    "file_path does not belong to requested canonical_url"
-  | Repository_catalog_unavailable message -> message
-;;
-
-let annotation_scope_error_code = function
-  | File_path_repo_id_mismatch -> "repo_mismatch"
-  | File_path_canonical_url_mismatch -> "canonical_url_mismatch"
-  | Repository_catalog_unavailable _ -> "repository_catalog_unavailable"
-;;
-
-let validate_annotation_post_scope ~state ~uri ~file_path =
-  if Filename.is_relative file_path then Ok ()
-  else (
-    let project_base = base_path_of_state state in
-    match nonempty_query_param uri "canonical_url" with
-    | Some canonical_url ->
-      (match Ide_paths.canonical_url_of_remote canonical_url with
-       | None -> Ok ()
-       | Some requested_slug ->
-         (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
-          | Error message -> Error (Repository_catalog_unavailable message)
-          | Ok (Some (repo, _)) ->
-            (match Ide_paths.canonical_url_of_remote repo.url with
-             | Some actual_slug when String.equal actual_slug requested_slug -> Ok ()
-             | Some _ | None -> Error File_path_canonical_url_mismatch)
-          | Ok None -> Error File_path_canonical_url_mismatch))
-    | None ->
-      (match nonempty_query_param uri "repo_id" with
-       | None -> Ok ()
-       | Some requested_repo_id ->
-         (match Repo_store.load_all ~base_path:project_base with
-          | Error message -> Error (Repository_catalog_unavailable message)
-          | Ok repositories ->
-            if
-              not
-                (List.exists
-                   (fun (repository : Repo_manager_types.repository) ->
-                     String.equal repository.id requested_repo_id)
-                   repositories)
-            then Ok ()
-            else
-            (match Repo_store.find_repo_by_path_prefix ~base_path:project_base file_path with
-             | Error message -> Error (Repository_catalog_unavailable message)
-             | Ok (Some (repo, _)) when String.equal repo.id requested_repo_id -> Ok ()
-             | Ok (Some _) | Ok None -> Error File_path_repo_id_mismatch))))
-;;
-
-let resolve_partition_for_annotation_post ~state ~uri ~file_path =
+(* RFC-0378 §5.3 — the human half of the anchor contract goes through
+   the same mint as the keeper half: the mutation scope names the
+   codebase, [file_path] is repo-root-relative, and the pair is minted
+   directly. The catalog re-derivation from the raw path string — the
+   third attribution vocabulary — is gone with its error taxonomy. *)
+let resolve_annotation_post_address ~state ~uri ~file_path =
   match resolve_partition_for_mutation ~state ~uri with
   | Error _ as err -> err
-  | Ok partition ->
-    (match validate_annotation_post_scope ~state ~uri ~file_path with
-     | Ok () -> Ok partition
-     | Error err ->
+  | Ok (Ide_paths.By_url slug) ->
+    (match Agent_observation.Code_address.v ~codebase:slug ~path:file_path with
+     | Ok address -> Ok address
+     | Error invalid ->
        Error
          (ide_error
-            (annotation_scope_error_code err)
-            (annotation_scope_error_message err)))
+            "invalid_file_path"
+            (Printf.sprintf
+               "file_path must be repo-root-relative (%s)"
+               (Agent_observation.Code_address.invalid_to_string invalid))))
+  | Ok
+      ( Ide_paths.No_canonical_url | Ide_paths.Unmatched | Ide_paths.Base_unresolved
+      | Ide_paths.Legacy_default ) ->
+    Error
+      (ide_error
+         "codebase_scope_required"
+         "annotation and cursor writes require a codebase scope (canonical_url or repo_id)")
 ;;
 
 let ide_memory_source_kind = "ide_annotation"
@@ -728,17 +686,19 @@ let add_routes router =
                           reqd
                       | Ok references ->
                         (match
-                           resolve_partition_for_annotation_post ~state ~uri ~file_path
+                           resolve_annotation_post_address ~state ~uri ~file_path
                          with
                          | Error err ->
                            respond_ide_error ~status:`Bad_request ~request err reqd
-                         | Ok partition ->
+                         | Ok address ->
                            (match
                               Ide_annotations.create
                                 ~base_dir:base
-                                ~partition
+                                ~partition:
+                                  (Ide_paths.By_url
+                                     (Agent_observation.Code_address.codebase address))
                                 ~keeper_id
-                                ~file_path
+                                ~file_path:(Agent_observation.Code_address.path address)
                                 ~line_start
                                 ~line_end
                                 ~kind
@@ -1078,21 +1038,22 @@ let add_routes router =
                         (json_error msg)
                         reqd
                     | Ok keeper_id ->
-                      (* task-1733: resolve the write partition from the posted
-                         [file_path] (validated against the scoped repo) rather
-                         than from URI query params alone, so cursor writes are
-                         attributed to the repo the file actually belongs to. *)
-                      (match resolve_partition_for_annotation_post ~state ~uri ~file_path with
+                      (* RFC-0378 §5.3: the cursor write goes through the same
+                         mint as annotations — the scope names the codebase and
+                         the posted path is repo-root-relative. *)
+                      (match resolve_annotation_post_address ~state ~uri ~file_path with
                        | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-                       | Ok partition ->
+                       | Ok address ->
                          (match
                             Ide_bridge.ingest_cursor_event
                               ~base_path:base
                               ~keeper_id
-                              ~file_path
+                              ~file_path:(Agent_observation.Code_address.path address)
                               ~line
                               ?column
-                              ~partition
+                              ~partition:
+                                (Ide_paths.By_url
+                                   (Agent_observation.Code_address.codebase address))
                               ?focus_mode
                               ~source
                               ()

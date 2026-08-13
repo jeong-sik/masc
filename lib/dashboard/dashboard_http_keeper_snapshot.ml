@@ -48,7 +48,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
       let raw_meta = m in
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
-      let defaults, effective_meta, config_error =
+      let effective_meta =
         match
           Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
             ~base_path:config.base_path
@@ -56,31 +56,40 @@ let keeper_config_json (config : Workspace.config) (name : string)
         with
         | Ok defaults ->
           (match Keeper_meta_contract.effective_meta_of_profile_defaults defaults m with
-           | Ok meta -> defaults, meta, None
+           | Ok meta -> Ok (defaults, meta)
            | Error detail ->
              let keeper_path =
                Option.value
                  ~default:(Keeper_types_profile.keeper_meta_path config m.name)
                  defaults.manifest_path
              in
-             ( defaults
-             , m
-             , Some
-                 { Keeper_types_profile.keeper_name = m.name
-                 ; keeper_path
-                 ; failing_path = keeper_path
-                 ; kind = Keeper_types_profile.Profile_error
-                 ; detail
-                 } ))
+             Error
+               { Keeper_types_profile.keeper_name = m.name
+               ; keeper_path
+               ; failing_path = keeper_path
+               ; kind = Keeper_types_profile.Profile_error
+               ; detail
+               })
         | Error error ->
-          ( Keeper_types_profile.empty_keeper_profile_defaults
-          , m
-          , Some
-              (Keeper_types_profile.keeper_toml_config_error_of_load_error
-                 ~keeper_name:m.name
-                 error) )
+          Error
+            (Keeper_types_profile.keeper_toml_config_error_of_load_error
+               ~keeper_name:m.name
+               error)
       in
-      let m = effective_meta in
+      (match effective_meta with
+       | Error config_error ->
+         let body =
+           `Assoc
+             [ "name", `String raw_meta.name
+             ; "effective_config", `Null
+             ; ( "config_error"
+               , Keeper_types_profile.keeper_toml_config_error_to_json
+                   config_error )
+             ; "sources", source_provenance_json config raw_meta
+             ]
+         in
+         `OK, with_keeper_config_field_presence body
+       | Ok (defaults, m) ->
       let active_goals =
         List.filter_map
           (fun goal_id ->
@@ -319,9 +328,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("pipeline_stage_detail", `String pipeline_stage_detail);
 	         ("state_diagram", `String state_diagram);
          ( "config_error",
-           Json_util.option_to_yojson
-             Keeper_types_profile.keeper_toml_config_error_to_json
-             config_error );
+           `Null );
          ("prompt", prompt);
          ("execution", execution);
          ("proactive", proactive);
@@ -334,7 +341,7 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("metrics", metrics);
        ]
       in
-      (`OK, with_keeper_config_field_presence body)
+      (`OK, with_keeper_config_field_presence body))
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 

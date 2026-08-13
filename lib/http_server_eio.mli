@@ -93,12 +93,54 @@ module Response : sig
       keep-alive clients and proxies see an explicit end-of-body. *)
   val empty : ?status:Httpun.Status.t -> Httpun.Reqd.t -> unit
 
+  val etag_hex_chars : int
+  (** Hex digest characters kept in an entity tag. A tag only has to
+      distinguish this body from the previous body of the same resource, so it
+      is truncated rather than carrying a full digest. *)
+
+  val etag_of_body : string -> string
+  (** Entity tag for a response body: a hex digest truncated to
+      {!etag_hex_chars}. One policy for every response that carries a tag,
+      {!json} and {!html_cached} alike. *)
+
+  type json_conditional =
+    | Untagged
+    | Tagged of string
+    | Not_modified of string
+
+  val json_conditional
+    :  status:Httpun.Status.t
+    -> meth:Httpun.Method.t
+    -> if_none_match:string option
+    -> body:string
+    -> json_conditional
+  (** What {!json} will send, decided before any socket work.
+
+      [Untagged] when the response is not a [`OK] answer to [`GET]/[`HEAD]: a
+      validator there would invite revalidation of something that should not be
+      reused. Otherwise [Not_modified] when [if_none_match] equals the body's
+      weak tag, and [Tagged] with that tag when it does not — including when the
+      client sent nothing, since it has not claimed to hold a copy.
+
+      Exposed so the rule is testable in full without constructing a
+      [Httpun.Reqd.t]. *)
+
   (** JSON response with optional zstd compression.  Default
       status [`OK].  When [compress = true] (default) AND
       [?request] or the request attached to [reqd] supplies an
       [Accept-Encoding: zstd] match,
       uses dictionary-based compression for small messages
-      (~70% reduction vs ~6% with standard zstd). *)
+      (~70% reduction vs ~6% with standard zstd).
+
+      A [`OK] response to a GET or HEAD also carries a weak [ETag] over the
+      uncompressed body and [Cache-Control: no-cache], and answers
+      [`Not_modified] when the request's [If-None-Match] matches. The tag is
+      weak because the same JSON is served under several content encodings,
+      which are encodings of one payload rather than several payloads.
+
+      A client that sends no [If-None-Match] is unaffected — it has not
+      claimed to hold a copy, so it always receives the body. Responses that
+      are not [`OK], and responses to unsafe methods, carry no tag. *)
   val json
     :  ?status:Httpun.Status.t
     -> ?compress:bool

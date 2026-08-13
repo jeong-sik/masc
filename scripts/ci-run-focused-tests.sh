@@ -38,6 +38,7 @@ paused_targets=(
 
 normal_targets=(
   @test/runtest-test_board_dispatch
+  @test/runtest-test_keeper_latched_reason_wiring
   @test/runtest-test_dedup_rules
   @test/runtest-test_exec_command_gate_log_sink
   @test/runtest-test_file_kind_vocabulary
@@ -148,6 +149,7 @@ normal_targets=(
   @test/runtest-test_keeper_gate_effect_coverage
   @test/runtest-test_keeper_gate_replay
   @test/runtest-test_workspace
+  @test/runtest-test_http_server_eio
   @test/runtest-test_verification
   @test/runtest-test_dashboard_verification
   @test/runtest-test_tool_schema_constraint_enforcement

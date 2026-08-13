@@ -513,6 +513,102 @@ let test_response_empty_includes_content_length_zero () =
     (String_util.contains_substring response "content-length: 0")
 ;;
 
+(* ===== JSON conditional-request rule ===== *)
+
+(* [Response.json] offers a validator so a polling client can be told "still
+   the same" instead of being sent the body again. Measured on the live
+   server, 11 of 12 polled dashboard routes return byte-identical bodies
+   across repeated polls, ~1.86 MB per full cycle.
+
+   The rule is exercised here rather than through a live server because what
+   can go wrong is the decision, not the socket write: tagging a response that
+   must not be reused, or answering 304 to a client that never claimed to hold
+   the body. *)
+
+let conditional_body = {|{"keepers":[],"generated_at":1.0}|}
+
+let tag_of body =
+  match
+    Response.json_conditional ~status:`OK ~meth:`GET ~if_none_match:None ~body
+  with
+  | Response.Tagged etag -> etag
+  | Response.Untagged -> Alcotest.fail "a 200 GET should carry a tag"
+  | Response.Not_modified _ ->
+    Alcotest.fail "no If-None-Match cannot be a match"
+
+let outcome_label = function
+  | Response.Untagged -> "untagged"
+  | Response.Tagged _ -> "tagged"
+  | Response.Not_modified _ -> "not_modified"
+
+let check_outcome name expected actual =
+  Alcotest.(check string) name expected (outcome_label actual)
+
+let test_json_conditional_matching_tag_is_not_modified () =
+  let etag = tag_of conditional_body in
+  check_outcome
+    "a client presenting the current tag is told nothing changed"
+    "not_modified"
+    (Response.json_conditional ~status:`OK ~meth:`GET
+       ~if_none_match:(Some etag) ~body:conditional_body)
+
+let test_json_conditional_stale_tag_sends_the_body () =
+  let stale = tag_of {|{"keepers":[],"generated_at":0.0}|} in
+  check_outcome
+    "a tag from an older body does not suppress the new one"
+    "tagged"
+    (Response.json_conditional ~status:`OK ~meth:`GET
+       ~if_none_match:(Some stale) ~body:conditional_body)
+
+let test_json_conditional_absent_header_sends_the_body () =
+  check_outcome
+    "a client that claims no copy always receives the body"
+    "tagged"
+    (Response.json_conditional ~status:`OK ~meth:`GET ~if_none_match:None
+       ~body:conditional_body)
+
+(* A tag on an error would invite a client to revalidate it and be told the
+   failure is unchanged, so failures carry none — even if the client happens
+   to present a matching tag. *)
+let test_json_conditional_error_status_carries_no_tag () =
+  let etag = tag_of conditional_body in
+  List.iter
+    (fun status ->
+      check_outcome
+        "an unsuccessful response carries no validator"
+        "untagged"
+        (Response.json_conditional ~status ~meth:`GET
+           ~if_none_match:(Some etag) ~body:conditional_body))
+    [ `Bad_request; `Not_found; `Internal_server_error; `Accepted ]
+
+(* Mutations answer with the result of the mutation. Tagging one would let a
+   client be told its stale copy still stands after it changed something. *)
+let test_json_conditional_unsafe_method_carries_no_tag () =
+  let etag = tag_of conditional_body in
+  List.iter
+    (fun meth ->
+      check_outcome
+        "an unsafe method carries no validator"
+        "untagged"
+        (Response.json_conditional ~status:`OK ~meth
+           ~if_none_match:(Some etag) ~body:conditional_body))
+    [ `POST; `PUT; `DELETE ]
+
+let test_json_conditional_tag_is_weak_and_body_derived () =
+  let etag = tag_of conditional_body in
+  Alcotest.(check bool)
+    "the tag is weak, because one payload goes out under several encodings"
+    true
+    (String.starts_with ~prefix:"W/\"" etag);
+  Alcotest.(check bool)
+    "a different body produces a different tag"
+    false
+    (String.equal etag (tag_of {|{"keepers":[],"generated_at":2.0}|}));
+  Alcotest.(check string)
+    "the same body produces the same tag"
+    etag
+    (tag_of conditional_body)
+
 let response_tests =
   [ ( "content_headers preserve all header segments"
     , `Quick
@@ -520,6 +616,24 @@ let response_tests =
   ; ( "empty response includes Content-Length: 0"
     , `Quick
     , test_response_empty_includes_content_length_zero )
+  ; ( "matching If-None-Match is 304"
+    , `Quick
+    , test_json_conditional_matching_tag_is_not_modified )
+  ; ( "stale If-None-Match sends the body"
+    , `Quick
+    , test_json_conditional_stale_tag_sends_the_body )
+  ; ( "absent If-None-Match sends the body"
+    , `Quick
+    , test_json_conditional_absent_header_sends_the_body )
+  ; ( "error statuses carry no validator"
+    , `Quick
+    , test_json_conditional_error_status_carries_no_tag )
+  ; ( "unsafe methods carry no validator"
+    , `Quick
+    , test_json_conditional_unsafe_method_carries_no_tag )
+  ; ( "the tag is weak and body-derived"
+    , `Quick
+    , test_json_conditional_tag_is_weak_and_body_derived )
   ]
 ;;
 

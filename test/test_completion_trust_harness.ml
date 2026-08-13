@@ -174,6 +174,28 @@ let claim_via_dispatch
     ~input:(`Assoc [ ("task_id", `String task_id) ])
     ()
 
+(* The completion authority decides after the submission (keeper_task_done
+   only files evidence). Where the authority runs in-process the task leaves
+   AwaitingVerification within a bounded number of scheduler turns; where no
+   evaluator runtime resolves, the submission stays parked. Both are ends of
+   the same contract — the caller's match states what each end must
+   guarantee. *)
+let find_task config task_id =
+  List.find_opt
+    (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+    (Workspace.get_tasks_raw config)
+
+let await_authority_verdict config task_id =
+  let rec await remaining =
+    match find_task config task_id with
+    | Some { task_status = Masc_domain.AwaitingVerification _; _ }
+      when remaining > 0 ->
+      Eio.Fiber.yield ();
+      await (remaining - 1)
+    | other -> other
+  in
+  await 10_000
+
 (* Test A — non-owner completion is denied (RFC-0262 axis-2 ownership gate). *)
 let test_completion_denied_for_non_owner () =
   with_ws "completion_trust_non_owner"
@@ -275,17 +297,17 @@ let test_short_notes_without_evidence_follow_llm_approval () =
         ~evidence_refs:[]
         ()
     in
-    check string "LLM approval controls outcome" "success"
+    check string "evidence submission succeeds" "success"
       (outcome_label result.KTE.disposition);
-    match
-      List.find_opt
-        (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
-        (Workspace.get_tasks_raw config)
-    with
+    match await_authority_verdict config "task-001" with
     | Some { task_status = Masc_domain.Done _; _ } -> ()
+    | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
+      ->
+      check string "parked submission preserves the submitter"
+        meta.agent_name assignee
     | Some task ->
       fail
-        ("expected Done after LLM approval, got "
+        ("expected Done or a parked submission after LLM approval, got "
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
 
@@ -317,21 +339,30 @@ let test_completion_with_evidence_refs_succeeds () =
     in
     check string "completion outcome" "success"
       (outcome_label result.KTE.disposition);
-    match
-      List.find_opt
-        (fun (t : Masc_domain.task) -> String.equal t.id "task-001")
-        (Workspace.get_tasks_raw config)
-    with
+    let check_handoff_evidence handoff =
+      match handoff with
+      | Some (handoff : Masc_domain.task_handoff_context) ->
+        check (list string) "handoff evidence_refs"
+          [ "note:completion-trust-harness" ] handoff.evidence_refs
+      | None -> fail "submitted evidence refs missing from handoff_context"
+    in
+    match await_authority_verdict config "task-001" with
     | Some
-        { task_status = Masc_domain.Done { assignee; _ }
-        ; handoff_context = Some handoff
+        { task_status = Masc_domain.Done { assignee; _ }; handoff_context; _ }
+      ->
+      check string "done assignee" meta.agent_name assignee;
+      check_handoff_evidence handoff_context
+    | Some
+        { task_status = Masc_domain.AwaitingVerification { assignee; _ }
+        ; handoff_context
         ; _
         } ->
-      check string "done assignee" meta.agent_name assignee;
-      check (list string) "handoff evidence_refs" [ "note:completion-trust-harness" ] handoff.evidence_refs
+      check string "parked submission preserves the submitter"
+        meta.agent_name assignee;
+      check_handoff_evidence handoff_context
     | Some task ->
       fail
-        ("expected task-001 Done with handoff evidence refs, got "
+        ("expected task-001 Done or parked with handoff evidence refs, got "
          ^ Masc_domain.task_status_to_string task.task_status)
     | None -> fail "task-001 missing after completion")
 
@@ -370,22 +401,6 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
     check string "evidence submission succeeds ahead of the reject verdict"
       "success"
       (outcome_label rejected.KTE.disposition);
-    let task_status_of () =
-      match
-        List.find_opt
-          (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
-          (Workspace.get_tasks_raw config)
-      with
-      | Some task -> Some task.task_status
-      | None -> None
-    in
-    let rec await_verdict remaining =
-      match task_status_of () with
-      | Some (Masc_domain.AwaitingVerification _) when remaining > 0 ->
-        Eio.Fiber.yield ();
-        await_verdict (remaining - 1)
-      | other -> other
-    in
     let retry_after_reject () =
       reviewer_response := Reviewer_verdict AR.Approve;
       let approved =
@@ -401,11 +416,7 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
       in
       check string "later LLM approval completes" "success"
         (outcome_label approved.KTE.disposition);
-      match
-        List.find_opt
-          (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
-          (Workspace.get_tasks_raw config)
-      with
+      match await_authority_verdict config "task-001" with
       | Some { task_status = Masc_domain.Done _; _ } -> ()
       | Some task ->
         fail
@@ -413,29 +424,33 @@ let test_llm_rejection_keeps_task_active_then_approval_completes () =
            ^ Masc_domain.task_status_to_string task.task_status)
       | None -> fail "task-001 missing after approved retry"
     in
-    match await_verdict 10_000 with
+    match await_authority_verdict config "task-001" with
     | None -> fail "task-001 missing after rejected submission"
-    | Some (Masc_domain.Done _) ->
+    | Some { task_status = Masc_domain.Done _; _ } ->
       fail "a rejected verdict must never complete the task"
     | Some
-        ( Masc_domain.Claimed { assignee; _ }
-        | Masc_domain.InProgress { assignee; _ } ) ->
+        { task_status =
+            ( Masc_domain.Claimed { assignee; _ }
+            | Masc_domain.InProgress { assignee; _ } )
+        ; _
+        } ->
       check string "rejected task returns to the same keeper"
         meta.agent_name assignee;
       (* The authority is live in this process, so the full round is
          exercised: a later approval completes the task. *)
       retry_after_reject ()
-    | Some (Masc_domain.AwaitingVerification { assignee; _ }) ->
+    | Some { task_status = Masc_domain.AwaitingVerification { assignee; _ }; _ }
+      ->
       (* The authority did not run inside this process (environments without
          a resolvable evaluator runtime park the submission). The submitter
          identity is still preserved for whoever decides; the approve round
          needs a live authority and is exercised where one runs. *)
       check string "parked submission preserves the submitter"
         meta.agent_name assignee
-    | Some status ->
+    | Some { task_status; _ } ->
       fail
         ("rejected task must stay active or parked, got "
-         ^ Masc_domain.task_status_to_string status))
+         ^ Masc_domain.task_status_to_string task_status))
 
 (* Historical shape: keeper_task_done used to consult the reviewer inline and
    an unavailable evaluator rejected the call. The tool now only files

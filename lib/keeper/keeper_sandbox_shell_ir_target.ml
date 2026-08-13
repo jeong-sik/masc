@@ -7,6 +7,7 @@ open Keeper_types_profile
 type target_error =
   { message : string
   ; fields : (string * Yojson.Safe.t) list
+  ; class_ : Tool_result.tool_failure_class
   }
 
 type docker_dispatch =
@@ -14,7 +15,9 @@ type docker_dispatch =
   ; runtime : Keeper_turn_sandbox_runtime.t
   }
 
-let target_error ?(fields = []) message = { message; fields }
+let target_error ?(fields = []) ?(class_ = Tool_result.Runtime_failure) message =
+  { message; fields; class_ }
+;;
 
 let docker_image (meta : keeper_meta) =
   match meta.sandbox_image with
@@ -25,26 +28,29 @@ let docker_image (meta : keeper_meta) =
 let tool_failure_class_of_image_preflight_failure failure_class =
   match failure_class with
   | Keeper_sandbox_runtime_classify.Image_config_missing ->
-    "policy_rejection"
+    Tool_result.Policy_rejection
   | Image_inspect_timeout ->
-    "transient_error"
-  | _ -> "runtime_failure"
+    Tool_result.Transient_error
+  | _ -> Tool_result.Runtime_failure
 ;;
 
-let image_preflight_failure_fields (failure : Keeper_sandbox_runtime.classified_error) =
+let image_preflight_failure_fields ~class_
+    (failure : Keeper_sandbox_runtime.classified_error) =
   let sandbox_failure_class =
     Keeper_sandbox_runtime_classify.docker_failure_class_to_string failure.failure_class
   in
   [ "requested_sandbox", `String "docker"
   ; "sandbox_failure_class", `String sandbox_failure_class
   ; ( "failure_class"
-    , `String (tool_failure_class_of_image_preflight_failure failure.failure_class) )
+    , `String (Tool_result.tool_failure_class_to_string class_) )
   ]
 ;;
 
 let image_preflight_target_error (failure : Keeper_sandbox_runtime.classified_error) =
+  let class_ = tool_failure_class_of_image_preflight_failure failure.failure_class in
   target_error
-    ~fields:(image_preflight_failure_fields failure)
+    ~class_
+    ~fields:(image_preflight_failure_fields ~class_ failure)
     (Keeper_sandbox_runtime.docker_image_preflight_failure_message
        ~prefix:"docker_container_start_failed"
        failure)

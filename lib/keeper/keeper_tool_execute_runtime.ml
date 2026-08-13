@@ -342,8 +342,9 @@ let handle_tool_execute_typed
                   })
         in
         (match dispatch_sandbox with
-         | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
+         | Error ({ message; fields; class_ } : Keeper_sandbox_shell_ir_target.target_error) ->
            Keeper_tool_execution.failure
+             ~class_
              (error_json
                 ~fields:
                   ([ "typed", `Bool true; "cmd", `String cmd ]

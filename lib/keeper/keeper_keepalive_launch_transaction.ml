@@ -147,16 +147,26 @@ let run
                    let exception_detail = Printexc.to_string exn in
                    let librarian_abort_error, rollback_error =
                      Eio.Cancel.protect (fun () ->
-                       match reject_for_rollback reg with
-                       | Error detail -> None, Some detail
-                       | Ok () ->
-                         let librarian_abort_error = abort_open_lifecycle () in
-                         let rollback_error =
-                           match rollback_registry rollback token reg with
-                           | Ok () -> None
-                           | Error detail -> Some detail
-                         in
-                         librarian_abort_error, rollback_error)
+                       match rollback with
+                       | Retain_registered ->
+                         (* This is an existing Offline authority intended for
+                            a later retry. Rejecting its not-yet-started lane
+                            made the registry retain an entry that could never
+                            fork. If the callback crossed the start boundary,
+                            the same choice also leaves terminal cleanup with
+                            its exact registry and Librarian ownership. *)
+                         None, None
+                       | Remove_registered | Restore_previous _ ->
+                         (match reject_for_rollback reg with
+                          | Error detail -> None, Some detail
+                          | Ok () ->
+                            let librarian_abort_error = abort_open_lifecycle () in
+                            let rollback_error =
+                              match rollback_registry rollback token reg with
+                              | Ok () -> None
+                              | Error detail -> Some detail
+                            in
+                            librarian_abort_error, rollback_error))
                    in
                    (match exn with
                     | Eio.Cancel.Cancelled _ -> raise exn

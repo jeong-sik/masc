@@ -2803,6 +2803,63 @@ let test_started_launch_exception_retains_registered_lane () =
        | None -> fail "started launch exception detached the live lane")
 ;;
 
+let test_offline_launch_exception_retains_retryable_lane () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       let name = "offline-launch-exception-retry" in
+       let offline = Reg.register_offline ~base_path:config.base_path name (make_meta name) in
+       let run launch =
+         Launch_transaction.run
+           ~base_path:config.base_path
+           ~keeper_name:name
+           ~expected_generation:offline.transition_seq
+           ~register:(fun _token _intake_token -> Ok offline)
+           ~rollback:Launch_transaction.Retain_registered
+           launch
+       in
+       (match
+          run (fun _intake_token _token _entry ->
+            failwith "injected pre-start callback failure")
+        with
+        | Error
+            (Launch_transaction.Launch_failed
+               { librarian_abort_error = None; rollback_error = None; _ }) -> ()
+        | Error _ -> fail "offline callback failure produced the wrong transaction outcome"
+        | Ok _ -> fail "offline callback failure unexpectedly committed");
+       let forked = ref false in
+       (match
+          run (fun _intake_token _token entry ->
+            match
+              Lane.fork
+                ~sw
+                entry.lane
+                ~run:(fun _ -> forked := true)
+                ~cleanup:(fun _ -> Ok ())
+            with
+            | Ok () -> entry
+            | Error error -> fail (Lane.start_error_to_string error))
+        with
+        | Ok current ->
+          check bool "retry preserves exact Offline lane" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id offline.lane))
+        | Error _ -> fail "retained Offline lane was not retryable");
+       Eio.Fiber.yield ();
+       check bool "retry started the retained Offline lane" true !forked)
+;;
+
 let test_restart_intake_epoch_survives_shutdown_overlap () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2983,6 +3040,8 @@ let () =
         test_launch_callback_cancellation_rolls_back_restart_transaction;
       test_case "started launch exception retains registered lane" `Quick
         test_started_launch_exception_retains_registered_lane;
+      test_case "offline launch exception retains retryable lane" `Quick
+        test_offline_launch_exception_retains_retryable_lane;
       test_case "restart intake epoch survives shutdown overlap" `Quick
         test_restart_intake_epoch_survives_shutdown_overlap;
     ];

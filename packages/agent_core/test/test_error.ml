@@ -228,6 +228,50 @@ let test_internal () =
   check string "internal" "Internal error: sentinel" (Error.to_string err)
 ;;
 
+(* ── of_raised_exn tests ──────────────────────────────────────────── *)
+
+(* The observed failure: two runtimes reported [Unhandled exception: Cancelled:
+   Eio__Time.Timeout] on 2026-08-12, an expected timeout wearing the wording
+   reserved for an unreachable invariant failure. Eio wraps the timeout in
+   [Cancel.Cancelled] when the expiry cancels a surrounding fiber rather than
+   the sleep itself, so this is the form a handler matching only the bare
+   exception misses. *)
+let test_wrapped_timeout_is_typed () =
+  match Error.of_raised_exn (Eio.Cancel.Cancelled Eio.Time.Timeout) with
+  | Error.Api (Retry.Timeout { phase; _ }) ->
+    check bool "no HTTP phase is claimed for a fiber timeout" true (phase = None);
+    check bool "is retryable" true
+      (Error.is_retryable (Error.of_raised_exn (Eio.Cancel.Cancelled Eio.Time.Timeout)))
+  | other ->
+    failf "expected Api (Timeout _), got %s" (Error.to_string other)
+;;
+
+let test_bare_timeout_is_typed () =
+  match Error.of_raised_exn Eio.Time.Timeout with
+  | Error.Api (Retry.Timeout _) -> ()
+  | other -> failf "expected Api (Timeout _), got %s" (Error.to_string other)
+;;
+
+(* A cancellation carrying anything else has no typed variant here, and
+   inventing one to absorb it would be worse than reporting it plainly. This
+   pins that only the timeout was reclassified. *)
+let test_other_cancellation_keeps_internal_wording () =
+  match Error.of_raised_exn (Eio.Cancel.Cancelled Not_found) with
+  | Error.Internal message ->
+    check bool "keeps the unhandled-exception wording" true
+      (String.length message > 0
+       && String.starts_with ~prefix:"Unhandled exception:" message)
+  | other -> failf "expected Internal, got %s" (Error.to_string other)
+;;
+
+let test_ordinary_exception_keeps_internal_wording () =
+  match Error.of_raised_exn (Failure "boom") with
+  | Error.Internal message ->
+    check string "unchanged for a non-timeout" "Unhandled exception: Failure(\"boom\")"
+      message
+  | other -> failf "expected Internal, got %s" (Error.to_string other)
+;;
+
 (* ── is_retryable tests ───────────────────────────────────────────── *)
 
 let test_retryable_api_rate_limited () =
@@ -339,6 +383,14 @@ let () =
         ; test_case "Mcp ServerStartFailed" `Quick test_retryable_mcp_start
         ; test_case "Config" `Quick test_retryable_config
         ; test_case "Internal" `Quick test_retryable_internal
+        ] )
+    ; ( "of_raised_exn"
+      , [ test_case "cancel-wrapped timeout is typed" `Quick test_wrapped_timeout_is_typed
+        ; test_case "bare timeout is typed" `Quick test_bare_timeout_is_typed
+        ; test_case "other cancellation keeps Internal" `Quick
+            test_other_cancellation_keeps_internal_wording
+        ; test_case "ordinary exception keeps Internal" `Quick
+            test_ordinary_exception_keeps_internal_wording
         ] )
     ; ( "equality"
       , [ test_case "same are equal" `Quick test_equality

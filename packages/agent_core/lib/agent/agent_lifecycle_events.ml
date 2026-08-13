@@ -131,9 +131,11 @@ let with_run_lifecycle_events
     result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    let error =
-      Error.Internal (Printf.sprintf "Unhandled exception: %s" (Printexc.to_string exn))
-    in
+    (* Classified rather than blanket-[Internal]: a timeout published as an
+       invariant failure reads to an operator as a broken agent, and gives a
+       downstream classifier free-form text instead of a variant. The re-raise
+       below is unchanged, so this never absorbs a cancellation. *)
+    let error = Error.of_raised_exn exn in
     publish_finished
       ~event_bus
       ~agent_name

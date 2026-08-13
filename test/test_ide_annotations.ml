@@ -192,17 +192,6 @@ let test_lsp_overlay_exposes_route_context () =
          check_contains "codelens carries opaque review reference" "review:review-15035" title;
          check_contains "codelens carries evidence reference" "evidence:turn-9" title
        | rows -> failf "expected one codelens, got %d" (List.length rows));
-      let inlay_hints =
-        Lsp.inlay_hints ~base_dir ~partition:legacy_partition ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
-      in
-      (match inlay_hints with
-       | [ hint ] ->
-         let label = Option.value ~default:"" (string_field "label" hint) in
-         let tooltip = Option.value ~default:"" (string_field "tooltip" hint) in
-         check_contains "inlay carries task route" "task:task-42" label;
-         check_contains "inlay carries telemetry reference" "telemetry:trace-9" label;
-         check_contains "inlay tooltip carries discussion reference" "discussion:thread-1" tooltip
-       | rows -> failf "expected one inlay hint, got %d" (List.length rows));
       let diagnostics =
         Lsp.diagnostics
           ~base_dir
@@ -522,81 +511,6 @@ let test_ingest_no_double_write () =
     check int "orphan has zero regions" 0 (count_lines legacy_path))
 ;;
 
-let test_definition_links_at_line () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~partition:Ide_paths.Legacy_default
-        ~keeper_id:"k1"
-        ~file_path:"lib/test.ml"
-        ~line_start:10
-        ~line_end:12
-        ~kind:Types.Decision
-        ~content:"use Eio for concurrency"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      Lsp.clear_cache ();
-      let links = Lsp.definition_links ~base_dir ~partition:legacy_partition ~document_root:base_dir ~file_path:"lib/test.ml" ~line:10 in
-      (match links with
-       | [ link ] ->
-         let uri = Option.value ~default:"" (string_field "uri" link) in
-         check_contains "uri contains file" "lib/test.ml" uri
-       | rows -> failf "expected one link, got %d" (List.length rows))))
-;;
-
-let test_definition_links_empty () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    Lsp.clear_cache ();
-    let links = Lsp.definition_links ~base_dir ~partition:legacy_partition ~document_root:base_dir ~file_path:"lib/empty.ml" ~line:5 in
-    check int "empty links" 0 (List.length links)))
-;;
-
-let test_reference_locations_related () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~partition:Ide_paths.Legacy_default
-        ~keeper_id:"k1"
-        ~file_path:"lib/a.ml"
-        ~line_start:5
-        ~line_end:5
-        ~kind:Types.Comment
-        ~content:"first"
-        ~goal_id:"goal-x"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      (match
-         Store.create
-           ~base_dir
-           ~partition:Ide_paths.Legacy_default
-           ~keeper_id:"k1"
-           ~file_path:"lib/a.ml"
-           ~line_start:20
-           ~line_end:20
-           ~kind:Types.Comment
-           ~content:"second same goal"
-           ~goal_id:"goal-x"
-           ()
-       with
-       | Error msg -> fail msg
-       | Ok _ ->
-         Lsp.clear_cache ();
-         let refs =
-           Lsp.reference_locations
-             ~base_dir ~partition:legacy_partition ~document_root:base_dir ~file_path:"lib/a.ml" ~line:4 ~include_declaration:true
-         in
-         check int "two related refs" 2 (List.length refs))))
-;;
-
 let test_completion_items_kinds () =
   Eio_main.run (fun _env ->
     with_temp_dir (fun base_dir ->
@@ -616,33 +530,6 @@ let test_code_actions_create () =
     check bool "has create action" true (List.length actions >= 1);
     let title = Option.value ~default:"" (string_field "title" (List.hd actions)) in
     check string "first action is create" "Create MASC Annotation" title))
-;;
-
-let test_document_symbols_lists () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~partition:Ide_paths.Legacy_default
-        ~keeper_id:"k1"
-        ~file_path:"lib/test.ml"
-        ~line_start:1
-        ~line_end:3
-        ~kind:Types.Bookmark
-        ~content:"important section"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      Lsp.clear_cache ();
-      let syms = Lsp.document_symbols ~base_dir ~partition:legacy_partition ~file_path:"lib/test.ml" in
-      (match syms with
-       | [ sym ] ->
-         let name = Option.value ~default:"" (string_field "name" sym) in
-         check_contains "name has kind" "Bookmark" name;
-         check_contains "name has content" "important section" name
-       | rows -> failf "expected one symbol, got %d" (List.length rows))))
 ;;
 
 let test_folding_ranges_groups () =
@@ -682,48 +569,6 @@ let test_folding_ranges_groups () =
          check bool "folding ranges is a list" true (List.length ranges >= 0))))
 ;;
 
-let test_document_highlights_related () =
-  Eio_main.run (fun _env ->
-    with_temp_dir (fun base_dir ->
-    match
-      Store.create
-        ~base_dir
-        ~partition:Ide_paths.Legacy_default
-        ~keeper_id:"k1"
-        ~file_path:"lib/test.ml"
-        ~line_start:5
-        ~line_end:5
-        ~kind:Types.Question
-        ~content:"is this correct?"
-        ~task_id:"task-99"
-        ()
-    with
-    | Error msg -> fail msg
-    | Ok _ ->
-      (match
-         Store.create
-           ~base_dir
-           ~partition:Ide_paths.Legacy_default
-           ~keeper_id:"k1"
-           ~file_path:"lib/test.ml"
-           ~line_start:15
-           ~line_end:15
-           ~kind:Types.Decision
-           ~content:"yes it is"
-           ~task_id:"task-99"
-           ()
-       with
-       | Error msg -> fail msg
-       | Ok _ ->
-         Lsp.clear_cache ();
-         let highlights =
-           Lsp.document_highlights ~base_dir ~partition:legacy_partition ~file_path:"lib/test.ml" ~line:4
-         in
-         check int "two highlights" 2 (List.length highlights))))
-;;
-
-(* Round-trip through [compact]. Guards the append-only snapshot marker:
-   the happy path must still expose every live annotation to a later [list]. *)
 let test_compact_preserves_annotations () =
   with_temp_dir (fun base_dir ->
     let mk content =
@@ -1106,14 +951,9 @@ let () =
             test_ingest_no_double_write
         ] )
     ; ( "overlay (expanded)"
-      , [ test_case "definition_links at annotation line" `Quick test_definition_links_at_line
-        ; test_case "definition_links empty when no annotation" `Quick test_definition_links_empty
-        ; test_case "reference_locations finds related" `Quick test_reference_locations_related
-        ; test_case "completion_items returns 4 kinds" `Quick test_completion_items_kinds
+      , [ test_case "completion_items returns 4 kinds" `Quick test_completion_items_kinds
         ; test_case "code_actions creates annotation" `Quick test_code_actions_create
-        ; test_case "document_symbols lists annotations" `Quick test_document_symbols_lists
         ; test_case "folding_ranges groups consecutive" `Quick test_folding_ranges_groups
-        ; test_case "document_highlights finds related" `Quick test_document_highlights_related
         ] )
     ; ( "mutation identity (task-1736 B3)"
       , [ test_case

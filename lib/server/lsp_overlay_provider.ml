@@ -80,25 +80,6 @@ module Cache = struct
   let clear () = Eio.Mutex.use_rw ~protect:true mutex (fun () -> Hashtbl.clear tbl)
 end
 
-(** Centralized [file://] URI helper using Fpath normalization.
-
-    [document_root] is the absolute directory a stored annotation's
-    [file_path] is relative to — the workspace tree the reader opened, not
-    the directory that holds the [.masc-ide] store. Conflating the two
-    produced URIs under the store root, which no editor can open. An
-    absolute [file_path] is already a host path and is used verbatim. *)
-let file_uri_of_relative ~document_root ~file_path =
-  let p =
-    if String.equal file_path ""
-    then Fpath.v document_root
-    else if Filename.is_relative file_path
-    then Fpath.append (Fpath.v document_root) (Fpath.v file_path)
-    else Fpath.v file_path
-  in
-  "file://" ^ Fpath.to_string (Fpath.rem_empty_seg (Fpath.normalize p))
-;;
-
-(** LSP CodeLens entry as JSON. *)
 let tag_opt label value =
   match value with
   | Some raw when String.trim raw <> "" -> [ Printf.sprintf "%s:%s" label raw ]
@@ -148,21 +129,6 @@ let codelens_to_json (a : annotation) : Yojson.Safe.t =
     ]);
   ]
 
-(** LSP InlayHint entry — shows route-context binding inline. *)
-let inlay_hint_to_json (a : annotation) : Yojson.Safe.t =
-  let label =
-    match annotation_context_label a with
-    | "" -> Printf.sprintf "[%s]" (annotation_kind_to_string a.kind)
-    | label -> label
-  in
-  `Assoc [
-    ("position", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-    ("label", `String label);
-    ("tooltip", `String (annotation_message_with_context a));
-    ("kind", `Int 2);  (* TypeParameter kind for inline annotations *)
-  ]
-
-(** Generate LSP CodeLens entries for a file. *)
 let codelenses ~base_dir ~partition ~file_path : Yojson.Safe.t list =
   let annotations = Cache.get ~base_dir ~partition ~file_path in
   List.filter_map (fun (a : annotation) ->
@@ -173,20 +139,6 @@ let codelenses ~base_dir ~partition ~file_path : Yojson.Safe.t list =
     | Comment -> None
   ) annotations
 
-(** Generate LSP InlayHint entries for a file.
-    Only annotations with route-context bindings produce hints. *)
-let inlay_hints ~base_dir ~partition ~file_path : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~partition ~file_path in
-  List.filter_map (fun (a : annotation) ->
-    if annotation_route_tags a <> [] then
-      Some (inlay_hint_to_json a)
-    else
-      None
-  ) annotations
-
-(** Merge MASC warnings with LSP diagnostics.
-    Annotations of kind [Question] are elevated to [Information] severity
-    diagnostics to surface unresolved questions in the editor. *)
 let diagnostics ~base_dir ~partition ~file_path ~(lsp_diagnostics : Yojson.Safe.t list) :
   Yojson.Safe.t list =
   let annotations = Cache.get ~base_dir ~partition ~file_path in
@@ -283,51 +235,7 @@ let enrich_hover ~base_dir ~partition ~file_path ~line (result : Yojson.Safe.t) 
        | None -> result)
     | _ -> result
 
-(** Generate LSP Location links for annotations overlapping [line].
-    Used by textDocument/definition to jump to annotation targets. *)
-let definition_links ~base_dir ~partition ~document_root ~file_path ~line : Yojson.Safe.t list =
-  let matching = annotations_at_line ~base_dir ~partition ~file_path ~line in
-  List.map (fun (a : annotation) ->
-    `Assoc [
-      ("uri", `String (file_uri_of_relative ~document_root ~file_path:a.file_path));
-      ("range", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-    ]
-  ) matching
 
-(** Generate LSP Location[] for annotations related to those at [line].
-    Finds annotations sharing the same goal_id or task_id across the file.
-    Used by textDocument/references. *)
-let reference_locations ~base_dir ~partition ~document_root ~file_path ~line ~include_declaration:_ :
-    Yojson.Safe.t list =
-  let matching = annotations_at_line ~base_dir ~partition ~file_path ~line in
-  let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
-  let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
-  let all = Cache.get ~base_dir ~partition ~file_path in
-  let related = List.filter (fun (a : annotation) ->
-    (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
-    || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
-  ) all in
-  let seen = Hashtbl.create 16 in
-  let deduped = List.filter (fun (a : annotation) ->
-    let key = (a.file_path, a.line_start) in
-    if Hashtbl.mem seen key then false
-    else (Hashtbl.add seen key (); true)
-  ) (matching @ related) in
-  List.map (fun (a : annotation) ->
-    `Assoc [
-      ("uri", `String (file_uri_of_relative ~document_root ~file_path:a.file_path));
-      ("range", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-    ]
-  ) deduped
-
-(** Generate CompletionItem[] for MASC annotation snippets.
-    Used by textDocument/completion. *)
 let completion_items ~base_dir ~partition ~file_path ~line:_ : Yojson.Safe.t list =
   let annotations = Cache.get ~base_dir ~partition ~file_path in
   let kinds = [ "Comment"; "Decision"; "Question"; "Bookmark" ] in
@@ -386,34 +294,6 @@ let code_actions ~base_dir ~partition ~file_path ~line ~diagnostics:_ : Yojson.S
     ]
   else [ create_action ]
 
-(** Generate SymbolInformation[] for MASC annotations.
-    Used by textDocument/documentSymbol. *)
-let document_symbols ~base_dir ~partition ~file_path : Yojson.Safe.t list =
-  let annotations = Cache.get ~base_dir ~partition ~file_path in
-  List.map (fun (a : annotation) ->
-    let kind_label = annotation_kind_to_string a.kind in
-    let truncated =
-      if String.length a.content > 40 then
-        String.sub a.content 0 40 ^ "..."
-      else a.content
-    in
-    let name = Printf.sprintf "[%s] %s" kind_label truncated in
-    `Assoc [
-      ("name", `String name);
-      ("kind", `Int 17);
-      ("range", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-      ("selectionRange", `Assoc [
-        ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-        ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-      ]);
-    ]
-  ) annotations
-
-(** Generate FoldingRange[] for consecutive annotation blocks.
-    Used by textDocument/foldingRange. *)
 let folding_ranges ~base_dir ~partition ~file_path : Yojson.Safe.t list =
   let annotations = Cache.get ~base_dir ~partition ~file_path in
   let sorted_anns = List.sort (fun (a : annotation) (b : annotation) ->
@@ -447,26 +327,3 @@ let folding_ranges ~base_dir ~partition ~file_path : Yojson.Safe.t list =
         ])
       else None
   ) groups
-
-(** Generate DocumentHighlight[] for annotations sharing goal/task context.
-    Used by textDocument/documentHighlight. *)
-let document_highlights ~base_dir ~partition ~file_path ~line : Yojson.Safe.t list =
-  let matching = annotations_at_line ~base_dir ~partition ~file_path ~line in
-  if matching = [] then []
-  else
-    let goal_ids = List.filter_map (fun (a : annotation) -> a.goal_id) matching in
-    let task_ids = List.filter_map (fun (a : annotation) -> a.task_id) matching in
-    let all = Cache.get ~base_dir ~partition ~file_path in
-    let related = List.filter (fun (a : annotation) ->
-      (match a.goal_id with Some g -> List.mem g goal_ids | None -> false)
-      || (match a.task_id with Some t -> List.mem t task_ids | None -> false)
-    ) all in
-    List.map (fun (a : annotation) ->
-      `Assoc [
-        ("range", `Assoc [
-          ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
-          ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
-        ]);
-        ("kind", `Int 2);
-      ]
-    ) related

@@ -168,42 +168,6 @@ let test_write_after_first_read_becomes_visible () =
   )
 ;;
 
-(* A [Location] URI has to point at the document in the tree the reader
-   opened. Building it from the directory that holds [.masc-ide] produced a
-   path under the store root, which no editor can open. *)
-let test_location_uri_uses_the_document_root () =
-  with_temp_dir (fun base_dir ->
-    Lsp.clear_cache ();
-    let document_root = Filename.concat base_dir "worktree" in
-    ignore
-      (create_annotation
-         ~base_dir
-         ~partition:repo_partition
-         ~keeper_id:"analyst"
-         ~content:"anchored"
-         ~line:4);
-    let uris =
-      Lsp.definition_links
-        ~base_dir
-        ~partition:(Some repo_partition)
-        ~document_root
-        ~file_path
-        ~line:3
-      |> List.filter_map (function
-        | `Assoc fields ->
-          (match List.assoc_opt "uri" fields with
-           | Some (`String uri) -> Some uri
-           | _ -> None)
-        | _ -> None)
-    in
-    check
-      (list string)
-      "location resolves under the opened tree, not under the store root"
-      [ "file://" ^ Filename.concat document_root file_path ]
-      uris
-  )
-;;
-
 let () =
   run
     "ide_lsp_join_key"
@@ -226,12 +190,6 @@ let () =
             "write after first read becomes visible"
             `Quick
             test_write_after_first_read_becomes_visible
-        ] )
-    ; ( "document root"
-      , [ test_case
-            "location URI uses the document root"
-            `Quick
-            test_location_uri_uses_the_document_root
         ] )
     ]
 ;;

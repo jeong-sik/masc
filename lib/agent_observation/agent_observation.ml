@@ -152,6 +152,61 @@ let canonical_url_of_remote raw =
            | Some segs -> Some (String.concat "_" (host_slug :: segs)))
 ;;
 
+(* RFC-0378 §5.1: a code fact's address, minted once where the write is
+   attributed and carried as a parsed value from then on. Consumers never
+   re-derive either half from tool input or store layout — [v] is the only
+   way in, and it rejects every shape the partitioned store cannot join on
+   instead of repairing it. *)
+module Code_address = struct
+  type t =
+    { codebase : string
+    ; path : string
+    }
+
+  type invalid =
+    | Empty_codebase
+    | Malformed_codebase
+    | Empty_path
+    | Absolute_path
+    | Unnormalized_path
+
+  let invalid_to_string = function
+    | Empty_codebase -> "empty codebase slug"
+    | Malformed_codebase -> "codebase is not a canonical host_path slug"
+    | Empty_path -> "empty repo-relative path"
+    | Absolute_path -> "path is absolute, expected repo-root relative"
+    | Unnormalized_path -> "path has ., .., or empty segments"
+  ;;
+
+  (* Same closed character set and leading-[..] guard as
+     [path_segment_to_slug], so every slug [canonical_url_of_remote] can
+     emit is accepted and nothing outside that alphabet is. *)
+  let valid_codebase slug =
+    not (String.length slug >= 2 && String.sub slug 0 2 = "..")
+    && String.for_all is_slug_char slug
+  ;;
+
+  let normalized_segment seg = seg <> "" && seg <> "." && seg <> ".."
+
+  let v ~codebase ~path =
+    if codebase = ""
+    then Error Empty_codebase
+    else if not (valid_codebase codebase)
+    then Error Malformed_codebase
+    else if path = ""
+    then Error Empty_path
+    else if path.[0] = '/'
+    then Error Absolute_path
+    else if not (List.for_all normalized_segment (String.split_on_char '/' path))
+    then Error Unnormalized_path
+    else Ok { codebase; path }
+  ;;
+
+  let codebase t = t.codebase
+  let path t = t.path
+  let equal a b = String.equal a.codebase b.codebase && String.equal a.path b.path
+end
+
 type write_region_event =
   { base_path : string
   ; partition : codebase_partition

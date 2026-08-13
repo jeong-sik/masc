@@ -66,6 +66,38 @@ val canonical_url_of_remote : string -> string option
     deterministic host_path slug. Returns [None] for blank, malformed, or
     traversal-looking inputs. *)
 
+module Code_address : sig
+  type t
+  (** A code fact's address: [(codebase, path)] where [codebase] is a
+      canonical host_path slug (the partitioned store's directory name,
+      {!canonical_url_of_remote} output) and [path] is the file's
+      repo-root-relative path.
+
+      RFC-0378 §5.1: the address is minted once where the write is
+      attributed; consumers carry the value and never re-derive either
+      half from tool input or store layout. The type is abstract so a
+      raw string cannot stand in for a parsed address. *)
+
+  type invalid =
+    | Empty_codebase
+    | Malformed_codebase
+    | Empty_path
+    | Absolute_path
+    | Unnormalized_path
+
+  val invalid_to_string : invalid -> string
+
+  val v : codebase:string -> path:string -> (t, invalid) result
+  (** Rejects rather than repairs: the codebase must already be a
+      canonical slug and the path must already be a normalized relative
+      path — [.], [..], empty segments, and absolute paths are errors,
+      not inputs to fix. *)
+
+  val codebase : t -> string
+  val path : t -> string
+  val equal : t -> t -> bool
+end
+
 type write_region_event =
   { base_path : string
   ; partition : codebase_partition

@@ -9,6 +9,7 @@ import {
   applyAgentCoreRuntimeEvent,
   hydrateAgentCoreRuntimeFromTelemetryEntries,
   replayAgentCoreRuntimeTelemetry,
+  loadMoreAgentCoreEvents,
 } from './agent-core-runtime-store'
 import {
   agentCoreAgentEvents,
@@ -449,5 +450,54 @@ describe('agent-core-runtime-store', () => {
 
     expect(agentCoreHealthSummary.value.totalEvents).toBe(1201)
     expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+  })
+
+  it('keeps loading more from retiring hasMore before the window is exhausted', async () => {
+    // A replayed row sits inside the server's total-matching count. Counting
+    // it again made loaded exceed total, and noteAgentCoreReplayWindow reads
+    // loaded >= total as "nothing left" — so the second page silently became
+    // the last one no matter how many rows the server still held.
+    const entry = (seq: number): TelemetryEntry =>
+      ({
+        source: 'agent_core_event',
+        type: 'agent_core:masc:trust_updated',
+        ts_unix: 500 + seq,
+        correlation_id: `corr-${seq}`,
+        run_id: 'run-page',
+        seq,
+        payload: {
+          agent_a: 'gamma',
+          agent_b: 'delta',
+          trust_score: 0.5,
+          timestamp: 500 + seq,
+        },
+      }) as TelemetryEntry
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 2,
+      total_matching_entries: 1200,
+      truncated: true,
+      entries: [entry(1), entry(2)],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 2,
+      total_matching_entries: 1200,
+      truncated: true,
+      entries: [entry(3), entry(4)],
+    })
+    await loadMoreAgentCoreEvents()
+
+    // Four distinct rows loaded out of 1200 — the operator must still be able
+    // to ask for the rest.
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(4)
+    expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(1200)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
   })
 })

@@ -144,8 +144,9 @@ type fact =
 
 ### 5.3 Anchor 계약 = co-view 계약
 
-`keeper_ide_annotate`(및 향후 anchored reply)의 입력은 **IDE 가 keeper 에게 준 바로 그 어휘**다: `(repo, repo-root 상대 경로, line range)`. 서버가 repo→slug 를 카탈로그로 해석해 `Code_address` 를 발행한다.
+`keeper_ide_annotate`(및 향후 anchored reply)의 입력은 **IDE 가 keeper 에게 준 바로 그 어휘**다: `(canonical slug, repo-root 상대 경로, line range)`.
 
+- **repo *이름*이 아니라 slug 다.** 현행 co-view 는 `repo: masc` 처럼 이름을 보내는데, 이름은 slug 와 별개인 또 하나의 문자열 별칭이라 계약 안에 어휘 분열을 재생산한다 (원칙 10). IDE 는 이미 자기 scope 의 slug 로 질의하고 있으므로 co-view 도 slug 를 싣는다. 그러면 annotate 의 서버 측 카탈로그 홉(이름→url→slug)이 통째로 사라진다 — 왕복의 두 절반과 read path 셋이 문자 그대로 같은 key 를 쓴다.
 - keeper 가 자기 마운트 레이아웃(`repos/<id>/…`)을 알아야 앵커를 되돌려줄 수 있는 현행 계약(#23469 의 sandbox-root 앵커링)은 삭제한다. keeper 는 받은 것을 그대로 돌려주면 된다.
 - 도구 스키마와 keeper 프롬프트가 이 계약을 서술한다 (프롬프트 변경은 원칙 22 로 허용).
 - acceptance: §2.1 owner probe 의 **정확한 재실행**이 green — 같은 (repo, path, line) 에 마커가 뜬다.
@@ -154,7 +155,8 @@ type fact =
 
 - `selectPreferredIdeRepositoryId` 의 경로 모양 휴리스틱(절대경로·`/.masc/` 포함 여부로 "사람의 repo" 추측)은 삭제. 현재 이 추측의 답(wkbl)은 code fact 0행 파티션이다.
 - 첫 진입은 명시 선택, 선택은 viewer 클라이언트에 지속 (localStorage — 서버 설정이 아니므로 TOML/env 비대상, 원칙 24).
-- 저장소 목록의 **정렬**은 실측(파티션별 code fact 최근성)으로 — 그것은 projection 이라 허용.
+- 저장소 목록의 **모집합도 실측**이다: 선택지는 카탈로그(repositories.toml)가 아니라 `code/by-url/` 에 실존하는 파티션에서 온다. workspace-root-only 하에서 slug 는 git remote 실측으로 발행되므로 **카탈로그 미등록 repo 의 파티션도 정당하게 생긴다** — 카탈로그를 모집합으로 쓰면 그 작업은 기록되고도 선택 불가능해진다. 카탈로그는 등록 repo 의 표시 이름을 빌려주는 projection 으로만 참여한다.
+- 목록의 **정렬**은 실측(파티션별 code fact 최근성)으로 — 그것도 projection 이라 허용.
 - 빈 파티션은 정직한 empty state: "이 저장소에서 keeper 작업 기록 없음".
 
 ### 5.5 개념 축소 — kill list
@@ -212,7 +214,12 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 | D | read path 잔존분 + dashboard scope 명시화 + empty state | N1 가시화 |
 | E | kill list 집행 + 구 테스트 삭제 + 데이터 cut (dry-run 선행) | 청소 |
 
-순서 제약: A→B 는 분리 불가 낙진 없음(타입 먼저, 배치 나중). C 는 B 이후 (annotations 가 code/ 에 떨어져야 V2 성립). E 최후 (죽는 표면의 소비자가 D 까지 존재).
+순서 제약과 머지 지점 일관성:
+
+- **A 시점**: 타입만 바뀐다. sink 는 현행 배치를 유지한다 — `Code` → `by-url/<slug>/`, `Keeper` → 현행 `_orphan/` 디렉터리. 배치가 안 바뀌었으므로 read path 도 그대로 일관이다. (`_orphan` *데이터와 기계*의 삭제는 E 소관 — A 가 지우면 Keeper fact 의 착지점이 없어 일관성이 깨진다.)
+- **B 시점**: 배치 전환 (`keeper/<keeper_id>/` 신설, Keeper fact 이동). 이 순간부터 `_orphan` 에 새 쓰기 0.
+- **C 는 B 이후**: annotations 가 `code/` 에 떨어져야 V2 가 성립한다.
+- **E 최후**: 죽는 표면의 소비자가 D 까지 존재하고, `_orphan` 잔여 기계는 B 이후 dead 지만 데이터 cut 과 함께 지운다.
 
 workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 소비하므로 **2a 선행이 이상적**이나, 2a 미착륙 시 A 가 동등 타입을 자기 모듈에 정의하고 2a 착륙 시 치환한다 (facade 아님 — 동일 개념의 소유권 이관).
 
@@ -233,3 +240,4 @@ workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 �
 2. cursor_events / pr_events — store 는 죽었으나 in-memory presence 경로가 별도인지 실측 후 처분.
 3. keeper fact 의 배치 — 신설 `keeper/<id>/` 가 기존 keeper 이벤트 스토어(turn record 등)와 중복 방출인지 조사. 중복이면 한쪽을 죽인다 (SSOT).
 4. checkout 판별자 표기 — `rev-parse --show-toplevel` 기반 실측값 제안 (workspace-root-only §5.2 인수). key 비참여는 본문 확정, 표기 형식만 미정.
+5. 한 tool call 이 **두 저장소의 파일을 만지는 경우** (예: Execute 가 masc 와 oas 를 함께 편집) — fact 는 주 경로 하나의 주소만 나른다. 현행과 동일한 한계이나 타입이 이를 명시하지 않는다. 부 경로들을 별도 Code fact 로 분리 방출할지, 단일 주소 한계를 계약으로 못박을지 결정 필요.

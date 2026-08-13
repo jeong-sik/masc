@@ -1,8 +1,11 @@
 ---
 status: reference
-last_verified: 2026-07-30
+last_verified: 2026-08-13
 code_refs:
   - lib/keeper/keeper_librarian.ml
+  - lib/keeper/keeper_agent_run_post_turn_memory.ml
+  - lib/keeper/keeper_counterpart_observation.ml
+  - lib/keeper/keeper_external_attention.ml
   - lib/keeper/keeper_memory_os_current.ml
   - lib/keeper/keeper_memory_os_recall.ml
 ---
@@ -48,6 +51,36 @@ stable responsibility, ongoing commitment, or jointly validated history, but
 must not infer a personality, sensitive trait, or motive from an isolated
 exchange. A changed relationship is ordinary explicit replacement: drop the
 superseded claim with a reason and add the corrected claim.
+
+Speaker provenance reaches the Librarian through bounded recent projections of
+the producer-owned durable stores, not by parsing the AGENT_CORE checkpoint
+envelope. Direct user rows come from `Keeper_chat_store`; connector input also
+comes from `Keeper_external_attention`, so a best-effort ambient chat append
+failure cannot erase the original actor evidence. Duplicate connector/chat
+projections are collapsed only by exact conversation and external-message IDs.
+Each observation keeps host-authored `channel`, `workspace_id`, `user_id`,
+`user_name`, and `authority` fields beside the untrusted `content`. This covers
+ambient connector messages (which enter the Keeper turn as ephemeral world
+context) and official-client turns (which return no AGENT_CORE checkpoint)
+without persisting the whole world-observation frame as a user message.
+Prompt-like text inside `content` cannot replace those typed fields and is
+never an instruction to the Librarian. A direct message may also appear in
+conversation history; its typed observation is the same evidence with
+provenance attached, not a second occurrence supporting a repeated pattern.
+
+The Librarian provider and the admin-only exact-run registry receive the same
+raw bounded observations. This preserves the registry's exact-input contract,
+but means the recent execution record is a second durable copy of counterpart
+text and identifiers, just as it is for conversation history. Reducing that
+copy requires a registry-wide retention or encrypted-reference design; this
+feature does not introduce a Librarian-only exception to exact observability.
+
+Current Memory OS recall is still Keeper-wide. Actor scoping is a semantic
+Librarian/response contract, not a new audience filter or authorization gate:
+one external actor's preference must not affect or be disclosed to another,
+and no remembered relationship grants effect authority. A future typed
+per-actor recall filter requires evidence of actual cross-actor leakage; this
+change does not silently introduce one.
 
 `Keeper_person_notes` remains a deliberate, keeper-authored annotation for the
 surface roster (RFC-0229), not an automatic semantic-memory writer and not a

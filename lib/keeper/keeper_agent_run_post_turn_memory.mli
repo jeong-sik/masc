@@ -23,8 +23,9 @@ val run :
 (** Run the full post-turn memory series.
 
     [post_turn_t0] is the timestamp (from [Time_compat.now ()]) taken
-    immediately before this function is called; it is used to compute
-    the [post_turn_ms] metric written to the decision log.
+    immediately before this function is called. It fences asynchronous
+    counterpart evidence so a later turn is not admitted into this Librarian
+    unit, and starts the [post_turn_ms] metric written to the decision log.
 
     [inference_telemetry] is [result.response.telemetry] from the AGENT_CORE
     result; it is optional because some providers do not emit telemetry.
@@ -36,3 +37,11 @@ val run :
     enabled, every completed conversation turn is eligible for Librarian
     extraction; the Librarian owns semantic selection rather than a scheduler-
     side external-effect heuristic. *)
+
+module For_testing : sig
+  val counterpart_observations_before :
+    base_dir:string ->
+    keeper_name:string ->
+    before:float ->
+    Keeper_counterpart_observation.t list
+end

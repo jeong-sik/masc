@@ -84,11 +84,16 @@ let select_recent_messages ~max_messages messages =
 ;;
 
 let prompt_input_for_librarian (inp : Keeper_librarian.input) =
+  let max_messages = prompt_max_messages () in
   { inp with
     messages =
       select_recent_messages
-        ~max_messages:(prompt_max_messages ())
+        ~max_messages
         inp.messages
+  ; counterpart_observations =
+      select_recent_messages
+        ~max_messages
+        inp.counterpart_observations
   }
 ;;
 

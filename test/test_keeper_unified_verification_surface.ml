@@ -645,7 +645,7 @@ let test_untitled_wake_keeps_pointer_out_of_prose () =
   | WO.Board_comment_added
   | WO.Board_reaction_changed _
   | WO.Fusion_completed
-  | WO.External_attention
+  | WO.External_attention _
   | WO.Goal_assigned
   | WO.Goal_reconciliation_ready
   | WO.Completion_authority_rejected _

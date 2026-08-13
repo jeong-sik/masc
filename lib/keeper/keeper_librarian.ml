@@ -20,6 +20,7 @@ type input =
   ; current : current_selection option
   ; max_recall_fact_bytes : int
   ; messages : Agent_core.Types.message list
+  ; counterpart_observations : Keeper_counterpart_observation.t list
   }
 
 type selection =
@@ -138,6 +139,9 @@ let prompt_variables (inp : input) : (string * string) list =
   ; "max_recall_fact_bytes", string_of_int inp.max_recall_fact_bytes
   ; ( "conversation_history"
     , format_messages_for_prompt inp.messages )
+  ; ( "counterpart_observations"
+    , Keeper_counterpart_observation.render_for_prompt
+        inp.counterpart_observations )
   ]
 ;;
 

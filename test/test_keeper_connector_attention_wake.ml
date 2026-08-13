@@ -282,7 +282,35 @@ let test_external_attention_projects_to_prompt_event () =
   check bool "ambient is not an explicit mention" false ev.WO.explicit_mention;
   check string "connector actor remains context" "Alex" ev.WO.author;
   check bool "post kind remains context" true
-    (ev.WO.post_kind = Masc.Board.Human_post)
+    (ev.WO.post_kind = Masc.Board.Human_post);
+  let prompt_fields = Masc.Keeper_unified_prompt.For_testing.board_event_fields ev in
+  check string "world prompt carries typed workspace" "guild-1"
+    (List.assoc "external_workspace_id" prompt_fields);
+  check string "world prompt carries typed actor" "user-1"
+    (List.assoc "external_user_id" prompt_fields);
+  check string "world prompt keeps external authority" "external"
+    (List.assoc "external_authority" prompt_fields);
+  (match ev.WO.event_kind with
+   | WO.External_attention observation ->
+     check string "typed connector channel survives" "discord" observation.channel;
+     check (option string) "typed workspace survives" (Some "guild-1")
+       observation.workspace_id;
+     check (option string) "typed actor id survives" (Some "user-1")
+       observation.user_id;
+     check (option string) "typed display name survives" (Some "Alex")
+       observation.user_name;
+     check string "typed content survives the world projection"
+       item.A.content_preview observation.content
+   | WO.Board_post_created
+   | WO.Board_comment_added
+   | WO.Board_reaction_changed _
+   | WO.Fusion_completed
+   | WO.Schedule_due _
+   | WO.Goal_assigned
+   | WO.Goal_reconciliation_ready
+   | WO.Completion_authority_rejected _
+   | WO.Task_cancelled _ ->
+     fail "connector attention must retain its typed counterpart projection")
 
 let () =
   init_runtime_default_for_tests ();

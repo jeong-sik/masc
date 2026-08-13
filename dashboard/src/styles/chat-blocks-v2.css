@@ -82,6 +82,25 @@
   background: var(--color-bg-surface);
 }
 
+/* Stands for the turns between the run's two drawn ends. Dashed rather than
+   solid so it reads as a gap in the sequence, not as another turn row. */
+.chat-auto-run-more {
+  width: 100%;
+  padding: 6px 12px;
+  border: 1px dashed var(--color-border-default);
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--color-fg-secondary);
+  font-size: var(--fs-xs);
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+.chat-auto-run-more:hover {
+  background: var(--color-bg-hover);
+}
+
 .chat-block-trace-hd {
   display: flex;
   align-items: center;

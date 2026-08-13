@@ -21,10 +21,11 @@ type post_target =
       ; thread_ts : string option
       ; blocks : rich_block list option
       }
-      (** Post to a bound Slack channel. [thread_ts] carries the continuation
-          thread coordinate when the post lands on the continuation's own
-          channel, so a threaded question is answered in its thread instead of
-          the channel root. [blocks] may carry Slack Block Kit rich blocks to
+      (** Post to a bound Slack channel. [thread_ts] carries the explicit
+          thread requested by the tool call, else the continuation thread
+          coordinate when the post lands on the continuation's own channel,
+          so a threaded question is answered in its thread instead of the
+          channel root. [blocks] may carry Slack Block Kit rich blocks to
           render alongside the plain-text fallback. *)
 
 val dashboard_label : string
@@ -32,6 +33,10 @@ val discord_label : string
 val slack_label : string
 
 val max_user_mentions : int
+
+val max_rich_blocks : int
+(** Slack chat.postMessage rejects more than this many top-level Block Kit
+    blocks per message. *)
 
 val user_mentions_of_args :
   surface:string -> Yojson.Safe.t -> (string list, string) result
@@ -50,6 +55,21 @@ val validate_user_mentions_against_roster :
     the exact resolved Discord channel or Slack channel/thread in [messages].
     The persisted chat lane is the roster SSOT; syntactically valid but stale,
     hallucinated, or cross-channel ids are rejected before any effect. *)
+
+val thread_ts_of_args :
+  surface:string -> Yojson.Safe.t -> (string option, string) result
+(** Decode the optional [thread_ts] tool argument: the Slack timestamp of an
+    existing thread's root message. Slack-only; blank or non-string values are
+    rejected. The value is passed to Slack verbatim — a foreign or expired
+    timestamp fails at the connector, not silently as a root post. *)
+
+val blocks_of_args :
+  surface:string -> Yojson.Safe.t -> (rich_block list option, string) result
+(** Decode the optional [blocks] tool argument: Slack Block Kit blocks for
+    chat.postMessage. Slack-only. The array must be non-empty, carry at most
+    {!max_rich_blocks} entries, and every entry must be a JSON object with a
+    non-empty string ["type"] member. Content stays the notification fallback
+    text. *)
 
 type delivery_target =
   | Delivered_to_dashboard
@@ -81,6 +101,7 @@ val resolve_target :
   surface:string ->
   channel_id:string option ->
   ?continuation_channel:Keeper_continuation_channel.t ->
+  ?requested_thread_ts:string ->
   ?bound_discord_channels:string list ->
   ?bound_slack_channels:string list ->
   unit ->
@@ -95,8 +116,9 @@ val resolve_target :
       keeps its thread channel as the target while authorizing it through
       the bound parent channel; an error names the bound channels when
       ambiguous, unbound, or foreign.
-    - ["slack"] → same semantics against [bound_slack_channels]. A typed
-      Slack continuation also supplies its [thread_ts], which travels with
+    - ["slack"] → same semantics against [bound_slack_channels]. An explicit
+      [requested_thread_ts] wins and travels with any bound channel. Otherwise
+      a typed Slack continuation supplies its [thread_ts], which travels with
       the target only when the post lands on the continuation's own channel.
       A continuation for another connector never supplies an id.
     - any other label → error: P4 ships discord + dashboard + slack

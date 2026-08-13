@@ -15,6 +15,10 @@ let slack_label = "slack"
 
 let max_user_mentions = 100
 
+(* Slack chat.postMessage rejects more than 50 top-level blocks per message
+   (official Block Kit limit). *)
+let max_rich_blocks = 50
+
 let is_ascii_upper_or_digit = function
   | 'A' .. 'Z' | '0' .. '9' -> true
   | _ -> false
@@ -75,6 +79,63 @@ let user_mentions_of_args ~surface args =
     else
       Error
         "mention_user_ids is supported only for Slack and Discord posts")
+
+let thread_ts_of_args ~surface args =
+  match args with
+  | `Assoc fields ->
+    (match List.filter (fun (name, _) -> name = "thread_ts") fields with
+     | [] -> Ok None
+     | [ (_, `String value) ] ->
+       let value = String.trim value in
+       if value = "" then
+         Error "thread_ts must be a non-empty Slack thread timestamp"
+       else if String.equal surface slack_label then Ok (Some value)
+       else Error "thread_ts is supported only for Slack posts"
+     | [ _ ] -> Error "thread_ts must be a string"
+     | _ -> Error "thread_ts must not be repeated")
+  | _ -> Error "keeper_surface_post arguments must be an object"
+
+let blocks_of_args ~surface args =
+  match args with
+  | `Assoc fields ->
+    (match List.filter (fun (name, _) -> name = "blocks") fields with
+     | [] -> Ok None
+     | [ (_, `List items) ] ->
+       if not (String.equal surface slack_label) then
+         Error "blocks is supported only for Slack posts"
+       else if items = [] then
+         Error "blocks must not be empty; omit it to render content instead"
+       else if List.length items > max_rich_blocks then
+         Error
+           (Printf.sprintf
+              "blocks supports at most %d Block Kit blocks per message"
+              max_rich_blocks)
+       else (
+         let block_type_error =
+           List.find_mapi
+             (fun index item ->
+                match item with
+                | `Assoc block_fields ->
+                  (match List.assoc_opt "type" block_fields with
+                   | Some (`String block_type)
+                     when String.trim block_type <> "" -> None
+                   | Some _ | None ->
+                     Some
+                       (Printf.sprintf
+                          "blocks[%d] must carry a non-empty string \"type\" \
+                           member (Block Kit block)"
+                          index))
+                | _ ->
+                  Some
+                    (Printf.sprintf "blocks[%d] must be a JSON object" index))
+             items
+         in
+         match block_type_error with
+         | Some message -> Error message
+         | None -> Ok (Some items))
+     | [ _ ] -> Error "blocks must be an array of Block Kit block objects"
+     | _ -> Error "blocks must not be repeated")
+  | _ -> Error "keeper_surface_post arguments must be an object"
 
 let message_matches_target target (message : Keeper_chat_store.chat_message) =
   match target, message.surface with
@@ -174,6 +235,7 @@ let delivery_target_of_yojson json =
 let delivery_target_wire_key = "external_effect_target"
 
 let resolve_target ~surface ~channel_id ?continuation_channel
+    ?requested_thread_ts
     ?(bound_discord_channels = [])
     ?(bound_slack_channels = []) () : (post_target, string) result =
   let surface = String.trim surface in
@@ -203,15 +265,19 @@ let resolve_target ~surface ~channel_id ?continuation_channel
     | None ->
       None, None, None
   in
-  (* A Slack [thread_ts] names a conversation inside one channel, so it only
-     travels with a post that lands on the continuation's own channel; an
-     explicit different channel gets a root post (a foreign thread_ts would be
-     rejected by Slack). *)
+  (* An explicit [thread_ts] from the tool call names the destination thread
+     directly and wins. Otherwise the continuation's [thread_ts] only travels
+     with a post that lands on the continuation's own channel; an explicit
+     different channel gets a root post (a foreign thread_ts would be rejected
+     by Slack). *)
   let slack_thread_ts_for ~channel_id =
-    match continuation_channel_id with
-    | Some continuation_id when String.equal channel_id continuation_id ->
-      continuation_slack_thread_ts
-    | Some _ | None -> None
+    match requested_thread_ts with
+    | Some _ -> requested_thread_ts
+    | None ->
+      (match continuation_channel_id with
+       | Some continuation_id when String.equal channel_id continuation_id ->
+         continuation_slack_thread_ts
+       | Some _ | None -> None)
   in
   let channel_id =
     match channel_id with

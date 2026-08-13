@@ -3514,6 +3514,45 @@ let test_cached_surface_success_clears_the_previous_error () =
     (Yojson.Safe.to_string succeeded.Cache.json)
 ;;
 
+let test_tool_call_fleet_cache_tracks_durable_revision () =
+  let base_path = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Dashboard_cache.invalidate_all ();
+      Masc.Keeper_tool_call_log.reset_for_testing ();
+      cleanup_dir base_path)
+    (fun () ->
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_tool_call_log.init ~base_path ();
+       let masc_root =
+         match Masc.Keeper_tool_call_log.configured_masc_root () with
+         | Some value -> value
+         | None -> fail "tool-call log did not retain its MASC root"
+       in
+       let key =
+         Server_dashboard_http_keeper_api.tool_calls_fleet_cache_key ~masc_root
+       in
+       ignore
+         (Dashboard_cache.get_or_compute key ~ttl:30.0 (fun () -> `List []));
+       check bool "fleet cache is seeded" true (Option.is_some (Dashboard_cache.peek key));
+       Masc.Keeper_tool_call_log.log_call
+         ~keeper_name:"analyst"
+         ~tool_name:"keeper_time_now"
+         ~input:(`Assoc [])
+         ~output_text:"ok"
+         ~success:true
+         ~duration_ms:1.0
+         ();
+       check int "durable append advances revision" 1
+         (Masc.Keeper_tool_call_log.committed_revision ());
+       let same_key =
+         Server_dashboard_http_keeper_api.tool_calls_fleet_cache_key ~masc_root
+       in
+       check string "cache identity remains bounded" key same_key;
+       check bool "revision change invalidates stale fleet rows" true
+         (Option.is_none (Dashboard_cache.peek key)))
+;;
+
 let () =
   run "dashboard_http_core"
     [
@@ -3539,6 +3578,8 @@ let () =
             test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming;
           test_case "operator snapshot hydrates on first default request" `Quick
             test_operator_snapshot_default_route_hydrates_first_success;
+          test_case "tool-call fleet cache follows durable revision" `Quick
+            test_tool_call_fleet_cache_tracks_durable_revision;
           test_case "dashboard query cache segment normalizes missing values" `Quick
             test_dashboard_query_cache_segment_normalizes_missing_values;
           test_case "dashboard query cache key partitions route params" `Quick

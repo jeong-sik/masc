@@ -9,6 +9,10 @@
 module Http = Http_server_eio
 (** Alias used internally for the Eio HTTP server module. *)
 
+val tool_calls_fleet_cache_key : masc_root:string -> string
+(** Return the bounded fleet-row cache key after invalidating its cached value
+    when the durable tool-call revision has advanced. *)
+
 (** {1 Trajectory merge}
 
     The dashboard merges the on-disk turn trajectory with internal-history

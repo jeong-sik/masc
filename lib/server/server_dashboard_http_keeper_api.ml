@@ -15,6 +15,24 @@ let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 let keeper_hot_path_cache_ttl_s = 30.0
 let keeper_composite_cache_ttl_s = 5.0
 
+let tool_calls_fleet_cache_revision_mu = Stdlib.Mutex.create ()
+let tool_calls_fleet_cache_revisions : (string, int) Hashtbl.t = Hashtbl.create 4
+
+let tool_calls_fleet_cache_key ~masc_root =
+  let key = Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root in
+  let revision = Keeper_tool_call_log.committed_revision () in
+  let changed =
+    Stdlib.Mutex.protect tool_calls_fleet_cache_revision_mu (fun () ->
+      match Hashtbl.find_opt tool_calls_fleet_cache_revisions masc_root with
+      | Some previous when previous = revision -> false
+      | Some _ | None ->
+        Hashtbl.replace tool_calls_fleet_cache_revisions masc_root revision;
+        true)
+  in
+  if changed then Dashboard_cache.invalidate key;
+  key
+;;
+
 (* Bounded dashboard hydration defaults for the operator compaction inspector.
    These cap best-effort filesystem scans; [scan_truncated] in the response makes
    the bound observable when there are more manifest segments than scanned. *)
@@ -1873,7 +1891,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let fleet_rows =
         match
           Dashboard_cache.get_or_compute
-            (Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root)
+            (tool_calls_fleet_cache_key ~masc_root)
             ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
               Domain_pool_ref.submit_cpu_or_inline (fun () ->
                 `List

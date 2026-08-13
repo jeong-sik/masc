@@ -239,6 +239,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0374 | Keeper Capability Probe Lane | Draft | - |
 | 0375 | Closed day-file projection cache — stop replaying the ledger per read | Draft (not recommended as written — see §8) | - |
 | 0376 | 출력 목적지는 Keeper 가 판단한다 | Draft | - |
+| 0377 | 같은 대화의 밀린 메시지는 한 턴이 함께 본다 (Conversation-Batched Stimulus Intake) | Draft | - |
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |

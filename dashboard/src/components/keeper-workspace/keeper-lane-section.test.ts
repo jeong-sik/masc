@@ -60,7 +60,9 @@ describe('KeeperLaneSection', () => {
     mocks.fetchKeeperWaitingInventory.mockResolvedValue(inventory())
     render(html`<${KeeperLaneSection} keeper=${{ name: 'kidsnote', agent_name: 'agent-kidsnote' }} />`)
 
-    await waitFor(() => expect(screen.getByText('처리 대기 중')).toBeTruthy())
+    // '처리 대기 중' → '대기 중': #28426 trimmed the lane-state labels but
+    // missed this assertion, which then timed out for every PR (#28443).
+    await waitFor(() => expect(screen.getByText('대기 중')).toBeTruthy())
     expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(1)
 
     mocks.refresh?.('rondo')

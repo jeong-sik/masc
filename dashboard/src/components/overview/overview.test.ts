@@ -1,6 +1,6 @@
 import { h } from 'preact'
 import { cleanup, render, waitFor } from '@testing-library/preact'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   computeFunnelCounts,
   formatTargetRatio,
@@ -45,6 +45,20 @@ vi.mock('../schedule/schedule-state', () => ({
   scheduledAutomationProjection: overviewMocks.scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh: () => () => {},
 }))
+
+// Overview joins the shared full-health subscription on mount, and the first
+// subscriber polls /dashboard/shell and /dashboard/execution. The harness
+// blocks real requests, so without an answer the render never reaches the
+// assertions.
+//
+// The subscription itself is not mocked: two cases below drive Overview
+// *through* it by stubbing /health?full=1, and a module mock would cut the
+// path they exercise. Only the network is replaced, and only for cases that
+// do not stub fetch themselves.
+const emptyJsonResponse = () =>
+  Promise.resolve(
+    new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }),
+  )
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
 function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
@@ -1019,7 +1033,14 @@ describe('computeOverviewDigest', () => {
 // ─── Prototype overview surface (header / KPIs / domains) ─────────────────────
 
 describe('Overview prototype surface', () => {
+  beforeEach(() => {
+    // Answer the full-health poll Overview starts on mount. Cases that need a
+    // specific body stub fetch themselves and override this.
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(emptyJsonResponse))
+  })
+
   afterEach(() => {
+    vi.unstubAllGlobals()
     cleanup()
   })
 
@@ -1037,7 +1058,7 @@ describe('Overview prototype surface', () => {
     expect(cells).toHaveLength(7)
     const labels = [...cells].map(c => c.querySelector('.ov-kpi-k')?.textContent)
     expect(labels).toEqual([
-      '실행 중 keeper',
+      '실행 Fiber',
       '주의 필요',
       '열린 Gate',
       '최우선 목표',
@@ -1066,7 +1087,7 @@ describe('Overview prototype surface', () => {
     const { container } = render(h(Overview, null))
     // The roster holds 2 active-looking rows; the projection reports 4 running.
     // The projection wins.
-    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('4 / 2')
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('4 / 등록 2')
     expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('4')
     expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('3')
     expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('1')
@@ -1096,7 +1117,7 @@ describe('Overview prototype surface', () => {
       const { container } = render(h(Overview, null))
 
       await waitFor(() => {
-        expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('7 / 8')
+        expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('7 / 등록 8')
         expect(container.querySelector('[data-testid="kpi-att"] .ov-kpi-v')?.textContent).toBe('1')
         expect(container.querySelector('[data-testid="overview-attention"] .ov-count')?.textContent).toBe('1')
         expect(container.querySelector('[data-testid="overview-attention"]')?.textContent).not.toContain('모든 keeper 정상')
@@ -1122,7 +1143,7 @@ describe('Overview prototype surface', () => {
     shellRuntimeResolution.value = null
 
     const { container } = render(h(Overview, null))
-    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('— / 3')
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('— / 등록 3')
     expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('—')
     expect(container.querySelector('[data-testid="fleet-stat-recovering"] .v')?.textContent).toBe('—')
     expect(container.querySelector('[data-testid="fleet-stat-paused"] .v')?.textContent).toBe('—')
@@ -1143,7 +1164,7 @@ describe('Overview prototype surface', () => {
     } as never
 
     const { container } = render(h(Overview, null))
-    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('0 / 1')
+    expect(container.querySelector('[data-testid="kpi-run"] .ov-kpi-v')?.textContent).toBe('0 / 등록 1')
     expect(container.querySelector('[data-testid="fleet-stat-running"] .v')?.textContent).toBe('0')
 
     keepers.value = []

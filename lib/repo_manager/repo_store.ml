@@ -411,7 +411,18 @@ let canonical_path raw =
   try Unix.realpath raw
   with Unix.Unix_error _ | Sys_error _ -> normalize_path raw
 
-let discover_repositories ~base_path =
+let discovery_skip_log_line ~abs_repo_dir ~detail =
+  Printf.sprintf
+    "repo discovery skipped %S: origin unavailable (%S)"
+    abs_repo_dir
+    detail
+;;
+
+let discover_repositories_with_budget_impl
+    ~before_origin_inspection
+    ~origin_budget_sec
+    ~base_path
+  =
   (* Issue #13188 + #13217 review: [find <base_path>] echoes the
      search-path prefix in every result, and a relative base_path
      (e.g. ["workspace"]) used to duplicate via [Filename.concat
@@ -432,6 +443,8 @@ let discover_repositories ~base_path =
       repositories
   in
   let git_dirs = discover_git_dirs ~base_path:abs_base_path in
+  before_origin_inspection ();
+  let budget = Repo_git.Inspection_budget.create ~timeout_sec:origin_budget_sec () in
   let has_hidden_segment_under_base path =
     if String.equal path abs_base_path then false
     else
@@ -457,39 +470,97 @@ let discover_repositories ~base_path =
                && (not (String.equal segment "." || String.equal segment ".."))
                && Char.equal segment.[0] '.')
   in
-  let candidates =
-    List.filter_map
-      (fun git_dir ->
+  let rec collect_candidates inspected acc = function
+    | [] -> Ok (List.rev acc)
+    | git_dir :: rest ->
         (* Canonicalize again here in case find traversed a symlink the
            caller did not anticipate; the existing-repo membership check
            below relies on identical normalized representations. *)
         let abs_repo_dir = canonical_path (Filename.dirname git_dir) in
-        if has_hidden_segment_under_base abs_repo_dir then None
-        else if List.exists (String.equal abs_repo_dir) existing_paths then None
+        if has_hidden_segment_under_base abs_repo_dir
+        then collect_candidates inspected acc rest
+        else if List.exists (String.equal abs_repo_dir) existing_paths
+        then collect_candidates inspected acc rest
         else
-          match Repo_git.get_origin_url ~local_path:abs_repo_dir with
-          | Ok url ->
+          (match Repo_git.Inspection_budget.remaining_timeout budget with
+           | Error _ ->
+             Error
+               (Printf.sprintf
+                  "repository origin inspection budget exhausted after %d candidates"
+                  inspected)
+           | Ok timeout_sec ->
+             (match
+                Repo_git.get_origin_url ~timeout_sec ~local_path:abs_repo_dir ()
+              with
+              | Ok url ->
               let name = Filename.basename abs_repo_dir in
               let id = slugify_id name in
-              Some
-                {
-                  id;
-                  name;
-                  url;
-                  local_path = abs_repo_dir;
-                  aliases = [];
-                  default_branch = "main";
-                  keepers = [];
-                  status = Active;
-                  auto_sync = false;
-                  sync_interval = 0;
-                  created_at = Int64.zero;
-                  updated_at = Int64.zero;
+              let candidate =
+                { id
+                ; name
+                ; url
+                ; local_path = abs_repo_dir
+                ; aliases = []
+                ; default_branch = "main"
+                ; keepers = []
+                ; status = Active
+                ; auto_sync = false
+                ; sync_interval = 0
+                ; created_at = Int64.zero
+                ; updated_at = Int64.zero
                 }
-          | Error _ -> None)
-      git_dirs
+              in
+              collect_candidates (inspected + 1) (candidate :: acc) rest
+              (* Typed origin failures let a real timeout fail the incomplete
+                 scan while a missing remote remains a normal skip. The
+                 rendered fields use OCaml string escaping so repository
+                 names and Git stderr cannot inject terminal controls or forge
+                 a second log line. *)
+              | Error detail ->
+                let detail_text = Repo_git.origin_lookup_error_to_string detail in
+                Log.Misc.warn "%s"
+                  (discovery_skip_log_line ~abs_repo_dir ~detail:detail_text);
+                (match detail with
+                 | Repo_git.Origin_lookup_timed_out _ ->
+                   Error
+                     (Printf.sprintf
+                        "repository origin inspection budget exhausted after %d candidates"
+                        (inspected + 1))
+                 | Repo_git.Origin_missing
+                 | Repo_git.Origin_lookup_failed _ ->
+                   collect_candidates (inspected + 1) acc rest)))
   in
-  Ok candidates
+  collect_candidates 0 [] git_dirs
+;;
+
+let discover_repositories_with_budget ~origin_budget_sec ~base_path =
+  discover_repositories_with_budget_impl
+    ~before_origin_inspection:(fun () -> ())
+    ~origin_budget_sec
+    ~base_path
+;;
+
+let discover_repositories ~base_path =
+  discover_repositories_with_budget
+    ~origin_budget_sec:Repo_git.inspection_timeout_sec
+    ~base_path
+;;
+
+module For_testing = struct
+  let discover_repositories_with_budget = discover_repositories_with_budget
+  let discover_repositories_with_budget_after_scan
+      ~before_origin_inspection
+      ~origin_budget_sec
+      ~base_path
+    =
+    discover_repositories_with_budget_impl
+      ~before_origin_inspection
+      ~origin_budget_sec
+      ~base_path
+  ;;
+
+  let discovery_skip_log_line = discovery_skip_log_line
+end
 
 let register_discovered ~base_path =
   let* candidates = discover_repositories ~base_path in

@@ -39,7 +39,7 @@ let status_json = function
 let git_status_json ~base_path (repo : Repo_manager_types.repository) =
   let abs_local_path = Repo_store.local_path ~base_path repo in
   let repo_for_git = { repo with local_path = abs_local_path } in
-  match Repo_git.status_summary ~repository:repo_for_git with
+  match Repo_git.status_summary ~repository:repo_for_git () with
   | Ok summary ->
       `Assoc
         [
@@ -68,7 +68,7 @@ let sync_currency_json ~base_path (repo : Repo_manager_types.repository) =
   let abs_local_path = Repo_store.local_path ~base_path repo in
   let repo_for_git = { repo with local_path = abs_local_path } in
   let target_ref = "origin/" ^ repo.default_branch in
-  match Repo_git.ahead_behind ~repository:repo_for_git ~target_ref with
+  match Repo_git.ahead_behind ~repository:repo_for_git ~target_ref () with
   | Ok (behind, ahead) ->
       `Assoc
         [

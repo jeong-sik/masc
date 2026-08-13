@@ -316,8 +316,8 @@ let test_baseline_covers_every_capability_for_each_target () =
 ;;
 
 let test_baseline_preserves_policy_exclusions_as_cells () =
-  let agentworld = target "AgentWorld" in
-  match baseline [ agentworld ] with
+  let optional_local_runtime = target "local.canary" in
+  match baseline [ optional_local_runtime ] with
   | Error error -> failf "unexpected baseline error: %s" (baseline_error_to_string error)
   | Ok cases ->
     check bool "librarian cell required" true

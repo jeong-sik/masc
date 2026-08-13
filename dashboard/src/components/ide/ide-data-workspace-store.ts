@@ -236,51 +236,50 @@ export function retainCurrentWorkspaceFetchIssues(
   })
 }
 
-function isManagedMirrorRepository(repository: Repository): boolean {
-  const localPath = repository.local_path.replace(/\\/g, '/')
-  return localPath === `.masc/repos/${repository.id}`
-    || localPath.startsWith('.masc/repos/')
-    || localPath.includes('/.masc/repos/')
-}
-
-// Reviewer #13232: detect Windows drive-letter absolute paths
-// (e.g. "C:/Users/.../repo" or "D:\\projects\\repo") after
-// backslash normalization so workspace repos on Windows are not
-// classified as managed mirrors and dropped from IDE default
-// selection.  Posix absolute paths still match via the
-// leading-slash branch.
-const WINDOWS_DRIVE_LETTER_PREFIX = /^[A-Za-z]:\//
-function isWorkspaceRepository(repository: Repository): boolean {
-  const localPath = repository.local_path.replace(/\\/g, '/')
-  const isAbsolute =
-    localPath.startsWith('/') ||
-    WINDOWS_DRIVE_LETTER_PREFIX.test(localPath)
-  return isAbsolute && !localPath.includes('/.masc/')
-}
-
 /** Repo is not reachable — server reported it as missing or unknown. */
 const UNREACHABLE_WORKSPACE_SOURCES: ReadonlySet<string> = new Set([
   'repository_missing',
   'repository_unknown',
 ])
 
-export function selectPreferredIdeRepositoryId(
+// RFC-0378 §5.4: the viewer's explicit choice is the only selection
+// authority — nothing infers "the repo the human cares about" from path
+// shape. The choice persists per viewer; when neither the live selection
+// nor the persisted one is usable, the honest answer is no selection.
+const ACTIVE_REPOSITORY_STORAGE_KEY = 'masc.ide.activeRepositoryId'
+
+function readPersistedRepositoryId(): string | null {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return null
+  try {
+    return window.localStorage.getItem(ACTIVE_REPOSITORY_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function persistRepositoryId(repoId: string | null): void {
+  if (typeof window === 'undefined' || window.localStorage === undefined) return
+  try {
+    if (repoId) window.localStorage.setItem(ACTIVE_REPOSITORY_STORAGE_KEY, repoId)
+    else window.localStorage.removeItem(ACTIVE_REPOSITORY_STORAGE_KEY)
+  } catch {
+    // Viewer storage unavailable — the selection stays session-local.
+  }
+}
+
+export function resolveActiveIdeRepositoryId(
   repositories: ReadonlyArray<Repository>,
   current: string | null,
+  persisted: string | null,
   excludeIds?: ReadonlySet<string>,
 ): string | null {
-  if (current && !excludeIds?.has(current) && repositories.some(repository => repository.id === current)) {
-    return current
-  }
-
-  const candidates = excludeIds && excludeIds.size > 0
-    ? repositories.filter(r => !excludeIds.has(r.id))
-    : repositories
-
-  return candidates.find(isWorkspaceRepository)?.id
-    ?? candidates.find(repository => !isManagedMirrorRepository(repository))?.id
-    ?? candidates[0]?.id
-    ?? null
+  const usable = (id: string | null): id is string =>
+    id !== null
+    && !excludeIds?.has(id)
+    && repositories.some(repository => repository.id === id)
+  if (usable(current)) return current
+  if (usable(persisted)) return persisted
+  return null
 }
 
 export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
@@ -352,7 +351,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
     repositoriesSignal.value = repositories
-    activeRepositoryIdSignal.value = selectPreferredIdeRepositoryId(repositories, current, unreachableRepoIds)
+    activeRepositoryIdSignal.value = resolveActiveIdeRepositoryId(
+      repositories,
+      current,
+      readPersistedRepositoryId(),
+      unreachableRepoIds,
+    )
   }
 
   const refreshRepositories = async (): Promise<ReadonlyArray<Repository>> => {
@@ -508,16 +512,22 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       workspaceSourceSignal.value = source
       workspaceBasePathSignal.value = basePath
 
-      // Self-healing: if the selected repo is unreachable (missing .git,
-      // path does not exist, etc.), exclude it and auto-switch to the next
-      // preferred repo so the IDE does not land on a blank screen.
+      // Self-healing without guessing (RFC-0378 §5.4): when the selected
+      // repo is unreachable, fall back to the persisted choice if it is
+      // still usable — otherwise clear the selection. The empty state is
+      // the honest answer; auto-switching to "the next preferred repo"
+      // was the path-shape heuristic this store no longer has.
       if (repoId && UNREACHABLE_WORKSPACE_SOURCES.has(source.kind)) {
         unreachableRepoIds.add(repoId)
-        const repos = repositoriesSignal.value
-        const nextId = selectPreferredIdeRepositoryId(repos, null, unreachableRepoIds)
-        if (nextId && nextId !== repoId) {
+        const nextId = resolveActiveIdeRepositoryId(
+          repositoriesSignal.value,
+          null,
+          readPersistedRepositoryId(),
+          unreachableRepoIds,
+        )
+        if (nextId !== repoId) {
           activeRepositoryIdSignal.value = nextId
-          return  // effect will re-fire with the new repoId
+          return  // effect will re-fire with the new selection (or none)
         }
       }
 
@@ -854,6 +864,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     repositories: () => repositoriesSignal.value,
     activeRepositoryId: () => activeRepositoryIdSignal.value,
     setActiveRepositoryId: (repoId: string | null) => {
+      persistRepositoryId(repoId)
       activeRepositoryIdSignal.value = repoId
     },
     subscribeActiveRepositoryId: (listener: () => void) =>

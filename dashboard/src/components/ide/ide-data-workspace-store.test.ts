@@ -33,7 +33,7 @@ import {
   replaceWorkspaceFetchIssue,
   retainCurrentWorkspaceFetchIssues,
   sameWorkspaceTreeIdentity,
-  selectPreferredIdeRepositoryId,
+  resolveActiveIdeRepositoryId,
   workspaceFetchIssueFromError,
   workspaceTreeIdentity,
 } from './ide-data-workspace-store'
@@ -149,6 +149,7 @@ function seedWorkspaceApiMocks(): void {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  window.localStorage.clear()
   seedWorkspaceApiMocks()
   clearIdeFileFocus()
   clearIdeContextFocus()
@@ -186,134 +187,37 @@ describe('firstObservedChangedFilePath', () => {
   })
 })
 
-describe('selectPreferredIdeRepositoryId', () => {
-  // ── Current selection persistence ────────────────────────────
+describe('resolveActiveIdeRepositoryId', () => {
+  // RFC-0378 §5.4: the viewer's explicit choice is the only selection
+  // authority. The path-shape heuristic is gone — when neither the live
+  // selection nor the persisted one is usable, the answer is none.
+  const repositories = [
+    repo('repo-a', '/Users/dancer/me/workspace/repo-a'),
+    repo('repo-b', '.masc/repos/repo-b'),
+  ]
 
   it('keeps the current repository when it is still present', () => {
-    const repositories = [
-      repo('repo-a', '/Users/dancer/me/workspace/repo-a'),
-      repo('repo-b', '.masc/repos/repo-b'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, 'repo-b')).toBe('repo-b')
+    expect(resolveActiveIdeRepositoryId(repositories, 'repo-b', null)).toBe('repo-b')
   })
 
-  // ── Workspace repo priority (absolute paths, not mirrors) ───
-
-  it('prefers a workspace repo over managed mirrors', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('managed-b', '.masc/repos/managed-b'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-a')
+  it('restores the persisted choice when there is no live selection', () => {
+    expect(resolveActiveIdeRepositoryId(repositories, null, 'repo-a')).toBe('repo-a')
   })
 
-  it('selects the first workspace repo when multiple exist', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('workspace-alpha', '/Users/dancer/me/workspace/alpha'),
-      repo('workspace-beta', '/Users/dancer/me/workspace/beta'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-alpha')
+  it('never guesses: no usable selection resolves to none', () => {
+    expect(resolveActiveIdeRepositoryId(repositories, null, null)).toBeNull()
+    expect(resolveActiveIdeRepositoryId(repositories, 'gone', 'also-gone')).toBeNull()
   })
 
-  it('does not treat absolute .masc/repos mirrors as workspace checkouts', () => {
-    const repositories = [
-      repo('mirror-a', '/Users/dancer/me/.masc/repos/mirror-a'),
-      repo('workspace-b', '/Users/dancer/me/workspace/project-b'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('workspace-b')
+  it('excludes unreachable repos from both live and persisted selection', () => {
+    const excluded = new Set(['repo-b'])
+    expect(resolveActiveIdeRepositoryId(repositories, 'repo-b', null, excluded)).toBeNull()
+    expect(resolveActiveIdeRepositoryId(repositories, null, 'repo-b', excluded)).toBeNull()
+    expect(resolveActiveIdeRepositoryId(repositories, null, 'repo-a', excluded)).toBe('repo-a')
   })
 
-  // ── Mirror-only fallback ─────────────────────────────────────
-
-  it('falls back to the first non-mirror repository when only mirrors exist', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('managed-b', '.masc/repos/managed-b'),
-    ]
-
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('managed-a')
-  })
-
-  it('returns null for an empty repository list', () => {
-    expect(selectPreferredIdeRepositoryId([], null)).toBeNull()
-  })
-
-  // ── excludeIds: self-healing after unreachable repo ──────────
-
-  it('skips excluded repo IDs and selects the next workspace repo', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('broken-cache', '/Users/dancer/me/.cache/some-tool'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    const excluded = new Set(['broken-cache'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-a')
-  })
-
-  it('drops current if it is in the exclude set', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('broken-cache', '/Users/dancer/me/.cache/some-tool'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    const excluded = new Set(['broken-cache'])
-    expect(selectPreferredIdeRepositoryId(repositories, 'broken-cache', excluded)).toBe('workspace-a')
-  })
-
-  it('skips multiple excluded repos', () => {
-    const repositories = [
-      repo('broken-a', '/Users/dancer/me/.cache/a'),
-      repo('broken-b', '/Users/dancer/me/.cache/b'),
-      repo('workspace-c', '/Users/dancer/me/workspace/c'),
-    ]
-
-    const excluded = new Set(['broken-a', 'broken-b'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-c')
-  })
-
-  it('returns null when all repos are excluded', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('managed-b', '.masc/repos/managed-b'),
-    ]
-
-    const excluded = new Set(['managed-a', 'managed-b'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBeNull()
-  })
-
-  // ── Reported bug: cache dir picked as first workspace repo ──
-
-  it('selects first workspace repo initially, even if it is a cache dir', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('llama-cpp', '/Users/dancer/me/.cache/llama.cpp'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    // Initial selection: llama-cpp is the first workspace repo.
-    // The self-healing in createIdeDataWorkspaceStore handles the
-    // auto-switch when workspace tree returns repository_missing.
-    expect(selectPreferredIdeRepositoryId(repositories, null)).toBe('llama-cpp')
-  })
-
-  it('self-heals by excluding broken cache and selecting next workspace repo', () => {
-    const repositories = [
-      repo('managed-a', '.masc/repos/managed-a'),
-      repo('llama-cpp', '/Users/dancer/me/.cache/llama.cpp'),
-      repo('workspace-a', '/Users/dancer/me/workspace/project-a'),
-    ]
-
-    // After self-healing excludes llama-cpp:
-    const excluded = new Set(['llama-cpp'])
-    expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-a')
+  it('empty repository list resolves to none', () => {
+    expect(resolveActiveIdeRepositoryId([], 'repo-a', 'repo-a')).toBeNull()
   })
 })
 

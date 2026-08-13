@@ -231,8 +231,22 @@ let make_tool_bundle_for_descriptors
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
+         let completion_boundary =
+           completion_boundary_of_runtime_handler descriptor.runtime_handler
+         in
+         let agent_core_descriptor =
+           (* Only a descriptor's static read-only proof can admit sibling
+              execution. Input-dependent and mutating tools remain serial. *)
+           match completion_boundary, descriptor.policy.readonly_hint with
+           | Continue_after_success, Some true ->
+             Some
+               (Agent_core.Tool.ordinary_descriptor
+                  Agent_core.Tool_contract.Concurrent)
+           | (Continue_after_success | Terminal_effect), (None | Some false) -> None
+           | Terminal_effect, Some true -> None
+         in
          let on_completed, on_failed, on_externalization_error =
-           match completion_boundary_of_runtime_handler descriptor.runtime_handler with
+           match completion_boundary with
            | Terminal_effect ->
              ( Some
                  (function
@@ -276,6 +290,7 @@ let make_tool_bundle_for_descriptors
                  ()
              in
              Tool_bridge.agent_core_tool_of_masc_with_execution_env
+               ?descriptor:agent_core_descriptor
                ~base_path:config.base_path
                ~model_projection:descriptor.model_output_projection
                ?on_externalization_error

@@ -595,8 +595,22 @@ let apply_patch ~old_string ~new_string ~replace_all text =
 
    Bounded because a keeper's checkout count is bounded: the live maximum
    measured across 12 keepers is 12 (2026-08-13). 64 leaves room without
-   letting a pathological tree grow this without limit. *)
-let origin_cache : (string, string) Hashtbl.t = Hashtbl.create 16
+   letting a pathological tree grow this without limit.
+
+   The failure is remembered too. A checkout that cannot answer — no remote, a
+   detached inspection, a stalled filesystem — answers the same way every time,
+   and every write is a call: caching only the successes would spend a
+   subprocess per write on exactly the checkouts that are already the most
+   expensive to ask. The entry is the resolver's whole answer, so a repeat costs
+   what a hit costs.
+
+   Full means stop inserting, not start over. [Hashtbl.reset] at the cap
+   discards all 64 on the insert that crosses it, so a tree that legitimately
+   exceeds the bound refills from empty over and over — the hit rate collapses
+   at the moment there are the most checkouts to serve. Declining the insert
+   keeps the entries that are already answering; the bound is held either way,
+   and only this one degrades gracefully. *)
+let origin_cache : (string, (string, string) result) Hashtbl.t = Hashtbl.create 16
 let origin_cache_mu = Stdlib.Mutex.create ()
 let origin_cache_capacity = 64
 
@@ -605,16 +619,13 @@ let cached_origin_url ~checkout_root =
     Stdlib.Mutex.protect origin_cache_mu (fun () ->
       Hashtbl.find_opt origin_cache checkout_root)
   with
-  | Some url -> Ok url
+  | Some answer -> answer
   | None ->
-    (match Repo_git.get_origin_url ~local_path:checkout_root with
-     | Error _ as error -> error
-     | Ok url ->
-       Stdlib.Mutex.protect origin_cache_mu (fun () ->
-         if Hashtbl.length origin_cache >= origin_cache_capacity
-         then Hashtbl.reset origin_cache;
-         Hashtbl.replace origin_cache checkout_root url);
-       Ok url)
+    let answer = Repo_git.get_origin_url ~local_path:checkout_root in
+    Stdlib.Mutex.protect origin_cache_mu (fun () ->
+      if Hashtbl.length origin_cache < origin_cache_capacity
+      then Hashtbl.replace origin_cache checkout_root answer);
+    answer
 ;;
 
 (* Attribution by measurement: ask git which checkout the path is in and what

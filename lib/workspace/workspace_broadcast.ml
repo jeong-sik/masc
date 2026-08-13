@@ -425,27 +425,37 @@ let reconcile_pending_mentions_unlocked config =
   let* names = authoritative_outbox_names config in
   let* current =
     names
-    |> List.filter_map (fun name ->
-      Option.map (fun request_id -> request_id, name)
-        (current_request_id_of_filename name))
+    |> List.filter (fun name -> Filename.check_suffix name outbox_filename_suffix)
+    |> List.map (fun name ->
+      match current_request_id_of_filename name with
+      | Some request_id -> Some request_id, name
+      | None -> None, name)
     |> List.fold_left
          (fun result (filename_request_id, name) ->
             let* messages = result in
-            let path = Filename.concat (mention_outbox_dir config) name in
-            match read_json_result config path with
-            | Error detail ->
+            match filename_request_id with
+            | None ->
               Log.Misc.error
-                "workspace mention recovery outbox read failed file=%s: %s"
-                name detail;
-              Ok ((None, filename_request_id, name) :: messages)
-            | Ok json ->
-              (match message_of_yojson json with
+                "workspace mention recovery found malformed outbox filename=%s"
+                name;
+              Ok ((None, "", name) :: messages)
+            | Some filename_request_id ->
+              let path = Filename.concat (mention_outbox_dir config) name in
+              (match read_json_result config path with
                | Error detail ->
                  Log.Misc.error
-                   "workspace mention recovery outbox decode failed file=%s: %s"
+                   "workspace mention recovery outbox read failed file=%s: %s"
                    name detail;
                  Ok ((None, filename_request_id, name) :: messages)
-               | Ok message -> Ok ((Some message, filename_request_id, name) :: messages)))
+               | Ok json ->
+                 (match message_of_yojson json with
+                  | Error detail ->
+                    Log.Misc.error
+                      "workspace mention recovery outbox decode failed file=%s: %s"
+                      name detail;
+                    Ok ((None, filename_request_id, name) :: messages)
+                  | Ok message ->
+                    Ok ((Some message, filename_request_id, name) :: messages))))
          (Ok [])
     |> Result.map
          (List.sort (fun (left, _, left_name) (right, _, right_name) ->
@@ -708,16 +718,19 @@ let broadcast_with_mention ?trace_context ~msg_type config ~from_agent ~content
      Log.Misc.error
        "workspace broadcast authoritative write failed request_id=%s seq=%d: %s"
        request_id seq message;
-     (match mention with
-      | None -> ()
-      | Some _ ->
-        delete_outbox_marker config request_id
-        |> Result.iter_error (fun detail ->
-          Log.Misc.warn
-            "workspace mention abandoned outbox cleanup failed request_id=%s: %s"
-            request_id detail));
      observe safe_msg_type;
-     Error (Broadcast_not_persisted message)
+     (match mention with
+      | None -> Error (Broadcast_not_persisted message)
+      | Some _ ->
+        (* The outbox commit above is already the durable acceptance point for
+           an explicit mention. Report a typed deferred outcome and retain it
+           for reconciliation; deleting it and raising made a failed cleanup
+           capable of resurrecting an effect the caller was told did not
+           persist. *)
+         Ok
+           { delivery with
+             mention_delivery = Deferred Workspace_status_unavailable
+           })
    | Ok { mirror_error } ->
      Option.iter
        (fun message ->

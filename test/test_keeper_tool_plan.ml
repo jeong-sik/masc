@@ -388,6 +388,7 @@ let test_composable_output_registry_is_closed () =
 ;;
 
 let () =
+  Eio_main.run @@ fun _env ->
   run
     "keeper_tool_plan"
     [ ( "typed-values"

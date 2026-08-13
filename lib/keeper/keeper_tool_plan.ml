@@ -696,7 +696,7 @@ let validate_output_references descriptors nodes =
                       { node_id = node.id
                       ; source_node_id
                       ; source_tool_name = source_node.tool_name
-                      }))))
+                      })))))
     nodes
 ;;
 
@@ -782,7 +782,7 @@ let create ~descriptors nodes =
                            { identity = Atomic.fetch_and_add next_plan_identity 1
                            ; nodes
                            ; descriptors
-                           }))))))
+                           })))))))
 ;;
 
 let dependency_layers plan =

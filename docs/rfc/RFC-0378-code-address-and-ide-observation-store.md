@@ -91,7 +91,7 @@ Keeper 의 코드 작업이 IDE 에 보이려면 쓰기와 읽기가 같은 주�
 | 이 경로는 어느 저장소인가 (git 실측, bounded, cache, local-path fallback) | workspace-root-only §3.2, §5 (2a/2b) |
 | typed `Unattributed` (귀속 실패의 타입) | workspace-root-only 2a 가 도입, **이 RFC 가 소비** |
 | 귀속 결과의 타입·발행 시점·저장 배치·읽기 어휘·anchor 계약 | **이 RFC** |
-| 동일 origin N-clone 의 checkout 판별자를 record 에 넣는가 (그쪽 §5.2 미결) | **이 RFC 가 답한다**: 넣되 key 가 아니라 projection 메타데이터 (§5.1) |
+| 동일 origin N-clone 의 checkout 판별자를 record 에 넣는가 (그쪽 §5.2 미결) | **이 RFC 가 답한다**: 넣되 key 가 아니라 projection 메타데이터 (§5.1). 원 질문은 region 레코드 한정이었으나 답은 Code fact 전체로 일반화한다 — 세 파일이 같은 key 로 조인되는 것이 이 RFC 의 요지이므로 판별자도 세 파일 같은 자리(비-key)에 있어야 한다 |
 
 agent_observation.mli 가 인용하는 "IDE Observation Plane v2 §7" 문서는 repo 에 존재하지 않는다. 이 RFC 구현에서 해당 포인터를 함께 제거한다 (원칙 8).
 
@@ -118,10 +118,18 @@ type fact =
       }
   | Keeper of
       { keeper_id : string
-      ; unaddressed : Unattributed.reason option
-        (* workspace-root-only 2a 의 타입. 관측성은 여기서: 카운터가 아니라 질의 가능한 필드 *)
+      ; unaddressed : unaddressed option
+        (* None = 애초에 파일이 없는 호출 (board/memory 등 순수 keeper-timeline fact).
+           Some = 파일은 있었으나 귀속 실패. 현행 orphan 레코드가 보존하던
+           포렌식 정보(시도한 경로)를 잃지 않는다. 관측성은 여기서:
+           카운터가 아니라 질의 가능한 필드 *)
       ; body : body
       }
+
+and unaddressed =
+  { reason : Unattributed.reason  (* workspace-root-only 2a 의 타입 *)
+  ; attempted_path : string       (* resolver 가 본 원경로 그대로 *)
+  }
 ```
 
 - 소비자는 주소를 **재유도할 수 없다** — 타입이 원천 봉쇄한다 (#28582/#28595 독트린의 타입화).
@@ -149,6 +157,8 @@ type fact =
 
 - **repo *이름*이 아니라 slug 다.** 현행 co-view 는 `repo: masc` 처럼 이름을 보내는데, 이름은 slug 와 별개인 또 하나의 문자열 별칭이라 계약 안에 어휘 분열을 재생산한다 (원칙 10). §5.3b 의 단일 wire key 아래에서 co-view 도 slug 를 싣고, annotate 의 서버 측 카탈로그 홉(이름→url→slug)은 통째로 사라진다 — 왕복의 두 절반과 read path 가 문자 그대로 같은 key 를 쓴다.
 - keeper 가 자기 마운트 레이아웃(`repos/<id>/…`)을 알아야 앵커를 되돌려줄 수 있는 현행 계약(#23469 의 sandbox-root 앵커링)은 삭제한다. keeper 는 받은 것을 그대로 돌려주면 된다.
+- **실패는 typed reject 다.** 입력이 (slug, repo-relative, lines) 이므로 annotate 에는 "귀속 실패인데 성공을 반환하는" 경로가 없어진다 — slug 는 어떤 값이든 정당한 파티션이고(모집합은 store 실측, §5.4), path 가 파싱 불가면 도구가 명시적으로 reject 한다. 현행 구현은 `Base_unresolved` 매장에도 `ok:true` 를 돌려준다 (`keeper_tool_ide_runtime.ml` — silent failure 의 재생산) — 이것이 계약 수준에서 불가능해진다.
+- **사람 쪽 절반도 같은 생성자를 지난다.** 대시보드의 REST annotation POST 는 현재 **세 번째 귀속 경로**를 갖는다: `server_ide_http.ml` 이 카탈로그 local_path 접두 매칭으로 raw file_path 에서 파티션을 재유도하고, 자체 실패 taxonomy 3종(`File_path_repo_id_mismatch` 등, :113-126)을 따로 둔다 — `codebase_partition` 4변형과도 workspace-root-only 의 `Unattributed` 와도 별개인 세 번째 어휘다. 이 경로와 taxonomy 는 죽고, REST 도 (slug, repo-relative) 를 받아 같은 smart constructor 로 `Code_address` 를 발행한다. keeper 절반·사람 절반·read path 가 한 생성자를 공유한다.
 - 도구 스키마와 keeper 프롬프트가 이 계약을 서술한다 (프롬프트 변경은 원칙 22 로 허용).
 - acceptance: §2.1 owner probe 의 **정확한 재실행**이 green — 같은 (repo, path, line) 에 마커가 뜬다.
 
@@ -175,19 +185,21 @@ type fact =
 
 | 대상 | 증거 | 처분 |
 |---|---|---|
-| partition 실패 4변형 + orphan 경로/판별 함수 | §5.1 — 실패는 fact 종류 | 삭제 (컴파일러가 낙진 전파) |
+| partition 실패 4변형 + orphan 경로/판별 함수 | §5.1 — 실패는 fact 종류 | **E 에서** 삭제 — read path 가 D 까지 이 타입으로 조회 (§7 머지 지점) |
 | `_orphan/` 데이터 380 MiB | store 의 97.6%, code fact 아님 | hard cut (§5.6) |
 | `IdeOrphanWrites` 카운터 | telemetry-as-fix, 소비자 0 | 삭제 |
 | LSP definition/references/documentSymbol/highlights/related-locations | 읽는 store 가 평생 4행 | 삭제 + 해당 테스트 동반 삭제 (원칙 20) |
-| LSP InlayHint (route-context) | 사용 증거 0 | 삭제 후보 — Open Q1 |
-| cursor_events·pr_events store/라우트/오버레이 | 마지막 기록 07-04/06-12, orphan 한정 | 라이브 여부 실측 후 삭제 — Open Q2 |
+| LSP InlayHint (route-context) | 사용 증거 0 + overlay 병합이 순수 additive 라 하부 LSP 네이티브 inlayHint 무손상 (적대 리뷰 확인) | 삭제 |
+| pr_events store 잔재 | 코드 소비자 **0 파일** (lib+dashboard 비테스트 전수) — 이미 코드 레벨 사망 | 삭제 |
+| cursor_events (store + `list_cursors` + overlay) | UI 는 wired(`keeper-cursor-overlay` → `fetchIdeCursors`)인데 producer 가 07-04 이후 침묵 — "안 쓰는 기능"이 아니라 "조용히 고장난 기능" | Open Q1: producer 수선 vs 동반 삭제 |
+| REST annotation POST 의 경로 재유도 + 실패 taxonomy 3종 | 세 번째 귀속 어휘 (§5.3) | C 에서 smart constructor 로 교체 |
 | `selectPreferredIdeRepositoryId` 휴리스틱 | 추측의 답이 빈 파티션 | 삭제 → §5.4 |
 | wire 의 codebase 철자 혼용 (`canonical_url=<full URL>`·`repo_id` scope param, co-view repo 이름) | codebase key 4종 분열 (§5.3b) | 단일 `codebase=<slug>` 로 — C(co-view)·D(REST) 에서 교체 |
-| `?(partition = Legacy_default)` optional 인자 기본값 11사이트 (ide_annotations 6 · ide_region_tracker 4 · ide_bridge 1) | 인자 누락이 조용히 orphan 착지 — #28581 결함이 정확히 이 모양이었음 | A 에서 required 인자로 교체 |
+| `?(partition = Legacy_default)` optional 인자 기본값 11사이트 (ide_annotations 6 · ide_region_tracker 4 · ide_bridge 1) | 인자 누락이 조용히 orphan 착지 — #28581 결함이 정확히 이 모양이었음 | write 측은 A, read 측은 D 에서 required 로 |
 | annotate sandbox-root 앵커링 | owner probe 2건 매장 | 계약 교체로 소멸 (§5.3) |
 | "IDE Observation Plane v2" 죽은 포인터 | repo 에 문서 부재 | 주석에서 제거 |
 
-**살아남는 것**: regions gutter 마커, tool/turn 타임라인, CodeLens + hover, annotation rail, anchored interject, REST annotations CRUD (사람 쪽 절반), `canonical_url_of_remote`.
+**살아남는 것**: regions gutter 마커, tool/turn 타임라인, CodeLens + hover, annotation rail, anchored interject, REST annotations CRUD (사람 쪽 절반 — 단 귀속은 §5.3 의 공유 생성자로), `canonical_url_of_remote`, 그리고 `ide_annotation_types.ml` 의 on-disk JSON 코덱. 코덱의 경계: `Code_address` 는 in-process 증명 타입이고 디스크 표현은 지금처럼 slug=디렉터리·path=문자열 필드다 — 코덱은 그 문자열을 주소로 재승격하지 않고 read path 의 질의 키로만 쓴다.
 
 annotation 의 존재 이유는 축소 재정의된다: **(a)** anchored interject 에 대한 keeper 의 anchored reply, **(b)** 기존 decision/task record 의 code-anchored projection. "keeper 가 아무 때나 남기는 노트"는 평생 4행으로 반증됐다.
 
@@ -196,6 +208,7 @@ annotation 의 존재 이유는 축소 재정의된다: **(a)** anchored interje
 - `<store-root>` 전체를 아카이브 후 삭제, fresh start (원칙 8/22). 마이그레이션·호환 reader 없음.
 - masc 파티션의 유용분(8.5 MiB)은 keeper 상시 가동으로 수일 내 자연 재생성된다.
 - 실행은 dry-run 근거 제시 후 별도 단계 (workspace-root-only 3b 와 같은 성격의 `rm -rf` 경로 분리 원칙).
+- **cut 은 프로세스 메모리 무효화와 원자적이다.** LSP overlay 캐시는 파일 byte 길이를 리비전 토큰으로 쓰는데 그 전제는 append-only 다 — 디렉터리 교체는 전제를 깬다. old-epoch 캐시 엔트리와 재생성된 파일이 같은 크기에서 마주치면 **삭제된 pre-cut 데이터를 live 로 서빙**한다 (적대 리뷰 P0-2; 캐시는 무기한 Hashtbl, 무효화 훅은 didSave 뿐). cut 절차 = store 교체 + 서버 재시작(권장) 또는 overlay 캐시 전체 무효화 호출.
 
 ## 6. 검증
 
@@ -206,7 +219,7 @@ annotation 의 존재 이유는 축소 재정의된다: **(a)** anchored interje
 | V1 | IDE 진입 → 저장소 명시 선택 → keeper 쓰기 1회 후 해당 파일 열기 | gutter 마커 표시, store 의 해당 행과 주소 일치 |
 | V2 | **owner probe 재실행**: co-view interject at file:line → keeper annotate | 같은 (repo, path, line) 에 마커 + rail 표시. `_orphan` 부재이므로 매장 불가 |
 | V3 | scope 선택 → reload | 선택 유지, 재추측 없음 |
-| V4 | cut 이후 store 전수 스캔 | code fact 전수가 addressed, keeper fact 전수가 keeper/ 아래 (스크립트 출력 = 증거) |
+| V4 | cut 이후 store 전수 스캔 **+ LSP 응답 재확인** | code fact 전수가 addressed, keeper fact 전수가 keeper/ 아래 (스크립트 출력 = 증거). 추가로 cut 직후 pre-cut 파일을 겨냥한 LSP 질의가 빈 결과 반환 — 디스크 스캔은 §5.6 의 메모리 epoch 혼입을 못 잡으므로 (버그가 서버 메모리에 있음) |
 
 feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는 만들지 않는다. 신규 테스트는 CI focused suite 에 배선한다 — masc CI 는 named suite 만 실행하므로 배선 없는 테스트는 컴파일만 된다.
 
@@ -230,11 +243,11 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 
 순서 제약과 머지 지점 일관성:
 
-- **A 시점** — 낙진 실측 (2026-08-14 census): 실패 variant 4종의 비테스트 소비자는 **lib 13파일 · ~40사이트, dashboard TS 0** — 전선은 서버에서 끝난다. 구성: 타입 정의·JSON 투영(agent_observation, ide_paths) / producer(resolver) / `?(partition = Legacy_default)` optional 기본값 11사이트 / 의식적 Legacy_default 리더 2곳(`server_ide_scope.ml` keeper-lane scope, `server_dashboard_http.ml` snapshot). keeper_vision_tool 의 `UnmatchedToolCalls` 는 동명이인 오탐.
-  A 는 variant enum 을 삭제하고 sink 라우팅 입력을 `Code_address.t option` 으로 바꾼다 (`Some` → by-url, `None` → 현행 `_orphan` 디렉터리 — 배치 불변이므로 read path 일관). optional 기본값 11사이트는 required 인자가 된다. 의식적 리더 2곳은 A 에서 `None` 경로로 기계적 치환하고 의미 재배치는 D. 13파일 기계적 변경이라 20k 상한에 근접 — A1(타입+producer) / A2(sink 시그니처) 분할 지점을 선지정한다. (`_orphan` *데이터와 기계*의 삭제는 E 소관.)
+- **A 시점** — 낙진 실측 두 겹 (2026-08-14, 독립 이중 측정): constructor 이름 grep 은 lib 13파일 · ~40사이트 · dashboard TS 0 을 주지만 **이것은 하한이다**. 타입 등식 재수출(`ide_paths.ml` 의 `type partition = Agent_observation.codebase_partition = …`)과 constructor 를 이름짓지 않는 타입 소비자 — 대표적으로 `lsp_overlay_provider.ml` 의 `Cache.key` 가 `partition_store_dir` 를 호출하며 이는 13개 LSP 진입점 전부의 공유 캐시 키다 — 는 이름 grep 에 잡히지 않는다 (적대 리뷰 P0-1). 그래서 **A 는 variant enum 을 삭제하지 않는다**: bus 이벤트·producer·sink write-path 시그니처만 fact / `Code_address.t option` 으로 바꾸고 (`Some` → by-url, `None` → 현행 `_orphan` 디렉터리, 배치 불변), 구 partition 타입은 **read-path 전용 어휘**로 D 까지 생존한다 — produce 측 역할만 상실. 모든 리더가 무변경으로 컴파일된다. optional 기본값 11사이트 중 write 측이 A 에서 required 가 된다. 20k 상한 근접 시 A1(타입+producer) / A2(sink 시그니처) 분할.
+- **D 시점**: 리더(REST scope · LSP overlay · dashboard snapshot)가 slug/keeper 어휘로 이행하며 구 partition 타입의 마지막 소비자가 사라진다.
 - **B 시점**: 배치 전환 (`keeper/<keeper_id>/` 신설, Keeper fact 이동). 이 순간부터 `_orphan` 에 새 쓰기 0.
 - **C 는 B 이후**: annotations 가 `code/` 에 떨어져야 V2 가 성립한다.
-- **E 최후**: 죽는 표면의 소비자가 D 까지 존재하고, `_orphan` 잔여 기계는 B 이후 dead 지만 데이터 cut 과 함께 지운다.
+- **E 최후**: 구 partition 타입(variant enum 의 사망 지점) · orphan 기계 · 죽는 표면을 데이터 cut 과 함께 삭제한다. cut 은 §5.6 의 프로세스 메모리 무효화와 원자적으로 묶인다.
 
 workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 소비하므로 **2a 선행이 이상적**이나, 2a 미착륙 시 A 가 동등 타입을 자기 모듈에 정의하고 2a 착륙 시 치환한다 (facade 아님 — 동일 개념의 소유권 이관).
 
@@ -256,8 +269,8 @@ workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 �
 
 ## 9. Open questions
 
-1. InlayHint(route-context) 존폐 — 사용 증거 0 이나 소비 경로 실측 후 확정.
-2. cursor_events / pr_events — store 는 각각 07-04 / 06-12 이후 침묵인데 **살아있는 리더가 있다**: dashboard snapshot 이 `list_cursors` 를 호출한다 (`server_dashboard_http.ml` `dashboard_ide_snapshot_json`). 리더 존재 ≠ 데이터 흐름 — 렌더 결과는 상시 빈 값이다. 처분 시 리더와 스토어를 함께 정리.
-3. keeper fact 의 배치 — 신설 `keeper/<id>/` 가 기존 keeper 이벤트 스토어(turn record 등)와 중복 방출인지 조사. 중복이면 한쪽을 죽인다 (SSOT).
-4. checkout 판별자 표기 — `rev-parse --show-toplevel` 기반 실측값 제안 (workspace-root-only §5.2 인수). key 비참여는 본문 확정, 표기 형식만 미정.
-5. 한 tool call 이 **두 저장소의 파일을 만지는 경우** (예: Execute 가 masc 와 oas 를 함께 편집) — fact 는 주 경로 하나의 주소만 나른다. 현행과 동일한 한계이나 타입이 이를 명시하지 않는다. 부 경로들을 별도 Code fact 로 분리 방출할지, 단일 주소 한계를 계약으로 못박을지 결정 필요.
+1. cursor_events — UI 는 wired(`keeper-cursor-overlay` → `fetchIdeCursors` → `list_cursors`, dashboard snapshot 도 호출)인데 producer 가 07-04 이후 침묵. "안 쓰는 기능"이 아니라 **"조용히 고장난 기능"**이다 — producer 수선 vs 기능 동반 삭제의 제품 결정 필요.
+2. keeper fact 의 배치 — 신설 `keeper/<id>/` 가 기존 keeper 이벤트 스토어(turn record 등)와 중복 방출인지 조사. 중복이면 한쪽을 죽인다 (SSOT).
+3. checkout 판별자 표기 — `rev-parse --show-toplevel` 기반 실측값 제안 (workspace-root-only §5.2 인수). key 비참여는 본문 확정, 표기 형식만 미정.
+4. 한 tool call 이 **두 저장소의 파일을 만지는 경우** (예: Execute 가 masc 와 oas 를 함께 편집) — fact 는 주 경로 하나의 주소만 나른다. 현행과 동일한 한계이나 타입이 이를 명시하지 않는다. 부 경로들을 별도 Code fact 로 분리 방출할지, 단일 주소 한계를 계약으로 못박을지 결정 필요.
+5. annotate 의 unaddressed tool-response — §5.3 의 typed reject 로 원칙은 닫혔으나, reject payload 의 정확한 필드(재시도 힌트 포함 여부)는 C 의 스키마 작업에서 확정.

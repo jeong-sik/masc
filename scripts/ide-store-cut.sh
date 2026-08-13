@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# RFC-0378 §5.6 — hard cut of the IDE observation store.
+#
+# Dry-run by default: measures the store and prints exactly what --execute
+# would do. Execution archives the store to a tar next to it, deletes the
+# directory, and reminds the operator that the running server must restart
+# (the LSP overlay cache keys revisions by file byte length under an
+# append-only assumption a directory swap breaks — review P0-2).
+#
+# The store root is <project-root>/.masc-ide, the sibling of the .masc
+# base path. Pass it explicitly, or let the script derive it from
+# MASC_BASE_PATH.
+set -euo pipefail
+
+STORE="${1:-}"
+if [ -z "${STORE}" ]; then
+  if [ -z "${MASC_BASE_PATH:-}" ]; then
+    echo "usage: $0 <store-root> [--execute]" >&2
+    echo "       (or set MASC_BASE_PATH and omit <store-root>)" >&2
+    exit 2
+  fi
+  STORE="$(dirname "${MASC_BASE_PATH}")/.masc-ide"
+fi
+
+MODE="${2:-dry-run}"
+
+if [ ! -d "${STORE}" ]; then
+  echo "store not found: ${STORE}" >&2
+  exit 1
+fi
+
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+ARCHIVE="${STORE%/}-pre-cut-${STAMP}.tar.gz"
+
+echo "== RFC-0378 ide store cut (${MODE}) =="
+echo "store:    ${STORE}"
+echo "size:     $(du -sh "${STORE}" | cut -f1)"
+echo "files:    $(find "${STORE}" -type f | wc -l | tr -d ' ')"
+echo "orphan:   $(du -sh "${STORE}/_orphan" 2>/dev/null | cut -f1 || echo 'absent')"
+echo "by-url:   $(du -sh "${STORE}/by-url" 2>/dev/null | cut -f1 || echo 'absent')"
+echo "archive:  ${ARCHIVE}"
+
+if [ "${MODE}" != "--execute" ]; then
+  echo
+  echo "dry-run only. To execute:"
+  echo "  1. stop the masc server (the overlay cache must not survive the swap)"
+  echo "  2. $0 ${STORE} --execute"
+  echo "  3. start the server — the store regrows from live keeper writes"
+  exit 0
+fi
+
+tar -czf "${ARCHIVE}" -C "$(dirname "${STORE}")" "$(basename "${STORE}")"
+echo "archived: ${ARCHIVE} ($(du -sh "${ARCHIVE}" | cut -f1))"
+rm -rf "${STORE}"
+echo "deleted:  ${STORE}"
+echo "restart the masc server before serving IDE reads."

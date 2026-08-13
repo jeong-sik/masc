@@ -116,7 +116,26 @@ RFC-0358 이 이미 turn record 와 raw trace 를 read-only dashboard projection
 소유한다. 사고 기록의 보존과 관측은 그쪽이 담당하므로 배달 경로가 없어져도 잃는
 관측성은 없다.
 
-### 4.2 turn outcome
+### 4.2 명시적 목적지를 가진 두 source family
+
+`origin_of_payload` 의 4개 source family 중 `Schedule_occurrence` 와
+`Fusion_completion` 은 §1 의 논거가 그대로 적용되지 않는다. mli 는 예약 wake 가
+"creation boundary 가 명시적 result destination 을 저장했을 때만" 참여한다고
+규정한다. 그 경우 목적지는 요청 시점에 정해진 것이므로 Keeper 판단이 빠졌다고 할 수
+없다.
+
+그럼에도 삭제 대상에 포함하는 근거는 두 가지다.
+
+1. 배달 **내용**은 4개 family 모두 동일하게 턴 최종 텍스트다. 목적지가 정당해도
+   사고 기록을 보내는 것은 고쳐야 한다.
+2. 실측에서 이 두 family 의 obligation 은 0건이다 (§2.2 의 42건은 전부
+   `hitl_resolution` 과 `connector_attention`). 삭제로 즉시 깨지는 동작이 없다.
+
+예약·fusion 결과를 지정된 목적지로 보내는 요구가 생기면, 그 목적지를 Keeper 의 턴
+입력으로 전달하고 Keeper 가 발화 도구로 보내는 방식으로 재구현한다. 시스템이 최종
+텍스트를 대신 보내는 방식으로 되돌리지 않는다.
+
+### 4.3 turn outcome
 
 `of_result_surface` 의 `response_text` 인자를 제거한다. `Completed` 는
 `No_visible_reply` 다. 발화는 도구가 소유하므로 최종 텍스트에서 발화 여부를 읽지

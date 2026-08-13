@@ -890,20 +890,20 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
      one of these axes to a generic text-only profile. JSON response-format
      support is an exact per-model contract rather than a provider-wide rule. *)
   let cases =
-    [ "qwen3.5:397b", false
-    ; "gemma4:31b", true
-    ; "kimi-k2.7-code", false
-    ; "minimax-m3", true
-    ; "nemotron-3-ultra", false
-    ; "deepseek-v4-flash", false
-    ; "deepseek-v4-pro", false
-    ; "glm-5.2", false
-    ; "gpt-oss:20b", false
-    ; "gpt-oss:120b", false
+    [ "qwen3.5:397b", false, Capabilities.No_thinking_control
+    ; "gemma4:31b", true, Capabilities.Ollama_think
+    ; "kimi-k2.7-code", false, Capabilities.Ollama_think
+    ; "minimax-m3", true, Capabilities.Ollama_think
+    ; "nemotron-3-ultra", false, Capabilities.Ollama_think
+    ; "deepseek-v4-flash", false, Capabilities.Ollama_think
+    ; "deepseek-v4-pro", false, Capabilities.Ollama_think
+    ; "glm-5.2", false, Capabilities.Ollama_think
+    ; "gpt-oss:20b", false, Capabilities.Ollama_think
+    ; "gpt-oss:120b", false, Capabilities.Ollama_think
     ]
   in
   List.iter
-    (fun (model_id, expected_json) ->
+    (fun (model_id, expected_json, expected_thinking_control) ->
        match
          Capabilities.for_provider_model_id
            ~allow_bare_fallback:false
@@ -922,8 +922,8 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
            expected_json
            c.supports_response_format_json;
          check_thinking_control
-           (model_id ^ " uses Ollama native think")
-           Capabilities.Ollama_think
+           (model_id ^ " uses its exact endpoint thinking control")
+           expected_thinking_control
            c.thinking_control_format)
     cases
 ;;

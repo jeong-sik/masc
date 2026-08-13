@@ -1079,7 +1079,11 @@ supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# ollama.com exposes this model through its OpenAI-compatible /v1 endpoint.
+# That wire cannot encode Ollama's native top-level [think] field; reasoning is
+# inherent/default-on for this deployment, so an explicit enable is satisfied
+# without emitting a control field.
+thinking_control_format = "none"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"

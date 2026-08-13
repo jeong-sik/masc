@@ -39,7 +39,7 @@ export interface ExactLaneRunSummary {
   persistenceError?: string
   persistenceState?: ExactLanePersistenceState
   // Opaque configured exact-lane slot. This is not separately authoritative
-  // provider/model attribution, and older retained rows have no value.
+  // provider/model attribution. Running rows have no terminal value yet.
   selectedSlot?: string | null
 }
 

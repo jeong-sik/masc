@@ -169,10 +169,11 @@ module Payload = struct
       ([ "outcome", `String (outcome_label completion.outcome)
        ; "elapsed_s", `Float completion.elapsed_s
        ; "output", completion.output
+       ; ( "selected_slot"
+         , match completion.selected_slot with
+           | None -> `Null
+           | Some selected_slot -> `String selected_slot )
        ]
-       @ (match completion.selected_slot with
-          | None -> []
-          | Some selected_slot -> [ "selected_slot", `String selected_slot ])
        @ detail)
   ;;
 
@@ -189,8 +190,7 @@ module Payload = struct
     let* detail_fields = detail_fields in
     let* () =
       Run_registry_core.Json.exact_fields
-        ~required:([ "outcome"; "elapsed_s"; "output" ] @ detail_fields)
-        ~optional:[ "selected_slot" ]
+        ~required:([ "outcome"; "elapsed_s"; "output"; "selected_slot" ] @ detail_fields)
         fields
     in
     let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
@@ -211,10 +211,11 @@ module Payload = struct
     in
     let* selected_slot =
       match List.assoc_opt "selected_slot" fields with
-      | None -> Ok None
+      | Some `Null -> Ok None
       | Some (`String selected_slot) when String.trim selected_slot <> "" ->
         Ok (Some selected_slot)
       | Some _ -> Error "field selected_slot must be a non-empty string"
+      | None -> Error "missing field selected_slot"
     in
     Ok { outcome; elapsed_s; output; selected_slot }
   ;;
@@ -239,14 +240,16 @@ type t =
 
 type completion_error =
   | Unknown_run
+  | Invalid_selected_slot
   | Persistence_failed of persistence_failure
 
 let completion_error_to_string = function
   | Unknown_run -> "completion referenced an unknown exact-lane run"
+  | Invalid_selected_slot -> "selected exact-lane slot must be non-blank"
   | Persistence_failed failure -> failure.detail
 ;;
 
-let storage_filename = "exact-lane-runs-v3.jsonl"
+let storage_filename = "exact-lane-runs-v4.jsonl"
 
 (* Re-exported from the store rather than re-derived from [Payload], so the
    bound a test reads is the bound [prune] applies. *)
@@ -384,31 +387,11 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output
     Error error
 ;;
 
-let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
-  mark_completed_internal
-    t
-    ~run_id
-    ~outcome
-    ~elapsed_s
-    ~selected_slot:None
-    ~output
-;;
-
-let mark_completed_with_slot
-      t
-      ~run_id
-      ~outcome
-      ~elapsed_s
-      ~selected_slot
-      ~output
-  =
-  mark_completed_internal
-    t
-    ~run_id
-    ~outcome
-    ~elapsed_s
-    ~selected_slot:(Some selected_slot)
-    ~output
+let mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
+  match selected_slot with
+  | Some selected_slot when String.trim selected_slot = "" -> Error Invalid_selected_slot
+  | None | Some _ ->
+    mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output
 ;;
 
 (* [total] counts every retained run, not the page, so a caller can say

@@ -523,22 +523,13 @@ let run_best_effort
         let complete ?selected_slot outcome output =
           let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
           let completion =
-            match selected_slot with
-            | None ->
-              Exact_lane_run_registry.mark_completed
-                registry
-                ~run_id
-                ~outcome
-                ~elapsed_s
-                ~output
-            | Some selected_slot ->
-              Exact_lane_run_registry.mark_completed_with_slot
-                registry
-                ~run_id
-                ~outcome
-                ~elapsed_s
-                ~selected_slot
-                ~output
+            Exact_lane_run_registry.mark_completed
+              registry
+              ~run_id
+              ~outcome
+              ~elapsed_s
+              ~selected_slot
+              ~output
           in
           match completion with
           | Ok () -> ()

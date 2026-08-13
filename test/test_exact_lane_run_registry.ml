@@ -7,7 +7,7 @@ let remove_if_exists path =
 ;;
 
 let mark_completed_exn t ~run_id ~outcome ~elapsed_s ~output =
-  match R.mark_completed t ~run_id ~outcome ~elapsed_s ~output with
+  match R.mark_completed t ~run_id ~outcome ~elapsed_s ~selected_slot:None ~output with
   | Ok () -> ()
   | Error error ->
     failf
@@ -15,9 +15,16 @@ let mark_completed_exn t ~run_id ~outcome ~elapsed_s ~output =
       (R.completion_error_to_string error)
 ;;
 
-let mark_completed_with_slot_exn t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
+let mark_completed_with_selected_slot_exn
+      t
+      ~run_id
+      ~outcome
+      ~elapsed_s
+      ~selected_slot
+      ~output
+  =
   match
-    R.mark_completed_with_slot
+    R.mark_completed
       t
       ~run_id
       ~outcome
@@ -44,7 +51,7 @@ let test_round_trip_preserves_exact_evidence () =
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
-  mark_completed_with_slot_exn
+  mark_completed_with_selected_slot_exn
     registry
     ~run_id:"run-1"
     ~outcome:R.Succeeded
@@ -60,6 +67,110 @@ let test_round_trip_preserves_exact_evidence () =
      check string "selected slot" "librarian-primary" selected_slot
    | _ -> fail "selected slot did not survive durable replay");
   remove_if_exists path
+;;
+
+let test_completion_without_slot_receipt_writes_explicit_null () =
+  let path = Filename.temp_file "exact-lane-null-slot-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"run-no-receipt"
+    ~lane:R.Board_attention
+    ~subject_id:"candidate-1"
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"run-no-receipt"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let lines = Fs_compat.load_file path |> String.split_on_char '\n' in
+  let completion_event = Yojson.Safe.from_string (List.nth lines 1) in
+  (match completion_event with
+   | `Assoc fields ->
+     (match List.assoc_opt "completion" fields with
+      | Some (`Assoc completion_fields) ->
+        check bool "None is explicit durable evidence" true
+          (List.assoc_opt "selected_slot" completion_fields = Some `Null)
+      | _ -> fail "completion event must carry an object payload")
+   | _ -> fail "completion event must be an object");
+  remove_if_exists path
+;;
+
+let test_missing_selected_slot_is_not_replayed () =
+  let path = Filename.temp_file "exact-lane-legacy-slot-" ".jsonl" in
+  remove_if_exists path;
+  let registry = R.create ~path () in
+  R.register_running
+    registry
+    ~run_id:"legacy-run"
+    ~lane:R.Board_attention
+    ~subject_id:"candidate-1"
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  mark_completed_exn
+    registry
+    ~run_id:"legacy-run"
+    ~outcome:R.Succeeded
+    ~elapsed_s:0.5
+    ~output:`Null;
+  let lines = Fs_compat.load_file path |> String.split_on_char '\n' in
+  let completion_event =
+    match Yojson.Safe.from_string (List.nth lines 1) with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "completion"
+              then (
+                match value with
+                | `Assoc completion_fields ->
+                  name, `Assoc (List.remove_assoc "selected_slot" completion_fields)
+                | _ -> fail "completion event must carry an object payload")
+              else name, value)
+           fields)
+    | _ -> fail "completion event must be an object"
+  in
+  Fs_compat.save_file
+    path
+    (String.concat
+       "\n"
+       [ List.nth lines 0; Yojson.Safe.to_string completion_event; "" ]);
+  let replayed = R.replay path in
+  check (option string) "pre-v4 completion is rejected, not projected as None" None
+    (R.get replayed ~run_id:"legacy-run" |> Option.map (fun run -> R.status_label run.R.status));
+  remove_if_exists path
+;;
+
+let test_blank_selected_slot_is_rejected_before_write () =
+  let registry = R.create () in
+  R.register_running
+    registry
+    ~run_id:"blank-slot"
+    ~lane:R.Librarian
+    ~subject_id:"trace-1"
+    ~actor:"keeper-a"
+    ~started_at:10.0
+    ~input:(R.Exact_input `Null);
+  let result =
+    R.mark_completed
+      registry
+      ~run_id:"blank-slot"
+      ~outcome:R.Succeeded
+      ~elapsed_s:0.5
+      ~selected_slot:(Some " \t")
+      ~output:`Null
+  in
+  check bool "blank selected slot is a typed writer error" true
+    (match result with
+     | Error R.Invalid_selected_slot -> true
+     | Error R.Unknown_run | Error (R.Persistence_failed _) | Ok () -> false);
+  check string "invalid completion leaves the registered run running" "running"
+    (R.get registry ~run_id:"blank-slot" |> Option.get |> fun run -> R.status_label run.R.status)
 ;;
 
 let test_running_shape_has_no_invented_completion () =
@@ -82,7 +193,7 @@ let test_running_shape_has_no_invented_completion () =
 ;;
 
 let test_current_storage_generation () =
-  check string "current store file" "exact-lane-runs-v3.jsonl" R.storage_filename
+  check string "current store file" "exact-lane-runs-v4.jsonl" R.storage_filename
 ;;
 
 (* The retained-run bound exists to serve the internal-agents monitor, which
@@ -213,6 +324,7 @@ let test_failed_durable_completion_is_explicitly_visible () =
       ~run_id:"completion-not-published"
       ~outcome:(R.Failed { code = "model_error"; detail = "typed failure detail" })
       ~elapsed_s:0.1
+      ~selected_slot:None
       ~output:(`String "must-not-publish")
   in
   (match completion with
@@ -220,6 +332,7 @@ let test_failed_durable_completion_is_explicitly_visible () =
      check bool "failure retains durable detail" true
        (String.trim failure.detail <> "")
    | Error R.Unknown_run -> fail "registered run became unknown"
+   | Error R.Invalid_selected_slot -> fail "explicit None slot became invalid"
    | Ok () -> fail "directory unexpectedly received durable completion");
   let run = R.get registry ~run_id:"completion-not-published" |> Option.get in
   check bool "failed completion is not reported as running" true
@@ -391,6 +504,12 @@ let () =
     "exact_lane_run_registry"
     [ ( "registry"
       , [ test_case "durable exact evidence" `Quick test_round_trip_preserves_exact_evidence
+        ; test_case "missing receipt is explicit null" `Quick
+            test_completion_without_slot_receipt_writes_explicit_null
+        ; test_case "pre-v4 completion is rejected" `Quick
+            test_missing_selected_slot_is_not_replayed
+        ; test_case "blank selected slot is rejected before write" `Quick
+            test_blank_selected_slot_is_rejected_before_write
         ; test_case "running shape" `Quick test_running_shape_has_no_invented_completion
         ; test_case "current storage generation" `Quick test_current_storage_generation
         ; test_case "exact history is not cross-lane pruned" `Quick

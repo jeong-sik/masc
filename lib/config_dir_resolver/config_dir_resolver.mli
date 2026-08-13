@@ -131,6 +131,10 @@ val credentials_dir : base_path:string -> string
 val agent_runtime_dir : base_path:string -> string
 (** [<base_path>/.masc/runtime/agent/]. Per-session agent runtime markers. *)
 
+val agent_execution_journals_dir : base_path:string -> string
+(** [<base_path>/.masc/runtime/agent/executions/]. Durable Agent Core
+    execution-journal scopes and their recovery locators. *)
+
 val repos_dir : base_path:string -> string
 (** [<base_path>/.masc/repos/]. Managed repository checkouts. *)
 

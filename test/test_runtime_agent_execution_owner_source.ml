@@ -68,6 +68,11 @@ let () =
   let owner_interface =
     resolve_source "lib/runtime/runtime_agent_execution_owner.mli"
   in
+  let identity =
+    resolve_source
+      "lib/keeper_runtime/keeper_agent_core_execution_identity.mli"
+  in
+  let store = resolve_source "lib/keeper/keeper_agent_core_execution_store.ml" in
   let bootstrap = resolve_source "lib/server/server_runtime_bootstrap.ml" in
   assert_contains
     ~label:"typed creation"
@@ -93,6 +98,22 @@ let () =
     ~label:"composition-root install"
     bootstrap
     "Runtime_agent_execution_owner.install ~sw initialized.agent_core_execution_runtime";
+  assert_contains
+    ~label:"typed retry identity"
+    identity
+    "type thinking_attempt = | Runtime_thinking_policy | Force_thinking | Force_no_thinking";
+  assert_contains
+    ~label:"fresh versus resume"
+    store
+    "type execution_mode = | Fresh_scope | Crash_resume of Agent_core.Agent.execution_locator";
+  assert_contains
+    ~label:"exclusive locator"
+    store
+    "Fs_compat.create_capability_file_exclusive ~parent ~leaf:locator_leaf ~permissions:0o600";
+  assert_contains
+    ~label:"unknown effect keeps locator"
+    store
+    "Agent_core.Agent.Operator_repair_required Agent_core.Agent.Effect_outcome_unknown -> Ok ()";
   List.iter
     (fun relative ->
        assert_not_contains

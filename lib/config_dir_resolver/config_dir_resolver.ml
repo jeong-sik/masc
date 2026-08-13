@@ -432,6 +432,9 @@ let credentials_dir ~base_path =
 let agent_runtime_dir ~base_path =
   Filename.concat (masc_root ~base_path) "runtime/agent"
 
+let agent_execution_journals_dir ~base_path =
+  Filename.concat (agent_runtime_dir ~base_path) "executions"
+
 let repos_dirname = "repos"
 
 let repos_dir ~base_path = Filename.concat (masc_root ~base_path) repos_dirname

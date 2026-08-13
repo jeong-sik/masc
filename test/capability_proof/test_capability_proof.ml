@@ -162,6 +162,91 @@ let test_blank_blocker_is_rejected () =
   | Ok result -> failf "blank blocker accepted as %s" (proof_result_to_string result)
 ;;
 
+let case ?(model_id = Some "model") runtime_id =
+  match create ~runtime_id ~model_id () with
+  | Ok case -> case
+  | Error error -> failf "unexpected case error: %s" (create_error_to_string error)
+;;
+
+let pass () =
+  match passed (three_path_evidence ()) with
+  | Ok result -> result
+  | Error error -> failf "unexpected pass error: %s" (result_error_to_string error)
+;;
+
+let block locator =
+  match blocked locator with
+  | Ok result -> result
+  | Error error -> failf "unexpected blocker error: %s" (result_error_to_string error)
+;;
+
+let test_campaign_metric_counts_every_unresolved_state () =
+  let cases = List.map case [ "passed"; "failed"; "unsupported"; "not-run"; "blocked"; "missing" ] in
+  let case_id_at index = List.nth cases index |> case_id in
+  let results =
+    [ case_id_at 0, pass ()
+    ; case_id_at 1, Result.get_ok (failed Provider_failure [ evidence "receipt:failure" ])
+    ; case_id_at 2, unsupported (Protocol_not_supported Browser)
+    ; case_id_at 3, not_run
+    ; case_id_at 4, block "blocker:credential"
+    ]
+  in
+  match summarize_campaign ~expected:cases ~results with
+  | Error error -> failf "unexpected campaign error: %s" (campaign_error_to_string error)
+  | Ok summary ->
+    check int "expected" 6 summary.expected;
+    check int "passed" 1 summary.passed;
+    check int "failed" 1 summary.failed;
+    check int "unsupported" 1 summary.unsupported;
+    check int "not run" 1 summary.not_run;
+    check int "blocked" 1 summary.blocked;
+    check int "missing" 1 summary.missing_evidence;
+    check int "strict unresolved metric" 4 summary.unresolved_required_cells;
+    check bool "campaign incomplete" false (campaign_complete summary)
+;;
+
+let test_campaign_complete_accepts_passed_and_typed_unsupported () =
+  let passed_case = case "passed" in
+  let unsupported_case = case "unsupported" in
+  let results =
+    [ case_id passed_case, pass ()
+    ; ( case_id unsupported_case
+      , unsupported (Runtime_role_policy Local_agentworld_librarian_only) )
+    ]
+  in
+  match summarize_campaign ~expected:[ passed_case; unsupported_case ] ~results with
+  | Error error -> failf "unexpected campaign error: %s" (campaign_error_to_string error)
+  | Ok summary ->
+    check int "unresolved zero" 0 summary.unresolved_required_cells;
+    check bool "campaign complete" true (campaign_complete summary)
+;;
+
+let test_campaign_rejects_duplicate_expected_identity () =
+  let duplicate = case "same" in
+  match summarize_campaign ~expected:[ duplicate; duplicate ] ~results:[] with
+  | Error (Duplicate_expected_case _) -> ()
+  | Error error -> failf "unexpected campaign error: %s" (campaign_error_to_string error)
+  | Ok _ -> fail "duplicate expected identity was accepted"
+;;
+
+let test_campaign_rejects_duplicate_result_identity () =
+  let expected = case "same" in
+  let id = case_id expected in
+  match summarize_campaign ~expected:[ expected ] ~results:[ id, not_run; id, not_run ] with
+  | Error (Duplicate_result_case _) -> ()
+  | Error error -> failf "unexpected campaign error: %s" (campaign_error_to_string error)
+  | Ok _ -> fail "duplicate result identity was accepted"
+;;
+
+let test_campaign_rejects_unexpected_result_identity () =
+  let expected = case "expected" in
+  let unexpected = case "unexpected" in
+  match summarize_campaign ~expected:[ expected ] ~results:[ case_id unexpected, not_run ] with
+  | Error (Unexpected_result_case _) -> ()
+  | Error error -> failf "unexpected campaign error: %s" (campaign_error_to_string error)
+  | Ok _ -> fail "unexpected result identity was accepted"
+;;
+
 let () =
   run
     "capability proof identity"
@@ -180,6 +265,13 @@ let () =
         ; test_case "failure needs evidence" `Quick test_failed_requires_evidence
         ; test_case "unsupported is typed" `Quick test_unsupported_policy_is_not_a_failure
         ; test_case "blocker nonblank" `Quick test_blank_blocker_is_rejected
+        ] )
+    ; ( "campaign metric"
+      , [ test_case "all unresolved states" `Quick test_campaign_metric_counts_every_unresolved_state
+        ; test_case "complete" `Quick test_campaign_complete_accepts_passed_and_typed_unsupported
+        ; test_case "duplicate expected" `Quick test_campaign_rejects_duplicate_expected_identity
+        ; test_case "duplicate result" `Quick test_campaign_rejects_duplicate_result_identity
+        ; test_case "unexpected result" `Quick test_campaign_rejects_unexpected_result_identity
         ] )
     ]
 ;;

@@ -525,3 +525,84 @@ let result_error_to_string = function
   | Failure_without_evidence -> "failure_without_evidence"
   | Blank_blocker_ref -> "blank_blocker_ref"
 ;;
+
+type campaign_summary =
+  { expected : int
+  ; passed : int
+  ; failed : int
+  ; unsupported : int
+  ; not_run : int
+  ; blocked : int
+  ; missing_evidence : int
+  ; unresolved_required_cells : int
+  }
+
+type campaign_error =
+  | Duplicate_expected_case of case_id
+  | Duplicate_result_case of case_id
+  | Unexpected_result_case of case_id
+
+let case_id_equal left right = String.equal left right
+
+let rec first_duplicate_case_id seen = function
+  | [] -> None
+  | case_id :: rest ->
+    if List.exists (case_id_equal case_id) seen
+    then Some case_id
+    else first_duplicate_case_id (case_id :: seen) rest
+;;
+
+let summarize_campaign ~expected ~results =
+  let expected_ids = List.map case_id expected in
+  match first_duplicate_case_id [] expected_ids with
+  | Some duplicate -> Error (Duplicate_expected_case duplicate)
+  | None ->
+    let result_ids = List.map fst results in
+    (match first_duplicate_case_id [] result_ids with
+     | Some duplicate -> Error (Duplicate_result_case duplicate)
+     | None ->
+       (match
+          List.find_opt
+            (fun result_id ->
+              not (List.exists (case_id_equal result_id) expected_ids))
+            result_ids
+        with
+        | Some unexpected -> Error (Unexpected_result_case unexpected)
+        | None ->
+          let passed, failed, unsupported, not_run, blocked =
+            List.fold_left
+              (fun (passed, failed, unsupported, not_run, blocked) (_, result) ->
+                match result with
+                | Passed _ -> passed + 1, failed, unsupported, not_run, blocked
+                | Failed _ -> passed, failed + 1, unsupported, not_run, blocked
+                | Unsupported _ -> passed, failed, unsupported + 1, not_run, blocked
+                | Not_run -> passed, failed, unsupported, not_run + 1, blocked
+                | Blocked _ -> passed, failed, unsupported, not_run, blocked + 1)
+              (0, 0, 0, 0, 0)
+              results
+          in
+          let expected_count = List.length expected_ids in
+          let missing_evidence = expected_count - List.length results in
+          let unresolved_required_cells = failed + not_run + blocked + missing_evidence in
+          Ok
+            { expected = expected_count
+            ; passed
+            ; failed
+            ; unsupported
+            ; not_run
+            ; blocked
+            ; missing_evidence
+            ; unresolved_required_cells
+            }))
+;;
+
+let campaign_complete summary = summary.unresolved_required_cells = 0
+
+let campaign_error_to_string = function
+  | Duplicate_expected_case case_id ->
+    "duplicate_expected_case:" ^ case_id_to_string case_id
+  | Duplicate_result_case case_id ->
+    "duplicate_result_case:" ^ case_id_to_string case_id
+  | Unexpected_result_case case_id ->
+    "unexpected_result_case:" ^ case_id_to_string case_id
+;;

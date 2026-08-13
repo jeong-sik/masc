@@ -195,3 +195,37 @@ val blocked : string -> (proof_result, result_error) result
 val failure_kind_to_string : failure_kind -> string
 val proof_result_to_string : proof_result -> string
 val result_error_to_string : result_error -> string
+
+type campaign_summary = private
+  { expected : int
+  ; passed : int
+  ; failed : int
+  ; unsupported : int
+  ; not_run : int
+  ; blocked : int
+  ; missing_evidence : int
+  ; unresolved_required_cells : int
+  }
+
+type campaign_error =
+  | Duplicate_expected_case of case_id
+  | Duplicate_result_case of case_id
+  | Unexpected_result_case of case_id
+
+val summarize_campaign
+  :  expected:t list
+  -> results:(case_id * proof_result) list
+  -> (campaign_summary, campaign_error) result
+(** Computes the strict campaign metric:
+
+    {v
+      unresolved_required_cells =
+        failed + not_run + blocked + missing_evidence
+    v}
+
+    [Unsupported] is reported separately and is accepted only because its
+    constructor requires a typed policy or capability reason. Unknown,
+    duplicate, or contradictory case identities reject the summary. *)
+
+val campaign_complete : campaign_summary -> bool
+val campaign_error_to_string : campaign_error -> string

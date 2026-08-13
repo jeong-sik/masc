@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, relative, resolve } from 'node:path'
 
 import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
@@ -223,10 +223,64 @@ function parseFeRoutedEventTypes(
   return found
 }
 
+function mlFilesUnder(root: string): string[] {
+  const files: string[] = []
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, entry.name)
+    if (entry.isDirectory()) files.push(...mlFilesUnder(path))
+    else if (entry.isFile() && entry.name.endsWith('.ml')) files.push(path)
+  }
+  return files
+}
+
+interface BackendEventEvidence {
+  eventType: string
+  sourceFile: string
+}
+
+const NON_DASHBOARD_BROADCAST_LITERALS = new Set([
+  // lib/sse.ml transport framing, not dashboard payload event types.
+  'lib/sse.ml:message',
+  'lib/sse.ml:presence',
+  // MCP content item in mcp_server_eio_call_tool.ml, not the adjacent
+  // keeper_tool_call broadcast payload.
+  'lib/mcp_server_eio_call_tool.ml:text',
+])
+
+function parseBackendEmittedEventTypes(libRoot: string): BackendEventEvidence[] {
+  const evidence = new Map<string, string>()
+  const candidatePattern = /Sse\.broadcast|sse_broadcast|broadcast_cached_surface|broadcast_run_status/
+  const literalPatterns = [
+    /"type"\s*,\s*`String\s*"([^"]+)"/g,
+    /~event_type\s*:\s*"([^"]+)"/g,
+    /let\s+[a-z0-9_]*(?:sse_)?event[a-z0-9_]*\s*=\s*"([^"]+)"/g,
+  ]
+
+  for (const sourcePath of mlFilesUnder(libRoot)) {
+    const source = readFileSync(sourcePath, 'utf8')
+    if (!candidatePattern.test(source)) continue
+    const sourceFile = relative(resolve(process.cwd(), '..'), sourcePath)
+    for (const [patternIndex, pattern] of literalPatterns.entries()) {
+      for (const match of source.matchAll(pattern)) {
+        const literal = match[1]
+        if (!literal || NON_DASHBOARD_BROADCAST_LITERALS.has(`${sourceFile}:${literal}`)) continue
+        const eventType = patternIndex === 1
+          && sourceFile === 'lib/keeper/keeper_event_bridge.ml'
+          ? `agent_core:${literal}`
+          : literal
+        evidence.set(eventType, sourceFile)
+      }
+    }
+  }
+
+  return [...evidence].map(([eventType, sourceFile]) => ({ eventType, sourceFile }))
+}
+
 const sseRegistrySource = readFileSync(resolve(process.cwd(), 'src/types/sse-event-registry.ts'), 'utf8')
 const sseRegistryConstants = parseExportedStringConstants(sseRegistrySource)
 const sseStoreSource = readFileSync(resolve(process.cwd(), 'src/sse-store.ts'), 'utf8')
 const feRouted = parseFeRoutedEventTypes(sseStoreSource, sseRegistryConstants)
+const backendEmitted = parseBackendEmittedEventTypes(resolve(process.cwd(), '../lib'))
 const classified = new Set([
   ...Object.keys(BACKEND_EMITTED),
   ...Object.keys(FE_ONLY_OR_EXTERNAL),
@@ -280,6 +334,23 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
       .map(t => BACKEND_WIRE_TYPE_ALIASES[t] ?? t)
       .filter(t => !registered.has(t))
     expect(unregistered, `backend events missing from SSE_EVENT_TYPES: ${unregistered.join(', ')}`).toEqual([])
+  })
+
+  it('source-parses a non-empty backend SSE emitter inventory', () => {
+    expect(backendEmitted.map(({ eventType }) => eventType)).toEqual(
+      expect.arrayContaining(['approval:pending', 'fusion_run_status', 'agent_core:turn_completed']),
+    )
+  })
+
+  it('accepts every source-discovered backend SSE event in the closed frontend sum', () => {
+    const registered = new Set<string>(SSE_EVENT_TYPES)
+    const unregistered = backendEmitted.filter(({ eventType }) => !registered.has(eventType))
+    expect(
+      unregistered,
+      `backend SSE emits unregistered event types: ${unregistered
+        .map(({ eventType, sourceFile }) => `${eventType} (${sourceFile})`)
+        .join(', ')}`,
+    ).toEqual([])
   })
 
   it('has no stale classification (every classified type is still FE-routed)', () => {

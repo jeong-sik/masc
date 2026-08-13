@@ -218,18 +218,19 @@
         "composition_parallel_schedule_observed",
         "composition_sequential_dataflow_observed",
         "composition_async_observed",
-        "composition_turn_context_observed"
+        "composition_turn_context_observed",
+        "composition_dashboard_browser_observed"
       ],
-      "evidence": ["observations/tool-calls-*.json", "turns/parallel-*.json"]
+      "evidence": ["observations/tool-calls-*.json", "turns/parallel-*.json", "browser/keeper-composition-inspector.json", "browser/keeper-composition-inspector.png"]
     },
     {
       "id": "RW18",
       "phase": "long_continuity",
-      "name": "same_keeper_eleven_turn_restart_recall",
+      "name": "same_keeper_eleven_linked_turn_restart_recall",
       "actors": ["coordinator"],
       "capabilities": ["MultiTurn", "Memory", "Context", "Restart", "Tool Composition"],
-      "user_story": "같은 Keeper가 11개 turn을 순서대로 완료하고 첫 turn의 secret을 반복 입력받지 않은 채 중간 Board 연쇄와 재시작 뒤 기억을 복원한다.",
-      "assertions": ["same_keeper_ten_turn_continuity", "context_secret_recalled"],
+      "user_story": "같은 Keeper가 서로 다른 runtime turn identity를 가진 11개 요청 turn을 순서대로 완료하고 첫 turn의 secret을 반복 입력받지 않은 채 중간 Board 연쇄와 재시작 뒤 기억을 복원한다.",
+      "assertions": ["same_keeper_eleven_linked_turns", "context_secret_recalled"],
       "evidence": ["turns/continuity-*.json", "turns/context-after-restart.json", "observations/board-post.json"]
     }
   ]

@@ -1608,6 +1608,20 @@ jobs:
             libzstd1 \
             zlib1g
 
+      - name: Install Dashboard browser proof runtime
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Install Dashboard dependencies and Chromium
+        working-directory: dashboard
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+          node --test e2e/keeper-composition-browser-evidence.test.mjs
+
       - name: Run five-Keeper real-world collaboration gate
         env:
           KEEPER_ACCEPTANCE_BINARY: ${{ github.workspace }}/keeper-realworld-runtime/masc

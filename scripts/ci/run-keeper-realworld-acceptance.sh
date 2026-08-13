@@ -181,6 +181,7 @@ common_args=(
   --expected-base-path "$base_path"
   --expected-source-sha "$EXPECTED_SHA"
   --timeout "$TURN_TIMEOUT_SEC"
+  --browser-proof-script "$ROOT_DIR/dashboard/e2e/keeper-composition-real-backend.mjs"
 )
 
 python3 "$ROOT_DIR/scripts/harness/workload/keeper_multi_collaboration_acceptance.py" \

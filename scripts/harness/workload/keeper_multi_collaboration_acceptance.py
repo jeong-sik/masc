@@ -76,12 +76,13 @@ KNOWN_ASSERTIONS = {
     "all_surfaces_observed",
     "correlation_marker_complete",
     "artifact_bundle_complete",
-    "same_keeper_ten_turn_continuity",
+    "same_keeper_eleven_linked_turns",
     "composition_inline_observed",
     "composition_parallel_schedule_observed",
     "composition_sequential_dataflow_observed",
     "composition_async_observed",
     "composition_turn_context_observed",
+    "composition_dashboard_browser_observed",
 }
 
 
@@ -501,6 +502,9 @@ class MissionRun:
         timeout: float,
         run_id: str,
         runtime_id: str | None,
+        token_file: pathlib.Path,
+        browser_proof_script: pathlib.Path,
+        expected_base_path: str,
     ) -> None:
         self.catalog = catalog
         self.client = client
@@ -512,6 +516,9 @@ class MissionRun:
         self.slug = safe_slug(run_id, 16)
         self.marker = f"keeper-collab-{self.slug}"
         self.runtime_id = runtime_id
+        self.token_file = token_file
+        self.browser_proof_script = browser_proof_script
+        self.expected_base_path = expected_base_path
         self.secret = f"memory-{uuid.uuid4().hex[:12]}"
         self.goal_id = f"goal-{self.marker}"
         self.schedule_id = f"schedule-{self.marker}"
@@ -527,6 +534,7 @@ class MissionRun:
         self.statuses: dict[str, Any] = {}
         self.observations: dict[str, ToolObservation] = {}
         self.tool_call_rows: dict[str, list[dict[str, Any]]] = {}
+        self.browser_proof: dict[str, Any] = {}
 
     def call(self, label: str, tool: str, arguments: dict[str, Any]) -> ToolObservation:
         observation = self.client.call_tool(tool, arguments)
@@ -849,12 +857,12 @@ class MissionRun:
             ),
             "researcher": (
                 composition_instruction
-                + "keeper_compose_background-snapshot을 정확히 한 번 제출하고 반환된 request_id로 "
-                "keeper_composition_status를 정확히 한 번 호출하세요. 기다리며 polling하지 마세요. "
+                + "keeper_compose_background-snapshot을 정확히 한 번 제출하고 request_id를 보존하세요. "
                 + f"Mission {self.marker}. masc_fusion으로 'How should five resident agents preserve "
                 "progress when one work source fails?'를 비동기로 시작하세요. 기다리거나 polling하지 말고 "
                 f"즉시 exact Task {self.task_ids['researcher']}를 claim하고, Board post {post_id}에 "
-                "FUSION_STARTED와 run_id를 comment한 뒤 Task evidence를 제출하세요."
+                "FUSION_STARTED와 run_id를 comment한 뒤 Task evidence를 제출하세요. 마지막으로 보존한 "
+                "request_id로 keeper_composition_status를 정확히 한 번 호출하고 status=done을 확인하세요."
             ),
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -878,6 +886,43 @@ class MissionRun:
                     "comment를 남기세요. 최초 turn의 continuity secret은 다시 쓰거나 추측하지 마세요."
                 ),
             )
+
+    def capture_browser_proof(self) -> None:
+        browser_dir = self.writer.output_dir / "browser"
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "MASC_COMPOSITION_DASHBOARD_URL": default_health_url(
+                    self.endpoint
+                ).removesuffix("/health?full=1"),
+                "MASC_COMPOSITION_DASHBOARD_TOKEN_FILE": str(self.token_file),
+                "MASC_COMPOSITION_KEEPER_NAME": self.roles["coordinator"],
+                "MASC_COMPOSITION_EXPECTED_BASE_PATH": self.expected_base_path,
+                "MASC_COMPOSITION_BROWSER_ARTIFACT_DIR": str(browser_dir),
+            }
+        )
+        completed = subprocess.run(
+            ["node", str(self.browser_proof_script)],
+            cwd=REPO_ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if completed.returncode != 0:
+            raise AcceptanceError(
+                "composition browser proof failed: "
+                + (completed.stderr.strip() or completed.stdout.strip())
+            )
+        measurement_path = browser_dir / "keeper-composition-inspector.json"
+        try:
+            measurement = json.loads(measurement_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise AcceptanceError(f"invalid browser proof measurement: {error}") from error
+        if not isinstance(measurement, dict):
+            raise AcceptanceError("browser proof measurement must be an object")
+        self.browser_proof = measurement
 
     def run_contention(self, post_id: str) -> None:
         prompts = {
@@ -1125,6 +1170,25 @@ class MissionRun:
         coordinator_turns = [
             turn for turn in self.turns.values() if turn.role == "coordinator"
         ]
+        required_inline_turn_labels = {
+            *(f"parallel-{role}" for role in self.roles),
+            *(f"continuity-{step}" for step in range(1, 10)),
+        }
+        required_coordinator_turn_labels = {
+            "parallel-coordinator",
+            *(f"continuity-{step}" for step in range(1, 10)),
+            "context-after-restart",
+        }
+
+        def rows_for_turn(role: str, turn: TurnObservation) -> list[dict[str, Any]]:
+            return [
+                row
+                for row in self.tool_call_rows.get(role, [])
+                if isinstance(row.get("ts"), (int, float))
+                and turn.started_epoch_seconds <= float(row["ts"])
+                <= turn.finished_epoch_seconds
+            ]
+
         def composition_runs(
             composition_tool: str,
         ) -> dict[tuple[str, str], list[dict[str, Any]]]:
@@ -1141,15 +1205,108 @@ class MissionRun:
         inline_runs = composition_runs("keeper_compose_mission-snapshot")
         async_runs = composition_runs("keeper_compose_background-snapshot")
         composition_rows = [row for rows in inline_runs.values() for row in rows]
-        complete_inline_runs = {
-            key: rows
-            for key, rows in inline_runs.items()
-            if len(rows) == 4
-            and {row.get("composition_node_id") for row in rows}
-            == {"clock", "board", "board-peer", "memory"}
-        }
-        complete_inline_roles = {role for role, _ in complete_inline_runs}
-        parallel_schedule_observed = any(
+        inline_turn_runs: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+        inline_turn_errors: list[str] = []
+        attributed_inline_run_keys: set[tuple[str, str]] = set()
+        for label in sorted(required_inline_turn_labels):
+            role = label.removeprefix("parallel-") if label.startswith("parallel-") else "coordinator"
+            turn = self.turns.get(label)
+            if turn is None:
+                inline_turn_errors.append(f"{label}:missing_turn")
+                continue
+            turn_rows = [
+                row
+                for row in rows_for_turn(role, turn)
+                if row.get("composition_tool") == "keeper_compose_mission-snapshot"
+            ]
+            run_ids = {
+                row.get("composition_run_id")
+                for row in turn_rows
+                if isinstance(row.get("composition_run_id"), str)
+                and row.get("composition_run_id")
+            }
+            if len(run_ids) != 1:
+                inline_turn_errors.append(f"{label}:runs={sorted(run_ids)}")
+                continue
+            run_id = next(iter(run_ids))
+            run_rows = [row for row in turn_rows if row.get("composition_run_id") == run_id]
+            outer_rows = [
+                row
+                for row in rows_for_turn(role, turn)
+                if row.get("tool") == "keeper_compose_mission-snapshot"
+            ]
+            parent_ids = {row.get("parent_tool_use_id") for row in run_rows}
+            node_ids = {row.get("composition_node_id") for row in run_rows}
+            if (
+                len(run_rows) != 4
+                or len(outer_rows) != 1
+                or node_ids != {"clock", "board", "board-peer", "memory"}
+                or len(parent_ids) != 1
+                or next(iter(parent_ids)) != outer_rows[0].get("tool_use_id")
+                or not all(row.get("disposition") == "completed" for row in run_rows)
+            ):
+                inline_turn_errors.append(f"{label}:invalid_rows={len(run_rows)}")
+                continue
+            inline_turn_runs[label] = (run_id, run_rows)
+            attributed_inline_run_keys.add((role, run_id))
+        unattributed_inline_runs = set(inline_runs) - attributed_inline_run_keys
+
+        researcher_turn = self.turns.get("parallel-researcher")
+        researcher_rows = (
+            rows_for_turn("researcher", researcher_turn)
+            if researcher_turn is not None
+            else []
+        )
+        async_submit_rows = [
+            row
+            for row in researcher_rows
+            if row.get("tool") == "keeper_compose_background-snapshot"
+        ]
+        async_status_rows = [
+            row for row in researcher_rows if row.get("tool") == "keeper_composition_status"
+        ]
+        async_request_id: str | None = None
+        async_outer_terminal = False
+        if len(async_submit_rows) == 1 and len(async_status_rows) == 1:
+            submission_output = parse_json_maybe(async_submit_rows[0].get("output", ""))
+            status_input = async_status_rows[0].get("input")
+            status_output = parse_json_maybe(async_status_rows[0].get("output", ""))
+            candidate_request_id = (
+                submission_output.get("request_id")
+                if isinstance(submission_output, dict)
+                else None
+            )
+            if isinstance(candidate_request_id, str) and candidate_request_id:
+                async_request_id = candidate_request_id
+                async_outer_terminal = (
+                    isinstance(status_input, dict)
+                    and status_input.get("request_id") == async_request_id
+                    and isinstance(status_output, dict)
+                    and status_output.get("request_id") == async_request_id
+                    and status_output.get("status") == "done"
+                    and status_output.get("ok") is True
+                )
+
+        coordinator_runtime_turn_ids: dict[str, int] = {}
+        coordinator_turn_evidence_errors: list[str] = []
+        for label in sorted(required_coordinator_turn_labels):
+            turn = self.turns.get(label)
+            if turn is None:
+                coordinator_turn_evidence_errors.append(f"{label}:missing_turn")
+                continue
+            keeper_turn_ids = {
+                row.get("keeper_turn_id")
+                for row in rows_for_turn("coordinator", turn)
+                if isinstance(row.get("keeper_turn_id"), int)
+            }
+            if len(keeper_turn_ids) != 1:
+                coordinator_turn_evidence_errors.append(
+                    f"{label}:keeper_turn_ids={sorted(keeper_turn_ids)}"
+                )
+                continue
+            coordinator_runtime_turn_ids[label] = next(iter(keeper_turn_ids))
+        required_inline_rows = [rows for _, rows in inline_turn_runs.values()]
+        parallel_schedule_observed = len(required_inline_rows) == 14 and all(
             all(
                 any(
                     row.get("composition_node_id") == node
@@ -1160,9 +1317,9 @@ class MissionRun:
                 )
                 for node in ("clock", "board", "board-peer")
             )
-            for rows in complete_inline_runs.values()
+            for rows in required_inline_rows
         )
-        sequential_dataflow_observed = any(
+        sequential_dataflow_observed = len(required_inline_rows) == 14 and all(
             any(
                 isinstance(row.get("input"), dict)
                 and row["input"].get("query") == clock_output.get("now_iso")
@@ -1173,7 +1330,7 @@ class MissionRun:
                 for row in rows
                 if row.get("composition_node_id") == "memory"
             )
-            for rows in complete_inline_runs.values()
+            for rows in required_inline_rows
             for clock_output in [
                 parse_json_maybe(
                     next(
@@ -1193,6 +1350,9 @@ class MissionRun:
             and isinstance(row.get("parent_tool_use_id"), str)
             and row.get("disposition") in {"completed", "deferred", "failed"}
             for row in composition_rows
+        )
+        browser_screenshot = (
+            self.writer.output_dir / "browser" / "keeper-composition-inspector.png"
         )
         parallel_events = sorted(
             [
@@ -1437,17 +1597,22 @@ class MissionRun:
                 and (self.writer.output_dir / "preflight.json").is_file(),
                 f"{len(artifact_files)} JSON evidence artifacts before bundle emission",
             ),
-            "same_keeper_ten_turn_continuity": (
-                len(coordinator_turns) >= 11
+            "same_keeper_eleven_linked_turns": (
+                set(coordinator_runtime_turn_ids) == required_coordinator_turn_labels
+                and len(set(coordinator_runtime_turn_ids.values())) == 11
+                and len({turn.operation_id for turn in coordinator_turns}) == 11
                 and all(turn.status == "passed" for turn in coordinator_turns)
                 and all(text_contains(board, f"CONTINUITY_STEP_{step}") for step in range(1, 10))
                 and text_contains(board, f"MEMORY_RECALLED={self.secret}"),
-                f"coordinator settled turns={len(coordinator_turns)} with nine linked steps and post-restart recall",
+                "eleven distinct runtime keeper_turn_id values join the requested operations, "
+                f"errors={coordinator_turn_evidence_errors}",
             ),
             "composition_inline_observed": (
-                complete_inline_roles == set(self.roles),
-                "complete inline composition roles="
-                + json.dumps(sorted(complete_inline_roles), ensure_ascii=False),
+                set(inline_turn_runs) == required_inline_turn_labels
+                and not inline_turn_errors
+                and not unattributed_inline_runs,
+                f"exact completed inline runs={len(inline_turn_runs)}/14 "
+                f"errors={inline_turn_errors} unattributed={sorted(unattributed_inline_runs)}",
             ),
             "composition_parallel_schedule_observed": (
                 parallel_schedule_observed,
@@ -1459,6 +1624,7 @@ class MissionRun:
             ),
             "composition_async_observed": (
                 len(async_runs) == 1
+                and async_outer_terminal
                 and all(
                     role == "researcher"
                     and len(rows) == 2
@@ -1469,13 +1635,37 @@ class MissionRun:
                         and row.get("disposition") == "completed"
                         for row in rows
                     )
+                    and all(
+                        row.get("parent_tool_use_id")
+                        == async_submit_rows[0].get("tool_use_id")
+                        for row in rows
+                    )
                     for (role, _), rows in async_runs.items()
                 ),
-                f"async composition runs={len(async_runs)}",
+                f"async runs={len(async_runs)} request_id={async_request_id} "
+                f"submit_rows={len(async_submit_rows)} status_rows={len(async_status_rows)} terminal={async_outer_terminal}",
             ),
             "composition_turn_context_observed": (
                 typed_context_observed,
                 f"typed composition rows={len(composition_rows)}",
+            ),
+            "composition_dashboard_browser_observed": (
+                self.browser_proof.get("schema")
+                == "masc.keeper_composition_browser_evidence.v1"
+                and self.browser_proof.get("keeper") == self.roles["coordinator"]
+                and self.browser_proof.get("nodes")
+                == ["board", "board-peer", "clock", "memory"]
+                and self.browser_proof.get("execution") == "inline"
+                and self.browser_proof.get("dispositions")
+                == ["completed", "completed", "completed", "completed"]
+                and self.browser_proof.get("input_visible") is True
+                and self.browser_proof.get("output_visible") is True
+                and isinstance(self.browser_proof.get("screenshot_sha256"), str)
+                and len(self.browser_proof["screenshot_sha256"]) == 64
+                and browser_screenshot.is_file()
+                and sha256_file(browser_screenshot)
+                == self.browser_proof["screenshot_sha256"],
+                "actual dashboard inspector renders one complete typed run with expanded input/output",
             ),
         }
         malformed = [
@@ -1501,6 +1691,7 @@ class MissionRun:
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()
         self.collect_product_observations(post_id)
+        self.capture_browser_proof()
         return post_id, self.evaluate_assertions(post_id)
 
 
@@ -1750,6 +1941,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--mcp-url", default=os.environ.get("MCP_URL", "http://127.0.0.1:8935/mcp"))
     parser.add_argument("--health-url")
     parser.add_argument("--token-file")
+    parser.add_argument("--browser-proof-script")
     parser.add_argument("--expected-base-path")
     parser.add_argument("--expected-source-sha")
     parser.add_argument("--allow-mutation", action="store_true")
@@ -1819,6 +2011,10 @@ def main() -> int:
             raise AcceptanceError("--run requires exact --expected-source-sha")
         if not args.output_dir:
             raise AcceptanceError("--run requires --output-dir")
+        if not args.token_file:
+            raise AcceptanceError("--run requires --token-file")
+        if not args.browser_proof_script:
+            raise AcceptanceError("--run requires --browser-proof-script")
         output_dir = pathlib.Path(args.output_dir).resolve()
         prepare_output_dir(output_dir)
         writer = EvidenceWriter(output_dir)
@@ -1836,6 +2032,9 @@ def main() -> int:
             timeout=args.timeout,
             run_id=run_id,
             runtime_id=args.runtime_id,
+            token_file=pathlib.Path(args.token_file).resolve(),
+            browser_proof_script=pathlib.Path(args.browser_proof_script).resolve(),
+            expected_base_path=args.expected_base_path,
         )
         try:
             post_id, assertions = mission_run.run()

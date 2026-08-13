@@ -27,6 +27,7 @@ val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
 val keeper_suffix_fusion : string
 val keeper_suffix_operator_note : string
+val keeper_suffix_turn_records : string
 
 (** {1 Dashboard cache keys} *)
 
@@ -99,9 +100,9 @@ val is_keeper_paused_work_get_path : string -> bool
 
 val keeper_get_permission : string -> Masc_domain.permission option
 (** Mandatory token-bound permission for sensitive keeper GET sub-routes.
-    Raw retained traces, Memory OS change journals, checkpoint state, and
-    paused-work operator state all require [CanAdmin]. [None] leaves the route
-    on its existing public-read policy. *)
+    Exact turn evidence requires [CanReadState]. Raw retained traces, Memory OS
+    change journals, checkpoint state, and paused-work operator state require
+    [CanAdmin]. [None] leaves the route on its existing public-read policy. *)
 
 (** {1 Trajectory preview helpers} *)
 

@@ -122,6 +122,7 @@ type turn_record =
   ; absolute_turn : int
   ; blocks : prompt_block list            (* assembly order *)
   ; runtime_profile : string
+  ; selected_model : string option        (* selected successful attempt *)
   ; sampling : { temperature : float option
                ; thinking_budget : int option
                ; enable_thinking : bool option }
@@ -439,7 +440,7 @@ view-side-repair violation of §2.3.
   no re-parse.
 - All three are `option`: `None` when the runtime is unknown or the operator
   left the rates unset in runtime.toml. The view renders "미상" (unknown),
-  never a fabricated value — the same absence contract `model` and
+  never a fabricated value — the same absence contract `selected_model` and
   `finish_reason` already follow (§2.3).
 - Cost is **not** stored: the view derives it from `price_*_per_million ×
   real token counts`, per the views-derive principle (§2.3).
@@ -476,7 +477,7 @@ the shared-record field addition catches every literal construction site
 
 1. **Type + codec** — `lib/types/turn_record.{mli,ml}`: three option fields
    on `t`; `to_json` via `opt_field`, `of_json` via `opt_member` (mirrors
-   `model`/`finish_reason`/`temperature`).
+   `selected_model`/`finish_reason`/`temperature`).
 2. **Runtime projection** — `lib/runtime/runtime.{ml,mli}`:
    `pricing_of_runtime_id : string -> float option * float option`, sibling
    to `max_context_of_runtime_id`.

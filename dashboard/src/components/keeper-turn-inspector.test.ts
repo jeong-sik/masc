@@ -154,7 +154,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
           turn_ref: 'trace-active#42',
           ts: 1_781_587_560,
           runtime_profile: 'local',
-          model: 'deepseek-v4-flash',
+          selected_model: 'deepseek-v4-flash',
           finish_reason: 'completed',
           input_tokens: 2400,
           output_tokens: 280,
@@ -505,7 +505,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
     ).toBe(false)
   })
 
-  it('grounds model / finish_reason from the record and marks deferred fields n/a', async () => {
+  it('grounds selected_model / finish_reason from the record and marks deferred fields n/a', async () => {
     fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
 
     const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
@@ -542,7 +542,7 @@ describe('KeeperTurnInspector v2 drawer', () => {
       ...response.entries[1]!,
       record: {
         ...response.entries[1]!.record,
-        model: undefined,
+        selected_model: undefined,
         finish_reason: undefined,
       },
     }

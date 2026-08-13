@@ -160,6 +160,11 @@ describe('keeper turn record cache token counts', () => {
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',
     )
+
+    getMock.mockResolvedValue(payload(entry({ selected_model: ' ' })))
+    await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
+      '유효하지 않은 keeper turn record payload',
+    )
   })
 
   it('projects the record identity fields the writer always emits', async () => {
@@ -244,8 +249,8 @@ describe('keeper turn record cache token counts', () => {
     )
   })
 
-  it('rejects fields outside the exact current nested record', async () => {
-    getMock.mockResolvedValue(payload(entry({ retired_field: 'invalid' })))
+  it('rejects the retired unversioned model field', async () => {
+    getMock.mockResolvedValue(payload(entry({ model: 'runtime' })))
 
     await expect(fetchKeeperTurnRecords('sangsu')).rejects.toThrow(
       '유효하지 않은 keeper turn record payload',

@@ -647,6 +647,10 @@ describe('IdeShell', () => {
   })
 
   it('surfaces malformed annotation responses in the IDE statusbar', async () => {
+    // RFC-0378 §5.4: annotations are code facts; the fetch only fires for an
+    // explicitly selected codebase, so the malformed-row guard is observed
+    // behind a persisted selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     vi.stubGlobal(
       'fetch',
       vi.fn(dashboardFetchMockWithResponse(

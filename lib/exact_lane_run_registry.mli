@@ -30,11 +30,13 @@ type run_status =
       { outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      ; selected_slot : string option
       }
   | Completion_persistence_failed of
       { intended_outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      ; selected_slot : string option
       ; failure : persistence_failure
       }
 
@@ -94,6 +96,18 @@ val mark_completed
     raised. The durable core entry remains [Running], while [get]/[list_runs]
     expose [Completion_persistence_failed] with an explicit durability state;
     callers never silently present a terminal run as still executing. *)
+
+val mark_completed_with_slot
+  :  t
+  -> run_id:string
+  -> outcome:outcome
+  -> elapsed_s:float
+  -> selected_slot:string
+  -> output:Yojson.Safe.t
+  -> (unit, completion_error) result
+(** Complete a run with the exact configured slot selected by the producer's
+    accepted flow receipt. Producers without that receipt use [mark_completed]
+    and project missing evidence instead of guessing. *)
 
 val list_runs : t -> run list
 

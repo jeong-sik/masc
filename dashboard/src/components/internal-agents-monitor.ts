@@ -336,6 +336,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
           <${EvidenceBadge} kind="typed" />
           <strong>Exact-output registry metadata</strong>
           <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음</span>
+          ${run.selectedSlot === undefined
+            ? null
+            : html`<span class="text-[var(--color-fg-muted)]">선택 slot <code>${run.selectedSlot ?? '미기록'}</code></span>`}
           <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>
         </div>
         <div class="grid gap-3 lg:grid-cols-2">

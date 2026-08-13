@@ -27,11 +27,13 @@ type run_status =
       { outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      ; selected_slot : string option
       }
   | Completion_persistence_failed of
       { intended_outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      ; selected_slot : string option
       ; failure : persistence_failure
       }
 
@@ -98,6 +100,7 @@ module Payload = struct
     { outcome : outcome
     ; elapsed_s : float
     ; output : Yojson.Safe.t
+    ; selected_slot : string option
     }
 
   let name = "exact_lane_run_registry"
@@ -167,6 +170,9 @@ module Payload = struct
        ; "elapsed_s", `Float completion.elapsed_s
        ; "output", completion.output
        ]
+       @ (match completion.selected_slot with
+          | None -> []
+          | Some selected_slot -> [ "selected_slot", `String selected_slot ])
        @ detail)
   ;;
 
@@ -184,6 +190,7 @@ module Payload = struct
     let* () =
       Run_registry_core.Json.exact_fields
         ~required:([ "outcome"; "elapsed_s"; "output" ] @ detail_fields)
+        ~optional:[ "selected_slot" ]
         fields
     in
     let* elapsed_s = Run_registry_core.Json.float_field "elapsed_s" fields in
@@ -202,7 +209,14 @@ module Payload = struct
         Ok (Failed { code; detail })
       | value -> Error (Printf.sprintf "unknown exact lane outcome %S" value)
     in
-    Ok { outcome; elapsed_s; output }
+    let* selected_slot =
+      match List.assoc_opt "selected_slot" fields with
+      | None -> Ok None
+      | Some (`String selected_slot) when String.trim selected_slot <> "" ->
+        Ok (Some selected_slot)
+      | Some _ -> Error "field selected_slot must be a non-empty string"
+    in
+    Ok { outcome; elapsed_s; output; selected_slot }
   ;;
 end
 
@@ -212,6 +226,7 @@ type failed_completion =
   { intended_outcome : outcome
   ; elapsed_s : float
   ; output : Yojson.Safe.t
+  ; selected_slot : string option
   ; failure : persistence_failure
   }
 
@@ -262,6 +277,7 @@ let run_of_entry failed_completions (entry : Store.entry) =
         { intended_outcome = failed.intended_outcome
         ; elapsed_s = failed.elapsed_s
         ; output = failed.output
+        ; selected_slot = failed.selected_slot
         ; failure = failed.failure
         }
     | None, Store.Running -> Running
@@ -272,6 +288,7 @@ let run_of_entry failed_completions (entry : Store.entry) =
         { outcome = completion.outcome
         ; elapsed_s = completion.elapsed_s
         ; output = completion.output
+        ; selected_slot = completion.selected_slot
         }
   in
   { run_id = entry.id
@@ -331,8 +348,8 @@ let register_running t ~run_id ~lane ~subject_id ~actor ~started_at ~input =
   notify_changed ()
 ;;
 
-let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
-  let completion = { Payload.outcome; elapsed_s; output } in
+let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
+  let completion = { Payload.outcome; elapsed_s; output; selected_slot } in
   let result =
     Cross_context_mutex.with_durable_lock t.observation_mutex (fun () ->
       match Store.complete t.store ~id:run_id ~completion with
@@ -348,7 +365,9 @@ let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
           | Run_registry_core.Durability_unknown -> Durability_unknown
         in
         let failure = { detail = failure.detail; state } in
-        let failed = { intended_outcome = outcome; elapsed_s; output; failure } in
+        let failed =
+          { intended_outcome = outcome; elapsed_s; output; selected_slot; failure }
+        in
         Atomic.set
           t.failed_completions
           ((run_id, failed) :: List.remove_assoc run_id (Atomic.get t.failed_completions));
@@ -363,6 +382,33 @@ let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
   | Error (Persistence_failed _ as error) ->
     notify_changed ();
     Error error
+;;
+
+let mark_completed t ~run_id ~outcome ~elapsed_s ~output =
+  mark_completed_internal
+    t
+    ~run_id
+    ~outcome
+    ~elapsed_s
+    ~selected_slot:None
+    ~output
+;;
+
+let mark_completed_with_slot
+      t
+      ~run_id
+      ~outcome
+      ~elapsed_s
+      ~selected_slot
+      ~output
+  =
+  mark_completed_internal
+    t
+    ~run_id
+    ~outcome
+    ~elapsed_s
+    ~selected_slot:(Some selected_slot)
+    ~output
 ;;
 
 (* [total] counts every retained run, not the page, so a caller can say
@@ -439,16 +485,22 @@ let run_summary_fields run =
   let completion =
     match run.status with
     | Running -> []
-    | Completed { outcome; elapsed_s; output = _ } ->
+    | Completed { outcome; elapsed_s; output = _; selected_slot } ->
       let detail =
         match outcome with
         | Succeeded | Cancelled -> []
         | Failed { code; detail } ->
           [ "code", `String code; "detail", `String detail ]
       in
-      [ "elapsed_s", `Float elapsed_s ] @ detail
+      [ "elapsed_s", `Float elapsed_s
+      ; ( "selected_slot"
+        , match selected_slot with
+          | None -> `Null
+          | Some selected_slot -> `String selected_slot )
+      ]
+      @ detail
     | Completion_persistence_failed
-        { intended_outcome; elapsed_s; output = _; failure } ->
+        { intended_outcome; elapsed_s; output = _; selected_slot; failure } ->
       let intended_failure =
         match intended_outcome with
         | Succeeded | Cancelled -> []
@@ -457,6 +509,10 @@ let run_summary_fields run =
       in
       [ "intended_status", `String (outcome_label intended_outcome)
       ; "elapsed_s", `Float elapsed_s
+      ; ( "selected_slot"
+        , match selected_slot with
+          | None -> `Null
+          | Some selected_slot -> `String selected_slot )
       ; "persistence_error", `String failure.detail
       ; ( "persistence_state"
         , `String

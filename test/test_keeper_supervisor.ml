@@ -1800,6 +1800,125 @@ let test_supervised_stop_joins_board_attention_worker () =
         true
         (Reg.lane_has_exited reg))
 
+let test_supervised_stop_drains_librarian_before_terminal () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Memory_lane.For_testing.reset ();
+      Reg.For_testing.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+      let name = "supervised-librarian-drain" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      Memory_lane.init ~sw;
+      (match
+         Memory_lane.begin_librarian_lifecycle
+           ~base_path:config.base_path
+           ~keeper_name:name
+       with
+       | Ok () -> ()
+       | Error error -> fail (Memory_lane.lifecycle_open_error_to_string error));
+      let reg = Reg.register_offline ~base_path:config.base_path name meta in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = supervisor_agent_name
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = Some (Eio.Stdenv.net env)
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      (match
+         Masc.Keeper_supervisor_launch.launch_supervised_fiber
+           ~proactive_warmup_sec:0
+           ctx
+           meta
+           reg
+       with
+       | Ok () -> ()
+       | Error error -> fail (Keeper_state_machine.transition_error_to_string error));
+      let librarian_started, resolve_librarian_started = Eio.Promise.create () in
+      let librarian_release, resolve_librarian_release = Eio.Promise.create () in
+      let librarian_cancelled = ref false in
+      let librarian_completed = ref false in
+      (match
+         Memory_lane.submit
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () ->
+              Eio.Promise.resolve resolve_librarian_started ();
+              try
+                Eio.Promise.await librarian_release;
+                librarian_completed := true
+              with
+              | Eio.Cancel.Cancelled _ as exn ->
+                librarian_cancelled := true;
+                raise exn)
+       with
+       | Memory_lane.Submitted
+       | Memory_lane.Coalesced -> ()
+       | Memory_lane.Ran_inline
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "supervised Librarian fixture was not submitted");
+      Eio.Promise.await librarian_started;
+      let stop_done, resolve_stop_done = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve
+          resolve_stop_done
+          (Masc.Keeper_keepalive.stop_keepalive_and_await
+             ~base_path:config.base_path
+             name));
+      Eio.Time.sleep ctx.clock 0.05;
+      check bool
+        "supervised stop waits for accepted Librarian work"
+        true
+        (Option.is_none (Eio.Promise.peek stop_done));
+      check bool
+        "terminal promise stays pending until Librarian drain"
+        true
+        (Option.is_none (Eio.Promise.peek reg.done_p));
+      Eio.Promise.resolve resolve_librarian_release ();
+      let joined = Eio.Promise.await stop_done in
+      (match joined with
+       | Masc.Keeper_keepalive.Keeper_not_registered ->
+         fail "supervised Keeper disappeared before Librarian join"
+       | Masc.Keeper_keepalive.Keeper_joined
+           { lane_exit = { cleanup_error = None; _ }; terminal = `Stopped } -> ()
+       | Masc.Keeper_keepalive.Keeper_joined
+           { lane_exit = { cleanup_error = Some error; _ }; _ } ->
+         fail ("supervised Librarian cleanup failed: " ^ error)
+       | Masc.Keeper_keepalive.Keeper_joined { terminal = `Crashed reason; _ } ->
+         fail ("supervised Librarian stop resolved as crashed: " ^ reason));
+      check bool
+        "supervised stop preserves Librarian work"
+        false
+        !librarian_cancelled;
+      check bool
+        "supervised stop drains Librarian before terminal"
+        true
+        !librarian_completed;
+      check
+        (option int)
+        "supervised Librarian has no pending work after stop"
+        (Some 0)
+        (Memory_lane.For_testing.pending
+           ~base_path:config.base_path
+           ~keeper_name:name))
+
 (* Codex #24135 finding 5: a rejected [Keeper_lane.fork] (parent switch already
    cancelling, or [claim_start] refused) must propagate [Error] from
    [launch_supervised_fiber] and resolve the done promise through the crash
@@ -2314,6 +2433,8 @@ let () =
         test_launch_rejected_terminal_state_does_not_announce_running;
       test_case "supervised stop joins Board worker" `Quick
         test_supervised_stop_joins_board_attention_worker;
+      test_case "supervised stop drains Librarian before terminal" `Quick
+        test_supervised_stop_drains_librarian_before_terminal;
       test_case "lane fork reject does not announce Running" `Quick
         test_launch_fork_rejection_does_not_announce_running;
       test_case "fork reject preserves newer same-name lane" `Quick

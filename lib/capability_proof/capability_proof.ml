@@ -401,12 +401,6 @@ let create_evidence_ref ~path ~kind ~locator ~sha256 ~captured_at =
   else Ok { path; kind; locator; sha256; captured_at }
 ;;
 
-let evidence_path evidence = evidence.path
-let evidence_kind evidence = evidence.kind
-let evidence_locator evidence = evidence.locator
-let evidence_sha256 evidence = evidence.sha256
-let evidence_captured_at evidence = evidence.captured_at
-
 type evidence_bundle = evidence_ref list
 
 type bundle_error =
@@ -525,8 +519,6 @@ let not_run = Not_run
 let blocked blocker =
   if String.trim blocker = "" then Error Blank_blocker_ref else Ok (Blocked blocker)
 ;;
-
-let blocker_ref_to_string blocker = blocker
 
 let proof_result_to_string = function
   | Passed _ -> "passed"

@@ -146,15 +146,7 @@ val create_evidence_ref
   -> captured_at:string
   -> (evidence_ref, evidence_error) result
 
-val evidence_path : evidence_ref -> proof_path
-val evidence_kind : evidence_ref -> evidence_kind
-val evidence_locator : evidence_ref -> string
-val evidence_sha256 : evidence_ref -> string
-val evidence_captured_at : evidence_ref -> string
-val proof_path_to_string : proof_path -> string
-val evidence_kind_to_string : evidence_kind -> string
 val evidence_error_to_string : evidence_error -> string
-val all_proof_paths : proof_path list
 
 type evidence_bundle
 
@@ -162,12 +154,7 @@ type bundle_error =
   | Missing_proof_paths of proof_path list
   | Duplicate_evidence_ref of string
 
-val create_evidence_bundle : evidence_ref list -> (evidence_bundle, bundle_error) result
-(** A passing bundle requires evidence from Hermetic, Isolated, and Fleet.
-    Exact duplicate references are rejected instead of being counted twice. *)
-
 val evidence_bundle_refs : evidence_bundle -> evidence_ref list
-val bundle_error_to_string : bundle_error -> string
 
 type failure_kind =
   | Contract_violation
@@ -208,9 +195,6 @@ val unsupported : unsupported_reason -> proof_result
 val not_run : proof_result
 val blocked : string -> (proof_result, result_error) result
 
-val blocker_ref_to_string : blocker_ref -> string
 val failure_kind_to_string : failure_kind -> string
-val runtime_role_policy_to_string : runtime_role_policy -> string
-val unsupported_reason_to_string : unsupported_reason -> string
 val proof_result_to_string : proof_result -> string
 val result_error_to_string : result_error -> string

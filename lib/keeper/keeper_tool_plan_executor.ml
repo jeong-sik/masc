@@ -79,7 +79,8 @@ let schedule plan =
       }
     in
     match batch with
-    | Unscheduled_serial node -> Serial_batch (scheduled_node ~batch_size:1 node)
+    | Unscheduled_serial (node, descriptor) ->
+      Serial_batch (scheduled_node ~batch_size:1 (node, descriptor))
     | Unscheduled_concurrent nodes ->
       let batch_size = List.length nodes in
       Concurrent_batch (List.map (scheduled_node ~batch_size) nodes))
@@ -314,7 +315,7 @@ let execute_keeper
             { expected = expected_completion; actual = actual_completion }
       }
   else
-  let dispatch ~node ~descriptor ~schedule ~input =
+  let dispatch ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input =
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed

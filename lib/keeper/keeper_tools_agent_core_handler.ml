@@ -48,9 +48,11 @@ let make_keeper_tool_handler
   let prepare_input =
     match descriptor, model_name, prepare_input with
     | Some canonical, Some model_name, _ ->
-      Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
-        ~tool_name:model_name
-        canonical
+      fun input ->
+        Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+          ~tool_name:model_name
+          canonical
+          ~input
     | Some _, None, _ ->
       invalid_arg
         "make_keeper_tool_handler: exact descriptor dispatch requires its model-visible name"

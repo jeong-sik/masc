@@ -811,7 +811,6 @@ let validate_terminal_dependency_boundary descriptors nodes =
              (Terminal_node_missing_dependency
                 { terminal_node_id = terminal.id; node_id = node.id }))
       nodes
-  | _ -> assert false
 ;;
 
 let create ~descriptors nodes =
@@ -852,7 +851,7 @@ let create ~descriptors nodes =
                                  { identity = Atomic.fetch_and_add next_plan_identity 1
                                  ; nodes
                                  ; descriptors
-                                 }))))))))
+                                 })))))))))
 ;;
 
 let dependency_layers plan =

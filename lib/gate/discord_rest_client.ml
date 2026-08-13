@@ -55,7 +55,15 @@ let auth_headers ~token =
   ; "User-Agent", user_agent
   ]
 
-let build_request ~token ~channel_id ~content ?reply_to_message_id () =
+let allowed_mentions_json user_ids =
+  match user_ids with
+  | [] -> `Assoc [ "parse", `List [] ]
+  | user_ids ->
+    `Assoc
+      [ "users", `List (List.map (fun id -> `String (snowflake_to_string id)) user_ids) ]
+
+let build_request ~token ~channel_id ~content ?reply_to_message_id
+    ?(allowed_user_mentions = []) () =
   let url =
     Printf.sprintf
       "%s/channels/%s/messages"
@@ -64,7 +72,11 @@ let build_request ~token ~channel_id ~content ?reply_to_message_id () =
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
   in
-  let fields = [ "content", `String content ] in
+  let fields =
+    [ "content", `String content
+    ; "allowed_mentions", allowed_mentions_json allowed_user_mentions
+    ]
+  in
   let fields =
     match reply_to_message_id with
     | None -> fields
@@ -242,17 +254,29 @@ let parse_empty_response ?request_id ~status ~body () =
   else Error (error_of_non2xx ~request_id ~status ~body)
 
 let send_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
-    ~token ~channel_id ~content ?reply_to_message_id () =
+    ~token ~channel_id ~content ?reply_to_message_id
+    ?(allowed_user_mentions = []) () =
   match snowflake_of_string channel_id with
   | Error message -> Error (Network message)
   | Ok channel_id ->
-    (match reply_to_message_id with
+    let rec decode_mentions acc = function
+      | [] -> Ok (List.rev acc)
+      | value :: rest ->
+        (match snowflake_of_string value with
+         | Ok id -> decode_mentions (id :: acc) rest
+         | Error message -> Error (Network message))
+    in
+    (match decode_mentions [] allowed_user_mentions with
+     | Error _ as error -> error
+     | Ok allowed_user_mentions ->
+    match reply_to_message_id with
      | Some value ->
        (match snowflake_of_string value with
         | Error message -> Error (Network message)
         | Ok reply_to_message_id ->
           let (url, headers, body) =
-            build_request ~token ~channel_id ~content ~reply_to_message_id ()
+            build_request ~token ~channel_id ~content ~reply_to_message_id
+              ~allowed_user_mentions ()
           in
           (match
              Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body
@@ -264,14 +288,14 @@ let send_message ?clock ?(timeout_sec = Masc_http_client.default_request_timeout
                ()))
      | None ->
        let (url, headers, body) =
-         build_request ~token ~channel_id ~content ()
+          build_request ~token ~channel_id ~content ~allowed_user_mentions ()
        in
        (match
           Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body ()
         with
         | Error msg -> Error (Network msg)
         | Ok (status, body) ->
-          parse_response ~request_id:(next_request_id "send") ~status ~body
+            parse_response ~request_id:(next_request_id "send") ~status ~body
             ()))
 
 (* Byte length of the UTF-8 sequence whose lead byte is [c]. An invalid

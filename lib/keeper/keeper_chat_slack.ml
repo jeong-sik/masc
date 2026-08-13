@@ -17,6 +17,7 @@ let pp_error fmt = function
 let slack_message_limit = 4000
 let slack_max_blocks = 50
 let slack_block_text_limit = 3000
+let slack_markdown_limit = 12_000
 let min_edit_interval_s = Slack_rest_client.streaming_update_min_interval_sec
 
 let redact content = Observability_redact.redact_text content
@@ -181,6 +182,25 @@ let status_block_json ({ Keeper_chat_blocks.kind } : Keeper_chat_blocks.status_b
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
     ]
 
+let markdown_block_json text =
+  let text =
+    redact text
+    |> escape_mrkdwn_text
+    |> fun value -> truncate_to_limit value slack_markdown_limit
+  in
+  `Assoc [ "type", `String "markdown"; "text", `String text ]
+
+let mention_block_json user_ids =
+  let text =
+    user_ids
+    |> List.map (Printf.sprintf "<@%s>")
+    |> String.concat " "
+  in
+  `Assoc
+    [ "type", `String "section"
+    ; "text", `Assoc [ "type", `String "mrkdwn"; "text", `String text ]
+    ]
+
 (* ── Content → Slack blocks ──────────────────────────────────────── *)
 
 let slack_block_of_chat_block = function
@@ -214,9 +234,38 @@ let slack_block_of_chat_block = function
   | Keeper_chat_blocks.Thinking _ -> None
 
 let content_blocks_of_text text =
-  text
-  |> Keeper_chat_blocks.parse_text_to_blocks
-  |> List.filter_map slack_block_of_chat_block
+  if String.trim text = "" then []
+  else
+    let media_blocks =
+      text
+      |> Keeper_chat_blocks.parse_text_to_blocks
+      |> List.filter_map (function
+        | Keeper_chat_blocks.Image _ as block -> slack_block_of_chat_block block
+        | Keeper_chat_blocks.Text _
+        | Keeper_chat_blocks.Heading _
+        | Keeper_chat_blocks.Unordered_list _
+        | Keeper_chat_blocks.Callout _
+        | Keeper_chat_blocks.Table _
+        | Keeper_chat_blocks.Code _
+        | Keeper_chat_blocks.Mermaid _
+        | Keeper_chat_blocks.Svg _
+        | Keeper_chat_blocks.Voice _
+        | Keeper_chat_blocks.Attach _
+        | Keeper_chat_blocks.Link _
+        | Keeper_chat_blocks.Fusion _
+        | Keeper_chat_blocks.Status _
+        | Keeper_chat_blocks.Trace _
+        | Keeper_chat_blocks.Thinking _ -> None)
+    in
+    markdown_block_json text :: media_blocks
+
+let message_blocks_of_text ~mention_user_ids text =
+  let mention_blocks =
+    match mention_user_ids with
+    | [] -> []
+    | user_ids -> [ mention_block_json user_ids ]
+  in
+  mention_blocks @ content_blocks_of_text text
 
 let final_message_blocks ~content ~event_blocks =
   content_blocks_of_text content @ event_blocks
@@ -317,10 +366,19 @@ let set_thread_status ?clock
 
 let send_message_with_blocks ?clock
     ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
-    ?thread_ts ~token ~channel ~content ~blocks () =
-  let content =
+    ?thread_ts ?(mention_user_ids = []) ~token ~channel ~content ~blocks () =
+  let fallback_content =
     redact content |> escape_mrkdwn_text |> fun s ->
     truncate_to_limit s slack_message_limit
+  in
+  let content =
+    match mention_user_ids with
+    | [] -> fallback_content
+    | user_ids ->
+      let mentions =
+        user_ids |> List.map (Printf.sprintf "<@%s>") |> String.concat " "
+      in
+      truncate_to_limit (mentions ^ "\n" ^ fallback_content) slack_message_limit
   in
   let blocks = limit_blocks_for_slack blocks in
   let body_json = build_message_body ~channel ~content ~blocks ?thread_ts () in
@@ -629,8 +687,8 @@ let adapter_loop_with_transport
              "keeper_chat_slack: protocol diagnostic delivery failed: %s"
              (Format.asprintf "%a" pp_error error));
         continue ()
-    | Tool_call_start _ ->
-        update_activity "필요한 작업을 진행하고 있어요…";
+    | Tool_call_start { tool_call_name; _ } ->
+        update_activity (Printf.sprintf "🔧 %s 사용 중…" tool_call_name);
         continue ()
     | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _
     | Tool_result_ready _ ->
@@ -696,6 +754,9 @@ module For_testing = struct
   let image_block_json = image_block_json
   let audio_block_json = audio_block_json
   let content_blocks_of_text = content_blocks_of_text
+  let message_blocks_of_text = message_blocks_of_text
+  let markdown_block_json = markdown_block_json
+  let mention_block_json = mention_block_json
   let final_message_blocks = final_message_blocks
   let build_message_body = build_message_body
   let build_thread_status_body = build_thread_status_body

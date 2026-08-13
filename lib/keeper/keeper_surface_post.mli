@@ -31,6 +31,16 @@ val dashboard_label : string
 val discord_label : string
 val slack_label : string
 
+val max_user_mentions : int
+
+val user_mentions_of_args :
+  surface:string -> Yojson.Safe.t -> (string list, string) result
+(** Decode and validate the optional [mention_user_ids] tool argument.
+    Slack accepts only stable [U...]/[W...] participant ids; Discord accepts
+    only decimal user snowflakes. Display names are never guessed. Duplicate
+    ids are collapsed and more than {!max_user_mentions} ids are rejected.
+    Non-empty mentions on dashboard or another surface are invalid. *)
+
 type delivery_target =
   | Delivered_to_dashboard
   | Delivered_to_discord of { channel_id : string }

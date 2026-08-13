@@ -487,14 +487,27 @@ let pp_send_error fmt = function
   | Rest_error e ->
     Format.fprintf fmt "discord rest error: %a" Discord_rest_client.pp_error e
 
-let send_message ~channel_id ~content ?reply_to_message_id () =
+let send_message ~channel_id ~content ?reply_to_message_id
+    ?(mention_user_ids = []) () =
   match bot_token_opt () with
   | None -> Error Missing_token
   | Some token ->
+    let content =
+      match mention_user_ids with
+      | [] -> content
+      | user_ids ->
+        let mentions =
+          user_ids |> List.map (Printf.sprintf "<@%s>") |> String.concat " "
+        in
+        mentions ^ "\n" ^ content
+    in
     let limit = Discord_rest_client.message_content_limit in
     let len = String.length content in
     if len <= limit then
-      (match Discord_rest_client.send_message ~token ~channel_id ~content ?reply_to_message_id () with
+      (match
+         Discord_rest_client.send_message ~token ~channel_id ~content
+           ?reply_to_message_id ~allowed_user_mentions:mention_user_ids ()
+       with
        | Ok id -> Ok id
        | Error e -> Error (Rest_error e))
     else
@@ -509,7 +522,11 @@ let send_message ~channel_id ~content ?reply_to_message_id () =
           if remaining_str = "" then None else Some remaining_str
         in
         let ref_id = if first then reply_to_message_id else None in
-        match Discord_rest_client.send_message ~token ~channel_id ~content:chunk ?reply_to_message_id:ref_id () with
+        match
+          Discord_rest_client.send_message ~token ~channel_id ~content:chunk
+            ?reply_to_message_id:ref_id
+            ~allowed_user_mentions:mention_user_ids ()
+        with
         | Ok id ->
             (match remaining with
              | None -> Ok id

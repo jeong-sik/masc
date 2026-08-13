@@ -922,15 +922,28 @@ let surface_post_schema =
     [ property
         "surface"
         "string"
-        "Lane to post to: 'dashboard' or 'discord'. Posting to a surface \
+        "Lane to post to: 'dashboard', 'discord', or 'slack'. Posting to a surface \
          this keeper is not bound to is an error, not a no-op."
-    ; property "content" "string" "Message text to deliver on the lane."
+    ; property
+        "content"
+        "string"
+        "Standard Markdown message to deliver. Discord renders it natively; \
+         Slack renders it through the official Block Kit markdown block."
     ; property
         "channel_id"
         "string"
-        "Discord channel snowflake. Required only when more than one \
-         channel is bound to this keeper; must be one of the bound \
-         channels."
+        "Bound Discord or Slack channel id. Required only when more than one \
+         channel is bound for the selected surface; must be one of those \
+         bindings."
+    ; ( "mention_user_ids"
+      , `Assoc
+          [ "type", `String "array"
+          ; "items", `Assoc [ "type", `String "string" ]
+          ; "maxItems", `Int Keeper_surface_post.max_user_mentions
+          ; ( "description"
+            , `String
+                "Stable ids from keeper_surface_read participants to visibly mention. Slack requires U.../W... ids; Discord requires decimal user snowflakes. Never guess an id from a display name; plain @name text is not an API mention." )
+          ] )
     ]
 ;;
 

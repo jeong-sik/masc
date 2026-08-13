@@ -3,8 +3,11 @@
 
 let keeper_surface_post_description =
   "Post a message to one conversation endpoint: 'dashboard' (appears \
-   in the operator's chat transcript) or 'discord' (sends to the bound \
-   channel). Posting to an unbound surface is an error. Both endpoints \
+   in the operator's chat transcript), 'discord', or 'slack'. Standard \
+   Markdown is rendered natively by Discord and by Slack's Block Kit \
+   markdown block. To create a real highlighted user mention, pass stable \
+   participant-roster ids in mention_user_ids; never guess ids from display \
+   names. Posting to an unbound surface is an error. These endpoints \
    are read by a person, so an unchanged status reposted every cycle \
    crowds their view and says nothing the previous one did not; when \
    there is nothing new, the turn ends without a post."
@@ -106,7 +109,8 @@ let surface_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Lane to post to: 'dashboard' or 'discord'" )
+                        , `String
+                            "Lane to post to: 'dashboard', 'discord', or 'slack'" )
                       ] )
                 ; ( "content"
                   , `Assoc
@@ -119,8 +123,17 @@ let surface_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Discord channel snowflake; required only when \
-                             more than one channel is bound" )
+                            "Bound Discord or Slack channel id; required only \
+                             when more than one channel is bound for the selected surface" )
+                      ] )
+                ; ( "mention_user_ids"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
+                      ; "maxItems", `Int 100
+                      ; ( "description"
+                        , `String
+                            "Stable ids from keeper_surface_read participants to visibly mention. Slack requires U.../W... ids; Discord requires decimal user snowflakes. Display names such as @Vincent do not create API mentions." )
                       ] )
                 ] )
           ; "required", `List [ `String "surface"; `String "content" ]

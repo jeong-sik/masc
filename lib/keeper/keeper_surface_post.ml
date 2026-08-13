@@ -13,6 +13,69 @@ let dashboard_label = "dashboard"
 let discord_label = "discord"
 let slack_label = "slack"
 
+let max_user_mentions = 100
+
+let is_ascii_upper_or_digit = function
+  | 'A' .. 'Z' | '0' .. '9' -> true
+  | _ -> false
+
+let valid_slack_user_id value =
+  let length = String.length value in
+  length >= 2
+  && (value.[0] = 'U' || value.[0] = 'W')
+  && String.for_all is_ascii_upper_or_digit value
+
+let valid_discord_user_id value =
+  value <> ""
+  && String.for_all (function '0' .. '9' -> true | _ -> false) value
+
+let user_mentions_of_args ~surface args =
+  let values =
+    match args with
+    | `Assoc fields ->
+      (match List.filter (fun (name, _) -> name = "mention_user_ids") fields with
+       | [] -> Ok []
+       | [ (_, `List values) ] ->
+         let rec strings acc = function
+           | [] -> Ok (List.rev acc)
+           | `String value :: rest when String.trim value <> "" ->
+             strings (String.trim value :: acc) rest
+           | `String _ :: _ -> Error "mention_user_ids cannot contain blank ids"
+           | _ :: _ -> Error "mention_user_ids must contain only strings"
+         in
+         strings [] values
+       | [ _ ] -> Error "mention_user_ids must be an array of strings"
+       | _ -> Error "mention_user_ids must not be repeated")
+    | _ -> Error "keeper_surface_post arguments must be an object"
+  in
+  Result.bind values (fun values ->
+    let values = List.sort_uniq String.compare values in
+    if List.length values > max_user_mentions then
+      Error
+        (Printf.sprintf
+           "mention_user_ids supports at most %d users"
+           max_user_mentions)
+    else if values = [] then Ok []
+    else if String.equal surface slack_label then
+      (match List.find_opt (fun value -> not (valid_slack_user_id value)) values with
+       | None -> Ok values
+       | Some value ->
+         Error
+           (Printf.sprintf
+              "Slack mention_user_ids must be stable U... or W... ids from the participant roster; invalid id %S"
+              value))
+    else if String.equal surface discord_label then
+      (match List.find_opt (fun value -> not (valid_discord_user_id value)) values with
+       | None -> Ok values
+       | Some value ->
+         Error
+           (Printf.sprintf
+              "Discord mention_user_ids must be decimal user snowflakes from the participant roster; invalid id %S"
+              value))
+    else
+      Error
+        "mention_user_ids is supported only for Slack and Discord posts")
+
 type delivery_target =
   | Delivered_to_dashboard
   | Delivered_to_discord of { channel_id : string }

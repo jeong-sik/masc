@@ -444,6 +444,48 @@ let test_assistant_message_persists_with_typed_surface () =
         (Option.map Masc.Surface_ref.lane_label m.Store.surface);
       check bool "no speaker on keeper output" true (m.Store.speaker = None))
 
+let test_slack_mentions_require_stable_ids () =
+  let args =
+    `Assoc
+      [ "mention_user_ids"
+      , `List [ `String "U060QL6SV1V"; `String "W123ABC"; `String "U060QL6SV1V" ]
+      ]
+  in
+  check (result (list string) string) "deduplicated stable ids"
+    (Ok [ "U060QL6SV1V"; "W123ABC" ])
+    (SP.user_mentions_of_args ~surface:"slack" args);
+  match
+    SP.user_mentions_of_args ~surface:"slack"
+      (`Assoc [ "mention_user_ids", `List [ `String "Vincent" ] ])
+  with
+  | Error message ->
+    check bool "error points to participant ids" true
+      (Astring.String.is_infix ~affix:"participant roster" message)
+  | Ok _ -> fail "Slack display name became a mention id"
+
+let test_discord_mentions_reject_broad_or_named_targets () =
+  check (result (list string) string) "decimal snowflakes"
+    (Ok [ "1234567890" ])
+    (SP.user_mentions_of_args ~surface:"discord"
+       (`Assoc [ "mention_user_ids", `List [ `String "1234567890" ] ]));
+  List.iter
+    (fun value ->
+       match
+         SP.user_mentions_of_args ~surface:"discord"
+           (`Assoc [ "mention_user_ids", `List [ `String value ] ])
+       with
+       | Error _ -> ()
+       | Ok _ -> failf "Discord accepted unsafe mention target %S" value)
+    [ "@everyone"; "Vincent"; "<@123>" ]
+
+let test_dashboard_rejects_nonempty_mentions () =
+  match
+    SP.user_mentions_of_args ~surface:"dashboard"
+      (`Assoc [ "mention_user_ids", `List [ `String "U123" ] ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "dashboard accepted connector mention ids"
+
 let () =
   run "keeper_surface_post"
     [
@@ -486,6 +528,14 @@ let () =
             test_set_blocks_attaches_to_slack;
           test_case "ignores non-slack targets" `Quick
             test_set_blocks_ignores_other_targets;
+        ] );
+      ( "mentions",
+        [ test_case "Slack uses stable ids" `Quick
+            test_slack_mentions_require_stable_ids
+        ; test_case "Discord rejects named or broad targets" `Quick
+            test_discord_mentions_reject_broad_or_named_targets
+        ; test_case "dashboard rejects connector mentions" `Quick
+            test_dashboard_rejects_nonempty_mentions
         ] );
       ( "terminal receipt",
         [

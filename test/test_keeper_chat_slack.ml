@@ -103,16 +103,20 @@ let test_limit_blocks_adds_visible_omission_notice () =
 
 (* ── content_blocks_of_text ─────────────────────────────────────── *)
 
-let test_content_blocks_empty_for_plain_text () =
-  let blocks = S.content_blocks_of_text "just plain text" in
-  check int "no blocks" 0 (List.length blocks)
+let test_content_blocks_use_native_markdown_for_plain_text () =
+  let blocks = S.content_blocks_of_text "**just plain text**" in
+  check int "one markdown block" 1 (List.length blocks);
+  let s = json_string (List.hd blocks) in
+  check bool "native markdown block" true (contains s "\"type\":\"markdown\"");
+  check bool "standard markdown stays intact" true
+    (contains s "**just plain text**")
 
 let test_content_blocks_detects_markdown_image () =
   let blocks =
     S.content_blocks_of_text "Hello ![alt text](https://example.com/img.png) world"
   in
-  check int "one block" 1 (List.length blocks);
-  let s = json_string (List.hd blocks) in
+  check int "markdown plus image block" 2 (List.length blocks);
+  let s = json_string (List.nth blocks 1) in
   check bool "type image" true (contains s "\"type\":\"image\"");
   check bool "image_url" true
     (contains s "\"image_url\":\"https://example.com/img.png\"");
@@ -120,8 +124,8 @@ let test_content_blocks_detects_markdown_image () =
 
 let test_content_blocks_detects_bare_image_url () =
   let blocks = S.content_blocks_of_text "https://example.com/photo.jpg" in
-  check int "one block" 1 (List.length blocks);
-  let s = json_string (List.hd blocks) in
+  check int "markdown plus image block" 2 (List.length blocks);
+  let s = json_string (List.nth blocks 1) in
   check bool "type image" true (contains s "\"type\":\"image\"");
   check bool "image_url" true
     (contains s "\"image_url\":\"https://example.com/photo.jpg\"")
@@ -130,8 +134,9 @@ let test_content_blocks_detects_link () =
   let blocks = S.content_blocks_of_text "https://example.com/page" in
   check int "one block" 1 (List.length blocks);
   let s = json_string (List.hd blocks) in
-  check bool "type section" true (contains s "\"type\":\"section\"");
-  check bool "link syntax" true (contains s "*<https://example.com/page|example.com>*")
+  check bool "type markdown" true (contains s "\"type\":\"markdown\"");
+  check bool "link retained for Slack translation" true
+    (contains s "https://example.com/page")
 
 let test_content_blocks_detects_code () =
   let blocks = S.content_blocks_of_text "```ocaml\nlet x = 1 + 2\n```" in
@@ -159,16 +164,18 @@ let test_content_blocks_redacts_text_derived_image_secrets () =
       (Printf.sprintf "![%s](https://example.com/diagram.png?token=%s)"
          secret secret)
   in
-  check int "one image block" 1 (List.length blocks);
-  let s = json_string (List.hd blocks) in
+  check int "markdown plus image block" 2 (List.length blocks);
+  let s = json_string (List.nth blocks 1) in
   check bool "raw secret removed" false (contains s secret);
   check bool "redaction marker present" true (contains s "[REDACTED]")
 
-let test_content_blocks_suppresses_credential_url () =
+let test_content_blocks_keeps_standard_markdown_contract_for_credential_url () =
   let blocks =
     S.content_blocks_of_text "https://user:pass@example.com/diagram.png"
   in
-  check int "credential URL does not become block" 0 (List.length blocks)
+  check int "no image block for credential URL" 1 (List.length blocks);
+  check bool "remaining block is markdown" true
+    (contains (json_string (List.hd blocks)) "\"type\":\"markdown\"")
 
 let test_final_message_blocks_merges_text_and_event_blocks () =
   let event_block =
@@ -180,13 +187,28 @@ let test_final_message_blocks_merges_text_and_event_blocks () =
       ~content:"https://example.com/photo.jpg"
       ~event_blocks:[ event_block ]
   in
-  check int "text block plus event block" 2 (List.length blocks);
+  check int "markdown, image, and event block" 3 (List.length blocks);
   let first = json_string (List.hd blocks) in
-  check bool "text-derived image first" true
-    (contains first "\"image_url\":\"https://example.com/photo.jpg\"");
-  let second = json_string (List.nth blocks 1) in
+  check bool "native markdown first" true
+    (contains first "\"type\":\"markdown\"");
+  let second = json_string (List.nth blocks 2) in
   check bool "event block preserved" true
     (contains second "https://event.example.com")
+
+let test_message_blocks_render_visible_stable_mentions () =
+  let blocks =
+    S.message_blocks_of_text ~mention_user_ids:[ "U060QL6SV1V" ]
+      "**PR report** raw <@U_UNTRUSTED>"
+  in
+  check int "mention plus markdown" 2 (List.length blocks);
+  let mention = json_string (List.hd blocks) in
+  check bool "Slack wire mention remains visible" true
+    (contains mention "<@U060QL6SV1V>");
+  let markdown = json_string (List.nth blocks 1) in
+  check bool "report uses native markdown" true
+    (contains markdown "**PR report**");
+  check bool "raw mention syntax is escaped" false
+    (contains markdown "<@U_UNTRUSTED>")
 
 let run_adapter ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?sleep
     ?set_activity_status events ~send_plain ~send_blocks =
@@ -244,8 +266,12 @@ let test_adapter_streams_one_edited_reply () =
     "rate-limited incremental edit"
     [ "hello world " ]
     (List.rev !stream_edits);
-  check int "unchanged terminal content skips duplicate edit" 0
-    (List.length !final_edits)
+  (match List.rev !final_edits with
+   | [ (content, [ block ]) ] ->
+     check string "final rich edit keeps complete text" "hello world " content;
+     check bool "final rich edit adds native markdown" true
+       (contains (json_string block) "\"type\":\"markdown\"")
+   | _ -> fail "streamed reply must receive one terminal rich edit")
 ;;
 
 let test_adapter_stream_error_edits_accepted_reply () =
@@ -386,6 +412,7 @@ let test_terminal_edit_waits_for_slack_interval () =
   let clock = ref 0.0 in
   let sleeps = ref [] in
   let edits = ref [] in
+  let final_edits = ref [] in
   let outcomes =
     run_adapter
       ~now:(fun () -> !clock)
@@ -396,8 +423,9 @@ let test_terminal_edit_waits_for_slack_interval () =
       ~edit_stream:(fun ~message_id ~content ->
         edits := (message_id, content) :: !edits;
         Ok ())
-      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
-        fail "unchanged terminal content must not be edited twice")
+      ~edit_blocks:(fun ~message_id ~content ~blocks ->
+        final_edits := (message_id, content, blocks) :: !final_edits;
+        Ok ())
       ~delete_stream:(fun ~message_id:_ ->
         fail "successful streaming reply must not be deleted")
       [ Masc.Keeper_chat_events.Text_delta "hello "
@@ -410,9 +438,16 @@ let test_terminal_edit_waits_for_slack_interval () =
         fail "streaming success must not create a second message")
   in
   check (list (float 0.0001)) "terminal edit sleeps for remaining interval"
-    [ 3.0 ] (List.rev !sleeps);
+    [ 3.0; 3.0 ] (List.rev !sleeps);
   check (list (pair string string)) "terminal edit uses accepted message"
     [ "slack-paced", "hello world" ] (List.rev !edits);
+  (match List.rev !final_edits with
+   | [ (message_id, content, [ block ]) ] ->
+     check string "rich edit keeps accepted message" "slack-paced" message_id;
+     check string "rich edit keeps complete content" "hello world" content;
+     check bool "rich edit carries markdown block" true
+       (contains (json_string block) "\"type\":\"markdown\"")
+   | _ -> fail "terminal delivery must add one rich edit");
   check bool "paced delivery settles successfully" true (outcomes = [ Ok () ])
 
 let test_adapter_external_effect_status_is_terminal_success () =
@@ -497,7 +532,7 @@ let test_native_activity_failure_does_not_affect_delivery () =
         Ok ())
   in
   check (list string) "typed activity lifecycle"
-    [ "답변을 준비하고 있어요…"; "필요한 작업을 진행하고 있어요…"; "" ]
+    [ "답변을 준비하고 있어요…"; "🔧 keeper_surface_post 사용 중…"; "" ]
     (List.rev !statuses);
   check (list string) "tool context is not exposed" [ "final" ]
     (List.rev !sends);
@@ -528,8 +563,8 @@ let () =
             test_limit_blocks_adds_visible_omission_notice
         ] )
     ; ( "content-blocks"
-      , [ test_case "empty for plain text" `Quick
-            test_content_blocks_empty_for_plain_text
+      , [ test_case "plain text uses native markdown" `Quick
+            test_content_blocks_use_native_markdown_for_plain_text
         ; test_case "detects markdown image" `Quick
             test_content_blocks_detects_markdown_image
         ; test_case "detects code fences" `Quick
@@ -542,10 +577,12 @@ let () =
         ; test_case "mixed content" `Quick test_content_blocks_mixed_content
         ; test_case "redacts text-derived image secrets" `Quick
             test_content_blocks_redacts_text_derived_image_secrets
-        ; test_case "suppresses credential URL blocks" `Quick
-            test_content_blocks_suppresses_credential_url
+        ; test_case "credential URL gets no image block" `Quick
+            test_content_blocks_keeps_standard_markdown_contract_for_credential_url
         ; test_case "final delivery merges text and event blocks" `Quick
             test_final_message_blocks_merges_text_and_event_blocks
+        ; test_case "stable mentions are visible" `Quick
+            test_message_blocks_render_visible_stable_mentions
         ] )
     ; ( "terminal-receipt"
       , [ test_case "terminal success settles once" `Quick

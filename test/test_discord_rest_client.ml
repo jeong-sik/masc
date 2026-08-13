@@ -54,11 +54,29 @@ let test_build_request_body_is_content_object () =
   in
   let json = Yojson.Safe.from_string body in
   match json with
-  | `Assoc [ ("content", `String "hello \"world\"") ] -> ()
+  | `Assoc
+      [ ("content", `String "hello \"world\"")
+      ; ("allowed_mentions", `Assoc [ ("parse", `List []) ])
+      ] -> ()
   | _ ->
       failf
         "body shape wrong: %s"
         (Yojson.Safe.to_string json)
+
+let test_build_request_allows_only_explicit_users () =
+  let _, _, body =
+    R.build_request ~token:"t" ~channel_id:(sf "1")
+      ~content:"<@123> @everyone <@&456>"
+      ~allowed_user_mentions:[ sf "123" ] ()
+  in
+  let open Yojson.Safe.Util in
+  let allowed =
+    Yojson.Safe.from_string body |> member "allowed_mentions"
+  in
+  check (list string) "only explicit user snowflakes"
+    [ "123" ] (allowed |> member "users" |> to_list |> List.map to_string);
+  check bool "broad parse modes absent" true
+    (allowed |> member "parse" = `Null)
 
 let test_build_typing_request_url_targets_channel () =
   let url, _, body =
@@ -524,6 +542,8 @@ let () =
             test_build_request_user_agent_present
         ; test_case "body is { content: <content> } JSON" `Quick
             test_build_request_body_is_content_object
+        ; test_case "only explicit user mentions are allowed" `Quick
+            test_build_request_allows_only_explicit_users
         ; test_case "typing URL targets channel" `Quick
             test_build_typing_request_url_targets_channel
         ; test_case "typing Authorization uses Bot scheme" `Quick

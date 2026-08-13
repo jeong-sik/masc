@@ -721,6 +721,7 @@ let test_large_connector_post_preserves_exact_durable_request () =
       ; "channel_id", `String "C-exact"
       ; "content", `String content
       ; "blocks", `List blocks
+      ; "mention_user_ids", `List [ `String "U123ABC" ]
       ]
   in
   match
@@ -734,6 +735,7 @@ let test_large_connector_post_preserves_exact_durable_request () =
          ; thread_ts
          ; content = decoded_content
          ; blocks = decoded_blocks
+         ; mention_user_ids
          }) ->
     Alcotest.check json "exact durable request retained" input decoded_input;
     Alcotest.check Alcotest.string "channel retained" "C-exact" channel_id;
@@ -747,7 +749,9 @@ let test_large_connector_post_preserves_exact_durable_request () =
       (Alcotest.list json)
       "large blocks retained"
       blocks
-      decoded_blocks
+      decoded_blocks;
+    Alcotest.check (Alcotest.list Alcotest.string) "mention ids retained"
+      [ "U123ABC" ] mention_user_ids
   | Ok (Replay_discord_post _) ->
     Alcotest.fail "Slack request decoded as Discord"
   | Error detail -> Alcotest.fail detail
@@ -762,6 +766,7 @@ let test_slack_connector_post_retains_thread_ts () =
       ; "thread_ts", `String "1700000000.000100"
       ; "content", `String "threaded reply"
       ; "blocks", `List []
+      ; "mention_user_ids", `List []
       ]
   in
   match
@@ -787,6 +792,7 @@ let test_connector_post_replay_retains_terminal_target () =
       [ "connector", `String "discord"
       ; "channel_id", `String "D-exact"
       ; "content", `String "approved reply"
+      ; "mention_user_ids", `List []
       ]
   in
   match connector_post_replay_of_gate_input input with
@@ -819,6 +825,12 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
         [ "connector", `String "slack"
         ; "channel_id", `String "C-exact"
         ; "content", `String "missing exact blocks"
+        ]
+    ; `Assoc
+        [ "connector", `String "discord"
+        ; "channel_id", `String "D-exact"
+        ; "content", `String "exact"
+        ; "mention_user_ids", `List [ `String "123"; `String "123" ]
         ]
     ; `Assoc
         [ "connector", `String "discord"

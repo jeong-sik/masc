@@ -322,11 +322,24 @@ let day_file_name_is_valid ~year ~month name =
   | None, _ | _, None -> false
 ;;
 
+(* Filesystem metadata the store never wrote: [.DS_Store] on macOS, [.nfs*]
+   handles, editor droppings. A store cannot prevent these appearing next to
+   its day-files, so they are not layout violations to report — the strict
+   readers skip them and keep erroring on any other unexpected entry.
+
+   Without this the strict readers refuse an entire store the moment a Finder
+   window has been opened on it, which is every real store on a macOS machine.
+   The non-strict readers already skip these, because they select entries by
+   name pattern rather than rejecting non-matches; this makes the two agree. *)
+let is_filesystem_metadata entry = String.length entry > 0 && Char.equal entry.[0] '.'
+
 let validate_layout_entries ~parent ~expected ~is_valid entries =
   let rec loop valid_entries = function
     | [] -> Ok (List.rev valid_entries)
     | entry :: rest ->
-      if is_valid entry
+      if is_filesystem_metadata entry
+      then loop valid_entries rest
+      else if is_valid entry
       then loop (entry :: valid_entries) rest
       else Error (Invalid_layout_entry { parent; entry; expected })
   in

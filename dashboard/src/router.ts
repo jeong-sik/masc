@@ -117,7 +117,7 @@ function canonicalRoute(tab: TabId, params: Record<string, string>): RouteState 
 
 function normalizeSegments(pathPart: string): string[] {
   const normalized = pathPart.replace(/^\/+/, '')
-  const segments = normalized.split('/').filter(Boolean)
+  const segments = normalized.split('/').filter(Boolean).map(decodeSafe)
   if (segments[0] === 'dashboard') return segments.slice(1)
   return segments
 }
@@ -133,7 +133,7 @@ function parseSegments(
 
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
-    const second = decodeSafe(segments[1])
+    const second = segments[1]
     if (
       `command:${second}` in CROSS_SURFACE_SECTION_REDIRECTS
       || `command:${second}` in SECTION_REDIRECTS
@@ -153,7 +153,7 @@ function parseSegments(
     && segments[1]
   ) {
     const tab = segments[0] as 'monitoring' | 'workspace' | 'lab' | 'code'
-    const nextParams = { ...params, section: decodeSafe(segments[1]) }
+    const nextParams = { ...params, section: segments[1] }
     return canonicalRoute(tab, nextParams)
   }
 
@@ -171,18 +171,17 @@ function parseHash(hash: string): RouteState {
   const raw = (hash || '').replace(/^#/, '').trim()
   if (!raw) return DEFAULT_ROUTE
 
-  const decoded = decodeSafe(raw)
-  let pathPart = decoded
+  let pathPart = raw
   let queryPart: string | undefined
 
-  if (decoded.startsWith('?')) {
+  if (raw.startsWith('?')) {
     pathPart = ''
-    queryPart = decoded.slice(1)
+    queryPart = raw.slice(1)
   } else {
-    const qIndex = decoded.indexOf('?')
+    const qIndex = raw.indexOf('?')
     if (qIndex >= 0) {
-      pathPart = decoded.slice(0, qIndex)
-      queryPart = decoded.slice(qIndex + 1)
+      pathPart = raw.slice(0, qIndex)
+      queryPart = raw.slice(qIndex + 1)
     }
   }
 

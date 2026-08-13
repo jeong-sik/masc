@@ -156,13 +156,22 @@ let combine first_label first second_label second =
 ;;
 
 let finish_lifecycle ~boundary ~base_path ~keeper_name ~terminalize =
-  match boundary with
-  | Graceful ->
-    let librarian = drain_result ~base_path ~keeper_name in
-    let terminal = terminalize_safely terminalize in
-    combine "Librarian cleanup" librarian "terminal cleanup" terminal
-  | Unexpected ->
-    let terminal = terminalize_safely terminalize in
-    let librarian = abort_result ~base_path ~keeper_name in
-    combine "terminal cleanup" terminal "Librarian cleanup" librarian
+  (* Exit settlement commonly runs after the lane has observed cancellation.
+     Keep the ordered Librarian/terminal transaction outside that cancelled
+     context; otherwise the first drain/abort suspension can raise immediately
+     and the lane cleanup may reinterpret a graceful stop as an unexpected
+     abort. *)
+  Eio.Cancel.protect (fun () ->
+    try
+      match boundary with
+      | Graceful ->
+        let librarian = drain_result ~base_path ~keeper_name in
+        let terminal = terminalize_safely terminalize in
+        combine "Librarian cleanup" librarian "terminal cleanup" terminal
+      | Unexpected ->
+        let terminal = terminalize_safely terminalize in
+        let librarian = abort_result ~base_path ~keeper_name in
+        combine "terminal cleanup" terminal "Librarian cleanup" librarian
+    with
+    | exn -> Error (Printexc.to_string exn))
 ;;

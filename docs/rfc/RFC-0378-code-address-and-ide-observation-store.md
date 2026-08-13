@@ -158,7 +158,7 @@ ide store 의 keeper-fact 절반은 **더 약한 스키마의 중복 투영**이
 - turn_events 의 방출→sink 사슬은 통째로 죽는다 (emit_turn_event 포함). keeper 타임라인 표면은 turn-records 를 읽는 read path 로 간다.
 - `_orphan/`·`orphan_path`·`partition_is_orphan` 은 신규 쓰기 0 이 된 뒤 E 에서 데이터와 함께 삭제.
 - 회전(rotation) 메커니즘은 by-url 스토어에 유지 (storage 역학이지 keeper 흐름 제어가 아님 — 원칙 9 비저촉).
-- `Scope_keeper_lane` 읽기는 D 에서 기존 keeper SSOT 기반 read path 로 이행한다. 현행은 전 keeper 의 `_orphan` 혼합을 읽고 keeper_id 로 필터링하는 구조 (`server_ide_scope.ml` 의 Legacy_default 매핑 — 2026-07-07 감사가 "턴은 repo fact 가 아니다"를 인지하고 만든 우회로였고, 이 정리가 그 인지의 정식화다).
+- `Scope_keeper_lane` 은 **E 에서 데이터와 함께 소멸한다** (구현이 정정한 결정 — D 의 "keeper SSOT 기반 read path 이행" 은 신규 read 표면 신설이라 §5.2 의 중복-투영 금지와 충돌한다). 그 scope 의 존재 이유는 orphan 데이터 접근(2026-07-07 감사)이었고, B 가 신규 쓰기를 끊고 cut 이 데이터를 지우면 대상이 없다. keeper 타임라인 표면은 기존 keeper 대시보드가 담당한다. **따라서 scope·구 partition 타입 삭제와 데이터 cut 은 한 원자 단계다** — cut 전에 scope 를 지우면 잔존 데이터를 읽을 길이 먼저 사라진다. 현행은 전 keeper 의 `_orphan` 혼합을 읽고 keeper_id 로 필터링하는 구조 (`server_ide_scope.ml` 의 Legacy_default 매핑 — 2026-07-07 감사가 "턴은 repo fact 가 아니다"를 인지하고 만든 우회로였고, 이 정리가 그 인지의 정식화다).
 
 ### 5.3 Anchor 계약 = co-view 계약
 

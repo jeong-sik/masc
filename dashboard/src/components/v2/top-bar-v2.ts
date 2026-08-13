@@ -197,6 +197,9 @@ export function AttentionIndicatorV2() {
 
 export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
   const tab = route.value.tab
+  const shellKeeperFiberCount = typeof shellCounts.value?.keepers === 'number'
+    ? shellCounts.value.keepers
+    : null
   const fallbackRunningKeepers = keepers.value.filter((keeper) => keeperRowLooksRunning({
     status: keeper.status,
     phase: keeper.lifecycle_phase ?? keeper.phase,
@@ -207,7 +210,7 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: shellCounts.value?.agents ?? 0,
-    keepersCount: shellCounts.value?.keepers ?? fallbackRunningKeepers,
+    keepersCount: shellKeeperFiberCount ?? fallbackRunningKeepers,
     keeperRowsCount: keepers.value.length,
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
@@ -215,11 +218,18 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
     runtimeHealthGeneratedAt: shellRuntimeResolution.value?.generated_at ?? null,
   })
   const keeperCount = runtimeCounts.live.keepers
-  const countMeaning = keeperLiveCountMeaning(runtimeCounts.source)
-  const countLabel = countMeaning === 'executable' ? '실행 가능' : '실행 중'
+  const countMeaning = keeperLiveCountMeaning(
+    runtimeCounts.source,
+    shellKeeperFiberCount === null ? 'running' : 'keeper-fiber',
+  )
+  const countPresentation = countMeaning === 'executable'
+    ? { label: '실행 가능', metric: 'executable' }
+    : countMeaning === 'running'
+      ? { label: '실행 중', metric: 'running' }
+      : { label: 'Keeper Fiber', metric: 'keeper_fibers' }
   const countTitle = [
     `runtime count: ${runtimeCountSourceLabel(runtimeCounts.source)}`,
-    `${countMeaning}=${runtimeCounts.live.keepers}`,
+    `${countPresentation.metric}=${runtimeCounts.live.keepers}`,
     `paused=${runtimeCounts.live.pausedKeepers}`,
     runtimeCounts.source === 'runtime-health'
       ? 'offline=0 (not derived from execution rows)'
@@ -237,7 +247,7 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
       </div>
       <div class="v2-top-spacer"></div>
       <span class="v2-statchip live" title=${countTitle}>
-        <${StatusDot} status="run" pulse=${true} />${keeperCount} ${countLabel}
+        <${StatusDot} status="run" pulse=${countMeaning !== 'keeper-fiber'} />${keeperCount} ${countPresentation.label}
       </span>
       <${AttentionIndicatorV2} />
       <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">

@@ -21,9 +21,12 @@ let create_tool_observer_serialization () : tool_observer_serialization =
        reject every later completion. Unlock explicitly while protecting the
        acquired critical section from cancellation, so one failed observation
        cannot erase unrelated later receipts. *)
-    Fun.protect
-      ~finally:(fun () -> Eio.Mutex.unlock mutex)
-      (fun () -> Eio.Cancel.protect observe)
+    Eio.Cancel.protect (fun () ->
+      match observe () with
+      | () -> Eio.Mutex.unlock mutex
+      | exception exn ->
+        Eio.Mutex.unlock mutex;
+        raise exn)
 ;;
 
 type agent_setup =

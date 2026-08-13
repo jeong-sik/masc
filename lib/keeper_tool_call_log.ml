@@ -177,6 +177,12 @@ let reset_for_testing () =
   with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation)
 ;;
 
+let pending_truncation_count_for_testing () =
+  with_pending_truncation_lock (fun () ->
+    Invocation_table.clean pending_truncation;
+    Invocation_table.length pending_truncation)
+;;
+
 let store_dir () =
   match (Atomic.get store_state).store with
   | Some store -> Some (Dated_jsonl.base_dir store)

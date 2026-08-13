@@ -237,5 +237,8 @@ val read_latest :
 val reset_for_testing : unit -> unit
 (** Resets the in-memory store reference. For unit tests only. *)
 
+val pending_truncation_count_for_testing : unit -> int
+(** Number of live invocation-scoped truncation observations. Test only. *)
+
 val queued_count_for_testing : unit -> int
 (** Number of queued asynchronous append records. For unit tests only. *)

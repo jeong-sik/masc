@@ -77,6 +77,17 @@ let test_distinct_occurrences_with_repeated_id_do_not_overwrite () =
     (Some "exec-1-000a")
     (Join.take ~invocation:first)
 
+let test_abandoned_join_is_released_with_invocation () =
+  Join.For_testing.clear ();
+  let record_abandoned () =
+    let abandoned = invocation ~turn:4 ~planned_index:2 "cancelled" in
+    Join.record ~invocation:abandoned ~execution_id:"exec-abandoned"
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  check int "cancelled publication leaves no join entry" 0 (Join.For_testing.size ())
+
 (* ── Bridge stamping ──────────────────────────────────── *)
 
 let mk_event ?(event_id = "event-1") ?caused_by payload : Agent_core.Event_bus.event =
@@ -635,6 +646,8 @@ let () =
         ; test_case "missing entry is None" `Quick test_missing_entry_is_none
         ; test_case "repeated ids keep distinct occurrences" `Quick
             test_distinct_occurrences_with_repeated_id_do_not_overwrite
+        ; test_case "cancelled invocation releases abandoned join" `Quick
+            test_abandoned_join_is_released_with_invocation
         ] )
     ; ( "bridge_stamping"
       , [ test_case "tool_called carries tool_use_id" `Quick

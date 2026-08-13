@@ -2,6 +2,20 @@
 
 open Alcotest
 
+(* RFC-0378 A2: test-side attribution builders. *)
+let unattributed_file attempted_path =
+  Agent_observation.File
+    (Agent_observation.Unaddressed
+       { reason = Agent_observation.Unattributed.Unregistered_path; attempted_path })
+;;
+
+let addressed_file ~codebase ~path =
+  match Agent_observation.Code_address.v ~codebase ~path with
+  | Ok address ->
+    Agent_observation.File (Agent_observation.Addressed { address; checkout = None })
+  | Error e -> failwith (Agent_observation.Code_address.invalid_to_string e)
+;;
+
 let with_temp_dir f =
   let dir = Filename.temp_file "ide_bridge_test" "" in
   Sys.remove dir;
@@ -16,6 +30,7 @@ let test_ingest_tool_event () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"fs_write"
       ~keeper_id:"keeper-alpha"
       ~turn_id:"turn-123"
@@ -43,7 +58,6 @@ let test_ingest_turn_event () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_turn_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
       ~turn_id:"turn-456"
       ~keeper_id:"keeper-beta"
       ~phase:"completed"
@@ -67,6 +81,7 @@ let test_ingest_multiple_events () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"fs_write"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -79,6 +94,7 @@ let test_ingest_multiple_events () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -123,6 +139,7 @@ let test_list_events_filters_keeper_and_pages () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-old"
@@ -135,6 +152,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"read_file"
       ~keeper_id:"k2"
       ~turn_id:"t-other"
@@ -147,6 +165,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-new"
@@ -176,6 +195,7 @@ let test_list_events_merges_kinds_newest_first () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-tool"
@@ -188,7 +208,6 @@ let test_list_events_merges_kinds_newest_first () =
       ();
     Ide_bridge.ingest_turn_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
       ~turn_id:"t-turn"
       ~keeper_id:"k1"
       ~phase:"completed"
@@ -224,8 +243,7 @@ let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:(Some resolved)
+      ~attribution:(unattributed_file resolved)
       ~tool_name:"edit_file"
       ~keeper_id:"analyst"
       ~turn_id:"turn-3"
@@ -250,8 +268,7 @@ let test_pathless_hook_stores_no_document () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:None
+      ~attribution:Agent_observation.Pathless
       ~tool_name:"masc_broadcast"
       ~keeper_id:"analyst"
       ~turn_id:"turn-4"
@@ -281,8 +298,7 @@ let test_cursor_from_hook_uses_real_file_and_line () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:(Some "lib/test.ml")
+      ~attribution:(unattributed_file "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -316,8 +332,7 @@ let test_cursor_from_hook_notifies_after_persist () =
       (fun () ->
         Ide_bridge.ingest_tool_event_from_hook
           ~base_path:base_dir
-          ~partition:Ide_paths.Legacy_default
-          ~file_path:(Some "lib/test.ml")
+          ~attribution:(unattributed_file "lib/test.ml")
           ~tool_name:"keeper_ide_annotate"
           ~keeper_id:"k1"
           ~turn_id:"turn-7"
@@ -356,8 +371,7 @@ let test_cursor_notifications_reraise_cancellation () =
           raises_cancel (fun () ->
             Ide_bridge.ingest_tool_event_from_hook
               ~base_path:base_dir
-              ~partition:Ide_paths.Legacy_default
-              ~file_path:(Some "lib/test.ml")
+              ~attribution:(unattributed_file "lib/test.ml")
               ~tool_name:"keeper_ide_annotate"
               ~keeper_id:"k1"
               ~turn_id:"turn-7"
@@ -392,8 +406,7 @@ let test_cursor_from_hook_skips_missing_line () =
     let input = `Assoc [ "file_path", `String "lib/test.ml" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:(Some "lib/test.ml")
+      ~attribution:(unattributed_file "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -413,8 +426,7 @@ let test_cursor_from_hook_skips_missing_focus_mode () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:(Some "lib/test.ml")
+      ~attribution:(unattributed_file "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-7"
@@ -437,8 +449,7 @@ let test_hook_no_file_path () =
     let input = `Assoc [ "command", `String "ls" ] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:None
+      ~attribution:Agent_observation.Pathless
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -463,8 +474,7 @@ let test_hook_summary_truncation () =
     let input = `Assoc [] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:None
+      ~attribution:Agent_observation.Pathless
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -488,8 +498,7 @@ let test_hook_typed_outcome_mapping () =
     let input = `Assoc [] in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:None
+      ~attribution:Agent_observation.Pathless
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -516,6 +525,7 @@ let test_concurrent_ingest () =
       fun () ->
         Ide_bridge.ingest_tool_event
           ~base_path:base_dir
+          ~partition:Ide_paths.Legacy_default
           ~tool_name:"fs_write"
           ~keeper_id:"k1"
           ~turn_id:(Printf.sprintf "t-%d" i)
@@ -682,6 +692,7 @@ let test_list_events_reads_across_segments () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
+      ~partition:Ide_paths.Legacy_default
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-live"
@@ -779,7 +790,7 @@ let test_queue_writer_drains () =
    empty while data piled up in _orphan. *)
 let test_partition_routes_tool_event_and_cursor_by_url () =
   with_temp_dir (fun base_dir ->
-    let by_url = Ide_paths.By_url "github.com/jeong-sik/wkbl" in
+    let by_url = Ide_paths.By_url "github.com_jeong-sik_wkbl" in
     let input =
       `Assoc
         [ "file_path", `String "lib/test.ml"
@@ -789,8 +800,7 @@ let test_partition_routes_tool_event_and_cursor_by_url () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:by_url
-      ~file_path:(Some "lib/test.ml")
+      ~attribution:(addressed_file ~codebase:"github.com_jeong-sik_wkbl" ~path:"lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-1"
@@ -840,8 +850,7 @@ let test_partition_legacy_default_isolated_from_by_url () =
     in
     Ide_bridge.ingest_tool_event_from_hook
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~file_path:(Some "lib/test.ml")
+      ~attribution:(unattributed_file "lib/test.ml")
       ~tool_name:"keeper_ide_annotate"
       ~keeper_id:"k1"
       ~turn_id:"turn-1"

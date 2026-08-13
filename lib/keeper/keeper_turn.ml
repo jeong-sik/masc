@@ -394,7 +394,13 @@ let run_keeper_invocation_turn_admitted_inner
        with
        | Error failure -> turn_resources_error ~surface failure
        | Ok { entry; publication_recovery } ->
-      let meta = entry.meta in
+      (match
+         Keeper_meta_contract.effective_meta_result
+           ~base_path:ctx.config.base_path
+           entry.meta
+       with
+       | Error error -> tool_result_error error
+       | Ok meta ->
       (match
          Keeper_unified_turn_pre_dispatch.load_profile_defaults
            ~base_path:ctx.config.base_path
@@ -814,7 +820,7 @@ let run_keeper_invocation_turn_admitted_inner
               in
               tool_result_ok_data reply_json
 
-))))
+)))))
 
 (* Turn-observation boundary for the chat lane.
 

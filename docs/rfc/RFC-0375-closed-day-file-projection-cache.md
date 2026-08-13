@@ -94,7 +94,7 @@ sound, and it is the constraint that decides whether a given surface can use
 this at all (see §6).
 
 Evaluation: for each day-file in range, take the cached `'acc` if the file is
-closed and its `(path, size, mtime)` boundary matches; otherwise fold it and
+closed and its recorded byte boundary still lies within the file; otherwise fold it and
 cache the result if it is closed. Fold today's file every time — or extend the
 incremental suffix read `count_entries` already does.
 
@@ -222,9 +222,18 @@ would have to include the filter, and the hit rate collapses).
   carries a version by convention, which is a convention that will be forgotten.
   Deriving it from something the compiler checks would be better; it is not
   obvious what.
-- Is `(path, size, mtime)` a sufficient boundary key? `count_entries` already
-  bets that it is. Same-second rewrites preserving size are the failure mode;
-  whether that is reachable here needs an answer, not an assumption.
+- What is the right boundary key? An earlier draft said `(path, size, mtime)`
+  and claimed `count_entries` already bets on it. **It does not.** Its cache is
+  `{ fc_boundary : int; fc_count : int }` — a byte offset and nothing else —
+  and its contract handles change by shrinking rather than by detection: "a
+  boundary past the current size (prune/rewrite) falls back to a full rescan,
+  so the cached count never drifts". That works because a count over a prefix
+  is reusable under append-only; a *projection* over a prefix is reusable the
+  same way only if it is a monoid, which §3 already requires. So the boundary
+  key question may reduce to the same offset, with no mtime involved. Confirm
+  that before designing a richer key — and note that a same-size in-place
+  rewrite stays undetected in both schemes, excluded by the append-only
+  assumption rather than by the key.
 - ~~Does any current surface actually span enough closed files to benefit?~~
   **Answered in §5.5: not the tail-bounded ones.** The remaining question is
   narrower — is `read_range`'s unbounded scan worth a projection cache, or

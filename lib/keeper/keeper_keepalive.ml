@@ -723,6 +723,9 @@ let start_keepalive_outcome_to_string = function
       "shutdown operation %s owns keeper admission"
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Keepalive_registration_rejected
+      Keeper_registry.Registration_intake_token_not_live ->
+    "registry registration rejected an inactive durable-intake token"
+  | Keepalive_registration_rejected
       (Keeper_registry.Registration_lifecycle_reserved owner) ->
     Printf.sprintf
       "keeper lifecycle reservation conflict: %s"
@@ -795,6 +798,7 @@ let record_lifecycle_start_denial
 let start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
+      ?intake_token
       (ctx : _ context)
   (m : keeper_meta)
   : start_keepalive_outcome
@@ -903,11 +907,13 @@ let start_keepalive
          match lifecycle_token with
          | None ->
            Keeper_registry.register_offline_if_admitted
+             ?intake_token
              ~base_path:ctx.config.base_path
              m.name
              m
          | Some token ->
            Keeper_registry.register_offline_if_admitted_for_lifecycle
+             ?intake_token
              token
              ~base_path:ctx.config.base_path
              m.name
@@ -920,6 +926,12 @@ let start_keepalive
            (Keeper_shutdown_types.Operation_id.to_string operation_id);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_shutdown_reserved operation_id)
+       | Error Keeper_registry.Registration_intake_token_not_live ->
+         Log.Keeper.error
+           "start_keepalive: inactive durable-intake token rejected %s"
+           m.name;
+         Keepalive_registration_rejected
+           Keeper_registry.Registration_intake_token_not_live
        | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
          Log.Keeper.warn
            "start_keepalive: lifecycle reservation rejected %s: %s"

@@ -46,7 +46,15 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Local) name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok m -> m
+  (* [sandbox_profile] is not a persisted meta field — it comes from the
+     keeper's TOML profile — so the fixture JSON cannot carry it, and passing
+     it there is rejected as outside the current schema. Set it on the record
+     the fixture returns instead. Before this, the parameter was accepted and
+     dropped: a case asking for [Docker] got a Local keeper, and
+     [keeper_observation_host_path_of_visible_path] returns early for
+     non-Docker profiles, so the container->host mapping the Docker case is
+     named for never ran. *)
+  | Ok m -> { m with Masc.Keeper_meta_contract.sandbox_profile }
   | Error e -> Alcotest.fail e
 ;;
 
@@ -71,11 +79,17 @@ let test_explicit_cwd_scopes_relative_file_path () =
        [ "file_path", `String "lib/foo.ml"; "cwd", `String "repos/masc" ])
 ;;
 
-let test_scratch_path_stays_sandbox_rooted_with_repo_cwd () =
+(* #28533 dropped "scratch" from the sandbox-rooted prefix list, in the same
+   change that removed the tool-schema sentence teaching it: no code ever
+   created that directory, so the only paths shaped like it were ones a model
+   invented from the sentence. A [scratch/…] path is therefore an ordinary
+   relative path now and anchors at the typed [cwd] like any other. "repos"
+   deliberately stays in that list. *)
+let test_scratch_path_anchors_at_cwd_like_any_relative_path () =
   check
     string
     "scratch/file_path"
-    "/sandbox/tester/scratch/notes.md"
+    "/sandbox/tester/repos/masc/scratch/notes.md"
     (observed_path
        [ "file_path", `String "scratch/notes.md"; "cwd", `String "repos/masc" ])
 ;;
@@ -568,9 +582,9 @@ let () =
             `Quick
             test_explicit_cwd_scopes_relative_file_path
         ; test_case
-            "scratch path stays sandbox-rooted with repo cwd"
+            "scratch path anchors at cwd like any relative path"
             `Quick
-            test_scratch_path_stays_sandbox_rooted_with_repo_cwd
+            test_scratch_path_anchors_at_cwd_like_any_relative_path
         ; test_case
             "sandbox-rooted file_path ignores cwd"
             `Quick

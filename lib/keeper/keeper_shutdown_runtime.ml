@@ -143,16 +143,19 @@ let restore_inventory_admission ~config inventory =
                  Ok
                    (String_map.add
                       operation.keeper_name
-                      operation.operation_id
+                      operation
                       fences)
-               | Some existing when Operation_id.equal existing operation.operation_id ->
+               | Some existing
+                 when Operation_id.equal
+                        existing.operation_id
+                        operation.operation_id ->
                  Ok fences
                | Some existing ->
                  Error
                    (Printf.sprintf
                       "multiple current shutdown admission owners: keeper=%s first=%s second=%s"
                       operation.keeper_name
-                      (Operation_id.to_string existing)
+                      (Operation_id.to_string existing.operation_id)
                       (Operation_id.to_string operation.operation_id))))
          | Keeper_shutdown_store.Operation _ -> fences)
       (Ok String_map.empty)
@@ -168,15 +171,16 @@ let restore_inventory_admission ~config inventory =
     let rec restore_corrupt_fences blocked = function
       | [] -> Ok blocked
       | { keeper_name; operation_id } :: rest ->
-        let operation_id =
+        let operation_id, ownerless_policy =
           match String_map.find_opt keeper_name current_fences with
-          | Some current -> current
-          | None -> operation_id
+          | Some current ->
+            current.operation_id, Require_removal_evidence current
+          | None -> operation_id, Restore_corrupt_fence
         in
         (match
            restore_admission
              ~config
-             ~ownerless_policy:Restore_corrupt_fence
+             ~ownerless_policy
              ~keeper_name
              ~operation_id
          with

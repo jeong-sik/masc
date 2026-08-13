@@ -606,13 +606,28 @@ let release_finalized_admission
     ?successor_operation_id
     operation
   =
-  match
-    Keeper_owner_registry.transition_shutdown
-      ~base_path:config.base_path
-      ~keeper_name:operation.keeper_name
-      ~from_operation_id:operation.operation_id
-      ~to_operation_id:successor_operation_id
-  with
+  let release_result =
+    match successor_operation_id with
+    | None ->
+      Keeper_owner_registry.rollback_shutdown
+        ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name
+        ~operation_id:operation.operation_id
+      |> Result.map (function
+        | Keeper_owner.Shutdown_rolled_back ->
+          Keeper_owner.Shutdown_transition_applied
+        | Keeper_owner.Shutdown_not_reserved ->
+          Keeper_owner.Shutdown_transition_already_applied
+        | Keeper_owner.Shutdown_reserved_by_other operation_id ->
+          Keeper_owner.Shutdown_transition_reserved_by_other operation_id)
+    | Some _ ->
+      Keeper_owner_registry.transition_shutdown
+        ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name
+        ~from_operation_id:operation.operation_id
+        ~to_operation_id:successor_operation_id
+  in
+  match release_result with
   | Ok Keeper_owner.Shutdown_transition_applied
   | Ok Keeper_owner.Shutdown_transition_already_applied -> Ok operation
   | Ok (Keeper_owner.Shutdown_transition_reserved_by_other operation_id) ->

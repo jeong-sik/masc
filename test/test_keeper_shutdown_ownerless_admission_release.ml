@@ -183,6 +183,28 @@ let check_create_meta_rejected label ~config operation =
          ~base_path:config.base_path)
 ;;
 
+let create_owner_meta_exn ~config name =
+  match
+    Keeper_owner_registry.create_meta
+      ~base_path:config.Workspace.base_path
+      (fixture_meta_exn name)
+  with
+  | Ok (Some _) -> ()
+  | Ok None -> fail "owner metadata creation removed its snapshot"
+  | Error error ->
+    fail (Keeper_owner_registry.command_error_to_string error)
+;;
+
+let owner_shutdown_operation_id_exn ~config name =
+  match
+    Keeper_owner_registry.shutdown_operation_id
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:name
+  with
+  | Ok operation_id -> operation_id
+  | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error)
+;;
+
 (* A finalized operation for a keeper whose owner and metadata are both gone
    — the [full-cycle-probe] shape: finalization already removed the meta and
    session, the keeper deletion took the owner, and only the admission
@@ -267,6 +289,60 @@ let test_ownerless_finalizer_hands_intake_to_corrupt_successor () =
          | Some actual -> Operation_id.equal actual successor_operation_id
          | None -> false);
       check_create_meta_rejected "corrupt successor" ~config operation)
+;;
+
+let test_plain_release_keeps_owner_fenced_on_intake_conflict () =
+  with_workspace (fun ~config ->
+    let name = "release-intake-conflict" in
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:(Finalized (finalized_after_removal_evidence name))
+        ~cleanup_intent:
+          { reason = Operator_stop_remove_meta; remove_session = true }
+    in
+    create_owner_meta_exn ~config name;
+    (match
+       Keeper_owner_registry.begin_shutdown
+         ~base_path:config.base_path
+         ~keeper_name:name
+         ~operation_id:operation.operation_id
+     with
+     | Ok (Keeper_owner.Shutdown_reserved _)
+     | Ok (Keeper_owner.Shutdown_already_reserved _) -> ()
+     | Error error ->
+       fail (Keeper_owner_registry.command_error_to_string error));
+    (match
+       Keeper_shutdown_intake_fence.rollback_shutdown
+         ~base_path:config.base_path
+         ~keeper_name:name
+         ~operation_id:operation.operation_id
+     with
+     | Keeper_shutdown_intake_fence.Rolled_back -> ()
+     | Keeper_shutdown_intake_fence.Not_reserved
+     | Keeper_shutdown_intake_fence.Reserved_by_other _ ->
+       fail "fixture failed to remove the current intake fence");
+    let conflicting_operation_id = Operation_id.generate () in
+    (match
+       Keeper_shutdown_intake_fence.restore_shutdown
+         ~base_path:config.base_path
+         ~keeper_name:name
+         ~operation_id:conflicting_operation_id
+     with
+     | Keeper_shutdown_intake_fence.Restored -> ()
+     | Keeper_shutdown_intake_fence.Already_restored
+     | Keeper_shutdown_intake_fence.Restore_conflict _ ->
+       fail "fixture failed to install the conflicting intake fence");
+    (match Keeper_shutdown_finalize.run ~config ~entry:None operation with
+     | Error _ -> ()
+     | Ok _ -> fail "conflicting intake fence was reported as released");
+    check
+      (option string)
+      "owner-local admission remains closed after release conflict"
+      (Some (Operation_id.to_string operation.operation_id))
+      (Option.map
+         Operation_id.to_string
+         (owner_shutdown_operation_id_exn ~config name)))
 ;;
 
 (* Metadata that outlived its owner is an inconsistent state, not a removal:
@@ -427,6 +503,63 @@ let test_boot_recovery_rejects_ownerless_dead_tombstone () =
     Dead_tombstone_cleanup
 ;;
 
+let check_corrupt_sibling_does_not_hide_ownerless_retain label reason =
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation
+        ~keeper_name:label
+        ~phase:(Blocked { stage = Meta_remove; detail = "fixture" })
+        ~cleanup_intent:{ reason; remove_session = false }
+    in
+    let corrupt_sibling =
+      { operation with operation_id = Operation_id.generate () }
+    in
+    persist_exn ~config operation;
+    persist_exn ~config corrupt_sibling;
+    let corrupt_path =
+      match
+        Keeper_shutdown_store.path
+          ~config
+          ~keeper_name:label
+          corrupt_sibling.operation_id
+      with
+      | Ok path -> path
+      | Error error ->
+        fail (Keeper_shutdown_store.error_to_string error)
+    in
+    (match Fs_compat.save_file_atomic corrupt_path "{not-json" with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    (match Keeper_shutdown_runtime.recover_at_boot ~config with
+     | [ Error _ ] -> ()
+     | [ Ok _ ] ->
+       fail "corrupt sibling hid the ownerless retain-meta inconsistency"
+     | outcomes ->
+       failf
+         "unexpected corrupt-sibling recovery outcome count: %d"
+         (List.length outcomes));
+    check
+      bool
+      "invalid current operation did not acquire a corrupt-only fence"
+      true
+      (Option.is_none
+         (Keeper_shutdown_intake_fence.shutdown_operation_id
+            ~base_path:config.base_path
+            ~keeper_name:label)))
+;;
+
+let test_corrupt_sibling_does_not_hide_ownerless_operator_retain () =
+  check_corrupt_sibling_does_not_hide_ownerless_retain
+    "ownerless-corrupt-operator-retain"
+    Operator_stop_retain_meta
+;;
+
+let test_corrupt_sibling_does_not_hide_ownerless_dead_tombstone () =
+  check_corrupt_sibling_does_not_hide_ownerless_retain
+    "ownerless-corrupt-dead-tombstone"
+    Dead_tombstone_cleanup
+;;
+
 let pending_completion_operation name =
   let evidence = finalized_after_removal_evidence name in
   make_operation
@@ -548,6 +681,10 @@ let () =
             `Quick
             test_ownerless_finalizer_hands_intake_to_corrupt_successor
         ; Alcotest.test_case
+            "plain release keeps owner fenced on intake conflict"
+            `Quick
+            test_plain_release_keeps_owner_fenced_on_intake_conflict
+        ; Alcotest.test_case
             "meta without owner still fails"
             `Quick
             test_meta_without_owner_still_fails
@@ -559,6 +696,14 @@ let () =
             "predicate rejects retain-meta intents"
             `Quick
             test_predicate_rejects_retain_meta_intents
+        ; Alcotest.test_case
+            "corrupt sibling does not hide ownerless operator-retain"
+            `Quick
+            test_corrupt_sibling_does_not_hide_ownerless_operator_retain
+        ; Alcotest.test_case
+            "corrupt sibling does not hide ownerless dead-tombstone"
+            `Quick
+            test_corrupt_sibling_does_not_hide_ownerless_dead_tombstone
         ] )
     ]
 ;;

@@ -52,7 +52,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     has_substantive_tools || has_validated_evidence
   in
   let is_scheduled_autonomous_cycle =
-    is_scheduled_autonomous_cycle_of_observation observation
+    is_autonomous_turn
+    && is_scheduled_autonomous_cycle_of_observation observation
   in
   let is_board_reactive =
     Keeper_world_observation.has_pending_board_activity observation

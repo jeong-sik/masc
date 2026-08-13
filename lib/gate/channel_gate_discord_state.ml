@@ -487,53 +487,102 @@ let pp_send_error fmt = function
   | Rest_error e ->
     Format.fprintf fmt "discord rest error: %a" Discord_rest_client.pp_error e
 
+type outbound_message =
+  { content : string
+  ; allowed_user_mentions : string list
+  }
+
+let text_chunks ~limit content =
+  let rec split acc rest =
+    if String.equal rest "" then List.rev acc
+    else
+      let chunk, remaining = Discord_rest_client.split_at_codepoint rest ~limit in
+      split (chunk :: acc) remaining
+  in
+  match split [] content with
+  | [] -> [ "" ]
+  | chunks -> chunks
+
+let mention_messages ~limit mention_user_ids =
+  let flush content ids acc =
+    if ids = [] then acc
+    else
+      { content; allowed_user_mentions = List.rev ids } :: acc
+  in
+  let rec group content ids acc = function
+    | [] -> List.rev (flush content ids acc)
+    | id :: rest ->
+      let token = Printf.sprintf "<@%s>" id in
+      let candidate = if ids = [] then token else content ^ " " ^ token in
+      if String.length candidate <= limit
+      then group candidate (id :: ids) acc rest
+      else
+        group token [ id ] (flush content ids acc) rest
+  in
+  group "" [] [] mention_user_ids
+
+let message_chunks_with_mentions ~limit ~content ~mention_user_ids =
+  match mention_user_ids with
+  | [] ->
+    text_chunks ~limit content
+    |> List.map (fun content -> { content; allowed_user_mentions = [] })
+  | user_ids ->
+    let prefix =
+      user_ids |> List.map (Printf.sprintf "<@%s>") |> String.concat " "
+    in
+    let combined = prefix ^ "\n" ^ content in
+    if String.length combined <= limit
+    then [ { content = combined; allowed_user_mentions = user_ids } ]
+    else
+      mention_messages ~limit user_ids
+      @ (text_chunks ~limit content
+         |> List.map (fun content -> { content; allowed_user_mentions = [] }))
+
+module For_testing = struct
+  type nonrec outbound_message = outbound_message =
+    { content : string
+    ; allowed_user_mentions : string list
+    }
+
+  let message_chunks_with_mentions = message_chunks_with_mentions
+end
+
 let send_message ~channel_id ~content ?reply_to_message_id
     ?(mention_user_ids = []) () =
   match bot_token_opt () with
   | None -> Error Missing_token
   | Some token ->
-    let content =
-      match mention_user_ids with
-      | [] -> content
-      | user_ids ->
-        let mentions =
-          user_ids |> List.map (Printf.sprintf "<@%s>") |> String.concat " "
-        in
-        mentions ^ "\n" ^ content
-    in
     let limit = Discord_rest_client.message_content_limit in
-    let len = String.length content in
-    if len <= limit then
-      (match
-         Discord_rest_client.send_message ~token ~channel_id ~content
-           ?reply_to_message_id ~allowed_user_mentions:mention_user_ids ()
-       with
-       | Ok id -> Ok id
-       | Error e -> Error (Rest_error e))
-    else
-      let rec send_chunks first rest =
-        (* Split on a codepoint boundary: the Discord limit is in Unicode
-           scalar values, and a mid-codepoint byte cut yields invalid
-           UTF-8 that Discord rejects with a 400. *)
-        let chunk, remaining_str =
-          Discord_rest_client.split_at_codepoint rest ~limit
-        in
-        let remaining =
-          if remaining_str = "" then None else Some remaining_str
-        in
+    let messages =
+      message_chunks_with_mentions ~limit ~content ~mention_user_ids
+    in
+    let rec send_chunks first last_id = function
+      | [] ->
+        (match last_id with
+         | Some id -> Ok id
+         | None ->
+           Error
+             (Rest_error
+                (Discord_rest_client.Other
+                   { request_id = ""
+                   ; reason = "Discord message chunker produced no output"
+                   ; body_bytes = 0
+                   })))
+      | message :: rest ->
         let ref_id = if first then reply_to_message_id else None in
         match
-          Discord_rest_client.send_message ~token ~channel_id ~content:chunk
+          Discord_rest_client.send_message
+            ~token
+            ~channel_id
+            ~content:message.content
             ?reply_to_message_id:ref_id
-            ~allowed_user_mentions:mention_user_ids ()
+            ~allowed_user_mentions:message.allowed_user_mentions
+            ()
         with
-        | Ok id ->
-            (match remaining with
-             | None -> Ok id
-             | Some next -> send_chunks false next)
+        | Ok id -> send_chunks false (Some id) rest
         | Error e -> Error (Rest_error e)
-      in
-      send_chunks true content
+    in
+    send_chunks true None messages
 
 let edit_message ~channel_id ~message_id ~content () =
   match bot_token_opt () with

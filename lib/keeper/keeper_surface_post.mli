@@ -41,6 +41,16 @@ val user_mentions_of_args :
     ids are collapsed and more than {!max_user_mentions} ids are rejected.
     Non-empty mentions on dashboard or another surface are invalid. *)
 
+val validate_user_mentions_against_roster :
+  target:post_target ->
+  messages:Keeper_chat_store.chat_message list ->
+  string list ->
+  (unit, string) result
+(** Fail closed unless every requested mention id appears as a user speaker on
+    the exact resolved Discord channel or Slack channel/thread in [messages].
+    The persisted chat lane is the roster SSOT; syntactically valid but stale,
+    hallucinated, or cross-channel ids are rejected before any effect. *)
+
 type delivery_target =
   | Delivered_to_dashboard
   | Delivered_to_discord of { channel_id : string }

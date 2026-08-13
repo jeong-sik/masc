@@ -810,6 +810,25 @@ let test_connector_post_replay_retains_terminal_target () =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let test_connector_post_replay_defaults_legacy_mentions () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  let input =
+    `Assoc
+      [ "connector", `String "discord"
+      ; "channel_id", `String "D-before-mentions"
+      ; "content", `String "already approved"
+      ]
+  in
+  match connector_post_replay_of_gate_input input with
+  | Ok (Replay_discord_post { mention_user_ids; input = decoded_input; _ }) ->
+    Alcotest.check (Alcotest.list Alcotest.string)
+      "missing legacy field means no mentions" [] mention_user_ids;
+    Alcotest.check json "durable input is not rewritten" input decoded_input
+  | Ok (Replay_slack_post _) ->
+    Alcotest.fail "Discord request decoded as Slack"
+  | Error detail -> Alcotest.fail detail
+;;
+
 let test_connector_post_rejects_heuristic_or_truncated_input () =
   List.iter
     (fun input ->
@@ -952,6 +971,10 @@ let () =
             "connector replay retains terminal target"
             `Quick
             test_connector_post_replay_retains_terminal_target
+        ; Alcotest.test_case
+            "legacy connector replay defaults missing mentions"
+            `Quick
+            test_connector_post_replay_defaults_legacy_mentions
         ; Alcotest.test_case
             "memory write replay keeps exact input"
             `Quick

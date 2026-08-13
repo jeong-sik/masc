@@ -76,6 +76,47 @@ let user_mentions_of_args ~surface args =
       Error
         "mention_user_ids is supported only for Slack and Discord posts")
 
+let message_matches_target target (message : Keeper_chat_store.chat_message) =
+  match target, message.surface with
+  | To_discord { channel_id = target_channel },
+    Some (Surface_ref.Discord { channel_id; _ }) ->
+    String.equal target_channel channel_id
+  | To_slack
+      { channel_id = target_channel; thread_ts = target_thread; blocks = _ },
+    Some (Surface_ref.Slack { channel_id; thread_ts; _ }) ->
+    String.equal target_channel channel_id && target_thread = thread_ts
+  | To_dashboard, _
+  | To_discord _, _
+  | To_slack _, _ -> false
+
+let validate_user_mentions_against_roster ~target ~messages mention_user_ids =
+  if mention_user_ids = [] then Ok ()
+  else
+    let roster = Hashtbl.create 8 in
+    List.iter
+      (fun (message : Keeper_chat_store.chat_message) ->
+         if
+           Keeper_chat_store.Role.equal message.role Keeper_chat_store.Role.User
+           && message_matches_target target message
+         then
+           match message.speaker with
+           | Some { speaker_id = Some id; _ } when String.trim id <> "" ->
+             Hashtbl.replace roster (String.trim id) ()
+           | Some { speaker_id = Some _; _ }
+           | Some { speaker_id = None; _ }
+           | None -> ())
+      messages;
+    let missing =
+      List.filter (fun id -> not (Hashtbl.mem roster id)) mention_user_ids
+    in
+    match missing with
+    | [] -> Ok ()
+    | _ ->
+      Error
+        (Printf.sprintf
+           "mention_user_ids are not in the current participant roster for the resolved target: %s"
+           (String.concat ", " missing))
+
 type delivery_target =
   | Delivered_to_dashboard
   | Delivered_to_discord of { channel_id : string }

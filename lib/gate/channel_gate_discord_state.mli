@@ -193,3 +193,16 @@ val trigger_typing :
 (** Trigger Discord's typing indicator for [channel_id]. Bot token is
     resolved from [DISCORD_BOT_TOKEN] at call time, matching
     {!send_message}. *)
+
+module For_testing : sig
+  type outbound_message =
+    { content : string
+    ; allowed_user_mentions : string list
+    }
+
+  val message_chunks_with_mentions :
+    limit:int ->
+    content:string ->
+    mention_user_ids:string list ->
+    outbound_message list
+end

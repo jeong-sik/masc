@@ -182,10 +182,30 @@ let status_block_json ({ Keeper_chat_blocks.kind } : Keeper_chat_blocks.status_b
     ; ("text", `Assoc [ ("type", `String "mrkdwn"); ("text", `String body) ])
     ]
 
+let escape_markdown_mentions text =
+  let length = String.length text in
+  let buffer = Buffer.create length in
+  let rec copy index =
+    if index < length then
+      if
+        text.[index] = '<'
+        && index + 1 < length
+        && (text.[index + 1] = '@' || text.[index + 1] = '!')
+      then (
+        Buffer.add_string buffer "&lt;";
+        copy (index + 1)
+      ) else (
+        Buffer.add_char buffer text.[index];
+        copy (index + 1)
+      )
+  in
+  copy 0;
+  Buffer.contents buffer
+
 let markdown_block_json text =
   let text =
     redact text
-    |> escape_mrkdwn_text
+    |> escape_markdown_mentions
     |> fun value -> truncate_to_limit value slack_markdown_limit
   in
   `Assoc [ "type", `String "markdown"; "text", `String text ]

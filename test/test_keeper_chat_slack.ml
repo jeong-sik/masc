@@ -104,12 +104,17 @@ let test_limit_blocks_adds_visible_omission_notice () =
 (* ── content_blocks_of_text ─────────────────────────────────────── *)
 
 let test_content_blocks_use_native_markdown_for_plain_text () =
-  let blocks = S.content_blocks_of_text "**just plain text**" in
+  let blocks = S.content_blocks_of_text "> quoted\n\n**just plain text**\n<@U123> <!channel>" in
   check int "one markdown block" 1 (List.length blocks);
   let s = json_string (List.hd blocks) in
   check bool "native markdown block" true (contains s "\"type\":\"markdown\"");
   check bool "standard markdown stays intact" true
-    (contains s "**just plain text**")
+    (contains s "**just plain text**");
+  check bool "blockquote marker stays intact" true (contains s "> quoted");
+  check bool "raw user mention is suppressed" false (contains s "<@U123>");
+  check bool "raw broadcast mention is suppressed" false (contains s "<!channel>");
+  check bool "user mention is escaped" true (contains s "&lt;@U123>");
+  check bool "broadcast mention is escaped" true (contains s "&lt;!channel>")
 
 let test_content_blocks_detects_markdown_image () =
   let blocks =

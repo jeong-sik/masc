@@ -486,6 +486,42 @@ let test_thread_registry_round_trip () =
     (Discord_state.is_known_thread ~channel_id:thread_id);
   check int "count restored" before (Discord_state.registered_thread_count ())
 
+let test_large_mention_allowlist_keeps_tokens_whole () =
+  let user_ids =
+    List.init 100 (fun index -> Printf.sprintf "12345678901234%04d" index)
+  in
+  let messages =
+    Discord_state.For_testing.message_chunks_with_mentions
+      ~limit:2000
+      ~content:"body"
+      ~mention_user_ids:user_ids
+  in
+  check bool "large allowlist uses multiple messages" true
+    (List.length messages > 1);
+  check (list string) "every allowed id is retained exactly once" user_ids
+    (List.concat_map
+       (fun (message : Discord_state.For_testing.outbound_message) ->
+          message.allowed_user_mentions)
+       messages);
+  List.iter
+    (fun (message : Discord_state.For_testing.outbound_message) ->
+       check bool "message remains within Discord limit" true
+         (String.length message.content <= 2000);
+       List.iter
+         (fun user_id ->
+            check bool "allowed mention has a complete visible token" true
+              (String_util.contains_substring
+                 message.content
+                 (Printf.sprintf "<@%s>" user_id)))
+         message.allowed_user_mentions)
+    messages;
+  match List.rev messages with
+  | last :: _ ->
+    check string "content is delivered after mention groups" "body" last.content;
+    check (list string) "content does not reopen mentions" []
+      last.allowed_user_mentions
+  | [] -> fail "mention chunker produced no messages"
+
 let () =
   Eio_main.run @@ fun _env ->
   run "channel_gate_discord_state"
@@ -535,5 +571,10 @@ let () =
         [
           test_case "register lookup update unregister" `Quick
             test_thread_registry_round_trip;
+        ] );
+      ( "message_chunks",
+        [
+          test_case "large mention allowlist keeps tokens whole" `Quick
+            test_large_mention_allowlist_keeps_tokens_whole;
         ] );
     ]

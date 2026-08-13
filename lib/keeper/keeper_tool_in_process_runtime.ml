@@ -988,7 +988,7 @@ let connector_post_replay_of_gate_input input =
     | _ ->
       Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
-  let required_string_list key fields =
+  let optional_string_list key fields =
     match
       List.filter_map
         (fun (name, value) -> if String.equal name key then Some value else None)
@@ -1010,7 +1010,7 @@ let connector_post_replay_of_gate_input input =
       decode [] values
     | [ _ ] ->
       Error (Printf.sprintf "approved connector_post %s must be an array" key)
-    | [] -> Error (Printf.sprintf "approved connector_post is missing %s" key)
+    | [] -> Ok []
     | _ -> Error (Printf.sprintf "approved connector_post repeats %s" key)
   in
   let reject_unknown ~allowed fields =
@@ -1033,7 +1033,11 @@ let connector_post_replay_of_gate_input input =
     let* connector = required_string "connector" fields in
     let* channel_id = required_string "channel_id" fields in
     let* content = required_string "content" fields in
-    let* mention_user_ids = required_string_list "mention_user_ids" fields in
+    (* Approvals persisted before rich mentions have no field at all. New
+       producers always write the canonical empty list, while replay keeps the
+       exact old no-mention meaning instead of making an approved effect
+       undecodable across the upgrade. *)
+    let* mention_user_ids = optional_string_list "mention_user_ids" fields in
     let* validated_mention_user_ids =
       Keeper_surface_post.user_mentions_of_args
         ~surface:connector
@@ -1342,7 +1346,23 @@ let handle_surface_post_with_outcome
         fail
           ~effect_disposition:Tool_result.Proven_pre_effect
           (Keeper_surface_post.error_json message)
-      | Ok Keeper_surface_post.To_dashboard ->
+      | Ok target ->
+        let messages =
+          Keeper_chat_store.load
+            ~base_dir:config.Workspace.base_path
+            ~keeper_name:meta.name
+        in
+        (match
+           Keeper_surface_post.validate_user_mentions_against_roster
+             ~target ~messages mention_user_ids
+         with
+         | Error message ->
+           fail
+             ~effect_disposition:Tool_result.Proven_pre_effect
+             (Keeper_surface_post.error_json message)
+         | Ok () ->
+         match target with
+         | Keeper_surface_post.To_dashboard ->
         (match
            Keeper_chat_store.append_assistant_message_result
              ~base_dir:config.Workspace.base_path
@@ -1364,7 +1384,7 @@ let handle_surface_post_with_outcome
            succeed
              Keeper_surface_post.To_dashboard
              (Keeper_surface_post.ok_json ~surface ()))
-    | Ok (Keeper_surface_post.To_discord { channel_id } as target) ->
+         | Keeper_surface_post.To_discord { channel_id } ->
       let input =
         connector_post_gate_input
           ~connector:surface
@@ -1382,9 +1402,7 @@ let handle_surface_post_with_outcome
         (Replay_discord_post
            { input; channel_id; content = safe_content; mention_user_ids })
       |> Keeper_tool_execution.with_surface_post_receipt target
-    | Ok
-        (Keeper_surface_post.To_slack { channel_id; thread_ts; blocks = _ } as
-         target) ->
+         | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks = _ } ->
       let slack_blocks =
         Keeper_chat_slack.message_blocks_of_text ~mention_user_ids safe_content
       in
@@ -1412,7 +1430,7 @@ let handle_surface_post_with_outcome
            ; blocks = slack_blocks
            ; mention_user_ids
            })
-      |> Keeper_tool_execution.with_surface_post_receipt target)
+      |> Keeper_tool_execution.with_surface_post_receipt target))
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =

@@ -486,6 +486,92 @@ let test_dashboard_rejects_nonempty_mentions () =
   | Error _ -> ()
   | Ok _ -> fail "dashboard accepted connector mention ids"
 
+let roster_message ~surface ~speaker_id : Store.chat_message =
+  { id = "roster-message"
+  ; role = Store.Role.User
+  ; content = "hello"
+  ; ts = Some 1.0
+  ; attachments = None
+  ; tool_call_id = None
+  ; tool_call_name = None
+  ; surface = Some surface
+  ; conversation_id = None
+  ; external_message_id = None
+  ; workspace_id = None
+  ; speaker =
+      Some
+        { Store.speaker_id = Some speaker_id
+        ; speaker_name = None
+        ; speaker_authority = Store.External
+        }
+  ; audio = None
+  ; blocks = None
+  ; mentions = []
+  ; kind = Store.Row_kind.Utterance
+  ; turn_ref = None
+  ; stream_lifecycle = None
+  ; delivery_key = None
+  }
+
+let test_mentions_require_exact_resolved_target_roster () =
+  let messages =
+    [ roster_message
+        ~surface:
+          (Masc.Surface_ref.Discord
+             { guild_id = None
+             ; channel_id = "D-current"
+             ; parent_channel_id = None
+             ; thread_id = None
+             })
+        ~speaker_id:"1234567890"
+    ; roster_message
+        ~surface:
+          (Masc.Surface_ref.Discord
+             { guild_id = None
+             ; channel_id = "D-other"
+             ; parent_channel_id = None
+             ; thread_id = None
+             })
+        ~speaker_id:"9999999999"
+    ; roster_message
+        ~surface:
+          (Masc.Surface_ref.Slack
+             { team_id = None
+             ; channel_id = "C-current"
+             ; thread_ts = Some "thread-other"
+             })
+        ~speaker_id:"UOTHER"
+    ]
+  in
+  check (result unit string) "current Discord participant is allowed" (Ok ())
+    (SP.validate_user_mentions_against_roster
+       ~target:(SP.To_discord { channel_id = "D-current" })
+       ~messages
+       [ "1234567890" ]);
+  (match
+     SP.validate_user_mentions_against_roster
+       ~target:(SP.To_discord { channel_id = "D-current" })
+       ~messages
+       [ "9999999999" ]
+   with
+   | Error message ->
+     check bool "cross-channel id is named" true
+       (Astring.String.is_infix ~affix:"9999999999" message)
+   | Ok () -> fail "cross-channel Discord participant was mentionable");
+  match
+    SP.validate_user_mentions_against_roster
+      ~target:
+        (SP.To_slack
+           { channel_id = "C-current"
+           ; thread_ts = Some "thread-current"
+           ; blocks = None
+           })
+      ~messages
+      [ "UOTHER" ]
+  with
+  | Error _ -> ()
+  | Ok () -> fail "participant from another Slack thread was mentionable"
+
 let () =
   run "keeper_surface_post"
     [
@@ -536,6 +622,8 @@ let () =
             test_discord_mentions_reject_broad_or_named_targets
         ; test_case "dashboard rejects connector mentions" `Quick
             test_dashboard_rejects_nonempty_mentions
+        ; test_case "requires exact resolved target roster" `Quick
+            test_mentions_require_exact_resolved_target_roster
         ] );
       ( "terminal receipt",
         [

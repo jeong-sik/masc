@@ -1,3 +1,4 @@
+import { keeperStreamContract } from './keeper-stream-contract'
 import {
   formatKeeperVisibleReply,
   keeperTurnOutcomeSuppressesReply,
@@ -26,7 +27,6 @@ import {
   activeStreamOperationId,
   activeStreamRequestId,
   getStreamController,
-  keeperClientObservedSseStreamContract,
   keeperThreads,
   keeperSending,
   keeperStreamStartedAt,
@@ -444,7 +444,7 @@ export function applyKeeperOperationTurnEvent(
       requestId: operationId,
       delivery: 'sending',
       streamState: 'opening',
-      streamContract: keeperClientObservedSseStreamContract(
+      streamContract: keeperStreamContract(
         'sse_event',
         'backend_stream_event',
         { eventName: 'keeper_chat_operation_event', requestId: operationId },
@@ -501,7 +501,7 @@ export function applyKeeperStreamEvent(
         ...entry,
         streamState: 'finalizing',
         delivery: 'streaming',
-        streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName }),
+        streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName }),
       }
     })
   }
@@ -513,7 +513,7 @@ export function applyKeeperStreamEvent(
         assistantEntryId,
         'opening',
         'sending',
-        keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
+        keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'RUN_STARTED' }),
       )
       return null
     case 'TEXT_MESSAGE_START': {
@@ -544,7 +544,7 @@ export function applyKeeperStreamEvent(
         assistantEntryId,
         'streaming',
         'streaming',
-        keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TEXT_MESSAGE_START' }),
+        keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TEXT_MESSAGE_START' }),
       )
       return null
     }
@@ -610,7 +610,7 @@ export function applyKeeperStreamEvent(
         timestamp: new Date().toISOString(),
         delivery: 'streaming',
         streamState: 'streaming',
-        streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_START' }),
+        streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_START' }),
         details: null,
       })
       return null
@@ -662,7 +662,7 @@ export function applyKeeperStreamEvent(
             ...entry,
             delivery: 'streaming',
             streamState: 'streaming',
-            streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
+            streamContract: keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'TOOL_CALL_END' }),
           }
         })
       }
@@ -678,7 +678,7 @@ export function applyKeeperStreamEvent(
           ...entry,
           delivery: 'delivered',
           streamState: null,
-          streamContract: keeperClientObservedSseStreamContract(
+          streamContract: keeperStreamContract(
             'sse_event',
             'backend_stream_event',
             { eventName: 'KEEPER_TOOL_RESULT_READY' },
@@ -697,7 +697,7 @@ export function applyKeeperStreamEvent(
           rawText: queued ? 'Queued' : entry.rawText,
           delivery: queued ? 'queued' : 'sending',
           streamState: queued ? null : 'opening',
-          streamContract: keeperClientObservedSseStreamContract(
+          streamContract: keeperStreamContract(
             'sse_event',
             'backend_stream_event',
             { eventName: 'KEEPER_CHAT_OPERATION_ACCEPTED', requestId: operationId },
@@ -711,7 +711,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONNECTED' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONNECTED' }),
         )
         return null
       }
@@ -732,7 +732,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_MESSAGE_START' }),
         )
         return null
       }
@@ -761,7 +761,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_PING' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_STREAM_PING' }),
         )
         return null
       }
@@ -783,7 +783,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_START' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_START' }),
         )
         return null
       }
@@ -800,7 +800,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_STOP' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_CONTENT_BLOCK_STOP' }),
         )
         return null
       }
@@ -817,7 +817,7 @@ export function applyKeeperStreamEvent(
             assistantEntryId,
             'thinking',
             'streaming',
-            keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_DELTA' }),
+            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_DELTA' }),
           )
         }
         return null
@@ -845,7 +845,7 @@ export function applyKeeperStreamEvent(
             assistantEntryId,
             'thinking',
             'streaming',
-            keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_SIGNATURE_DELTA' }),
+            keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_THINKING_SIGNATURE_DELTA' }),
           )
         }
         return null
@@ -857,7 +857,7 @@ export function applyKeeperStreamEvent(
           assistantEntryId,
           'streaming',
           'streaming',
-          keeperClientObservedSseStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MEDIA_DELTA' }),
+          keeperStreamContract('sse_event', 'backend_stream_event', { eventName: 'KEEPER_MEDIA_DELTA' }),
         )
         return null
       }
@@ -880,7 +880,7 @@ export function applyKeeperStreamEvent(
           rawText: rawText || entry.rawText,
           delivery: 'delivered',
           streamState: null,
-          streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+          streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
             eventName: 'KEEPER_CONTINUATION_CHECKPOINT',
           }),
         }))
@@ -905,7 +905,7 @@ export function applyKeeperStreamEvent(
           text: '',
           delivery: 'delivered',
           streamState: null,
-          streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+          streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
             eventName: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
           }),
         }))
@@ -980,7 +980,7 @@ export function applyKeeperStreamEvent(
           delivery,
           streamState: null,
           error: null,
-          streamContract: keeperClientObservedSseStreamContract(
+          streamContract: keeperStreamContract(
             'sse_event',
             'backend_terminal_event',
             { eventName: 'RUN_FINISHED', requestId: source.operationId },

@@ -5,7 +5,7 @@ import '../styles/keeper-workspace.css'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { ChatTranscript } from '../components/chat/primitives'
-import { keeperClientObservedSseStreamContract } from '../keeper-state'
+import { keeperStreamContract } from '../keeper-stream-contract'
 import {
   resetToolCallOutputs,
   type ToolCallOutputHydrationContract,
@@ -67,7 +67,7 @@ export const hydrationFailedEntries: KeeperConversationEntry[] = [
     turnRef: 'tool-output-failure#1',
     delivery: 'delivered',
     streamState: null,
-    streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+    streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
       eventName: 'RUN_FINISHED',
       turnRef: 'tool-output-failure#1',
       reason: 'terminal event observed before tool output hydration failed',
@@ -113,7 +113,7 @@ export const coverageGapEntries: KeeperConversationEntry[] = [
     turnRef: 'tool-output-failure#2',
     delivery: 'delivered',
     streamState: null,
-    streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+    streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
       eventName: 'RUN_FINISHED',
       turnRef: 'tool-output-failure#2',
       reason: 'terminal event observed after an older tool-output tail hydrated',

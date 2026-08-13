@@ -1,3 +1,4 @@
+import { keeperStreamContract } from '../keeper-stream-contract'
 import { html } from 'htm/preact'
 import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
@@ -37,7 +38,6 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
-  keeperStreamContract,
   setRecordValue,
 } from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'

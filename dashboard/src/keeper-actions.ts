@@ -1,3 +1,4 @@
+import { keeperStreamContract } from './keeper-stream-contract'
 import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
@@ -46,8 +47,6 @@ import {
   clearActiveStream,
   clearActiveStreamRequestId,
   finalizeAssistantEntry,
-  keeperClientObservedSseStreamContract,
-  keeperStreamContract,
   releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
   normalizeKeeperProbeResult,
@@ -1095,7 +1094,7 @@ export async function sendKeeperThreadMessage(
       streamState: null,
       timestamp: new Date().toISOString(),
       error: null,
-      streamContract: keeperClientObservedSseStreamContract('sse_event', 'backend_terminal_event', {
+      streamContract: keeperStreamContract('sse_event', 'backend_terminal_event', {
         eventName: 'RUN_FINISHED',
       }),
     })

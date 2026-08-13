@@ -83,3 +83,27 @@ export function extractArray(value: unknown, keys: string[] = []): unknown[] {
   }
   return []
 }
+
+// Strict counterpart to asStringArray: that one answers "give me whatever
+// strings are in here" and silently drops the rest, which is the right policy
+// for display lists. This one answers "is this a well-formed string array",
+// so a single non-string element rejects the whole value. Payload fields that
+// feed contracts use this; do not swap them.
+export function asStrictStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  const values = value.map(item => asString(item))
+  if (values.some(item => item === undefined)) return null
+  return values as string[]
+}
+
+// Drops keys whose value is undefined so an optional-field record can be built
+// with `field: maybe ?? undefined` without the key surviving as an explicit
+// undefined (which JSON.stringify and structural equality both treat as
+// present).
+export function withoutUndefined<const T extends Record<string, unknown>>(record: T): T {
+  const next: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(record)) {
+    if (value !== undefined) next[key] = value
+  }
+  return next as T
+}

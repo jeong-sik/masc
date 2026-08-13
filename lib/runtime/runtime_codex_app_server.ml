@@ -571,7 +571,10 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
       | "completed" ->
         let* items = required_member stage "items" turn_fields in
         let* terminal_final, terminal_fallback = messages_of_items ~stage items in
-        let visible_text = Option.filter (fun text -> String.trim text <> "") in
+        let visible_text = function
+          | Some text when String.trim text <> "" -> Some text
+          | Some _ | None -> None
+        in
         let text =
           match
             visible_text terminal_final,
@@ -661,7 +664,9 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       if String.equal method_ "item/agentMessage/delta"
       then (
         emit_stream_event on_stream_event (Text_delta delta);
-        Some (Option.value seen_fallback ~default:"" ^ delta))
+        match seen_fallback with
+        | None -> Some delta
+        | Some text -> Some (text ^ delta))
       else seen_fallback
     in
     await_turn_terminal

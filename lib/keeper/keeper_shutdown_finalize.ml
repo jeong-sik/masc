@@ -693,6 +693,7 @@ let deliver_finalized_completion ~config ?successor_operation_id operation =
             ?successor_operation_id
             persisted))
   | Prepared
+  | Joining_lanes
   | Joined_idle
   | Finalizing_tasks _
   | Cleanup_ready _
@@ -856,6 +857,7 @@ let run ~config ~entry ?successor_operation_id operation =
   | Finalized _ ->
     deliver_finalized_completion ~config ?successor_operation_id operation
   | Prepared
+  | Joining_lanes
   | Reconciliation_required _
   | Blocked _
   | Superseded _ -> Error Unsupported_phase

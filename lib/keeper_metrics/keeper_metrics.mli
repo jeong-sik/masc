@@ -127,6 +127,7 @@ type t =
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
+  | MemoryLaneRejectedDraining
   | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight

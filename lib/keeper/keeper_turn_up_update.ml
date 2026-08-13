@@ -433,6 +433,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   | Keepalive_identity_unrepairable
                   | Keepalive_registration_rejected _
                   | Keepalive_fiber_start_rejected _
+                  | Keepalive_memory_lane_not_ready _
                   | Keepalive_lane_ownership_lost
                   | Keepalive_fork_rejected _ ) as rejected ->
                   tool_result_error

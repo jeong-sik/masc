@@ -619,8 +619,10 @@ let run_best_effort
                     "memory os librarian cancelled lane=%s before commit"
                     exact_lane_id)
                  (* Cancellation is not the pass declining its own turn, so the
-                    cadence counter is left alone and the next due turn retries
-                    as it would after any other incomplete pass. *)
+                    cadence counter remains due. A later turn can schedule a
+                    new pass, but it does not replay this immutable input;
+                    graceful lifecycle boundaries therefore drain accepted
+                    work instead of cancelling it. *)
                ~cadence_deferred:false);
            raise exn
          | exn ->

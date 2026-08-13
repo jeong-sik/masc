@@ -68,6 +68,8 @@ let test_inline_when_uninitialized () =
   | Lane.Submitted -> Alcotest.fail "expected Ran_inline, got Submitted"
   | Lane.Coalesced -> Alcotest.fail "expected Ran_inline, got Coalesced"
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
+  | Lane.Rejected_draining ->
+    Alcotest.fail "expected Ran_inline, got Rejected_draining"
 ;;
 
 (* A raising unit in the inline path is contained and returns Ran_inline. *)
@@ -81,6 +83,8 @@ let test_inline_contains_raise () =
   | Lane.Submitted -> Alcotest.fail "expected Ran_inline, got Submitted"
   | Lane.Coalesced -> Alcotest.fail "expected Ran_inline, got Coalesced"
   | Lane.Dropped -> Alcotest.fail "expected Ran_inline, got Dropped"
+  | Lane.Rejected_draining ->
+    Alcotest.fail "expected Ran_inline, got Rejected_draining"
 ;;
 
 (* Two units for the same keeper run one after another: the second only starts
@@ -257,12 +261,16 @@ let test_releases_on_cancel () =
           | Lane.Submitted -> ()
           | Lane.Coalesced -> Alcotest.fail "first cancel unit unexpectedly coalesced"
           | Lane.Ran_inline -> Alcotest.fail "cancel test unexpectedly ran inline"
-          | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped");
+          | Lane.Dropped -> Alcotest.fail "cancel test unexpectedly dropped"
+          | Lane.Rejected_draining ->
+            Alcotest.fail "cancel test unexpectedly crossed a drain boundary");
          (match latest with
           | Lane.Submitted -> ()
           | Lane.Coalesced -> Alcotest.fail "first latest unit unexpectedly coalesced"
-         | Lane.Ran_inline -> Alcotest.fail "latest cancel unit unexpectedly ran inline"
-          | Lane.Dropped -> Alcotest.fail "latest cancel unit unexpectedly dropped");
+          | Lane.Ran_inline -> Alcotest.fail "latest cancel unit unexpectedly ran inline"
+          | Lane.Dropped -> Alcotest.fail "latest cancel unit unexpectedly dropped"
+          | Lane.Rejected_draining ->
+            Alcotest.fail "latest cancel unit unexpectedly crossed a drain boundary");
          Eio.Promise.await started;
          Eio.Switch.fail sw Cancel_lane_test))
    with
@@ -274,48 +282,190 @@ let test_releases_on_cancel () =
   | None -> Alcotest.fail "keeper entry missing after cancel"
 ;;
 
-let test_keeper_shutdown_cancels_and_joins_librarian () =
+let test_keeper_shutdown_drains_and_joins_librarian () =
   Lane.For_testing.reset ();
   let cancelled = ref false in
+  let current_completed = ref false in
+  let latest_completed = ref false in
+  let raced_after_drain_ran = ref false in
+  let reopened_completed = ref false in
   Eio_main.run (fun _env ->
     Eio.Switch.run (fun sw ->
       Lane.init ~sw;
       let started, set_started = Eio.Promise.create () in
-      let never, _set_never = Eio.Promise.create () in
+      let release, set_release = Eio.Promise.create () in
       let submitted =
         Lane.submit
           ~base_path
           ~keeper_name:"shutdown-owner"
           (fun () ->
              Eio.Promise.resolve set_started ();
-             try Eio.Promise.await never with
+             try
+               Eio.Promise.await release;
+               current_completed := true
+             with
              | Eio.Cancel.Cancelled _ as exn ->
                cancelled := true;
                raise exn)
       in
       (match submitted with
        | Lane.Submitted -> ()
-       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
+       | Lane.Rejected_draining ->
          Alcotest.fail "shutdown Librarian was not submitted");
       Eio.Promise.await started;
       (match
-         Lane.cancel_and_join_librarian
+         Lane.submit
            ~base_path
            ~keeper_name:"shutdown-owner"
+           (fun () -> latest_completed := true)
        with
-       | Lane.Librarian_joined Keeper_lane.Shutdown_requested -> ()
-       | Lane.Librarian_joined _ ->
-         Alcotest.fail "shutdown Librarian joined with a non-shutdown outcome"
-       | Lane.No_librarian_work -> Alcotest.fail "shutdown missed active Librarian"
-       | Lane.Librarian_join_failed detail -> Alcotest.fail detail);
-      Alcotest.(check bool) "provider scope observed cancellation" true !cancelled;
+       | Lane.Submitted -> ()
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
+       | Lane.Rejected_draining ->
+         Alcotest.fail "latest Librarian unit was not submitted");
+      let joined, set_joined = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve
+          set_joined
+          (Lane.drain_and_join_librarian
+             ~base_path
+             ~keeper_name:"shutdown-owner"));
+      Eio.Fiber.yield ();
+      (match
+         Lane.submit
+           ~base_path
+           ~keeper_name:"shutdown-owner"
+           (fun () -> raced_after_drain_ran := true)
+       with
+       | Lane.Rejected_draining -> ()
+       | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+         Alcotest.fail "post-drain submission crossed the lifecycle boundary");
+      (match Lane.begin_librarian_lifecycle ~base_path ~keeper_name:"shutdown-owner" with
+       | Error Lane.Librarian_drain_still_active -> ()
+       | Ok () -> Alcotest.fail "new lifecycle opened while the prior drain was active");
+      Alcotest.(check bool)
+        "join waits for the accepted current unit"
+        true
+        (Option.is_none (Eio.Promise.peek joined));
+      Alcotest.(check bool) "provider scope was not cancelled" false !cancelled;
+      Eio.Promise.resolve set_release ();
+      (match Eio.Promise.await joined with
+       | Ok Lane.Librarian_drained -> ()
+       | Ok Lane.No_librarian_work -> Alcotest.fail "shutdown missed active Librarian"
+       | Error error -> Alcotest.fail (Lane.librarian_drain_error_to_string error));
+      Alcotest.(check bool) "current unit completed" true !current_completed;
+      Alcotest.(check bool) "accepted latest unit completed" true !latest_completed;
+      Alcotest.(check bool)
+        "racing post-drain unit did not run"
+        false
+        !raced_after_drain_ran;
+      Alcotest.(check bool) "provider scope stayed uncancelled" false !cancelled;
       Alcotest.(check (option int))
         "terminal join drained all Librarian work"
         (Some 0)
         (Lane.For_testing.pending
            ~base_path
+           ~keeper_name:"shutdown-owner");
+      (match
+         Lane.submit
+           ~base_path
            ~keeper_name:"shutdown-owner"
-)))
+           (fun () -> Alcotest.fail "closed lifecycle accepted later work")
+       with
+       | Lane.Rejected_draining -> ()
+       | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+         Alcotest.fail "terminal drain fence reopened without a new lifecycle");
+      (match Lane.begin_librarian_lifecycle ~base_path ~keeper_name:"shutdown-owner" with
+       | Ok () -> ()
+       | Error error -> Alcotest.fail (Lane.lifecycle_open_error_to_string error));
+      let reopened_done, set_reopened_done = Eio.Promise.create () in
+      (match
+         Lane.submit
+           ~base_path
+           ~keeper_name:"shutdown-owner"
+           (fun () ->
+              reopened_completed := true;
+              Eio.Promise.resolve set_reopened_done ())
+       with
+       | Lane.Submitted -> ()
+       | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
+       | Lane.Rejected_draining ->
+         Alcotest.fail "new lifecycle could not submit Librarian work");
+      Eio.Promise.await reopened_done;
+      Alcotest.(check bool) "new lifecycle work completed" true !reopened_completed))
+;;
+
+let test_empty_drain_fences_late_submission () =
+  Lane.For_testing.reset ();
+  let late_ran = ref false in
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun sw ->
+      Lane.init ~sw;
+      (match
+         Lane.drain_and_join_librarian
+           ~base_path
+           ~keeper_name:"empty-drain-owner"
+       with
+       | Ok Lane.No_librarian_work -> ()
+       | Ok Lane.Librarian_drained ->
+         Alcotest.fail "empty drain reported completed work"
+       | Error error ->
+         Alcotest.fail (Lane.librarian_drain_error_to_string error));
+      (match
+         Lane.submit
+           ~base_path
+           ~keeper_name:"empty-drain-owner"
+           (fun () -> late_ran := true)
+       with
+       | Lane.Rejected_draining -> ()
+       | Lane.Submitted | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+         Alcotest.fail "empty drain left no lifecycle fence");
+      Alcotest.(check bool) "late empty-drain unit did not run" false !late_ran))
+;;
+
+let test_drain_reports_parent_cancellation () =
+  Lane.For_testing.reset ();
+  Eio_main.run (fun _env ->
+    Eio.Switch.run (fun _root_sw ->
+      (try
+         Eio.Switch.run (fun executor_sw ->
+           Lane.init ~sw:executor_sw;
+           let started, set_started = Eio.Promise.create () in
+           let never, _set_never = Eio.Promise.create () in
+           (match
+              Lane.submit
+                ~base_path
+                ~keeper_name:"cancelled-drain-owner"
+                (fun () ->
+                   Eio.Promise.resolve set_started ();
+                   Eio.Promise.await never)
+            with
+            | Lane.Submitted -> ()
+            | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
+           | Lane.Rejected_draining ->
+              Alcotest.fail "cancellation fixture was not submitted");
+           Eio.Promise.await started;
+           Eio.Switch.fail executor_sw Cancel_lane_test)
+       with
+       | Cancel_lane_test -> ());
+      (* The owner and its cleanup have already finished. Shutdown must still
+         observe that exact terminal receipt instead of treating the detached
+         entry as ownerless success. *)
+      match
+        Lane.drain_and_join_librarian
+          ~base_path
+          ~keeper_name:"cancelled-drain-owner"
+      with
+      | Error (Lane.Librarian_interrupted (Keeper_lane.Cancelled_by_parent _)) -> ()
+      | Error error ->
+        Alcotest.failf
+          "unexpected typed drain error: %s"
+          (Lane.librarian_drain_error_to_string error)
+      | Ok Lane.No_librarian_work ->
+        Alcotest.fail "cancelled active drain was reported as no work"
+      | Ok Lane.Librarian_drained ->
+        Alcotest.fail "parent-cancelled drain was reported as completed"))
 ;;
 
 (* Submitting against a finished executor switch must not leak the pending
@@ -341,9 +491,27 @@ let test_finished_switch_drops_without_leak () =
    | Lane.Dropped -> ()
    | Lane.Submitted -> Alcotest.fail "expected Dropped, got Submitted"
    | Lane.Coalesced -> Alcotest.fail "expected Dropped, got Coalesced"
-   | Lane.Ran_inline -> Alcotest.fail "expected Dropped, got Ran_inline");
+   | Lane.Ran_inline -> Alcotest.fail "expected Dropped, got Ran_inline"
+   | Lane.Rejected_draining ->
+     Alcotest.fail "expected Dropped, got Rejected_draining");
   match Lane.For_testing.pending ~base_path ~keeper_name:"k1" with
-  | Some 0 -> ()
+  | Some 0 ->
+    (match Lane.drain_and_join_librarian ~base_path ~keeper_name:"k1" with
+     | Error (Lane.Librarian_interrupted (Keeper_lane.Failed _)) -> ()
+     | Error error ->
+       Alcotest.failf
+         "finished-switch drain returned an unexpected error: %s"
+         (Lane.librarian_drain_error_to_string error)
+     | Ok Lane.No_librarian_work ->
+       Alcotest.fail "finished-switch drop lost its terminal owner receipt"
+     | Ok Lane.Librarian_drained ->
+       Alcotest.fail "finished-switch drop was reported as completed");
+    (match Lane.begin_librarian_lifecycle ~base_path ~keeper_name:"k1" with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.fail
+         ("finished-switch receipt prevented lifecycle reopen: "
+          ^ Lane.lifecycle_open_error_to_string error))
   | Some n -> Alcotest.failf "pending leaked after finished switch submit: %d" n
   | None -> Alcotest.fail "keeper entry missing after finished switch submit"
 ;;
@@ -428,7 +596,8 @@ let test_post_turn_librarian_live_config_boundaries () =
         in
         (match blocker with
          | Lane.Submitted -> ()
-         | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped ->
+         | Lane.Coalesced | Lane.Ran_inline | Lane.Dropped
+         | Lane.Rejected_draining ->
            Alcotest.fail "Librarian blocker was not submitted");
         Eio.Promise.await started;
         run_post_turn ~config ~meta ~turn;
@@ -489,9 +658,17 @@ let () =
         ; Alcotest.test_case "releases on raise" `Quick test_releases_on_raise
         ; Alcotest.test_case "releases on cancel" `Quick test_releases_on_cancel
         ; Alcotest.test_case
-            "Keeper shutdown cancels and joins Librarian"
+            "Keeper shutdown drains and joins Librarian"
             `Quick
-            test_keeper_shutdown_cancels_and_joins_librarian
+            test_keeper_shutdown_drains_and_joins_librarian
+        ; Alcotest.test_case
+            "drain reports parent cancellation"
+            `Quick
+            test_drain_reports_parent_cancellation
+        ; Alcotest.test_case
+            "empty drain fences late submission"
+            `Quick
+            test_empty_drain_fences_late_submission
         ; Alcotest.test_case
             "finished switch drops without leak"
             `Quick

@@ -955,14 +955,37 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
            (Lane.Id.equal expected actual)
        | (Shutdown_types.Registered_lane _ | Shutdown_types.Dormant_meta), _ ->
          fail "shutdown lane ownership changed during round-trip");
-      let joined =
+      let joining =
         { loaded with
           revision = loaded.revision + 1
+        ; phase = Shutdown_types.Joining_lanes
+        ; updated_at = Masc_domain.now_iso ()
+        }
+      in
+      (match Shutdown_store.replace ~config ~expected_revision:loaded.revision joining with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let joining_loaded =
+        match Shutdown_store.load ~config ~keeper_name:meta.name operation_id with
+        | Ok loaded -> loaded
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match joining_loaded.phase with
+       | Shutdown_types.Joining_lanes -> ()
+       | _ -> fail "durable lane-join phase did not round-trip");
+      let joined =
+        { joining_loaded with
+          revision = joining_loaded.revision + 1
         ; phase = Shutdown_types.Joined_idle
         ; updated_at = Masc_domain.now_iso ()
         }
       in
-      (match Shutdown_store.replace ~config ~expected_revision:loaded.revision joined with
+      (match
+         Shutdown_store.replace
+           ~config
+           ~expected_revision:joining_loaded.revision
+           joined
+       with
        | Ok () -> ()
        | Error error -> fail (Shutdown_store.error_to_string error));
       let stale =
@@ -1073,6 +1096,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
            (Printexc.to_string worker_failure)
            detail
        | Shutdown_types.Prepared
+       | Shutdown_types.Joining_lanes
        | Shutdown_types.Joined_idle
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
@@ -2417,15 +2441,19 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Error error -> fail (Lane.start_error_to_string error));
       Eio.Fiber.yield ();
       let librarian_started, resolve_librarian_started = Eio.Promise.create () in
-      let librarian_never, _resolve_librarian_never = Eio.Promise.create () in
+      let librarian_release, resolve_librarian_release = Eio.Promise.create () in
       let librarian_cancelled = ref false in
+      let librarian_completed = ref false in
       (match
          Memory_lane.submit
            ~base_path:config.base_path
            ~keeper_name:name
            (fun () ->
               Eio.Promise.resolve resolve_librarian_started ();
-              try Eio.Promise.await librarian_never with
+              try
+                Eio.Promise.await librarian_release;
+                librarian_completed := true
+              with
               | Eio.Cancel.Cancelled _ as exn ->
                 librarian_cancelled := true;
                 raise exn)
@@ -2433,24 +2461,65 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Memory_lane.Submitted -> ()
        | Memory_lane.Coalesced
        | Memory_lane.Ran_inline
-       | Memory_lane.Dropped -> fail "shutdown Librarian was not submitted");
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "shutdown Librarian was not submitted");
       Eio.Promise.await librarian_started;
+      let shutdown_done, resolve_shutdown_done = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve
+          resolve_shutdown_done
+          (Shutdown_prepare_join.run
+             ~config
+             ~entry
+             ~request:
+               { actor = "operator"
+               ; cleanup_intent = retain_operator_cleanup
+               }));
+      let rec await_durable_joining_lanes () =
+        match Eio.Promise.peek shutdown_done with
+        | Some (Ok _) -> fail "shutdown completed before Librarian release"
+        | Some (Error error) -> fail (Shutdown_prepare_join.error_to_string error)
+        | None ->
+          (match
+             owner_shutdown_operation_id_exn
+               ~base_path:config.base_path
+               ~keeper_name:name
+           with
+           | None ->
+             Eio.Fiber.yield ();
+             await_durable_joining_lanes ()
+           | Some operation_id ->
+             (match Shutdown_store.load ~config ~keeper_name:name operation_id with
+              | Ok { phase = Shutdown_types.Joining_lanes; _ } -> operation_id
+              | Ok { phase = Shutdown_types.Prepared; _ } ->
+                Eio.Fiber.yield ();
+                await_durable_joining_lanes ()
+              | Ok operation ->
+                fail
+                  (Printf.sprintf
+                     "Librarian wait entered unexpected durable revision=%d"
+                     operation.revision)
+              | Error (Shutdown_store.Not_found _) ->
+                Eio.Fiber.yield ();
+                await_durable_joining_lanes ()
+              | Error error -> fail (Shutdown_store.error_to_string error)))
+      in
+      let _joining_operation_id = await_durable_joining_lanes () in
+      check bool
+        "shutdown remains pending while accepted Librarian work runs"
+        true
+        (Option.is_none (Eio.Promise.peek shutdown_done));
+      Eio.Promise.resolve resolve_librarian_release ();
       let operation =
-        match
-          Shutdown_prepare_join.run
-            ~config
-            ~entry
-            ~request:
-              { actor = "operator"
-              ; cleanup_intent = retain_operator_cleanup
-              }
-        with
+        match Eio.Promise.await shutdown_done with
         | Ok operation -> operation
         | Error error -> fail (Shutdown_prepare_join.error_to_string error)
       in
       (match operation.phase with
        | Shutdown_types.Joined_idle -> ()
        | Shutdown_types.Prepared
+       | Shutdown_types.Joining_lanes
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
@@ -2462,9 +2531,13 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
         true
         (Option.is_some operation.join_evidence);
       check bool
-        "shutdown cancelled the detached Librarian before returning"
-        true
+        "shutdown preserved the detached Librarian through completion"
+        false
         !librarian_cancelled;
+      check bool
+        "shutdown drained the detached Librarian before returning"
+        true
+        !librarian_completed;
       check
         (option int)
         "shutdown joined the detached Librarian"
@@ -2482,8 +2555,176 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
            "shutdown admission fence retains operation identity"
            true
            (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
-      | None ->
+       | None ->
          fail "shutdown admission fence reopened before finalization"))
+
+let test_keeper_shutdown_owner_failure_persists_blocked_join () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "shutdown-owner-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-owner-failure-lane" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let prepared = ref None in
+      let exception Close_owner_before_join in
+      (try
+         Eio.Switch.run @@ fun owner_sw ->
+         install_owner_inventory_exn ~sw:owner_sw config;
+         let entry = R.For_testing.register ~base_path:config.base_path name meta in
+         let operation =
+           match
+             Shutdown_prepare_join.prepare
+               ~config
+               ~entry
+               ~request:
+                 { actor = "operator"
+                 ; cleanup_intent = retain_operator_cleanup
+                 }
+           with
+           | Ok operation -> operation
+           | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+         in
+         prepared := Some (entry, operation);
+         Eio.Switch.fail owner_sw Close_owner_before_join
+       with
+       | Close_owner_before_join -> ());
+      let entry, operation =
+        match !prepared with
+        | Some prepared -> prepared
+        | None -> fail "shutdown owner failure fixture was not prepared"
+      in
+      let blocked =
+        match Shutdown_prepare_join.join_prepared ~config ~entry ~operation with
+        | Error (Shutdown_prepare_join.Join_failed blocked) -> blocked
+        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+        | Ok _ -> fail "closed owner was reported as a successful lane join"
+      in
+      (match blocked.phase with
+       | Shutdown_types.Blocked { stage = Shutdown_types.Lane_join; detail } ->
+         check bool "owner failure records a non-empty join detail" true
+           (String.length detail > 0)
+       | _ -> fail "owner failure did not become durable Blocked/Lane_join");
+      let loaded =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:name
+            operation.operation_id
+        with
+        | Ok loaded -> loaded
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      match loaded.phase with
+      | Shutdown_types.Blocked { stage = Shutdown_types.Lane_join; _ } -> ()
+      | _ -> fail "reloaded owner failure remained stranded in Joining_lanes")
+
+let test_keeper_shutdown_blocks_join_replay_after_record_failure () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir "shutdown-join-record-retry" in
+  Fun.protect
+    ~finally:(fun () ->
+      Memory_lane.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let name = "shutdown-join-record-retry-lane" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      install_owner_inventory_exn ~sw config;
+      let entry = R.For_testing.register ~base_path:config.base_path name meta in
+      Memory_lane.init ~sw;
+      let librarian_started, resolve_librarian_started = Eio.Promise.create () in
+      let librarian_release, resolve_librarian_release = Eio.Promise.create () in
+      (match
+         Memory_lane.submit
+           ~base_path:config.base_path
+           ~keeper_name:name
+           (fun () ->
+              Eio.Promise.resolve resolve_librarian_started ();
+              Eio.Promise.await librarian_release)
+       with
+       | Memory_lane.Submitted -> ()
+       | Memory_lane.Coalesced
+       | Memory_lane.Ran_inline
+       | Memory_lane.Dropped
+       | Memory_lane.Rejected_draining ->
+         fail "record retry Librarian fixture was not submitted");
+      Eio.Promise.await librarian_started;
+      let operation =
+        match
+          Shutdown_prepare_join.prepare
+            ~config
+            ~entry
+            ~request:
+              { actor = "operator"
+              ; cleanup_intent = retain_operator_cleanup
+              }
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+      in
+      let first_join, resolve_first_join = Eio.Promise.create () in
+      Eio.Fiber.fork ~sw (fun () ->
+        Eio.Promise.resolve
+          resolve_first_join
+          (Shutdown_prepare_join.join_prepared ~config ~entry ~operation));
+      let rec await_joining () =
+        match Shutdown_store.load ~config ~keeper_name:name operation.operation_id with
+        | Ok ({ phase = Shutdown_types.Joining_lanes; _ } as joining) -> joining
+        | Ok _ | Error (Shutdown_store.Not_found _) ->
+          Eio.Fiber.yield ();
+          await_joining ()
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let joining = await_joining () in
+      let operation_path =
+        match Shutdown_store.path ~config ~keeper_name:name operation.operation_id with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let held_path = operation_path ^ ".held" in
+      Unix.rename operation_path held_path;
+      Eio.Promise.resolve resolve_librarian_release ();
+      (match Eio.Promise.await first_join with
+       | Error (Shutdown_prepare_join.Join_record_update_failed _) -> ()
+       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+       | Ok _ -> fail "missing shutdown record did not fail final join persistence");
+      Unix.rename held_path operation_path;
+      let blocked =
+        match Shutdown_prepare_join.join_prepared ~config ~entry ~operation:joining with
+        | Error (Shutdown_prepare_join.Join_failed blocked) -> blocked
+        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
+        | Ok _ -> fail "Joining_lanes replay guessed a successful prior join"
+      in
+      (match blocked.phase with
+       | Shutdown_types.Blocked { stage = Shutdown_types.Lane_join; _ } -> ()
+       | _ -> fail "join replay did not fail closed as Blocked/Lane_join");
+      match
+        Shutdown_store.load ~config ~keeper_name:name operation.operation_id
+      with
+      | Ok { phase = Shutdown_types.Blocked { stage = Shutdown_types.Lane_join; _ }; _ } ->
+        ()
+      | Ok _ -> fail "reloaded join replay remained stranded in Joining_lanes"
+      | Error error -> fail (Shutdown_store.error_to_string error))
 
 let test_keeper_shutdown_prepare_joins_not_started_lane () =
   Eio_main.run @@ fun env ->
@@ -2520,6 +2761,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
       (match operation.phase with
        | Shutdown_types.Joined_idle -> ()
        | Shutdown_types.Prepared
+       | Shutdown_types.Joining_lanes
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
@@ -2783,6 +3025,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Finalized evidence ->
          check int "no pending confirms" 0 evidence.cleanup.pending_confirms_removed
        | Shutdown_types.Prepared
+       | Shutdown_types.Joining_lanes
        | Shutdown_types.Joined_idle
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
@@ -3093,6 +3336,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
            ; _
            } -> check bool "exact dead lane unregistered" true registry_unregistered
        | Shutdown_types.Prepared
+       | Shutdown_types.Joining_lanes
        | Shutdown_types.Joined_idle
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
@@ -3159,6 +3403,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
            registry_unregistered;
          check bool "dead tombstone meta retained" false meta_removed
        | Shutdown_types.Prepared
+       | Shutdown_types.Joining_lanes
        | Shutdown_types.Joined_idle
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
@@ -4256,6 +4501,10 @@ let () =
         test_dashboard_purge_resolution_is_fail_closed;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
+      test_case "shutdown owner failure persists blocked join" `Quick
+        test_keeper_shutdown_owner_failure_persists_blocked_join;
+      test_case "shutdown blocks join replay after record failure" `Quick
+        test_keeper_shutdown_blocks_join_replay_after_record_failure;
       test_case "shutdown prepare joins not-started lane" `Quick
         test_keeper_shutdown_prepare_joins_not_started_lane;
       test_case "shutdown prepare failure rolls back admission fence" `Quick

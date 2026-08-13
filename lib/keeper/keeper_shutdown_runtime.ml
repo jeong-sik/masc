@@ -307,6 +307,7 @@ let finalize_if_ready ~config ~entry (operation : Keeper_shutdown_types.t) =
          (worker_key operation)
          (Keeper_shutdown_finalize.error_to_string error))
   | Prepared
+  | Joining_lanes
   | Reconciliation_required _
   | Blocked _
   | Superseded _ -> ()
@@ -314,7 +315,8 @@ let finalize_if_ready ~config ~entry (operation : Keeper_shutdown_types.t) =
 
 let run_worker ~config ~entry (operation : Keeper_shutdown_types.t) =
   match operation.phase with
-  | Prepared ->
+  | Prepared
+  | Joining_lanes ->
     (match entry with
      | None ->
        persist_unhandled_failure
@@ -509,6 +511,19 @@ let settled_reconciliation_state
   }
 ;;
 
+let blocked_interrupted_join_state (operation : Keeper_shutdown_types.t) =
+  { operation with
+    revision = operation.revision + 1
+  ; phase =
+      Blocked
+        { stage = Lane_join
+        ; detail =
+            "server process ended while joining Keeper and Librarian lanes; Librarian completion is unknown"
+        }
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
 let recover_operation
     ~config
     ?successor_operation_id
@@ -527,6 +542,7 @@ let recover_operation
   let operation_result =
     match operation.phase with
     | Prepared -> persist_recovered (recovered_join_state operation)
+    | Joining_lanes -> persist_recovered (blocked_interrupted_join_state operation)
     | Reconciliation_required turn ->
       persist_recovered (settled_reconciliation_state operation turn)
     | Joined_idle
@@ -551,6 +567,7 @@ let recover_operation
          recovered
        |> Result.map_error Keeper_shutdown_finalize.error_to_string
      | Prepared
+     | Joining_lanes
      | Reconciliation_required _
      | Blocked _
      | Superseded _ -> Ok recovered)

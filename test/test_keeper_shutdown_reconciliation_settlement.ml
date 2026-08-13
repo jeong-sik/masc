@@ -141,6 +141,7 @@ let recover_exn ~config operation =
 let phase_label operation =
   match operation.phase with
   | Prepared -> "prepared"
+  | Joining_lanes -> "joining_lanes"
   | Joined_idle -> "joined_idle"
   | Finalizing_tasks _ -> "finalizing_tasks"
   | Cleanup_ready _ -> "cleanup_ready"
@@ -241,6 +242,44 @@ let test_recovery_still_settles_prepared_without_turn () =
       (requires_admission_fence recovered))
 ;;
 
+(* [Joining_lanes] proves that the previous process crossed the point where
+   the primary and Librarian lanes were being joined. Unlike [Prepared], boot
+   cannot infer whether the accepted Librarian input committed. Recovery must
+   retain admission and name that uncertainty instead of silently finalizing. *)
+let test_recovery_blocks_interrupted_lane_join () =
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation
+        ~keeper_name:"reconciliation-joining-lanes"
+        ~phase:Joining_lanes
+        ~turn_disposition:No_inflight_turn
+    in
+    write_keeper_meta_exn ~config ~keeper_name:operation.keeper_name;
+    persist_exn ~config operation;
+    let recovered = recover_exn ~config operation in
+    (match recovered.phase with
+     | Blocked { stage = Lane_join; detail } ->
+       check string
+         "blocked evidence names unknown Librarian completion"
+         "server process ended while joining Keeper and Librarian lanes; Librarian completion is unknown"
+         detail
+     | _ -> fail "interrupted lane join did not recover as blocked");
+    check bool "interrupted join retains admission" true (requires_admission_fence recovered);
+    match
+      Keeper_shutdown_store.load
+        ~config
+        ~keeper_name:operation.keeper_name
+        operation.operation_id
+    with
+    | Ok { phase = Blocked { stage = Lane_join; _ }; _ } -> ()
+    | Ok persisted ->
+      failf "durable interrupted join phase=%s" (phase_label persisted)
+    | Error error ->
+      failf
+        "durable interrupted join missing: %s"
+        (Keeper_shutdown_store.error_to_string error))
+;;
+
 (* A shutdown whose lane is unregistered by a concurrent fiber (supervisor,
    keepalive, or a sibling shutdown) must not block. Reading the registry one
    step earlier already returns [Ok ()] for an absent lane, so blocking when
@@ -282,6 +321,10 @@ let () =
             "still settles a prepared operation without a turn"
             `Quick
             test_recovery_still_settles_prepared_without_turn
+        ; test_case
+            "blocks a process interrupted during lane join"
+            `Quick
+            test_recovery_blocks_interrupted_lane_join
         ] )
     ]
 ;;

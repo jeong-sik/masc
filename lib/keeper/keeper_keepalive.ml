@@ -703,6 +703,7 @@ type start_keepalive_outcome =
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
+  | Keepalive_memory_lane_not_ready of Keeper_memory_lane.lifecycle_open_error
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
 
@@ -740,6 +741,8 @@ let start_keepalive_outcome_to_string = function
     Printf.sprintf
       "Fiber_started rejected: %s"
       (Keeper_state_machine.transition_error_to_string error)
+  | Keepalive_memory_lane_not_ready error ->
+    Keeper_memory_lane.lifecycle_open_error_to_string error
   | Keepalive_lane_ownership_lost -> "lane ownership lost before fiber fork"
   | Keepalive_fork_rejected error -> Keeper_lane.start_error_to_string error
 
@@ -955,6 +958,38 @@ let start_keepalive
            (Keeper_registry.Registration_event_queue_unavailable
               { keeper_name; detail })
        | Ok reg ->
+      (match
+         Keeper_memory_lane.begin_librarian_lifecycle
+           ~base_path:ctx.config.base_path
+           ~keeper_name:m.name
+       with
+       | Error error ->
+         let detail = Keeper_memory_lane.lifecycle_open_error_to_string error in
+         Log.Keeper.error
+           "start_keepalive: Librarian lifecycle not ready keeper=%s error=%s"
+           m.name
+           detail;
+         (match Keeper_lane.reject_before_start reg.lane ~reason:(Failure detail) with
+          | Ok () -> ()
+          | Error lane_error ->
+            Log.Keeper.error
+              "start_keepalive: failed to close lane after Librarian lifecycle rejection keeper=%s error=%s"
+              m.name
+              (Keeper_lane.start_error_to_string lane_error));
+         (match Keeper_registry.unregister_exact reg with
+          | Keeper_registry.Exact_unregistered
+          | Keeper_registry.Exact_entry_missing -> ()
+          | Keeper_registry.Exact_entry_replaced ->
+            Log.Keeper.warn
+              "start_keepalive: newer registry entry replaced Librarian-rejected lane keeper=%s"
+              m.name
+          | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+            Log.Keeper.warn
+              "start_keepalive: lifecycle reservation retained Librarian-rejected lane keeper=%s owner=%s"
+              m.name
+              (Keeper_lifecycle_reservation.snapshot_to_string owner));
+         Keepalive_memory_lane_not_ready error
+       | Ok () ->
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,
@@ -1132,13 +1167,14 @@ let start_keepalive
         let cleanup_tracking outcome =
           let librarian_join_result =
             match
-              Keeper_memory_lane.cancel_and_join_librarian
+              Keeper_memory_lane.drain_and_join_librarian
                 ~base_path:ctx.config.Workspace.base_path
                 ~keeper_name:live_meta.name
             with
-            | Keeper_memory_lane.No_librarian_work
-            | Keeper_memory_lane.Librarian_joined _ -> Ok ()
-            | Keeper_memory_lane.Librarian_join_failed detail -> Error detail
+            | Ok Keeper_memory_lane.No_librarian_work
+            | Ok Keeper_memory_lane.Librarian_drained -> Ok ()
+            | Error error ->
+              Error (Keeper_memory_lane.librarian_drain_error_to_string error)
           in
           let terminal_result =
             match librarian_join_result with
@@ -1243,7 +1279,7 @@ let start_keepalive
              ~keeper_name:live_meta.name
              ~failure_reason:(Keeper_registry.Exception detail);
            Keepalive_fork_rejected error))
-        )
+        ))
 ;;
 
 type joined_stop =

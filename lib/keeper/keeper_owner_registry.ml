@@ -616,27 +616,45 @@ let cancel_queued_operation ~base_path ~keeper_name operation_id =
 ;;
 
 let create_meta ~base_path meta =
-  match find_pool base_path with
-  | Error error -> Error (Command_lookup_failed error)
-  | Ok pool ->
-    Keeper_lifecycle_reservation.with_key_lock
+  match
+    Keeper_shutdown_intake_fence.run_durable_intake_if_open
       ~base_path
       ~keeper_name:meta.Keeper_meta_contract.name
-      (fun () ->
-         match
-           Keeper_lifecycle_reservation.authorize
+      (fun _intake_token ->
+         match find_pool base_path with
+         | Error error -> Error (Command_lookup_failed error)
+         | Ok pool ->
+           Keeper_lifecycle_reservation.with_key_lock
              ~base_path
              ~keeper_name:meta.name
-             ()
-         with
-         | Error reservation -> Error (Command_lifecycle_reserved reservation)
-         | Ok () ->
-           (match ensure_empty_in_pool pool meta.name with
-            | Error error -> Error (Command_lookup_failed error)
-            | Ok owner ->
-              (match Keeper_owner.apply_meta owner (Keeper_owner_reducer.Create meta) with
-               | Error error -> Error (Command_rejected error)
-               | Ok committed -> Ok committed)))
+             (fun () ->
+                match
+                  Keeper_lifecycle_reservation.authorize
+                    ~base_path
+                    ~keeper_name:meta.name
+                    ()
+                with
+                | Error reservation -> Error (Command_lifecycle_reserved reservation)
+                | Ok () ->
+                  (match ensure_empty_in_pool pool meta.name with
+                   | Error error -> Error (Command_lookup_failed error)
+                   | Ok owner ->
+                     (match
+                        Keeper_owner.apply_meta
+                          owner
+                          (Keeper_owner_reducer.Create meta)
+                      with
+                      | Error error -> Error (Command_rejected error)
+                      | Ok committed -> Ok committed))))
+  with
+  | Keeper_shutdown_intake_fence.Intake_committed result -> result
+  | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
+    Error
+      (shutdown_fence_error
+         (Printf.sprintf
+            "keeper=%s create_meta_operation=%s"
+            meta.name
+            (Keeper_shutdown_types.Operation_id.to_string operation_id)))
 ;;
 
 let all_projections ~base_path =

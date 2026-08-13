@@ -97,6 +97,7 @@ normal_targets=(
   @test/runtest-test_keeper_codex_error_carriage
   @test/runtest-test_keeper_persistence_span_history
   @test/runtest-test_keeper_rotation_eligibility_census
+  @test/runtest-test_keeper_shutdown_ownerless_admission_release
   @test/runtest-test_keeper_toml_accessor_matrix
   @test/runtest-test_keeper_turn_dispatch_authority
   @test/runtest-test_runtime_quota_window

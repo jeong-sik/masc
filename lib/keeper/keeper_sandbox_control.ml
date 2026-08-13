@@ -395,13 +395,13 @@ let checkout_json ~budget ~catalog (checkout : Keeper_playground_checkouts.check
   let name = checkout.name in
   let origin =
     with_inspection_budget budget (fun timeout_sec ->
-      Repo_git.get_origin_url ~timeout_sec ~local_path:checkout_abs ())
+      Repo_git.get_origin_url ~timeout_sec ~local_path:checkout_abs ()
+      |> Result.map_error Repo_git.origin_lookup_error_to_string)
   in
   let catalog_resolution =
     match origin with
     | Ok origin -> resolve_catalog ~catalog ~origin
-    | Error error ->
-      Origin_unavailable (Repo_git.origin_lookup_error_to_string error)
+    | Error error -> Origin_unavailable error
   in
   let repository : Repo_manager_types.repository =
     match catalog_resolution with

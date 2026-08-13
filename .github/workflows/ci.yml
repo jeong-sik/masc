@@ -1704,7 +1704,7 @@ jobs:
               echo "FAIL Keeper Real-World Gate: acceptance result=$ACCEPTANCE_RESULT" >&2
               exit 1
             fi
-            echo "PASS Keeper Real-World Gate: trusted event=$EVENT_NAME ref=$EVENT_REF workflow=$EVENT_WORKFLOW_REF candidate=$TESTED_SOURCE_SHA passed RW01-RW16"
+            echo "PASS Keeper Real-World Gate: trusted event=$EVENT_NAME ref=$EVENT_REF workflow=$EVENT_WORKFLOW_REF candidate=$TESTED_SOURCE_SHA passed complete mission catalog"
             exit 0
           fi
           if [ "$EVENT_NAME" != "pull_request" ]; then

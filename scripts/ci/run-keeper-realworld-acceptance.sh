@@ -96,6 +96,8 @@ mkdir -p "$OUTPUT_DIR" "$base_path/.masc/config"
 cp "$ROOT_DIR/config/runtime.toml" "$base_path/.masc/config/runtime.toml"
 cp "$ROOT_DIR/config/agent-core-models-overlay.toml" \
   "$base_path/.masc/config/agent-core-models-overlay.toml"
+cp "$ROOT_DIR/scripts/fixtures/keeper-multi-collaboration/tool-compositions.toml" \
+  "$base_path/.masc/config/tool-compositions.toml"
 cp "$MANIFEST" "$OUTPUT_DIR/runtime-artifact-manifest.json"
 
 server_log="$OUTPUT_DIR/server.log"

@@ -291,7 +291,7 @@ describe('KeeperToolCallInspector render', () => {
     expect(compositionRow?.getAttribute('data-composition-run')).toBe('run-42')
     expect(compositionRow?.getAttribute('data-composition-execution')).toBe('inline')
     expect(compositionRow?.getAttribute('data-tool-call-disposition')).toBe('failed')
-    expect(text).toContain('↳ publish_report · inline')
+    expect(compositionRow?.textContent).toContain('↳ publish_report · inline')
   })
 
   it('renders a typed deferred composition action without counting it as failed', async () => {

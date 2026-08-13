@@ -168,6 +168,28 @@ describe('ToolQualityPanel', () => {
     expect(fetchToolQuality).toHaveBeenCalledTimes(2)
   })
 
+  it('renders typed deferred observations without treating them as failures', async () => {
+    const fetchToolQuality = vi.fn().mockResolvedValue({
+      ...payload,
+      total: 0,
+      success: 0,
+      failure: 0,
+      deferred: 1,
+      success_rate: 0,
+    })
+    const { ToolQualityPanel } = await loadPanel({ fetchToolQuality })
+
+    await act(async () => {
+      render(html`<${ToolQualityPanel} />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.textContent).not.toContain('도구 호출 데이터 없음')
+    expect(container.textContent).toContain('대기')
+    expect(container.textContent).toContain('1')
+  })
+
   it('normalizes missing tool metric fields before rendering', async () => {
     const fetchMock = vi.fn().mockResolvedValue(okJson(payloadWithMissingToolMetrics))
     vi.stubGlobal('fetch', fetchMock)

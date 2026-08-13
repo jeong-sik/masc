@@ -35,6 +35,20 @@ type turn_span_stat = {
 let seconds_per_hour = Masc_time_constants.hour
 let persistent_turn_window_hours = 24.0
 let recent_turn_max_age_hours = 24.0
+
+type persistence_tier =
+  { id : string
+  ; required_span_hours : float
+  }
+
+let persistence_tiers =
+  [ { id = "1h"; required_span_hours = 1.0 }
+  ; { id = "2h"; required_span_hours = 2.0 }
+  ; { id = "4h"; required_span_hours = 4.0 }
+  ; { id = "24h"; required_span_hours = persistent_turn_window_hours }
+  ]
+;;
+
 let decision_tail_max_bytes = 512 * 1024
 let decision_tail_max_lines = 5000
 
@@ -272,14 +286,25 @@ let latest_age_hours_json ~now stat =
   | Some latest -> `Float (latest_age_hours ~now latest)
   | None -> `Null
 
-let has_persistent_turn_span ~now stat =
-  stat.recent_interaction_count >= 2
+let has_persistent_turn_span_for ~required_span_hours ~now stat =
+  Float.is_finite required_span_hours
+  && required_span_hours > 0.0
+  && stat.recent_interaction_count >= 2
   &&
   match stat.first_ts, stat.latest_ts with
   | Some first, Some latest ->
-    hours_between first latest >= persistent_turn_window_hours
+    first <= latest
+    && latest <= now
+    && hours_between first latest >= required_span_hours
     && latest_age_hours ~now latest <= recent_turn_max_age_hours
   | _ -> false
+
+let has_persistent_turn_span ~now stat =
+  has_persistent_turn_span_for
+    ~required_span_hours:persistent_turn_window_hours
+    ~now
+    stat
+;;
 
 let turn_span_evidence_json ~now keeper_name stat =
   `Assoc [

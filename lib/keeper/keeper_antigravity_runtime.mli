@@ -5,8 +5,9 @@ type attempt_outcome =
   ; effect_disposition : Keeper_provider_attempt_effect.t
   }
 (** One Antigravity candidate result plus its typed effect observation.
-    Validation/setup and a typed process-spawn failure are provably
-    pre-dispatch; all other client outcomes remain fail-closed. *)
+    Validation, setup, process spawn, and provider work before the first
+    dynamic tool invocation are provably effect-free. Entering a dynamic tool
+    closes the same-turn retry boundary before user/tool code can run. *)
 
 val run :
   runtime_id:string ->

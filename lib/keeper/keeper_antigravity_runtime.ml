@@ -223,6 +223,20 @@ let tool_result (result : Host.dynamic_tool_result) =
   }
 ;;
 
+let antigravity_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) =
+  { tool with
+    call =
+      (fun ~call_id input ->
+        (* Close the outer same-turn retry boundary before entering user/tool
+           code. The handler may commit and then raise or be cancelled, so
+           observing only its returned value would reopen a duplicate-effect
+           window. Process spawn and provider generation alone do not produce
+           a MASC product effect. *)
+        observe_effect_attempted ();
+        tool.call ~call_id input)
+  }
+;;
+
 let find_tool tools name =
   List.find_opt (fun (tool : Host.dynamic_tool) -> String.equal tool.name name) tools
 ;;
@@ -302,7 +316,8 @@ let stream_projection ~turn_count on_event =
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~raw_trace ~on_event ~effect_disposition
+    ~context_injector ~context ~event_bus ~raw_trace ~on_event
+    ~observe_effect_attempted
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -499,6 +514,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~terminal_error
         ~raw_trace_run
     in
+    let dynamic_tools =
+      List.map (antigravity_dynamic_tool ~observe_effect_attempted) dynamic_tools
+    in
     let* claimed_session =
       match
         Session_store.claim
@@ -668,10 +686,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                    (Runtime_antigravity.run_turn
                       ~conversation_mode
                       ~home_dir:(Runtime_antigravity_home.home_dir home)
-                      ~on_spawned:(fun () ->
-                        Atomic.set
-                          effect_disposition
-                          Keeper_provider_attempt_effect.Observation_unavailable)
                       ~mgr:process_mgr
                       ~clock
                       ~cwd:process_cwd
@@ -900,6 +914,9 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in
+  let observe_effect_attempted () =
+    Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
+  in
   let result =
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       run_without_lifecycle
@@ -918,7 +935,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
         ~event_bus
         ~raw_trace
         ~on_event
-        ~effect_disposition
+        ~observe_effect_attempted
         ~config)
   in
   { result; effect_disposition = Atomic.get effect_disposition }

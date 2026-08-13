@@ -1310,7 +1310,6 @@ let keeper_chat_trace_blocks config name =
     Some
       (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
          ~max_lines:trajectory_max_limit
-         ~max_internal_lines:trajectory_max_limit
          ~config
          ~keeper_name:name
          ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
@@ -2436,7 +2435,7 @@ let handle_keeper_get_subroutes state req request reqd =
                in
                let all_lines =
                  if include_thinking then
-                   merge_keeper_trace_lines ~config ~trace_id trajectory_lines
+                   order_keeper_trace_lines trajectory_lines
                  else
                    trajectory_lines
                in

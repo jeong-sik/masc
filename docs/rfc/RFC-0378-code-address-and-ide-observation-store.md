@@ -141,6 +141,7 @@ type fact =
 - 모든 fact 는 정확히 한 곳에 떨어진다. `_orphan/` 디렉터리·`orphan_path`·`partition_is_orphan`·`IdeOrphanWrites` 카운터는 코드에서 삭제.
 - 회전(rotation) 메커니즘은 유지 (storage 역학이지 keeper 흐름 제어가 아님 — 원칙 9 비저촉).
 - IDE 는 `code/` 만 읽고, keeper 타임라인 패널은 `keeper/` 를 읽는다.
+- `Scope_keeper_lane` 읽기는 `keeper/<keeper_id>/` 직결로 바뀐다. 현행은 전 keeper 의 `_orphan` 혼합을 읽고 keeper_id 로 필터링하는 구조 (`server_ide_scope.ml` 의 Legacy_default 매핑 — 2026-07-07 감사가 "턴은 repo fact 가 아니다"를 인지하고 만든 우회로였고, 이 이분이 그 인지의 정식화다).
 
 ### 5.3 Anchor 계약 = co-view 계약
 
@@ -182,6 +183,7 @@ type fact =
 | cursor_events·pr_events store/라우트/오버레이 | 마지막 기록 07-04/06-12, orphan 한정 | 라이브 여부 실측 후 삭제 — Open Q2 |
 | `selectPreferredIdeRepositoryId` 휴리스틱 | 추측의 답이 빈 파티션 | 삭제 → §5.4 |
 | wire 의 codebase 철자 혼용 (`canonical_url=<full URL>`·`repo_id` scope param, co-view repo 이름) | codebase key 4종 분열 (§5.3b) | 단일 `codebase=<slug>` 로 — C(co-view)·D(REST) 에서 교체 |
+| `?(partition = Legacy_default)` optional 인자 기본값 11사이트 (ide_annotations 6 · ide_region_tracker 4 · ide_bridge 1) | 인자 누락이 조용히 orphan 착지 — #28581 결함이 정확히 이 모양이었음 | A 에서 required 인자로 교체 |
 | annotate sandbox-root 앵커링 | owner probe 2건 매장 | 계약 교체로 소멸 (§5.3) |
 | "IDE Observation Plane v2" 죽은 포인터 | repo 에 문서 부재 | 주석에서 제거 |
 
@@ -228,7 +230,8 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 
 순서 제약과 머지 지점 일관성:
 
-- **A 시점**: 타입만 바뀐다. sink 는 현행 배치를 유지한다 — `Code` → `by-url/<slug>/`, `Keeper` → 현행 `_orphan/` 디렉터리. 배치가 안 바뀌었으므로 read path 도 그대로 일관이다. (`_orphan` *데이터와 기계*의 삭제는 E 소관 — A 가 지우면 Keeper fact 의 착지점이 없어 일관성이 깨진다.)
+- **A 시점** — 낙진 실측 (2026-08-14 census): 실패 variant 4종의 비테스트 소비자는 **lib 13파일 · ~40사이트, dashboard TS 0** — 전선은 서버에서 끝난다. 구성: 타입 정의·JSON 투영(agent_observation, ide_paths) / producer(resolver) / `?(partition = Legacy_default)` optional 기본값 11사이트 / 의식적 Legacy_default 리더 2곳(`server_ide_scope.ml` keeper-lane scope, `server_dashboard_http.ml` snapshot). keeper_vision_tool 의 `UnmatchedToolCalls` 는 동명이인 오탐.
+  A 는 variant enum 을 삭제하고 sink 라우팅 입력을 `Code_address.t option` 으로 바꾼다 (`Some` → by-url, `None` → 현행 `_orphan` 디렉터리 — 배치 불변이므로 read path 일관). optional 기본값 11사이트는 required 인자가 된다. 의식적 리더 2곳은 A 에서 `None` 경로로 기계적 치환하고 의미 재배치는 D. 13파일 기계적 변경이라 20k 상한에 근접 — A1(타입+producer) / A2(sink 시그니처) 분할 지점을 선지정한다. (`_orphan` *데이터와 기계*의 삭제는 E 소관.)
 - **B 시점**: 배치 전환 (`keeper/<keeper_id>/` 신설, Keeper fact 이동). 이 순간부터 `_orphan` 에 새 쓰기 0.
 - **C 는 B 이후**: annotations 가 `code/` 에 떨어져야 V2 가 성립한다.
 - **E 최후**: 죽는 표면의 소비자가 D 까지 존재하고, `_orphan` 잔여 기계는 B 이후 dead 지만 데이터 cut 과 함께 지운다.
@@ -254,7 +257,7 @@ workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 �
 ## 9. Open questions
 
 1. InlayHint(route-context) 존폐 — 사용 증거 0 이나 소비 경로 실측 후 확정.
-2. cursor_events / pr_events — store 는 죽었으나 in-memory presence 경로가 별도인지 실측 후 처분.
+2. cursor_events / pr_events — store 는 각각 07-04 / 06-12 이후 침묵인데 **살아있는 리더가 있다**: dashboard snapshot 이 `list_cursors` 를 호출한다 (`server_dashboard_http.ml` `dashboard_ide_snapshot_json`). 리더 존재 ≠ 데이터 흐름 — 렌더 결과는 상시 빈 값이다. 처분 시 리더와 스토어를 함께 정리.
 3. keeper fact 의 배치 — 신설 `keeper/<id>/` 가 기존 keeper 이벤트 스토어(turn record 등)와 중복 방출인지 조사. 중복이면 한쪽을 죽인다 (SSOT).
 4. checkout 판별자 표기 — `rev-parse --show-toplevel` 기반 실측값 제안 (workspace-root-only §5.2 인수). key 비참여는 본문 확정, 표기 형식만 미정.
 5. 한 tool call 이 **두 저장소의 파일을 만지는 경우** (예: Execute 가 masc 와 oas 를 함께 편집) — fact 는 주 경로 하나의 주소만 나른다. 현행과 동일한 한계이나 타입이 이를 명시하지 않는다. 부 경로들을 별도 Code fact 로 분리 방출할지, 단일 주소 한계를 계약으로 못박을지 결정 필요.

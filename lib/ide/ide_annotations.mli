@@ -21,12 +21,10 @@ val store_file : base_dir:string -> partition:Ide_paths.partition -> unit -> str
 (** [store_file ~base_dir ~partition ()] is the append-only
     [annotations.jsonl] inside the partition's directory. Exposed so a
     reader can observe the store's revision (its byte length, since every
-    mutation is an append) without restating the file name. Default
-    [partition] is {!Ide_paths.Legacy_default}. *)
+    mutation is an append) without restating the file name. *)
 
 val ensure_store : base_dir:string -> partition:Ide_paths.partition -> unit -> unit
-(** Create the partition's directory if absent. Idempotent. Default
-    [partition] is {!Ide_paths.Legacy_default}. *)
+(** Create the partition's directory if absent. Idempotent. *)
 
 val create
   :  base_dir:string
@@ -42,8 +40,7 @@ val create
   -> ?references:annotation_reference list
   -> unit
   -> (annotation, string) result
-(** Append a new annotation to the chosen partition. Default
-    [partition] is {!Ide_paths.Legacy_default}. *)
+(** Append a new annotation to the chosen partition. *)
 
 val list
   :  base_dir:string
@@ -52,8 +49,7 @@ val list
   -> unit
   -> annotation list
 (** Read all annotations for the chosen partition. Tombstoned entries
-    are excluded. Sorted by [created_at_ms] descending (newest first).
-    Default [partition] is {!Ide_paths.Legacy_default}. *)
+    are excluded. Sorted by [created_at_ms] descending (newest first). *)
 
 val delete
   :  base_dir:string
@@ -64,9 +60,8 @@ val delete
   -> unit
   -> (unit, string) result
 (** Soft-delete: append a tombstone record. Only the original
-    [keeper_id] may delete its own annotation. The [?partition] must
-    match the one the annotation was created under. Default
-    [partition] is {!Ide_paths.Legacy_default}.
+    [keeper_id] may delete its own annotation. The [partition] must
+    match the one the annotation was created under.
 
     [?expected_version] enables optimistic concurrency: pass the
     annotation's [updated_at_ms] (its version token, exposed in
@@ -77,7 +72,7 @@ val delete
 val compact : base_dir:string -> partition:Ide_paths.partition -> unit -> unit
 (** Append a compaction snapshot marker that lets readers ignore earlier
     tombstoned state while replaying records written during the compaction
-    window. Default [partition] is {!Ide_paths.Legacy_default}. *)
+    window. *)
 
 val annotation_kind_of_string : string -> annotation_kind option
 (** Parse kind string, returning [None] for unknown values. *)

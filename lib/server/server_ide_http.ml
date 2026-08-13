@@ -57,7 +57,7 @@ let resolve_partition_for_mutation ~state ~uri =
     Error
       (ide_error
          "keeper_lane_read_only"
-         "keeper_lane is a read-only scope; mutations require repo_id or canonical_url")
+         "keeper_lane is a read-only scope; mutations require a codebase scope (codebase=<slug>)")
   | Ok scope -> Ok (partition_of_ide_scope scope)
   | Error _ as err -> err
 ;;
@@ -125,7 +125,7 @@ let resolve_annotation_post_address ~state ~uri ~file_path =
     Error
       (ide_error
          "codebase_scope_required"
-         "annotation and cursor writes require a codebase scope (canonical_url or repo_id)")
+         "annotation and cursor writes require a codebase scope (codebase=<slug>)")
 ;;
 
 let ide_memory_source_kind = "ide_annotation"

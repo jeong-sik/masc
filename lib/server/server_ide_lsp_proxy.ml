@@ -240,14 +240,14 @@ let overlay_partition cs =
 ;;
 
 (* What this connection addresses, read from its URL before the socket is
-   upgraded. Two things are needed and they must agree: the store partition,
-   and the workspace tree document paths are relative to. [repo_id] and
-   [keeper_lane] (+[keeper]) resolve both through the same resolvers the REST
-   IDE routes use, so the two surfaces share one vocabulary. A bare
-   [canonical_url] names a partition but no tree: its documents would be
-   keyed against the project base while their rows are stored against a repo
-   root, which is the mismatch this addressing exists to prevent, so it is
-   refused rather than served as silently empty overlays. *)
+   upgraded. Two independent axes: the overlay store partition comes from
+   the IDE scope ([codebase]/[keeper_lane], resolved by the same
+   [Server_ide_scope] the REST routes use, so the two surfaces share one
+   vocabulary), and the workspace tree that document paths are relative to
+   comes from the workspace axis parameters ([repo_id]/[keeper]) resolved
+   by [resolve_workspace_base]. RFC-0378 §5.3b: the scope carries the
+   slug itself — the old full-URL spelling that could name a partition
+   without a tree died with that vocabulary. *)
 let lsp_connection_addressing ~state ~uri =
   match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
   | Error err -> Error err

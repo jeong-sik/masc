@@ -375,7 +375,9 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
              | None -> fail "concurrent batch returned no report");
             let schedules =
               !entered_schedules
-              |> List.sort (fun left right ->
+              |> List.sort (fun
+                (left : Agent_core.Tool_contract.schedule)
+                (right : Agent_core.Tool_contract.schedule) ->
                 Int.compare left.planned_index right.planned_index)
             in
             check int "both handlers crossed the barrier" 2 (List.length schedules);

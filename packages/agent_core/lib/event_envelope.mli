@@ -1,8 +1,6 @@
-(** Canonical event envelope for cross-runtime causality evidence.
-
-    This module is intentionally independent from {!Event_bus}: existing
-    event bus envelopes remain backward-compatible, while new code can use
-    this richer envelope for durable event streams and adapter boundaries. *)
+(** Canonical event envelope for cross-runtime causality evidence. Event buses,
+    durable stores, and adapter boundaries carry this same producer-owned
+    identity instead of reconstructing identity from content or timestamps. *)
 
 type source_clock =
   | Wall
@@ -19,14 +17,17 @@ type t =
   ; seq : int option
   ; parent_event_id : string option
   ; caused_by : string option
-    (** Untyped compatibility causation field. Private canonical execution
-        events require this to be [None] and carry typed plural causes outside
-        this compatibility envelope. *)
+    (** External causation pointer. Private execution events carry typed plural
+        causes outside this envelope and require this field to be [None]. *)
   ; source_clock : source_clock
   }
 
-(** Generate a process-local compatibility identifier. AGENT_CORE's private canonical
-    execution writer owns its own typed random identity. *)
+(** Raised when the operating-system entropy source cannot mint an identity.
+    Identity creation never falls back to clocks, process IDs, paths, or event
+    content. *)
+exception Entropy_unavailable of string
+
+(** Generate a producer-owned, cross-process collision-resistant identifier. *)
 val fresh_id : unit -> string
 
 val source_clock_to_string : source_clock -> string

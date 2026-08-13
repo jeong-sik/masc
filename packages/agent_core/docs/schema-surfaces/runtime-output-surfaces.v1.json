@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-21",
+  "updated_at": "2026-08-14",
   "description": "Operator-facing index of AGENT_CORE runtime output and schema surfaces. Entries whose producer referenced the deleted Runtime_server / Runtime_sync / Runtime_projection / Runtime_evidence cluster (removed in v0.217.x) are marked removed_in; their schema files under docs/schemas/ are retained for historical decode only.",
   "surfaces": [
     {
@@ -15,7 +15,7 @@
       "tests": ["test/test_event_bus.ml", "test/test_event_envelope.ml"],
       "stability": "evolving",
       "version_field": null,
-      "notes": "Native payloads stay provider-agnostic; downstream domain events should use Custom or a downstream bus."
+      "notes": "Native payloads stay provider-agnostic and every occurrence carries one producer-owned event_id preserved by durable and live adapters; downstream domain events should use Custom or a downstream bus."
     },
     {
       "id": "agent_core.runtime_protocol.v2",

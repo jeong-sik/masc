@@ -465,9 +465,8 @@ let slot_scheduler_observed
 
 (** Append a caller-supplied addendum to an atd-emitted record JSON.
 
-    Used by [agent_completed] and [agent_failed] to splice the
-    runtime-local Result/Error projection ([result_fields] /
-    [error_fields]) onto the typed base record without forcing the
+    Used by [agent_completed] to splice the runtime-local Result projection
+    ([result_fields]) onto the typed base record without forcing the
     leaf event library to depend on [Agent_core] variant types.
 
     Field order is [<base record fields in atd declaration order> @
@@ -522,14 +521,9 @@ let agent_completed
     payload_json
 ;;
 
-(** Emit an [agent_failed] envelope.  All five error fields are
-    encoded in the atd schema; the caller passes the simple
-    projections directly. *)
-let agent_failed
-      ?caused_by
-      ~(ts_unix : float)
-      ~(correlation_id : string)
-      ~(run_id : string)
+(** Encode the typed [agent_failed] payload independently from its delivery
+    envelope. *)
+let agent_failed_payload
       ~(agent_name : string)
       ~(task_id : string)
       ~(elapsed_s : float)
@@ -538,33 +532,18 @@ let agent_failed
       ~(error_code : string)
       ~(error_retryable : bool)
       ~(error_detail : Yojson.Safe.t)
-      ()
   : Yojson.Safe.t
   =
-  let payload_json =
-    let p : Sse_event_t.agent_failed_payload =
-      { agent_name
-      ; task_id
-      ; elapsed_s
-      ; error
-      ; error_domain
-      ; error_code
-      ; error_retryable
-      ; error_detail
-      }
-    in
-    Yojson.Safe.from_string (Sse_event_j.string_of_agent_failed_payload p)
-  in
-  wrap_envelope
-    { event_type = "agent_failed"
-    ; ts_unix
-    ; correlation_id
-    ; run_id
-    ; caused_by
-    ; agent_name = Some agent_name
-    ; task_id = Some task_id
-    ; turn = None
-    ; tool_name = None
+  let p : Sse_event_t.agent_failed_payload =
+    { agent_name
+    ; task_id
+    ; elapsed_s
+    ; error
+    ; error_domain
+    ; error_code
+    ; error_retryable
+    ; error_detail
     }
-    payload_json
+  in
+  Yojson.Safe.from_string (Sse_event_j.string_of_agent_failed_payload p)
 ;;

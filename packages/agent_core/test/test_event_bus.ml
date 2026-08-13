@@ -987,14 +987,19 @@ let test_fresh_id_unique () =
 
 let test_mk_envelope_defaults () =
   let env = Event_bus.mk_envelope () in
+  check bool "event_id non-empty" true (String.length env.event_id > 0);
   check bool "correlation_id non-empty" true (String.length env.correlation_id > 0);
   check bool "run_id non-empty" true (String.length env.run_id > 0);
-  check bool "ts > 0" true (env.ts > 0.0);
+  check bool "event_time > 0" true (env.event_time > 0.0);
+  check bool "observed_at > 0" true (env.observed_at > 0.0);
   check (option string) "caused_by defaults to None" None env.caused_by
 ;;
 
 let test_mk_envelope_explicit () =
-  let env = Event_bus.mk_envelope ~correlation_id:"c" ~run_id:"r" () in
+  let env =
+    Event_bus.mk_envelope ~event_id:"e" ~correlation_id:"c" ~run_id:"r" ()
+  in
+  check string "event_id" "e" env.event_id;
   check string "correlation_id" "c" env.correlation_id;
   check string "run_id" "r" env.run_id;
   check (option string) "caused_by omitted stays None" None env.caused_by

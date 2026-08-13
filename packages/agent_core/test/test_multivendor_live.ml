@@ -24,7 +24,7 @@
 
     Invariants checked, per EVENT-CATALOG.md I1/I2:
     - Same native variant names across every provider.
-    - Envelope [correlation_id] / [run_id] present and preserved.
+    - Envelope [event_id] / [correlation_id] / [run_id] present and preserved.
 
     Run manually:
       dune exec --root . test/test_multivendor_live.exe *)
@@ -55,8 +55,19 @@ let assert_transcript ~provider ~names =
 ;;
 
 let assert_envelope ~provider events =
+  let event_ids = List.map (fun (event : Event_bus.event) -> event.meta.event_id) events in
+  check
+    int
+    (Printf.sprintf "[%s] every occurrence has a distinct producer id" provider)
+    (List.length event_ids)
+    (List.length (List.sort_uniq String.compare event_ids));
   List.iter
     (fun (e : Event_bus.event) ->
+       check
+         bool
+         (Printf.sprintf "[%s] event_id non-empty" provider)
+         true
+         (String.length e.meta.event_id > 0);
        check
          bool
          (Printf.sprintf "[%s] correlation_id non-empty" provider)
@@ -67,7 +78,16 @@ let assert_envelope ~provider events =
          (Printf.sprintf "[%s] run_id non-empty" provider)
          true
          (String.length e.meta.run_id > 0);
-       check bool (Printf.sprintf "[%s] ts populated" provider) true (e.meta.ts > 0.0))
+       check
+         bool
+         (Printf.sprintf "[%s] event time populated" provider)
+         true
+         (e.meta.event_time > 0.0);
+       check
+         bool
+         (Printf.sprintf "[%s] observation time populated" provider)
+         true
+         (e.meta.observed_at > 0.0))
     events
 ;;
 

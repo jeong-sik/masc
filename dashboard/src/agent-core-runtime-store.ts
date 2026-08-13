@@ -5,7 +5,6 @@ import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
 import { AGENT_CORE_TELEMETRY_REPLAY_LIMIT, AGENT_CORE_EVENT_PREFIX } from './config/constants'
 import {
   agentCoreTotalEvents,
-  agentCoreAgentEvents,
   agentCoreReplayLoadedEvents,
   agentCoreReplayTotalMatchingEvents,
   noteAgentCoreReplayWindow,
@@ -22,11 +21,21 @@ import type {
 type AgentCoreRuntimeEnvelope = Record<string, unknown> & {
   type: string
   payload: Record<string, unknown>
+  dashboard_event_key?: string
 }
+
+type RuntimeEventIdentity =
+  | { kind: 'stable'; key: string }
+  | { kind: 'unidentified' }
 
 type IngestOptions = {
   includeLiveTrace?: boolean
   origin?: 'live' | 'replay'
+}
+
+type QueuedLiveRuntimeEvent = {
+  event: AgentCoreRuntimeEnvelope
+  opts?: IngestOptions
 }
 
 type EvidenceRefSets = {
@@ -40,8 +49,14 @@ type EvidenceRefSets = {
 }
 
 const seenAgentCoreEventKeys = new Set<string>()
+const loadedReplayAgentCoreEventKeys = new Set<string>()
+let unidentifiedAgentCoreEventSequence = 0
+let loadedUnidentifiedReplayEventCount = 0
 let replayGeneration = 0
 let initialReplayPromise: Promise<void> | null = null
+let replayFetchedAgentCoreEventCount = 0
+let activeFullReplayGeneration: number | null = null
+let queuedLiveRuntimeEvents: QueuedLiveRuntimeEvent[] = []
 
 function emptyEvidenceRefSets(): EvidenceRefSets {
   return {
@@ -206,41 +221,34 @@ function runtimeEventType(event: AgentCoreRuntimeEnvelope): string {
   return asString(event.event_type) ?? event.type
 }
 
-function runtimeEventKey(event: AgentCoreRuntimeEnvelope): string {
+function stableRuntimeEventIdentity(event: AgentCoreRuntimeEnvelope): RuntimeEventIdentity {
   const payload = eventPayload(event)
-  const type = runtimeEventType(event)
-  const correlationId = asString(event.correlation_id)
-  const runId = asString(event.run_id)
-  const reportedTsUnix = eventReportedUnixSeconds(event)
-  const agentName =
-    asString(event.agent_name)
-    ?? asString(payload.agent_name)
-    ?? asString(payload.agent)
-    ?? asString(payload.keeper_name)
-    ?? ''
-  const taskId = asString(event.task_id) ?? asString(payload.task_id) ?? ''
-  const toolName = asString(event.tool_name) ?? asString(payload.tool_name) ?? ''
-  const turn = asNumber(event.turn) ?? asNumber(payload.turn)
-  if (correlationId || runId || reportedTsUnix != null) {
-    return [
-      type,
-      agentName,
-      correlationId ?? '',
-      runId ?? '',
-      reportedTsUnix != null ? String(reportedTsUnix) : '',
-      taskId,
-      toolName,
-      turn != null ? String(turn) : '',
-    ].join('|')
+  const runId = asString(event.run_id) ?? asString(payload.run_id)
+  const eventId = asString(event.event_id) ?? asString(payload.event_id)
+  if (eventId) {
+    return { kind: 'stable', key: `event:${eventId}` }
   }
-  return JSON.stringify({
-    type,
-    agentName,
-    taskId,
-    toolName,
-    turn: turn ?? null,
-    payload,
-  })
+
+  const seq = asNumber(event.seq) ?? asNumber(payload.seq)
+  if (runId && seq != null && Number.isSafeInteger(seq) && seq >= 0) {
+    return { kind: 'stable', key: `run:${runId}|seq:${seq}` }
+  }
+
+  return { kind: 'unidentified' }
+}
+
+function runtimeEventKey(event: AgentCoreRuntimeEnvelope): string {
+  if (event.dashboard_event_key) return event.dashboard_event_key
+  const identity = stableRuntimeEventIdentity(event)
+  const key = identity.kind === 'stable'
+    ? identity.key
+    : `unidentified:${++unidentifiedAgentCoreEventSequence}`
+  event.dashboard_event_key = key
+  return key
+}
+
+function loadedAgentCoreEventCount(): number {
+  return loadedReplayAgentCoreEventKeys.size + loadedUnidentifiedReplayEventCount
 }
 
 function traceDetail(
@@ -248,6 +256,7 @@ function traceDetail(
   detail: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
+    event_id: asString(event.event_id) ?? null,
     event_type: runtimeEventType(event),
     correlation_id: asString(event.correlation_id) ?? null,
     run_id: asString(event.run_id) ?? null,
@@ -279,6 +288,7 @@ function keeperLifecycleEvent(event: AgentCoreRuntimeEnvelope): AgentCoreKeeperL
     phase: toKeeperPhase(asString(payload.phase)),
     detail: asString(payload.detail),
     event_type: runtimeEventType(event),
+    event_id: asString(event.event_id),
     correlation_id: asString(event.correlation_id),
     run_id: asString(event.run_id),
     event_key: runtimeEventKey(event),
@@ -359,6 +369,7 @@ function ingestRuntimeProjection(
         secondary_agent: asString(payload.agent_b),
         trust_score: asNumber(payload.trust_score),
         event_type: runtimeEventType(event),
+        event_id: asString(event.event_id),
         correlation_id: asString(event.correlation_id),
         run_id: asString(event.run_id),
         event_key: runtimeEventKey(event),
@@ -374,6 +385,7 @@ function ingestRuntimeProjection(
         new_score: asNumber(payload.new_score),
         trend: asString(payload.trend),
         event_type: runtimeEventType(event),
+        event_id: asString(event.event_id),
         correlation_id: asString(event.correlation_id),
         run_id: asString(event.run_id),
         event_key: runtimeEventKey(event),
@@ -531,26 +543,61 @@ function coerceAgentCoreRuntimeEnvelope(raw: unknown): AgentCoreRuntimeEnvelope 
   }
 }
 
+function applyCoercedAgentCoreRuntimeEvent(
+  event: AgentCoreRuntimeEnvelope,
+  opts?: IngestOptions,
+): boolean {
+  const identity = stableRuntimeEventIdentity(event)
+  if (identity.kind === 'stable') {
+    if (seenAgentCoreEventKeys.has(identity.key)) return false
+    seenAgentCoreEventKeys.add(identity.key)
+    if (opts?.origin === 'replay') loadedReplayAgentCoreEventKeys.add(identity.key)
+    event.dashboard_event_key = identity.key
+  } else {
+    runtimeEventKey(event)
+    if (opts?.origin === 'replay') loadedUnidentifiedReplayEventCount += 1
+  }
+  ingestRuntimeProjection(event, opts)
+  // A live arrival is news the replay window never counted, so it belongs
+  // above the server's total. A replayed row is not: it is already inside
+  // that total, and counting it again is what made "load more" claim 1700
+  // of 1200 and retire `hasMore` with rows still unfetched.
+  if (opts?.origin !== 'replay') agentCoreTotalEvents.value += 1
+  return true
+}
+
 export function applyAgentCoreRuntimeEvent(raw: unknown, opts?: IngestOptions): boolean {
   const event = coerceAgentCoreRuntimeEnvelope(raw)
   if (!event) return false
-  const key = runtimeEventKey(event)
-  if (seenAgentCoreEventKeys.has(key)) {
-    return false
+  if (opts?.origin !== 'replay' && activeFullReplayGeneration !== null) {
+    queuedLiveRuntimeEvents.push({ event, opts })
+    return true
   }
-  seenAgentCoreEventKeys.add(key)
-  ingestRuntimeProjection(event, opts)
-  if (opts?.origin === 'replay') {
-    agentCoreTotalEvents.value = seenAgentCoreEventKeys.size
-  } else {
-    agentCoreTotalEvents.value = Math.max(seenAgentCoreEventKeys.size, agentCoreTotalEvents.value + 1)
+  return applyCoercedAgentCoreRuntimeEvent(event, opts)
+}
+
+function beginFullReplayHydration(generation: number): void {
+  activeFullReplayGeneration = generation
+}
+
+function finishFullReplayHydration(generation: number): void {
+  if (activeFullReplayGeneration !== generation) return
+  activeFullReplayGeneration = null
+  if (queuedLiveRuntimeEvents.length === 0) return
+  const pending = queuedLiveRuntimeEvents
+  queuedLiveRuntimeEvents = []
+  for (const { event, opts } of pending) {
+    applyCoercedAgentCoreRuntimeEvent(event, opts)
   }
-  return true
 }
 
 export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEntry[]): void {
   resetAgentCoreRuntimeSignals()
   seenAgentCoreEventKeys.clear()
+  loadedReplayAgentCoreEventKeys.clear()
+  unidentifiedAgentCoreEventSequence = 0
+  loadedUnidentifiedReplayEventCount = 0
+  replayFetchedAgentCoreEventCount = 0
   const ordered = [...entries].sort((a, b) => {
     const left = coerceAgentCoreRuntimeEnvelope(a)
     const right = coerceAgentCoreRuntimeEnvelope(b)
@@ -559,14 +606,18 @@ export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEn
   for (const entry of ordered) {
     applyAgentCoreRuntimeEvent(entry, { origin: 'replay' })
   }
+  replayFetchedAgentCoreEventCount = entries.length
   noteAgentCoreReplayWindow({
-    loadedEvents: agentCoreTotalEvents.value,
-    totalMatchingEvents: agentCoreTotalEvents.value,
+    loadedEvents: loadedAgentCoreEventCount(),
+    totalMatchingEvents: entries.length,
     truncated: false,
   })
 }
 
-export function appendAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEntry[]): void {
+export function appendAgentCoreRuntimeFromTelemetryEntries(
+  entries: TelemetryEntry[],
+  replayOffset: number,
+): void {
   const ordered = [...entries].sort((a, b) => {
     const left = coerceAgentCoreRuntimeEnvelope(a)
     const right = coerceAgentCoreRuntimeEnvelope(b)
@@ -575,22 +626,28 @@ export function appendAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEnt
   for (const entry of ordered) {
     applyAgentCoreRuntimeEvent(entry, { origin: 'replay' })
   }
+  replayFetchedAgentCoreEventCount = replayOffset + entries.length
 }
 
 export async function replayAgentCoreRuntimeTelemetry(signal?: AbortSignal): Promise<void> {
   const generation = ++replayGeneration
-  const response = await fetchTelemetry({
-    source: 'agent_core_event',
-    n: AGENT_CORE_TELEMETRY_REPLAY_LIMIT,
-    signal,
-  })
-  if (generation !== replayGeneration) return
-  hydrateAgentCoreRuntimeFromTelemetryEntries(response.entries)
-  noteAgentCoreReplayWindow({
-    loadedEvents: agentCoreTotalEvents.value,
-    totalMatchingEvents: response.total_matching_entries ?? response.count,
-    truncated: response.has_more ?? response.truncated ?? false,
-  })
+  beginFullReplayHydration(generation)
+  try {
+    const response = await fetchTelemetry({
+      source: 'agent_core_event',
+      n: AGENT_CORE_TELEMETRY_REPLAY_LIMIT,
+      signal,
+    })
+    if (generation !== replayGeneration) return
+    hydrateAgentCoreRuntimeFromTelemetryEntries(response.entries)
+    noteAgentCoreReplayWindow({
+      loadedEvents: loadedAgentCoreEventCount(),
+      totalMatchingEvents: response.total_matching_entries ?? response.count,
+      truncated: response.has_more ?? response.truncated ?? false,
+    })
+  } finally {
+    finishFullReplayHydration(generation)
+  }
 }
 
 export function ensureAgentCoreRuntimeReplay(): Promise<void> {
@@ -606,17 +663,31 @@ export function ensureAgentCoreRuntimeReplay(): Promise<void> {
 }
 
 export async function loadMoreAgentCoreEvents(signal?: AbortSignal): Promise<void> {
-  const currentOffset = agentCoreAgentEvents.value.length
+  const currentOffset = replayFetchedAgentCoreEventCount
   const response = await fetchTelemetry({
     source: 'agent_core_event',
     n: AGENT_CORE_TELEMETRY_REPLAY_LIMIT,
     offset: currentOffset,
     signal,
   })
-  appendAgentCoreRuntimeFromTelemetryEntries(response.entries)
+  // The server caps telemetry offsets. Once it reports an earlier offset than
+  // requested, this is a replay of a page we already consumed: do not project
+  // it again or advance the cursor beyond reachable history.
+  if (response.offset !== currentOffset) {
+    noteAgentCoreReplayWindow({
+      loadedEvents: loadedAgentCoreEventCount(),
+      totalMatchingEvents: response.total_matching_entries ?? response.count,
+      truncated: false,
+      capped: true,
+      observedTotalEvents: agentCoreTotalEvents.value,
+    })
+    return
+  }
+  appendAgentCoreRuntimeFromTelemetryEntries(response.entries, response.offset)
   noteAgentCoreReplayWindow({
-    loadedEvents: agentCoreTotalEvents.value,
+    loadedEvents: loadedAgentCoreEventCount(),
     totalMatchingEvents: response.total_matching_entries ?? response.count,
     truncated: response.has_more ?? response.truncated ?? false,
+    observedTotalEvents: agentCoreTotalEvents.value,
   })
 }

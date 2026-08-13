@@ -356,6 +356,7 @@ export const agentCoreTotalEvents = signal(0)
 export const agentCoreReplayLoadedEvents = signal(0)
 export const agentCoreReplayTotalMatchingEvents = signal(0)
 export const agentCoreReplayTruncated = signal(false)
+export const agentCoreReplayCapped = signal(false)
 export const agentCoreTotalLlmCalls = signal(0)
 export const agentCoreTotalErrors = signal(0)
 export const agentCoreLastLlmCallTs = signal<number | null>(null)
@@ -376,6 +377,7 @@ export function resetAgentCoreRuntimeSignals(): void {
   agentCoreReplayLoadedEvents.value = 0
   agentCoreReplayTotalMatchingEvents.value = 0
   agentCoreReplayTruncated.value = false
+  agentCoreReplayCapped.value = false
   agentCoreTotalLlmCalls.value = 0
   agentCoreTotalErrors.value = 0
   agentCoreLastLlmCallTs.value = null
@@ -394,14 +396,22 @@ export function noteAgentCoreReplayWindow(input: {
   loadedEvents: number
   totalMatchingEvents: number
   truncated: boolean
+  capped?: boolean
+  observedTotalEvents?: number
 }): void {
   const loadedEvents = Math.max(0, Math.floor(input.loadedEvents))
   const totalMatchingEvents = Math.max(loadedEvents, Math.floor(input.totalMatchingEvents))
+  const observedTotalEvents = Math.max(
+    totalMatchingEvents,
+    Math.floor(input.observedTotalEvents ?? totalMatchingEvents),
+  )
   const truncated = input.truncated && totalMatchingEvents > loadedEvents
+  const capped = Boolean(input.capped) && totalMatchingEvents > loadedEvents
   agentCoreReplayLoadedEvents.value = loadedEvents
   agentCoreReplayTotalMatchingEvents.value = totalMatchingEvents
-  agentCoreReplayTruncated.value = truncated
-  agentCoreTotalEvents.value = totalMatchingEvents
+  agentCoreReplayTruncated.value = truncated && !capped
+  agentCoreReplayCapped.value = capped
+  agentCoreTotalEvents.value = observedTotalEvents
 }
 
 function sameAgentCoreAgentEvent(left: AgentCoreAgentEvent, right: AgentCoreAgentEvent): boolean {
@@ -509,6 +519,7 @@ export const agentCoreHealthSummary: ReadonlySignal<AgentCoreHealthSummary> = co
   replayLoadedEvents: agentCoreReplayLoadedEvents.value,
   replayTotalMatchingEvents: agentCoreReplayTotalMatchingEvents.value,
   replayTruncated: agentCoreReplayTruncated.value,
+  replayCapped: agentCoreReplayCapped.value,
   hasMore: agentCoreReplayTruncated.value,
   totalLlmCalls: agentCoreTotalLlmCalls.value,
   totalErrors: agentCoreTotalErrors.value,

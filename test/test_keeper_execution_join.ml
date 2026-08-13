@@ -54,13 +54,16 @@ let test_rerecord_overwrites () =
 
 (* ── Bridge stamping ──────────────────────────────────── *)
 
-let mk_event ?caused_by payload : Agent_core.Event_bus.event =
-  { meta =
-      { correlation_id = "corr-1"
-      ; run_id = "run-1"
-      ; ts = 1781200000.0
-      ; caused_by
-      }
+let mk_event ?(event_id = "event-1") ?caused_by payload : Agent_core.Event_bus.event =
+  let meta =
+    Agent_core.Event_bus.mk_envelope
+      ~event_id
+      ~correlation_id:"corr-1"
+      ~run_id:"run-1"
+      ?caused_by
+      ()
+  in
+  { meta = { meta with event_time = 1781200000.0; observed_at = 1781200000.5 }
   ; payload
   }
 
@@ -357,7 +360,7 @@ let test_terminal_agent_failure_projection_redacts_detail () =
           }))
 ;;
 
-let test_agent_failed_matches_typed_sse_event () =
+let test_agent_failed_keeps_canonical_envelope_and_typed_error () =
   let agent_name = "agent_core-r1" in
   let task_id = "task-failed-1" in
   let elapsed_s = 4.25 in
@@ -380,30 +383,52 @@ let test_agent_failed_matches_typed_sse_event () =
   let actual =
     Bridge.native_event_to_json
       (mk_event
+         ~event_id:"event-agent-failed-1"
          ~caused_by
          (Agent_core.Event_bus.AgentFailed
             { agent_name; task_id; error; elapsed = elapsed_s }))
     |> Option.get
-    |> Yojson.Safe.to_string
   in
-  let expected =
-    Sse_event.agent_failed
-      ~caused_by
-      ~ts_unix:1781200000.0
-      ~correlation_id:"corr-1"
-      ~run_id:"run-1"
-      ~agent_name
-      ~task_id
-      ~elapsed_s
-      ~error:projection.error
-      ~error_domain:projection.error_domain
-      ~error_code:projection.error_code
-      ~error_retryable:projection.error_retryable
-      ~error_detail:projection.error_detail
-      ()
-    |> Yojson.Safe.to_string
+  check (option string) "producer event identity" (Some "event-agent-failed-1")
+    (string_of_field (member "event_id" actual));
+  check (option string) "causation survives" (Some caused_by)
+    (string_of_field (member "caused_by" actual));
+  check (option string) "serialized error domain" (Some projection.error_domain)
+    (string_of_field (payload_member "error_domain" actual));
+  check bool "serialized typed detail" true
+    (payload_member "error_detail" actual = Some projection.error_detail)
+
+let test_publish_to_bridge_preserves_one_producer_identity () =
+  Eio_main.run @@ fun _env ->
+  let bus = Agent_core.Event_bus.create () in
+  let config =
+    Agent_core.Event_bus.subscription_config
+      ~capacity:2
+      ~overflow:Agent_core.Event_bus.Drop_oldest
+    |> Result.get_ok
   in
-  check string "agent_failed bridge matches typed constructor" expected actual
+  let subscription = Agent_core.Event_bus.subscribe ~config bus in
+  let event =
+    Agent_core.Event_bus.mk_event
+      ~event_id:"event-publish-bridge-1"
+      ~correlation_id:"corr-publish-bridge"
+      ~run_id:"run-publish-bridge"
+      (Agent_core.Event_bus.TurnStarted { agent_name = "keeper-a"; turn = 3 })
+  in
+  Agent_core.Event_bus.publish bus event;
+  let delivered =
+    match Agent_core.Event_bus.drain subscription with
+    | [ delivered ] -> delivered
+    | events -> failf "expected one delivered event, got %d" (List.length events)
+  in
+  let first = Bridge.native_event_to_json delivered |> Option.get in
+  let retry = Bridge.native_event_to_json delivered |> Option.get in
+  check (option string) "published identity reaches adapter"
+    (Some "event-publish-bridge-1")
+    (string_of_field (member "event_id" first));
+  check string "re-serialization keeps exact occurrence identity"
+    (Yojson.Safe.to_string first)
+    (Yojson.Safe.to_string retry)
 
 let test_authorization_errors_have_typed_projection () =
   let check_projection label expected_domain error =
@@ -608,8 +633,10 @@ let () =
             test_empty_tool_use_id_omitted_from_payload
         ; test_case "non-terminal outcomes keep distinct wire types" `Quick
             test_non_terminal_agent_outcomes_keep_distinct_wire_types
-        ; test_case "agent_failed matches typed constructor" `Quick
-            test_agent_failed_matches_typed_sse_event
+        ; test_case "agent_failed keeps canonical envelope" `Quick
+            test_agent_failed_keeps_canonical_envelope_and_typed_error
+        ; test_case "publish to bridge preserves producer identity" `Quick
+            test_publish_to_bridge_preserves_one_producer_identity
         ; test_case "terminal agent failures redact raw detail" `Quick
             test_terminal_agent_failure_projection_redacts_detail
         ; test_case "authorization errors have typed projection" `Quick

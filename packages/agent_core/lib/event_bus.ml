@@ -13,14 +13,7 @@ open Types
 
 (* ── Envelope ─────────────────────────────────────────────────────── *)
 
-type envelope =
-  { correlation_id : string
-  ; run_id : string
-  ; ts : float
-  ; caused_by : string option
-  }
-
-type envelope_v2 = Event_envelope.t
+type envelope = Event_envelope.t
 
 (* ── Payload type ─────────────────────────────────────────────────── *)
 
@@ -150,38 +143,18 @@ let payload_kind = function
 
 let fresh_id = Event_envelope.fresh_id
 
-let mk_envelope ?correlation_id ?run_id ?caused_by () =
-  let correlation_id =
-    match correlation_id with
-    | Some id -> id
-    | None -> fresh_id ()
-  in
-  let run_id =
-    match run_id with
-    | Some id -> id
-    | None -> fresh_id ()
-  in
-  { correlation_id; run_id; ts = Unix.gettimeofday (); caused_by }
-;;
-
-let mk_envelope_v2 = Event_envelope.make
-
-let envelope_v2_of_envelope ?event_id ?observed_at ?seq ?parent_event_id (env : envelope) =
+let mk_envelope ?event_id ?correlation_id ?run_id ?caused_by () =
   Event_envelope.make
     ?event_id
-    ~correlation_id:env.correlation_id
-    ~run_id:env.run_id
-    ~event_time:env.ts
-    ?observed_at
-    ?seq
-    ?parent_event_id
-    ?caused_by:env.caused_by
+    ?correlation_id
+    ?run_id
+    ?caused_by
     ~source_clock:Event_envelope.Wall
     ()
 ;;
 
-let mk_event ?correlation_id ?run_id ?caused_by payload =
-  { meta = mk_envelope ?correlation_id ?run_id ?caused_by (); payload }
+let mk_event ?event_id ?correlation_id ?run_id ?caused_by payload =
+  { meta = mk_envelope ?event_id ?correlation_id ?run_id ?caused_by (); payload }
 ;;
 
 (* ── Subscription ─────────────────────────────────────────────────── *)

@@ -247,6 +247,96 @@ let test_campaign_rejects_unexpected_result_identity () =
   | Ok _ -> fail "unexpected result identity was accepted"
 ;;
 
+let target ?model_id ?(inference_protocol = Agent_core_http) runtime_id =
+  { runtime_id; model_id; inference_protocol }
+;;
+
+let baseline targets =
+  baseline_expected
+    ~targets
+    ~build_commit:(Some "6959248d23")
+    ~config_revision:(Some "sha256:runtime-config")
+;;
+
+let test_baseline_requires_discovered_targets () =
+  match baseline [] with
+  | Error Empty_baseline_targets -> ()
+  | Error error -> failf "unexpected baseline error: %s" (baseline_error_to_string error)
+  | Ok _ -> fail "empty target inventory produced a complete-looking baseline"
+;;
+
+let test_baseline_rejects_invalid_and_duplicate_targets () =
+  (match baseline [ target "  " ] with
+   | Error (Baseline_case_error (Blank_field Runtime_id)) -> ()
+   | Error error -> failf "unexpected blank-target error: %s" (baseline_error_to_string error)
+   | Ok _ -> fail "blank runtime target entered the baseline");
+  let duplicate = target ~model_id:"model" "runtime" in
+  match baseline [ duplicate; duplicate ] with
+  | Error (Duplicate_baseline_case _) -> ()
+  | Error error -> failf "unexpected duplicate-target error: %s" (baseline_error_to_string error)
+  | Ok _ -> fail "duplicate runtime/model target produced duplicate matrix cells"
+;;
+
+let test_baseline_covers_every_capability_for_each_target () =
+  let targets =
+    [ target ~model_id:"deepseek-v4-flash" "ollama_cloud.deepseek-v4-flash"
+    ; target
+        ~model_id:"gpt-5-codex"
+        ~inference_protocol:Official_client
+        "codex_subscription.gpt-5-codex"
+    ]
+  in
+  match baseline targets with
+  | Error error -> failf "unexpected baseline error: %s" (baseline_error_to_string error)
+  | Ok cases ->
+    List.iter
+      (fun target ->
+        let target_cases =
+          List.filter (fun case -> String.equal (runtime_id case) target.runtime_id) cases
+        in
+        List.iter
+          (fun required_capability ->
+            check bool "target has capability goal" true
+              (List.exists
+                 (fun case -> capability case = required_capability)
+                 target_cases))
+          all_capability_cases;
+        let provider_protocols =
+          target_cases
+          |> List.filter (fun case -> capability case = Provider_probe)
+          |> List.map protocol
+        in
+        check bool "provider cells use discovered inference protocol" true
+          (List.for_all (( = ) target.inference_protocol) provider_protocols))
+      targets;
+    let ids = List.map (fun case -> case |> case_id |> case_id_to_string) cases in
+    check int "all baseline identities unique"
+      (List.length ids)
+      (List.sort_uniq String.compare ids |> List.length)
+;;
+
+let test_baseline_preserves_policy_exclusions_as_cells () =
+  let agentworld =
+    target ~model_id:"agentworld-35b-a3b" "ollama.agentworld-35b-a3b"
+  in
+  match baseline [ agentworld ] with
+  | Error error -> failf "unexpected baseline error: %s" (baseline_error_to_string error)
+  | Ok cases ->
+    check bool "librarian cell required" true
+      (List.exists (fun case -> capability case = Librarian_run) cases);
+    check bool "autonomous cell remains for typed Unsupported verdict" true
+      (List.exists (fun case -> capability case = Autonomous_turn) cases);
+    let queue_scenarios =
+      cases
+      |> List.filter (fun case -> capability case = Queue_fifo)
+      |> List.map scenario
+    in
+    List.iter
+      (fun scenario ->
+        check bool "queue adverse scenario required" true (List.mem scenario queue_scenarios))
+      [ Nominal; Duplicate_delivery; Blocked_head; Restart_recovery ]
+;;
+
 let () =
   run
     "capability proof identity"
@@ -272,6 +362,21 @@ let () =
         ; test_case "duplicate expected" `Quick test_campaign_rejects_duplicate_expected_identity
         ; test_case "duplicate result" `Quick test_campaign_rejects_duplicate_result_identity
         ; test_case "unexpected result" `Quick test_campaign_rejects_unexpected_result_identity
+        ] )
+    ; ( "baseline manifest"
+      , [ test_case "requires targets" `Quick test_baseline_requires_discovered_targets
+        ; test_case
+            "invalid and duplicate targets"
+            `Quick
+            test_baseline_rejects_invalid_and_duplicate_targets
+        ; test_case
+            "every target covers every capability"
+            `Quick
+            test_baseline_covers_every_capability_for_each_target
+        ; test_case
+            "policy exclusions remain cells"
+            `Quick
+            test_baseline_preserves_policy_exclusions_as_cells
         ] )
     ]
 ;;

@@ -606,3 +606,197 @@ let campaign_error_to_string = function
   | Unexpected_result_case case_id ->
     "unexpected_result_case:" ^ case_id_to_string case_id
 ;;
+
+type baseline_target =
+  { runtime_id : string
+  ; model_id : string option
+  ; inference_protocol : protocol
+  }
+
+type baseline_error =
+  | Empty_baseline_targets
+  | Baseline_case_error of create_error
+  | Duplicate_baseline_case of case_id
+
+type baseline_requirement =
+  | Provider_lane of proof_role
+  | Autonomous of scenario
+  | Verify of scenario
+  | Cross_verify of scenario
+  | Librarian_exact of scenario
+  | Hitl_judge of scenario
+  | Board_attention_exact of scenario
+  | Compaction_exact of scenario
+  | Fusion_panel_case of scenario
+  | Fusion_judge_case of scenario
+  | Fusion_meta_judge_case of scenario
+  | Keeper_queue of scenario
+  | Scheduler of scenario
+  | Board of scenario
+  | Task of scenario
+  | Goal of scenario
+  | Serial_tools of scenario
+  | Parallel_tools of scenario
+  | Batch_tools of scenario
+  | Async_tools of scenario
+  | Sandbox of scenario
+  | Broadcast of scenario
+  | Stream of scenario
+  | Succession of scenario
+
+let baseline_requirements =
+  List.map (fun role -> Provider_lane role) all_proof_roles
+  @ [ Autonomous Nominal
+    ; Autonomous Provider_rejected
+    ; Autonomous Cancelled
+    ; Autonomous Restart_recovery
+    ; Verify Nominal
+    ; Verify Provider_rejected
+    ; Cross_verify Nominal
+    ; Cross_verify Provider_rejected
+    ; Librarian_exact Nominal
+    ; Librarian_exact Provider_rejected
+    ; Hitl_judge Nominal
+    ; Hitl_judge Effect_denied
+    ; Hitl_judge Effect_deferred
+    ; Hitl_judge Cancelled
+    ; Hitl_judge Provider_rejected
+    ; Board_attention_exact Nominal
+    ; Board_attention_exact Provider_rejected
+    ; Compaction_exact Nominal
+    ; Compaction_exact Provider_rejected
+    ; Compaction_exact Restart_recovery
+    ; Fusion_panel_case Nominal
+    ; Fusion_panel_case Provider_rejected
+    ; Fusion_panel_case Cancelled
+    ; Fusion_judge_case Nominal
+    ; Fusion_judge_case Provider_rejected
+    ; Fusion_judge_case Cancelled
+    ; Fusion_meta_judge_case Nominal
+    ; Fusion_meta_judge_case Provider_rejected
+    ; Fusion_meta_judge_case Cancelled
+    ; Keeper_queue Nominal
+    ; Keeper_queue Duplicate_delivery
+    ; Keeper_queue Blocked_head
+    ; Keeper_queue Restart_recovery
+    ; Scheduler Nominal
+    ; Scheduler Duplicate_delivery
+    ; Scheduler Restart_recovery
+    ; Board Nominal
+    ; Board Invalid_input
+    ; Board Effect_denied
+    ; Task Nominal
+    ; Task Invalid_input
+    ; Task Effect_denied
+    ; Goal Nominal
+    ; Goal Invalid_input
+    ; Goal Effect_denied
+    ; Serial_tools Nominal
+    ; Serial_tools Invalid_input
+    ; Serial_tools Effect_denied
+    ; Parallel_tools Nominal
+    ; Parallel_tools Invalid_input
+    ; Parallel_tools Effect_denied
+    ; Batch_tools Nominal
+    ; Batch_tools Invalid_input
+    ; Batch_tools Effect_denied
+    ; Async_tools Nominal
+    ; Async_tools Cancelled
+    ; Async_tools Duplicate_delivery
+    ; Async_tools Restart_recovery
+    ; Sandbox Nominal
+    ; Sandbox Effect_denied
+    ; Broadcast Nominal
+    ; Broadcast Duplicate_delivery
+    ; Stream Nominal
+    ; Stream Duplicate_delivery
+    ; Stream Restart_recovery
+    ; Succession Nominal
+    ; Succession Restart_recovery
+    ]
+;;
+
+let requirement_case ~inference_protocol = function
+  | Provider_lane role -> role, Provider_probe, Nominal, inference_protocol
+  | Autonomous scenario ->
+    Autonomous_keeper, Autonomous_turn, scenario, inference_protocol
+  | Verify scenario -> Verification, Verification_run, scenario, inference_protocol
+  | Cross_verify scenario ->
+    Cross_verifier, Cross_verification, scenario, inference_protocol
+  | Librarian_exact scenario ->
+    Exact_lane Librarian, Librarian_run, scenario, inference_protocol
+  | Hitl_judge scenario ->
+    Exact_lane Hitl_auto_judge, Hitl_auto_judge_run, scenario, inference_protocol
+  | Board_attention_exact scenario ->
+    Exact_lane Board_attention, Board_attention_run, scenario, inference_protocol
+  | Compaction_exact scenario ->
+    Exact_lane Compaction, Compaction_run, scenario, inference_protocol
+  | Fusion_panel_case scenario ->
+    Fusion_panel, Fusion_panel_run, scenario, inference_protocol
+  | Fusion_judge_case scenario ->
+    Fusion_judge, Fusion_judge_run, scenario, inference_protocol
+  | Fusion_meta_judge_case scenario ->
+    Fusion_meta_judge, Fusion_meta_judge_run, scenario, inference_protocol
+  | Keeper_queue scenario -> Autonomous_keeper, Queue_fifo, scenario, Durable_store
+  | Scheduler scenario ->
+    Autonomous_keeper, Scheduler_occurrence, scenario, Durable_store
+  | Board scenario -> Autonomous_keeper, Board_comment, scenario, Domain_api
+  | Task scenario -> Autonomous_keeper, Task_lifecycle, scenario, Domain_api
+  | Goal scenario -> Autonomous_keeper, Goal_lifecycle, scenario, Domain_api
+  | Serial_tools scenario -> Autonomous_keeper, Tool_serial, scenario, Mcp
+  | Parallel_tools scenario -> Autonomous_keeper, Tool_parallel, scenario, Mcp
+  | Batch_tools scenario -> Autonomous_keeper, Tool_batch, scenario, Mcp
+  | Async_tools scenario -> Autonomous_keeper, Async_lifecycle, scenario, Mcp
+  | Sandbox scenario -> Autonomous_keeper, Sandbox_containment, scenario, Mcp
+  | Broadcast scenario -> Autonomous_keeper, Broadcast_turn, scenario, Mcp
+  | Stream scenario -> Autonomous_keeper, Stream_replay, scenario, Sse
+  | Succession scenario ->
+    Autonomous_keeper, Restart_succession, scenario, Durable_store
+;;
+
+let baseline_expected ~targets ~build_commit ~config_revision =
+  match targets with
+  | [] -> Error Empty_baseline_targets
+  | _ ->
+    let rec add_requirements target acc = function
+      | [] -> Ok acc
+      | requirement :: rest ->
+        let role, capability, scenario, protocol =
+          requirement_case ~inference_protocol:target.inference_protocol requirement
+        in
+        (match
+           create
+             ~runtime_id:target.runtime_id
+             ~model_id:target.model_id
+             ~role
+             ~capability
+             ~scenario
+             ~protocol
+             ~build_commit
+             ~config_revision
+         with
+         | Error error -> Error (Baseline_case_error error)
+         | Ok case -> add_requirements target (case :: acc) rest)
+    in
+    let rec add_targets acc = function
+      | [] -> Ok (List.rev acc)
+      | target :: rest ->
+        (match add_requirements target acc baseline_requirements with
+         | Error _ as error -> error
+         | Ok acc -> add_targets acc rest)
+    in
+    (match add_targets [] targets with
+     | Error _ as error -> error
+     | Ok cases ->
+       (match first_duplicate_case_id [] (List.map case_id cases) with
+        | Some duplicate -> Error (Duplicate_baseline_case duplicate)
+        | None -> Ok cases))
+;;
+
+let baseline_error_to_string = function
+  | Empty_baseline_targets -> "empty_baseline_targets"
+  | Baseline_case_error error ->
+    "baseline_case_error:" ^ create_error_to_string error
+  | Duplicate_baseline_case case_id ->
+    "duplicate_baseline_case:" ^ case_id_to_string case_id
+;;

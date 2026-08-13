@@ -229,3 +229,30 @@ val summarize_campaign
 
 val campaign_complete : campaign_summary -> bool
 val campaign_error_to_string : campaign_error -> string
+
+type baseline_target =
+  { runtime_id : string
+  ; model_id : string option
+  ; inference_protocol : protocol
+  }
+(** One discovered runtime/model target. Registration and availability remain
+    separate facts: a registered but unavailable target still receives matrix
+    cells and must be reported as [Not_run], [Blocked], or typed [Unsupported]. *)
+
+type baseline_error =
+  | Empty_baseline_targets
+  | Baseline_case_error of create_error
+  | Duplicate_baseline_case of case_id
+
+val baseline_expected
+  :  targets:baseline_target list
+  -> build_commit:string option
+  -> config_revision:string option
+  -> (t list, baseline_error) result
+(** Expand the concrete Keeper autonomy baseline across every supplied target.
+    The internal requirement vocabulary is a closed sum of valid role and
+    capability pairings, not a Cartesian product that can manufacture invalid
+    combinations. Every completed cell still requires the three proof paths
+    enforced by {!passed}. *)
+
+val baseline_error_to_string : baseline_error -> string

@@ -5,6 +5,12 @@
     [/api/v1/dashboard/*], and the broader operator-facing JSON
     surface. *)
 
+val exact_lane_run_page_max : int
+(** Largest page [GET /api/v1/dashboard/exact-lane-runs] will serve. Exposed
+    because the store behind that route bounds its retained history, and a
+    bound below this would let the monitor's cursor page off the end of the
+    store; a test pins the relation. *)
+
 val add_routes :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

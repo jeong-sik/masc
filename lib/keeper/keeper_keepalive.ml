@@ -216,7 +216,25 @@ let set_keeper_paused_state ~agent_name paused =
         ();
       log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
-       if (not paused) && transcript_corruption_reset_required entry.meta
+       (* The heartbeat emits [Pause] *because* the lane is already paused
+          (masc_grpc_service.ml: [if view.keeper_paused then Pause :: ...]), so
+          this directive is a reflection of observed state, not a command. The
+          reducer's [Pause] overwrites [latched_reason] unconditionally, and the
+          only reason available here is a synthesized [Operator_paused]. Applying
+          it to a lane that already carries a classified latch relabels a
+          terminal failure as an operator pause -- every heartbeat cycle, so the
+          real reason never survives. Nothing to reconcile: skip (#28397).
+
+          A paused lane with no latched reason is left alone by this guard: the
+          contract calls that a fail-closed unclassified state, and deciding what
+          it should become is a separate question from not clobbering a reason
+          that exists. *)
+       if paused && entry.meta.paused && Option.is_some entry.meta.latched_reason
+       then
+         Log.Keeper.debug
+           "directive pause: %s already latched, leaving its reason intact"
+           entry.name
+       else if (not paused) && transcript_corruption_reset_required entry.meta
        then (
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string DirectiveFailures)

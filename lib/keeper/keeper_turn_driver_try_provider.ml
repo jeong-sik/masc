@@ -332,6 +332,7 @@ let rejected_body_bytes = function
       ( InvalidRequest
           { reason =
               ( Json_parse_error
+              | Attempt_rejected
               | Request_body_refused_by_provider _
               | Unknown_invalid_request )
           ; _

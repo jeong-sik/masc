@@ -133,6 +133,11 @@ let api_invalid_request_unknown_model =
        ; reason = Agent_core.Retry.Unknown_invalid_request
        })
 
+let api_attempt_rejected =
+  Agent_core.Provider_failure_attribution.core_error_of_http_error
+    (Llm_provider.Http_client.AcceptRejected
+       { reason = "selected runtime cannot encode the request" })
+
 (* Until RFC-0370 §3.1, the Codex app-server boundary folded provider- and
    transport-side failures into [Internal] strings (the catch-all in
    [codex_error_to_core_error]); these three verbatim live-log classes
@@ -190,6 +195,7 @@ let census_rows =
   ; "api:context_overflow", api_context_overflow, 9
   ; "internal:remote_command_failed", internal_remote_command_failed, 4
   ; "api:invalid_request", api_invalid_request_unknown_model, 2
+  ; "api:attempt_rejected", api_attempt_rejected, 0
   ; "api:turn_budget_timeout", api_turn_budget_timeout, 0
   ; "provider:parse_error", provider_parse_error, 0
   ; "provider:unknown_variant", provider_unknown_variant, 0
@@ -259,6 +265,7 @@ let expected_rotation =
   ; "api:context_overflow", true
   ; "internal:remote_command_failed", false
   ; "api:invalid_request", false
+  ; "api:attempt_rejected", true
   ; "api:turn_budget_timeout", true
   ; "provider:parse_error", false
   ; "provider:unknown_variant", false

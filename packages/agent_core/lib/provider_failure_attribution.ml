@@ -41,9 +41,9 @@ type accept_rejected =
   | Api_invalid_request
   | Config_invalid_config of { field : string }
 
-let invalid_request reason =
+let invalid_request ?(reason_kind = Retry.Unknown_invalid_request) reason =
   Error.Api
-    (Retry.InvalidRequest { message = reason; reason = Retry.Unknown_invalid_request })
+    (Retry.InvalidRequest { message = reason; reason = reason_kind })
 ;;
 
 let core_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
@@ -55,7 +55,8 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
   | Http.TimeoutError _ -> Error.Provider (Llm_provider.Error.of_http_error err)
   | Http.AcceptRejected { reason } ->
     (match accept_rejected with
-     | Api_invalid_request -> invalid_request reason
+     | Api_invalid_request ->
+       invalid_request ~reason_kind:Retry.Attempt_rejected reason
      | Config_invalid_config { field } ->
        Error.Config (Error.InvalidConfig { field; detail = reason }))
   | Http.ProviderFailure

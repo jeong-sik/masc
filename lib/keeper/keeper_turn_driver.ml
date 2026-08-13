@@ -181,6 +181,9 @@ let lane_should_retry
        last candidate still returns the typed error, keeping the typed
        overflow observation (blocker label, failure route) intact. *)
     true
+  else if Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next error
+  then
+    true
   else
     match Keeper_turn_driver_try_runtime.core_error_to_http_error error with
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err

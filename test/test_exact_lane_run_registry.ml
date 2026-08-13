@@ -56,7 +56,7 @@ let test_round_trip_preserves_exact_evidence () =
     ~run_id:"run-1"
     ~outcome:R.Succeeded
     ~elapsed_s:0.5
-    ~selected_slot:"librarian-primary"
+    ~selected_slot:(Some "librarian-primary")
     ~output:(`Assoc [ "fact_count", `Int 3 ]);
   let replayed = R.replay path in
   let original = R.get registry ~run_id:"run-1" |> Option.get |> R.run_to_yojson in

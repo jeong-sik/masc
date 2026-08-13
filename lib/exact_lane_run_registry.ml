@@ -382,6 +382,7 @@ let mark_completed_internal t ~run_id ~outcome ~elapsed_s ~selected_slot ~output
     notify_changed ();
     Ok ()
   | Error Unknown_run -> Error Unknown_run
+  | Error Invalid_selected_slot -> Error Invalid_selected_slot
   | Error (Persistence_failed _ as error) ->
     notify_changed ();
     Error error

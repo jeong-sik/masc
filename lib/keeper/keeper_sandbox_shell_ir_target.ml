@@ -128,23 +128,3 @@ let docker_target ~turn_sandbox_factory ~meta ~cwd ?timeout_sec () =
          ; runtime
          })
 ;;
-
-let docker_local_fallback_target ~meta ?timeout_sec () =
-  let image = docker_image meta in
-  match
-    Keeper_sandbox_runtime.docker_image_present_optional
-      ~image
-      ?timeout_sec
-      ()
-  with
-  | Ok () -> None
-  | Error message ->
-    Some
-      ( Masc_exec.Sandbox_target.host ()
-      , [ "requested_sandbox", `String "docker"
-        ; "via", `String "local_fallback"
-        ; "fallback_reason", `String "docker_preflight_unavailable"
-        ; "sandbox_fallback", `String "local_playground"
-        ; "sandbox_fallback_reason", `String (Exec_policy.truncate_for_log message)
-        ] )
-;;

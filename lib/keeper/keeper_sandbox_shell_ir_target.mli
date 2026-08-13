@@ -21,9 +21,3 @@ val docker_target
   -> ?timeout_sec:float
   -> unit
   -> (docker_dispatch, target_error) result
-
-val docker_local_fallback_target
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> ?timeout_sec:float
-  -> unit
-  -> (Masc_exec.Sandbox_target.t * (string * Yojson.Safe.t) list) option

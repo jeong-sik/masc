@@ -313,16 +313,11 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
   | Agent_core.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
-    (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
-       tool_use_id ↔ execution_id pair before AGENT_CORE published this event,
-       so the lookup is deterministic. A miss means the execution did not
-       go through a keeper hook (worker/eval lanes), not a failure. *)
-    let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
+    (* RFC-0233 PR-2: the keeper post_tool_use hook registered this exact
+       immutable invocation before AGENT_CORE published the event. Physical
+       invocation identity keeps blank/repeated provider ids distinct. *)
     let execution_id_fields =
-      match
-        if tool_use_id = "" then None
-        else Keeper_execution_join.take ~tool_use_id
-      with
+      match Keeper_execution_join.take ~invocation with
       | Some execution_id -> [ "execution_id", `String execution_id ]
       | None -> []
     in

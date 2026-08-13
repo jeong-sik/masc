@@ -14,44 +14,46 @@
 
 let max_output_len = 4000
 
-(** The provider call id is not an occurrence identity: it may be blank or
-    repeated. Agent Core scopes one occurrence by turn and planned index, so
-    keep those typed fields in the pending-observation key as well. *)
-type invocation_key =
-  { keeper_name : string
-  ; tool_use_id : string
-  ; turn : int
-  ; planned_index : int
-  }
+module Invocation_key = struct
+  type t = Agent_core.Tool_contract.Invocation.t
 
-let invocation_key ~keeper_name invocation =
-  { keeper_name
-  ; tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation
-  ; turn = Agent_core.Tool_contract.Invocation.turn invocation
-  ; planned_index = Agent_core.Tool_contract.Invocation.planned_index invocation
-  }
-;;
+  let equal left right = left == right
+  let hash = Hashtbl.hash
+end
+
+module Invocation_table = Ephemeron.K1.Make (Invocation_key)
 
 (** Pre-truncation info, keyed by the exact Agent Core occurrence. Set by the
-    tool handler wrapper and consumed by the on-tool-result hook. *)
-let pending_truncation : (invocation_key, int * int option) Hashtbl.t =
-  Hashtbl.create 8
+    tool handler wrapper and consumed by the on-tool-result hook. The weak key
+    prevents cancellation before that hook from retaining the invocation. *)
+let pending_truncation : (int * int option) Invocation_table.t =
+  Invocation_table.create 8
 ;;
 
-let set_truncation_info ~keeper_name ~invocation ~original_bytes ?truncated_to () =
-  Hashtbl.replace
-    pending_truncation
-    (invocation_key ~keeper_name invocation)
-    (original_bytes, truncated_to)
+let pending_truncation_mu = Stdlib.Mutex.create ()
+
+let with_pending_truncation_lock f =
+  Stdlib.Mutex.lock pending_truncation_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_truncation_mu)
+    f
 ;;
 
-let consume_truncation_info ~keeper_name ~invocation () =
-  let key = invocation_key ~keeper_name invocation in
-  match Hashtbl.find_opt pending_truncation key with
-  | Some info ->
-    Hashtbl.remove pending_truncation key;
-    info
-  | None -> 0, None
+let set_truncation_info ~invocation ~original_bytes ?truncated_to () =
+  with_pending_truncation_lock (fun () ->
+    Invocation_table.replace
+      pending_truncation
+      invocation
+      (original_bytes, truncated_to))
+;;
+
+let consume_truncation_info ~invocation () =
+  with_pending_truncation_lock (fun () ->
+    match Invocation_table.find_opt pending_truncation invocation with
+    | Some info ->
+      Invocation_table.remove pending_truncation invocation;
+      info
+    | None -> 0, None)
 ;;
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
@@ -172,7 +174,7 @@ let reset_for_testing () =
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
-  Hashtbl.reset pending_truncation
+  with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation)
 ;;
 
 let store_dir () =

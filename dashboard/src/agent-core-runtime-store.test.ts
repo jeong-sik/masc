@@ -428,6 +428,57 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreAgentEvents.value[0]?.type).toBe('reputation_changed')
   })
 
+  it('preserves a live event accepted while initial replay hydration is in flight', async () => {
+    let resolveReplay: ((response: Awaited<ReturnType<typeof fetchTelemetry>>) => void) | undefined
+    fetchTelemetryMock.mockImplementation(() => new Promise(resolve => {
+      resolveReplay = resolve
+    }))
+
+    const replay = replayAgentCoreRuntimeTelemetry()
+    expect(applyAgentCoreRuntimeEvent({
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-live-during-replay',
+      ts_unix: 556,
+      run_id: 'run-live-during-replay',
+      payload: {
+        agent_a: 'live-agent',
+        agent_b: 'live-peer',
+        trust_score: 0.8,
+        timestamp: 556,
+      },
+    })).toBe(true)
+
+    resolveReplay?.({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 0,
+      total_matching_entries: 1,
+      has_more: false,
+      entries: [{
+        source: 'agent_core_event',
+        type: 'agent_core:masc:trust_updated',
+        event_id: 'evt-replayed-snapshot',
+        ts_unix: 555,
+        run_id: 'run-replayed-snapshot',
+        payload: {
+          agent_a: 'replayed-agent',
+          agent_b: 'replayed-peer',
+          trust_score: 0.7,
+          timestamp: 555,
+        },
+      } as TelemetryEntry],
+    })
+    await replay
+
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(1)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+    expect(agentCoreAgentEvents.value.map(event => event.event_id)).toEqual([
+      'evt-live-during-replay',
+      'evt-replayed-snapshot',
+    ])
+  })
+
   it('increments total events above the replay baseline for live arrivals', async () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
@@ -621,6 +672,54 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
   })
 
+  it('keeps the fetched cursor separate from the deduplicated displayed count', async () => {
+    const duplicated = {
+      source: 'agent_core_event',
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-page-overlap',
+      run_id: 'run-page-overlap',
+      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+    } as TelemetryEntry
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 0,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [duplicated],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 1,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [duplicated],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(1)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 0,
+      offset: 2,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 2,
+      signal: undefined,
+    })
+  })
+
   it('stops at the telemetry offset cap without replaying a clamped page', async () => {
     const entry = (seq: number): TelemetryEntry => ({
       source: 'agent_core_event',
@@ -650,7 +749,7 @@ describe('agent-core-runtime-store', () => {
       offset: 5499,
       signal: undefined,
     })
-    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(5499)
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(1)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
     expect(agentCoreHealthSummary.value.replayCapped).toBe(true)
     expect(agentCoreHealthSummary.value.hasMore).toBe(false)

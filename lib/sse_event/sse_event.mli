@@ -137,12 +137,7 @@ val slot_scheduler_observed
     [(string * Yojson.Safe.t) list] and passes it via
     [~result_fields].  The list is appended to the atd-emitted base
     record in declaration order, preserving byte equality with the
-    previous inline `Assoc-construction path.
-
-    [agent_failed]'s five error fields are simple projections
-    (string/bool/Yojson.Safe.t) and are encoded directly in the atd
-    schema, so they are passed as labeled arguments instead of an
-    addendum list. *)
+    previous inline `Assoc-construction path. *)
 
 val agent_completed
   :  ts_unix:float
@@ -152,22 +147,6 @@ val agent_completed
   -> task_id:string
   -> elapsed_s:float
   -> result_fields:(string * Yojson.Safe.t) list
-  -> Yojson.Safe.t
-
-val agent_failed
-  :  ?caused_by:string
-  -> ts_unix:float
-  -> correlation_id:string
-  -> run_id:string
-  -> agent_name:string
-  -> task_id:string
-  -> elapsed_s:float
-  -> error:string
-  -> error_domain:string
-  -> error_code:string
-  -> error_retryable:bool
-  -> error_detail:Yojson.Safe.t
-  -> unit
   -> Yojson.Safe.t
 
 (** Encode the typed [agent_failed] payload without an envelope. Adapter

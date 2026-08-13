@@ -123,7 +123,7 @@ describe('AgentCoreHealthChip', () => {
       payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
     }] as TelemetryEntry[])
     noteAgentCoreReplayWindow({
-      loadedEvents: 5499,
+      loadedEvents: 1,
       totalMatchingEvents: 6000,
       truncated: false,
       capped: true,

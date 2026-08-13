@@ -18,24 +18,6 @@
 
 (** {1 Event types} *)
 
-(** Canonical envelope type for adapters that project durable journal events
-    across runtimes. Journal variants remain unchanged for compatibility.
-    @since 0.170.5 *)
-type envelope_v2 = Event_envelope.t
-
-val mk_envelope_v2
-  :  ?event_id:string
-  -> ?correlation_id:string
-  -> ?run_id:string
-  -> ?event_time:float
-  -> ?observed_at:float
-  -> ?seq:int
-  -> ?parent_event_id:string
-  -> ?caused_by:string
-  -> ?source_clock:Event_envelope.source_clock
-  -> unit
-  -> envelope_v2
-
 (** An agent loop event. Each variant captures the data needed
     to replay the action without re-executing it. *)
 type event =

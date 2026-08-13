@@ -835,7 +835,16 @@ let classify_forwarded_method method_ =
   | "textDocument/prepareTypeHierarchy"
   | "textDocument/semanticTokens/full"
   | "textDocument/semanticTokens/full/delta"
-  | "textDocument/semanticTokens/range" -> Forward_read_only
+  | "textDocument/semanticTokens/range"
+  (* RFC-0378 rung E: these five had MASC-overlay handlers that read the
+     lifetime-4-rows annotations store; the overlay died with that need,
+     and the native language-server behavior relays like any other
+     read-only method. *)
+  | "textDocument/definition"
+  | "textDocument/references"
+  | "textDocument/documentSymbol"
+  | "textDocument/documentHighlight"
+  | "textDocument/inlayHint" -> Forward_read_only
   (* Everything else — textDocument/rename, prepareRename, formatting,
      rangeFormatting, onTypeFormatting, willSaveWaitUntil,
      workspace/executeCommand, workspace/applyEdit — is denied explicitly.
@@ -885,37 +894,6 @@ let handle_codelens cs params id =
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/inlayHint — merge LSP response with MASC overlays. *)
-let handle_inlay_hint cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.inlay_hints ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router
-            proc
-            ~method_:(lsp_method_to_string InlayHint)
-            ~params
-            ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/diagnostic — merge LSP response with MASC diagnostics. *)
 let handle_diagnostic cs params id =
   match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`Assoc [ "items", `List [] ])
@@ -1052,74 +1030,6 @@ let handle_hover cs params id =
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/definition — merge LSP response with MASC annotation links. *)
-let handle_definition cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc =
-      match request.line with
-      | Some line ->
-        Lsp_overlay_provider.definition_links ~base_dir:base ~partition:(overlay_partition cs) ~document_root:(document_root cs) ~file_path:relative ~line
-      | None -> []
-    in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Definition)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/references — merge LSP response with MASC annotation locations. *)
-let handle_references cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc =
-      match request.line with
-      | Some line ->
-        Lsp_overlay_provider.reference_locations
-          ~base_dir:base ~partition:(overlay_partition cs) ~document_root:(document_root cs) ~file_path:relative ~line ~include_declaration:true
-      | None -> []
-    in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string References)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/completion — merge LSP response with MASC annotation snippets. *)
 let handle_completion cs params id =
   match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
@@ -1186,35 +1096,6 @@ let handle_code_action cs params id =
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/documentSymbol — inject MASC annotation symbols. *)
-let handle_document_symbol cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.document_symbols ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Document_symbol)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Handle textDocument/foldingRange — inject MASC annotation folding ranges. *)
 let handle_folding_range cs params id =
   match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
@@ -1242,40 +1123,6 @@ let handle_folding_range cs params id =
          | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
 ;;
 
-(** Handle textDocument/documentHighlight — highlight related MASC annotations. *)
-let handle_document_highlight cs params id =
-  match resolve_document_request ~anchor:(document_root cs) params with
-  | Error _ -> send_response cs id (`List [])
-  | Ok request ->
-    let base = cs.base_path in
-    let relative = request.relative_path in
-    let masc =
-      match request.line with
-      | Some line ->
-        Lsp_overlay_provider.document_highlights ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative ~line
-      | None -> []
-    in
-    (match request.language with
-     | Unknown_lang -> send_response cs id (`List masc)
-     | Known_lang lang_id ->
-      match ensure_lsp_process cs lang_id with
-      | Error msg ->
-        note_overlay_only cs ~lang_id ~error:msg;
-        send_response cs id (`List masc)
-      | Ok proc ->
-        let promise =
-          Lsp_message_router.send_request
-            cs.router proc
-            ~method_:(lsp_method_to_string Document_highlight)
-            ~params ~client_id:(req_id_to_int id)
-        in
-        (match Eio.Promise.await promise with
-         | Ok (`List items) -> send_response cs id (`List (items @ masc))
-         | Ok other -> send_response cs id other
-         | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg))
-;;
-
-(** Dispatch an incoming LSP message to the appropriate handler. *)
 let dispatch_message cs msg =
   if Atomic.get cs.disconnected
   then ()
@@ -1335,15 +1182,10 @@ let dispatch_message cs msg =
           (* MASC-overlay-aware handlers *)
           | Some Hover, Some n -> handle_hover cs params n
           | Some CodeLens, Some n -> handle_codelens cs params n
-          | Some InlayHint, Some n -> handle_inlay_hint cs params n
           | Some Diagnostic, Some n -> handle_diagnostic cs params n
-          | Some Definition, Some n -> handle_definition cs params n
-          | Some References, Some n -> handle_references cs params n
           | Some Completion, Some n -> handle_completion cs params n
           | Some CodeAction, Some n -> handle_code_action cs params n
-          | Some Document_symbol, Some n -> handle_document_symbol cs params n
           | Some Folding_range, Some n -> handle_folding_range cs params n
-          | Some Document_highlight, Some n -> handle_document_highlight cs params n
           | _ ->
             (match id_opt with
              | Some n ->

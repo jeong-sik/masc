@@ -140,9 +140,19 @@ val start
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
-(** [on_turn_slot_released] fires when a turn ends and the slot is still
-    unclaimed after the queued chat operation, if any, has been offered it. The
-    signal therefore means "a turn can start now", not "a turn ended".
+(** [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
+    after the queued chat operation (if any) has been offered it, and the
+    autonomous lane has been refused the slot since the last notification. The
+    signal therefore means "the lane that lost the slot can start now", not "a
+    turn ended".
+
+    All three conditions are load-bearing. Dropping the third one is what
+    {!Keeper_registry.Turn_slot_released} did on 2026-08-12: a keeper woken by
+    the release starts its next turn at once, so every turn end scheduled the
+    next turn and the keepalive cadence stopped governing. Measured on the live
+    fleet across the restart that carried it: turn starts went from 114.9/hour
+    to 1523.5/hour, and the median interval between keepalive cycles fell from
+    313s to 10s — the turn duration, not the configured cadence.
 
     It exists because the two lanes learn about a free slot by opposite means.
     A chat producer notifies the Owner through {!wake_operation_drain} — "the

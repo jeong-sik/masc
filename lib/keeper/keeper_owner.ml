@@ -199,6 +199,15 @@ type t =
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; on_turn_slot_released : (unit -> unit) option
+  ; autonomous_lost_slot : bool ref
+        (* Set when the autonomous lane asked for the slot and was refused,
+           cleared when the release notification is delivered. Without it the
+           notification fires after every turn, and since a woken keeper starts
+           its next turn immediately, each turn's end schedules the next one:
+           the keepalive cadence stops governing and turn rate rises to one per
+           turn duration. Only a lane that actually lost the slot needs telling
+           that it is free. Owner-fiber-local; every reader and writer below
+           runs in the command loop. *)
   }
 
 let error_to_string = function
@@ -236,8 +245,9 @@ let notify_turn_slot_released t =
   match t.on_turn_slot_released with
   | None -> ()
   | Some notify ->
-    if Option.is_none (Atomic.get t.turn_in_flight)
+    if Option.is_none (Atomic.get t.turn_in_flight) && !(t.autonomous_lost_slot)
     then (
+      t.autonomous_lost_slot := false;
       try notify () with
       | exn ->
         Log.Keeper.routine
@@ -495,6 +505,7 @@ let start
     ; store_error = ref None
     ; child_active = ref false
     ; child_cancel = Atomic.make None
+    ; autonomous_lost_slot = ref false
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
     ; on_turn_slot_released
@@ -845,6 +856,9 @@ let start
               | Ok () ->
                 (match Atomic.get t.turn_in_flight with
                  | Some in_flight ->
+                   (match lane with
+                    | Autonomous -> t.autonomous_lost_slot := true
+                    | Chat_operation | Maintenance -> ());
                    Eio.Promise.resolve
                      resolve
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))

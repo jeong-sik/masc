@@ -53,7 +53,7 @@ let with_workspace f =
 
 (* Both keepers have taken turns, so [total_turns > 0] holds for both. They
    differ only in when the last turn landed. *)
-let seed_keeper config ~name ~last_turn_ts =
+let seed_keeper config ?(autonomous_at = "") ~name ~last_turn_ts () =
   let json =
     `Assoc
       [ "name", `String name
@@ -67,6 +67,17 @@ let seed_keeper config ~name ~last_turn_ts =
     let meta =
       Keeper_meta_contract.map_usage
         (fun usage -> { usage with total_turns = 5; last_turn_ts })
+        meta
+    in
+    let meta =
+      Keeper_meta_contract.map_runtime
+        (fun runtime ->
+           { runtime with
+             autonomous_action_count = 3
+           ; autonomous_tool_turn_count = 2
+           ; board_reactive_turn_count = 4
+           ; last_autonomous_action_at = autonomous_at
+           })
         meta
     in
     (match Keeper_meta_store.replace_snapshot config meta with
@@ -96,11 +107,12 @@ let keeper_names feature key =
 let test_stale_keeper_fails_runtime_liveness () =
   with_workspace
   @@ fun config ->
-  seed_keeper config ~name:"fresh" ~last_turn_ts:(now -. hour_seconds);
+  seed_keeper config ~name:"fresh" ~last_turn_ts:(now -. hour_seconds) ();
   seed_keeper
     config
     ~name:"stale"
-    ~last_turn_ts:(now -. ((recent_window_hours +. 2.0) *. hour_seconds));
+    ~last_turn_ts:(now -. ((recent_window_hours +. 2.0) *. hour_seconds))
+    ();
   let payload = Feature_proof.json ~config ~now () in
   let feature = feature_by_id payload "runtime_liveness" in
   check
@@ -125,7 +137,7 @@ let test_stale_keeper_fails_runtime_liveness () =
 let test_recent_keeper_passes_runtime_liveness () =
   with_workspace
   @@ fun config ->
-  seed_keeper config ~name:"fresh" ~last_turn_ts:(now -. hour_seconds);
+  seed_keeper config ~name:"fresh" ~last_turn_ts:(now -. hour_seconds) ();
   let payload = Feature_proof.json ~config ~now () in
   let feature = feature_by_id payload "runtime_liveness" in
   check
@@ -145,7 +157,7 @@ let test_recent_keeper_passes_runtime_liveness () =
 let test_keeper_without_turns_fails_runtime_liveness () =
   with_workspace
   @@ fun config ->
-  seed_keeper config ~name:"idle" ~last_turn_ts:0.0;
+  seed_keeper config ~name:"idle" ~last_turn_ts:0.0 ();
   let payload = Feature_proof.json ~config ~now () in
   let feature = feature_by_id payload "runtime_liveness" in
   check
@@ -160,6 +172,70 @@ let test_keeper_without_turns_fails_runtime_liveness () =
     (U.member "status" feature |> U.to_string)
 ;;
 
+(* [autonomous_tool_use] and [board_reactive_autonomy] read lifetime counters,
+   which never decrease. Both keepers below carry the same counters; only the
+   timestamps differ, so a predicate that ignores time reports them
+   identically. *)
+let iso_ago seconds = Masc_domain.iso8601_of_unix_seconds (now -. seconds)
+
+let test_stale_keeper_fails_autonomous_tool_use () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper
+    config
+    ~name:"fresh"
+    ~last_turn_ts:(now -. hour_seconds)
+    ~autonomous_at:(iso_ago hour_seconds)
+    ();
+  seed_keeper
+    config
+    ~name:"stale"
+    ~last_turn_ts:(now -. hour_seconds)
+    ~autonomous_at:(iso_ago ((recent_window_hours +. 2.0) *. hour_seconds))
+    ();
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "autonomous_tool_use" in
+  check
+    (list string)
+    "a keeper still turning but not acting autonomously is not observed"
+    [ "fresh" ]
+    (keeper_names feature "observed_keepers");
+  check
+    (list string)
+    "it is reported missing rather than dropped"
+    [ "stale" ]
+    (keeper_names feature "missing_keepers")
+;;
+
+let test_stopped_keeper_fails_board_reactive_autonomy () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper
+    config
+    ~name:"fresh"
+    ~last_turn_ts:(now -. hour_seconds)
+    ~autonomous_at:(iso_ago hour_seconds)
+    ();
+  seed_keeper
+    config
+    ~name:"stopped"
+    ~last_turn_ts:(now -. ((recent_window_hours +. 2.0) *. hour_seconds))
+    ~autonomous_at:(iso_ago hour_seconds)
+    ();
+  let payload = Feature_proof.json ~config ~now () in
+  let feature = feature_by_id payload "board_reactive_autonomy" in
+  check
+    (list string)
+    "a stopped keeper does not carry the board-reactive claim"
+    [ "fresh" ]
+    (keeper_names feature "observed_keepers");
+  check
+    string
+    "a partially stopped fleet does not pass"
+    "warn"
+    (U.member "status" feature |> U.to_string)
+;;
+
 let () =
   run
     "dashboard_keeper_feature_proof"
@@ -170,6 +246,16 @@ let () =
             "keeper without turns fails"
             `Quick
             test_keeper_without_turns_fails_runtime_liveness
+        ] )
+    ; ( "counter_features_are_dated"
+      , [ test_case
+            "stale autonomous action fails autonomous_tool_use"
+            `Quick
+            test_stale_keeper_fails_autonomous_tool_use
+        ; test_case
+            "stopped keeper fails board_reactive_autonomy"
+            `Quick
+            test_stopped_keeper_fails_board_reactive_autonomy
         ] )
     ]
 ;;

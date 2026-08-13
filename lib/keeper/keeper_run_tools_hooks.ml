@@ -10,6 +10,22 @@ open Keeper_agent_prompt_metrics
 
 type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
 
+type tool_observer_serialization = (unit -> unit) -> unit
+
+let create_tool_observer_serialization () : tool_observer_serialization =
+  let mutex = Eio.Mutex.create () in
+  fun observe ->
+    Eio.Mutex.lock mutex;
+    (* The enclosing Agent-core hook reports a failed observer and continues.
+       [use_rw] would poison the per-run mutex on that reported exception and
+       reject every later completion. Unlock explicitly while protecting the
+       acquired critical section from cancellation, so one failed observation
+       cannot erase unrelated later receipts. *)
+    Fun.protect
+      ~finally:(fun () -> Eio.Mutex.unlock mutex)
+      (fun () -> Eio.Cancel.protect observe)
+;;
+
 type agent_setup =
   { tools : Agent_core.Tool.t list
   ; cleanup : unit -> unit
@@ -210,6 +226,13 @@ let assemble_hooks
       acc
       initial_schema_filter;
     let meta_ref = ref acc.meta in
+    (* Explicitly concurrent tools complete in sibling fibers. Their tool bodies
+       stay concurrent, but the post-tool observer is one transaction: it
+       refreshes [acc.meta], appends the receipt detail, derives the fallback
+       turn identity, and emits the observation/activity pair. A per-run Eio
+       mutex gives those effects one order without introducing a process-global
+       gate or serializing tool execution itself. *)
+    let serialize_tool_observer = create_tool_observer_serialization () in
     let base_hooks =
       Keeper_hooks_agent_core.make_hooks
         ~config
@@ -224,106 +247,107 @@ let assemble_hooks
         ~on_tool_executed:
           (fun
             ~tool_name ~input ~output_text ~success ~duration_ms ~provider ~typed_outcome ->
-          let route_evidence =
-            Keeper_tool_call_log.route_evidence_json_of_tool_io
-              ~tool_name
-              ~input
-              ~output_text
-          in
-          let progress_io_fingerprints =
-            Keeper_tool_progress_identity.digest_tool_io
-              ~tool_name
-              ~input
-              ~output_text
-          in
-          (match Keeper_registry.get ~base_path:config.base_path meta.name with
-           | Some entry ->
-             acc.meta <- entry.meta;
-             meta_ref := entry.meta
-           | None -> ());
-          let execution_outcome =
-            if success then Tool_result.Ok else Tool_result.Error
-          in
-          let task_id =
-            Keeper_run_tools_task_scope.task_id_scope_of_tool_call
-              ~tool_name
-              ~input
-              ~meta:acc.meta
-          in
-          acc.tool_calls
-          <- { tool_name
-             ; provider
-             ; execution_outcome
-             ; typed_outcome
-             ; latency_ms = duration_ms
-             ; task_id
-             ; route_evidence
-             ; input_fingerprint =
-                 Option.map
-                   (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
-                      d.input_fingerprint)
-                   progress_io_fingerprints
-             ; output_fingerprint =
-                 Option.map
-                   (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
-                      d.output_fingerprint)
-                   progress_io_fingerprints
-             }
-             :: acc.tool_calls;
-          (* Emit neutral agent observation events; UI adapters subscribe separately. *)
-          (let typed_outcome_str =
-             match typed_outcome with
-             | Some Keeper_tool_outcome.Progress -> "progress"
-             | Some (Keeper_tool_outcome.No_progress _) -> "no_progress"
-             | Some (Keeper_tool_outcome.Error _) -> "error"
-             | None -> Tool_result.string_of_tool_call_outcome execution_outcome
-           in
-           let turn_id =
-             match acc.meta.Keeper_meta_contract.current_task_id with
-             | Some t -> Keeper_id.Task_id.to_string t
-             | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
-           in
-           (* task-1733: resolve the partition from the tool's actual edited
-              file (input.path / input.file_path, with explicit cwd honoured
-              for relative paths), not from the [.masc] runtime root.
-              #23469: relative shapes anchor at this keeper's playground
-              sandbox root, matching the file tools' own resolution. *)
-           let partition, observed_file_path =
-             observation_partition_for_tool_input
-               ~config
-               ~meta:acc.meta
-               ~kind:"tool_event"
-               input
-           in
-           Agent_observation.emit_tool_event
-             { base_path = config.base_path
-             ; partition
-             ; file_path = observed_file_path
-             ; tool_name
-             ; keeper_id = acc.meta.name
-             ; turn_id
-             ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
-             ; typed_outcome = typed_outcome_str
-             ; duration_ms
-             ; output_text
-             ; input
-             };
-           (* #23540: keeper in-turn tool executions never reached the
-              activity log ([tool.called] is emitted only by the external MCP
-              path), so the agent timeline reported tool_calls = 0 for any
-              keeper working through its own turn. *)
-           Keeper_tool_activity.emit_tool_exec
-             ~config
-             ~meta:acc.meta
-             ~tool_name
-             ~success
-             ~duration_ms:(int_of_float (Float.round duration_ms))
-             ~typed_outcome
-             ~provider
-             ~keeper_turn_id:(Some keeper_turn_id)
-             ~agent_core_turn:acc.current_turn
-             ~task_id
-             ()))
+            serialize_tool_observer (fun () ->
+              let route_evidence =
+                Keeper_tool_call_log.route_evidence_json_of_tool_io
+                  ~tool_name
+                  ~input
+                  ~output_text
+              in
+              let progress_io_fingerprints =
+                Keeper_tool_progress_identity.digest_tool_io
+                  ~tool_name
+                  ~input
+                  ~output_text
+              in
+              (match Keeper_registry.get ~base_path:config.base_path meta.name with
+               | Some entry ->
+                 acc.meta <- entry.meta;
+                 meta_ref := entry.meta
+               | None -> ());
+              let execution_outcome =
+                if success then Tool_result.Ok else Tool_result.Error
+              in
+              let task_id =
+                Keeper_run_tools_task_scope.task_id_scope_of_tool_call
+                  ~tool_name
+                  ~input
+                  ~meta:acc.meta
+              in
+              acc.tool_calls
+              <- { tool_name
+                 ; provider
+                 ; execution_outcome
+                 ; typed_outcome
+                 ; latency_ms = duration_ms
+                 ; task_id
+                 ; route_evidence
+                 ; input_fingerprint =
+                     Option.map
+                       (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                          d.input_fingerprint)
+                       progress_io_fingerprints
+                 ; output_fingerprint =
+                     Option.map
+                       (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                          d.output_fingerprint)
+                       progress_io_fingerprints
+                 }
+                 :: acc.tool_calls;
+              (* Emit neutral agent observation events; UI adapters subscribe separately. *)
+              (let typed_outcome_str =
+                 match typed_outcome with
+                 | Some Keeper_tool_outcome.Progress -> "progress"
+                 | Some (Keeper_tool_outcome.No_progress _) -> "no_progress"
+                 | Some (Keeper_tool_outcome.Error _) -> "error"
+                 | None -> Tool_result.string_of_tool_call_outcome execution_outcome
+               in
+               let turn_id =
+                 match acc.meta.Keeper_meta_contract.current_task_id with
+                 | Some t -> Keeper_id.Task_id.to_string t
+                 | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
+               in
+               (* task-1733: resolve the partition from the tool's actual edited
+                  file (input.path / input.file_path, with explicit cwd honoured
+                  for relative paths), not from the [.masc] runtime root.
+                  #23469: relative shapes anchor at this keeper's playground
+                  sandbox root, matching the file tools' own resolution. *)
+               let partition, observed_file_path =
+                 observation_partition_for_tool_input
+                   ~config
+                   ~meta:acc.meta
+                   ~kind:"tool_event"
+                   input
+               in
+               Agent_observation.emit_tool_event
+                 { base_path = config.base_path
+                 ; partition
+                 ; file_path = observed_file_path
+                 ; tool_name
+                 ; keeper_id = acc.meta.name
+                 ; turn_id
+                 ; outcome = Tool_result.string_of_tool_call_outcome execution_outcome
+                 ; typed_outcome = typed_outcome_str
+                 ; duration_ms
+                 ; output_text
+                 ; input
+                 };
+               (* #23540: keeper in-turn tool executions never reached the
+                  activity log ([tool.called] is emitted only by the external MCP
+                  path), so the agent timeline reported tool_calls = 0 for any
+                  keeper working through its own turn. *)
+               Keeper_tool_activity.emit_tool_exec
+                 ~config
+                 ~meta:acc.meta
+                 ~tool_name
+                 ~success
+                 ~duration_ms:(int_of_float (Float.round duration_ms))
+                 ~typed_outcome
+                 ~provider
+                 ~keeper_turn_id:(Some keeper_turn_id)
+                 ~agent_core_turn:acc.current_turn
+                 ~task_id
+                 ())))
         ()
     in
     let before_turn_hook : Agent_core.Hooks.hooks =

@@ -301,9 +301,12 @@ let with_raw_trace_run_classified_result
         | result -> finalize result
         | exception exn ->
           let backtrace = Printexc.get_raw_backtrace () in
-          let error_msg =
-            Printf.sprintf "Unhandled exception: %s" (Printexc.to_string exn)
-          in
+          (* The trace field is a string, so the classification has to be
+             rendered rather than carried — but it is the same classification
+             the lifecycle event publishes, so a raw trace and its event cannot
+             describe the same failure differently. A timeout reads as one here
+             instead of as an unhandled exception. *)
+          let error_msg = Error.to_string (Error.of_raised_exn exn) in
           (match
              Raw_trace.finish_run
                active

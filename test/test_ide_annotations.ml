@@ -234,6 +234,7 @@ let test_region_tracker_writes_fixed_regions_file () =
   with_temp_dir (fun base_dir ->
     Region.ingest_tool_call
       ~base_dir
+      ~partition:Ide_paths.Legacy_default
       ~keeper_id:"sangsu"
       ~turn:7
       (`Assoc

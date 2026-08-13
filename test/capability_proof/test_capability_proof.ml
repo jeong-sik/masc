@@ -147,11 +147,11 @@ let test_failed_requires_evidence () =
 ;;
 
 let test_unsupported_policy_is_not_a_failure () =
-  let result = unsupported (Runtime_role_not_declared Autonomous_keeper) in
+  let result = unsupported (Capability_not_declared Autonomous_turn) in
   check
     string
     "policy exclusion stays typed"
-    "unsupported:runtime_role_not_declared:autonomous_keeper"
+    "unsupported:capability_not_declared:autonomous_turn"
     (proof_result_to_string result)
 ;;
 

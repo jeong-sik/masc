@@ -169,7 +169,6 @@ type failure_kind =
   | Domain_receipt_failure
 
 type unsupported_reason =
-  | Runtime_role_not_declared of proof_role
   | Protocol_not_supported of protocol
   | Capability_not_declared of capability_case
 

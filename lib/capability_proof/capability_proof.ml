@@ -458,7 +458,6 @@ type failure_kind =
   | Domain_receipt_failure
 
 type unsupported_reason =
-  | Runtime_role_not_declared of proof_role
   | Protocol_not_supported of protocol
   | Capability_not_declared of capability_case
 
@@ -490,8 +489,6 @@ let failure_kind_to_string = function
 ;;
 
 let unsupported_reason_to_string = function
-  | Runtime_role_not_declared role ->
-    "runtime_role_not_declared:" ^ proof_role_to_string role
   | Protocol_not_supported protocol -> "protocol_not_supported:" ^ protocol_to_string protocol
   | Capability_not_declared capability ->
     "capability_not_declared:" ^ capability_case_to_string capability

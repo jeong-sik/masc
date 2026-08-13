@@ -157,7 +157,8 @@ export interface IdeRunProgressGoal {
 
 export interface IdeActivityPanelProps {
   readonly activeFile?: string | null
-  readonly repoId?: string | null
+  /** RFC-0378 §5.3b: canonical codebase slug — the wire key. */
+  readonly codebase?: string | null
   /**
    * Keeper whose repo-unattributed lane (turn/coordination events) is
    * merged into the feed alongside repo-scoped events.
@@ -207,11 +208,11 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
 }
 
 async function fetchActivityEvents(
-  repoId?: string | null,
+  codebase?: string | null,
   keeperLane?: string | null,
 ): Promise<ActivityFetchResult> {
   const graph = await fetchActivityGraphEvents()
-  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, repoId, keeperLane)
+  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase, keeperLane)
   return {
     workspaceId: graph.workspaceId,
     // A bridge fetch failure must degrade the refresh tone instead of
@@ -251,12 +252,12 @@ interface BridgeFetchResult {
  */
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
-  repoId?: string | null,
+  codebase?: string | null,
   keeperLane?: string | null,
 ): Promise<BridgeFetchResult> {
   const sources: Array<Promise<ReadonlyArray<IdeBridgeEvent>>> = []
-  const repo = repoId?.trim()
-  if (repo) sources.push(fetchIdeEvents({ limit: 50, repoId: repo }))
+  const scoped = codebase?.trim()
+  if (scoped) sources.push(fetchIdeEvents({ limit: 50, codebase: scoped }))
   const lane = keeperLane?.trim()
   if (lane) {
     sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
@@ -450,18 +451,18 @@ function normalizedPollMs(value: number | undefined): number | null {
   return Math.floor(value)
 }
 
-function activityScopeKey(repoId?: string | null, keeperLane?: string | null): string {
-  return JSON.stringify([repoId?.trim() || null, keeperLane?.trim() || null])
+function activityScopeKey(codebase?: string | null, keeperLane?: string | null): string {
+  return JSON.stringify([codebase?.trim() || null, keeperLane?.trim() || null])
 }
 
-function hasActivityBridgeScope(repoId?: string | null, keeperLane?: string | null): boolean {
-  return Boolean(repoId?.trim()) || Boolean(keeperLane?.trim())
+function hasActivityBridgeScope(codebase?: string | null, keeperLane?: string | null): boolean {
+  return Boolean(codebase?.trim()) || Boolean(keeperLane?.trim())
 }
 
 export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
-    repoId = null,
+    codebase = null,
     keeperLane = null,
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
@@ -475,8 +476,8 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     return store
   }, [])
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
-  const requestedScopeKey = activityScopeKey(repoId, keeperLane)
-  const bridgeScoped = hasActivityBridgeScope(repoId, keeperLane)
+  const requestedScopeKey = activityScopeKey(codebase, keeperLane)
+  const bridgeScoped = hasActivityBridgeScope(codebase, keeperLane)
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null)
   const loadedScopeKeyRef = useRef<string | null>(null)
   const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
@@ -499,7 +500,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok } = await fetchActivityEvents(repoId, keeperLane)
+      const { events, workspaceId, ok } = await fetchActivityEvents(codebase, keeperLane)
       if (cancelled) return
       if (ok) {
         store.reset(workspaceId)
@@ -528,7 +529,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       cancelled = true
       if (timer !== null) clearTimeout(timer)
     }
-  }, [store, refreshMs, repoId, keeperLane, requestedScopeKey])
+  }, [store, refreshMs, codebase, keeperLane, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)

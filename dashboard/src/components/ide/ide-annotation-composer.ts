@@ -73,6 +73,7 @@ function draftProblem(draft: IdeAnnotationComposerDraft): string | null {
 export function IdeAnnotationComposer({
   documentStore,
   activeRepositoryId,
+  codebaseForRepo,
   subscribeActiveRepositoryId,
   refresh,
   draft: controlledDraft,
@@ -85,6 +86,8 @@ export function IdeAnnotationComposer({
     subscribe: (listener: () => void) => () => void
   }
   activeRepositoryId: () => string | null
+  /** RFC-0378 §5.3b: repo id → canonical codebase slug (the wire key). */
+  codebaseForRepo: (repoId: string) => string | null
   subscribeActiveRepositoryId: (listener: () => void) => () => void
   refresh: () => void
   draft?: IdeAnnotationComposerDraft | null
@@ -146,7 +149,7 @@ export function IdeAnnotationComposer({
           kind: draft.kind,
           content: draft.content.trim(),
         },
-        { repoId },
+        { codebase: codebaseForRepo(repoId) },
       )
       if (created === null) {
         showToast('주석 응답 파싱 실패 — 서버 응답을 확인하세요', 'error')

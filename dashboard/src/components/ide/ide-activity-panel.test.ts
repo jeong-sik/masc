@@ -90,7 +90,7 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { repoId: 'masc' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_masc' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('no recent activity')
@@ -130,7 +130,7 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-a' }), container)
     await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
 
     render(h(IdeActivityPanel, {}), container)
@@ -157,7 +157,7 @@ describe('IdeActivityPanel', () => {
           headers: { 'Content-Type': 'application/json' },
         })
       }
-      if (url.includes('repo_id=repo-a')) {
+      if (url.includes('codebase=github.com_x_repo-a')) {
         return new Response(JSON.stringify({
           ok: true,
           data: {
@@ -171,7 +171,7 @@ describe('IdeActivityPanel', () => {
           },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
-      if (url.includes('repo_id=repo-b')) {
+      if (url.includes('codebase=github.com_x_repo-b')) {
         return new Promise<Response>(resolve => {
           resolveRepoB = resolve
         })
@@ -180,10 +180,10 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { repoId: 'repo-a' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-a' }), container)
     await waitFor(() => expect(container.textContent).toContain('turn-repo-a'))
 
-    render(h(IdeActivityPanel, { repoId: 'repo-b' }), container)
+    render(h(IdeActivityPanel, { codebase: 'github.com_x_repo-b' }), container)
     expect(container.textContent).not.toContain('turn-repo-a')
     await waitFor(() => expect(resolveRepoB).not.toBeNull())
 
@@ -439,7 +439,7 @@ describe('IdeActivityPanel', () => {
     const container = document.createElement('div')
     // Bridge events are fetched only under an explicit scope: without a
     // repo or keeper lane the server rejects unscoped /api/v1/ide/events.
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', repoId: 'masc' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', codebase: 'github.com_x_masc' }), container)
 
     await waitFor(() => {
       expect(container.textContent).toContain('tool:execute')
@@ -476,12 +476,12 @@ describe('IdeActivityPanel', () => {
     }))
 
     const container = document.createElement('div')
-    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', repoId: 'masc' }), container)
+    render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', codebase: 'github.com_x_masc' }), container)
 
     await waitFor(() => expect(ideEventUrls).toHaveLength(1))
     const url = new URL(ideEventUrls[0]!, 'http://localhost')
     expect(url.pathname).toBe('/api/v1/ide/events')
-    expect(url.searchParams.get('repo_id')).toBe('masc')
+    expect(url.searchParams.get('codebase')).toBe('github.com_x_masc')
     expect(url.searchParams.get('limit')).toBe('50')
   })
 

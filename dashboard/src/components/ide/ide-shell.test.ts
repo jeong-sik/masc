@@ -6,8 +6,8 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 const repositoryRow = {
   id: 'masc',
   name: 'masc',
-  url: '',
-  codebase: null,
+  url: 'https://github.com/jeong-sik/masc.git',
+  codebase: 'github.com_jeong-sik_masc',
   local_path: '/workspace/masc',
   default_branch: 'main',
   status: 'active',

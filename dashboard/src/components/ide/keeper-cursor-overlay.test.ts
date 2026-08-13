@@ -97,12 +97,12 @@ describe('getKeeperColor', () => {
     const onUpdate = vi.fn()
     const onStatus = vi.fn()
 
-    const cleanup = connectKeeperCursorPush(onUpdate, { repoId: 'masc', onStatus })
+    const cleanup = connectKeeperCursorPush(onUpdate, { codebase: 'github.com_jeong-sik_masc', onStatus })
 
     await vi.waitFor(() => expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
       active_file: 'lib/a.ml',
     })))
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/v1/ide/cursors?repo_id=masc')
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc')
     expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({
       status: 'live',
       failedCount: 0,

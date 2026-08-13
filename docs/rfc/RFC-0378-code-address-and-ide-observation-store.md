@@ -171,7 +171,8 @@ and unaddressed =
 - full URL 은 귀속 시점(git remote → `canonical_url_of_remote`)에만 존재하는 raw 입력.
 - repo 표시 이름·카탈로그 repo_id 는 projection 라벨 — wire key 로 쓰지 않는다.
 - REST 질의는 `codebase=<slug>`, co-view 는 slug, annotate 는 slug, viewer 지속 상태도 slug. 전부 문자 그대로 store 디렉터리 이름과 같은 값.
-- `keeper_lane` scope 는 codebase 철자가 아니라 별개 축("이 keeper 가 만진 것")이므로 유지.
+- `keeper_lane` scope 는 codebase 철자가 아니라 별개 축("이 keeper 가 만진 것")이므로 유지. scope 간 상호배타(정확히 하나)는 서버가 이미 패턴매치로 강제하고 있고(`server_ide_scope.ml` `resolve_declared_scope` 의 `conflicting_ide_scope` 거부) 그 계약은 파라미터 개명 후에도 그대로다.
+- 알려진 한계: `canonical_url_of_remote` 는 입력 전체를 소문자화하므로, 대소문자를 구분하는 self-hosted 호스트에서 실제로 다른 두 저장소가 같은 slug 로 충돌할 수 있다. GitHub 중심 카탈로그인 현재는 저위험 — 충돌이 실측되면 slug drift(§9 Q6)와 같은 축에서 다룬다.
 
 ### 5.4 Scope — 추측하지 않는다
 
@@ -244,7 +245,7 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 순서 제약과 머지 지점 일관성:
 
 - **A 시점** — 낙진 실측 두 겹 (2026-08-14, 독립 이중 측정): constructor 이름 grep 은 lib 13파일 · ~40사이트 · dashboard TS 0 을 주지만 **이것은 하한이다**. 타입 등식 재수출(`ide_paths.ml` 의 `type partition = Agent_observation.codebase_partition = …`)과 constructor 를 이름짓지 않는 타입 소비자 — 대표적으로 `lsp_overlay_provider.ml` 의 `Cache.key` 가 `partition_store_dir` 를 호출하며 이는 13개 LSP 진입점 전부의 공유 캐시 키다 — 는 이름 grep 에 잡히지 않는다 (적대 리뷰 P0-1). 그래서 **A 는 variant enum 을 삭제하지 않는다**: bus 이벤트·producer·sink write-path 시그니처만 fact / `Code_address.t option` 으로 바꾸고 (`Some` → by-url, `None` → 현행 `_orphan` 디렉터리, 배치 불변), 구 partition 타입은 **read-path 전용 어휘**로 D 까지 생존한다 — produce 측 역할만 상실. 모든 리더가 무변경으로 컴파일된다. optional 기본값 11사이트 중 write 측이 A 에서 required 가 된다. 20k 상한 근접 시 A1(타입+producer) / A2(sink 시그니처) 분할.
-- **D 시점**: 리더가 slug/keeper 어휘로 이행하며 구 partition 타입의 마지막 소비자가 사라진다 — 구체적으로 `Ide_bridge` 의 list_* 시그니처, `Lsp_overlay_provider` 13개 진입점의 `partition option` 파라미터, REST scope 해석, dashboard snapshot. **A 에서는 이 read 시그니처들이 의도적으로 무변경이다** (타입이 살아 있으므로 컴파일 일관 — A2 는 sink write 시그니처의 분할 지점이지 리더 이행 지점이 아니다).
+- **D 시점**: 리더가 slug/keeper 어휘로 이행하며 구 partition 타입의 마지막 소비자가 사라진다 — 구체적으로 `Ide_bridge` 의 list_* 시그니처, `Lsp_overlay_provider` 13개 진입점의 `partition option` 파라미터, REST scope 해석(`server_ide_scope.ml` 의 `scope_params` / `resolve_declared_scope` — 상호배타 검사 포함), dashboard snapshot, 그리고 그 규칙을 클라이언트에서 미러링하는 `api/ide.ts` resolveIdeScope 와 `ide-memory-panel.ts` 의 사전 검사. 서버 파라미터 개명은 미러 2곳과 한 PR 에서 움직인다. **A 에서는 이 read 시그니처들이 의도적으로 무변경이다** (타입이 살아 있으므로 컴파일 일관 — A2 는 sink write 시그니처의 분할 지점이지 리더 이행 지점이 아니다).
 - **B 시점**: 배치 전환 (`keeper/<keeper_id>/` 신설, Keeper fact 이동). 이 순간부터 `_orphan` 에 새 쓰기 0.
 - **C 는 B 이후**: annotations 가 `code/` 에 떨어져야 V2 가 성립한다.
 - **E 최후**: 구 partition 타입(variant enum 의 사망 지점) · orphan 기계 · 죽는 표면을 데이터 cut 과 함께 삭제한다. cut 은 §5.6 의 프로세스 메모리 무효화와 원자적으로 묶인다.
@@ -274,3 +275,4 @@ workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 �
 3. checkout 판별자 표기 — `rev-parse --show-toplevel` 기반 실측값 제안 (workspace-root-only §5.2 인수). key 비참여는 본문 확정, 표기 형식만 미정.
 4. 한 tool call 이 **두 저장소의 파일을 만지는 경우** (예: Execute 가 masc 와 oas 를 함께 편집) — fact 는 주 경로 하나의 주소만 나른다. 현행과 동일한 한계이나 타입이 이를 명시하지 않는다. 부 경로들을 별도 Code fact 로 분리 방출할지, 단일 주소 한계를 계약으로 못박을지 결정 필요.
 5. annotate 의 unaddressed tool-response — §5.3 의 typed reject 로 원칙은 닫혔으나, reject payload 의 정확한 필드(재시도 힌트 포함 여부)는 C 의 스키마 작업에서 확정.
+6. slug drift — origin remote 가 바뀌면(조직 개명, host 이전, fork 승격) slug 가 갈라져 같은 저장소의 기록이 두 파티션으로 나뉜다. 일회성 전환이 아니라 **운영 중 반복 가능한 정상 이벤트**라 hard-cut 독트린의 범주 밖이다. 권고 기본값: drift 는 정상 동작으로 계약한다 — 새 파티션이 시작되고 둘 다 §5.4 모집합에 보인다. 자동 병합은 만들지 않는다 (병합은 identity 를 다시 추측하는 일이고, 그 추측이 이 RFC 가 죽이는 부류다). 운영에서 실제로 아프면 명시적 1회성 이관 도구로.

@@ -260,7 +260,7 @@ let test_region_tracker_writes_fixed_regions_file () =
 let make_filter () : Types.annotation_filter =
   { file_path = None; keeper_id = None; goal_id = None; task_id = None }
 
-let create_in_partition ~base_dir ~codebase ~kind ~content () =
+let create_in_codebase ~base_dir ~codebase ~kind ~content () =
   Store.create
     ~base_dir
     ~codebase
@@ -273,11 +273,11 @@ let create_in_partition ~base_dir ~codebase ~kind ~content () =
     ()
 ;;
 
-let test_create_by_url_isolates_from_legacy () =
+let test_create_isolates_codebases () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let _ =
-      create_in_partition
+      create_in_codebase
         ~base_dir
         ~codebase:(slug)
         ~kind:Types.Comment
@@ -291,24 +291,24 @@ let test_create_by_url_isolates_from_legacy () =
         ~filter:(make_filter ())
         ()
     in
-    let orphan = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
-    check int "by-url count" 1 (List.length by_url);
-    check int "orphan is empty" 0 (List.length orphan))
+    let other = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
+    check int "owning codebase count" 1 (List.length by_url);
+    check int "other codebase is empty" 0 (List.length other))
 ;;
 
-let test_create_orphan_separates_from_by_url () =
+let test_codebases_hold_their_own_rows () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let _ =
-      create_in_partition
+      create_in_codebase
         ~base_dir
         ~codebase:"github.com_other_repo"
         ~kind:Types.Comment
-        ~content:"orphan record"
+        ~content:"other-repo record"
         ()
     in
     let _ =
-      create_in_partition
+      create_in_codebase
         ~base_dir
         ~codebase:(slug)
         ~kind:Types.Comment
@@ -322,22 +322,21 @@ let test_create_orphan_separates_from_by_url () =
         ~filter:(make_filter ())
         ()
     in
-    let orphan =
+    let other =
       Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) ()
     in
-    check int "by-url count" 1 (List.length by_url);
-    check int "orphan count" 1 (List.length orphan);
+    check int "owning codebase count" 1 (List.length by_url);
+    check int "other codebase count" 1 (List.length other);
     let by_url_content = (List.hd by_url).content in
-    let orphan_content = (List.hd orphan).content in
-    check string "by-url content" "by-url record" by_url_content;
-    check string "orphan content" "orphan record" orphan_content)
+    let other_content = (List.hd other).content in
+    check string "owning codebase content" "by-url record" by_url_content;
+    check string "other codebase content" "other-repo record" other_content)
 ;;
 
 let test_explicit_codebase_store () =
   with_temp_dir (fun base_dir ->
-    (* No ?codebase argument → defaults to Orphan → writes to the
-       historical flat path. PR-1c will flip the keeper write path,
-       but until then existing behaviour MUST remain. *)
+    (* A write lands in the store file of exactly the codebase it names,
+       and only that codebase's list sees it. *)
     let _ =
       Store.create
         ~base_dir
@@ -347,7 +346,7 @@ let test_explicit_codebase_store () =
         ~line_start:1
         ~line_end:3
         ~kind:Types.Comment
-        ~content:"orphan default"
+        ~content:"explicit codebase"
         ()
     in
     let other_path =
@@ -355,25 +354,26 @@ let test_explicit_codebase_store () =
         (Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo")
         "annotations.jsonl"
     in
-    check bool "orphan file exists" true (Sys.file_exists other_path);
-    let orphan = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
-    check int "orphan count" 1 (List.length orphan))
+    check bool "named codebase store file exists" true (Sys.file_exists other_path);
+    let rows = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
+    check int "named codebase count" 1 (List.length rows))
 ;;
 
-let test_delete_partition_scoped () =
+let test_delete_is_codebase_scoped () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let by_url =
       Result.get_ok
-        (create_in_partition
+        (create_in_codebase
            ~base_dir
            ~codebase:(slug)
            ~kind:Types.Comment
            ~content:"to delete"
            ())
     in
-    (* Delete in matching codebase succeeds; same id in Orphan fails. *)
-    let in_legacy =
+    (* Delete in the owning codebase succeeds; same id under another
+       codebase misses. *)
+    let in_other =
       Store.delete
         ~base_dir
         ~codebase:"github.com_other_repo"
@@ -381,8 +381,8 @@ let test_delete_partition_scoped () =
         ~keeper_id:"sangsu"
         ()
     in
-    (match in_legacy with
-     | Ok () -> fail "Orphan delete must miss when annotation lives in By_url"
+    (match in_other with
+     | Ok () -> fail "delete under another codebase must miss"
      | Error _ -> ());
     let in_by_url =
       Store.delete
@@ -394,10 +394,10 @@ let test_delete_partition_scoped () =
     in
     (match in_by_url with
      | Ok () -> ()
-     | Error msg -> failf "By_url delete failed: %s" msg))
+     | Error msg -> failf "delete in the owning codebase failed: %s" msg))
 ;;
 
-let test_region_append_by_url_isolates_from_legacy () =
+let test_region_append_isolates_codebases () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
     let region : Types.code_region =
@@ -413,7 +413,7 @@ let test_region_append_by_url_isolates_from_legacy () =
     let by_url_path = Region.regions_file ~base_dir ~codebase:(slug) () in
     let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
     check bool "by-url regions exists" true (Sys.file_exists by_url_path);
-    check bool "orphan regions absent" false (Sys.file_exists other_path))
+    check bool "other codebase regions absent" false (Sys.file_exists other_path))
 ;;
 
 (* RFC-0128 PR-1e — content fallback + single-write invariant.
@@ -421,9 +421,9 @@ let test_region_append_by_url_isolates_from_legacy () =
    Before PR-1e, edit_file tool_calls with no diff/patch argument
    produced zero regions in Ide_region_tracker.ingest_tool_call. The
    missing record was previously synthesised by Ide_meta_sync.flush_regions,
-   which wrote to the Orphan codebase while ingest_tool_call (post
+   which wrote to an unaddressed store while ingest_tool_call (post
    PR-1c) wrote to the resolved codebase — a double-write of the
-   same region across two buckets. PR-1e moves the content fallback
+   same region across two stores. PR-1e moves the content fallback
    into ingest_tool_call itself and removes the meta_sync call site
    from track_write_region, restoring a single source of truth. *)
 
@@ -484,8 +484,8 @@ let test_ingest_edit_file_content_fallback () =
 let test_ingest_no_double_write () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
-    (* The same tool_call must produce exactly one region in the chosen
-       codebase and zero in Orphan. Regression guard for the
+    (* The same tool_call must produce exactly one region in the named
+       codebase and zero anywhere else. Regression guard for the
        meta_sync/ingest double-write that PR-1e closed. *)
     let json =
       `Assoc
@@ -508,7 +508,7 @@ let test_ingest_no_double_write () =
     in
     let other_path = Region.regions_file ~base_dir ~codebase:"github.com_other_repo" () in
     check int "by-url has one region" 1 (count_lines by_url_path);
-    check int "orphan has zero regions" 0 (count_lines other_path))
+    check int "other codebase has zero regions" 0 (count_lines other_path))
 ;;
 
 let test_completion_items_kinds () =
@@ -656,7 +656,7 @@ let test_delete_allows_owner () =
 
 (* task-1744: tombstoned annotations must be excluded from load/list.
 
-   Before the fix, [load_all_partition] only skipped the tombstone marker
+   Before the fix, [load_all_for_codebase] only skipped the tombstone marker
    line, leaving the earlier annotation with the same id visible in
    [list], contradicting the mli contract "Tombstoned entries are
    excluded". These cases exercise both the plain tombstone path, where
@@ -860,13 +860,13 @@ let test_cas_rejects_version_mismatch () =
     | Error msg -> failf "matching expected_version must delete: %s" msg)
 ;;
 
-let test_cas_absent_version_is_legacy () =
+let test_cas_absent_version_skips_check () =
   with_temp_dir (fun base_dir ->
     let created = make_cas_annotation base_dir in
-    (* No expected_version → legacy delete-by-id contract. *)
+    (* No expected_version → delete by id alone, no version check. *)
     match Store.delete ~base_dir ~codebase:"github.com_other_repo" ~id:created.id ~keeper_id:"alice" () with
     | Ok () -> ()
-    | Error msg -> failf "legacy delete without version must succeed: %s" msg)
+    | Error msg -> failf "delete without version must succeed: %s" msg)
 ;;
 
 (* 2020-01-01T00:00:00Z as epoch ms. A monotonic boot-relative clock — the
@@ -920,33 +920,33 @@ let () =
             `Quick
             test_region_tracker_writes_fixed_regions_file
         ] )
-    ; ( "codebase (RFC-0128)"
+    ; ( "codebase isolation"
       , [ test_case
-            "create By_url isolates from Orphan"
+            "create isolates codebases"
             `Quick
-            test_create_by_url_isolates_from_legacy
+            test_create_isolates_codebases
         ; test_case
-            "Orphan and By_url are separate buckets"
+            "codebases hold their own rows"
             `Quick
-            test_create_orphan_separates_from_by_url
+            test_codebases_hold_their_own_rows
         ; test_case
-            "Orphan default is unchanged"
+            "explicit codebase store is written and read back"
             `Quick
             test_explicit_codebase_store
         ; test_case
             "delete is codebase-scoped"
             `Quick
-            test_delete_partition_scoped
+            test_delete_is_codebase_scoped
         ; test_case
-            "append_region By_url isolates from Orphan"
+            "append_region isolates codebases"
             `Quick
-            test_region_append_by_url_isolates_from_legacy
+            test_region_append_isolates_codebases
         ; test_case
             "edit_file ingest content fallback emits one region (PR-1e)"
             `Quick
             test_ingest_edit_file_content_fallback
         ; test_case
-            "ingest no double-write across partitions (PR-1e)"
+            "ingest writes exactly one codebase store (PR-1e)"
             `Quick
             test_ingest_no_double_write
         ] )
@@ -990,9 +990,9 @@ let () =
             `Quick
             test_cas_rejects_version_mismatch
         ; test_case
-            "absent expected_version keeps legacy delete"
+            "absent expected_version deletes by id alone"
             `Quick
-            test_cas_absent_version_is_legacy
+            test_cas_absent_version_skips_check
         ] )
     ]
 ;;

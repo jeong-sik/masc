@@ -2,8 +2,8 @@
 
     [test_ide_canonical_url_join.ml] pins the resolver that decides a write's
     codebase and repo-relative path. Nothing pinned that the LSP reader
-    addresses the codebase the write landed in — so the reader read
-    [_orphan/] while keeper writes accumulated under [by-url/<slug>/], and
+    addresses the codebase the write landed in — so the reader once
+    addressed a different store directory than the writes landed in, and
     every overlay came back empty. These cases pin the reader's half of that
     join. *)
 
@@ -14,7 +14,6 @@ module Types = Ide_annotation_types
 module Lsp = Lsp_overlay_provider
 
 let slug = "github.com_jeong-sik_masc"
-let repo_partition = slug
 let file_path = "lib/keeper/keeper_tool_ide_runtime.ml"
 
 (* The overlay cache is guarded by an [Eio.Mutex], so every case runs inside
@@ -64,13 +63,13 @@ let codelens_titles ~base_dir ~codebase =
 (* The defect this file exists for: the write names a by-URL codebase and the
    read has to name the same one. A reader that omits the codebase (the old
    behavior) sees nothing. *)
-let test_by_url_write_is_read_under_its_partition () =
+let test_write_is_read_under_its_codebase () =
   with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
     ignore
       (create_annotation
          ~base_dir
-         ~codebase:repo_partition
+         ~codebase:slug
          ~keeper_id:"analyst"
          ~content:"picked Eio.Mutex over Lazy here"
          ~line:12);
@@ -78,7 +77,7 @@ let test_by_url_write_is_read_under_its_partition () =
       (list string)
       "the addressed codebase yields the keeper's annotation"
       [ "[Decision] picked Eio.Mutex over Lazy here" ]
-      (codelens_titles ~base_dir ~codebase:(Some repo_partition));
+      (codelens_titles ~base_dir ~codebase:(Some slug));
     check
       (list string)
       "the orphan codebase does not"
@@ -108,16 +107,16 @@ let test_unaddressed_store_reads_empty () =
   )
 ;;
 
-(* Two partitions hold the same repo-relative path. A cache keyed on
+(* Two codebases hold the same repo-relative path. A cache keyed on
    [base_dir + file_path] alone served one codebase's rows for the other's
    request. *)
-let test_partitions_do_not_share_cache_entries () =
+let test_codebases_do_not_share_cache_entries () =
   with_temp_dir (fun base_dir ->
     Lsp.clear_cache ();
     ignore
       (create_annotation
          ~base_dir
-         ~codebase:repo_partition
+         ~codebase:slug
          ~keeper_id:"analyst"
          ~content:"by-url row"
          ~line:5);
@@ -133,7 +132,7 @@ let test_partitions_do_not_share_cache_entries () =
       (list string)
       "by-url codebase serves its own row"
       [ "[Decision] by-url row" ]
-      (codelens_titles ~base_dir ~codebase:(Some repo_partition));
+      (codelens_titles ~base_dir ~codebase:(Some slug));
     check
       (list string)
       "orphan codebase is not served the by-url row"
@@ -152,11 +151,11 @@ let test_write_after_first_read_becomes_visible () =
       (list string)
       "empty store reads empty"
       []
-      (codelens_titles ~base_dir ~codebase:(Some repo_partition));
+      (codelens_titles ~base_dir ~codebase:(Some slug));
     ignore
       (create_annotation
          ~base_dir
-         ~codebase:repo_partition
+         ~codebase:slug
          ~keeper_id:"analyst"
          ~content:"written after the reader cached the empty store"
          ~line:9);
@@ -164,7 +163,7 @@ let test_write_after_first_read_becomes_visible () =
       (list string)
       "the later write is visible without an explicit invalidation"
       [ "[Decision] written after the reader cached the empty store" ]
-      (codelens_titles ~base_dir ~codebase:(Some repo_partition))
+      (codelens_titles ~base_dir ~codebase:(Some slug))
   )
 ;;
 
@@ -175,15 +174,15 @@ let () =
       , [ test_case
             "by-url write reads under its codebase"
             `Quick
-            test_by_url_write_is_read_under_its_partition
+            test_write_is_read_under_its_codebase
         ; test_case
             "unaddressed store reads empty"
             `Quick
             test_unaddressed_store_reads_empty
         ; test_case
-            "partitions do not share cache entries"
+            "codebases do not share cache entries"
             `Quick
-            test_partitions_do_not_share_cache_entries
+            test_codebases_do_not_share_cache_entries
         ] )
     ; ( "freshness"
       , [ test_case

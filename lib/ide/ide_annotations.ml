@@ -31,8 +31,8 @@ let compact_annotations_key = "annotations"
 let compact_seq_mu = Stdlib.Mutex.create ()
 let compact_seq = ref 0
 
-(* RFC-0128 §4.2: [_orphan/] and [by-url/<slug>/] live one or two
-   levels deeper than the flat store. Delegate parent creation to the
+(* RFC-0378 §5.2: a codebase store lives at [by-url/<slug>/], two
+   levels below the store root. Delegate parent creation to the
    filesystem SSOT instead of carrying a local recursive mkdir copy. *)
 let ensure_dir = Fs_compat.mkdir_p
 

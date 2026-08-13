@@ -93,6 +93,28 @@ if [ "${MODE}" != "--execute" ]; then
   exit 0
 fi
 
+# The overlay cache keys revisions by file byte length under an
+# append-only assumption a directory swap breaks, so no process may hold
+# store files across the cut. An open file under the store is proof the
+# server (or another reader) is still running — refuse. lsof reporting
+# nothing is necessarily weaker evidence (a running server holds store
+# fds only around reads and writes), which is why the restart step in
+# the procedure above stays mandatory rather than being replaced by
+# this check.
+# lsof exits non-zero on traversal warnings even when it did find open
+# files, so the verdict reads the output, never the exit code.
+if command -v lsof >/dev/null 2>&1; then
+  OPEN_PIDS="$(lsof -t +D "${STORE}" 2>/dev/null || true)"
+  if [ -n "${OPEN_PIDS}" ]; then
+    echo "refusing: processes still hold files under ${STORE}:" >&2
+    lsof +D "${STORE}" 2>/dev/null | head -6 >&2 || true
+    echo "stop the masc server first." >&2
+    exit 1
+  fi
+else
+  echo "warning: lsof unavailable — cannot check for open store files" >&2
+fi
+
 tar -czf "${ARCHIVE}" -C "$(dirname "${STORE}")" "$(basename "${STORE}")"
 tar -tzf "${ARCHIVE}" >/dev/null
 echo "archived: ${ARCHIVE} ($(du -sh "${ARCHIVE}" | cut -f1))"

@@ -6,8 +6,8 @@
     routes take that decision from query parameters; the LSP proxy takes it
     from the same parameters on its WebSocket URL. Both resolve through this
     module so the two surfaces cannot drift into separate vocabularies —
-    the drift that left the LSP overlay reading [_orphan/] while keeper
-    writes landed in [by-url/<slug>/]. *)
+    the drift that once had the LSP overlay and the keeper writes
+    addressing two different store directories. *)
 
 type ide_error =
   { code : string

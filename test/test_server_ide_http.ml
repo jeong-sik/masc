@@ -133,10 +133,10 @@ let scoped_ide_path path =
   path ^ separator ^ masc_scope_query
 ;;
 
-let masc_partition () =
+let masc_codebase () =
   match Ide_paths.canonical_url_of_remote masc_remote with
   | Some slug -> slug
-  | None -> fail "test remote must produce a canonical IDE partition slug"
+  | None -> fail "test remote must produce a canonical IDE codebase slug"
 ;;
 
 let with_env name value f =
@@ -654,39 +654,7 @@ let test_post_cursors_honors_canonical_url_scope () =
     | [] -> fail "expected scoped cursor")
 ;;
 
-let test_post_cursors_resolves_partition_from_file_path () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
-    let token = create_worker_token base_path "alice" in
-    (* POST cursor with a file_path that belongs to the scoped repo: the
-       server must resolve the write partition from the posted file_path
-       (task-1733) and scope it to the repo the file actually belongs to. *)
-    let file_path = Filename.concat masc_path "lib/a.ml" in
-    let body =
-      Yojson.Safe.to_string
-        (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
-    in
-    let scoped_path =
-      "/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc"
-    in
-    let post_request =
-      http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
-    in
-    let post_response = dispatch router post_request in
-    check_status "POST cursor with matching file_path returns 201" 201 post_response;
-    let get_request = http_request ~meth:`GET ~path:scoped_path () in
-    let get_response = dispatch router get_request in
-    check_status "GET scoped cursors after file_path-resolved POST succeeds" 200 get_response;
-    let json = get_response |> response_body |> Yojson.Safe.from_string in
-    let data = Json.member "data" json in
-    match json_list_member "scoped cursor snapshot" "cursors" data with
-    | cursor :: _ ->
-      check string "scoped cursor file" "lib/a.ml"
-        (json_string_member "cursor" "file_path" cursor)
-    | [] -> fail "expected file_path-resolved cursor")
-;;
-
-let test_post_cursors_rejects_file_path_scope_mismatch () =
+let test_post_cursors_rejects_absolute_file_path () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
@@ -741,12 +709,12 @@ let test_post_annotations_accepts_matching_repo_scope () =
     check_status "POST annotation with a codebase scope returns 201" 201 response;
     check
       int
-      "matching annotation is visible in requested partition"
+      "matching annotation is visible in the requested codebase"
       1
       (annotation_count router "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc");
     check
       int
-      "matching annotation is not written to other partition"
+      "matching annotation is not written to another codebase"
       0
       (annotation_count router "/api/v1/ide/annotations?codebase=example.com_agent-core"))
 ;;
@@ -756,7 +724,7 @@ let test_post_annotations_rejects_absolute_file_path () =
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
     (* RFC-0378 §5.3: an absolute path is not the co-view vocabulary —
-       typed reject at the mint, and nothing lands in any partition. *)
+       typed reject at the mint, and nothing lands in any store. *)
     let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let request =
       http_request
@@ -775,12 +743,12 @@ let test_post_annotations_rejects_absolute_file_path () =
       (error_code_of_response response);
     check
       int
-      "rejected annotation is not written to the scoped partition"
+      "rejected annotation is not written to the scoped codebase"
       0
       (annotation_count router "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc");
     check
       int
-      "rejected annotation is not written to any other partition"
+      "rejected annotation is not written to any other codebase"
       0
       (annotation_count router "/api/v1/ide/annotations?codebase=example.com_agent-core"))
 ;;
@@ -844,7 +812,7 @@ let test_read_annotations_rejects_missing_scope () =
 let test_read_cursors_accepts_unknown_codebase_as_empty () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     (* RFC-0378 §5.4: the scope universe is store-measured, not the
-       catalog — an unknown slug is a legitimate empty partition, not a
+       catalog — an unknown slug is a legitimate empty store, not a
        registry miss. *)
     let request =
       http_request ~meth:`GET ~path:"/api/v1/ide/cursors?codebase=github.com_x_missing" ()
@@ -893,7 +861,7 @@ let test_memory_response_declares_annotation_source_contract () =
     (match
        Ide_annotations.create
          ~base_dir:base_path
-         ~codebase:(masc_partition ())
+         ~codebase:(masc_codebase ())
          ~keeper_id:"alice"
          ~file_path:"lib/a.ml"
          ~line_start:1
@@ -951,7 +919,7 @@ let test_memory_response_honors_canonical_url_scope () =
     (match
        Ide_annotations.create
          ~base_dir:base_path
-         ~codebase:(masc_partition ())
+         ~codebase:(masc_codebase ())
          ~keeper_id:"alice"
          ~file_path:"lib/scoped.ml"
          ~line_start:4
@@ -1098,6 +1066,10 @@ let () =
             test_hook_cursors_broadcast_ws_invalidation
         ; test_case "POST cursor honors canonical_url scope" `Quick
             test_post_cursors_honors_canonical_url_scope
+        ; test_case
+            "POST cursor rejects an absolute file_path"
+            `Quick
+            test_post_cursors_rejects_absolute_file_path
         ; test_case "POST annotation accepts matching repo scope" `Quick
             test_post_annotations_accepts_matching_repo_scope
         ; test_case "POST annotation rejects an absolute file_path" `Quick

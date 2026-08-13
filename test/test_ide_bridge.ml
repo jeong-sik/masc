@@ -263,7 +263,7 @@ let test_list_events_merges_kinds_newest_first () =
       (List.map (json_intlit "timestamp_ms") events))
 ;;
 
-(* masc#28582: the row carries the path the partition resolver named, not the
+(* masc#28582: the row carries the path the attribution resolver named, not the
    argument the keeper typed. The two differ whenever the keeper addressed a
    file through its sandbox — which is the normal case — and a consumer that
    joins on [file_path] can only match one of them. Both the event and the
@@ -568,7 +568,7 @@ let test_hook_no_file_path () =
       ~output_text:"file1.ml\nfile2.ml"
       ~input;
     (* RFC-0378 §5.2: a pathless call is a keeper fact — the ide store
-       persists nothing for it, in any partition. *)
+       persists nothing for it, in any store. *)
     let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "pathless call persists no ide row" false (Sys.file_exists path))

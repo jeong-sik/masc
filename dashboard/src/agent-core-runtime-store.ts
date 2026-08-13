@@ -621,5 +621,6 @@ export async function loadMoreAgentCoreEvents(signal?: AbortSignal): Promise<voi
     loadedEvents: replayFetchedAgentCoreEventCount,
     totalMatchingEvents: response.total_matching_entries ?? response.count,
     truncated: response.has_more ?? response.truncated ?? false,
+    observedTotalEvents: agentCoreTotalEvents.value,
   })
 }

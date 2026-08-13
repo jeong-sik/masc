@@ -244,7 +244,7 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 순서 제약과 머지 지점 일관성:
 
 - **A 시점** — 낙진 실측 두 겹 (2026-08-14, 독립 이중 측정): constructor 이름 grep 은 lib 13파일 · ~40사이트 · dashboard TS 0 을 주지만 **이것은 하한이다**. 타입 등식 재수출(`ide_paths.ml` 의 `type partition = Agent_observation.codebase_partition = …`)과 constructor 를 이름짓지 않는 타입 소비자 — 대표적으로 `lsp_overlay_provider.ml` 의 `Cache.key` 가 `partition_store_dir` 를 호출하며 이는 13개 LSP 진입점 전부의 공유 캐시 키다 — 는 이름 grep 에 잡히지 않는다 (적대 리뷰 P0-1). 그래서 **A 는 variant enum 을 삭제하지 않는다**: bus 이벤트·producer·sink write-path 시그니처만 fact / `Code_address.t option` 으로 바꾸고 (`Some` → by-url, `None` → 현행 `_orphan` 디렉터리, 배치 불변), 구 partition 타입은 **read-path 전용 어휘**로 D 까지 생존한다 — produce 측 역할만 상실. 모든 리더가 무변경으로 컴파일된다. optional 기본값 11사이트 중 write 측이 A 에서 required 가 된다. 20k 상한 근접 시 A1(타입+producer) / A2(sink 시그니처) 분할.
-- **D 시점**: 리더(REST scope · LSP overlay · dashboard snapshot)가 slug/keeper 어휘로 이행하며 구 partition 타입의 마지막 소비자가 사라진다.
+- **D 시점**: 리더가 slug/keeper 어휘로 이행하며 구 partition 타입의 마지막 소비자가 사라진다 — 구체적으로 `Ide_bridge` 의 list_* 시그니처, `Lsp_overlay_provider` 13개 진입점의 `partition option` 파라미터, REST scope 해석, dashboard snapshot. **A 에서는 이 read 시그니처들이 의도적으로 무변경이다** (타입이 살아 있으므로 컴파일 일관 — A2 는 sink write 시그니처의 분할 지점이지 리더 이행 지점이 아니다).
 - **B 시점**: 배치 전환 (`keeper/<keeper_id>/` 신설, Keeper fact 이동). 이 순간부터 `_orphan` 에 새 쓰기 0.
 - **C 는 B 이후**: annotations 가 `code/` 에 떨어져야 V2 가 성립한다.
 - **E 최후**: 구 partition 타입(variant enum 의 사망 지점) · orphan 기계 · 죽는 표면을 데이터 cut 과 함께 삭제한다. cut 은 §5.6 의 프로세스 메모리 무효화와 원자적으로 묶인다.

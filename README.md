@@ -1,6 +1,6 @@
 # MASC
 
-[![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
+[![OCaml](https://img.shields.io/badge/OCaml-5.5-orange.svg)](https://ocaml.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [한국어 버전](README.ko.md)
@@ -12,10 +12,7 @@ dashboard and per-turn receipts make agent decisions and failures inspectable.
 
 It is not meant to be the fastest way to get work done. MASC trades speed for
 coordination, observability, and experiments with long-running keeper-based
-agents. Some design choices are practical; some are playful.
-Accidental jokes, odd names, and small bits of fiction are part of the project
-taste; they are there because they make the experiment more fun, not because
-they are architecture requirements.
+agents.
 
 > **Development status:** MASC is still a pre-1.0 experiment. It is not a
 > productivity tool, production service, or security boundary. Use it for local
@@ -27,11 +24,8 @@ they are architecture requirements.
 
 A **Keeper** is an optional resident agent managed by MASC. It stays alive while
 the server is running, wakes on heartbeat intervals, and reacts to mentions or
-messages.
-
-### Why "Keeper"
-
-Agents in this environment are called **Keepers**, a nickname borrowed from Bullfrog's *Dungeon Keeper* by Peter Molyneux. This is project vocabulary and a playful naming choice, not a deeper architecture claim. The project intentionally leaves room for incidental jokes and character-like naming.
+messages. The name is borrowed from Bullfrog\'s *Dungeon Keeper*; it is project
+vocabulary, not an architecture claim.
 
 ---
 
@@ -64,25 +58,25 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 | **OpenTelemetry** | 🟡 | OTLP HTTP exporter + GenAI semconv spans/metrics work, but many signals and instrumentation gaps are not yet collected | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | **Goal + Task** | 🟡 | Goal/Task CRUD, transitions, verification, and prompt injection work. Automatic scheduling is not implemented | `masc_goal_*` / `masc_*task*` tools |
 | **Multi-Runtime** | 🟡 | Keeper-specific provider × model routing | `runtime.toml` |
-| **Provider Failover** | ❌ | No automatic failover on provider failure; requires manual config change + server restart | `runtime.toml` |
-| **Fusion (+ JoJ)** | 🟡 | Ask several models the same question and let a judge synthesize consensus/contradictions/blind spots. Simple/Refine/Conditional work; JoJ is not wired | `masc_fusion` tool |
-| **Multi-Channel** | 🟡 | External channel messages start/respond to turns. Only Discord is live today; Slack/Telegram need sidecars | `POST /api/v1/gate/message` |
+| **Provider Failover** | 🟡 | Ordered failover groups via `[runtime.lanes]`; health-based automatic rotation is not implemented | `runtime.toml` `[runtime.lanes]` |
+| **Fusion (+ JoJ)** | 🟡 | Ask several models the same question and let a judge synthesize consensus/contradictions/blind spots. Simple/Refine/Conditional work; JoJ requires the judges preset in `runtime.toml` | `masc_fusion` tool |
+| **Multi-Channel** | 🟡 | External channel messages start/respond to turns. Discord and Slack are live; Telegram needs a sidecar | `POST /api/v1/gate/message` |
 
 ### Current behavior and limits
 
-- **Keepers** — Each Keeper is a long-running agent that stays resident while the server is alive. It wakes on heartbeat, runs turns, and its memory and decision logs persist across restarts. **A Keeper runs only one turn at a time** — parallelism comes from multiple Keepers running together. `[autonomous] concurrency` is a dead legacy key; MASC does not impose a global active-Keeper cap.
+- **Keepers** — Each Keeper is a long-running agent that stays resident while the server is alive. It wakes on heartbeat, runs turns, and its memory and decision logs persist across restarts. **A Keeper runs only one turn at a time** — parallelism comes from multiple Keepers running together. MASC does not impose a global active-Keeper cap.
 - **Gate / HITL** — The dispatch boundary sends the opaque operation identity and complete typed input to one Gate. Workspace or Keeper Always Allow proceeds directly; Auto Judge runs asynchronously; Manual persists a HITL request. Deferred requests return to the Keeper instead of awaiting a promise, and an exact approved request is consumed once when that Keeper lane wakes. Gate decisions are authorization workflow, not a sandbox or credential boundary.
 - **Sandbox** — Actually invokes `docker run --rm` with cap-drop / no-new-privileges / read-only rootfs. MASC observes active Docker operations but does not pre-admit them through a global spawn slot. Network is controlled by the keeper's `network_mode` (default `inherit`, can be `none`). *Limit*: not every Keeper runs Docker (some use `local`=host execution). If the image is missing and the path is inside the playground, execution falls back to host (telemetry is recorded). Do not treat this as a security boundary.
 - **Multi-Runtime** — A single line in `runtime.toml` under `runtime.assignments`, `keeper = provider.model`, sends every turn for that Keeper to the chosen provider.
-- **Provider Failover** — Ordered automatic failover on provider failure is not implemented. When a provider fails, you must manually edit default/assignment and restart the server.
-- **Fusion + JoJ** — When a Keeper calls `masc_fusion`, panel models answer the same question independently and a judge synthesizes consensus, contradictions, and blind spots. *Limit*: The Judge-of-Judges (JoJ) phase has code and call paths, but the live config lacks a first-order `judges` panel, so JoJ calls **fail-closed with an error**. The result registry is in-memory and is lost on restart.
+- **Provider Failover** — `[runtime.lanes]` in `runtime.toml` defines ordered failover groups; a Keeper falls through a lane when its current runtime is rejected. Health-based automatic rotation across providers is not implemented.
+- **Fusion + JoJ** — When a Keeper calls `masc_fusion`, panel models answer the same question independently and a judge synthesizes consensus, contradictions, and blind spots. *Limit*: the Judge-of-Judges (JoJ) phase fails closed unless the JoJ judges preset from `config/runtime.toml` (RFC-0283) is configured. Run results persist to `.masc/fusion-runs.jsonl`.
 - **Goal + Task** — Goals and tasks are created via MCP tools, transitioned through states, and active goals are injected into the Keeper system prompt. Turns are driven by channels/events. (The goal-loop OODA machinery was fully retired on 2026-07-21 — RFC-0352 Path B: the Goal entity, MCP tools, and task linkage stay; the scheduler scripts, server broadcast, and dashboard panel are gone.)
 - **OpenTelemetry** — The OTLP HTTP exporter and GenAI semconv spans/metrics work. *Limit*: many signals and instrumentation gaps are not yet collected. For example, low-level Keeper turn events, internal fusion metrics, and per-provider latency breakdowns are only partially covered.
 - **CODE / IDE (observational, not working)** — The aim is an observational IDE where humans issue commands rather than editing code directly. The LSP proxy, annotation overlay, and dashboard CODE shell are implemented, but **the observational command-only flow is not validated, so CODE is not usable in practice.**
 
 ---
 
-## Quick Start (5 minutes)
+## Quick Start
 
 ### One-touch (recommended)
 
@@ -188,7 +182,7 @@ opam install . --deps-only
 scripts/dune-local.sh build @default
 ```
 
-Requirements: OCaml >= 5.4, opam >= 2.0, dune >= 3.22. Build/test/CI details are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Requirements: OCaml 5.5.0 (pinned in `dune-project`), opam >= 2.0, dune >= 3.22. Build/test/CI details are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 `scripts/dune-local.sh` uses a global lock file (`/tmp/me-dune-local.lock`) to avoid concurrent build collisions across worktrees, and disables the Dune shared cache by default for local builds. This avoids stale native artifacts after shared opam pins move; set `MASC_DUNE_CACHE=enabled` explicitly if you need to re-enable it.
 
@@ -244,7 +238,6 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 |------|------|
 | `runtime.toml` | Provider/model catalog + `[runtime].default`. Required to start: if it (or `[runtime].default`) is missing, the server logs `refusing to boot` and exits 1 — no environment-default fallback |
 | `agent-core-models-overlay.toml` | Deployment-local capability rows merged onto agent core's embedded catalog. Do not copy upstream catalog rows here |
-⚠️ **Legacy / unused keys**: If your `runtime.toml` contains `[autonomous] concurrency` or `[bootstrap] max_active_keepers`, remove it; neither key controls execution.
 
 **When creating agents**
 
@@ -272,7 +265,6 @@ Example Keeper definition (`keepers/<name>.toml`):
 
 ```toml
 [keeper]
-name = "albini"
 name = "albini"
 goal = "Call out and chase owners of stalled tasks. Does not write code."
 active_goal_ids = ["goal-pm-flow"]
@@ -324,16 +316,6 @@ masc/
 
 ---
 
-## Related Projects
-
-Older versions of this README carried a detailed comparison against other agent
-runtimes. That comparison was useful as a snapshot, but it is not maintained as
-a live upstream inventory. Treat MASC's current local contract as the material
-above: repo-local MCP workspace, Keeper turns, dashboard/receipt visibility,
-filesystem state under `<base-path>/.masc/`, and runtime assignment through
-`runtime.toml`.
-
----
 
 ## Dashboard
 
@@ -361,14 +343,6 @@ Route examples: `dashboard#monitoring?section=agents`, `dashboard#monitoring?sec
 
 (Some diagnostic views such as `monitoring?section=journey` are provided by a route-only mapping in `dashboard/src/components/status.ts` rather than a rail surface — reachable by route but not by rail label.)
 
-### Design preview
-
-A v2 Keeper Agent surface mockup (roster rail, per-turn detail, runtime panel). This is a design mockup, not a snapshot of the current build.
-
-[![MASC v2 Keeper Agent 대시보드 시안](docs/design/assets/2026-07-04-masc-v2-keeper-agent.png)](docs/design/2026-07-04-masc-v2-keeper-agent-design.md)
-
-See [docs/design/2026-07-04-masc-v2-keeper-agent-design.md](docs/design/2026-07-04-masc-v2-keeper-agent-design.md) for the layout breakdown.
-
 ---
 
 ## Documentation
@@ -381,7 +355,7 @@ unless they are linked from a current runbook.
 |---|---|---|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Build/test/PR expectations | Contributor workflow, not product marketing |
 | [`ROADMAP.md`](ROADMAP.md) | 6-8 week operating view | Check its version header against `dune-project` and `CHANGELOG.md` |
-| [`docs/agent core-MASC-BOUNDARY.md`](docs/agent core-MASC-BOUNDARY.md) | MASC ↔ agent core boundary | Reference doc; prefer its `last_verified` and generated pin block over old prose elsewhere |
+| [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | MASC ↔ agent core boundary | Reference doc; prefer its `last_verified` and generated pin block over old prose elsewhere |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | Spec suite entry point | Living draft; individual spec files may still carry migration context |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper concepts and operator notes | Older manual; for config truth prefer [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), and live code |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | Release evidence bundle | Evidence format; version lines must match current release metadata before use |
@@ -396,13 +370,11 @@ The table below lists concrete remaining tasks derived from the current limits d
 
 | # | Area | Remaining work | Expected status change |
 |---|------|---------------|------------------------|
-| 1 | **Keepers / Fleet** | Remove the dead `[autonomous] concurrency` key from deployed `runtime.toml` files and keep fleet documentation aligned with the no-global-cap runtime contract. | 🟡→✅ |
-| 2 | **Provider Failover** | Implement provider-health based **ordered automatic failover**. When a provider fails, automatically route a Keeper's turn to the next candidate provider and log/metric recovery. | ❌→✅ |
-| 3 | **Fusion + JoJ** | Add a first-order judge panel config for the Judge-of-Judges (JoJ) phase in `runtime.toml`, and persist the fusion result registry to disk. | 🟡→✅ |
-| 4 | **Goal + Task** | (superseded) The goal-loop OODA machinery is fully retired (2026-07-21, RFC-0352 Path B). Goal-driven wake, if ever wanted, must be a new typed-Scheduler design — not a revival of this row. | RFC-0352 |
+| 2 | **Provider Failover** | Add provider-health based automatic rotation on top of the ordered `[runtime.lanes]` groups, with recovery logs/metrics. | 🟡→✅ |
+| 3 | **Fusion + JoJ** | Validate the staged judge-of-judges path end to end with the shipped judges preset. | 🟡→✅ |
 | 5 | **TUI** | Make `masc-tui` usable in practice. The binary exists but is currently unusable due to CJK/emoji layout, streaming progress, and rich-block rendering gaps. | ❌→🟡/✅ |
 | 6 | **IDE** | Make the observational IDE usable in practice. The LSP proxy, annotation overlay, and dashboard IDE shell exist, but the command-only flow is not validated and the IDE is currently unusable. | ❌→🟡/✅ |
-| 7 | **Multi-Channel** | Add **sidecars** for Slack, Telegram, and other channels outside Discord, and extend the gate message schema per channel. | 🟡→✅ |
+| 7 | **Multi-Channel** | Add sidecars for Telegram and other channels beyond Discord/Slack, and extend the gate message schema per channel. | 🟡→✅ |
 | 8 | **Sandbox** | Reduce host-execution fallback cases when Docker image is missing or the path is inside the playground, and document `sandbox_profile=local` usage explicitly. | ✅ stabilization |
 | 9 | **HITL** | Keep human decisions nonblocking: persist the exact request, let the Keeper continue other work, and wake only that Keeper lane when a decision arrives. | ✅ stabilization |
 | 10 | **Gate** | Keep Always Allow, LLM Auto Judge, and HITL as non-hierarchical choices; audit exact one-use grants without classifying products, commands, or risk levels. | ✅ stabilization |

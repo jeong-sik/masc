@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.22.0] - 2026-08-14
+
 - **Breaking (agent execution ownership)**: MASC now owns its execution engine
   as the embedded `masc.agent_core` library. Runtime modules, configuration,
   environment keys, telemetry, dashboard events, persistence fields, and

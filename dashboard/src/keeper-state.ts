@@ -1596,6 +1596,10 @@ export function setActiveStream(
   const streams = keeperActiveStreams.get(name) ?? new Map<string, KeeperActiveStream>()
   streams.set(operationId, { entryId, controller })
   keeperActiveStreams.set(name, streams)
+  // The client mints the operation id before opening the direct response
+  // stream. Claim it at the same lifecycle boundary as the stream controller,
+  // before an observer broadcast can race the ACCEPTED event.
+  claimLiveSendRequest(operationId, name)
 }
 
 export function clearActiveStream(name: string, operationId: string): void {

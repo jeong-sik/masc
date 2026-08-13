@@ -56,7 +56,6 @@ import {
   liveSendOwnsRequest,
   releaseLiveSendRequest,
   setActiveStream,
-  setActiveStreamRequestId,
   setRecordValue,
   setStatusDetail,
   updateThreadEntry,
@@ -989,7 +988,6 @@ export async function sendKeeperThreadMessage(
             [localId, assistantId],
             acceptedOperationId,
           )
-          setActiveStreamRequestId(keeperName, acceptedOperationId)
           upsertTrackedKeeperChatOperation({
             operationId: acceptedOperationId,
             keeperName,

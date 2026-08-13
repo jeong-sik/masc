@@ -187,6 +187,36 @@ describe('Keeper operation stream projection', () => {
     expect(entry?.text).toBe('오퍼레이터가 비유/빈정거림')
   })
 
+  it('claims ownership before the direct stream receives acceptance', () => {
+    appendThreadEntry('sangsu', {
+      id: 'reply-opening',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: '',
+      rawText: '',
+      timestamp: null,
+      requestId: 'kmsg-opening',
+      delivery: 'sending',
+      streamState: 'opening',
+      details: null,
+    })
+    setActiveStream(
+      'sangsu',
+      'kmsg-opening',
+      'reply-opening',
+      new AbortController(),
+    )
+
+    applyKeeperOperationTurnEvent('sangsu', {
+      operationId: 'kmsg-opening',
+      event: { type: 'TEXT_MESSAGE_CONTENT', delta: 'observer raced acceptance' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-opening')
+    expect(entry?.text).toBe('')
+  })
+
   // A late-attaching echo drops the leading fragments, so the two copies land
   // out of phase and read as interleaved rather than as a clean repetition --
   // this is the shape the operator reported.

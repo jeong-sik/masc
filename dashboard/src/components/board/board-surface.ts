@@ -14,7 +14,7 @@ import { CursorPagination } from '../common/pagination'
 import { route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
 import { votePost } from '../../api/board'
-import { createPost, currentDashboardActor, sendBroadcast } from '../../api'
+import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
 import { deleteBoardPost, setBoardPostPinned } from '../../api/actions'
 import { dispatchOperatorAction, operatorActionBusy } from '../../operator-store'
 import { registerBoardHearthsRefresh } from '../../sse-store'
@@ -904,7 +904,14 @@ function BdComposer() {
           payload: { message },
         })
       } else {
-        await sendBroadcast(currentDashboardActor(), message)
+        const receipt = await sendBroadcast(currentDashboardActor(), message)
+        if (!receipt.ok) {
+          setLocalBody('')
+          resetMobileMentionDrafts()
+          setMobileOpen(false)
+          showToast(broadcastReceiptMessage(receipt), 'warning')
+          return
+        }
       }
       setLocalBody('')
       resetMobileMentionDrafts()

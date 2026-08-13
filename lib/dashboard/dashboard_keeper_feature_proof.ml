@@ -112,16 +112,52 @@ let meta_feature_json
     ("next_action", `String next_action);
   ]
 
+let timestamp_within_window ?window_hours ~now ts =
+  (* Reject zero/negative timestamps (marker/unset) and future timestamps
+     (clock skew or corrupted logs). Without the [ts <= now] guard, any
+     future timestamp would satisfy the recency check because [now -. ts]
+     would be negative and trivially [<= hours *. 3600.0]. *)
+  ts > 0.0
+  && ts <= now
+  &&
+  match window_hours with
+  | None -> true
+  | Some hours when hours <= 0.0 ->
+    (* Non-positive window is treated as "no recency check": flipping it
+       to a hard reject would silently disqualify all past evidence. The
+       top-level [json] helper clamps callers' inputs to a sane domain;
+       this keeps internal logic robust if a caller bypasses the boundary. *)
+    true
+  | Some hours -> now -. ts <= hours *. Masc_time_constants.hour
+
+(* Every counter in keeper meta is a lifetime total: once it passes zero it
+   stays positive for the rest of the keeper's life. A feature that asks only
+   "is this counter above zero" therefore reports a stopped keeper as present
+   forever — a 26-hour-paused keeper passed [runtime_liveness] on the live
+   fleet (#27947).
+
+   [last_activity] dates the counter, and the window is applied here rather
+   than inside each [predicate] so that adding a counter feature requires
+   naming the timestamp that dates it. A predicate cannot opt out. *)
 let meta_counter_feature
       snapshots
       ~id
       ~label
       ~eligible
+      ~now
+      ~last_activity
       ~predicate
       ~summary_label
       ~evidence_refs
       ~next_action
   =
+  let predicate meta =
+    predicate meta
+    && timestamp_within_window
+         ~window_hours:Decision.recent_turn_max_age_hours
+         ~now
+         (last_activity meta)
+  in
   let eligible_snapshots = List.filter eligible snapshots in
   let total = keeper_count eligible_snapshots in
   let observed =
@@ -157,40 +193,14 @@ let meta_counter_feature
     ~next_action
     eligible_snapshots
 
-let timestamp_within_window ?window_hours ~now ts =
-  (* Reject zero/negative timestamps (marker/unset) and future timestamps
-     (clock skew or corrupted logs). Without the [ts <= now] guard, any
-     future timestamp would satisfy the recency check because [now -. ts]
-     would be negative and trivially [<= hours *. 3600.0]. *)
-  ts > 0.0
-  && ts <= now
-  &&
-  match window_hours with
-  | None -> true
-  | Some hours when hours <= 0.0 ->
-    (* Non-positive window is treated as "no recency check": flipping it
-       to a hard reject would silently disqualify all past evidence. The
-       top-level [json] helper clamps callers' inputs to a sane domain;
-       this keeps internal logic robust if a caller bypasses the boundary. *)
-    true
-  | Some hours -> now -. ts <= hours *. Masc_time_constants.hour
-
 let runtime_liveness_feature ~now snapshots =
   meta_counter_feature snapshots
     ~id:"runtime_liveness"
     ~label:"Persisted keeper runtime turns"
     ~eligible:(fun _snapshot -> true)
-    ~predicate:(fun meta ->
-       (* A lifetime counter latches: once [total_turns] passes zero it stays
-          positive for the rest of the keeper's life, so a counter-only
-          predicate reports a stopped keeper as live forever. This feature is
-          named liveness, so it also requires the last persisted turn to be
-          recent, using the same window as [persistent_24h_turn_exchange]. *)
-       meta.runtime.usage.total_turns > 0
-       && timestamp_within_window
-            ~window_hours:Decision.recent_turn_max_age_hours
-            ~now
-            meta.runtime.usage.last_turn_ts)
+    ~now
+    ~last_activity:(fun meta -> meta.runtime.usage.last_turn_ts)
+    ~predicate:(fun meta -> meta.runtime.usage.total_turns > 0)
     ~summary_label:
       (Printf.sprintf
          "keepers have persisted runtime turns with a latest turn <= %.1fh old"
@@ -274,11 +284,19 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
         "Keep the runtime running until every keeper has decision-log turn evidence spanning at least 24h with a recent latest turn." );
   ]
 
-let autonomous_tool_feature snapshots =
+let autonomous_tool_feature ~now snapshots =
   meta_counter_feature snapshots
     ~id:"autonomous_tool_use"
     ~label:"Autonomous tool turns"
     ~eligible:(fun _snapshot -> true)
+    ~now
+      (* [last_autonomous_action_at] dates this counter specifically, so a
+         keeper that is turning on chat but has not acted autonomously in the
+         window does not carry the claim. *)
+    ~last_activity:(fun meta ->
+       Option.value
+         (Masc_domain.parse_iso8601_opt meta.runtime.last_autonomous_action_at)
+         ~default:0.0)
     ~predicate:(fun meta ->
        meta.runtime.autonomous_action_count > 0
        && meta.runtime.autonomous_tool_turn_count > 0)
@@ -287,11 +305,17 @@ let autonomous_tool_feature snapshots =
     ~next_action:
       "Run or repair keepers until each active keeper records autonomous tool-turn counters."
 
-let board_reactive_feature snapshots =
+let board_reactive_feature ~now snapshots =
   meta_counter_feature snapshots
     ~id:"board_reactive_autonomy"
     ~label:"Board-reactive turns"
     ~eligible:(fun _snapshot -> true)
+    ~now
+      (* Keeper meta carries no timestamp for the board-reactive counter, so
+         this dates it by the keeper's last persisted turn. That is enough to
+         drop a stopped keeper; a keeper still turning but not board-reacting
+         keeps the claim until meta gains a per-kind timestamp. *)
+    ~last_activity:(fun meta -> meta.runtime.usage.last_turn_ts)
     ~predicate:(fun meta -> meta.runtime.board_reactive_turn_count > 0)
     ~summary_label:"keepers have board-reactive turn counters"
     ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/board"]
@@ -455,8 +479,8 @@ let json ~config ?window_hours ?now () =
     [
       runtime_liveness_feature ~now snapshots;
       persistent_turn_exchange_feature ~config ~now snapshots;
-      autonomous_tool_feature snapshots;
-      board_reactive_feature snapshots;
+      autonomous_tool_feature ~now snapshots;
+      board_reactive_feature ~now snapshots;
       scheduled_proactive_feature ~config ?window_hours ~now snapshots;
     ]
   in

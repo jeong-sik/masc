@@ -210,8 +210,17 @@ val dependency_layers : t -> node list list
 
 val descriptor : t -> Node_id.t -> Keeper_tool_descriptor.t option
 
+(** A validated output is an in-process capability branded by the exact
+    immutable plan instance and [Run_id] that produced it. It is deliberately
+    not serializable or durable: process restart, plan reconstruction, or a
+    different run must revalidate the producer value instead of replaying this
+    token. *)
 type output
 
+(** [Unknown_node_id] means the caller asked to validate or resolve a node that
+    is not in the canonical plan. A producer lookup miss inside an otherwise
+    known consumer is reported by [Input_template_resolution_failed], so the
+    two failures are not interchangeable. *)
 type execution_error =
   | Unknown_node_id of Node_id.t
   | Input_template_resolution_failed of

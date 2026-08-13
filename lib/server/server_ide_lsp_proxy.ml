@@ -214,6 +214,11 @@ type conn_state =
   ; wsd : Ws_wsd.t
   ; base_path : string
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
+  ; store_scope : Server_ide_scope.ide_scope option
+        (* The IDE observation scope declared on this connection's URL, in
+           the same vocabulary the REST routes use. [None] = the client
+           declared none, so this connection addresses no annotation store
+           and gets language-server passthrough only. *)
   ; workspace_root : string ref
   ; send_queue : ws_send_msg Eio.Stream.t
   ; dispatch_queue : inbound_dispatch_msg Eio.Stream.t
@@ -225,6 +230,45 @@ type conn_state =
   }
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
+
+(* The [.masc-ide/] partition this connection addresses. Threaded into every
+   overlay read so the reader cannot land in a partition the client never
+   named — the defect that had overlay reads served from [_orphan/] while
+   keeper writes accumulated under [by-url/<slug>/]. *)
+let overlay_partition cs =
+  Option.map Server_ide_scope.partition_of_ide_scope cs.store_scope
+;;
+
+(* What this connection addresses, read from its URL before the socket is
+   upgraded. Two things are needed and they must agree: the store partition,
+   and the workspace tree document paths are relative to. [repo_id] and
+   [keeper_lane] (+[keeper]) resolve both through the same resolvers the REST
+   IDE routes use, so the two surfaces share one vocabulary. A bare
+   [canonical_url] names a partition but no tree: its documents would be
+   keyed against the project base while their rows are stored against a repo
+   root, which is the mismatch this addressing exists to prevent, so it is
+   refused rather than served as silently empty overlays. *)
+let lsp_connection_addressing ~state ~uri =
+  match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
+  | Error err -> Error err
+  | Ok (Some (Server_ide_scope.Scope_canonical_url _)) ->
+    Error
+      (Server_ide_scope.ide_error
+         "unanchored_ide_scope"
+         "LSP connections must scope by repo_id or keeper_lane: canonical_url           names a partition but not a workspace tree")
+  | Ok ((Some (Server_ide_scope.Scope_repo_id _ | Server_ide_scope.Scope_keeper_lane _) | None) as scope)
+    ->
+    let anchor, _source =
+      Server_routes_http_routes_workspace.resolve_workspace_base ~state ~uri
+    in
+    Ok (scope, anchor)
+;;
+
+(* A stored annotation's [file_path] is relative to the workspace tree the
+   client opened, which is also the anchor its document URIs resolve
+   against — not the directory that holds the store. *)
+let document_root cs = !(cs.workspace_root)
+;;
 
 let find_process cs lang_id =
   Eio.Mutex.use_ro cs.process_mutex (fun () -> Hashtbl.find_opt cs.processes lang_id)
@@ -586,8 +630,16 @@ let initialize_capabilities_json () =
     ]
 ;;
 
-let initialize_result_json () =
-  `Assoc [ "capabilities", initialize_capabilities_json () ]
+(* [workspaceRoot] is a MASC extension on the initialize result. Without it
+   a browser client has no way to name a document: it knows the path it
+   browsed (repo-relative) but not the host tree that path hangs off, so it
+   cannot form the absolute [file:] URI the protocol requires. Advertising
+   the resolved root closes that gap without inventing a URI convention. *)
+let initialize_result_json ~workspace_root () =
+  `Assoc
+    [ "capabilities", initialize_capabilities_json ()
+    ; "masc", `Assoc [ "workspaceRoot", `String workspace_root ]
+    ]
 ;;
 
 (** Extract client request ID from JSON-RPC message fields. *)
@@ -611,11 +663,11 @@ let extract_line params =
   | _ -> None
 ;;
 
-let resolve_document_request ~base params =
+let resolve_document_request ~anchor params =
   match extract_uri params with
   | None -> Error Missing_document_uri
   | Some uri ->
-    (match resolve_relative ~base uri with
+    (match resolve_relative ~base:anchor uri with
      | None -> Error Document_uri_outside_workspace
      | Some relative_path ->
        let line =
@@ -739,13 +791,14 @@ let forward_notification cs lang_id method_ params =
 
 let forward_document_sync_notification cs method_ params =
   let wire_method = lsp_method_to_string method_ in
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> ()
   | Ok request ->
     if method_ = Did_save
     then
       Lsp_overlay_provider.invalidate_cache
         ~base_dir:cs.base_path
+        ~partition:(overlay_partition cs)
         ~file_path:request.relative_path;
     (match request.language with
      | Unknown_lang -> ()
@@ -806,12 +859,12 @@ let classify_forwarded_method method_ =
 
 (** Handle textDocument/codeLens — merge LSP response with MASC overlays. *)
 let handle_codelens cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
     let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~file_path:relative in
+    let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
     (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
@@ -836,12 +889,12 @@ let handle_codelens cs params id =
 
 (** Handle textDocument/inlayHint — merge LSP response with MASC overlays. *)
 let handle_inlay_hint cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
     let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.inlay_hints ~base_dir:base ~file_path:relative in
+    let masc = Lsp_overlay_provider.inlay_hints ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
     (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
@@ -866,7 +919,7 @@ let handle_inlay_hint cs params id =
 
 (** Handle textDocument/diagnostic — merge LSP response with MASC diagnostics. *)
 let handle_diagnostic cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`Assoc [ "items", `List [] ])
   | Ok request ->
     let base = cs.base_path in
@@ -876,6 +929,7 @@ let handle_diagnostic cs params id =
       let diags =
         Lsp_overlay_provider.diagnostics
           ~base_dir:base
+          ~partition:(overlay_partition cs)
           ~file_path:relative
           ~lsp_diagnostics:[]
       in
@@ -887,6 +941,7 @@ let handle_diagnostic cs params id =
         let diags =
           Lsp_overlay_provider.diagnostics
             ~base_dir:base
+            ~partition:(overlay_partition cs)
             ~file_path:relative
             ~lsp_diagnostics:[]
         in
@@ -910,6 +965,7 @@ let handle_diagnostic cs params id =
            let merged =
              Lsp_overlay_provider.diagnostics
                ~base_dir:base
+               ~partition:(overlay_partition cs)
                ~file_path:relative
                ~lsp_diagnostics:existing
            in
@@ -920,7 +976,7 @@ let handle_diagnostic cs params id =
 
 (** Handle textDocument/hover — enrich LSP response with MASC annotations. *)
 let handle_hover cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id `Null
   | Ok request ->
     let base = cs.base_path in
@@ -931,11 +987,13 @@ let handle_hover cs params id =
        | Some line
          when Lsp_overlay_provider.has_annotations_at_line
                 ~base_dir:base
+                ~partition:(overlay_partition cs)
                 ~file_path:relative
                 ~line ->
          let enriched =
            Lsp_overlay_provider.enrich_hover
              ~base_dir:base
+             ~partition:(overlay_partition cs)
              ~file_path:relative
              ~line
              (`Assoc
@@ -957,11 +1015,13 @@ let handle_hover cs params id =
          | Some line
            when Lsp_overlay_provider.has_annotations_at_line
                   ~base_dir:base
+                  ~partition:(overlay_partition cs)
                   ~file_path:relative
                   ~line ->
            send_response cs id
              (Lsp_overlay_provider.enrich_hover
                 ~base_dir:base
+                ~partition:(overlay_partition cs)
                 ~file_path:relative
                 ~line
                 (`Assoc
@@ -986,6 +1046,7 @@ let handle_hover cs params id =
               send_response cs id
                 (Lsp_overlay_provider.enrich_hover
                    ~base_dir:base
+                   ~partition:(overlay_partition cs)
                    ~file_path:relative
                    ~line
                    result)
@@ -995,7 +1056,7 @@ let handle_hover cs params id =
 
 (** Handle textDocument/definition — merge LSP response with MASC annotation links. *)
 let handle_definition cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
@@ -1003,7 +1064,7 @@ let handle_definition cs params id =
     let masc =
       match request.line with
       | Some line ->
-        Lsp_overlay_provider.definition_links ~base_dir:base ~file_path:relative ~line
+        Lsp_overlay_provider.definition_links ~base_dir:base ~partition:(overlay_partition cs) ~document_root:(document_root cs) ~file_path:relative ~line
       | None -> []
     in
     (match request.language with
@@ -1028,7 +1089,7 @@ let handle_definition cs params id =
 
 (** Handle textDocument/references — merge LSP response with MASC annotation locations. *)
 let handle_references cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
@@ -1037,7 +1098,7 @@ let handle_references cs params id =
       match request.line with
       | Some line ->
         Lsp_overlay_provider.reference_locations
-          ~base_dir:base ~file_path:relative ~line ~include_declaration:true
+          ~base_dir:base ~partition:(overlay_partition cs) ~document_root:(document_root cs) ~file_path:relative ~line ~include_declaration:true
       | None -> []
     in
     (match request.language with
@@ -1062,7 +1123,7 @@ let handle_references cs params id =
 
 (** Handle textDocument/completion — merge LSP response with MASC annotation snippets. *)
 let handle_completion cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
@@ -1070,7 +1131,7 @@ let handle_completion cs params id =
     let masc =
       match request.line with
       | Some line ->
-        Lsp_overlay_provider.completion_items ~base_dir:base ~file_path:relative ~line
+        Lsp_overlay_provider.completion_items ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative ~line
       | None -> []
     in
     (match request.language with
@@ -1095,7 +1156,7 @@ let handle_completion cs params id =
 
 (** Handle textDocument/codeAction — inject MASC annotation actions. *)
 let handle_code_action cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
@@ -1104,7 +1165,7 @@ let handle_code_action cs params id =
       match request.line with
       | Some line ->
         Lsp_overlay_provider.code_actions
-          ~base_dir:base ~file_path:relative ~line ~diagnostics:[]
+          ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative ~line ~diagnostics:[]
       | None -> []
     in
     (match request.language with
@@ -1129,12 +1190,12 @@ let handle_code_action cs params id =
 
 (** Handle textDocument/documentSymbol — inject MASC annotation symbols. *)
 let handle_document_symbol cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
     let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.document_symbols ~base_dir:base ~file_path:relative in
+    let masc = Lsp_overlay_provider.document_symbols ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
     (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
@@ -1157,12 +1218,12 @@ let handle_document_symbol cs params id =
 
 (** Handle textDocument/foldingRange — inject MASC annotation folding ranges. *)
 let handle_folding_range cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
     let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~file_path:relative in
+    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
     (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
@@ -1185,7 +1246,7 @@ let handle_folding_range cs params id =
 
 (** Handle textDocument/documentHighlight — highlight related MASC annotations. *)
 let handle_document_highlight cs params id =
-  match resolve_document_request ~base:cs.base_path params with
+  match resolve_document_request ~anchor:(document_root cs) params with
   | Error _ -> send_response cs id (`List [])
   | Ok request ->
     let base = cs.base_path in
@@ -1193,7 +1254,7 @@ let handle_document_highlight cs params id =
     let masc =
       match request.line with
       | Some line ->
-        Lsp_overlay_provider.document_highlights ~base_dir:base ~file_path:relative ~line
+        Lsp_overlay_provider.document_highlights ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative ~line
       | None -> []
     in
     (match request.language with
@@ -1245,9 +1306,19 @@ let dispatch_message cs msg =
                  | _ -> cs.base_path)
               | _ -> cs.base_path
             in
-            let root = workspace_root_for_initialize ~base_path:cs.base_path root_uri in
-            cs.workspace_root := root;
-            send_response cs n (initialize_result_json ())
+            (* A scope declared on the connection URL is authoritative: it
+               already fixed both the partition and the tree document paths
+               are relative to. Letting [rootUri] move the anchor afterwards
+               would decouple the two again, which is how document keys came
+               to be expressed against one root and stored against another.
+               Without a declared scope the client's [rootUri] still decides,
+               as before. *)
+            (match cs.store_scope with
+             | Some _ -> ()
+             | None ->
+               cs.workspace_root
+               := workspace_root_for_initialize ~base_path:cs.base_path root_uri);
+            send_response cs n (initialize_result_json ~workspace_root:!(cs.workspace_root) ())
           | Some Initialized, _ -> ()
           | Some Shutdown, Some n -> send_response cs n `Null
           | Some Exit, _ -> disconnect cs
@@ -1292,7 +1363,7 @@ let dispatch_message cs msg =
                     Mcp_error_code.(to_wire_code Method_not_found)
                     ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
                 | Forward_read_only ->
-                  (match resolve_document_request ~base:cs.base_path params with
+                  (match resolve_document_request ~anchor:(document_root cs) params with
                    | Error Missing_document_uri ->
                      send_error cs n
                        Mcp_error_code.(to_wire_code Method_not_found)
@@ -1365,6 +1436,19 @@ let add_routes ~sw ~clock router =
                | None ->
                  Log.Server.warn "LSP WebSocket: no proc_mgr available"
                | Some proc_mgr ->
+                 let uri = Uri.of_string request.Httpun.Request.target in
+                 (match lsp_connection_addressing ~state ~uri with
+                  | Error err ->
+                    Http.Response.json_value
+                      ~status:`Bad_request
+                      ~request
+                      (`Assoc
+                         [ "ok", `Bool false
+                         ; "error", `String err.Server_ide_scope.message
+                         ; "code", `String err.Server_ide_scope.code
+                         ])
+                      reqd
+                  | Ok (store_scope, workspace_base) ->
                  (* RFC-0281: drive the upgraded connection via the shared
                     attachment SSOT.  The previous code built [ws_conn] and
                     [ignore]d it (never calling Gluten [upgrade]), so frames
@@ -1396,7 +1480,8 @@ let add_routes ~sw ~clock router =
                           ; wsd
                           ; base_path = base_path_of_state state
                           ; proc_mgr
-                          ; workspace_root = ref (base_path_of_state state)
+                          ; store_scope
+                          ; workspace_root = ref workspace_base
                           ; send_queue =
                               Eio.Stream.create
                                 Lsp_proxy_limits.outbound_send_queue_capacity
@@ -1425,7 +1510,7 @@ let add_routes ~sw ~clock router =
                           ())
                   with
                   | Ok () -> ()
-                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e)))
+                  | Error e -> Log.Server.warn "WebSocket upgrade failed: %s" e))))
            request
            reqd)
       router

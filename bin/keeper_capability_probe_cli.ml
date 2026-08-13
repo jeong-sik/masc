@@ -184,6 +184,10 @@ let invocation_error_json (err : Probe.invocation_error) =
     `Assoc [ "kind", `String "not_official_client_lane"; "lane", `String lane ]
   | Probe.Tools_only_via_mcp_bridge lane ->
     `Assoc [ "kind", `String "tools_only_via_mcp_bridge"; "lane", `String lane ]
+  | Probe.Not_antigravity_lane lane ->
+    `Assoc [ "kind", `String "not_antigravity_lane"; "lane", `String lane ]
+  | Probe.Antigravity_home_unavailable detail ->
+    `Assoc [ "kind", `String "antigravity_home_unavailable"; "detail", `String detail ]
   | Probe.Tool_schema_rejected detail ->
     `Assoc [ "kind", `String "tool_schema_rejected"; "detail", `String detail ]
 ;;
@@ -211,17 +215,29 @@ let run_surface_pass ~tools =
    probes answer the same question and only differ in how the turn is carried.
    A wrong choice would come back as a lane-guard error, which is a worse
    answer than the one the runtime can actually give. *)
-let probe_for_lane ~sw ~net ~clock ~mgr ~fs ~base_path ~runtime_id ~tool ~prompt =
+let is_antigravity runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some { execution = Runtime_execution.Antigravity_cli _; _ } -> true
+  | Some _ | None -> false
+;;
+
+let probe_for_lane ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~runtime_id ~tool
+    ~prompt =
   if is_agent_core runtime_id
   then
     Probe.probe_invocation ~sw ~net ~clock ~now:Unix.gettimeofday ~runtime_id ~tool
       ~prompt ()
+  else if is_antigravity runtime_id
+  then
+    Probe.probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs
+      ~base_path ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
   else
     Probe.probe_official_client_invocation ~mgr ~clock ~fs ~base_path
       ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
 ;;
 
-let run_invocation_pass ~sw ~net ~clock ~mgr ~fs ~base_path ~cfg ~surface =
+let run_invocation_pass ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~cfg
+    ~surface =
   List.iter
     (fun runtime_id ->
       List.iter
@@ -232,8 +248,8 @@ let run_invocation_pass ~sw ~net ~clock ~mgr ~fs ~base_path ~cfg ~surface =
               let prompt = render_prompt cfg.prompt ~tool:model_facing_name in
               let started = Unix.gettimeofday () in
               let outcome =
-                probe_for_lane ~sw ~net ~clock ~mgr ~fs ~base_path ~runtime_id
-                  ~tool ~prompt
+                probe_for_lane ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path
+                  ~runtime_id ~tool ~prompt
               in
               let wall_s = Unix.gettimeofday () -. started in
               let body =
@@ -335,6 +351,7 @@ let () =
       (List.length cfg.runtimes)
       projected
       cfg.repeat;
-    run_invocation_pass ~sw ~net ~clock ~mgr:(Eio.Stdenv.process_mgr env)
-      ~fs:(Eio.Stdenv.fs env) ~base_path ~cfg ~surface)
+    run_invocation_pass ~sw ~net ~secure_random:(Eio.Stdenv.secure_random env)
+      ~clock ~mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env) ~base_path
+      ~cfg ~surface)
 ;;

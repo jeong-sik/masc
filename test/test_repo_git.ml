@@ -130,6 +130,51 @@ let test_get_branches () =
           | Ok branches ->
               Alcotest.(check bool) "has main" true (List.mem "main" branches)))
 
+let test_get_origin_url () =
+  with_temp_dir (fun tmp ->
+      let source = Filename.concat tmp "source" in
+      init_local_repo source;
+      (match
+         run_cmd
+           ~cwd:source
+           [ "git"; "remote"; "add"; "origin"; "https://example.test/owner/repo.git" ]
+       with
+       | Ok () -> ()
+       | Error e -> Alcotest.fail ("git remote add failed: " ^ e));
+      match Repo_git.get_origin_url ~local_path:source with
+      | Ok url ->
+          Alcotest.(check string)
+            "origin URL"
+            "https://example.test/owner/repo.git"
+            url
+      | Error e -> Alcotest.fail ("get_origin_url failed: " ^ e))
+
+let test_get_origin_url_times_out_on_stalled_config () =
+  with_temp_dir (fun tmp ->
+      let fake_bin = Filename.concat tmp "bin" in
+      Unix.mkdir fake_bin 0o755;
+      let fake_git = Filename.concat fake_bin "git" in
+      write_file fake_git "#!/bin/sh\nsleep 30\n";
+      Unix.chmod fake_git 0o755;
+      let old_path = Sys.getenv "PATH" in
+      Fun.protect
+        ~finally:(fun () -> Unix.putenv "PATH" old_path)
+        (fun () ->
+          Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+          let started_at = Unix.gettimeofday () in
+          match Repo_git.get_origin_url ~local_path:tmp with
+          | Ok url -> Alcotest.failf "expected timeout, got origin %s" url
+          | Error error ->
+              let elapsed = Unix.gettimeofday () -. started_at in
+              Alcotest.(check bool)
+                "reports timeout"
+                true
+                (String_util.contains_substring error "timeout after 5s");
+              Alcotest.(check bool)
+                "returns within a bounded interval"
+                true
+                (elapsed >= 4.0 && elapsed < 10.0)))
+
 let test_fetch () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -262,6 +307,13 @@ let () =
         ] );
       ( "get_branches",
         [ Alcotest.test_case "returns branches" `Quick test_get_branches ] );
+      ( "get_origin_url",
+        [ Alcotest.test_case "returns configured origin" `Quick test_get_origin_url
+        ; Alcotest.test_case
+            "times out on stalled config"
+            `Slow
+            test_get_origin_url_times_out_on_stalled_config
+        ] );
       ( "fetch", [ Alcotest.test_case "returns remotes" `Quick test_fetch ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );

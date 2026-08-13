@@ -1001,6 +1001,7 @@ let run_blocks
     ?(on_event : (Agent_core.Types.sse_event -> unit) option)
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
+    ?execution_store
     ?(agent_ref : Agent_core.Agent.t option ref option)
     ?cooperative_yield_probe
     (goal_blocks : Agent_core.Types.content_block list)
@@ -1069,6 +1070,7 @@ let run_blocks
                    ?clock
                    ?on_yield
                    ?on_resume
+                   ?execution_store
                    ~on_event:cb
                    agent
                    goal_blocks
@@ -1078,6 +1080,7 @@ let run_blocks
                    ?clock
                    ?on_yield
                    ?on_resume
+                   ?execution_store
                    agent
                    goal_blocks)
               |> Result.map (fun response -> `Completed response)
@@ -1106,6 +1109,7 @@ let run_blocks
                   ?clock
                   ?on_yield
                   ?on_resume
+                  ?execution_store
                   ~api_strategy
                   ~on_tool_boundary
                   agent
@@ -1302,12 +1306,13 @@ let run
     ?on_event
     ?on_yield
     ?on_resume
+    ?execution_store
     ?agent_ref
     ?cooperative_yield_probe
     (goal : string)
   : (run_result, Agent_core.Error.t) result =
   run_blocks ~sw ~net ~config ?agent_core_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ?cooperative_yield_probe [Agent_core.Types.Text goal]
+    ?execution_store ?agent_ref ?cooperative_yield_probe [Agent_core.Types.Text goal]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)

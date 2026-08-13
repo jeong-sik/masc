@@ -351,6 +351,7 @@ val run :
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?execution_store:Agent_core.Agent.execution_store ->
   ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
   string ->
@@ -369,11 +370,15 @@ val run_blocks :
   ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
+  ?execution_store:Agent_core.Agent.execution_store ->
   ?agent_ref:Agent_core.Agent.t option ref ->
   ?cooperative_yield_probe:cooperative_yield_probe ->
   Agent_core.Types.content_block list ->
   (run_result, Agent_core.Error.t) result
-(** Runs an Agent Core agent against structured user-authored content blocks. *)
+(** Runs an Agent Core agent against structured user-authored content blocks.
+    When [execution_store] is supplied, the caller-owned store is forwarded
+    unchanged to the one Agent Core execution path selected for this API call.
+    The store remains scoped to one API call and must not be reused. *)
 
 val run_with_masc_tools :
   sw:Eio.Switch.t ->

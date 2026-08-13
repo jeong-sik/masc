@@ -532,6 +532,7 @@ let run_named
     ?checkpoint_sink
     ?context_injector
     ?context
+    ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
     ?enable_thinking
     ?cooperative_yield_probe
     ?agent_core_checkpoint
@@ -868,6 +869,7 @@ let run_named
             ~hooks
             ~context_injector
             ~context
+            ~terminal_effect_state
             ~event_bus
             ~raw_trace
             ~on_event
@@ -946,6 +948,7 @@ let run_named
             ~hooks
             ~context_injector
             ~context
+            ~terminal_effect_state
             ~event_bus
             ~raw_trace
             ~on_event
@@ -1022,6 +1025,7 @@ let run_named
             ~hooks
             ~context_injector
             ~context
+            ~terminal_effect_state
             ~event_bus
             ~raw_trace
             ~on_event

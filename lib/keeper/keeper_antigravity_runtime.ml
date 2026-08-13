@@ -205,7 +205,8 @@ let stream_projection ~turn_count on_event =
 
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
-    ~context_injector ~context ~event_bus ~raw_trace ~on_event ~effect_disposition
+    ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
+    ~effect_disposition
     ~(config : Runtime_execution.antigravity_cli) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -308,6 +309,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~event_bus
         ~context_injector
         ~context
+        ~terminal_effect_state
         ~terminal_error
         ~raw_trace_run:None
     in
@@ -374,6 +376,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~event_bus
         ~context_injector
         ~context
+        ~terminal_effect_state
         ~terminal_error
         ~raw_trace_run
     in
@@ -476,13 +479,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             internal_error ("Antigravity host-stop settlement failed: " ^ detail))
         in
         session_state := settled;
-        Ok
-          (Host.repeated_tool_call_result
-             ~model:config.model
-             ~session_id
-             ~turn_id
-             ~turns_used:turn_count
-             stop)
+        Host.host_stop_result
+          ~model:config.model
+          ~session_id
+          ~turn_id
+          ~turns_used:turn_count
+          stop
       | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
         Error
           (internal_error
@@ -774,7 +776,9 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
 
 let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
-    ~context ~event_bus ~raw_trace ~on_event ~config =
+    ~context
+    ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+    ~event_bus ~raw_trace ~on_event ~config =
   let effect_disposition =
     Atomic.make Keeper_provider_attempt_effect.No_effect_observed
   in
@@ -793,6 +797,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
         ~hooks
         ~context_injector
         ~context
+        ~terminal_effect_state
         ~event_bus
         ~raw_trace
         ~on_event

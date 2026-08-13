@@ -177,7 +177,21 @@ let failure_data ~tool_name (failure : Executor.failure) =
     [ "composition_tool", `String tool_name
     ; "settled", `List (List.map node_result_to_json failure.settled)
     ; "cause", cause_to_json failure.cause
+    ; ( "effect_disposition"
+      , `String
+          (Tool_result.failure_effect_disposition_to_string
+             failure.effect_disposition) )
     ]
+;;
+
+let failure_class (failure : Executor.failure) =
+  match failure.cause with
+  | Executor.Tool_did_not_complete result ->
+    Option.value
+      ~default:Tool_result.Runtime_failure
+      (Tool_result.failure_class result.result)
+  | Executor.Plan_execution_failed _ | Executor.Outer_completion_mismatch _ ->
+    Tool_result.Runtime_failure
 ;;
 
 let result_of_execution ~tool_name ~start_time = function
@@ -292,24 +306,63 @@ let make_tools
                ~start_time
                "composition execution requires Agent-Core invocation identity"
            | Some parent_invocation ->
-             Executor.execute_keeper
-               ~plan:entry.plan
-               ~run_id:(Keeper_tool_plan.Run_id.fresh ())
-               ~parent_invocation
-               ~config
-               ~meta
-               ~publication_recovery
-               ~ctx_snapshot
-               ?turn_sandbox_factory
-               ?clock
-               ?continuation_channel
-               ?gate_context
-               ?gate_grant
-               ?record_gate_result
-               ?on_completed
-               ?on_deferred
-               ?on_external_effect_deferred
-               ?on_failed
-               ()
-             |> result_of_execution ~tool_name ~start_time)))
+             let execution =
+               Executor.execute_keeper
+                 ~plan:entry.plan
+                 ~run_id:(Keeper_tool_plan.Run_id.fresh ())
+                 ~parent_invocation
+                 ~config
+                 ~meta
+                 ~publication_recovery
+                 ~ctx_snapshot
+                 ?turn_sandbox_factory
+                 ?clock
+                 ?continuation_channel
+                 ?gate_context
+                 ?gate_grant
+                 ?record_gate_result
+                 ?on_completed
+                 ?on_deferred
+                 ?on_external_effect_deferred
+                 ?on_failed
+                 ()
+             in
+             (match completion, execution with
+              | ( Agent_core.Tool_contract.Terminal_after_success _
+                , Error failure )
+                when failure.effect_disposition <> Tool_result.Proven_pre_effect
+                     && not
+                          (match failure.cause with
+                           | Executor.Tool_did_not_complete
+                               { result = Tool_result.Deferred _; _ } ->
+                             true
+                           | Executor.Tool_did_not_complete
+                               { result =
+                                   (Tool_result.Completed _ | Tool_result.Failed _)
+                               ; _
+                               }
+                           | Executor.Plan_execution_failed _
+                           | Executor.Outer_completion_mismatch _ ->
+                             false) ->
+                Option.iter
+                  (fun mark_failed ->
+                     let diagnostic =
+                       failure_data ~tool_name failure |> Yojson.Safe.to_string
+                     in
+                     mark_failed
+                       { Keeper_tools_agent_core.failure_class =
+                           failure_class failure
+                       ; effect_disposition = failure.effect_disposition
+                       ; diagnostic
+                       })
+                  on_failed
+              | Agent_core.Tool_contract.Continue_after_success, _
+              | Agent_core.Tool_contract.Terminal_after_success _, Ok _
+              | ( Agent_core.Tool_contract.Terminal_after_success _
+                , Error
+                    { Executor.effect_disposition = Tool_result.Proven_pre_effect
+                    ; _
+                    } ) ->
+                ());
+             result_of_execution ~tool_name ~start_time execution)))
 ;;

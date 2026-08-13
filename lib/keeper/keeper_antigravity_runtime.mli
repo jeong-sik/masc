@@ -21,6 +21,7 @@ val run :
   hooks:Agent_core.Hooks.hooks option ->
   context_injector:Agent_core.Hooks.context_injector option ->
   context:Agent_core.Context.t option ->
+  ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->

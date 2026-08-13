@@ -30,7 +30,20 @@ type node_result = private
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
   ; result : Tool_result.result
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition option
+  ; deferred_kind : Keeper_tool_execution.deferred_kind option
   }
+
+type dispatch_result
+
+(** Construct a low-level dispatch settlement. Callers that own more precise
+    producer evidence must supply it; absent failure evidence is conservatively
+    treated as an unknown effect outcome. *)
+val dispatch_result
+  :  ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  -> ?deferred_kind:Keeper_tool_execution.deferred_kind
+  -> Tool_result.result
+  -> dispatch_result
 
 type cause =
   | Plan_execution_failed of
@@ -47,6 +60,7 @@ type cause =
 type failure = private
   { settled : node_result list
   ; cause : cause
+  ; effect_disposition : Tool_result.failure_effect_disposition
   }
 
 type dispatch =
@@ -54,7 +68,7 @@ type dispatch =
   -> descriptor:Keeper_tool_descriptor.t
   -> schedule:Agent_core.Tool_contract.schedule
   -> input:Yojson.Safe.t
-  -> Tool_result.result
+  -> dispatch_result
 
 (** Execute dependency batches to completion. Concurrent siblings are all
     settled before the lowest-planned-index cause is selected. A [Deferred]

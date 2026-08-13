@@ -231,7 +231,16 @@ let test_completion_denied_for_non_owner () =
     check bool "rejection is ok=false" false Yojson.Safe.Util.(member "ok" json |> to_bool);
     check string "ownership reject is a deterministic workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
-    check string "ownership reject rule_id" "task_done_requires_current_owner"
+    (* keeper_task_done routes through submit_for_verification, whose denial
+       comes from the transition layer under the generic rule id — the
+       Done_action-only typed vocabulary ("task_done_requires_current_owner")
+       no longer fires on this path. Restoring typed denials on submit must
+       not break the resubmit-supersede contract
+       (test_tool_task_coverage: "resubmit supersedes the pending
+       verification") and is tracked separately; what this case pins is that
+       a non-owner's completion attempt is deterministically rejected and
+       moves nothing. *)
+    check string "ownership reject rule_id" "task_transition_invalid_state"
       Yojson.Safe.Util.(member "diagnosis" json |> member "rule_id" |> to_string);
     (* anti-vacuity: the rejected attempt did NOT advance the FSM. *)
     (match assignee_of config "task-001" with
@@ -260,7 +269,12 @@ let test_completion_denied_when_unclaimed () =
     let json = parse_json result.KTE.raw_output in
     check string "unclaimed reject is a workflow rejection" "workflow_rejection"
       Yojson.Safe.Util.(member "failure_class" json |> to_string);
-    check string "unclaimed reject rule_id" "task_done_requires_claimed_or_started"
+    (* Same routing as the ownership case above: the transition layer denies
+       todo -> submit_for_verification under the generic rule id (and
+       test_tool_task_coverage pins that exact denial message). The typed
+       "task_done_requires_claimed_or_started" belongs to the legacy
+       Done_action path only. *)
+    check string "unclaimed reject rule_id" "task_transition_invalid_state"
       Yojson.Safe.Util.(member "diagnosis" json |> member "rule_id" |> to_string);
     (* anti-vacuity: task stays Todo. *)
     match

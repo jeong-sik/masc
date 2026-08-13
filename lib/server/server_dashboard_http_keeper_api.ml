@@ -21,15 +21,16 @@ let tool_calls_fleet_cache_revisions : (string, int) Hashtbl.t = Hashtbl.create 
 let tool_calls_fleet_cache_key ~masc_root =
   let key = Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root in
   let revision = Keeper_tool_call_log.committed_revision () in
-  let changed =
-    Stdlib.Mutex.protect tool_calls_fleet_cache_revision_mu (fun () ->
-      match Hashtbl.find_opt tool_calls_fleet_cache_revisions masc_root with
-      | Some previous when previous = revision -> false
-      | Some _ | None ->
-        Hashtbl.replace tool_calls_fleet_cache_revisions masc_root revision;
-        true)
-  in
-  if changed then Dashboard_cache.invalidate key;
+  Stdlib.Mutex.protect tool_calls_fleet_cache_revision_mu (fun () ->
+    match Hashtbl.find_opt tool_calls_fleet_cache_revisions masc_root with
+    | Some previous when previous = revision -> ()
+    | Some _ | None ->
+      (* Publish the observed revision only after the old value is gone.
+         Otherwise a concurrent reader can observe the new revision between
+         [replace] and [invalidate], treat the cache as current, and return the
+         stale rows for the full TTL. *)
+      Dashboard_cache.invalidate key;
+      Hashtbl.replace tool_calls_fleet_cache_revisions masc_root revision);
   key
 ;;
 

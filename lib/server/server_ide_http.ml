@@ -83,7 +83,7 @@ let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
     Usage: ?take=true resets accumulators after read (destructive),
            default is non-destructive peek.
 
-    Callers: IDE Observation Plane frontend for real-time dashboard. *)
+    Callers: the dashboard's IDE panels, for real-time updates. *)
 let observation_snapshot_handler request reqd =
   let uri = Uri.of_string request.Httpun.Request.target in
   let take =

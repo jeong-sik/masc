@@ -395,19 +395,19 @@ let run_keeper_invocation_turn_admitted_inner
        | Error failure -> turn_resources_error ~surface failure
        | Ok { entry; publication_recovery } ->
       (match
-         Keeper_meta_contract.effective_meta_result
+         Keeper_unified_turn_pre_dispatch.load_profile_defaults
            ~base_path:ctx.config.base_path
+           ~keeper_name:entry.meta.name
+       with
+       | Error err -> tool_result_error (Agent_core.Error.to_string err)
+       | Ok profile_defaults ->
+      (match
+         Keeper_meta_contract.effective_meta_of_profile_defaults
+           profile_defaults
            entry.meta
        with
        | Error error -> tool_result_error error
        | Ok meta ->
-      (match
-         Keeper_unified_turn_pre_dispatch.load_profile_defaults
-           ~base_path:ctx.config.base_path
-           ~keeper_name:meta.name
-       with
-       | Error err -> tool_result_error (Agent_core.Error.to_string err)
-       | Ok profile_defaults ->
       (* RFC vision-delegation §2.3 site 1 (fresh input). For a Delegate keeper,
          evict each image to the artifact store + an eager analyze_image reading
          BEFORE it enters the turn, so the main history stays text-only and

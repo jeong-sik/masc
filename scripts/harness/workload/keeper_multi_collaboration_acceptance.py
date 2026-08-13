@@ -1125,29 +1125,30 @@ class MissionRun:
         coordinator_turns = [
             turn for turn in self.turns.values() if turn.role == "coordinator"
         ]
-        composition_rows = [
-            row
-            for rows in self.tool_call_rows.values()
-            for row in rows
-            if row.get("composition_tool") == "keeper_compose_mission-snapshot"
-        ]
-        async_composition_rows = [
-            row
-            for rows in self.tool_call_rows.values()
-            for row in rows
-            if row.get("composition_tool") == "keeper_compose_background-snapshot"
-        ]
-        inline_runs: dict[str, list[dict[str, Any]]] = {}
-        for row in composition_rows:
-            run_id = row.get("composition_run_id")
-            if isinstance(run_id, str) and run_id:
-                inline_runs.setdefault(run_id, []).append(row)
-        complete_inline_runs = [
-            rows
-            for rows in inline_runs.values()
-            if {row.get("composition_node_id") for row in rows}
+        def composition_runs(
+            composition_tool: str,
+        ) -> dict[tuple[str, str], list[dict[str, Any]]]:
+            runs: dict[tuple[str, str], list[dict[str, Any]]] = {}
+            for role, rows in self.tool_call_rows.items():
+                for row in rows:
+                    if row.get("composition_tool") != composition_tool:
+                        continue
+                    run_id = row.get("composition_run_id")
+                    if isinstance(run_id, str) and run_id:
+                        runs.setdefault((role, run_id), []).append(row)
+            return runs
+
+        inline_runs = composition_runs("keeper_compose_mission-snapshot")
+        async_runs = composition_runs("keeper_compose_background-snapshot")
+        composition_rows = [row for rows in inline_runs.values() for row in rows]
+        complete_inline_runs = {
+            key: rows
+            for key, rows in inline_runs.items()
+            if len(rows) == 4
+            and {row.get("composition_node_id") for row in rows}
             == {"clock", "board", "board-peer", "memory"}
-        ]
+        }
+        complete_inline_roles = {role for role, _ in complete_inline_runs}
         parallel_schedule_observed = any(
             all(
                 any(
@@ -1159,20 +1160,30 @@ class MissionRun:
                 )
                 for node in ("clock", "board", "board-peer")
             )
-            for rows in complete_inline_runs
+            for rows in complete_inline_runs.values()
         )
         sequential_dataflow_observed = any(
             any(
-                row.get("composition_node_id") == "memory"
+                isinstance(row.get("input"), dict)
+                and row["input"].get("query") == clock_output.get("now_iso")
                 and row.get("batch_index") == 1
                 and row.get("batch_size") == 1
                 and row.get("execution_mode") == "serial"
                 and row.get("disposition") == "completed"
-                and isinstance(row.get("input"), dict)
-                and isinstance(row["input"].get("query"), str)
                 for row in rows
+                if row.get("composition_node_id") == "memory"
             )
-            for rows in complete_inline_runs
+            for rows in complete_inline_runs.values()
+            for clock_output in [
+                parse_json_maybe(
+                    next(
+                        row.get("output", "")
+                        for row in rows
+                        if row.get("composition_node_id") == "clock"
+                    )
+                )
+            ]
+            if isinstance(clock_output, dict)
         )
         typed_context_observed = bool(composition_rows) and all(
             isinstance(row.get("composition_run_id"), str)
@@ -1434,8 +1445,9 @@ class MissionRun:
                 f"coordinator settled turns={len(coordinator_turns)} with nine linked steps and post-restart recall",
             ),
             "composition_inline_observed": (
-                len(complete_inline_runs) >= len(self.roles),
-                f"complete inline composition runs={len(complete_inline_runs)}",
+                complete_inline_roles == set(self.roles),
+                "complete inline composition roles="
+                + json.dumps(sorted(complete_inline_roles), ensure_ascii=False),
             ),
             "composition_parallel_schedule_observed": (
                 parallel_schedule_observed,
@@ -1446,14 +1458,20 @@ class MissionRun:
                 "memory node receives typed clock output in serial batch 1",
             ),
             "composition_async_observed": (
-                {row.get("composition_node_id") for row in async_composition_rows}
-                == {"clock", "board"}
+                len(async_runs) == 1
                 and all(
-                    row.get("composition_execution") == "async"
-                    and row.get("disposition") == "completed"
-                    for row in async_composition_rows
+                    role == "researcher"
+                    and len(rows) == 2
+                    and {row.get("composition_node_id") for row in rows}
+                    == {"clock", "board"}
+                    and all(
+                        row.get("composition_execution") == "async"
+                        and row.get("disposition") == "completed"
+                        for row in rows
+                    )
+                    for (role, _), rows in async_runs.items()
                 ),
-                f"async nested action rows={len(async_composition_rows)}",
+                f"async composition runs={len(async_runs)}",
             ),
             "composition_turn_context_observed": (
                 typed_context_observed,

@@ -49,7 +49,6 @@ let test_pending_observations_are_occurrence_scoped () =
   List.iter
     (fun (invocation, original_bytes) ->
        Keeper_tool_call_log.set_truncation_info
-         ~keeper_name:"keeper-a"
          ~invocation
          ~original_bytes
          ())
@@ -60,7 +59,6 @@ let test_pending_observations_are_occurrence_scoped () =
     ];
   let consume invocation =
     Keeper_tool_call_log.consume_truncation_info
-      ~keeper_name:"keeper-a"
       ~invocation
       ()
   in

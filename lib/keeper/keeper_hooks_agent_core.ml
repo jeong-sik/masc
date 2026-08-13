@@ -459,7 +459,6 @@ let make_hooks
         let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
         let original_bytes, truncated_to =
           Keeper_tool_call_log.consume_truncation_info
-            ~keeper_name:(!meta_ref).name
             ~invocation
             ()
         in
@@ -480,7 +479,7 @@ let make_hooks
            strictly before AGENT_CORE publishes ToolCompleted for this call, so the
            event bridge can stamp the same id onto the agent_core:tool_completed
            row (insert happens-before publish happens-before drain). *)
-        Keeper_execution_join.record ~tool_use_id
+        Keeper_execution_join.record ~invocation
           ~execution_id:(Ids.Execution_id.to_string execution_id);
         (try
            Keeper_tool_call_log.log_call

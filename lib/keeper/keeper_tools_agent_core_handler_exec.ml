@@ -42,7 +42,6 @@ let execute_with_observers
     Option.iter
       (fun invocation ->
          Keeper_tool_call_log.set_truncation_info
-           ~keeper_name:meta.name
            ~invocation
            ~original_bytes
            ())

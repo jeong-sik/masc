@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import {
+  decodeScheduledAutomationLookup,
   fetchDashboardScheduledAutomation,
   normalizeScheduledAutomation,
 } from './dashboard-scheduled-automation'
@@ -115,6 +116,60 @@ describe('normalizeScheduledAutomation', () => {
     })
 
     expect(normalized.state).toBe('unavailable')
+  })
+})
+
+describe('decodeScheduledAutomationLookup', () => {
+  it('accepts the owner envelope and keeps the exact request identity', () => {
+    const decoded = decodeScheduledAutomationLookup({
+      schema: 'masc.dashboard.scheduled_automation.lookup.v1',
+      source: 'schedule_store',
+      generated_at: '2026-08-14T00:00:00Z',
+      status: 'found',
+      schedule_id: 'sched-exact',
+      request: {
+        schedule_id: 'sched-exact',
+        status: 'due',
+        source: 'operator_request',
+        payload_kind: 'keeper.review',
+      },
+    }, 'sched-exact')
+
+    expect(decoded).toEqual({
+      status: 'found',
+      scheduleId: 'sched-exact',
+      request: {
+        schedule_id: 'sched-exact',
+        status: 'due',
+        source: 'operator_request',
+        payload_kind: 'keeper.review',
+      },
+    })
+  })
+
+  it('rejects a request row that does not belong to the requested identity', () => {
+    expect(() => decodeScheduledAutomationLookup({
+      schema: 'masc.dashboard.scheduled_automation.lookup.v1',
+      source: 'schedule_store',
+      generated_at: '2026-08-14T00:00:00Z',
+      status: 'found',
+      schedule_id: 'sched-exact',
+      request: {
+        schedule_id: 'sched-other',
+        status: 'due',
+        source: 'operator_request',
+      },
+    }, 'sched-exact')).toThrow('request identity mismatch')
+  })
+
+  it('rejects an envelope returned for a different route identity', () => {
+    expect(() => decodeScheduledAutomationLookup({
+      schema: 'masc.dashboard.scheduled_automation.lookup.v1',
+      source: 'schedule_store',
+      generated_at: '2026-08-14T00:00:00Z',
+      status: 'not_found',
+      schedule_id: 'sched-other',
+    }, 'sched-exact')).toThrow('envelope identity mismatch')
   })
 })
 

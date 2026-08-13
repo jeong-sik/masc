@@ -120,6 +120,7 @@ function parseLookupRequest(
 
 export function decodeScheduledAutomationLookup(
   raw: unknown,
+  expectedScheduleId: string,
 ): DashboardScheduledAutomationLookup {
   const record = asRecord(raw)
   if (!record) throw new Error('Invalid scheduled-automation lookup response: envelope must be an object')
@@ -134,6 +135,9 @@ export function decodeScheduledAutomationLookup(
     throw new Error('Invalid scheduled-automation lookup response: invalid generated_at or schedule_id')
   }
   const scheduleId = record.schedule_id
+  if (scheduleId !== expectedScheduleId) {
+    throw new Error('Invalid scheduled-automation lookup response: envelope identity mismatch')
+  }
   switch (record.status) {
     case 'found':
       exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id', 'request'], 'envelope')
@@ -311,5 +315,5 @@ export async function fetchDashboardScheduledAutomationLookup(
   const raw = await get<unknown>(`/api/v1/dashboard/scheduled-automation?${query}`, {
     signal: opts?.signal,
   })
-  return decodeScheduledAutomationLookup(raw)
+  return decodeScheduledAutomationLookup(raw, scheduleId)
 }

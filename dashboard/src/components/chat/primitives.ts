@@ -3807,10 +3807,40 @@ function AutonomousTurnGroup({
   `
 }
 
+// How many turns an opened run draws at each end before the middle becomes a
+// control. A run has no ceiling -- a keeper wakes on the order of once every
+// few minutes, so an unattended weekend is hundreds of turns -- and drawing it
+// whole trades the wall of headers the fold removed for a wall of rows. The
+// two ends are the parts a reader asks for: where the run started and what the
+// keeper just did.
+const AUTONOMOUS_RUN_WINDOW_HEAD = 3
+const AUTONOMOUS_RUN_WINDOW_TAIL = 3
+// Turns revealed per press of the middle control. Small enough that one press
+// cannot restore the wall, large enough that walking a long run is not dozens
+// of presses.
+const AUTONOMOUS_RUN_WINDOW_STEP = 10
+
+/** Which slice of an opened run to draw, given how far the reader has already
+ *  walked the head down. [hidden] is the count the middle control stands for;
+ *  zero means every turn is drawn and no control belongs in the output.
+ *
+ *  A run only short enough to hide one turn is drawn whole: a control that
+ *  costs a press to save a single row is the same trade `foldAutonomousRuns`
+ *  declines at its own threshold. */
+export function autonomousRunWindow(
+  total: number,
+  headCount: number,
+): { head: number; tail: number; hidden: number } {
+  const tail = AUTONOMOUS_RUN_WINDOW_TAIL
+  if (total <= headCount + tail + 1) return { head: total, tail: 0, hidden: 0 }
+  return { head: headCount, tail, hidden: total - headCount - tail }
+}
+
 /** A run of consecutive autonomous turns behind one header. Starts closed for
  *  the same reason each turn does: the transcript's subject is the conversation
  *  these wakes sit between. Expanding renders the run's turns as the same rows
- *  they would be at top level, each still closed and each still its own turn. */
+ *  they would be at top level, each still closed and each still its own turn --
+ *  but only the window's worth of them, with the middle behind a control. */
 function AutonomousTurnRun({
   entries,
   showMetadata,
@@ -3831,10 +3861,25 @@ function AutonomousTurnRun({
   action?: ChatTranscriptAction
 }) {
   const [open, setOpen] = useState(false)
+  // Only ever grows, and only by a press: new turns arriving in an open run
+  // extend the tail, so the reader's walked-down head stays where they left it.
+  const [headCount, setHeadCount] = useState(AUTONOMOUS_RUN_WINDOW_HEAD)
   const first = timeLabel(entries[0]?.timestamp)
   const last = timeLabel(entries[entries.length - 1]?.timestamp)
   // Both ends or neither: a half range would read as a single point in time.
   const range = first && last ? (first === last ? first : `${first} ~ ${last}`) : null
+  const drawn = autonomousRunWindow(entries.length, headCount)
+  const turn = (entry: KeeperConversationEntry) => html`<${AutonomousTurnGroup}
+    key=${entry.id}
+    entry=${entry}
+    showMetadata=${showMetadata}
+    variant=${variant}
+    showSourceBadge=${showSourceBadge}
+    toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
+    toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
+    toolOutputHydrationContract=${toolOutputHydrationContract}
+    action=${action}
+  />`
   return html`
     <div class="chat-block-trace chat-auto-run ${open ? 'open' : ''}">
       <button
@@ -3850,17 +3895,17 @@ function AutonomousTurnRun({
       </button>
       ${open
         ? html`<div class="chat-auto-run-turns">
-            ${entries.map((entry) => html`<${AutonomousTurnGroup}
-              key=${entry.id}
-              entry=${entry}
-              showMetadata=${showMetadata}
-              variant=${variant}
-              showSourceBadge=${showSourceBadge}
-              toolOutputsCoveredSinceMs=${toolOutputsCoveredSinceMs}
-              toolOutputsCoveredThroughMs=${toolOutputsCoveredThroughMs}
-              toolOutputHydrationContract=${toolOutputHydrationContract}
-              action=${action}
-            />`)}
+            ${entries.slice(0, drawn.head).map(turn)}
+            ${drawn.hidden > 0
+              ? html`<button
+                  type="button"
+                  class="chat-auto-run-more"
+                  onClick=${() => setHeadCount((n) => n + AUTONOMOUS_RUN_WINDOW_STEP)}
+                >
+                  가운데 ${drawn.hidden}개 더 보기
+                </button>`
+              : null}
+            ${drawn.tail > 0 ? entries.slice(entries.length - drawn.tail).map(turn) : null}
           </div>`
         : null}
     </div>

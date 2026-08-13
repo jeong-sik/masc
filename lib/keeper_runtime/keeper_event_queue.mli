@@ -337,3 +337,9 @@ val queue_to_yojson : t -> Yojson.Safe.t
 
 val queue_of_yojson : Yojson.Safe.t -> (t, string) result
 (** Parse a queue written by [queue_to_yojson]. *)
+
+val continuation_channel_of_payload :
+  stimulus_payload -> Keeper_continuation_channel.t option
+(** Reply route named by a continuation-bearing stimulus. [None] for every
+    other payload and for a scheduled wake without a persisted result
+    destination. *)

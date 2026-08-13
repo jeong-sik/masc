@@ -112,6 +112,32 @@ let test_basic_trajectory () =
   ()
 ;;
 
+let test_all_withheld_reasoning_kinds_are_activity () =
+  let withheld kind seq =
+    make_record
+      ~seq
+      ~ts:(100.0 +. Float.of_int seq)
+      ~agent_name:"test-agent"
+      ~record_type:Assistant_block
+      ~block_kind:kind
+      ~assistant_block:
+        (`Assoc
+          [ "observation", `String "withheld"
+          ; "content", `Null
+          ])
+      ()
+  in
+  let trajectory =
+    Trajectory.of_raw_trace_records
+      [ withheld "thinking" 1
+      ; withheld "reasoning_details" 2
+      ; withheld "redacted_thinking" 3
+      ]
+  in
+  let think, _act, _observe, _respond = Trajectory.count_steps trajectory in
+  Alcotest.(check int) "all reasoning variants remain visible as activity" 3 think
+;;
+
 let test_tool_call_pairing () =
   let records =
     [ make_record
@@ -493,6 +519,10 @@ let () =
     "trajectory"
     [ ( "trajectory"
       , [ Alcotest.test_case "basic trajectory from records" `Quick test_basic_trajectory
+        ; Alcotest.test_case
+            "all withheld reasoning kinds remain activity"
+            `Quick
+            test_all_withheld_reasoning_kinds_are_activity
         ; Alcotest.test_case "tool call pairing" `Quick test_tool_call_pairing
         ; Alcotest.test_case "error run" `Quick test_error_run
         ; Alcotest.test_case "orphan tool finish" `Quick test_orphan_tool_finish

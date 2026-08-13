@@ -23,8 +23,8 @@ Keeper 는 자기 출력을 board 에 놓을지, discord 채널에 놓을지, da
 
 ## 2. 증거
 
-keeper `sangsu`, 2026-08-13 13:28–17:35 (4시간 07분), 모델
-`ollama_cloud.deepseek-v4-flash`.
+측정일 2026-08-13. §2.1 과 §2.4 는 keeper `sangsu` (13:28–17:35, 4시간 07분, 모델
+`ollama_cloud.deepseek-v4-flash`), §2.2 는 obligation 을 가진 keeper 전수다.
 
 ### 2.1 배달 실측
 
@@ -48,7 +48,30 @@ obligation 19건 전수:
 즉 Keeper 는 이미 두 가지를 구분해서 하고 있었다 — **말할 때는 도구를 썼고, 생각할
 때는 텍스트로 썼다.** 배달 경로가 그 구분을 무시하고 사고 기록만 골라 발송했다.
 
-### 2.2 목적지 판단 부재의 결과
+### 2.2 단일 keeper 현상이 아니다
+
+obligation 을 가진 keeper 전수 (42건):
+
+| keeper | obligation | `connector_message_id` 보유 | 커넥터 |
+|---|---|---|---|
+| sangsu | 19 | 17 | discord |
+| kidsnote | 10 | 2 | slack |
+| rtprobe | 8 | 0 | dashboard |
+| analyst | 3 | 0 | dashboard |
+| rondo | 2 | 0 | dashboard |
+
+42건 중 38건의 본문을 확인했고 전부 사고 기록이었다. 목적지를 판단해 작성한 발화는
+한 건도 없다. 커넥터 종류와 무관하게 같은 형태가 나온다.
+
+- kidsnote: `"이미 처리한 Vincent의 Slack 메시지입니다. 새 요청 없음. 게시 없이
+  종료합니다."`
+- rondo: `"Memory write confirmed. 상태 불변 — 말할 것 없음."`
+- analyst: `"중복 wake(appr_10736fa7 …)는 이미 읽어 evidence 에 반영 완료"`
+
+"게시 없이 종료합니다" 와 "말할 것 없음" 이 게시 대상이 됐다. Keeper 가 내린 결론과
+배달 경로가 실행한 동작이 정반대다.
+
+### 2.3 목적지 판단 부재의 결과
 
 사용자가 discord 에서 "미안해 그만 좀 조용하거라" 라고 요청했다. Keeper 는
 `"조용히 하라는 요청이니, 추가 반응 없이 무응답으로 끝낸다."` 를 생성했고, 이 문장이
@@ -56,7 +79,7 @@ obligation `kdelivery-34d18e16…` 으로 같은 채널에 발송됐다
 (`connector_message_id = 1537387311699075102`). Keeper 는 침묵을 결정했는데 배달
 경로가 그 결정을 채널에 실어 보냈다.
 
-### 2.3 반복 실측
+### 2.4 반복 실측
 
 `run_finished` 200턴 중 183턴(비어 있지 않은 184턴의 99%)이 같은 결론을 재진술했다.
 그중 140턴은 `새 근거 없으니 무응답으로 끝낸다.` 한 문장이 전부다.

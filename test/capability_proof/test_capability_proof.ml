@@ -211,7 +211,7 @@ let test_campaign_complete_accepts_passed_and_typed_unsupported () =
   let results =
     [ case_id passed_case, pass ()
     ; ( case_id unsupported_case
-      , unsupported (Runtime_role_policy Agentworld_runtime_librarian_only) )
+      , unsupported (Capability_not_declared Autonomous_turn) )
     ]
   in
   match summarize_campaign ~expected:[ passed_case; unsupported_case ] ~results with

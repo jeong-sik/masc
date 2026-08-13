@@ -3011,6 +3011,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
             ~name:"non-target-running"
             ~trace_id:"trace-non-target-running"
             ()
+          |> fun meta -> { meta with proactive = { enabled = false } }
         in
         List.iter
           (write_keeper_meta_exn config)
@@ -3021,7 +3022,9 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
             let json = Server_routes_http_runtime.make_health_json request in
             let open Yojson.Safe.Util in
             let fleet_safety = json |> member "keeper_fleet_safety" in
-            Alcotest.(check int) "health counts all live executable capacity" 2
+            Alcotest.(check int)
+              "proactive-disabled Running keeper counts as reaction capacity"
+              2
               (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
             Alcotest.(check int) "capacity shortfall remains numeric capacity" 1
               (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);

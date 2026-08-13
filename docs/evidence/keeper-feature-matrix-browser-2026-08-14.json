@@ -1,0 +1,34 @@
+{
+  "schema": "masc.keeper_feature_matrix.browser_render_evidence.v1",
+  "captured_at": "2026-08-13T15:36:00Z",
+  "browser": "chromium",
+  "viewport": {
+    "width": 1440,
+    "height": 1000
+  },
+  "full_page": true,
+  "document": {
+    "path": "docs/design/keeper-feature-state-matrix-2026-08-13.html",
+    "title": "MASC Keeper 기능 상태·증거 매트릭스",
+    "section_count": 8,
+    "feature_row_count": 40,
+    "runtime_provider_row_count": 8,
+    "team_scenario_row_count": 12,
+    "feature_status_counts": {
+      "verified": 1,
+      "partial": 27,
+      "source_only": 8,
+      "missing_proof": 2,
+      "blocked": 2
+    },
+    "body_horizontal_overflow": false,
+    "console_errors": []
+  },
+  "screenshot": {
+    "path": "/Users/dancer/me/reports/masc-keeper-feature-state-matrix-20260814.png",
+    "sha256": "63e1b28bc80e5b23463a7afd3740d65be8adcffe07ba0d43a7f0bd87d4cec690",
+    "pixel_width": 1440,
+    "pixel_height": 8064
+  },
+  "verdict": "pass"
+}

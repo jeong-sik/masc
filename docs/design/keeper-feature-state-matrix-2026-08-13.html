@@ -37,6 +37,7 @@
     input { flex:1; min-width:230px; }
     .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
     table { width:100%; min-width:1680px; border-collapse:collapse; background:var(--panel); }
+    table.compact { min-width:1080px; }
     th,td { border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:10px; text-align:left; vertical-align:top; }
     th { background:#172334; color:#dfeaf7; white-space:nowrap; }
     tr:last-child td { border-bottom:0; } td:last-child,th:last-child { border-right:0; }
@@ -67,19 +68,19 @@
   <p class="lead">기능 이름이 코드에 존재하는지와 Keeper가 실제로 오래, 반복해서, 여러 Runtime에서 그 기능을 끝까지 수행하는지는 다른 사실이다. 이 문서는 source → feature test → exact-head CI → live receipt/log → Dashboard/browser → 장기 실행의 증거를 분리한다.</p>
 
   <section class="grid">
-    <article class="card"><h3>Upstream main</h3><div class="metric info">f473c0e8bf</div><p class="muted">#28574와 #28597까지 병합. runtime checkout은 아직 <code>f83f655904</code>.</p></article>
-    <article class="card"><h3>Live binary 기준</h3><div class="metric bad">UNKNOWN</div><p class="muted"><code>binary_commit</code> 부재. 표시된 f83은 <code>runtime_repo_head</code> 조회값이라 배포 증거가 아니다.</p></article>
-    <article class="card"><h3>Feature proof</h3><div class="metric warn">2 pass / 3 warn</div><p class="muted">현재 API가 측정하는 5개 자율성 축. 전체 기능 수가 아니다.</p></article>
-    <article class="card"><h3>24h 연속성</h3><div class="metric warn">1 / 13 Keeper</div><p class="muted">analyst만 53.3h span. 다른 Keeper는 아직 24h 증거 미달.</p></article>
-    <article class="card"><h3>Queue / Scheduler</h3><div class="metric warn">idle / 107 ticks</div><p class="muted">pending 0, 107회 성공·0회 실패·emitted 0. 처리할 item/occurrence가 없어 기능 완료 증거는 아님.</p></article>
-    <article class="card"><h3>Fleet health</h3><div class="metric warn">degraded</div><p class="muted">10 fibers 중 executable 7. reaction capacity가 target보다 3 부족.</p></article>
+    <article class="card"><h3>Upstream main</h3><div class="metric info">372edb534d</div><p class="muted">GitHub <code>refs/heads/main</code> 직접 조회. live checkout probe는 <code>a157997abf</code>로 서로 다르다.</p></article>
+    <article class="card"><h3>Live binary 기준</h3><div class="metric bad">UNKNOWN</div><p class="muted"><code>binary_commit</code> 부재. <code>a157997abf</code>는 <code>runtime_repo_head</code>라 배포 SHA 증거가 아니다.</p></article>
+    <article class="card"><h3>Runtime catalog</h3><div class="metric warn">45 / 47</div><p class="muted">8 provider family. Local Ollama 2개만 명시적 request-body 설정이 없어 dispatch blocked.</p></article>
+    <article class="card"><h3>10-turn continuity</h3><div class="metric warn">1 runtime pass</div><p class="muted">Ollama Cloud canary가 10쌍 대화와 9개 사실 전부 회상을 통과. 다른 46개는 미실행.</p></article>
+    <article class="card"><h3>Queue / Scheduler</h3><div class="metric warn">0 pending / 227 ticks</div><p class="muted">queue clean, runner 227회 성공·0회 실패. 실제 due occurrence를 처리한 이번 snapshot 증거는 아님.</p></article>
+    <article class="card"><h3>Fleet health</h3><div class="metric warn">10 running / 7 executable</div><p class="muted">overall degraded. 실패 fiber는 0이고 proactive-disabled 3개 때문에 reaction capacity가 3 부족.</p></article>
   </section>
 
-  <p class="muted">동결 시각: <code>2026-08-13T13:46:26Z</code>. 아래 수치는 이후 현재값으로 읽으면 안 된다. upstream main, runtime checkout, live binary identity는 각각 분리한다. 원본 축약 스냅샷은 <a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T134626Z.json">JSON evidence</a>에 있다.</p>
+  <p class="muted">동결 시각: <code>2026-08-13T15:32:54Z</code>. 아래 수치는 이후 현재값으로 읽으면 안 된다. upstream main, runtime checkout, live binary identity는 각각 분리한다. 최신 축약 스냅샷은 <a href="../evidence/keeper-runtime-health-live-2026-08-13T153254Z.json">runtime/health JSON evidence</a>에 있다.</p>
 
   <article class="card notice">
     <h3>현재 판정</h3>
-    <p><strong>기능 기반은 넓지만 제품 목표는 아직 완료가 아니다.</strong> 현재 라이브 증거는 자율 턴·24h span·tool turn·board reaction·scheduled cycle 5축에 집중되어 있다. Task/Goal/Fusion/Judge/Connector/Memory 관계 회상/멀티모달/Failover/Async·Batch의 동일 canary 기반 end-to-end 증거와 브라우저 캡처가 빠져 있다.</p>
+    <p><strong>기능 기반은 넓지만 제품 목표는 아직 완료가 아니다.</strong> 47개 runtime이 설정돼 있다는 사실과 그 runtime에서 Keeper 기능이 동작한다는 사실을 분리했다. 현재 강한 새 증거는 Ollama Cloud 한 runtime의 10-turn 의미 연속성뿐이다. 나머지 provider/runtime, 1/2/4/24h, Task/Goal/Fusion/Judge/Connector/Memory restart/멀티모달/Failover/Async·Batch, 모든 팀 시나리오와 브라우저 대조가 남아 있다.</p>
   </article>
 
   <article class="card notice">
@@ -118,13 +119,13 @@
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Comment</td><td><span class="badge"></span></td><td>Keeper별 범위 미측정</td><td class="axis">미측정</td><td>board comment tools/read model</td><td>source/tests; live comment receipt 미동결.</td><td>mention→comment→consumer cursor를 동일 ID로 저장.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Karma / Vote</td><td><span class="badge"></span></td><td>Keeper별 범위 미측정</td><td class="axis">미측정</td><td>karma ledger, vote projection</td><td>source/tests; live vote receipt 미동결.</td><td>다른 Keeper 글 vote→ledger→UI를 같은 event_id로 대조.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Goal</td><td><span class="badge"></span></td><td>Fleet 범위 미측정</td><td class="axis">미측정</td><td>goal index/reconciliation, Dashboard tree</td><td>source와 UI tests.</td><td>Goal→Task→progress→completion reconciliation canary.</td><td>E1·E2·E4·E5</td></tr>
-        <tr data-domain="Coordination" data-required="source test ci live" data-evidence="source test"><td>Coordination</td><td class="feature">Broadcast</td><td><span class="badge"></span></td><td>2 Keeper 수신 미측정</td><td class="axis">미측정</td><td><code>workspace_broadcast</code>, wake policy</td><td>focused tests; #28590 별도.</td><td>하이픈 identity 포함 2 Keeper 수신·중복 없음.</td><td>E1·E2·E3·E4</td></tr>
-        <tr data-domain="Coordination" data-required="source test live duration" data-evidence="source test live"><td>Coordination</td><td class="feature">Drain Queue</td><td><span class="badge"></span></td><td>13 Keeper, pending 0 snapshot</td><td class="axis">restart drain — · 24h —</td><td><code>Keeper_event_queue</code>, owner lock</td><td>idle snapshot만 있음. 처리 item 없음.</td><td>고유 item enqueue→drain→restart 후 같은 item_id terminal receipt.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live"><td>Coordination</td><td class="feature">Schedule Job</td><td><span class="badge"></span></td><td>runner 107 idle ticks</td><td class="axis">발화 구간 미측정</td><td><code>schedule_service</code>, runner</td><td>107 success, emitted 0 snapshot.</td><td>occurrence create→due→wake→terminal→cancel receipt/UI.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test ci live" data-evidence="source test"><td>Coordination</td><td class="feature">Broadcast</td><td><span class="badge"></span></td><td>2 Keeper 수신 미측정</td><td class="axis">미측정</td><td><code>workspace_broadcast</code>, wake policy</td><td>#28590 head <code>eee87f8fe696</code>이 full hyphenated target과 first-mention ordering을 수정; exact-head Build 진행 중.</td><td>CI Gate green 후 하이픈 identity 포함 2 Keeper 수신·중복 없음 live.</td><td>E1·E2·E3·E4</td></tr>
+        <tr data-domain="Coordination" data-required="source test live duration" data-evidence="source test live"><td>Coordination</td><td class="feature">Drain Queue</td><td><span class="badge"></span></td><td>11 queue owners, pending 0</td><td class="axis">restart drain — · 24h —</td><td><code>Keeper_event_queue</code>, owner lock</td><td>15:32Z snapshot: counts complete, runnable/outbox 0. idle 상태일 뿐 item drain 증거는 아님.</td><td>고유 item enqueue→drain→restart 후 같은 item_id terminal receipt.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live"><td>Coordination</td><td class="feature">Schedule Job</td><td><span class="badge"></span></td><td>runner 227 idle ticks</td><td class="axis">발화 구간 미측정</td><td><code>schedule_service</code>, runner</td><td>227 success, failure/crash 0; 최신 tick emitted 0.</td><td>occurrence create→due→wake→terminal→cancel receipt/UI.</td><td>E1·E2·E4·E5</td></tr>
 
         <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">Autonomous</td><td><span class="badge"></span></td><td>tool turn 9/13; executable 7/10</td><td class="axis">24h 1/13</td><td>heartbeat, supervisor, turn counters</td><td>fleet snapshot.</td><td>disabled canary와 active denominator를 분리해 장기 진척 추적.</td><td>E1·E2·E4·E6</td></tr>
         <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">Proactive</td><td><span class="badge"></span></td><td>scheduled evidence 13/13</td><td class="axis">24h 1/13</td><td>scheduled decision log</td><td>13/13 recent evidence snapshot.</td><td>실제 새 진척·비반복·실패율을 1/2/4/24h로 판정.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">MultiTurn continuity</td><td><span class="badge"></span></td><td>runtime liveness 13/13</td><td class="axis">10T 일부 · 24h 1/13</td><td>turn driver, checkpoint, compaction</td><td>recent turn 13/13.</td><td>동일 작업 10T와 1/2/4/24h 의미 회상·비반복 campaign.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">MultiTurn continuity</td><td><span class="badge"></span></td><td>1 Keeper / 1 runtime semantic canary</td><td class="axis">10T 1/1 PASS · restart/1/2/4/24h —</td><td>turn driver, chat transcript, owner operation ledger</td><td><code>canary-multiturn-20260813-210119</code>: 10 user + 10 assistant record, turn 10에서 앞선 9개 사실·순서·예외 전부 정확히 회상. <a href="../evidence/keeper-multiturn-live-2026-08-13T120751Z.json">evidence</a>.</td><td>restart/compaction을 건넌 동일 사실, 다른 46 runtime, 1/2/4/24h 비반복·진척 campaign.</td><td>E1·E2·E4·E6</td></tr>
         <tr data-domain="Autonomy" data-required="scenario source test ci live browser duration" data-evidence=""><td>Autonomy</td><td class="feature">Team scenarios</td><td><span class="badge"></span></td><td>PoC·QA·소설·연구 모두 미측정</td><td class="axis">전 구간 —</td><td>조합 가능한 하위 기능만 존재</td><td>campaign evidence 없음.</td><td>성공조건·역할·artifact·반론·검증 manifest로 실행.</td><td>E0–E6</td></tr>
 
         <tr data-domain="Reasoning" data-required="source test ci live browser" data-evidence="source test"><td>Reasoning</td><td class="feature">Fusion</td><td><span class="badge"></span></td><td>preset별 범위 미측정</td><td class="axis">미측정</td><td><code>lib/fusion</code>, TOML panels</td><td>source/focused suites.</td><td>partial/all-fail→judge→consumer를 동일 run_id로 저장.</td><td>E1–E5</td></tr>
@@ -139,11 +140,11 @@
         <tr data-domain="Memory" data-required="source test ci live duration" data-evidence="source test ci"><td>Memory</td><td class="feature">Counterpart relationship</td><td><span class="badge"></span></td><td>live fleet 미측정</td><td class="axis">session restart — · 24h —</td><td>#28592/#28598/#28600, typed evidence</td><td>source 병합 확인; live binary SHA 미확인.</td><td>재빌드 후 동명이인·관계 변화·근거 창 multi-session 검증.</td><td>E1·E2·E3·E4·E6</td></tr>
 
         <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Multi Lane</td><td><span class="badge"></span></td><td>lane/runtime별 미측정</td><td class="axis">10T — · 장기 —</td><td>ordered runtime lanes, independent Keeper lanes</td><td>source contract.</td><td>lane 격리·공정성·실패 전파를 live receipt로 대조.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Execution" data-required="scenario source test live" data-evidence="source"><td>Execution</td><td class="feature">Parallel Tool</td><td><span class="badge"></span></td><td>provider별 미측정</td><td class="axis">미측정</td><td>도구 호출/Fusion 내부 병렬</td><td>제품-level 계약 불명확.</td><td>독립 호출·순서 의존·partial failure typed contract와 live run.</td><td>E0·E1·E2·E4</td></tr>
+        <tr data-domain="Execution" data-required="scenario source test live" data-evidence="source"><td>Execution</td><td class="feature">Parallel Tool</td><td><span class="badge"></span></td><td>Z.AI canary에서 한 turn에 2 tool result</td><td class="axis">실행 mode 미증명</td><td>Agent Core batch + descriptor execution mode</td><td>두 결과의 같은 timestamp는 병렬 증거가 아니다. #28606은 concurrent census 기대값 모순과 ordering/partial-failure/cancel test 부재로 BLOCK.</td><td>#28605 invocation scope·trajectory ordering 수리 후 실제 mixed batch의 planned order, sibling failure, cancel, observation identity 검증.</td><td>E0·E1·E2·E4</td></tr>
         <tr data-domain="Execution" data-required="scenario source test live" data-evidence=""><td>Execution</td><td class="feature">Batch Tool</td><td><span class="badge"></span></td><td>미측정</td><td class="axis">미측정</td><td>공개 batch contract 확인 안 됨</td><td>evidence 없음.</td><td>batch identity·부분 실패·재시도 의미부터 정의.</td><td>E0·E1·E2·E4</td></tr>
         <tr data-domain="Execution" data-required="source test live duration" data-evidence="source test"><td>Execution</td><td class="feature">Async Tool / Job</td><td><span class="badge"></span></td><td>Fusion 경로 일부</td><td class="axis">restart — · 장기 —</td><td><code>keeper_msg_async</code>, accept/status/wake</td><td>terminal/inventory/path tests.</td><td>accept→handle→observe/cancel→restart→terminal public surface.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Multi Runtime</td><td><span class="badge"></span></td><td>catalog 존재; runtime별 미측정</td><td class="axis">각 runtime 10T —</td><td><code>runtime.toml</code>, lanes</td><td>configuration source.</td><td>Codex/ClaudeCode/Antigravity/API 각각 10T.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Model / Provider Free</td><td><span class="badge"></span></td><td>provider matrix 미측정</td><td class="axis">각 provider 10T —</td><td>capability flags; role-name policy 없음</td><td>source boundary.</td><td>동일 semantic contract를 provider matrix로 대조.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Multi Runtime</td><td><span class="badge"></span></td><td>8 provider / 47 runtime; 45 dispatchable</td><td class="axis">10T 1/47 · 1/2/4/24h 0/47</td><td><code>runtime.toml</code>, 10 lane, 14 assignment</td><td>live catalog·admission은 확인. 실제 10T pass는 Ollama Cloud 1개뿐.</td><td>provider family별 대표부터 10T→restart→1/2/4/24h 확장; blocked Local Ollama 2개는 TOML 설정 후 재조회.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Model / Provider Free</td><td><span class="badge"></span></td><td>8 provider family catalog 확인</td><td class="axis">semantic parity 1/8</td><td>capability flags; role-name policy 없음</td><td>한 provider의 10T만 통과했으므로 provider-free 주장은 아직 불가.</td><td>동일 9-fact semantic contract와 tool/async contract를 8 provider family에서 대조.</td><td>E1·E2·E4·E6</td></tr>
         <tr data-domain="Execution" data-required="source test live duration" data-evidence="source test"><td>Execution</td><td class="feature">Runtime Failover</td><td><span class="badge"></span></td><td>A→B 경로별 미측정</td><td class="axis">10T/restart —</td><td>ordered lanes, failover tests</td><td>focused tests.</td><td>A 실패→B 전환 시 중복 없이 turn/memory 유지.</td><td>E1·E2·E4·E6</td></tr>
         <tr data-domain="Execution" data-required="source test live browser" data-evidence="source test"><td>Execution</td><td class="feature">TOML configuration</td><td><span class="badge"></span></td><td>reload class별 미측정</td><td class="axis">미측정</td><td>boot/sweep/request reload matrix</td><td>parser/boot tests.</td><td>edit→trigger→effective meta/runtime→Dashboard.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Execution" data-required="source test live" data-evidence="source test live"><td>Execution</td><td class="feature">File System</td><td><span class="badge"></span></td><td>effective base 1개 live</td><td class="axis">재기동 1회</td><td>base-path resolution</td><td><code>/Users/dancer/me/.masc</code> live.</td><td>상대/절대 경로와 restart artifact 동일성 확장.</td><td>E1·E2·E4</td></tr>
@@ -152,29 +153,69 @@
         <tr data-domain="Execution" data-required="source test live" data-evidence="source test"><td>Execution</td><td class="feature">GitHub Credential</td><td><span class="badge"></span></td><td>identity별 미측정</td><td class="axis">미측정</td><td><code>keeper_github_identity</code>, redaction</td><td>focused tests.</td><td>optional identity 실패가 일반 Keeper를 막지 않는지 live 확인.</td><td>E1·E2·E4</td></tr>
 
         <tr data-domain="Surface" data-required="source test live browser" data-evidence="source test"><td>Surface</td><td class="feature">Connector routing</td><td><span class="badge"></span></td><td>Dashboard/Discord/Slack</td><td class="axis">미측정</td><td><code>keeper_surface_read/post</code>, ingress</td><td>source/tests.</td><td>맥락 기반 surface 선택과 승인되지 않은 재배달 없음.</td><td>E1·E2·E4·E5</td></tr>
-        <tr data-domain="Surface" data-required="source test ci live browser" data-evidence="source test live" data-blocked="true"><td>Surface</td><td class="feature">Discord</td><td><span class="badge"></span></td><td>gateway alive; 3 live 시나리오 미완</td><td class="axis">10T/장기 —</td><td>gateway + typed terminal replay outcome</td><td>#28574 head <code>c9df777b83</code> CI 진행 중.</td><td>침묵·명시 post·무발화와 checkpoint 비지속 live 검증.</td><td>E1–E5</td></tr>
+        <tr data-domain="Surface" data-required="source test ci live browser" data-evidence="source test ci" data-blocked="true"><td>Surface</td><td class="feature">Discord</td><td><span class="badge"></span></td><td>gateway alive; 3 live 시나리오 미완</td><td class="axis">10T/장기 —</td><td>gateway + typed terminal replay outcome</td><td>gate replay settlement 수정은 main에 병합. 현재 배포 binary SHA는 여전히 불명.</td><td>재배포 후 침묵·명시 post·무발화, continuation 중복 없음, browser/Discord 대조.</td><td>E1–E5</td></tr>
         <tr data-domain="Surface" data-required="source test live browser" data-evidence="source test"><td>Surface</td><td class="feature">Slack</td><td><span class="badge"></span></td><td>실채널 미측정</td><td class="axis">미측정</td><td>Socket/REST gateway, directory</td><td>source/focused tests.</td><td>mention→reply, no-op silence, reconnect canary.</td><td>E1·E2·E4·E5</td></tr>
         <tr data-domain="Surface" data-required="source test ci live browser" data-evidence="source test live"><td>Surface</td><td class="feature">Dashboard</td><td><span class="badge"></span></td><td>API live; asset stale</td><td class="axis">snapshot 1회</td><td>API read models + TS UI</td><td>feature-proof 200, DOM build stale.</td><td>API/DOM을 같은 timestamp/run_id로 screenshot 대조.</td><td>E1–E5</td></tr>
 
         <tr data-domain="Operations" data-required="source test live browser" data-evidence="source test live"><td>Operations</td><td class="feature">Observability</td><td><span class="badge"></span></td><td>file sink active; OTel inactive</td><td class="axis">snapshot 1회</td><td>receipts, metrics, activity, OTel</td><td>health/log snapshot.</td><td>request→effect→receipt→wake→UI causal ID.</td><td>E1·E2·E4·E5</td></tr>
-        <tr data-domain="Operations" data-required="source test live duration" data-evidence="source test live"><td>Operations</td><td class="feature">Log</td><td><span class="badge"></span></td><td>50k retained, fleet coverage 미측정</td><td class="axis">24h 완전성 —</td><td>structured/file sinks, raw trace</td><td>sink active snapshot.</td><td>rotation을 건넌 causal completeness와 누락 projection 검증.</td><td>E1·E2·E4·E6</td></tr>
-        <tr data-domain="Operations" data-required="source live duration" data-evidence="source live"><td>Operations</td><td class="feature">Long-run performance</td><td><span class="badge"></span></td><td>10 fibers; executable 7</td><td class="axis">uptime 6m43s · 24h —</td><td>GC/FD/queue metrics, sweeper</td><td>재기동 직후 snapshot.</td><td>1/2/4/24h RSS·CPU·FD·latency·queue age·progress.</td><td>E1·E4·E6</td></tr>
+        <tr data-domain="Operations" data-required="source test live duration" data-evidence="source test live"><td>Operations</td><td class="feature">Log</td><td><span class="badge"></span></td><td>53,042 total / 50k retained</td><td class="axis">24h 완전성 —</td><td>structured/file sinks, raw trace</td><td>sink active; recent error 0, warning 1 snapshot.</td><td>rotation을 건넌 causal completeness와 누락 projection 검증.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Operations" data-required="source live duration" data-evidence="source live"><td>Operations</td><td class="feature">Long-run performance</td><td><span class="badge"></span></td><td>10 fibers; executable 7; failure 0</td><td class="axis">uptime 57m21s · 1/2/4/24h —</td><td>GC/FD/queue metrics, sweeper</td><td>단일 57분 snapshot. queue clean, health computation 123ms.</td><td>1/2/4/24h RSS·CPU·FD·latency·queue age·실제 진척을 같은 process identity로 수집.</td><td>E1·E4·E6</td></tr>
       </tbody>
     </table>
   </div>
 
-  <h2>3. 병렬 트랙과 실제 의존성</h2>
-  <div class="stack">
-    <article class="card lane next"><div class="step"><strong>Track A</strong><h3>#28597 병합 완료</h3><p>head <code>abe0e09c2b4c</code>의 Build and Test, Keeper Real-World Gate, CI Gate 성공 후 <code>f473c0e8bf</code>로 병합됐다.</p></div></article>
-    <article class="card lane"><div class="step"><strong>A →</strong><h3>#28470 / #28488 재검증</h3><p>둘 다 새 main <code>f473c0e8bf</code> 위로 재배치했다. 새 head는 각각 <code>2da9e2ad7a</code>, <code>7b1b921c53</code>이며 CI가 시작됐다.</p></div></article>
-    <article class="card lane"><div class="step"><strong>Track B</strong><h3>Discord 출력 경계</h3><p>#28574는 exact-head 3개 gate 성공 후 <code>0d2609fa9b</code>로 병합됐다. #28596은 새 head <code>e9a300ed0c</code>의 CI와 live 침묵·명시 post·무발화 시나리오가 남았다.</p></div></article>
-    <article class="card lane block"><div class="step"><strong>Track C</strong><h3>Evidence campaign preflight</h3><p>카탈로그는 16 mission/29 assertion 검증을 통과했다. 다만 live는 <code>binary_commit</code>이 없고 current source에 존재하는 operator tool 5개를 노출하지 않아 mutation 전 preflight에서 멈췄다. exact SHA로 재빌드·재기동한 뒤 다시 시작한다.</p></div></article>
-    <article class="card lane block"><div class="step"><strong>C0</strong><h3>Board producer 경계 · #28620</h3><p>실 browser matrix는 첫 post에서 멈췄다. 고유 canary는 저장 성공과 46.836초 receipt 지연을 분리해 증명했고 fixture는 exact id로 삭제했다. timeout 상향이나 전역 hard gate 없이, 등록·초기화된 lane의 discoverable fan-out만 durable owner cursor로 돌리고 zero-cursor lane은 기존 candidate 기록을 보존한다. 첫 CI가 독립 test stanza의 <code>modules</code> 누락을 잡아 배선을 고쳤고, Draft head <code>2bc6849b58</code>는 Build and Test·CI Regression Gate·Keeper Real-World Gate·CI Gate를 통과했다. 배포 후 browser 재검증은 아직이며, Keeper가 registry에 등록되기 전 post는 기존부터 남은 별도 lifecycle gap이다.</p></div></article>
-    <article class="card lane"><div class="step"><strong>C1</strong><h3>Memory 관계 회상</h3><p>화자·대상·관계·행동·시간·근거를 N→N+3과 session restart에서 확인하며 추측된 관계는 저장하지 않는다.</p></div></article>
-    <article class="card lane"><div class="step"><strong>C2</strong><h3>Scenario campaigns</h3><p>협업 코드, 연구/논문, 연작 글, 반론·변론을 Goal/Task/Board/Fusion/Verification/Memory 조합으로 실행하고 10-turn과 장기 구간을 수집한다.</p></div></article>
+  <h2>3. Runtime / Provider 검증 매트릭스</h2>
+  <p class="muted">catalog에 있다는 것은 TOML 파싱과 dispatch admission 증거다. 실제 Keeper turn, semantic continuity, failover, browser, 장기 성능은 별도 축이다. 분모는 <code>2026-08-13T15:32:49Z</code>의 47개 runtime으로 고정했다.</p>
+  <div class="table-wrap">
+    <table class="compact">
+      <thead><tr><th>Provider family</th><th>Catalog / dispatch</th><th>현재 live 실행</th><th>10T</th><th>Restart</th><th>1h</th><th>2h</th><th>4h</th><th>24h</th><th>Browser</th><th>빠진 일</th></tr></thead>
+      <tbody>
+        <tr><td class="feature">Ollama Cloud</td><td>11 / 11</td><td><span class="badge partial">PARTIAL</span> DeepSeek v4 Flash 한 canary</td><td>1 / 11 PASS</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>나머지 10 runtime 10T, restart/compaction, 전 장기 구간, UI transcript 대조.</td></tr>
+        <tr><td class="feature">Z.AI Coding</td><td>1 / 1</td><td><span class="badge partial">PARTIAL</span> GLM-5-Turbo 한 turn에 tool result 2개</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>동시 실행 여부부터 invocation evidence로 증명한 뒤 10T·failover·장기 실행.</td></tr>
+        <tr><td class="feature">Antigravity Google Subscription</td><td>11 / 11</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>대표 runtime 10T 후 모델별 capability 차이를 확장.</td></tr>
+        <tr><td class="feature">Claude Code Max Subscription</td><td>7 / 7</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>10T, tool feedback, compaction/restart, duration, browser.</td></tr>
+        <tr><td class="feature">Codex ChatGPT Subscription</td><td>10 / 10</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>tool-only completion 수리 상태를 분리하고 대표 runtime부터 semantic canary.</td></tr>
+        <tr><td class="feature">Kimi For Coding Subscription</td><td>3 / 3</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>10T와 tool/async contract, restart, duration.</td></tr>
+        <tr><td class="feature">Local Llama Server</td><td>1 / 1</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>local capacity·latency를 함께 기록하는 10T/장기 canary.</td></tr>
+        <tr><td class="feature">Local Ollama</td><td>1 / 3</td><td><span class="badge blocked">2 CONFIG BLOCKED</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><code>gemma4-26b-a4b-qat</code>, <code>gemma-4-E2B-it-qat-GGUF</code>에 positive <code>max-request-body-bytes</code>를 TOML로 설정; 3개 모두 canary.</td></tr>
+      </tbody>
+    </table>
   </div>
 
-  <h2>4. 구현 규칙</h2>
+  <h2>4. 팀 시나리오 검증 매트릭스</h2>
+  <p class="muted">하위 기능 source가 있다는 이유로 팀 시나리오를 통과 처리하지 않는다. 각 행은 고유 Goal/Task/artifact/run ID, 역할별 Keeper, 반론·검증 결과, terminal receipt, browser 결과가 하나의 chain으로 이어져야 한다.</p>
+  <div class="table-wrap">
+    <table class="compact">
+      <thead><tr><th>시나리오</th><th>사용자 관점 성공조건</th><th>필수 기능 조합</th><th>현재</th><th>현재 근거</th><th>빠진 실행</th></tr></thead>
+      <tbody>
+        <tr><td class="feature">협업</td><td>여러 Keeper가 역할을 나눠 하나의 결과물을 완성하고 서로의 상태를 안다.</td><td>Goal · Task · Board · Comment · Memory · Multi Lane</td><td><span class="badge missing">NOT RUN</span></td><td>개별 source만 존재.</td><td>planner/worker/reviewer 3-lane canary, 동일 artifact와 causal ID, 10T.</td></tr>
+        <tr><td class="feature">PoC</td><td>아이디어에서 실행 가능한 작은 산출물과 검증 결과까지 도달한다.</td><td>Goal · Task · Tool · File System · Verification</td><td><span class="badge missing">NOT RUN</span></td><td>campaign evidence 없음.</td><td>요구→구현→실행 proof→review→terminal artifact.</td></tr>
+        <tr><td class="feature">QA 100% coverage</td><td>대상 범위를 명시하고 실제 coverage 100%와 기능 동작을 함께 증명한다.</td><td>Task · Parallel/Batch Tool · Log · Cross-Verification</td><td><span class="badge missing">NOT RUN</span></td><td>coverage campaign 없음.</td><td>대상 패키지와 측정 명령을 manifest에 고정하고 기능 E2E와 coverage artifact 대조.</td></tr>
+        <tr><td class="feature">동작 증명 팀</td><td>구현자와 검증자가 독립 근거로 같은 동작을 재현한다.</td><td>Task · Judge · Cross-Verification · Dashboard</td><td><span class="badge missing">NOT RUN</span></td><td>개별 verification source만 존재.</td><td>producer와 verifier를 다른 lane/runtime에 배치하고 상충 결과도 보존.</td></tr>
+        <tr><td class="feature">연작 소설</td><td>인물·사건·톤·연속성을 10T 이상 유지하며 여러 편을 완성한다.</td><td>MultiTurn · Memory · Librarian · Comment</td><td><span class="badge missing">NOT RUN</span></td><td>9-fact 단일 Keeper 회상만 통과.</td><td>다중 Keeper 작가/편집자, session restart, 설정·인물 관계·반복 검출.</td></tr>
+        <tr><td class="feature">정부 지침 반론</td><td>원문 근거를 인용하고 서로 다른 관점의 반론·재반론·종합을 만든다.</td><td>Web · Librarian · Fusion · Judge of Judge</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>출처 snapshot, 입장별 Keeper, 반박 chain, 최종 synthesis provenance.</td></tr>
+        <tr><td class="feature">논문·개념 실측</td><td>가설·방법·측정·재현·한계를 하나의 artifact로 남긴다.</td><td>Goal · Tool · Log · Fusion · Verification</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>측정 데이터와 분석 code/artifact, 독립 재현, judge verdict.</td></tr>
+        <tr><td class="feature">새 연구주제 발견</td><td>검색 결과를 단순 요약하지 않고 새로운 질문과 검증 계획을 도출한다.</td><td>Web · Memory · Fusion · Judge</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>검색 corpus, novelty 반론, 선행연구 충돌, 후속 experiment plan.</td></tr>
+        <tr><td class="feature">과학·수학·CS 난제</td><td>가정·추론·계산·반례·검증을 분리하고 틀린 경로도 식별한다.</td><td>Thinking · Tool · Fusion · Cross-Verification</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>문제별 verifier와 계산 도구, 반례 lane, 최종 uncertainty.</td></tr>
+        <tr><td class="feature">웹 연구</td><td>검색·원문 확인·출처 비교·변경 가능성 표시까지 수행한다.</td><td>Connector · Web · Librarian · Citation · Browser</td><td><span class="badge missing">NOT RUN</span></td><td>외부 참고 조사만 존재; Keeper campaign 아님.</td><td>Keeper가 직접 검색하고 source URL/artifact와 결과를 UI에서 대조.</td></tr>
+        <tr><td class="feature">기고문 작성</td><td>조사·초안·편집·사실검증·게시 대상 선택을 끝낸다.</td><td>Memory · Comment · Connector · Slack/Discord/Dashboard</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>작성/편집/검증 역할과 승인된 surface 한 곳의 exact delivery.</td></tr>
+        <tr><td class="feature">상호 반론·이해·피드백·도구 사용</td><td>서로의 주장을 정확히 재진술하고 근거로 반박·수정하며 필요한 도구를 쓴다.</td><td>Board · Comment · Fusion · MultiTurn · Tool · Memory</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>주장 identity, steelman, 반론, 수정 이력, tool receipt, 합의/비합의 terminal.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>5. 병렬 트랙과 실제 의존성</h2>
+  <div class="stack">
+    <article class="card lane next"><div class="step"><strong>Track A</strong><h3>독립 merge 후보</h3><p>#28470 <code>2da9e2ad7afa</code>, #28584 <code>ad531f5776cd</code>, #28604 <code>ef08cd9a992e</code>, #28620 <code>2bc6849b58cc</code>는 exact-head 전체 CI가 green이고 unresolved thread가 없다. Draft는 Ready 전환이 별도 상태 변경이다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>A →</strong><h3>Broadcast · #28590</h3><p>head <code>eee87f8fe696</code>이 full hyphen target과 first-mention ordering을 함께 보존하고 unresolved thread는 0이다. 다만 이 동결 시각에는 Build and Test가 진행 중이라 CI Gate까지 기다려야 한다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>Track B</strong><h3>Parallel Tool · #28605 → #28606</h3><p>#28605는 invocation truncation key에 turn/planned-index scope가 없고 concurrent trajectory round가 completion-time mutable count에 의존한다. #28606은 두 descriptor를 Concurrent로 올리면서 census test가 빈 목록을 기대해 deterministic failure다. 실행-level ordering·partial failure·cancel 증거도 없어 둘 다 현재 병합하지 않는다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>Track C</strong><h3>Exact binary identity와 재배포</h3><p>live health의 <code>a157997abf</code>는 checkout probe이고 embedded binary SHA가 아니다. Dashboard asset도 stale이다. 사용자가 재빌드·재기동한 뒤 새 process의 exact identity를 확보하고, source/merged/deployed/live/browser 축을 다시 연결한다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>C0</strong><h3>Board producer 경계 · #28620</h3><p>실 browser matrix는 첫 post에서 멈췄고 고유 canary는 46.836초 delayed 201을 증명했다. Draft head <code>2bc6849b58cc</code>는 timeout 상향이나 전역 gate 없이 discoverable fan-out을 durable owner cursor로 옮겼고 전체 CI green이다. 배포 후 동일 browser matrix 재실행과 pre-registration lifecycle gap이 남았다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>C1</strong><h3>Runtime representative canaries</h3><p>Ollama Cloud 10T pass를 템플릿으로 삼아 Codex, Claude Code, Antigravity, Kimi, Z.AI, local llama-server, Local Ollama 대표 runtime을 먼저 10T로 비교한다. catalog 나열을 실행 증거로 취급하지 않는다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>C2</strong><h3>Memory restart와 시나리오 campaign</h3><p>같은 9-fact canary를 restart/compaction까지 연장한 뒤, 협업 코드·연구/논문·연작 글·반론/변론을 Goal/Task/Board/Fusion/Verification/Memory 조합으로 실행한다.</p></div></article>
+  </div>
+
+  <h2>6. 구현 규칙</h2>
   <div class="grid">
     <article class="card"><h3>기능 우선</h3><p>실제 canary 실패를 먼저 재현한다. 관측 인프라가 없다는 이유로 정상 기능을 막는 전역 gate를 만들지 않는다.</p></article>
     <article class="card"><h3>Typed boundary</h3><p><code>Raw → Resolved → Decision → Command</code>. 문자열/substring/regex가 도메인 상태를 대신하지 않는다.</p></article>
@@ -184,7 +225,7 @@
     <article class="card"><h3>증거 분리</h3><p>Source, CI, merged, deployed, live, screenshot은 서로 대체하지 않는다. 동일 canary identity로 연결한다.</p></article>
   </div>
 
-  <h2>5. 외부 구현에서 가져올 것</h2>
+  <h2>7. 외부 구현에서 가져올 것</h2>
   <div class="grid">
     <article class="card"><h3>Hermes Agent</h3><p>항상 주입되는 작은 user/profile memory와 on-demand session search/procedural skills를 분리한다. MASC도 사람·관계 핵심 snapshot과 상세 사건 검색을 같은 저장소로 뭉개지 않는 편이 맞다.</p></article>
     <article class="card"><h3>OpenClaw</h3><p>agent별 workspace·identity·user·memory·session store 분리와 runtime/provider 경계를 참고한다. bootstrap file은 context이지 실행 권한이 아니다.</p></article>
@@ -192,17 +233,20 @@
     <article class="card"><h3>MemGPT</h3><p>bounded active context와 external memory tier 사이 이동, interrupt 기반 control flow를 참고한다. 저장량보다 올바른 recall/reinjection과 실패 가시성이 핵심이다.</p></article>
   </div>
 
-  <h2>6. 근거와 갱신 계약</h2>
+  <h2>8. 근거와 갱신 계약</h2>
   <details open><summary>저장소·라이브 근거</summary><ul class="refs">
     <li><code>docs/KEEPER-CAPABILITY-MATRIX.md</code> — Keeper가 실제 받는 typed capability family.</li>
     <li><code>docs/TOML-RELOAD-MATRIX.md</code> — boot/sweep/request reload 구분.</li>
     <li><code>lib/dashboard/dashboard_keeper_feature_proof.ml</code> — 현재 5개 autonomy feature proof read model.</li>
+    <li><a href="../evidence/keeper-runtime-health-live-2026-08-13T153254Z.json"><code>keeper-runtime-health-live-2026-08-13T153254Z.json</code></a> — upstream main, live checkout probe와 binary identity 한계, fleet/queue/scheduler/log, 8 provider·47 runtime·45 dispatchable catalog를 동결.</li>
+    <li><a href="../evidence/keeper-multiturn-live-2026-08-13T120751Z.json"><code>keeper-multiturn-live-2026-08-13T120751Z.json</code></a> — 20-record transcript SHA, 10 user/assistant 쌍, turn 10의 9개 사실 회상, runtime/TOML/terminal state와 증거 한계를 동결.</li>
+    <li><a href="../evidence/keeper-feature-matrix-browser-2026-08-14.json"><code>keeper-feature-matrix-browser-2026-08-14.json</code></a> — Chromium full-page 1440×8034 screenshot SHA, 40 feature/8 provider/12 scenario 행, console error 0과 body overflow 없음.</li>
     <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T134626Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T134626Z.json</code></a> — latest health/feature-proof/PR head를 <code>2026-08-13T13:46:26Z</code>에 동결. checkout과 binary identity 불일치도 보존한다.</li>
     <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — 이전 snapshot. live 수치 변화와 재기동 이후 구간을 비교할 때만 사용한다.</li>
     <li><a href="../evidence/keeper-multi-collaboration-preflight-2026-08-13T133813Z.json"><code>keeper-multi-collaboration-preflight-2026-08-13T133813Z.json</code></a> — mutation 없이 검증한 16 mission catalog와 live preflight blocker.</li>
     <li><a href="../evidence/keeper-pr-transition-2026-08-13T134218Z.json"><code>keeper-pr-transition-2026-08-13T134218Z.json</code></a> — #28574/#28597 병합 및 #28470/#28488 재배치 exact head.</li>
     <li><a href="../evidence/keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json"><code>keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json</code></a> — browser 20초 실패, 46.836초 delayed 201, 92.007초 read, exact-id cleanup을 한 canary로 동결.</li>
-    <li><code>/health?full=1</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — live 원본 route. 동결 JSON 이후의 현재값은 새 캡처 없이는 주장하지 않는다.</li>
+    <li><code>/health?full=1</code>, <code>/api/v1/runtime/resolved</code>, <code>/api/v1/dashboard/runtime-defaults</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — live 원본 route. 동결 JSON 이후의 현재값은 새 캡처 없이는 주장하지 않는다.</li>
     <li>#28597 exact head <code>abe0e09c2b4cd43398f14533858b24913f06371b</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704177944">31704177944</a>.</li>
     <li>#28574 exact head <code>c9df777b836477c9a60ecf89fe9e3b3e70e4a770</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704238533">31704238533</a>.</li>
   </ul></details>
@@ -213,7 +257,7 @@
   </ul></details>
   <p class="muted">갱신 규칙: live 수치는 캡처 시각이 지나면 역사적 증거다. PR head가 바뀌면 이전 CI는 무효다. 기능 행의 상태는 더 강한 증거가 생길 때만 올리고, source가 사라지거나 live가 모순되면 즉시 내린다.</p>
 
-  <footer>동결 기준 <code>2026-08-13T13:46:26Z</code> · upstream <code>f473c0e8bf</code> · runtime checkout <code>f83f655904</code> · live binary SHA unknown · effective base <code>/Users/dancer/me</code></footer>
+  <footer>동결 기준 <code>2026-08-13T15:32:54Z</code> · upstream <code>372edb534d</code> · runtime checkout probe <code>a157997abf</code> · live binary SHA unknown · effective base <code>/Users/dancer/me</code></footer>
 </main>
 <script>
   const query = document.querySelector('#query');

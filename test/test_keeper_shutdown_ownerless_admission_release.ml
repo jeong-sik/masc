@@ -225,7 +225,7 @@ let test_retain_meta_supersession_does_not_fast_path () =
       (String_util.contains_substring detail "Keeper owner not found"))
 ;;
 
-let test_ownerless_recovery_hands_intake_to_corrupt_successor () =
+let test_ownerless_finalizer_hands_intake_to_corrupt_successor () =
   with_workspace (fun ~config ->
     let name = "ownerless-corrupt-successor" in
     let operation =
@@ -247,16 +247,16 @@ let test_ownerless_recovery_hands_intake_to_corrupt_successor () =
      | Keeper_shutdown_intake_fence.Restore_conflict _ ->
        fail "fixture failed to install current intake fence");
     match
-      Keeper_shutdown_runtime.recover_operation_with_corrupt_owner_fence
+      Keeper_shutdown_finalize.run
         ~config
-        ~corrupt_owner_fence:
-          (Some
-             { keeper_name = name
-             ; operation_id = successor_operation_id
-             })
+        ~entry:None
+        ~successor_operation_id
         operation
     with
-    | Error detail -> failf "ownerless corrupt handoff failed: %s" detail
+    | Error error ->
+      failf
+        "ownerless corrupt handoff failed: %s"
+        (Keeper_shutdown_finalize.error_to_string error)
     | Ok _ ->
       check bool "corrupt successor owns the intake fence" true
         (match
@@ -500,9 +500,9 @@ let () =
             `Quick
             test_retain_meta_supersession_does_not_fast_path
         ; Alcotest.test_case
-            "ownerless recovery hands intake to corrupt successor"
+            "ownerless finalizer hands intake to corrupt successor"
             `Quick
-            test_ownerless_recovery_hands_intake_to_corrupt_successor
+            test_ownerless_finalizer_hands_intake_to_corrupt_successor
         ; Alcotest.test_case
             "meta without owner still fails"
             `Quick

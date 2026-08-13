@@ -36,6 +36,7 @@ val register_completion_handler :
 val run :
   config:Workspace.config ->
   entry:Keeper_registry.registry_entry option ->
+  ?successor_operation_id:Keeper_shutdown_types.Operation_id.t ->
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, error) result
 

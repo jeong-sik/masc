@@ -481,7 +481,11 @@ let settled_reconciliation_state
   }
 ;;
 
-let recover_operation ~config (operation : Keeper_shutdown_types.t) =
+let recover_operation
+    ~config
+    ?successor_operation_id
+    (operation : Keeper_shutdown_types.t)
+  =
   let persist_recovered recovered =
     match
       Keeper_shutdown_store.replace
@@ -512,7 +516,11 @@ let recover_operation ~config (operation : Keeper_shutdown_types.t) =
      | Finalizing_tasks _
      | Cleanup_ready _
      | Finalized _ ->
-       Keeper_shutdown_finalize.run ~config ~entry:None recovered
+       Keeper_shutdown_finalize.run
+         ~config
+         ~entry:None
+         ?successor_operation_id
+         recovered
        |> Result.map_error Keeper_shutdown_finalize.error_to_string
      | Prepared
      | Reconciliation_required _
@@ -525,7 +533,10 @@ let recover_operation_with_corrupt_owner_fence
     ~corrupt_owner_fence
     operation
   =
-  match recover_operation ~config operation with
+  let successor_operation_id =
+    Option.map (fun fence -> fence.operation_id) corrupt_owner_fence
+  in
+  match recover_operation ~config ?successor_operation_id operation with
   | Error _ as error -> error
   | Ok recovered ->
     if Keeper_shutdown_types.requires_admission_fence recovered

@@ -601,16 +601,21 @@ let unregister_retired_exact ~base_path operation entry =
             (Keeper_lifecycle_reservation.snapshot_to_string owner)))
 ;;
 
-let release_finalized_admission ~(config : Workspace.config) operation =
+let release_finalized_admission
+    ~(config : Workspace.config)
+    ?successor_operation_id
+    operation
+  =
   match
-    Keeper_owner_registry.rollback_shutdown
+    Keeper_owner_registry.transition_shutdown
       ~base_path:config.base_path
       ~keeper_name:operation.keeper_name
-      ~operation_id:operation.operation_id
+      ~from_operation_id:operation.operation_id
+      ~to_operation_id:successor_operation_id
   with
-  | Ok Keeper_owner.Shutdown_rolled_back
-  | Ok Keeper_owner.Shutdown_not_reserved -> Ok operation
-  | Ok (Keeper_owner.Shutdown_reserved_by_other operation_id) ->
+  | Ok Keeper_owner.Shutdown_transition_applied
+  | Ok Keeper_owner.Shutdown_transition_already_applied -> Ok operation
+  | Ok (Keeper_owner.Shutdown_transition_reserved_by_other operation_id) ->
     Log.Keeper.warn
       "finalized Keeper shutdown found a newer admission owner: keeper=%s finalized_operation=%s current_operation=%s"
       operation.keeper_name
@@ -621,14 +626,15 @@ let release_finalized_admission ~(config : Workspace.config) operation =
     if admission_already_released_by_removal ~config operation error
     then
       (match
-         Keeper_shutdown_intake_fence.rollback_shutdown
+         Keeper_shutdown_intake_fence.transition_shutdown
            ~base_path:config.base_path
            ~keeper_name:operation.keeper_name
-           ~operation_id:operation.operation_id
+           ~from_operation_id:operation.operation_id
+           ~to_operation_id:successor_operation_id
        with
-       | Keeper_shutdown_intake_fence.Rolled_back
-       | Keeper_shutdown_intake_fence.Not_reserved -> Ok operation
-       | Keeper_shutdown_intake_fence.Reserved_by_other existing ->
+       | Keeper_shutdown_intake_fence.Transition_applied
+       | Keeper_shutdown_intake_fence.Transition_already_applied -> Ok operation
+       | Keeper_shutdown_intake_fence.Transition_reserved_by_other existing ->
          Error
            (Admission_release_failed
               ( operation
@@ -647,11 +653,11 @@ let invoke_completion_handler ~config operation action =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let deliver_finalized_completion ~config operation =
+let deliver_finalized_completion ~config ?successor_operation_id operation =
   match operation.phase with
   | Finalized { completion = Completion_not_requested; _ }
   | Finalized { completion = Completion_delivered _; _ } ->
-    release_finalized_admission ~config operation
+    release_finalized_admission ~config ?successor_operation_id operation
   | Finalized ({ completion = Completion_pending action; _ } as evidence) ->
     (match invoke_completion_handler ~config operation action with
      | Error detail -> Error (Completion_failed (operation, detail))
@@ -666,7 +672,11 @@ let deliver_finalized_completion ~config operation =
        in
        (match replace ~config delivered with
         | Error _ as error -> error
-        | Ok persisted -> release_finalized_admission ~config persisted))
+        | Ok persisted ->
+          release_finalized_admission
+            ~config
+            ?successor_operation_id
+            persisted))
   | Prepared
   | Joined_idle
   | Finalizing_tasks _
@@ -676,7 +686,13 @@ let deliver_finalized_completion ~config operation =
   | Superseded _ -> Error Unsupported_phase
 ;;
 
-let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
+let complete_cleanup
+    ~(config : Workspace.config)
+    ~entry
+    ?successor_operation_id
+    operation
+    cleanup
+  =
   let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()
@@ -754,7 +770,10 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
          match replace ~config finalized with
          | Error _ as error -> error
          | Ok persisted_finalized ->
-           deliver_finalized_completion ~config persisted_finalized)
+           deliver_finalized_completion
+             ~config
+             ?successor_operation_id
+             persisted_finalized)
   in
   match validate_exact_registry_generation ~base_path:config.base_path operation entry with
   | Error detail -> block ~config operation Registry_unregister detail
@@ -772,7 +791,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
         | Ok registry_unregistered -> finish registry_unregistered))
 ;;
 
-let run ~config ~entry operation =
+let run ~config ~entry ?successor_operation_id operation =
   match operation.phase with
   | Joined_idle ->
     (match read_operation_meta ~config operation with
@@ -785,7 +804,13 @@ let run ~config ~entry operation =
            | Error _ as error -> error
            | Ok ready ->
              (match ready.phase with
-              | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
+              | Cleanup_ready cleanup ->
+                complete_cleanup
+                  ~config
+                  ~entry
+                  ?successor_operation_id
+                  ready
+                  cleanup
               | _ -> Error Unsupported_phase))))
   | Finalizing_tasks settled_task_ids ->
     (match read_operation_meta ~config operation with
@@ -798,10 +823,23 @@ let run ~config ~entry operation =
            | Error _ as error -> error
            | Ok ready ->
              (match ready.phase with
-              | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
+              | Cleanup_ready cleanup ->
+                complete_cleanup
+                  ~config
+                  ~entry
+                  ?successor_operation_id
+                  ready
+                  cleanup
               | _ -> Error Unsupported_phase))))
-  | Cleanup_ready cleanup -> complete_cleanup ~config ~entry operation cleanup
-  | Finalized _ -> deliver_finalized_completion ~config operation
+  | Cleanup_ready cleanup ->
+    complete_cleanup
+      ~config
+      ~entry
+      ?successor_operation_id
+      operation
+      cleanup
+  | Finalized _ ->
+    deliver_finalized_completion ~config ?successor_operation_id operation
   | Prepared
   | Reconciliation_required _
   | Blocked _

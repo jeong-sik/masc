@@ -6,8 +6,12 @@
 open Masc_domain
 open Workspace_utils
 
+exception Broadcast_not_persisted of string
+
 type broadcast_delivery =
-  { rendered : string
+  { request_id : string
+  ; seq : int
+  ; rendered : string
   ; from_agent : string
   ; content : string
   ; mention : string option
@@ -54,10 +58,10 @@ let emit_message_activity config ~from_agent ~content ~mention
 let broadcast_channel config =
   Printf.sprintf "broadcast:%s:default" (project_prefix config)
 
-type mention_handler = string option -> unit
+type mention_handler = broadcast_delivery -> unit
 
 let on_broadcast_mention : mention_handler Atomic.t =
-  Atomic.make (fun _mention -> ())
+  Atomic.make (fun _delivery -> ())
 
 let set_on_broadcast_mention handler =
   Atomic.set on_broadcast_mention handler
@@ -124,6 +128,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
     else (content, msg_type)
   in
   let seq = Workspace_state.next_seq config in
+  let request_id = Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
   let mention = pre_extract_mention in
   let safe_content = sanitize_message content in
   let safe_agent = sanitize_agent_name from_agent in
@@ -144,32 +149,55 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
   } in
   let msg_file =
     Filename.concat (messages_dir config)
-      (Printf.sprintf "%09d_%s_broadcast.json" seq (safe_filename from_agent))
+      (Printf.sprintf
+         "%09d_%s_%s_broadcast.json"
+         seq
+         (safe_filename from_agent)
+         request_id)
   in
-  write_json config msg_file (message_to_yojson msg);
-  (match backend_publish config ~channel:(broadcast_channel config)
-      ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
-   | Ok _ -> ()
-   | Error (Backend_types.BackendNotSupported msg) when String.starts_with ~prefix:"FileSystem backend" msg ->
-       Log.Misc.debug "broadcast publish skipped: %s" msg
-   | Error ((Backend_types.BackendNotSupported _
-            | Backend_types.NotFound _ | Backend_types.AlreadyExists _
-            | Backend_types.IOError _ | Backend_types.InvalidKey _
-            | Backend_types.ConnectionFailed _) as e) ->
-       Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
-  emit_message_activity config ~from_agent:safe_agent ~content:safe_content
-    ~mention ();
-  (try (Atomic.get on_broadcast_mention) mention
-   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Misc.warn "on_broadcast_mention callback failed: %s"
-       (Printexc.to_string exn));
-  observe safe_msg_type;
-  { rendered = Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content
-  ; from_agent = safe_agent
-  ; content = safe_content
-  ; mention
-  ; msg_type = safe_msg_type
-  }
+  let delivery =
+    { request_id
+    ; seq
+    ; rendered = Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content
+    ; from_agent = safe_agent
+    ; content = safe_content
+    ; mention
+    ; msg_type = safe_msg_type
+    }
+  in
+  (match write_json_commit_result config msg_file (message_to_yojson msg) with
+   | Error message ->
+     Log.Misc.error
+       "workspace broadcast authoritative write failed request_id=%s seq=%d: %s"
+       request_id seq message;
+     observe safe_msg_type;
+     raise (Broadcast_not_persisted message)
+   | Ok { mirror_error } ->
+     Option.iter
+       (fun message ->
+          Log.Misc.warn
+            "workspace broadcast local mirror write failed request_id=%s seq=%d: %s"
+            request_id seq message)
+       mirror_error;
+     (match backend_publish config ~channel:(broadcast_channel config)
+         ~message:(Yojson.Safe.to_string (message_to_yojson msg)) with
+      | Ok _ -> ()
+      | Error (Backend_types.BackendNotSupported msg)
+        when String.starts_with ~prefix:"FileSystem backend" msg ->
+        Log.Misc.debug "broadcast publish skipped: %s" msg
+      | Error ((Backend_types.BackendNotSupported _
+               | Backend_types.NotFound _ | Backend_types.AlreadyExists _
+               | Backend_types.IOError _ | Backend_types.InvalidKey _
+               | Backend_types.ConnectionFailed _) as e) ->
+        Log.Misc.error "broadcast publish failed: %s" (Backend_types.show_error e));
+     emit_message_activity config ~from_agent:safe_agent ~content:safe_content
+       ~mention ();
+     (try (Atomic.get on_broadcast_mention) delivery
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+        Log.Misc.warn "on_broadcast_mention callback failed: %s"
+          (Printexc.to_string exn));
+     observe safe_msg_type;
+     delivery)
 
 module For_testing = struct
   let replace_on_broadcast_mention handler =

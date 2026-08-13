@@ -14,10 +14,15 @@ type delivery_key =
   | Operation of Request_id.t
   | Fusion_run of Request_id.t
   | Continuation of Request_id.t
+  | Workspace_message of Request_id.t
 (** [Continuation] identifies the terminal transcript row owned by one
     autonomous continuation-delivery intent.  It is deliberately distinct
     from the producer's operation or Fusion identity: the deterministic
     intent id is the idempotency authority at this projection boundary. *)
+
+(** [Workspace_message] identifies one producer-minted workspace broadcast.
+    It lets a mentioned Keeper append that exact broadcast to its durable
+    transcript once without treating the broadcast as a chat operation. *)
 
 type transcript_slot =
   | Accepted_user

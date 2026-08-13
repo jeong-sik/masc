@@ -38,6 +38,7 @@ paused_targets=(
 
 normal_targets=(
   @test/runtest-test_board_dispatch
+  @test/runtest-test_slack_user_directory
   @test/runtest-test_cancel_safe
   @test/runtest-test_cancel_wall_bucket
   @test/runtest-test_cap_blocker_structured_error

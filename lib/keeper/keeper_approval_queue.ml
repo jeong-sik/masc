@@ -1531,9 +1531,9 @@ let merge_loaded_map ~surface ~existing ~loaded =
    hashtable and creates a Dated_jsonl handle. It is also used by synchronous
    tests outside an Eio context, so an Eio mutex would either raise Get_context
    or poison the registry after a recoverable store-creation failure. *)
-let approval_sse_pending_event = "approval:pending"
-let approval_sse_resolved_event = "approval:resolved"
-let approval_sse_summary_event = "approval:summary_updated"
+let approval_sse_pending_event = Dashboard_sse_event.Approval_pending
+let approval_sse_resolved_event = Dashboard_sse_event.Approval_resolved
+let approval_sse_summary_event = Dashboard_sse_event.Approval_summary_updated
 
 let generate_id () = make_generated_id "appr"
 
@@ -1842,15 +1842,14 @@ let pending_entry_json_fields
 let broadcast_pending entry audit_receipt =
   try
     Sse.broadcast
-      (`Assoc
-          [ "type", `String approval_sse_pending_event
-          ; ( "payload"
-            , `Assoc
-                (pending_entry_json_fields
-                   ~include_input:true
-                   entry
-                 @ [ "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt ]) )
-          ])
+      (Dashboard_sse_event.encode
+         approval_sse_pending_event
+         ~payload:
+           (`Assoc
+              (pending_entry_json_fields
+                 ~include_input:true
+                 entry
+               @ [ "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt ])))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -1914,14 +1913,13 @@ let record_summary_updated ~now (entry : pending_approval) =
        ());
   try
     Sse.broadcast
-      (`Assoc
-         [ "type", `String approval_sse_summary_event
-         ; ( "payload"
-           , `Assoc
-               (pending_entry_json_fields
-                  ~include_input:false
-                  entry) )
-         ])
+      (Dashboard_sse_event.encode
+         approval_sse_summary_event
+         ~payload:
+           (`Assoc
+              (pending_entry_json_fields
+                 ~include_input:false
+                 entry)))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -1929,7 +1927,7 @@ let record_summary_updated ~now (entry : pending_approval) =
       ~keeper_name:entry.keeper_name
       ~site:"broadcast_summary"
       ~id:entry.id
-      ~event_type:approval_sse_summary_event
+      ~event_type:(Dashboard_sse_event.to_string approval_sse_summary_event)
       exn
 ;;
 
@@ -2878,17 +2876,16 @@ let resolve_entry
   before_terminal_publish ();
   (try
      Sse.broadcast
-       (`Assoc
-           [ "type", `String approval_sse_resolved_event
-           ; ( "payload"
-             , `Assoc
-                 [ "id", `String entry.id
-                 ; "keeper_name", `String entry.keeper_name
-                 ; "tool_name", `String entry.tool_name
-                 ; "decision", `String decision_str
-                 ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
-                 ] )
-           ])
+       (Dashboard_sse_event.encode
+          approval_sse_resolved_event
+          ~payload:
+            (`Assoc
+               [ "id", `String entry.id
+               ; "keeper_name", `String entry.keeper_name
+               ; "tool_name", `String entry.tool_name
+               ; "decision", `String decision_str
+               ; "audit", Keeper_approval.Audit.receipt_to_yojson audit_receipt
+               ]))
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->

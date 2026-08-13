@@ -259,7 +259,7 @@ let audit_receipts_to_yojson receipts =
   `List (List.map Keeper_approval.Audit.receipt_to_yojson receipts)
 ;;
 
-let approval_sse_audit_event = "approval:audit"
+let approval_sse_audit_event = Dashboard_sse_event.Approval_audit
 
 let authorization_subject_id = function
   | One_shot_resolution approval_id -> Some approval_id
@@ -281,14 +281,13 @@ let broadcast_failed_authorization_audits ~keeper_name ~source receipts =
        | Error _ ->
          (try
             Sse.broadcast
-              (`Assoc
-                  [ "type", `String approval_sse_audit_event
-                  ; ( "payload"
-                    , `Assoc
-                        [ "id", Json_util.string_opt_to_json id
-                        ; "audit", Keeper_approval.Audit.receipt_to_yojson receipt
-                        ] )
-                  ])
+              (Dashboard_sse_event.encode
+                 approval_sse_audit_event
+                 ~payload:
+                   (`Assoc
+                      [ "id", Json_util.string_opt_to_json id
+                      ; "audit", Keeper_approval.Audit.receipt_to_yojson receipt
+                      ]))
           with
           | Eio.Cancel.Cancelled _ as exn ->
             (* Authorization is already committed.  This observation lane must

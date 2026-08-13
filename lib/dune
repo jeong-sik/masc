@@ -145,6 +145,9 @@
   ;; lib/dashboard_eval_feed/. 178+59 LoC, deps: stdlib + Yojson +
   ;; masc.agent_core + masc_core (Json_util/Safe_ops).
   masc.dashboard_eval_feed
+  ;; Closed dashboard SSE producer sum + pure JSON encoder. Effectful
+  ;; broadcasting remains in the parent library's caller shells.
+  masc.dashboard_sse_event
   ;; RFC-0056 Phase 1 — Dashboard_tla_specs leaf module extracted to
   ;; lib/dashboard_tla_specs/. 330+87 LoC, deps: stdlib + Yojson + Unix +
   ;; fs_compat (Fs_compat) + masc_core (Json_util/String_util) +

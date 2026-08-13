@@ -276,11 +276,38 @@ function parseBackendEmittedEventTypes(libRoot: string): BackendEventEvidence[] 
   return [...evidence].map(([eventType, sourceFile]) => ({ eventType, sourceFile }))
 }
 
+function parseTypedDashboardEventTypes(source: string): Map<string, string> {
+  const mappingStart = source.indexOf('let to_string = function')
+  const mappingEnd = source.indexOf('\n;;', mappingStart)
+  if (mappingStart < 0 || mappingEnd <= mappingStart) {
+    throw new Error('Dashboard_sse_event.to_string exhaustive mapping not found')
+  }
+  const mapping = new Map<string, string>()
+  const mappingSource = source.slice(mappingStart, mappingEnd)
+  for (const match of mappingSource.matchAll(/\|\s+([A-Z][A-Za-z0-9_]*)\s+->\s+"([^"]+)"/g)) {
+    const constructor = match[1]
+    const eventType = match[2]
+    if (constructor && eventType) mapping.set(eventType, constructor)
+  }
+  return mapping
+}
+
 const sseRegistrySource = readFileSync(resolve(process.cwd(), 'src/types/sse-event-registry.ts'), 'utf8')
 const sseRegistryConstants = parseExportedStringConstants(sseRegistrySource)
 const sseStoreSource = readFileSync(resolve(process.cwd(), 'src/sse-store.ts'), 'utf8')
 const feRouted = parseFeRoutedEventTypes(sseStoreSource, sseRegistryConstants)
-const backendEmitted = parseBackendEmittedEventTypes(resolve(process.cwd(), '../lib'))
+const typedBackendEventSource = readFileSync(
+  resolve(process.cwd(), '../lib/dashboard_sse_event/dashboard_sse_event.ml'),
+  'utf8',
+)
+const typedBackendEvents = parseTypedDashboardEventTypes(typedBackendEventSource)
+const backendEmitted = [
+  ...parseBackendEmittedEventTypes(resolve(process.cwd(), '../lib')),
+  ...[...typedBackendEvents.keys()].map(eventType => ({
+    eventType,
+    sourceFile: 'lib/dashboard_sse_event/dashboard_sse_event.ml',
+  })),
+]
 const classified = new Set([
   ...Object.keys(BACKEND_EMITTED),
   ...Object.keys(FE_ONLY_OR_EXTERNAL),
@@ -342,6 +369,15 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
     )
   })
 
+  it('source-parses the closed typed backend event sum', () => {
+    expect(Object.fromEntries(typedBackendEvents)).toEqual({
+      'approval:pending': 'Approval_pending',
+      'approval:resolved': 'Approval_resolved',
+      'approval:audit': 'Approval_audit',
+      'approval:summary_updated': 'Approval_summary_updated',
+    })
+  })
+
   it('accepts every source-discovered backend SSE event in the closed frontend sum', () => {
     const registered = new Set<string>(SSE_EVENT_TYPES)
     const unregistered = backendEmitted.filter(({ eventType }) => !registered.has(eventType))
@@ -364,7 +400,13 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
     it(`backend ${backendFile.replace('../', '')} still emits "${eventType}"`, () => {
       const source = readFileSync(resolve(process.cwd(), backendFile), 'utf8')
       const wireType = BACKEND_WIRE_TYPE_ALIASES[eventType] ?? eventType
-      expect(source).toContain(`"${wireType}"`)
+      const typedConstructor = typedBackendEvents.get(wireType)
+      if (typedConstructor) {
+        expect(typedBackendEventSource).toContain(`| ${typedConstructor} -> "${wireType}"`)
+        expect(source).toContain(`Dashboard_sse_event.${typedConstructor}`)
+      } else {
+        expect(source).toContain(`"${wireType}"`)
+      }
     })
   }
 
@@ -374,18 +416,8 @@ describe('SSE event-type cross-boundary parity (exact-match routes)', () => {
   // schema coverage, and nothing bound it to a refresh — so Auto Judge
   // verdicts settled invisibly until the 120-180s periodic sweep. Keep this
   // producer-side positive control in addition to the bilateral registry gate.
-  const backendApprovalEvents = ((): string[] => {
-    const source = readFileSync(
-      resolve(process.cwd(), '../lib/keeper/keeper_approval_queue.ml'),
-      'utf8',
-    )
-    const found = new Set<string>()
-    for (const match of source.matchAll(/"(approval:[a-z_]+)"/g)) {
-      const eventType = match[1]
-      if (eventType !== undefined) found.add(eventType)
-    }
-    return [...found]
-  })()
+  const backendApprovalEvents = [...typedBackendEvents.keys()]
+    .filter(eventType => eventType.startsWith('approval:'))
 
   it('parses a non-empty backend approval:* inventory', () => {
     // Positive control: a rename or regex drift that matches nothing must fail

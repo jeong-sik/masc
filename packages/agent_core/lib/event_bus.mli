@@ -10,28 +10,10 @@
 
 (** {2 Envelope} *)
 
-(** Correlation metadata attached to every event. *)
-type envelope =
-  { correlation_id : string (** Session-level correlation (formerly session_id). *)
-  ; run_id : string (** Per-run identifier (formerly worker_run_id). *)
-  ; ts : float (** Event timestamp (Unix epoch). *)
-  ; caused_by : string option
-    (** Causal scope identifier. Distinct from [correlation_id]
-        (same-session scoping): [caused_by] points at a specific prior
-        [run_id] or [correlation_id] to reconstruct
-        A→B→C cascades within a session. [None] means "no known parent
-        event" (root of a causation chain). Convention:
-        [caused_by = Some parent.run_id] when the trigger is a concrete
-        event; [caused_by = Some parent.correlation_id] when the
-        trigger is the session as a whole. Anthropic Multi-Agent
-        Pattern 4 (Message Bus). @since 0.161.0 (#877) *)
-  }
-
-(** Richer, cross-runtime envelope with explicit event IDs, observation time,
-    and sequence/parent metadata. Existing {!envelope} remains the event bus
-    compatibility shape; new adapters should prefer [envelope_v2].
-    @since 0.170.5 *)
-type envelope_v2 = Event_envelope.t
+(** Canonical producer-owned identity and causality metadata attached to every
+    event. The event bus and its durable/SSE adapters share this exact envelope,
+    so one occurrence keeps one [event_id] across every delivery surface. *)
+type envelope = Event_envelope.t
 
 (** {2 Payload types} *)
 
@@ -219,45 +201,27 @@ val payload_kind : payload -> string
 
 (** {2 ID generation} *)
 
-(** Generate a process-local compatibility identifier. AGENT_CORE's private canonical
-    execution writer owns its own typed random identity. *)
+(** Generate a producer-owned, cross-process collision-resistant event
+    identifier. Raises {!Event_envelope.Entropy_unavailable} rather than
+    fabricating a clock- or content-derived fallback. *)
 val fresh_id : unit -> string
 
-(** Create an envelope with optional correlation/run IDs (defaults to fresh)
-    and an optional causation link.
+(** Create a canonical envelope. Event, correlation, and run IDs default to
+    fresh producer-owned values.
     @since 0.161.0 [?caused_by] added. *)
 val mk_envelope
-  :  ?correlation_id:string
-  -> ?run_id:string
-  -> ?caused_by:string
-  -> unit
-  -> envelope
-
-val mk_envelope_v2
   :  ?event_id:string
   -> ?correlation_id:string
   -> ?run_id:string
-  -> ?event_time:float
-  -> ?observed_at:float
-  -> ?seq:int
-  -> ?parent_event_id:string
   -> ?caused_by:string
-  -> ?source_clock:Event_envelope.source_clock
   -> unit
-  -> envelope_v2
-
-val envelope_v2_of_envelope
-  :  ?event_id:string
-  -> ?observed_at:float
-  -> ?seq:int
-  -> ?parent_event_id:string
   -> envelope
-  -> envelope_v2
 
 (** Create an event by wrapping a payload in a fresh envelope.
     @since 0.161.0 [?caused_by] added. *)
 val mk_event
-  :  ?correlation_id:string
+  :  ?event_id:string
+  -> ?correlation_id:string
   -> ?run_id:string
   -> ?caused_by:string
   -> payload

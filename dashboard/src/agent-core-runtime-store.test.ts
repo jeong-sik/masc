@@ -140,6 +140,7 @@ describe('agent-core-runtime-store', () => {
     expect(applyAgentCoreRuntimeEvent(liveEvent)).toBe(false)
     expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
     expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
+    expect(agentCoreAgentEvents.value[0]?.event_id).toBe('evt-live-replay')
   })
 
   it('hydrates keeper lifecycle phase from Agent Core payload', () => {
@@ -317,7 +318,7 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
   })
 
-  it('scopes a repeated producer event id to its run', () => {
+  it('treats a repeated producer event id as the same occurrence across run drift', () => {
     const event = (runId: string) => ({
       type: 'agent_core:masc:trust_updated',
       event_id: 'evt-process-local',
@@ -330,19 +331,19 @@ describe('agent-core-runtime-store', () => {
     })
 
     expect(applyAgentCoreRuntimeEvent(event('run-a'))).toBe(true)
-    expect(applyAgentCoreRuntimeEvent(event('run-b'))).toBe(true)
-    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(applyAgentCoreRuntimeEvent(event('run-b'))).toBe(false)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
   })
 
-  it('preserves current native envelopes until the producer emits an identity', () => {
+  it('preserves envelopes that have no producer identity', () => {
     const event = {
       type: 'agent_core:masc:trust_updated',
       ts_unix: 610,
-      correlation_id: 'corr-legacy',
-      run_id: 'run-legacy',
+      correlation_id: 'corr-unidentified',
+      run_id: 'run-unidentified',
       payload: {
-        agent_a: 'legacy-agent',
-        agent_b: 'legacy-peer',
+        agent_a: 'unidentified-agent',
+        agent_b: 'unidentified-peer',
         trust_score: 0.4,
         timestamp: 610,
       },

@@ -16,12 +16,12 @@ type t =
   ; source_clock : source_clock
   }
 
-let id_counter = Atomic.make 0
+exception Entropy_unavailable of string
 
 let fresh_id () =
-  let n = Atomic.fetch_and_add id_counter 1 in
-  let now_us = Int.of_float (Unix.gettimeofday () *. 1e6) in
-  Printf.sprintf "evt-%x-%x-%x" (Unix.getpid ()) now_us n
+  match Llm_provider.Random_id.create () with
+  | Ok value -> "evt-" ^ value
+  | Error detail -> raise (Entropy_unavailable detail)
 ;;
 
 let source_clock_to_string = function

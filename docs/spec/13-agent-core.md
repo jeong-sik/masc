@@ -60,7 +60,10 @@ validated against the same captured descriptor that is dispatched.
 
 `Keeper_event_bridge` subscribes to `Agent_core.Event_bus`, converts its closed
 payload variants to MASC SSE events, and appends replayable JSONL under
-`.masc/agent-core-events/`. MASC-owned domain events use the process-wide bus in
+`.masc/agent-core-events/`. Agent Core mints one producer-owned `event_id` per
+occurrence; the bridge preserves the same canonical envelope in JSONL and SSE
+so replay/live overlap is deduplicated by identity rather than content or
+timestamps. MASC-owned domain events use the process-wide bus in
 `Event_bus_slots`; they are not inferred from assistant text.
 
 ## State ownership

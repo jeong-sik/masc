@@ -6,6 +6,7 @@ import type { KeeperPhase } from './core'
 
 interface AgentCoreAgentEventBase {
   agent_name: string
+  event_id?: string
   event_type?: string
   correlation_id?: string
   run_id?: string

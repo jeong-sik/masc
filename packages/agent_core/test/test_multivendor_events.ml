@@ -9,8 +9,8 @@
 
     Invariants checked (see docs/EVENT-CATALOG.md Invariants I1-I6):
 
-    - I1/I2: Envelope fields (correlation_id, run_id, ts) are present and
-      preserved across every native variant.
+    - I1/I2: Producer event identity, correlation/run scope, and event time are
+      present and preserved across every native variant.
     - Event_bus.payload_kind returns the canonical label for each native
       variant.
     - The golden lifecycle transcript (AgentStarted -> TurnStarted ->
@@ -105,11 +105,17 @@ let test_envelope_preserved_across_variants () =
   List.iter (fun p -> Event_bus.publish bus (mk p)) variants;
   let received = Event_bus.drain sub in
   check int "count" (List.length variants) (List.length received);
+  let event_ids = List.map (fun (event : Event_bus.event) -> event.meta.event_id) received in
+  check int "every occurrence has a distinct producer id"
+    (List.length event_ids)
+    (List.length (List.sort_uniq String.compare event_ids));
   List.iter
     (fun (e : Event_bus.event) ->
+       check bool "event_id populated" true (String.length e.meta.event_id > 0);
        check string "correlation_id preserved" corr e.meta.correlation_id;
        check string "run_id preserved" run_id e.meta.run_id;
-       check bool "ts populated" true (e.meta.ts > 0.0))
+       check bool "event time populated" true (e.meta.event_time > 0.0);
+       check bool "observation time populated" true (e.meta.observed_at > 0.0))
     received
 ;;
 

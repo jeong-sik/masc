@@ -217,8 +217,7 @@ function stableRuntimeEventIdentity(event: AgentCoreRuntimeEnvelope): RuntimeEve
   const runId = asString(event.run_id) ?? asString(payload.run_id)
   const eventId = asString(event.event_id) ?? asString(payload.event_id)
   if (eventId) {
-    const scope = runId ?? asString(event.correlation_id) ?? asString(payload.correlation_id) ?? ''
-    return { kind: 'stable', key: `event:${scope}|${eventId}` }
+    return { kind: 'stable', key: `event:${eventId}` }
   }
 
   const seq = asNumber(event.seq) ?? asNumber(payload.seq)
@@ -244,6 +243,7 @@ function traceDetail(
   detail: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
+    event_id: asString(event.event_id) ?? null,
     event_type: runtimeEventType(event),
     correlation_id: asString(event.correlation_id) ?? null,
     run_id: asString(event.run_id) ?? null,
@@ -275,6 +275,7 @@ function keeperLifecycleEvent(event: AgentCoreRuntimeEnvelope): AgentCoreKeeperL
     phase: toKeeperPhase(asString(payload.phase)),
     detail: asString(payload.detail),
     event_type: runtimeEventType(event),
+    event_id: asString(event.event_id),
     correlation_id: asString(event.correlation_id),
     run_id: asString(event.run_id),
     event_key: runtimeEventKey(event),
@@ -355,6 +356,7 @@ function ingestRuntimeProjection(
         secondary_agent: asString(payload.agent_b),
         trust_score: asNumber(payload.trust_score),
         event_type: runtimeEventType(event),
+        event_id: asString(event.event_id),
         correlation_id: asString(event.correlation_id),
         run_id: asString(event.run_id),
         event_key: runtimeEventKey(event),
@@ -370,6 +372,7 @@ function ingestRuntimeProjection(
         new_score: asNumber(payload.new_score),
         trend: asString(payload.trend),
         event_type: runtimeEventType(event),
+        event_id: asString(event.event_id),
         correlation_id: asString(event.correlation_id),
         run_id: asString(event.run_id),
         event_key: runtimeEventKey(event),

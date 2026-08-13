@@ -169,3 +169,17 @@ val agent_failed
   -> error_detail:Yojson.Safe.t
   -> unit
   -> Yojson.Safe.t
+
+(** Encode the typed [agent_failed] payload without an envelope. Adapter
+    boundaries that own a richer canonical envelope can reuse the schema
+    encoder without decoding or rebuilding its fields. *)
+val agent_failed_payload
+  :  agent_name:string
+  -> task_id:string
+  -> elapsed_s:float
+  -> error:string
+  -> error_domain:string
+  -> error_code:string
+  -> error_retryable:bool
+  -> error_detail:Yojson.Safe.t
+  -> Yojson.Safe.t

@@ -575,98 +575,92 @@ let apply_patch ~old_string ~new_string ~replace_all text =
       Ok (Buffer.contents buf, occurrences)))
 ;;
 
-(* RFC-0128 §4.5 — resolve an absolute or base-relative file_path to
-   a partition + repo-relative path. Four outcomes:
+(* RFC-0378 §5.1 — resolve a write's file path to its attribution.
 
-   1. [Repo_store.find_repo_by_path_prefix] hits AND the repo's [url]
-      normalises via [Agent_observation.canonical_url_of_remote] → [By_url slug]
-      bucket + the repo-relative [rel_path].
-   2. [Repo_store.find_repo_by_path_prefix] hits but the URL is blank or
-      unparseable → [No_canonical_url] + original path. Counter labelled
-      [reason=blank_url] or [reason=url_unparseable].
-   3. A sandbox playground [repo_id] is not present in the repository store →
-      [Unmatched] + original path. Counter labelled
-      [reason=sandbox_unregistered_repo].
-   4. No registered repo contains this path → [Base_unresolved] + original path.
-      Counter labelled [reason=unregistered_repo].
+   This is the system's only [Code_address] mint: it anchors the path,
+   recovers the owning repository (sandbox playground parse or
+   registered local_path prefix), lexically collapses dot segments, and
+   constructs the address. Attribution failure is a typed fact kind
+   carried on the record as [Unaddressed { reason; attempted_path }] —
+   not an exception. Total: never raises.
 
-   The keeper write path is fire-and-forget; this resolver also never
-   raises — unresolved paths degrade to typed non-[By_url] partitions with
-   metric labels so the operator can see how often each reason appears. *)
-let resolve_partition_for_write ~base_dir ~kind ~file_path =
+   Keeper writes inside the sandbox playground never appear under a
+   registered repo's [local_path] (the playground clone path is opaque
+   to [repositories.toml]), so the SSOT
+   {!Playground_paths.parse_playground_repo_path} recovers the
+   [(repo_id, rel)] pair first and the repository URL is looked up by
+   id. This makes the sandbox/working-tree join work without forcing
+   the operator to register every playground clone path. *)
+let resolve_write_attribution ~base_dir ~file_path =
   let abs =
     if Filename.is_relative file_path
     then Filename.concat base_dir file_path
     else file_path
   in
-  let bump_orphan ~reason =
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string IdeOrphanWrites)
-      ~labels:[ "kind", kind; "reason", reason ]
-      ()
+  let unaddressed reason =
+    Agent_observation.Unaddressed { reason; attempted_path = file_path }
   in
-  let resolve_by_url ~rel ~repo_url ~orphan_reasons =
+  (* Lexical dot-segment collapse. [None] when the path escapes the
+     repo root — such a path does not name a file of the matched repo,
+     so it fails attribution rather than being repaired. *)
+  let normalize_rel rel =
+    let rec go acc = function
+      | [] -> Some (List.rev acc)
+      | ("" | ".") :: rest -> go acc rest
+      | ".." :: rest ->
+        (match acc with
+         | [] -> None
+         | _ :: tl -> go tl rest)
+      | seg :: rest -> go (seg :: acc) rest
+    in
+    match go [] (String.split_on_char '/' rel) with
+    | None | Some [] -> None
+    | Some segs -> Some (String.concat "/" segs)
+  in
+  let mint ~rel ~repo_url =
     let url = String.trim repo_url in
-    if url = "" then begin
-      bump_orphan ~reason:(snd orphan_reasons);
-      (Agent_observation.No_canonical_url, file_path)
-    end
+    if url = ""
+    then unaddressed Agent_observation.Unattributed.Blank_remote_url
     else
       match Agent_observation.canonical_url_of_remote url with
       | None ->
-        bump_orphan ~reason:(fst orphan_reasons);
-        (Agent_observation.No_canonical_url, file_path)
-      | Some slug -> (Agent_observation.By_url slug, rel)
+        unaddressed (Agent_observation.Unattributed.Unparseable_remote_url url)
+      | Some slug ->
+        (match normalize_rel rel with
+         | None -> unaddressed Agent_observation.Unattributed.Unregistered_path
+         | Some rel ->
+           (match Agent_observation.Code_address.v ~codebase:slug ~path:rel with
+            | Ok address -> Agent_observation.Addressed { address; checkout = None }
+            | Error invalid ->
+              unaddressed (Agent_observation.Unattributed.Unmintable invalid)))
   in
-  (* RFC-0128 §4.5 PR-6: keeper writes inside the sandbox playground
-     never appear under a registered repo's [local_path] (the playground
-     clone path is opaque to [repositories.toml]). Use the SSOT
-     {!Playground_paths.parse_playground_repo_path} to recover the
-     [(repo_id, rel)] pair, then look up the repository's URL by id.
-     This makes the sandbox/working-tree join work without forcing the
-     operator to also register every playground clone path. *)
   match
     Playground_paths.parse_playground_repo_path ~base_path:base_dir ~abs_path:abs
   with
   | Some (repo_id, rel) ->
     (match Repo_store.find_url_by_id ~base_path:base_dir repo_id with
-     | Ok (Some url) ->
-       resolve_by_url
-         ~rel
-         ~repo_url:url
-         ~orphan_reasons:("sandbox_url_unparseable", "sandbox_blank_url")
+     | Ok (Some url) -> mint ~rel ~repo_url:url
      | Ok None ->
-       bump_orphan ~reason:"sandbox_unregistered_repo";
-       (Agent_observation.Unmatched, file_path)
+       unaddressed (Agent_observation.Unattributed.Unregistered_repo_id repo_id)
      | Error _ ->
-       bump_orphan ~reason:"repository_catalog_unavailable";
-       (Agent_observation.Unmatched, file_path))
+       unaddressed Agent_observation.Unattributed.Repository_catalog_unavailable)
   | None ->
     (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir abs with
-     | Ok None ->
-       bump_orphan ~reason:"unregistered_repo";
-       (Agent_observation.Base_unresolved, file_path)
-     | Ok (Some (repo, rel)) ->
-       resolve_by_url
-         ~rel
-         ~repo_url:repo.url
-         ~orphan_reasons:("url_unparseable", "blank_url")
+     | Ok (Some (repo, rel)) -> mint ~rel ~repo_url:repo.url
+     | Ok None -> unaddressed Agent_observation.Unattributed.Unregistered_path
      | Error _ ->
-       bump_orphan ~reason:"repository_catalog_unavailable";
-       (Agent_observation.Base_unresolved, file_path))
+       unaddressed Agent_observation.Unattributed.Repository_catalog_unavailable)
 ;;
 
-(** After a successful file write, record the code region in [.masc-ide/].
-    Fire-and-forget: errors are logged but never block the write path.
-    Emits a neutral [Agent_observation.write_region_event]; the IDE adapter
-    registers the concrete region-tracker sink.
+(** After a successful file write, record the code region in the IDE
+    observation store. Fire-and-forget: errors are logged but never
+    block the write path. Emits a neutral
+    [Agent_observation.write_region_event]; the IDE adapter registers
+    the concrete region-tracker sink.
 
-    RFC-0128 §4.5: the partition is resolved per-write from the
-    [file_path] so sandbox-clone keeper writes and working-tree IDE
-    reads see the same [By_url <slug>] bucket. When the path cannot
-    be resolved to a registered repo the record goes to
-    [.masc-ide/_orphan/] and the [masc_ide_orphan_writes_total]
-    counter increments. *)
+    RFC-0378 §5.1: the attribution is minted per-write from the
+    [file_path], so sandbox-clone keeper writes and working-tree IDE
+    reads join on the same [Code_address]. *)
 let track_write_region
       ~config
       ~keeper_name
@@ -679,8 +673,12 @@ let track_write_region
       ()
   =
   let base_dir = Keeper_alerting_path.project_root_of_config config in
-  let partition, rel_file_path =
-    resolve_partition_for_write ~base_dir ~kind:"region" ~file_path
+  let attribution = resolve_write_attribution ~base_dir ~file_path in
+  let rel_file_path =
+    match attribution with
+    | Agent_observation.Addressed { address; _ } ->
+      Agent_observation.Code_address.path address
+    | Agent_observation.Unaddressed { attempted_path; _ } -> attempted_path
   in
   let tool_name =
     match fs_write_mode_of_string_opt mode_raw with
@@ -714,7 +712,7 @@ let track_write_region
   try
     match
       Agent_observation.emit_write_region_event
-        { base_path = base_dir; partition; keeper_id = keeper_name; turn; tool_call_json }
+        { base_path = base_dir; attribution; keeper_id = keeper_name; turn; tool_call_json }
     with
     | Ok () -> None
     | Error err ->

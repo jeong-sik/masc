@@ -198,6 +198,11 @@ module Unattributed = struct
     | Unregistered_repo_id of string
     | Unregistered_path
     | Repository_catalog_unavailable
+    | Unmintable of Code_address.invalid
+      (* The repo and relative path were recovered but the address
+         constructor rejected the residue. Reaching this is a resolver
+         invariant break worth diagnosing, so the rejection is carried
+         instead of being collapsed into another reason. *)
 
   let reason_to_string = function
     | Blank_remote_url -> "blank_remote_url"
@@ -205,6 +210,7 @@ module Unattributed = struct
     | Unregistered_repo_id _ -> "unregistered_repo_id"
     | Unregistered_path -> "unregistered_path"
     | Repository_catalog_unavailable -> "repository_catalog_unavailable"
+    | Unmintable _ -> "unmintable_address"
   ;;
 end
 

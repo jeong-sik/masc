@@ -74,6 +74,10 @@ module Unattributed : sig
     | Unregistered_repo_id of string
     | Unregistered_path
     | Repository_catalog_unavailable
+    | Unmintable of Code_address.invalid
+        (** The repo and relative path were recovered but the address
+            constructor rejected the residue — a resolver invariant
+            break carried for diagnosis instead of collapsed. *)
 
   val reason_to_string : reason -> string
 end

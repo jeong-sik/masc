@@ -37,15 +37,27 @@ let install_fresh_ide_sink () =
   Ide_bridge.install_agent_observation_sinks ()
 ;;
 
+(* RFC-0378 A2: test-side attribution builders ([file_attribution] for
+   region/annotation facts; wrap in [File] for tool facts). *)
+let unattributed_file attempted_path =
+  Agent_observation.Unaddressed
+    { reason = Agent_observation.Unattributed.Unregistered_path; attempted_path }
+;;
+
+let addressed_file ~codebase ~path =
+  match Agent_observation.Code_address.v ~codebase ~path with
+  | Ok address -> Agent_observation.Addressed { address; checkout = None }
+  | Error e -> failwith (Agent_observation.Code_address.invalid_to_string e)
+;;
+
 let test_tool_observation_reaches_ide_storage_and_cursor () =
   with_temp_dir (fun base_dir ->
     install_fresh_ide_sink ();
     Agent_observation.emit_tool_event
       { base_path = base_dir
-      ; partition = Agent_observation.Legacy_default
-        (* The producer resolves this alongside the partition; the raw
-           [input] below still carries the argument the keeper typed. *)
-      ; file_path = Some "lib/test.ml"
+      ; attribution = Agent_observation.File (unattributed_file "lib/test.ml")
+        (* The producer mints this from the resolver; the raw [input]
+           below still carries the argument the keeper typed. *)
       ; tool_name = "keeper_ide_annotate"
       ; keeper_id = "keeper-alpha"
       ; turn_id = "turn-9"
@@ -77,7 +89,6 @@ let test_turn_observation_reaches_ide_storage () =
     install_fresh_ide_sink ();
     Agent_observation.emit_turn_event
       { base_path = base_dir
-      ; partition = Agent_observation.Legacy_default
       ; turn_id = "turn-10"
       ; keeper_id = "keeper-beta"
       ; phase = "completed"
@@ -97,11 +108,13 @@ let test_turn_observation_reaches_ide_storage () =
 let test_write_region_observation_reaches_ide_storage () =
   with_temp_dir (fun base_dir ->
     install_fresh_ide_sink ();
-    let partition = Agent_observation.By_url "github.com_owner_repo" in
+    let attribution =
+      addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/region.ml"
+    in
     (match
        Agent_observation.emit_write_region_event
          { base_path = base_dir
-         ; partition
+         ; attribution
          ; keeper_id = "keeper-delta"
          ; turn = 12
          ; tool_call_json =
@@ -145,7 +158,7 @@ let test_write_region_no_sink_returns_error () =
     let result =
       Agent_observation.emit_write_region_event
         { base_path = base_dir
-        ; partition = Agent_observation.Legacy_default
+        ; attribution = unattributed_file "lib/region.ml"
         ; keeper_id = "keeper-delta"
         ; turn = 12
         ; tool_call_json =
@@ -174,9 +187,8 @@ let test_annotation_request_reaches_ide_storage () =
     let result =
       Agent_observation.emit_annotation_request
         { base_path = base_dir
-        ; partition = Agent_observation.Legacy_default
+        ; attribution = unattributed_file "lib/annotated.ml"
         ; keeper_id = "keeper-epsilon"
-        ; file_path = "lib/annotated.ml"
         ; line_start = 7
         ; line_end = 9
         ; kind = Agent_observation.Decision
@@ -255,8 +267,7 @@ let test_snapshot_reset_clears_accumulated_observations () =
   Agent_observation.reset_for_testing ();
   Agent_observation.emit_tool_event
     { base_path = "/tmp/masc"
-    ; partition = Agent_observation.Legacy_default
-    ; file_path = None
+    ; attribution = Agent_observation.Pathless
     ; tool_name = "execute"
     ; keeper_id = "keeper-snapshot"
     ; turn_id = "turn-1"
@@ -282,7 +293,7 @@ let test_write_region_snapshot_uses_tool_call_payload () =
   let result =
     Agent_observation.emit_write_region_event
       { base_path = "/tmp/masc"
-      ; partition = Agent_observation.By_url "github.com_owner_repo"
+      ; attribution = addressed_file ~codebase:"github.com_owner_repo" ~path:"lib/region.ml"
       ; keeper_id = "keeper-region"
       ; turn = 7
       ; tool_call_json =

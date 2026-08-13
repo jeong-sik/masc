@@ -6,7 +6,7 @@ module Region = Ide_region_tracker
 module Lsp = Lsp_overlay_provider
 
 (* The overlay reader has to name the store it addresses. These cases write
-   through [Store.create]'s default partition, so they read that same one;
+   through the partition [Store.create] names explicitly, so they read that same one;
    the by-URL producer/reader join is covered in
    [test_ide_lsp_join_key.ml]. *)
 let legacy_partition = Some Ide_paths.Legacy_default
@@ -130,6 +130,7 @@ let test_create_lists_route_context () =
     match
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"sangsu"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
@@ -166,6 +167,7 @@ let test_lsp_overlay_exposes_route_context () =
     match
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"sangsu"
         ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
         ~line_start:12
@@ -348,6 +350,7 @@ let test_legacy_default_is_unchanged () =
     let _ =
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"sangsu"
         ~file_path:"lib/foo.ml"
         ~line_start:1
@@ -523,6 +526,7 @@ let test_definition_links_at_line () =
     match
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"k1"
         ~file_path:"lib/test.ml"
         ~line_start:10
@@ -556,6 +560,7 @@ let test_reference_locations_related () =
     match
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"k1"
         ~file_path:"lib/a.ml"
         ~line_start:5
@@ -570,6 +575,7 @@ let test_reference_locations_related () =
       (match
          Store.create
            ~base_dir
+           ~partition:Ide_paths.Legacy_default
            ~keeper_id:"k1"
            ~file_path:"lib/a.ml"
            ~line_start:20
@@ -616,6 +622,7 @@ let test_document_symbols_lists () =
     match
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"k1"
         ~file_path:"lib/test.ml"
         ~line_start:1
@@ -642,6 +649,7 @@ let test_folding_ranges_groups () =
     match
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"k1"
         ~file_path:"lib/test.ml"
         ~line_start:1
@@ -655,6 +663,7 @@ let test_folding_ranges_groups () =
       (match
          Store.create
            ~base_dir
+           ~partition:Ide_paths.Legacy_default
            ~keeper_id:"k1"
            ~file_path:"lib/test.ml"
            ~line_start:3
@@ -677,6 +686,7 @@ let test_document_highlights_related () =
     match
       Store.create
         ~base_dir
+        ~partition:Ide_paths.Legacy_default
         ~keeper_id:"k1"
         ~file_path:"lib/test.ml"
         ~line_start:5
@@ -691,6 +701,7 @@ let test_document_highlights_related () =
       (match
          Store.create
            ~base_dir
+           ~partition:Ide_paths.Legacy_default
            ~keeper_id:"k1"
            ~file_path:"lib/test.ml"
            ~line_start:15
@@ -717,6 +728,7 @@ let test_compact_preserves_annotations () =
       match
         Store.create
           ~base_dir
+          ~partition:Ide_paths.Legacy_default
           ~keeper_id:"sangsu"
           ~file_path:"lib/x.ml"
           ~line_start:1
@@ -762,6 +774,7 @@ let make_alice_annotation base_dir =
   Result.get_ok
     (Store.create
        ~base_dir
+       ~partition:Ide_paths.Legacy_default
        ~keeper_id:"alice"
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -807,6 +820,7 @@ let create_note ~base_dir ~keeper_id ~content () =
   Result.get_ok
     (Store.create
        ~base_dir
+       ~partition:Ide_paths.Legacy_default
        ~keeper_id
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -908,6 +922,7 @@ let make_cas_annotation base_dir =
   Result.get_ok
     (Store.create
        ~base_dir
+       ~partition:Ide_paths.Legacy_default
        ~keeper_id:"alice"
        ~file_path:"lib/a.ml"
        ~line_start:1
@@ -933,6 +948,7 @@ let test_concurrent_create_compact_no_loss () =
             match
               Store.create
                 ~base_dir
+                ~partition:Ide_paths.Legacy_default
                 ~keeper_id:"alice"
                 ~file_path:"lib/a.ml"
                 ~line_start:1

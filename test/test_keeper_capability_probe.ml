@@ -208,6 +208,288 @@ let write_file path contents =
   close_out oc
 ;;
 
+let completion_result_or_fail = function
+  | Ok result -> result
+  | Error detail -> failf "completion result fixture rejected: %s" detail
+;;
+
+let test_completion_requires_observed_evidence () =
+  (match
+     Probe.Probe_result.completed
+       ~response_bytes:0
+       ~tool_invocations:0
+       ~elapsed_s:0.1
+   with
+   | Ok _ -> fail "registration-only input became Completed"
+   | Error detail ->
+     check bool "rejection names missing evidence" true
+       (String_util.contains_substring detail "registration is not evidence"));
+  List.iter
+    (fun status ->
+       match
+         Probe.Probe_result.of_yojson
+           (`Assoc [ "status", `String status ])
+       with
+       | Ok _ -> failf "legacy %s status was admitted" status
+       | Error detail ->
+         check bool ("unknown status rejects " ^ status) true
+           (String_util.contains_substring detail "unknown completion probe status"))
+    [ "passed"; "skipped" ]
+;;
+
+let test_existing_lane_evidence_adapts_without_failure_string_matching () =
+  List.iter
+    (fun invocation ->
+       match Probe.Probe_result.completed_of_invocation invocation with
+       | Ok (Probe.Probe_result.Completed _) -> ()
+       | Ok _ -> fail "positive invocation became a non-completed result"
+       | Error detail -> failf "positive invocation was rejected: %s" detail)
+    [ Probe.Tool_invoked { tool = "masc_board_list"; elapsed_s = 0.2 }
+    ; Probe.Other_tool_invoked
+        { requested = "masc_board_list"
+        ; invoked = [ "keeper_tasks_list" ]
+        ; elapsed_s = 0.3
+        }
+    ; Probe.Replied_no_tool { reply_bytes = 12; elapsed_s = 0.4 }
+    ];
+  match
+    Probe.Probe_result.completed_of_invocation
+      (Probe.Provider_rejected { detail = "401 or connection reset" })
+  with
+  | Ok _ -> fail "flattened provider rejection was misclassified as completion"
+  | Error detail ->
+    check bool "legacy failure requires typed producer" true
+      (String_util.contains_substring detail "preserve the typed failure")
+;;
+
+let test_completion_result_codec_round_trips_closed_outcomes () =
+  let results =
+    [ completion_result_or_fail
+        (Probe.Probe_result.completed
+           ~response_bytes:12
+           ~tool_invocations:0
+           ~elapsed_s:0.25)
+    ; completion_result_or_fail
+        (Probe.Probe_result.auth_failed ~detail:"credential rejected")
+    ; completion_result_or_fail
+        (Probe.Probe_result.transport_failed ~detail:"connection refused")
+    ; completion_result_or_fail
+        (Probe.Probe_result.unsupported_lane
+           ~lane:Probe.Antigravity
+           ~detail:"completion adapter is not wired")
+    ; Probe.Probe_result.not_run
+        ~reason:Probe.Probe_result.Registered_only
+        ~detail:"catalog row only"
+        ()
+    ]
+  in
+  List.iter
+    (fun result ->
+       let encoded = Probe.Probe_result.to_yojson result in
+       match Probe.Probe_result.of_yojson encoded with
+       | Error detail -> failf "probe-result round trip failed: %s" detail
+       | Ok decoded ->
+         check bool "closed probe result round-trips" true (decoded = result))
+    results
+;;
+
+let completion_fleet_runtime_toml =
+  "[providers.glm]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:1/v1\"\n\
+   \n\
+   [providers.kimi]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:2/v1\"\n\
+   \n\
+   [providers.ollama_cloud]\n\
+   protocol = \"openai-compatible-http\"\n\
+   endpoint = \"http://127.0.0.1:3/v1\"\n\
+   \n\
+   [providers.ollama]\n\
+   protocol = \"ollama-http\"\n\
+   endpoint = \"http://127.0.0.1:11434\"\n\
+   \n\
+   [providers.codex]\n\
+   protocol = \"codex-app-server\"\n\
+   command = \"/usr/bin/true\"\n\
+   is-non-interactive = true\n\
+   \n\
+   [providers.claude]\n\
+   protocol = \"claude-code\"\n\
+   command = \"/usr/bin/true\"\n\
+   is-non-interactive = true\n\
+   \n\
+   [providers.antigravity]\n\
+   protocol = \"antigravity-cli\"\n\
+   command = \"/usr/bin/true\"\n\
+   is-non-interactive = true\n\
+   timeout-s = 30.0\n\
+   \n\
+   [providers.antigravity.credentials]\n\
+   type = \"file\"\n\
+   path = \"/tmp/masc-completion-probe-oauth-fixture\"\n\
+   \n\
+   [models.glm-5]\n\
+   api-name = \"glm-5\"\n\
+   max-context = 200000\n\
+   [models.kimi-k2-7]\n\
+   api-name = \"kimi-k2.7\"\n\
+   max-context = 262144\n\
+   [models.deepseek-v4-flash]\n\
+   api-name = \"deepseek-v4-flash\"\n\
+   max-context = 1048576\n\
+   [models.agentworld-35b-a3b]\n\
+   api-name = \"agentworld-35b-a3b\"\n\
+   max-context = 32768\n\
+   [models.codex]\n\
+   api-name = \"gpt-5.6\"\n\
+   max-context = 400000\n\
+   [models.claude]\n\
+   api-name = \"claude-sonnet-4-6\"\n\
+   max-context = 200000\n\
+   [models.gemini]\n\
+   api-name = \"gemini-3.1-pro\"\n\
+   max-context = 1000000\n\
+   \n\
+   [glm.glm-5]\n\
+   [kimi.kimi-k2-7]\n\
+   [ollama_cloud.deepseek-v4-flash]\n\
+   [ollama.agentworld-35b-a3b]\n\
+   [codex.codex]\n\
+   [claude.claude]\n\
+   [antigravity.gemini]\n\
+   \n\
+   [runtime]\n\
+   default = \"glm.glm-5\"\n\
+   \n\
+   [runtime.role_policies]\n\
+   \"ollama.agentworld-35b-a3b\" = \"librarian-only\"\n"
+;;
+
+let with_completion_fleet f =
+  let path = Filename.temp_file "completion-probe-fleet" ".toml" in
+  write_file path completion_fleet_runtime_toml;
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+       let config =
+         match Runtime_toml.parse_file path with
+         | Ok config -> config
+         | Error errors ->
+           failf
+             "completion fleet parse failed: %s"
+             (String.concat
+                "; "
+                (List.map Runtime_toml.show_parse_error errors))
+       in
+       (match Runtime.init_default ~config_path:path with
+        | Ok () -> ()
+        | Error detail -> failf "completion fleet materialization failed: %s" detail);
+       f config)
+;;
+
+let completion_fleet_runtime_ids =
+  [ "glm.glm-5", "agent_core"
+  ; "kimi.kimi-k2-7", "agent_core"
+  ; "ollama_cloud.deepseek-v4-flash", "agent_core"
+  ; "ollama.agentworld-35b-a3b", "agent_core"
+  ; "codex.codex", "official_client"
+  ; "claude.claude", "official_client"
+  ; "antigravity.gemini", "antigravity"
+  ]
+;;
+
+let runtime_or_fail runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some runtime -> runtime
+  | None -> failf "completion fleet runtime %s did not materialize" runtime_id
+;;
+
+let test_completion_probe_targets_preserve_attribution_and_lane_dispatch () =
+  with_completion_fleet (fun config ->
+    List.iter
+      (fun (runtime_id, expected_dispatch) ->
+         let runtime = runtime_or_fail runtime_id in
+         let target = Probe.probe_target_of_runtime runtime in
+         check string "runtime attribution" runtime_id target.runtime_id;
+         check string "provider attribution" runtime.provider.id target.provider_id;
+         check string "binding model attribution" runtime.binding.model_id
+           target.binding_model_id;
+         let dispatched =
+           Probe.dispatch_probe_target
+             ~agent_core:(fun _ -> "agent_core")
+             ~official_client:(fun _ -> "official_client")
+             ~antigravity:(fun _ -> "antigravity")
+             target
+         in
+         check string (runtime_id ^ " dispatch") expected_dispatch dispatched;
+         let registered_only =
+           Probe.Probe_result.not_run
+             ~reason:Probe.Probe_result.Registered_only
+             ()
+         in
+         let observation =
+           Probe.completion_probe_observation
+             ~config
+             ~runtime
+             ~requested_role:Runtime.Librarian
+             ~result:registered_only
+         in
+         (match observation.result with
+          | Probe.Probe_result.Not_run
+              { reason = Probe.Probe_result.Registered_only; _ } -> ()
+          | _ -> failf "%s registration became positive evidence" runtime_id))
+      completion_fleet_runtime_ids)
+;;
+
+let test_policy_eligibility_and_completion_evidence_remain_independent () =
+  with_completion_fleet (fun config ->
+    let runtime = runtime_or_fail "ollama.agentworld-35b-a3b" in
+    let completed =
+      completion_result_or_fail
+        (Probe.Probe_result.completed
+           ~response_bytes:24
+           ~tool_invocations:0
+           ~elapsed_s:0.5)
+    in
+    let unsupported_but_completed =
+      Probe.completion_probe_observation
+        ~config
+        ~runtime
+        ~requested_role:Runtime.Keeper_turn
+        ~result:completed
+    in
+    (match unsupported_but_completed.policy_eligibility, unsupported_but_completed.result with
+     | Runtime.Unsupported _, Probe.Probe_result.Completed _ -> ()
+     | _ -> fail "availability evidence overwrote AgentWorld role policy");
+    let eligible_but_not_run =
+      Probe.completion_probe_observation
+        ~config
+        ~runtime
+        ~requested_role:Runtime.Librarian
+        ~result:
+          (Probe.Probe_result.not_run
+             ~reason:Probe.Probe_result.Live_probe_deferred
+             ())
+    in
+    (match eligible_but_not_run.policy_eligibility, eligible_but_not_run.result with
+     | Runtime.Eligible, Probe.Probe_result.Not_run _ -> ()
+     | _ -> fail "policy eligibility fabricated completion availability");
+    List.iter
+      (fun observation ->
+         let json = Probe.completion_probe_observation_to_yojson observation in
+         match Probe.completion_probe_observation_of_yojson json with
+         | Error detail -> failf "observation codec rejected its output: %s" detail
+         | Ok decoded ->
+           check bool "completion observation round-trips" true
+             (decoded = observation))
+      [ unsupported_but_completed; eligible_but_not_run ])
+;;
+
 let probe_antigravity_offline ~runtime_id ~tool =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -562,6 +844,18 @@ let () =
     ; ( "agreement with the surface"
       , [ test_case "round-trips every published name" `Quick test_agrees_with_the_surface_it_reports_on
         ; test_case "no schema-withheld descriptor" `Quick test_no_descriptor_is_withheld_by_a_schema_error
+        ] )
+    ; ( "completion availability contract"
+      , [ test_case "Completed requires observed evidence" `Quick
+            test_completion_requires_observed_evidence
+        ; test_case "existing lanes adapt only positive evidence" `Quick
+            test_existing_lane_evidence_adapts_without_failure_string_matching
+        ; test_case "closed Probe_result codec round-trips" `Quick
+            test_completion_result_codec_round_trips_closed_outcomes
+        ; test_case "fleet attribution and lane dispatch stay typed" `Quick
+            test_completion_probe_targets_preserve_attribution_and_lane_dispatch
+        ; test_case "policy and availability remain independent" `Quick
+            test_policy_eligibility_and_completion_evidence_remain_independent
         ] )
     ; ( "probe_invocation (offline)"
       , [ test_case "operator-only costs no turn" `Quick test_operator_only_costs_no_turn

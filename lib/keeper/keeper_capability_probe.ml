@@ -112,6 +112,496 @@ let invocation_to_string = function
   | Provider_rejected { detail } -> Printf.sprintf "provider rejected: %s" detail
 ;;
 
+(* ------------------------------------------------------------------ *)
+(* Completion availability contract                                   *)
+(* ------------------------------------------------------------------ *)
+
+type official_client_lane =
+  | Codex_app_server
+  | Claude_code
+[@@deriving show, eq]
+
+type probe_lane =
+  | Agent_core
+  | Official_client of official_client_lane
+  | Antigravity
+[@@deriving show, eq]
+
+type probe_target =
+  { runtime_id : string
+  ; provider_id : string
+  ; binding_model_id : string
+  ; configured_model_id : string option
+  ; lane : probe_lane
+  }
+[@@deriving show, eq]
+
+let probe_lane_of_execution = function
+  | Runtime_execution.Agent_core _ -> Agent_core
+  | Runtime_execution.Codex_app_server _ -> Official_client Codex_app_server
+  | Runtime_execution.Claude_code _ -> Official_client Claude_code
+  | Runtime_execution.Antigravity_cli _ -> Antigravity
+;;
+
+let probe_target_of_runtime (runtime : Runtime.t) =
+  { runtime_id = runtime.id
+  ; provider_id = runtime.provider.id
+  ; binding_model_id = runtime.binding.model_id
+  ; configured_model_id = Runtime_execution.model_id runtime.execution
+  ; lane = probe_lane_of_execution runtime.execution
+  }
+;;
+
+let dispatch_probe_target ~agent_core ~official_client ~antigravity target =
+  match target.lane with
+  | Agent_core -> agent_core target
+  | Official_client _ -> official_client target
+  | Antigravity -> antigravity target
+;;
+
+let probe_lane_to_string = function
+  | Agent_core -> "agent_core"
+  | Official_client Codex_app_server -> "codex_app_server"
+  | Official_client Claude_code -> "claude_code"
+  | Antigravity -> "antigravity"
+;;
+
+let probe_lane_of_string = function
+  | "agent_core" -> Ok Agent_core
+  | "codex_app_server" -> Ok (Official_client Codex_app_server)
+  | "claude_code" -> Ok (Official_client Claude_code)
+  | "antigravity" -> Ok Antigravity
+  | value -> Error (Printf.sprintf "unknown completion probe lane %S" value)
+;;
+
+let non_blank ~field value =
+  if String.equal (String.trim value) ""
+  then Error (field ^ " must not be blank")
+  else Ok value
+;;
+
+let ( >>= ) = Result.bind
+
+let sorted_strings = List.sort String.compare
+
+let exact_object ~context ~fields = function
+  | `Assoc entries ->
+    let actual = entries |> List.map fst |> sorted_strings in
+    let expected = sorted_strings fields in
+    if actual = expected
+    then Ok entries
+    else
+      Error
+        (Printf.sprintf
+           "%s fields must be exactly [%s]; got [%s]"
+           context
+           (String.concat ", " expected)
+           (String.concat ", " actual))
+  | _ -> Error (context ^ " must be a JSON object")
+;;
+
+let required_field ~context name fields =
+  match List.assoc_opt name fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "%s.%s is required" context name)
+;;
+
+let json_string ~context name fields =
+  let ( let* ) = Result.bind in
+  let* value = required_field ~context name fields in
+  match value with
+  | `String value -> Ok value
+  | _ -> Error (Printf.sprintf "%s.%s must be a string" context name)
+;;
+
+let json_int ~context name fields =
+  let ( let* ) = Result.bind in
+  let* value = required_field ~context name fields in
+  match value with
+  | `Int value -> Ok value
+  | _ -> Error (Printf.sprintf "%s.%s must be an integer" context name)
+;;
+
+let json_float ~context name fields =
+  let ( let* ) = Result.bind in
+  let* value = required_field ~context name fields in
+  match value with
+  | `Float value -> Ok value
+  | `Int value -> Ok (Float.of_int value)
+  | _ -> Error (Printf.sprintf "%s.%s must be a number" context name)
+;;
+
+let json_string_option ~context name fields =
+  let ( let* ) = Result.bind in
+  let* value = required_field ~context name fields in
+  match value with
+  | `Null -> Ok None
+  | `String value -> Ok (Some value)
+  | _ -> Error (Printf.sprintf "%s.%s must be a string or null" context name)
+;;
+
+module Probe_result = struct
+  type completed_evidence =
+    { response_bytes : int
+    ; tool_invocations : int
+    ; elapsed_s : float
+    }
+  [@@deriving show, eq]
+
+  type not_run_reason =
+    | Registered_only
+    | Skipped_by_request
+    | Live_probe_deferred
+    | Runtime_not_registered
+  [@@deriving show, eq]
+
+  type t =
+    | Completed of completed_evidence
+    | Auth_failed of { detail : string }
+    | Transport_failed of { detail : string }
+    | Unsupported_lane of
+        { lane : probe_lane
+        ; detail : string
+        }
+    | Not_run of
+        { reason : not_run_reason
+        ; detail : string option
+        }
+  [@@deriving show, eq]
+
+  let completed ~response_bytes ~tool_invocations ~elapsed_s =
+    if response_bytes < 0
+    then Error "completed.response_bytes must be non-negative"
+    else if tool_invocations < 0
+    then Error "completed.tool_invocations must be non-negative"
+    else if (not (Float.is_finite elapsed_s)) || elapsed_s < 0.0
+    then Error "completed.elapsed_s must be finite and non-negative"
+    else if response_bytes = 0 && tool_invocations = 0
+    then
+      Error
+        "completed requires observed response bytes or a tool invocation; registration is not evidence"
+    else Ok (Completed { response_bytes; tool_invocations; elapsed_s })
+  ;;
+
+  let completed_of_invocation = function
+    | Tool_invoked { elapsed_s; _ } ->
+      completed ~response_bytes:0 ~tool_invocations:1 ~elapsed_s
+    | Other_tool_invoked { invoked; elapsed_s; _ } ->
+      completed
+        ~response_bytes:0
+        ~tool_invocations:(List.length invoked)
+        ~elapsed_s
+    | Replied_no_tool { reply_bytes; elapsed_s } ->
+      completed ~response_bytes:reply_bytes ~tool_invocations:0 ~elapsed_s
+    | Provider_rejected _ ->
+      Error
+        "Provider_rejected flattened auth and transport; preserve the typed failure before constructing Probe_result"
+  ;;
+
+  let failure constructor ~field ~detail =
+    Result.map constructor (non_blank ~field detail)
+  ;;
+
+  let auth_failed ~detail =
+    failure (fun detail -> Auth_failed { detail }) ~field:"auth_failed.detail" ~detail
+  ;;
+
+  let transport_failed ~detail =
+    failure
+      (fun detail -> Transport_failed { detail })
+      ~field:"transport_failed.detail"
+      ~detail
+  ;;
+
+  let unsupported_lane ~lane ~detail =
+    failure
+      (fun detail -> Unsupported_lane { lane; detail })
+      ~field:"unsupported_lane.detail"
+      ~detail
+  ;;
+
+  let not_run ~reason ?detail () = Not_run { reason; detail }
+
+  let not_run_reason_to_string = function
+    | Registered_only -> "registered_only"
+    | Skipped_by_request -> "skipped_by_request"
+    | Live_probe_deferred -> "live_probe_deferred"
+    | Runtime_not_registered -> "runtime_not_registered"
+  ;;
+
+  let not_run_reason_of_string = function
+    | "registered_only" -> Ok Registered_only
+    | "skipped_by_request" -> Ok Skipped_by_request
+    | "live_probe_deferred" -> Ok Live_probe_deferred
+    | "runtime_not_registered" -> Ok Runtime_not_registered
+    | value -> Error (Printf.sprintf "unknown not-run reason %S" value)
+  ;;
+
+  let to_yojson = function
+    | Completed { response_bytes; tool_invocations; elapsed_s } ->
+      `Assoc
+        [ "status", `String "completed"
+        ; "response_bytes", `Int response_bytes
+        ; "tool_invocations", `Int tool_invocations
+        ; "elapsed_s", `Float elapsed_s
+        ]
+    | Auth_failed { detail } ->
+      `Assoc [ "status", `String "auth_failed"; "detail", `String detail ]
+    | Transport_failed { detail } ->
+      `Assoc [ "status", `String "transport_failed"; "detail", `String detail ]
+    | Unsupported_lane { lane; detail } ->
+      `Assoc
+        [ "status", `String "unsupported_lane"
+        ; "lane", `String (probe_lane_to_string lane)
+        ; "detail", `String detail
+        ]
+    | Not_run { reason; detail } ->
+      `Assoc
+        [ "status", `String "not_run"
+        ; "reason", `String (not_run_reason_to_string reason)
+        ; ( "detail"
+          , match detail with
+            | None -> `Null
+            | Some value -> `String value )
+        ]
+  ;;
+
+  let of_yojson json =
+    let ( let* ) = Result.bind in
+    let* initial =
+      match json with
+      | `Assoc fields -> Ok fields
+      | _ -> Error "probe result must be a JSON object"
+    in
+    let* status = json_string ~context:"probe_result" "status" initial in
+    match status with
+    | "completed" ->
+      let* fields =
+        exact_object
+          ~context:"probe_result.completed"
+          ~fields:[ "status"; "response_bytes"; "tool_invocations"; "elapsed_s" ]
+          json
+      in
+      let* response_bytes =
+        json_int ~context:"probe_result.completed" "response_bytes" fields
+      in
+      let* tool_invocations =
+        json_int ~context:"probe_result.completed" "tool_invocations" fields
+      in
+      let* elapsed_s = json_float ~context:"probe_result.completed" "elapsed_s" fields in
+      completed ~response_bytes ~tool_invocations ~elapsed_s
+    | "auth_failed" | "transport_failed" ->
+      let context = "probe_result." ^ status in
+      let* fields =
+        exact_object ~context ~fields:[ "status"; "detail" ] json
+      in
+      let* detail = json_string ~context "detail" fields in
+      if String.equal status "auth_failed"
+      then auth_failed ~detail
+      else transport_failed ~detail
+    | "unsupported_lane" ->
+      let context = "probe_result.unsupported_lane" in
+      let* fields =
+        exact_object ~context ~fields:[ "status"; "lane"; "detail" ] json
+      in
+      let* lane = json_string ~context "lane" fields >>= probe_lane_of_string in
+      let* detail = json_string ~context "detail" fields in
+      unsupported_lane ~lane ~detail
+    | "not_run" ->
+      let context = "probe_result.not_run" in
+      let* fields =
+        exact_object ~context ~fields:[ "status"; "reason"; "detail" ] json
+      in
+      let* reason =
+        json_string ~context "reason" fields >>= not_run_reason_of_string
+      in
+      let* detail = json_string_option ~context "detail" fields in
+      Ok (not_run ~reason ?detail ())
+    | value ->
+      Error
+        (Printf.sprintf
+           "unknown completion probe status %S; expected completed, auth_failed, transport_failed, unsupported_lane, or not_run"
+           value)
+end
+
+type completion_probe_observation =
+  { target : probe_target
+  ; requested_role : Runtime.runtime_role
+  ; policy_eligibility : Runtime.runtime_role_eligibility
+  ; result : Probe_result.t
+  }
+[@@deriving show, eq]
+
+let completion_probe_observation ~config ~runtime ~requested_role ~result =
+  let target = probe_target_of_runtime runtime in
+  let policy_eligibility =
+    Runtime.runtime_role_eligibility
+      config
+      ~target_ref:target.runtime_id
+      ~role:requested_role
+  in
+  { target; requested_role; policy_eligibility; result }
+;;
+
+let runtime_role_of_string = function
+  | "keeper-turn" -> Ok Runtime.Keeper_turn
+  | "cross-verification" -> Ok Runtime.Cross_verification
+  | "media-failover" -> Ok Runtime.Media_failover
+  | "librarian" -> Ok Runtime.Librarian
+  | "compaction" -> Ok Runtime.Compaction
+  | "hitl-auto-judge" -> Ok Runtime.Hitl_auto_judge
+  | "board-attention" -> Ok Runtime.Board_attention
+  | value when String.starts_with ~prefix:"exact-output:" value ->
+    let prefix_length = String.length "exact-output:" in
+    let lane_id = String.sub value prefix_length (String.length value - prefix_length) in
+    Result.map
+      (fun lane_id -> Runtime.Other_exact_output_lane lane_id)
+      (non_blank ~field:"requested_role exact-output lane" lane_id)
+  | value -> Error (Printf.sprintf "unknown runtime role %S" value)
+;;
+
+let runtime_policy_to_string = function
+  | Runtime_schema.Unrestricted -> "unrestricted"
+  | Runtime_schema.Librarian_only -> "librarian-only"
+;;
+
+let runtime_policy_of_string = function
+  | "unrestricted" -> Ok Runtime_schema.Unrestricted
+  | "librarian-only" -> Ok Runtime_schema.Librarian_only
+  | value -> Error (Printf.sprintf "unknown runtime role policy %S" value)
+;;
+
+let probe_target_to_yojson target =
+  `Assoc
+    [ "runtime_id", `String target.runtime_id
+    ; "provider_id", `String target.provider_id
+    ; "binding_model_id", `String target.binding_model_id
+    ; ( "configured_model_id"
+      , match target.configured_model_id with
+        | None -> `Null
+        | Some value -> `String value )
+    ; "lane", `String (probe_lane_to_string target.lane)
+    ]
+;;
+
+let probe_target_of_yojson json =
+  let ( let* ) = Result.bind in
+  let context = "completion_probe.target" in
+  let* fields =
+    exact_object
+      ~context
+      ~fields:
+        [ "runtime_id"; "provider_id"; "binding_model_id"; "configured_model_id"; "lane" ]
+      json
+  in
+  let* runtime_id = json_string ~context "runtime_id" fields >>= non_blank ~field:"runtime_id" in
+  let* provider_id =
+    json_string ~context "provider_id" fields >>= non_blank ~field:"provider_id"
+  in
+  let* binding_model_id =
+    json_string ~context "binding_model_id" fields
+    >>= non_blank ~field:"binding_model_id"
+  in
+  let* configured_model_id = json_string_option ~context "configured_model_id" fields in
+  let* lane = json_string ~context "lane" fields >>= probe_lane_of_string in
+  Ok { runtime_id; provider_id; binding_model_id; configured_model_id; lane }
+;;
+
+let eligibility_to_yojson = function
+  | Runtime.Eligible -> `Assoc [ "status", `String "eligible" ]
+  | Runtime.Unsupported { target_ref; policy; requested_role } ->
+    `Assoc
+      [ "status", `String "unsupported"
+      ; "target_ref", `String target_ref
+      ; "policy", `String (runtime_policy_to_string policy)
+      ; "requested_role", `String (Runtime.runtime_role_to_string requested_role)
+      ]
+;;
+
+let eligibility_of_yojson json =
+  let ( let* ) = Result.bind in
+  let* initial =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "completion_probe.policy_eligibility must be a JSON object"
+  in
+  let context = "completion_probe.policy_eligibility" in
+  let* status = json_string ~context "status" initial in
+  match status with
+  | "eligible" ->
+    let* _ = exact_object ~context ~fields:[ "status" ] json in
+    Ok Runtime.Eligible
+  | "unsupported" ->
+    let* fields =
+      exact_object
+        ~context
+        ~fields:[ "status"; "target_ref"; "policy"; "requested_role" ]
+        json
+    in
+    let* target_ref = json_string ~context "target_ref" fields in
+    let* policy = json_string ~context "policy" fields >>= runtime_policy_of_string in
+    let* requested_role =
+      json_string ~context "requested_role" fields >>= runtime_role_of_string
+    in
+    (match policy, requested_role with
+     | Runtime_schema.Unrestricted, _ ->
+       Error "unrestricted policy cannot produce unsupported eligibility"
+     | Runtime_schema.Librarian_only, Runtime.Librarian ->
+       Error "librarian-only policy cannot reject the librarian role"
+     | Runtime_schema.Librarian_only, _ ->
+       Ok (Runtime.Unsupported { target_ref; policy; requested_role }))
+  | value -> Error (Printf.sprintf "unknown policy eligibility status %S" value)
+;;
+
+let completion_probe_schema = "masc.keeper.completion-probe.v1"
+
+let completion_probe_observation_to_yojson observation =
+  `Assoc
+    [ "schema", `String completion_probe_schema
+    ; "target", probe_target_to_yojson observation.target
+    ; "requested_role", `String (Runtime.runtime_role_to_string observation.requested_role)
+    ; "policy_eligibility", eligibility_to_yojson observation.policy_eligibility
+    ; "result", Probe_result.to_yojson observation.result
+    ]
+;;
+
+let completion_probe_observation_of_yojson json =
+  let ( let* ) = Result.bind in
+  let context = "completion_probe" in
+  let* fields =
+    exact_object
+      ~context
+      ~fields:[ "schema"; "target"; "requested_role"; "policy_eligibility"; "result" ]
+      json
+  in
+  let* schema = json_string ~context "schema" fields in
+  let* () =
+    if String.equal schema completion_probe_schema
+    then Ok ()
+    else Error (Printf.sprintf "unsupported completion probe schema %S" schema)
+  in
+  let* target_json = required_field ~context "target" fields in
+  let* target = probe_target_of_yojson target_json in
+  let* requested_role =
+    json_string ~context "requested_role" fields >>= runtime_role_of_string
+  in
+  let* eligibility_json = required_field ~context "policy_eligibility" fields in
+  let* policy_eligibility = eligibility_of_yojson eligibility_json in
+  let* () =
+    match policy_eligibility with
+    | Runtime.Eligible -> Ok ()
+    | Runtime.Unsupported { target_ref; requested_role = policy_role; _ } ->
+      if not (String.equal target_ref target.runtime_id)
+      then Error "policy eligibility target_ref must equal target.runtime_id"
+      else if not (Runtime.equal_runtime_role policy_role requested_role)
+      then Error "policy eligibility requested_role must equal observation requested_role"
+      else Ok ()
+  in
+  let* result_json = required_field ~context "result" fields in
+  let* result = Probe_result.of_yojson result_json in
+  Ok { target; requested_role; policy_eligibility; result }
+;;
+
 type invocation_error =
   | Not_on_surface of verdict
   | Unresolvable_runtime of string

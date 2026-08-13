@@ -114,6 +114,129 @@ type invocation =
 
 val invocation_to_string : invocation -> string
 
+(** {1 Completion availability contract}
+
+    Registration, role-policy eligibility, and observed availability are three
+    independent axes. This contract deliberately has no [Passed] constructor:
+    only [Probe_result.Completed] carries positive availability evidence, and
+    it can be created only from a non-empty response/tool observation. *)
+
+type official_client_lane =
+  | Codex_app_server
+  | Claude_code
+[@@deriving show, eq]
+
+type probe_lane =
+  | Agent_core
+  | Official_client of official_client_lane
+  | Antigravity
+[@@deriving show, eq]
+
+type probe_target =
+  { runtime_id : string
+  ; provider_id : string
+  ; binding_model_id : string
+  ; configured_model_id : string option
+      (** The model selected by the materialized execution, if explicitly
+          configured. [None] remains [null]; the binding model is not copied in
+          as a fabricated effective selection. *)
+  ; lane : probe_lane
+  }
+[@@deriving show, eq]
+
+val probe_target_of_runtime : Runtime.t -> probe_target
+
+val dispatch_probe_target :
+  agent_core:(probe_target -> 'a) ->
+  official_client:(probe_target -> 'a) ->
+  antigravity:(probe_target -> 'a) ->
+  probe_target ->
+  'a
+(** Pure lane dispatch used by the future live completion runner. Agent Core
+    covers HTTP runtimes such as GLM, Kimi, Ollama Cloud, and local AgentWorld;
+    Codex/Claude share the official-client callback; Antigravity uses its MCP
+    bridge callback. No callback is invoked for another lane. *)
+
+module Probe_result : sig
+  type completed_evidence = private
+    { response_bytes : int
+    ; tool_invocations : int
+    ; elapsed_s : float
+    }
+
+  type not_run_reason =
+    | Registered_only
+    | Skipped_by_request
+    | Live_probe_deferred
+    | Runtime_not_registered
+  [@@deriving show, eq]
+
+  type t = private
+    | Completed of completed_evidence
+    | Auth_failed of { detail : string }
+    | Transport_failed of { detail : string }
+    | Unsupported_lane of
+        { lane : probe_lane
+        ; detail : string
+        }
+    | Not_run of
+        { reason : not_run_reason
+        ; detail : string option
+        }
+  [@@deriving show, eq]
+
+  val completed :
+    response_bytes:int ->
+    tool_invocations:int ->
+    elapsed_s:float ->
+    (t, string) result
+  (** [Completed] requires non-negative counts, finite non-negative elapsed
+      time, and at least one response byte or tool invocation. A registered or
+      skipped target therefore cannot be promoted to positive evidence. *)
+
+  val completed_of_invocation : invocation -> (t, string) result
+  (** Adapts positive evidence from the existing Agent Core, official-client,
+      and Antigravity invocation paths. [Provider_rejected] is refused because
+      that legacy constructor has already flattened auth and transport into a
+      string; the live adapter must preserve the typed failure before that
+      boundary instead of string-matching it back. *)
+
+  val auth_failed : detail:string -> (t, string) result
+  val transport_failed : detail:string -> (t, string) result
+  val unsupported_lane : lane:probe_lane -> detail:string -> (t, string) result
+
+  val not_run : reason:not_run_reason -> ?detail:string -> unit -> t
+
+  val to_yojson : t -> Yojson.Safe.t
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+  (** Strict tagged codec. Unknown statuses, including legacy [passed] or
+      [skipped], are rejected rather than canonicalized. *)
+end
+
+type completion_probe_observation =
+  { target : probe_target
+  ; requested_role : Runtime.runtime_role
+  ; policy_eligibility : Runtime.runtime_role_eligibility
+  ; result : Probe_result.t
+  }
+[@@deriving show, eq]
+
+val completion_probe_observation :
+  config:Runtime_schema.config ->
+  runtime:Runtime.t ->
+  requested_role:Runtime.runtime_role ->
+  result:Probe_result.t ->
+  completion_probe_observation
+(** Joins attribution with the two independent typed decisions. A runtime may
+    be [Completed] yet policy-[Unsupported] for the requested role, or policy
+    [Eligible] while [Not_run]; neither axis overwrites the other. *)
+
+val completion_probe_observation_to_yojson :
+  completion_probe_observation -> Yojson.Safe.t
+
+val completion_probe_observation_of_yojson :
+  Yojson.Safe.t -> (completion_probe_observation, string) result
+
 (** Why a probe could not be attempted at all. *)
 type invocation_error =
   | Not_on_surface of verdict

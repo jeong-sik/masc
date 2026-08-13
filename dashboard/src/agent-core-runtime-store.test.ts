@@ -516,6 +516,7 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
     expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(3)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(4)
   })
 
   it('keeps loading more from retiring hasMore before the window is exhausted', async () => {

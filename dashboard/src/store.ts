@@ -394,14 +394,19 @@ export function noteAgentCoreReplayWindow(input: {
   loadedEvents: number
   totalMatchingEvents: number
   truncated: boolean
+  observedTotalEvents?: number
 }): void {
   const loadedEvents = Math.max(0, Math.floor(input.loadedEvents))
   const totalMatchingEvents = Math.max(loadedEvents, Math.floor(input.totalMatchingEvents))
+  const observedTotalEvents = Math.max(
+    totalMatchingEvents,
+    Math.floor(input.observedTotalEvents ?? totalMatchingEvents),
+  )
   const truncated = input.truncated && totalMatchingEvents > loadedEvents
   agentCoreReplayLoadedEvents.value = loadedEvents
   agentCoreReplayTotalMatchingEvents.value = totalMatchingEvents
   agentCoreReplayTruncated.value = truncated
-  agentCoreTotalEvents.value = totalMatchingEvents
+  agentCoreTotalEvents.value = observedTotalEvents
 }
 
 function sameAgentCoreAgentEvent(left: AgentCoreAgentEvent, right: AgentCoreAgentEvent): boolean {

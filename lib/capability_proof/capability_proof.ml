@@ -800,3 +800,80 @@ let baseline_error_to_string = function
   | Duplicate_baseline_case case_id ->
     "duplicate_baseline_case:" ^ case_id_to_string case_id
 ;;
+
+type registered_runtime =
+  | Agent_core_runtime of
+      { runtime_id : string
+      ; model_id : string option
+      }
+  | Official_client_runtime of
+      { runtime_id : string
+      ; model_id : string option
+      }
+
+type inventory_error =
+  | Empty_runtime_inventory
+  | Invalid_runtime_registration of create_error
+  | Duplicate_runtime_registration of
+      { runtime_id : string
+      ; model_id : string option
+      }
+
+let registered_target = function
+  | Agent_core_runtime { runtime_id; model_id } ->
+    { runtime_id; model_id; inference_protocol = Agent_core_http }
+  | Official_client_runtime { runtime_id; model_id } ->
+    { runtime_id; model_id; inference_protocol = Official_client }
+;;
+
+let same_target left right =
+  String.equal left.runtime_id right.runtime_id
+  && Option.equal String.equal left.model_id right.model_id
+;;
+
+let validate_registered_target target =
+  match nonblank Runtime_id target.runtime_id with
+  | Error error -> Error (Invalid_runtime_registration error)
+  | Ok _ ->
+    (match optional_nonblank Model_id target.model_id with
+     | Error error -> Error (Invalid_runtime_registration error)
+     | Ok _ -> Ok target)
+;;
+
+let baseline_targets_of_inventory inventory =
+  let rec add targets = function
+    | [] -> Ok (List.rev targets)
+    | registration :: rest ->
+      let target = registered_target registration in
+      (match validate_registered_target target with
+       | Error _ as error -> error
+       | Ok target ->
+         (match List.find_opt (same_target target) targets with
+          | Some duplicate ->
+            Error
+              (Duplicate_runtime_registration
+                 { runtime_id = duplicate.runtime_id; model_id = duplicate.model_id })
+          | None -> add (target :: targets) rest))
+  in
+  match inventory with
+  | [] -> Error Empty_runtime_inventory
+  | registrations -> add [] registrations
+;;
+
+let baseline_of_inventory ~inventory ~build_commit ~config_revision =
+  match baseline_targets_of_inventory inventory with
+  | Error error -> Error (`Inventory error)
+  | Ok targets ->
+    (match baseline_expected ~targets ~build_commit ~config_revision with
+     | Error error -> Error (`Baseline error)
+     | Ok cases -> Ok cases)
+;;
+
+let inventory_error_to_string = function
+  | Empty_runtime_inventory -> "empty_runtime_inventory"
+  | Invalid_runtime_registration error ->
+    "invalid_runtime_registration:" ^ create_error_to_string error
+  | Duplicate_runtime_registration { runtime_id; model_id } ->
+    let model = Option.value ~default:"null" model_id in
+    "duplicate_runtime_registration:" ^ runtime_id ^ ":" ^ model
+;;

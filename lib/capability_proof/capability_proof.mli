@@ -256,3 +256,41 @@ val baseline_expected
     enforced by {!passed}. *)
 
 val baseline_error_to_string : baseline_error -> string
+
+type registered_runtime =
+  | Agent_core_runtime of
+      { runtime_id : string
+      ; model_id : string option
+      }
+  | Official_client_runtime of
+      { runtime_id : string
+      ; model_id : string option
+      }
+(** A runtime-config registration classified by its actual inference adapter.
+    Availability and successful execution are deliberately absent: neither is
+    implied by registration. *)
+
+type inventory_error =
+  | Empty_runtime_inventory
+  | Invalid_runtime_registration of create_error
+  | Duplicate_runtime_registration of
+      { runtime_id : string
+      ; model_id : string option
+      }
+
+val baseline_targets_of_inventory
+  :  registered_runtime list
+  -> (baseline_target list, inventory_error) result
+(** Convert the runtime-config inventory into proof targets without provider-name
+    inference. The closed constructor chooses one of the two in-scope inference
+    protocols, so caller strings cannot silently route an official client
+    through Agent Core or vice versa. Unsupported bridge lanes are not coerced
+    into this inventory. *)
+
+val baseline_of_inventory
+  :  inventory:registered_runtime list
+  -> build_commit:string option
+  -> config_revision:string option
+  -> (t list, [ `Inventory of inventory_error | `Baseline of baseline_error ]) result
+
+val inventory_error_to_string : inventory_error -> string

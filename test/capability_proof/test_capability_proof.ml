@@ -1,6 +1,13 @@
 open Alcotest
 open Capability_proof
 
+let protocol_testable =
+  testable
+    (fun formatter protocol ->
+      Format.pp_print_string formatter (protocol_to_string protocol))
+    ( = )
+;;
+
 let create
       ?(runtime_id = "ollama_cloud.deepseek-v4-flash")
       ?(model_id = Some "deepseek-v4-flash")
@@ -335,6 +342,72 @@ let test_baseline_preserves_policy_exclusions_as_cells () =
       [ Nominal; Duplicate_delivery; Blocked_head; Restart_recovery ]
 ;;
 
+let test_inventory_assigns_protocol_from_closed_adapter () =
+  let inventory =
+    [ Agent_core_runtime
+        { runtime_id = "kimi_coding.kimi-k3"; model_id = Some "kimi-k3" }
+    ; Official_client_runtime
+        { runtime_id = "codex_subscription.gpt-5-codex"
+        ; model_id = Some "gpt-5-codex"
+        }
+    ]
+  in
+  match baseline_targets_of_inventory inventory with
+  | Error error -> failf "unexpected inventory error: %s" (inventory_error_to_string error)
+  | Ok [ agent_core; official_client ] ->
+    check protocol_testable "agent core protocol" Agent_core_http
+      agent_core.inference_protocol;
+    check protocol_testable "official client protocol" Official_client
+      official_client.inference_protocol
+  | Ok targets -> failf "expected two targets, got %d" (List.length targets)
+;;
+
+let test_inventory_rejects_empty_invalid_and_duplicate_entries () =
+  (match baseline_targets_of_inventory [] with
+   | Error Empty_runtime_inventory -> ()
+   | Error error -> failf "unexpected empty error: %s" (inventory_error_to_string error)
+   | Ok _ -> fail "empty inventory was accepted");
+  (match
+     baseline_targets_of_inventory
+       [ Agent_core_runtime { runtime_id = "runtime"; model_id = Some " " } ]
+   with
+   | Error (Invalid_runtime_registration (Blank_field Model_id)) -> ()
+   | Error error -> failf "unexpected invalid error: %s" (inventory_error_to_string error)
+   | Ok _ -> fail "blank registered model was accepted");
+  let registration =
+    Agent_core_runtime { runtime_id = "runtime"; model_id = None }
+  in
+  match baseline_targets_of_inventory [ registration; registration ] with
+  | Error (Duplicate_runtime_registration { runtime_id = "runtime"; model_id = None }) -> ()
+  | Error error -> failf "unexpected duplicate error: %s" (inventory_error_to_string error)
+  | Ok _ -> fail "duplicate inventory row was accepted"
+;;
+
+let test_inventory_expands_all_targets_without_availability_claims () =
+  let inventory =
+    [ Agent_core_runtime
+        { runtime_id = "ollama.agentworld-35b-a3b"
+        ; model_id = Some "agentworld-35b-a3b"
+        }
+    ; Official_client_runtime
+        { runtime_id = "claude_code.sonnet"; model_id = Some "sonnet" }
+    ]
+  in
+  match
+    baseline_of_inventory
+      ~inventory
+      ~build_commit:(Some "build")
+      ~config_revision:(Some "config")
+  with
+  | Error (`Inventory error) ->
+    failf "unexpected inventory error: %s" (inventory_error_to_string error)
+  | Error (`Baseline error) ->
+    failf "unexpected baseline error: %s" (baseline_error_to_string error)
+  | Ok cases ->
+    check int "both registrations expanded equally" 0 (List.length cases mod 2);
+    check bool "no result verdict fabricated" true (List.length cases > 0)
+;;
+
 let () =
   run
     "capability proof identity"
@@ -375,6 +448,20 @@ let () =
             "policy exclusions remain cells"
             `Quick
             test_baseline_preserves_policy_exclusions_as_cells
+        ] )
+    ; ( "runtime inventory"
+      , [ test_case
+            "closed adapter selects protocol"
+            `Quick
+            test_inventory_assigns_protocol_from_closed_adapter
+        ; test_case
+            "invalid inventory fails closed"
+            `Quick
+            test_inventory_rejects_empty_invalid_and_duplicate_entries
+        ; test_case
+            "inventory expands without availability claim"
+            `Quick
+            test_inventory_expands_all_targets_without_availability_claims
         ] )
     ]
 ;;

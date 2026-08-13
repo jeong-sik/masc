@@ -105,10 +105,6 @@ val protocol : t -> protocol
 val build_commit : t -> string option
 val config_revision : t -> string option
 
-val exact_lane_to_string : exact_lane -> string
-val proof_role_to_string : proof_role -> string
-val capability_case_to_string : capability_case -> string
-val scenario_to_string : scenario -> string
 val protocol_to_string : protocol -> string
 val create_error_to_string : create_error -> string
 

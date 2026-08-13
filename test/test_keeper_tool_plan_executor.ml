@@ -170,6 +170,45 @@ let test_failed_sibling_stops_downstream_after_batch_settlement () =
        fail "tool failure became a plan error")
 ;;
 
+let test_deferred_cause_does_not_mask_unknown_sibling () =
+  Eio_main.run @@ fun _env ->
+  let plan = fixture () in
+  let dispatch ~node ~descriptor:_ ~schedule:_ ~input:_ =
+    match node_name node with
+    | "left" ->
+      Executor.dispatch_result
+        ~deferred_kind:Masc.Keeper_tool_execution.Generic_deferred
+        (Tool_result.make_deferred ~tool_name:"left" ~start_time:0.0 ())
+    | "right" ->
+      Executor.dispatch_result
+        ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+        (Tool_result.make_err
+           ~tool_name:"right"
+           ~class_:Tool_result.Runtime_failure
+           ~start_time:0.0
+           "right outcome unknown")
+    | _ ->
+      Executor.dispatch_result
+        (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
+  in
+  match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch () with
+  | Ok _ -> fail "deferred and failed siblings did not stop the plan"
+  | Error failure ->
+    (match failure.cause with
+     | Executor.Tool_did_not_complete result ->
+       check string "lowest planned cause" "left" (Plan.Node_id.to_string result.node_id);
+       (match result.result with
+        | Tool_result.Deferred _ -> ()
+        | Tool_result.Completed _ | Tool_result.Failed _ ->
+          fail "lower-index deferred cause changed")
+     | Executor.Plan_execution_failed _ | Executor.Outer_completion_mismatch _ ->
+       fail "deferred cause became a plan error");
+    check string
+      "unknown sibling dominates deferred cause"
+      "effect_outcome_unknown"
+      (Tool_result.failure_effect_disposition_to_string failure.effect_disposition)
+;;
+
 let test_malformed_declared_output_stops_before_consumer () =
   Eio_main.run @@ fun _env ->
   let plan = fixture () in
@@ -228,6 +267,10 @@ let () =
             "failed sibling stops downstream"
             `Quick
             test_failed_sibling_stops_downstream_after_batch_settlement
+        ; test_case
+            "deferred cause does not mask unknown sibling"
+            `Quick
+            test_deferred_cause_does_not_mask_unknown_sibling
         ; test_case
             "malformed producer stops consumers"
             `Quick

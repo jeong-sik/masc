@@ -4730,7 +4730,7 @@ value = { surface = "dashboard", content = "must not be reached" }
 |}
 ;;
 
-let write_then_unchanged_board_then_terminal_composition ~revision =
+let write_then_unchanged_board_composition ~revision =
   Printf.sprintf
     {|[[compositions]]
 name = "write-then-durable-wait"
@@ -4749,14 +4749,6 @@ after = ["write"]
 [compositions.nodes.input]
 kind = "literal"
 value = { if_revision = %S }
-
-[[compositions.nodes]]
-id = "post"
-tool = "keeper_surface_post"
-after = ["wait"]
-[compositions.nodes.input]
-kind = "literal"
-value = { surface = "dashboard", content = "must not be reached" }
 |}
     revision
 ;;
@@ -4987,6 +4979,15 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
                  (Tool_result.failure_effect_disposition_to_string
                     failure.effect_disposition)
              | _ -> fail "prior memory effect did not terminalize the bundle");
+            let failure_payload = parse_json result.content in
+            check string
+              "nested failed node retains producer-owned disposition"
+              "proven_pre_effect"
+              Yojson.Safe.Util.
+                (member "cause" failure_payload
+                 |> member "node"
+                 |> member "failure_effect_disposition"
+                 |> to_string);
             match result.abort_turn with
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary
@@ -5109,7 +5110,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
               fail "official-client provider loop remained open after unknown effect"))
 ;;
 
-let test_terminal_composition_generic_defer_yields_to_durable_stimulus () =
+let test_terminal_composition_post_effect_defer_closes_without_resume () =
   with_exec_fixture "composition-generic-defer-terminal-boundary"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        (match
@@ -5146,7 +5147,7 @@ let test_terminal_composition_generic_defer_yields_to_durable_stimulus () =
        let catalog =
          match
            Masc.Keeper_tool_composition_catalog.parse
-             (write_then_unchanged_board_then_terminal_composition ~revision)
+             (write_then_unchanged_board_composition ~revision)
          with
          | Ok catalog -> catalog
          | Error error ->
@@ -5164,6 +5165,19 @@ let test_terminal_composition_generic_defer_yields_to_durable_stimulus () =
        Fun.protect
          ~finally:bundle.cleanup
          (fun () ->
+            let composition_tool =
+              match
+                find_tool_by_name
+                  bundle.tools
+                  "keeper_compose_write-then-durable-wait"
+              with
+              | Some tool -> tool
+              | None -> fail "ordinary generic-deferred composition was not materialized"
+            in
+            (match Agent_core.Tool.completion composition_tool with
+             | Agent_core.Tool_contract.Continue_after_success -> ()
+             | Agent_core.Tool_contract.Terminal_after_success _ ->
+               fail "composition without a terminal node became statically terminal");
             let terminal_error = ref None in
             let projected =
               match
@@ -5197,24 +5211,39 @@ let test_terminal_composition_generic_defer_yields_to_durable_stimulus () =
             let result = tool.call ~call_id:"generic-deferred-composition" (`Assoc []) in
             check bool "generic-deferred composition is incomplete" false result.success;
             (match bundle.terminal_effect_state () with
-             | Masc.Keeper_tools_agent_core.Deferred_tool_result -> ()
-             | _ -> fail "generic deferred node did not retain its typed bundle state");
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed failure ->
+               check string
+                 "prior write prevents false resumability"
+                 "proven_post_effect"
+                 (Tool_result.failure_effect_disposition_to_string
+                    failure.effect_disposition)
+             | _ -> fail "post-effect defer did not terminalize the composition");
+            let deferred_payload = parse_json result.content in
+            check string
+              "nested deferred node retains producer-owned kind"
+              "generic_deferred"
+              Yojson.Safe.Util.
+                (member "cause" deferred_payload
+                 |> member "node"
+                 |> member "deferred_kind"
+                 |> to_string);
             match result.abort_turn with
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary
                   { tool_name
                   ; outcome =
-                      Masc.Keeper_official_client_host.Durable_stimulus_deferred
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Proven_post_effect; _ }
                   }) ->
               check string
-                "official-client durable-stimulus terminal tool"
+                "official-client post-effect defer terminal tool"
                 "keeper_compose_write-then-durable-wait"
                 tool_name
             | Some
                 (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
             | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
             | None ->
-              fail "official-client provider loop remained open after durable wait"))
+              fail "official-client provider loop remained retryable after post-effect defer"))
 ;;
 
 let test_composition_runtime_uses_canonical_descriptor () =
@@ -5415,8 +5444,8 @@ let () =
         test_terminal_composition_post_effect_failure_closes_official_client_loop;
       test_case "unknown-effect composition closes official-client loop" `Quick
         test_terminal_composition_unknown_write_failure_closes_official_client_loop;
-      test_case "generic-deferred composition yields to durable stimulus" `Quick
-        test_terminal_composition_generic_defer_yields_to_durable_stimulus;
+      test_case "post-effect deferred composition closes without resume" `Quick
+        test_terminal_composition_post_effect_defer_closes_without_resume;
       test_case "terminal composition requires terminal outer invocation" `Quick
         test_composition_terminal_requires_terminal_outer_invocation;
     ]);

@@ -698,10 +698,38 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
         | result ->
           let result = settle result in
           let terminal_boundary =
-            match Agent_core.Tool.completion tool with
-            | Agent_core.Tool_contract.Continue_after_success -> None
-            | Agent_core.Tool_contract.Terminal_after_success _ ->
-              (match terminal_effect_state () with
+            match terminal_effect_state () with
+            | Keeper_tools_agent_core.Terminal_effect_failed
+                ({ effect_disposition =
+                     ( Tool_result.Proven_post_effect
+                     | Tool_result.Effect_outcome_unknown )
+                 ; _
+                 } as failure) ->
+              (* A composition may be statically ordinary yet fail after a
+                 nested effect.  Producer-owned aggregate evidence outranks
+                 the outer success-completion declaration: allowing the
+                 provider to retry would repeat an already-applied or
+                 indeterminate effect. *)
+              Some
+                (Terminal_tool_boundary
+                   { tool_name = tool.schema.name
+                   ; outcome =
+                       Terminal_failed
+                         { failure_class = failure.failure_class
+                         ; effect_disposition = failure.effect_disposition
+                         ; diagnostic = failure.diagnostic
+                         }
+                   })
+            | ( Keeper_tools_agent_core.Terminal_effect_open
+              | Keeper_tools_agent_core.Deferred_tool_result
+              | Keeper_tools_agent_core.External_effect_deferred
+              | Keeper_tools_agent_core.Terminal_effect_completed _
+              | Keeper_tools_agent_core.Terminal_effect_failed
+                  { effect_disposition = Tool_result.Proven_pre_effect; _ } ) as state ->
+              (match Agent_core.Tool.completion tool with
+               | Agent_core.Tool_contract.Continue_after_success -> None
+               | Agent_core.Tool_contract.Terminal_after_success _ ->
+                 (match state with
                | Keeper_tools_agent_core.Terminal_effect_completed _
                  ->
                  Some
@@ -722,25 +750,16 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                       ; outcome = Durable_stimulus_deferred
                       })
                | Keeper_tools_agent_core.Terminal_effect_failed
-                   ({ effect_disposition =
+                   { effect_disposition = Tool_result.Proven_pre_effect; _ }
+               | Keeper_tools_agent_core.Terminal_effect_open ->
+                 None
+               | Keeper_tools_agent_core.Terminal_effect_failed
+                   { effect_disposition =
                        ( Tool_result.Proven_post_effect
                        | Tool_result.Effect_outcome_unknown )
                    ; _
-                   } as failure) ->
-                 Some
-                   (Terminal_tool_boundary
-                      { tool_name = tool.schema.name
-                      ; outcome =
-                          Terminal_failed
-                            { failure_class = failure.failure_class
-                            ; effect_disposition = failure.effect_disposition
-                            ; diagnostic = failure.diagnostic
-                            }
-                      })
-               | Keeper_tools_agent_core.Terminal_effect_failed
-                   { effect_disposition = Tool_result.Proven_pre_effect; _ }
-               | Keeper_tools_agent_core.Terminal_effect_open ->
-                 None)
+                   } ->
+                 assert false))
           in
           let result =
             match terminal_boundary with

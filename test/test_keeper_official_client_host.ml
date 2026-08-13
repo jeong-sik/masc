@@ -369,6 +369,44 @@ let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
       fail "post-effect terminal failure did not close the official-client loop")
 ;;
 
+let test_ordinary_post_effect_failure_aborts_the_official_client_turn () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let state = ref Masc.Keeper_tools_agent_core.Terminal_effect_open in
+    let tool, _terminal_error =
+      one_dynamic_tool
+        ~descriptor:
+          (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+        ~terminal_effect_state:(fun () -> !state)
+        ~active
+        (fun _input ->
+           state :=
+             Masc.Keeper_tools_agent_core.Terminal_effect_failed
+               { failure_class = Tool_result.Runtime_failure
+               ; effect_disposition = Tool_result.Effect_outcome_unknown
+               ; diagnostic = "ordinary composition effect is indeterminate"
+               };
+           Error
+             { Agent_core.Types.message = "ordinary composition failed"
+             ; recoverable = false
+             ; error_class = Some Agent_core.Types.Deterministic
+             })
+    in
+    let result = tool.call ~call_id:"ordinary-post-effect" (`Assoc []) in
+    match result.abort_turn with
+    | Some
+        (Terminal_tool_boundary
+          { tool_name = "effect"
+          ; outcome =
+              Terminal_failed
+                { effect_disposition = Tool_result.Effect_outcome_unknown; _ }
+          }) ->
+      ()
+    | Some (Terminal_tool_boundary _)
+    | Some (Repeated_tool_call _)
+    | None ->
+      fail "ordinary post-effect failure remained provider-retryable")
+;;
+
 let test_terminal_pre_effect_failure_remains_correction_capable () =
   with_active_raw_trace (fun ~path:_ ~active ->
     let tool, _terminal_error =
@@ -925,6 +963,10 @@ let () =
             "terminal post-effect failure aborts official-client turn"
             `Quick
             test_terminal_post_effect_failure_aborts_the_official_client_turn
+        ; test_case
+            "ordinary post-effect failure aborts official-client turn"
+            `Quick
+            test_ordinary_post_effect_failure_aborts_the_official_client_turn
         ; test_case
             "terminal pre-effect failure stays correction-capable"
             `Quick

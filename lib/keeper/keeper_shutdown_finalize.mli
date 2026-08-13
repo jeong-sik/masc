@@ -39,6 +39,19 @@ val run :
   Keeper_shutdown_types.t ->
   (Keeper_shutdown_types.t, error) result
 
+(** [admission_already_released_by_removal ~config operation error] holds when
+    [error] says the Keeper owner is absent from the registry and the keeper's
+    metadata is gone from the store: the keeper was removed outright, so the
+    admission fence this operation wants to release no longer exists — the
+    removal itself achieved the release. Logs one info line when true. A
+    leftover meta without its owner keeps the error, mirroring the
+    [remove_meta_file] cross-check. *)
+val admission_already_released_by_removal :
+     config:Workspace.config
+  -> Keeper_shutdown_types.t
+  -> Keeper_owner_registry.command_error
+  -> bool
+
 module For_testing : sig
   val paused_meta :
     Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta

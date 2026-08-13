@@ -527,7 +527,13 @@ let recover_operation_with_corrupt_owner_fence
               (Operation_id.to_string operation.operation_id)
               (Operation_id.to_string existing))
        | Error error ->
-         Error (Keeper_owner_registry.command_error_to_string error))
+         if
+           Keeper_shutdown_finalize.admission_already_released_by_removal
+             ~config
+             operation
+             error
+         then Ok recovered
+         else Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let recover_at_boot ~config =

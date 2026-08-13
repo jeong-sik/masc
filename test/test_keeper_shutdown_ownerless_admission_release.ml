@@ -1,0 +1,262 @@
+(* Boot recovery re-enters every durable shutdown operation, including ones
+   whose keeper was later removed outright: an operator stop with meta
+   removal unregisters the owner and deletes the metadata. An admission
+   fence lives inside its Keeper owner, so once the owner is gone and the
+   keeper's metadata went with it there is no fence left to release — the
+   removal itself achieved the release. Before this settlement existed,
+   three durable operations for the deleted keeper [full-cycle-probe]
+   failed recovery on every boot (2026-08-12): finalized operations died at
+   admission release, the superseded one at the shutdown transition, and no
+   code path could retire any of them. A leftover meta without its owner
+   stays an error, mirroring the [remove_meta_file] cross-check. *)
+
+open Alcotest
+open Masc
+open Keeper_shutdown_types
+
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let cleanup_dir path =
+  let rec rm p =
+    match Unix.lstat p with
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Array.iter (fun name -> rm (Filename.concat p name)) (Sys.readdir p);
+      Unix.rmdir p
+    | _ -> Unix.unlink p
+    | exception Unix.Unix_error _ -> ()
+  in
+  rm path
+;;
+
+let with_workspace f =
+  let base = temp_dir "keeper_shutdown_ownerless_" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Keeper_shutdown_finalize.register_remove_pending_confirms_by_target
+         (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
+       Fun.protect
+         ~finally:(fun () ->
+           Keeper_shutdown_finalize.For_testing
+           .reset_remove_pending_confirms_by_target ();
+           Fs_compat.clear_fs ())
+         (fun () ->
+            let config = Workspace.default_config base in
+            let (_init_msg : string) = Workspace.init config ~agent_name:None in
+            Eio.Switch.run @@ fun sw ->
+            (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+             | Ok 0 -> ()
+             | Ok count -> failf "unexpected initial owner count: %d" count
+             | Error error ->
+               fail (Keeper_owner_registry.install_error_to_string error));
+            f ~config))
+;;
+
+let fixture_meta_exn name =
+  let json =
+    `Assoc
+      [ "name", `String name
+      ; "agent_name", `String (Keeper_identity.keeper_agent_name name)
+      ; "trace_id", `String "trace-ownerless-admission-release-test"
+      ]
+  in
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error detail -> failf "meta fixture rejected: %s" detail
+;;
+
+let trace_id_exn value =
+  match Keeper_id.Trace_id.of_string value with
+  | Ok trace_id -> trace_id
+  | Error detail -> failf "trace id rejected: %s" detail
+;;
+
+(* Digest of the meta the original finalization snapshotted. The keeper is
+   gone by recovery time, so the digest only has to be well-formed audit
+   evidence, not anything present on disk. *)
+let removed_keeper_digest name =
+  Keeper_meta_json.Snapshot_digest.of_meta (fixture_meta_exn name)
+;;
+
+let finalized_after_removal_evidence name =
+  { cleanup =
+      { settled_task_ids = []
+      ; pending_confirms_removed = 0
+      ; meta_snapshot_digest = removed_keeper_digest name
+      }
+  ; meta_removed = true
+  ; session_removed = true
+  ; registry_unregistered = true
+  ; accumulator_dropped = true
+  ; completion = Completion_not_requested
+  }
+;;
+
+let make_operation ~keeper_name ~phase ~cleanup_intent =
+  { schema_version
+  ; revision = 1
+  ; operation_id = Operation_id.generate ()
+  ; keeper_name
+  ; lane_ownership = Dormant_meta
+  ; trace_id = trace_id_exn "trace-ownerless-admission-release-test"
+  ; generation = 1
+  ; actor = "test"
+  ; cleanup_intent
+  ; turn_disposition = No_inflight_turn
+  ; expected_backlog_version = 0
+  ; owned_task_ids = []
+  ; join_evidence = None
+  ; phase
+  ; created_at = Masc_domain.now_iso ()
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+let persist_exn ~config operation =
+  match Keeper_shutdown_store.persist_new ~config operation with
+  | Ok () -> ()
+  | Error error ->
+    failf "persist_new failed: %s" (Keeper_shutdown_store.error_to_string error)
+;;
+
+let recover_fence ~config operation =
+  Keeper_shutdown_runtime.recover_operation_with_corrupt_owner_fence
+    ~config
+    ~corrupt_owner_fence:None
+    operation
+;;
+
+let check_settled label ~config operation =
+  match recover_fence ~config operation with
+  | Ok recovered ->
+    check
+      bool
+      (label ^ ": settled operation must not fence admission")
+      false
+      (requires_admission_fence recovered);
+    check
+      bool
+      (label ^ ": settlement keeps the terminal phase")
+      true
+      (match recovered.phase with
+       | Finalized _ | Superseded _ -> true
+       | _ -> false)
+  | Error detail -> failf "%s: recovery still fails: %s" label detail
+;;
+
+(* A finalized operation for a keeper whose owner and metadata are both gone
+   — the [full-cycle-probe] shape: finalization already removed the meta and
+   session, the keeper deletion took the owner, and only the admission
+   release was still failing. Recovery must settle it instead of failing
+   every boot. *)
+let test_finalized_operation_settles_when_keeper_removed () =
+  with_workspace (fun ~config ->
+    let name = "ownerless-finalized" in
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:(Finalized (finalized_after_removal_evidence name))
+        ~cleanup_intent:
+          { reason = Operator_stop_remove_meta; remove_session = true }
+    in
+    persist_exn ~config operation;
+    check_settled "finalized" ~config operation)
+;;
+
+(* A superseded operation for the same removed keeper settles at the
+   shutdown transition instead: no fence exists to transition away from. *)
+let test_superseded_operation_settles_when_keeper_removed () =
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation
+        ~keeper_name:"ownerless-superseded"
+        ~phase:(Superseded (Operator_metadata_update { actor = "dashboard" }))
+        ~cleanup_intent:
+          { reason = Operator_stop_retain_meta; remove_session = false }
+    in
+    persist_exn ~config operation;
+    check_settled "superseded" ~config operation)
+;;
+
+(* Metadata that outlived its owner is an inconsistent state, not a removal:
+   the release must keep failing so the inconsistency surfaces instead of
+   being silently absorbed. *)
+let test_meta_without_owner_still_fails () =
+  with_workspace (fun ~config ->
+    let name = "ownerless-with-meta" in
+    let meta = fixture_meta_exn name in
+    (match Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error detail -> failf "replace_snapshot failed: %s" detail);
+    let operation =
+      make_operation
+        ~keeper_name:name
+        ~phase:(Finalized (finalized_after_removal_evidence name))
+        ~cleanup_intent:
+          { reason = Operator_stop_remove_meta; remove_session = true }
+    in
+    persist_exn ~config operation;
+    match recover_fence ~config operation with
+    | Ok _ -> fail "recovery settled an operation whose meta outlived its owner"
+    | Error detail ->
+      check
+        string
+        "failure names the admission release"
+        "Keeper shutdown admission release failed"
+        (String.sub detail 0
+           (String.length "Keeper shutdown admission release failed")))
+;;
+
+(* Only [Owner_not_found] is a removal signal: a registry that is stopping,
+   for example, must not be mistaken for a deleted keeper. *)
+let test_predicate_rejects_other_lookup_errors () =
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation
+        ~keeper_name:"ownerless-inventory-stopping"
+        ~phase:(Finalized (finalized_after_removal_evidence
+                             "ownerless-inventory-stopping"))
+        ~cleanup_intent:
+          { reason = Operator_stop_remove_meta; remove_session = true }
+    in
+    check
+      bool
+      "inventory stopping is not a removal"
+      false
+      (Keeper_shutdown_finalize.admission_already_released_by_removal
+         ~config
+         operation
+         (Keeper_owner_registry.Command_lookup_failed
+            Keeper_owner_registry.Inventory_stopping)))
+;;
+
+let () =
+  Alcotest.run
+    "keeper_shutdown_ownerless_admission_release"
+    [ ( "recovery"
+      , [ Alcotest.test_case
+            "finalized operation settles when keeper removed"
+            `Quick
+            test_finalized_operation_settles_when_keeper_removed
+        ; Alcotest.test_case
+            "superseded operation settles when keeper removed"
+            `Quick
+            test_superseded_operation_settles_when_keeper_removed
+        ; Alcotest.test_case
+            "meta without owner still fails"
+            `Quick
+            test_meta_without_owner_still_fails
+        ; Alcotest.test_case
+            "predicate rejects other lookup errors"
+            `Quick
+            test_predicate_rejects_other_lookup_errors
+        ] )
+    ]
+;;

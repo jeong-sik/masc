@@ -505,6 +505,34 @@ let remove_meta_file ~config operation cleanup =
      | Error error -> Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
+(* An admission fence lives inside its Keeper owner, so a registry without
+   that owner has no fence left to release. [Owner_not_found] plus the
+   keeper's metadata also gone means the keeper was removed outright (an
+   operator stop with meta removal that already unregistered the owner): the
+   removal itself achieved the admission release, and re-running release
+   against it would fail every boot forever. A leftover meta without its
+   owner is an inconsistent state and stays an error, mirroring
+   [remove_meta_file]. Logs one info line when true so the terminal
+   disposition stays observable in boot logs. *)
+let admission_already_released_by_removal
+  ~(config : Workspace.config)
+  operation
+  error
+  =
+  match error with
+  | Keeper_owner_registry.Command_lookup_failed
+      (Keeper_owner_registry.Owner_not_found _) ->
+    (match Keeper_meta_store.read_meta config operation.keeper_name with
+     | Ok None ->
+       Log.Keeper.info
+         "shutdown admission already released by Keeper removal: keeper=%s operation=%s"
+         operation.keeper_name
+         (Operation_id.to_string operation.operation_id);
+       true
+     | Ok (Some _) | Error _ -> false)
+  | _ -> false
+;;
+
 let remove_session_dir ~config operation =
   if operation.cleanup_intent.remove_session
   then (
@@ -598,9 +626,12 @@ let release_finalized_admission ~(config : Workspace.config) operation =
     (Operation_id.to_string operation_id);
     Ok operation
   | Error error ->
-    Error
-      (Admission_release_failed
-         (operation, Keeper_owner_registry.command_error_to_string error))
+    if admission_already_released_by_removal ~config operation error
+    then Ok operation
+    else
+      Error
+        (Admission_release_failed
+           (operation, Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let invoke_completion_handler ~config operation action =

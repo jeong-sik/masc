@@ -486,7 +486,19 @@ let discover_repositories ~base_path =
                   created_at = Int64.zero;
                   updated_at = Int64.zero;
                 }
-          | Error _ -> None)
+          (* Now that [get_origin_url] is bounded, this branch fires on a
+             timeout as well as on a checkout that genuinely has no origin —
+             and the two are not the same thing. Dropping either one silently
+             makes a repository vanish from discovery with nothing to read:
+             before the bound, the same condition at least presented as a hang.
+             Say which one happened; the drop itself stays, because a candidate
+             without an origin has no url to register. *)
+          | Error detail ->
+            Log.Misc.warn
+              "repo discovery skipped %s: origin unavailable (%s)"
+              abs_repo_dir
+              detail;
+            None)
       git_dirs
   in
   Ok candidates

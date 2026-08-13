@@ -868,7 +868,7 @@ let test_identical_keeper_invocations_join_across_production_boundaries () =
          ~keeper_name:meta.name
          ~content:
            (String.make
-              (Tool_bridge.default_externalize_threshold_bytes + 1)
+              (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
               'x')
          ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
          ();

@@ -150,7 +150,7 @@ not change what a single cold read costs and should not be measured on it.
 ## §5.5 Measurement — which readers can benefit
 
 §7's gating question ("does any current surface actually span enough closed
-files to benefit?") was measured against the live `~/me/.masc` stores before
+files to benefit?") was measured against a live workspace's stores before
 any implementation. It changes the scope below.
 
 Keeper metric stores, 8 of them:

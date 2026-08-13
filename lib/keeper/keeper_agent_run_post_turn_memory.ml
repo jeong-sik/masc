@@ -2,6 +2,69 @@
 
     Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-4). *)
 
+let counterpart_observations_before ~base_dir ~keeper_name ~before =
+  let user_rows =
+    (Keeper_chat_store.load_page
+       ~base_dir
+       ~keeper_name
+       ~before
+       ()).messages
+    |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
+      match message.role, message.speaker with
+      | Keeper_chat_store.Role.User, Some _ -> true
+      | Keeper_chat_store.Role.User, None
+      | Keeper_chat_store.Role.Assistant, _
+      | Keeper_chat_store.Role.Tool, _ -> false)
+  in
+  let external_items =
+    Keeper_external_attention.load_recent_evidence_events
+      ~base_path:base_dir
+      ~keeper_name
+    |> List.filter_map (function
+      | Keeper_external_attention.Recorded item when item.received_at < before ->
+        Some item
+      | Keeper_external_attention.Recorded _
+      | Keeper_external_attention.Resolved _
+      | Keeper_external_attention.Ignored _ -> None)
+  in
+  let external_delivery_keys =
+    external_items
+    |> List.filter_map (fun (item : Keeper_external_attention.item) ->
+      match item.external_message with
+      | None -> None
+      | Some message ->
+        Some (item.conversation.conversation_id, message.message_id))
+  in
+  let is_external_duplicate (message : Keeper_chat_store.chat_message) =
+    match message.conversation_id, message.external_message_id with
+    | Some conversation_id, Some message_id ->
+      List.exists
+        (fun (external_conversation_id, external_message_id) ->
+          String.equal conversation_id external_conversation_id
+          && String.equal message_id external_message_id)
+        external_delivery_keys
+    | None, _ | _, None -> false
+  in
+  let external_observations =
+    List.map
+      (fun (item : Keeper_external_attention.item) ->
+        item.received_at, Keeper_counterpart_observation.of_external_attention item)
+      external_items
+  in
+  let chat_observations =
+    user_rows
+    |> List.filter (fun message -> not (is_external_duplicate message))
+    |> List.filter_map (fun (message : Keeper_chat_store.chat_message) ->
+      match message.ts, Keeper_counterpart_observation.of_chat_message message with
+      | Some ts, Some observation -> Some (ts, observation)
+      | None, _ | _, None -> None)
+  in
+  external_observations @ chat_observations
+  |> List.stable_sort (fun (left_ts, _) (right_ts, _) ->
+    Float.compare left_ts right_ts)
+  |> List.map snd
+;;
+
 
 let run
   ~config
@@ -30,6 +93,17 @@ let run
           ~base_path:config.Workspace.base_path
       in
       let run_admitted_librarian () =
+        (* Durable chat is the typed source for direct input. Connector
+           attention is also read from its producer-owned store so a
+           best-effort ambient chat append cannot erase the actor evidence.
+           Both reads are bounded and fenced before this turn's post-turn
+           timestamp; identity is never recovered from checkpoint prose. *)
+        let counterpart_observations =
+          counterpart_observations_before
+            ~base_dir:config.Workspace.base_path
+            ~keeper_name:meta.name
+            ~before:post_turn_t0
+        in
         match
           Keeper_memory_os_current.read_for_keepers_dir
             ~keepers_dir
@@ -60,6 +134,7 @@ let run
             ; max_recall_fact_bytes =
                 Env_config.KeeperMemoryOs.recall_facts_max_bytes ()
             ; messages = librarian_messages
+            ; counterpart_observations
             }
           in
           Keeper_librarian_runtime.run_best_effort
@@ -121,7 +196,7 @@ let run
        eval_json
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
+  | exn ->
      Otel_metric_store.inc_counter
        Keeper_metrics.(to_string DispatchEventFailures)
        ~labels:[ "keeper", meta.name; "site", "post_turn_eval" ]
@@ -130,3 +205,7 @@ let run
        "post_turn_eval jsonl append failed: %s"
        (Printexc.to_string exn))
 ;;
+
+module For_testing = struct
+  let counterpart_observations_before = counterpart_observations_before
+end

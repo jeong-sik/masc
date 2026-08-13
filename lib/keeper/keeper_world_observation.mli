@@ -30,7 +30,12 @@ type pending_board_event_kind =
           wake, not its only copy. Carrying the record mirrors
           {!Keeper_event_queue.Connector_attention}'s pointer discipline and
           {!Completion_authority_rejected}'s payload-carrying shape below. *)
-  | External_attention
+  | External_attention of Keeper_counterpart_observation.t
+      (** A typed projection of the host-authored connector identity and the
+          untrusted speaker content. Unlike the flat event preview, it keeps
+          identity visible in the current Keeper prompt. The Librarian reads
+          the same producer-owned attention record through its bounded durable
+          projection. *)
   | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)

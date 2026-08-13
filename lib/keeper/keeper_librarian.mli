@@ -22,6 +22,10 @@ type input =
     (** Maximum UTF-8 bytes for the exact rendered fact lines. The prompt states
         this capacity and the parser rejects an oversized selection. *)
   ; messages : Agent_core.Types.message list
+  ; counterpart_observations : Keeper_counterpart_observation.t list
+    (** Host-authored speaker provenance plus untrusted current-turn content.
+        This covers connector attention outside the AGENT_CORE checkpoint and
+        direct turns on runtimes that return no AGENT_CORE checkpoint. *)
   }
 
 type selection =

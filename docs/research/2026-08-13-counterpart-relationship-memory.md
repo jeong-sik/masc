@@ -73,10 +73,17 @@ memory does not enforce policy.
 
 1. Memory OS remains the sole automatic semantic-memory authority. No new
    people database, graph, score, TTL, or `person` category is added.
-2. A person is anchored by a stable actor reference. For an external message,
-   it is `channel + workspace_id + user_id`; `user_name` is a mutable display
-   label. An authenticated owner without an external ID is named by the
-   `owner`/`operator` role, not a fabricated identifier.
+2. A person is anchored by a stable actor reference. The Librarian reads a
+   bounded typed projection of producer-owned durable records: direct rows
+   come from the chat store and connector rows also come from external
+   attention, which survives a failed best-effort ambient chat append.
+   `channel + workspace_id + user_id` identify an external actor, `user_name`
+   is a mutable display label, `authority` is host-authored, and only `content`
+   is untrusted text. An authenticated owner without an external ID is named by
+   the `owner`/`operator` role, not a fabricated identifier. This avoids
+   treating a copied prompt marker as identity and covers ambient and
+   official-client paths that do not preserve the incoming message in an
+   AGENT_CORE checkpoint.
 3. Existing categories retain their meaning. A person claim can be a `fact`,
    `preference`, `goal`, `validated_approach`, or `lesson`; the claim sentence
    contains the actor reference and Keeper-relative relationship.
@@ -93,6 +100,20 @@ memory does not enforce policy.
 7. Correction uses the existing total selection contract: drop the superseded
    claim with a reason and add the corrected claim in the same commit. If
    attribution or durability is uncertain, add nothing.
+
+Recall remains Keeper-wide rather than adding an actor-indexed authorization
+layer. The Keeper must not disclose or apply one external actor's private facts
+to another actor; this is a semantic response contract, not a deterministic
+hard gate in this change.
+
+The provider sees raw observations inside the bounded prompt. The admin-only
+exact-run registry keeps the same raw input to preserve its exact-input
+contract, so its recent retained runs are a second durable copy of actor text
+and identifiers. A registry-wide retention or encrypted-reference design is
+deferred rather than creating a Librarian-only pseudo-exact exception. This is
+also not an instruction-injection proof: `content` remains model-visible
+untrusted text, and the prompt contract requires treating it only as quoted
+evidence.
 
 `Keeper_person_notes` continues as a deliberate roster annotation. It is not
 an automatic Librarian sink and is not synchronized with Memory OS. If future

@@ -120,6 +120,17 @@ let test_record_dedup_window_bounded () =
     record_exn it;
     last_filler := it
   done;
+  let evidence_events =
+    A.load_recent_evidence_events ~base_path ~keeper_name
+  in
+  Alcotest.(check bool)
+    "memory evidence window is independent from dedup window"
+    true
+    (List.exists
+       (function
+         | A.Recorded recorded -> String.equal recorded.A.event_id first.A.event_id
+         | A.Resolved _ | A.Ignored _ -> false)
+       evidence_events);
   (* The oldest event has scrolled past the window: re-recording it is a
      fresh append, not a duplicate. *)
   (match A.record ~base_path first with

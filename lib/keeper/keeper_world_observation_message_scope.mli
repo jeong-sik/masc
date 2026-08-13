@@ -77,8 +77,10 @@ val render_recent_direct_conversation_context
   -> string
 
 (** Pure source-ordered classification after the optional durable ack row.
-    Paired direct turns are acknowledged only by an assistant utterance with
-    the same typed [turn_ref]; an unrelated assistant row never clears input. *)
+    Paired turns are acknowledged by an assistant utterance with the same
+    typed [turn_ref], or by a terminal assistant transcript row with the same
+    typed delivery key. An unrelated assistant row and a transport-failure row
+    never clear input. *)
 val pending_messages_of_messages
   :  ?ack_id:string
   -> targets:string list

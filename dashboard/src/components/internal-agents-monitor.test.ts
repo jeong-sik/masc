@@ -159,6 +159,7 @@ describe('InternalAgentsMonitor', () => {
         startedAt: 1786000000,
         status: 'succeeded',
         elapsedSeconds: 2,
+        selectedSlot: 'librarian-primary',
       }],
     })
     // The listing carries no payloads; opening the row is what fetches them.
@@ -170,6 +171,7 @@ describe('InternalAgentsMonitor', () => {
       startedAt: 1786000000,
       status: 'succeeded',
       elapsedSeconds: 2,
+      selectedSlot: 'librarian-primary',
       input: {
         kind: 'exact',
         payload: { current_fact_count: 1, message_count: 5 },
@@ -211,6 +213,7 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('낡은 기억')
     expect(container.textContent).toContain('새 근거로 대체됨')
     expect(container.textContent).toContain('TOOL-FREE')
+    expect(container.textContent).toContain('선택 slot librarian-primary')
     expect(container.textContent).toContain('외부 research/RAW 입력을 받지 않습니다')
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
       'kidsnote',

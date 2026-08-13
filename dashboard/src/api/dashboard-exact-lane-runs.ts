@@ -125,7 +125,9 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
   const base = ['run_id', 'lane', 'subject_id', 'actor', 'started_at', 'status']
     .concat(withPayloads ? ['input'] : [])
   // `output` rides with the payloads; a summary never carries it.
-  const completion = withPayloads ? ['elapsed_s', 'output'] : ['elapsed_s']
+  const completion = withPayloads
+    ? ['elapsed_s', 'output', 'selected_slot']
+    : ['elapsed_s', 'selected_slot']
   const persistenceFailure = status === 'completion_persistence_failed'
     || status === 'completion_durability_unknown'
   const intendedStatus = persistenceFailure
@@ -149,7 +151,7 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
       : status === 'failed'
         ? [...base, ...completion, 'code', 'detail']
         : [...base, ...completion]
-  exactFields(raw, required, ['selected_slot'], context)
+  exactFields(raw, required, [], context)
   const persistenceState = persistenceFailure
     ? string(raw.persistence_state, `${context}.persistence_state`)
     : undefined
@@ -161,10 +163,7 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
   if (persistenceState !== expectedPersistenceState) {
     fail(`${context}.persistence_state must be ${JSON.stringify(expectedPersistenceState)}`)
   }
-  if (status === 'running' && 'selected_slot' in raw) {
-    fail(`${context}.selected_slot is only valid after completion`)
-  }
-  const selectedSlot = !('selected_slot' in raw)
+  const selectedSlot = status === 'running'
     ? undefined
     : raw.selected_slot === null
       ? null

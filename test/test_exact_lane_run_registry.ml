@@ -15,6 +15,23 @@ let mark_completed_exn t ~run_id ~outcome ~elapsed_s ~output =
       (R.completion_error_to_string error)
 ;;
 
+let mark_completed_with_slot_exn t ~run_id ~outcome ~elapsed_s ~selected_slot ~output =
+  match
+    R.mark_completed_with_slot
+      t
+      ~run_id
+      ~outcome
+      ~elapsed_s
+      ~selected_slot
+      ~output
+  with
+  | Ok () -> ()
+  | Error error ->
+    failf
+      "exact-lane completion with slot failed: %s"
+      (R.completion_error_to_string error)
+;;
+
 let test_round_trip_preserves_exact_evidence () =
   let path = Filename.temp_file "exact-lane-runs-" ".jsonl" in
   remove_if_exists path;
@@ -27,16 +44,21 @@ let test_round_trip_preserves_exact_evidence () =
     ~actor:"keeper-a"
     ~started_at:10.0
     ~input:(R.Exact_input (`Assoc [ "message_count", `Int 4 ]));
-  mark_completed_exn
+  mark_completed_with_slot_exn
     registry
     ~run_id:"run-1"
     ~outcome:R.Succeeded
     ~elapsed_s:0.5
+    ~selected_slot:"librarian-primary"
     ~output:(`Assoc [ "fact_count", `Int 3 ]);
   let replayed = R.replay path in
   let original = R.get registry ~run_id:"run-1" |> Option.get |> R.run_to_yojson in
   let restored = R.get replayed ~run_id:"run-1" |> Option.get |> R.run_to_yojson in
   check string "round trip" (Yojson.Safe.to_string original) (Yojson.Safe.to_string restored);
+  (match R.get replayed ~run_id:"run-1" |> Option.get with
+   | { status = R.Completed { selected_slot = Some selected_slot; _ }; _ } ->
+     check string "selected slot" "librarian-primary" selected_slot
+   | _ -> fail "selected slot did not survive durable replay");
   remove_if_exists path
 ;;
 

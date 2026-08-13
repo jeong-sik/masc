@@ -311,36 +311,88 @@ let required_runtime_metadata name =
 
 let test_runtime_tool_authority_matches_effects () =
   let verify = required_runtime_metadata "masc_runtime_verify" in
-  check bool "verify remains Worker-readable" true
-    (verify.required_permission = Masc_domain.CanReadState);
-  check (option bool) "verify remains read-only" (Some true) verify.readonly;
-  check (option bool) "verify remains idempotent" (Some true) verify.idempotent;
+  check bool "verify requires operator authority" true
+    (verify.required_permission = Masc_domain.CanAdmin);
+  check (option bool) "verify is not read-only" (Some false) verify.readonly;
+  check (option bool) "verify is not idempotent" (Some false) verify.idempotent;
   let probe = required_runtime_metadata "masc_runtime_ollama_probe" in
   check bool "probe requires operator authority" true
     (probe.required_permission = Masc_domain.CanAdmin);
   check (option bool) "probe is not read-only" (Some false) probe.readonly;
   check (option bool) "probe is not idempotent" (Some false) probe.idempotent;
+  List.iter
+    (fun tool_name ->
+      (match
+         Auth.authorize_tool_for_role
+           ~agent_name:"runtime-probe-worker"
+           ~role:Masc_domain.Worker
+           ~tool_name
+       with
+       | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
+       | Ok () -> failf "Worker must not invoke operator tool %s" tool_name
+       | Error error ->
+         failf "unexpected Worker authorization error: %s"
+           (Masc_domain.masc_error_to_string error));
+      match
+        Auth.authorize_tool_for_role
+          ~agent_name:"runtime-probe-admin"
+          ~role:Masc_domain.Admin
+          ~tool_name
+      with
+      | Ok () -> ()
+      | Error error ->
+        failf "Admin must retain %s access: %s" tool_name
+          (Masc_domain.masc_error_to_string error))
+    [ "masc_runtime_verify"; "masc_runtime_ollama_probe" ]
+;;
+
+let test_runtime_verify_pool_selection_fails_closed () =
+  let select ?runtime_pool () =
+    Masc.Tool_local_runtime_verify.For_testing.select_endpoint_urls_for_pool
+      ?runtime_pool
+      [ "http://127.0.0.1:19001"; "http://127.0.0.1:19002" ]
+  in
+  check (option (list string)) "default selects the discovered pool"
+    (Some [ "http://127.0.0.1:19001"; "http://127.0.0.1:19002" ])
+    (select ());
+  check (option (list string)) "runtime id selects one endpoint"
+    (Some [ "http://127.0.0.1:19002" ])
+    (select ~runtime_pool:"local-19002" ());
+  check (option (list string)) "unknown explicit pool selects nothing"
+    None
+    (select ~runtime_pool:"missing-pool" ())
+;;
+
+let test_runtime_verify_requests_external_effect_authorization () =
+  let calls = ref [] in
+  let authorize_external_effect ~operation ~input ~continue:_ =
+    calls := (operation, input) :: !calls;
+    Tool_result.ok
+      ~tool_name:operation
+      ~start_time:0.0
+      {|{"ok":true,"effect":"intercepted"}|}
+  in
+  let args = `Assoc [ "runtime_pool", `String "local-19002" ] in
+  let context : Masc.Tool_local_runtime_core.context =
+    { config = Masc.Workspace.default_config "/tmp"
+    ; agent_name = "runtime-verify-effect-test"
+    ; authorize_external_effect = Some authorize_external_effect
+    }
+  in
   (match
-     Auth.authorize_tool_for_role
-       ~agent_name:"runtime-probe-worker"
-       ~role:Masc_domain.Worker
-       ~tool_name:"masc_runtime_ollama_probe"
+     Masc.Tool_local_runtime.dispatch context ~name:"masc_runtime_verify" ~args
    with
-   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
-   | Ok () -> fail "Worker must not invoke the operator runtime probe"
-   | Error error ->
-     failf "unexpected Worker authorization error: %s"
-       (Masc_domain.masc_error_to_string error));
-  match
-    Auth.authorize_tool_for_role
-      ~agent_name:"runtime-probe-admin"
-      ~role:Masc_domain.Admin
-      ~tool_name:"masc_runtime_ollama_probe"
-  with
-  | Ok () -> ()
-  | Error error ->
-    failf "Admin must retain runtime probe access: %s"
-      (Masc_domain.masc_error_to_string error)
+   | Some result ->
+     check bool "authorizer intercepts before completion" true
+       (Tool_result.is_success result)
+   | None -> fail "runtime verify handler was not selected");
+  match !calls with
+  | [ operation, input ] ->
+    check string "exact operation" "masc_runtime_verify" operation;
+    check string "complete input"
+      (Yojson.Safe.to_string args)
+      (Yojson.Safe.to_string input)
+  | calls -> failf "expected one authorization request, got %d" (List.length calls)
 ;;
 
 let () =
@@ -397,5 +449,9 @@ let () =
         [
           test_case "authority and execution policy match effects" `Quick
             test_runtime_tool_authority_matches_effects;
+          test_case "explicit runtime pool selection fails closed" `Quick
+            test_runtime_verify_pool_selection_fails_closed;
+          test_case "runtime verify requests external effect authorization" `Quick
+            test_runtime_verify_requests_external_effect_authorization;
         ] );
     ]

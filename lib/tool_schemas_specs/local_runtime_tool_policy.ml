@@ -21,16 +21,18 @@ let operation_id = function
 ;;
 
 let model_exposure = function
-  | Verify -> Keeper_callable
+  | Verify -> Operator_diagnostic
   | Ollama_probe -> Operator_diagnostic
 ;;
 
 let execution_policy = function
   | Verify ->
-    { required_permission = CanReadState
-    ; read_only = true
-    ; idempotent = true
-    ; retryable = true
+    (* The contract check issues one real chat-completion per selected
+       discovery endpoint. That can load a model and changes warm/cache state. *)
+    { required_permission = CanAdmin
+    ; read_only = false
+    ; idempotent = false
+    ; retryable = false
     }
   | Ollama_probe ->
     (* [/api/generate] can load a model and changes warm/cache state. *)

@@ -11,25 +11,42 @@ let safe_discovery_endpoints () =
   | Stdlib.Effect.Unhandled _ -> None
   | _ -> None
 
+let select_endpoint_urls_for_pool ?runtime_pool endpoint_urls =
+  match Option.bind runtime_pool String_util.trim_to_option with
+  | None -> if endpoint_urls = [] then None else Some endpoint_urls
+  | Some pool
+    when String.equal pool Local_runtime_pool.default_pool_label
+         || String.equal pool "default" ->
+      if endpoint_urls = [] then None else Some endpoint_urls
+  | Some pool ->
+      let matches url =
+        String.equal pool url
+        || String.equal pool (Local_runtime_pool.runtime_id_of_base_url url)
+      in
+      (match List.filter matches endpoint_urls with
+       | [] -> None
+      | selected -> Some selected)
+;;
+
+module For_testing = struct
+  let select_endpoint_urls_for_pool = select_endpoint_urls_for_pool
+end
+
 let discovery_endpoints_for_pool runtime_pool =
   match safe_discovery_endpoints () with
   | None -> None
   | Some [] -> None
   | Some endpoints ->
-      let matches_pool (endpoint : Discovery_cache.endpoint_info) =
-        match Option.bind runtime_pool String_util.trim_to_option with
-        | None -> true
-        | Some pool
-          when String.equal pool Local_runtime_pool.default_pool_label
-               || String.equal pool "default" ->
-            true
-        | Some pool ->
-            String.equal pool endpoint.url
-            || String.equal pool
-                 (Local_runtime_pool.runtime_id_of_base_url endpoint.url)
+      let endpoint_urls =
+        List.map (fun (endpoint : Discovery_cache.endpoint_info) -> endpoint.url) endpoints
       in
-      let filtered = List.filter matches_pool endpoints in
-      Some (if Stdlib.List.length filtered = 0 then endpoints else filtered)
+      Option.map
+        (fun selected_urls ->
+          List.filter
+            (fun (endpoint : Discovery_cache.endpoint_info) ->
+              List.mem endpoint.url selected_urls)
+            endpoints)
+        (select_endpoint_urls_for_pool ?runtime_pool endpoint_urls)
 
 let endpoint_model_id (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.models with

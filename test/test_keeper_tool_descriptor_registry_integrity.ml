@@ -319,9 +319,6 @@ let test_registered_cluster_model_projections_are_explicit () =
   let keeper_model_names = Policy.keeper_model_tool_names () in
   List.iter
     (fun name -> check_projection name Descriptor.Internal_name)
-    [ "masc_runtime_verify" ];
-  List.iter
-    (fun name -> check_projection name Descriptor.Internal_name)
     [ "keeper_library_read"
     ; "keeper_library_search"
     ; "masc_library_add"
@@ -344,12 +341,13 @@ let test_registered_cluster_model_projections_are_explicit () =
       "masc_status"
     ; "masc_pause"
     ; "masc_resume"
-      (* Native Ollama timing probe. Its output is load/prompt-eval timings and
-         a prefix-reuse inference — an explicit Admin diagnostic, distinct from
-         [/api/v1/dashboard/runtime-probe], which reads metadata only. It carried
-         1,219 bytes of schema into every Keeper turn and was called 0 times in
-         the 6 days to 2026-08-06. Registration is unchanged; the metadata-only
-         dashboard route owns a separate [CanReadState] authority. *)
+      (* Completion-backed runtime verification and the native Ollama timing
+         probe are explicit Admin diagnostics, distinct from
+         [/api/v1/dashboard/runtime-probe], which reads metadata only. Both can
+         load a model or change warm/cache state. Registration is unchanged;
+         the metadata-only dashboard route owns separate [CanReadState]
+         authority. *)
+    ; "masc_runtime_verify"
     ; "masc_runtime_ollama_probe"
     ];
   List.iter
@@ -364,10 +362,10 @@ let test_registered_cluster_model_projections_are_explicit () =
 let test_local_runtime_effect_policy_is_explicit () =
   let verify = required_internal_descriptor "masc_runtime_verify" in
   Alcotest.(check (option bool))
-    "verify is read-only"
-    (Some true)
+    "verify is not read-only"
+    (Some false)
     verify.policy.readonly_hint;
-  Alcotest.(check bool) "verify is retryable" true verify.policy.retryable;
+  Alcotest.(check bool) "verify is not retryable" false verify.policy.retryable;
   let probe = required_internal_descriptor "masc_runtime_ollama_probe" in
   Alcotest.(check (option bool))
     "native probe is not read-only"

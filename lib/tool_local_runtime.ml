@@ -29,7 +29,7 @@ let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
     (Yojson.Safe.to_string data)
 ;;
 
-let handle_runtime_verify _ctx args : Core.tool_result =
+let run_runtime_verify args : Core.tool_result =
   let tool_name = "masc_runtime_verify" in
   let start_time = Time_compat.now () in
   let runtime_pool = Json_util.get_string args "runtime_pool" in
@@ -54,6 +54,17 @@ let handle_runtime_verify _ctx args : Core.tool_result =
         Tool_local_runtime_verify.runtime_verify_json
           ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
     ]
+
+let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
+  let continue () = run_runtime_verify args in
+  match ctx.authorize_external_effect with
+  | None -> continue ()
+  | Some authorize ->
+    authorize
+      ~operation:"masc_runtime_verify"
+      ~input:args
+      ~continue
+;;
 
 let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
   let tool_name = "masc_runtime_ollama_probe" in

@@ -14,7 +14,8 @@ type definition =
 let operation_id = Local_runtime_tool_policy.operation_id
 
 (* Who the tool is for. Both operations stay registered in the catalog. The
-   native Ollama probe is an explicit Admin operation; the metadata-only
+   completion-backed contract check and native Ollama probe are explicit Admin
+   operations; the metadata-only
    dashboard runtime probe has its own [CanReadState] route authority and does
    not reuse this tool identity. The question this answers is narrower: does
    the autonomous Keeper model see the schema in its tool list every turn. *)
@@ -30,7 +31,7 @@ let definitions : definition list =
     { operation = Verify; schema = {
       name = "masc_runtime_verify";
       description =
-        "Verify only the optional typed local OpenAI-compatible runtime pool used for local benchmarks. Returns reachability, chat-completions contract status, model match, slots, ctx, configured capacity, active slots, and local blocker codes. Missing local discovery does not assess or block official-client, CLI, or remote Keeper provider lanes.";
+        "Admin-only contract probe for the optional typed local OpenAI-compatible runtime pool used for local benchmarks. It issues one real chat completion per selected endpoint and may load models or change warm/cache state, so it is not read-only or idempotent. An explicit runtime_pool that matches no endpoint fails closed. Returns reachability, chat-completions contract status, model match, slots, ctx, configured capacity, active slots, and local blocker codes. Missing local discovery does not assess or block official-client, CLI, or remote Keeper provider lanes.";
       input_schema =
         `Assoc
           [

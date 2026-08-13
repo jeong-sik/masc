@@ -111,6 +111,11 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active };
 
+  { env_name = "MASC_KEEPER_ATTRIBUTION_BY_GIT";
+    description = "Attribute keeper writes by git remote instead of path reverse-parse";
+    default = false; category = "keeper";
+    lifecycle = Active };
+
   (* ── Dashboard ────────────────────────────────────────────── *)
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";

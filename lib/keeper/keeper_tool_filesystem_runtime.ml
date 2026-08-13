@@ -586,6 +586,71 @@ let apply_patch ~old_string ~new_string ~replace_all text =
    The keeper write path is fire-and-forget; this resolver also never
    raises — unresolved paths degrade to typed non-[By_url] partitions with
    metric labels so the operator can see how often each reason appears. *)
+(* Origin URL per checkout root.
+
+   [resolve_partition_for_write] runs on every write, every annotation, and
+   once per turn. Without memoisation the git-remote path would spawn a
+   subprocess per call for a value that changes only when someone re-points a
+   remote — which is a manual act followed by a restart.
+
+   Bounded because a keeper's checkout count is bounded: the live maximum
+   measured across 12 keepers is 12 (2026-08-13). 64 leaves room without
+   letting a pathological tree grow this without limit. *)
+let origin_cache : (string, string) Hashtbl.t = Hashtbl.create 16
+let origin_cache_mu = Stdlib.Mutex.create ()
+let origin_cache_capacity = 64
+
+let cached_origin_url ~checkout_root =
+  match
+    Stdlib.Mutex.protect origin_cache_mu (fun () ->
+      Hashtbl.find_opt origin_cache checkout_root)
+  with
+  | Some url -> Ok url
+  | None ->
+    (match Repo_git.get_origin_url ~local_path:checkout_root with
+     | Error _ as error -> error
+     | Ok url ->
+       Stdlib.Mutex.protect origin_cache_mu (fun () ->
+         if Hashtbl.length origin_cache >= origin_cache_capacity
+         then Hashtbl.reset origin_cache;
+         Hashtbl.replace origin_cache checkout_root url);
+       Ok url)
+;;
+
+(* Attribution by measurement: ask git which checkout the path is in and what
+   that checkout's origin is, instead of reverse-parsing a prescribed layout.
+
+   Restricted to paths inside a keeper playground. The other two callers pass
+   something else — [keeper_agent_run.ml] passes [config.base_path] once per
+   turn — and [worktree_root] on that would resolve to whatever repository
+   contains the base path, silently re-bucketing turn events. *)
+let git_attribution ~base_dir ~abs =
+  match Playground_paths.parse_playground_file_path ~base_path:base_dir ~abs_path:abs with
+  | None -> None
+  | Some _ ->
+    let containing_dir =
+      if Sys.file_exists abs && Sys.is_directory abs then abs else Filename.dirname abs
+    in
+    (match Repo_git.worktree_root ~local_path:containing_dir with
+     | Error detail -> Some (Error ("worktree_root: " ^ detail))
+     | Ok checkout_root ->
+       (match cached_origin_url ~checkout_root with
+        | Error detail -> Some (Error ("get_origin_url: " ^ detail))
+        | Ok origin -> Some (Ok (checkout_root, origin))))
+;;
+
+let path_relative_to ~root path =
+  let root = Keeper_alerting_path.strip_trailing_slashes root in
+  let prefix = root ^ "/" in
+  if String.equal path root
+  then Some ""
+  else if String.starts_with ~prefix path
+  then
+    Some
+      (String.sub path (String.length prefix) (String.length path - String.length prefix))
+  else None
+;;
+
 let resolve_partition_for_write ~base_dir ~kind ~file_path =
   let abs =
     if Filename.is_relative file_path
@@ -618,6 +683,51 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
      [(repo_id, rel)] pair, then look up the repository's URL by id.
      This makes the sandbox/working-tree join work without forcing the
      operator to also register every playground clone path. *)
+  let git_attributed =
+    if Feature_flag_registry.get_bool "MASC_KEEPER_ATTRIBUTION_BY_GIT"
+    then git_attribution ~base_dir ~abs
+    else None
+  in
+  match git_attributed with
+  | Some (Error detail) ->
+    (* git could not answer. The path is inside a playground, so the
+       reverse-parse would be guessing at a layout the system no longer
+       creates; report it rather than falling through to a different
+       mechanism whose answer would be indistinguishable. *)
+    Log.Keeper.warn "write attribution by git failed path=%s error=%s" abs detail;
+    bump_orphan ~reason:"git_attribution_failed";
+    (Agent_observation.Base_unresolved, file_path)
+  | Some (Ok (checkout_root, origin)) ->
+    (* [git rev-parse --show-toplevel] returns a realpath, so the write path
+       has to be resolved the same way before they can be compared — on macOS
+       a temp dir is /var/... to the caller and /private/var/... to git. The
+       file itself may not exist yet, so only its directory is resolved. *)
+    let resolved_abs =
+      let dir = Filename.dirname abs in
+      match Unix.realpath dir with
+      | real_dir -> Filename.concat real_dir (Filename.basename abs)
+      | exception Unix.Unix_error _ -> abs
+    in
+    let rel =
+      Option.value (path_relative_to ~root:checkout_root resolved_abs) ~default:file_path
+    in
+    (match Agent_observation.canonical_url_of_remote origin with
+     | Some slug -> (Agent_observation.By_url slug, rel)
+     | None ->
+       (* A checkout cloned from another local checkout has a filesystem path
+          as its origin, which canonicalisation rejects. Measured live:
+          code-reviewer/repos/masc/review-pr-28304 points at the operator tree.
+          The registered catalog can still name it. *)
+       (match Repo_store.find_repo_by_path_prefix ~base_path:base_dir origin with
+        | Ok (Some (repo, _)) ->
+          resolve_by_url
+            ~rel
+            ~repo_url:repo.url
+            ~orphan_reasons:("git_local_origin_unparseable", "git_local_origin_blank")
+        | Ok None | Error _ ->
+          bump_orphan ~reason:"git_origin_not_canonical";
+          (Agent_observation.No_canonical_url, file_path)))
+  | None ->
   match
     Playground_paths.parse_playground_repo_path ~base_path:base_dir ~abs_path:abs
   with

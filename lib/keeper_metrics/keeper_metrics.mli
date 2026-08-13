@@ -65,6 +65,7 @@ type t =
   | CrashPersistenceFailures
   | KeepaliveSignalFailures
   | BoardSignalRoutedTotal
+  | BoardSignalCursorDeferredTotal
   | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal

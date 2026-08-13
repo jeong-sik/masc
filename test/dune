@@ -2026,6 +2026,12 @@
 
 (include stanzas/test_keeper_keepalive_helpers.inc)
 
+(test
+ (name test_keeper_board_discoverable_cursor)
+ (libraries
+  masc_test_deps masc masc.config masc.keeper_metrics masc.keeper_runtime
+  masc_workspace masc_types masc.keeper_registry alcotest eio eio_main unix))
+
 (include stanzas/test_sse_retry_ssot.inc)
 
 (include stanzas/test_sse_storm_e2e.inc)

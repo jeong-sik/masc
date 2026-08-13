@@ -69,6 +69,9 @@ val effective_keepalive_meta :
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.addressed_board_signal -> unit
+(** Addressed signals are durably routed immediately. Discoverable posts are
+    left to the existing per-Keeper durable Board cursor because they have no
+    immediate wake target. *)
 
 (** Fork the Board-attention judgment worker as a sibling of the heartbeat
     loop on the same Keeper lane switch. Both lane-start paths call this, so

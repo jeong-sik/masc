@@ -4,24 +4,42 @@ include Keeper_types_profile_defaults
 include Keeper_types_profile_toml_normalizers
 include Keeper_types_profile_agent_core_env
 
-let keeper_toml_field_names =
-  [ "name"
-  ; "instructions"
-  ; "autonomous_wake_prompt"
-  ; "autoboot_enabled"
-  ; "mention_targets"
-  ; "proactive_enabled"
-  ; "allowed_paths"
-  ; "sandbox_profile"
-  ; "sandbox_image"
-  ; "network_mode"
-  ; "multimodal_policy"
-  ; "active_goal_ids"
-  ; "max_context_override"
-  ; "telemetry_feedback_enabled"
-  ; "telemetry_feedback_window_hours"
-  ; "always_allow"
+type keeper_toml_field_kind =
+  | Field_string
+  | Field_bool
+  | Field_int
+  | Field_string_array
+
+(* One list carries both what a keeper TOML key may be called and what it may
+   hold. [detect_unknown_keeper_toml_keys] reads the names and
+   [validate_known_keeper_field_types] reads the kinds, so a key cannot be
+   accepted as known while having no declared type.
+
+   That combination is what makes the loader's conflation reachable: for a key
+   nothing type-checks, [Keeper_toml_loader.toml_string_list] returns [[]] and
+   [toml_bool_opt] returns [None] for a wrong-typed value exactly as they do
+   for an absent one, and the profile keeps a default the file did not ask for
+   (#26622). Declaring the kind here is what keeps that unreachable. *)
+let keeper_toml_fields =
+  [ "name", Field_string
+  ; "instructions", Field_string
+  ; "autonomous_wake_prompt", Field_string
+  ; "autoboot_enabled", Field_bool
+  ; "mention_targets", Field_string_array
+  ; "proactive_enabled", Field_bool
+  ; "allowed_paths", Field_string_array
+  ; "sandbox_profile", Field_string
+  ; "sandbox_image", Field_string
+  ; "network_mode", Field_string
+  ; "multimodal_policy", Field_string
+  ; "active_goal_ids", Field_string_array
+  ; "max_context_override", Field_int
+  ; "telemetry_feedback_enabled", Field_bool
+  ; "telemetry_feedback_window_hours", Field_int
+  ; "always_allow", Field_bool
   ]
+
+let keeper_toml_field_names = List.map fst keeper_toml_fields
 
 let canonical_keeper_toml_key_names = keeper_toml_field_names
 
@@ -57,35 +75,24 @@ let toml_value_kind = function
   | Keeper_toml_loader.Toml_local_time _ -> "local time"
 ;;
 
+let keeper_toml_field_kind_expectation = function
+  | Field_string ->
+    "string", (function Keeper_toml_loader.Toml_string _ -> true | _ -> false)
+  | Field_bool ->
+    "boolean", (function Keeper_toml_loader.Toml_bool _ -> true | _ -> false)
+  | Field_int ->
+    "integer", (function Keeper_toml_loader.Toml_int _ -> true | _ -> false)
+  | Field_string_array ->
+    ( "string array"
+    , function Keeper_toml_loader.Toml_string_array _ -> true | _ -> false )
+;;
+
 let validate_known_keeper_field_types doc =
-  let string_fields =
-    [ "name"; "instructions"; "autonomous_wake_prompt"; "sandbox_profile"
-    ; "sandbox_image"; "network_mode"; "multimodal_policy" ]
-  in
-  let bool_fields =
-    [ "autoboot_enabled"; "proactive_enabled"; "telemetry_feedback_enabled"
-    ; "always_allow" ]
-  in
-  let int_fields =
-    [ "max_context_override"; "telemetry_feedback_window_hours" ]
-  in
-  let string_array_fields =
-    [ "mention_targets"; "allowed_paths"; "active_goal_ids" ]
-  in
   let expected key =
     let bare_key = String.sub key 7 (String.length key - 7) in
-    if List.mem bare_key string_fields
-    then Some ("string", function Keeper_toml_loader.Toml_string _ -> true | _ -> false)
-    else if List.mem bare_key bool_fields
-    then Some ("boolean", function Keeper_toml_loader.Toml_bool _ -> true | _ -> false)
-    else if List.mem bare_key int_fields
-    then Some ("integer", function Keeper_toml_loader.Toml_int _ -> true | _ -> false)
-    else if List.mem bare_key string_array_fields
-    then
-      Some
-        ( "string array"
-        , function Keeper_toml_loader.Toml_string_array _ -> true | _ -> false )
-    else None
+    Option.map
+      keeper_toml_field_kind_expectation
+      (List.assoc_opt bare_key keeper_toml_fields)
   in
   doc
   |> List.find_map (fun (key, value) ->

@@ -1705,16 +1705,15 @@ let add_routes ~sw ~clock router =
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  (* Schedule projection, served by its owner. Previously reachable only as a
-     nested field of /api/v1/dashboard/tools, which made a surface that needs
-     schedule state fetch the whole tool inventory. No cache: the owner reads a
-     single ledger file, and a TTL here would be staler than what the tools
-     snapshot used to provide. *)
+  (* Schedule projection, served by its owner. The no-query aggregate keeps its
+     shared live cache; an exact schedule_id lookup reads the same ledger and
+     row encoder without adding a client-controlled cache key. *)
   |> Http.Router.get "/api/v1/dashboard/scheduled-automation" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
-           Server_dashboard_http.dashboard_scheduled_automation_http_json
+           Server_dashboard_http.dashboard_scheduled_automation_query_http_json
              ~config:(Mcp_server.workspace_config state)
+             req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

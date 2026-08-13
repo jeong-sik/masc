@@ -834,6 +834,33 @@ let schedule_live_supported_non_terminal_evidence_json schedules =
     ]
 ;;
 
+let schedule_request_rows_dashboard_json ~config ~now state request_rows =
+  let request_rows_with_wakes =
+    List.map
+      (fun (request : Schedule_domain.schedule_request) ->
+         let last_wake =
+           Schedule_store.last_wake_for_schedule_instance state
+             ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
+             ~schedule_id:request.Schedule_domain.schedule_id
+         in
+         request, last_wake)
+      request_rows
+  in
+  let evidence_snapshot =
+    schedule_evidence_snapshot
+      ~config
+      (List.map snd request_rows_with_wakes)
+  in
+  List.map
+    (fun (request, last_wake) ->
+       schedule_request_dashboard_json
+         ~now
+         ~evidence_snapshot
+         ?last_wake
+         request)
+    request_rows_with_wakes
+;;
+
 let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
   (* Read-only projection; the schedule store remains the status SSOT. *)
   let now = Unix.gettimeofday () in
@@ -901,21 +928,8 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
         | _ -> String.compare left.schedule_id right.schedule_id)
     in
     let request_rows = take schedule_projection_request_limit sorted in
-    let request_rows_with_wakes =
-      List.map
-        (fun (request : Schedule_domain.schedule_request) ->
-           let last_wake =
-             Schedule_store.last_wake_for_schedule_instance state
-               ~schedule_instance_id:request.Schedule_domain.schedule_instance_id
-               ~schedule_id:request.Schedule_domain.schedule_id
-           in
-           request, last_wake)
-        request_rows
-    in
-    let evidence_snapshot =
-      schedule_evidence_snapshot
-        ~config
-        (List.map snd request_rows_with_wakes)
+    let request_jsons =
+      schedule_request_rows_dashboard_json ~config ~now state request_rows
     in
     `Assoc
       (base_fields
@@ -936,15 +950,74 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
                ; "terminal_count", `Int terminal_count
                ; "next_due_at", unix_iso_option_json (schedule_next_due_at schedules)
                ] )
-         ; ( "requests"
-           , `List
-               (List.map
-                  (fun (request, last_wake) ->
-                     schedule_request_dashboard_json
-                       ~now
-                       ~evidence_snapshot
-                       ?last_wake
-                       request)
-                  request_rows_with_wakes) )
+         ; "requests", `List request_jsons
          ])
+;;
+
+type exact_lookup_status =
+  | Found
+  | Not_found
+  | Unavailable
+  | Invalid_id
+
+let exact_lookup_status_to_string = function
+  | Found -> "found"
+  | Not_found -> "not_found"
+  | Unavailable -> "unavailable"
+  | Invalid_id -> "invalid_id"
+;;
+
+let exact_lookup_json ~schedule_id status fields =
+  `Assoc
+    ([ "schema", `String "masc.dashboard.scheduled_automation.lookup.v1"
+     ; "source", `String "schedule_store"
+     ; "generated_at", `String (Masc_domain.now_iso ())
+     ; "status", `String (exact_lookup_status_to_string status)
+     ; "schedule_id", `String schedule_id
+     ]
+     @ fields)
+;;
+
+let scheduled_automation_exact_lookup_json config ~schedule_id:raw_schedule_id =
+  if String.trim raw_schedule_id = ""
+  then
+    exact_lookup_json
+      ~schedule_id:raw_schedule_id
+      Invalid_id
+      [ "reason", `String "schedule_id must be non-empty" ]
+  else
+    let schedule_id = raw_schedule_id in
+    (match Schedule_store.read_state_result config with
+     | Error err ->
+       let reason =
+         "schedule store read failed: " ^ Schedule_store.read_error_to_string err
+       in
+       exact_lookup_json
+         ~schedule_id
+         Unavailable
+         [ "reason", `String reason ]
+     | Ok state ->
+       (match
+          List.find_opt
+            (fun (request : Schedule_domain.schedule_request) ->
+               String.equal request.schedule_id schedule_id)
+            state.schedules
+        with
+        | None -> exact_lookup_json ~schedule_id Not_found []
+        | Some request ->
+          let requests =
+            schedule_request_rows_dashboard_json
+              ~config
+              ~now:(Unix.gettimeofday ())
+              state
+              [ request ]
+          in
+          (match requests with
+           | [ request_json ] ->
+             exact_lookup_json ~schedule_id Found [ "request", request_json ]
+           | [] | _ :: _ :: _ ->
+             exact_lookup_json
+               ~schedule_id
+               Unavailable
+               [ "reason", `String "exact schedule projection cardinality mismatch" ])))
 ;;

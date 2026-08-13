@@ -283,8 +283,8 @@ let dashboard_proof_compute ~config ~limit () : Yojson.Safe.t =
 
    [live_cache_ttl_s] is the 30 s tier documented for "frequently-changing data
    such as active keeper state" — schedule state belongs there rather than in
-   the 120 s projection tier. The response takes no query parameters, so
-   base_path is the whole key. *)
+   the 120 s projection tier. The aggregate response takes no selectors, so
+   base_path is the whole key. Exact lookups bypass this aggregate cache below. *)
 let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
   Yojson.Safe.t
   =
@@ -301,6 +301,20 @@ let dashboard_scheduled_automation_http_json ~(config : Workspace.config) :
       Domain_pool_ref.submit_io_or_inline (fun () ->
         Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
           config))
+;;
+
+let dashboard_scheduled_automation_query_http_json
+  ~(config : Workspace.config)
+  (request : Httpun.Request.t)
+  : Yojson.Safe.t
+  =
+  match Server_utils.query_param request "schedule_id" with
+  | None -> dashboard_scheduled_automation_http_json ~config
+  | Some schedule_id ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+        config
+        ~schedule_id)
 ;;
 
 let dashboard_proof_http_json ~config request : Yojson.Safe.t =

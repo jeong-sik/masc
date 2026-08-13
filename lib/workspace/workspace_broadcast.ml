@@ -6,7 +6,11 @@
 open Masc_domain
 open Workspace_utils
 
-exception Broadcast_not_persisted of string
+type broadcast_error = Broadcast_not_persisted of string
+
+let broadcast_error_to_string = function
+  | Broadcast_not_persisted detail -> detail
+;;
 
 type broadcast_delivery =
   { request_id : string
@@ -65,6 +69,8 @@ let on_broadcast_mention : mention_handler Atomic.t =
 
 let set_on_broadcast_mention handler =
   Atomic.set on_broadcast_mention handler
+
+let write_json_commit = Atomic.make write_json_commit_result
 
 let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~content =
   let started_at = Time_compat.now () in
@@ -165,13 +171,12 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
     ; msg_type = safe_msg_type
     }
   in
-  (match write_json_commit_result config msg_file (message_to_yojson msg) with
+  (match (Atomic.get write_json_commit) config msg_file (message_to_yojson msg) with
    | Error message ->
      Log.Misc.error
        "workspace broadcast authoritative write failed request_id=%s seq=%d: %s"
        request_id seq message;
-     observe safe_msg_type;
-     raise (Broadcast_not_persisted message)
+     Error (Broadcast_not_persisted message)
    | Ok { mirror_error } ->
      Option.iter
        (fun message ->
@@ -197,9 +202,11 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
         Log.Misc.warn "on_broadcast_mention callback failed: %s"
           (Printexc.to_string exn));
      observe safe_msg_type;
-     delivery)
+     Ok delivery)
 
 module For_testing = struct
   let replace_on_broadcast_mention handler =
     Atomic.exchange on_broadcast_mention handler
+
+  let replace_write_json_commit handler = Atomic.exchange write_json_commit handler
 end

@@ -48,21 +48,19 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   else
     let trace_context = Otel_trace_context.from_ambient () in
     let delivery =
-      try
-        Ok
-          (Workspace.broadcast ?trace_context config
-             ~from_agent:agent_name ~content:message)
-      with
-      | Workspace_broadcast.Broadcast_not_persisted detail -> Error detail
+      Workspace.broadcast ?trace_context config
+        ~from_agent:agent_name ~content:message
     in
     match delivery with
-    | Error detail ->
+    | Error error ->
       Some
         (Tool_result.error
            ~failure_class:Tool_result.Runtime_failure
            ~tool_name
            ~start_time
-           (Printf.sprintf "Broadcast was not persisted: %s" detail))
+           (Printf.sprintf
+              "Broadcast was not persisted: %s"
+              (Workspace.broadcast_error_to_string error)))
     | Ok delivery ->
       let from_agent = delivery.from_agent in
       let mention = delivery.mention in

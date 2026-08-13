@@ -26,6 +26,8 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
            "runtime resolved projection invariant violated: runtime %S has no max-context resolution"
            rt.id)
   in
+  (* TEL-OK: read-only projection into the response document; the boot path is
+     where a blocked runtime is logged. *)
   let dispatch_blocker =
     Runtime.keeper_dispatch_blocker (Runtime.keeper_dispatch_readiness rt)
   in

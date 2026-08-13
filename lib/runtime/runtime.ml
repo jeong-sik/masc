@@ -586,6 +586,8 @@ type keeper_dispatch_readiness =
   | Dispatchable
   | Missing_request_body_cap of { table_path : string }
 
+(* TEL-OK: pure predicate over an already-materialized runtime; the boot logger
+   and the resolved projection own its observability. *)
 let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
   (* Only Agent_core is judged, because only Agent_core builds the request whose
      size this bounds. An official-client turn hands its conversation to a
@@ -606,6 +608,7 @@ let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
   | Runtime_execution.Antigravity_cli _ -> Dispatchable
 ;;
 
+(* TEL-OK: pure rendering of the variant above; callers decide where it lands. *)
 let keeper_dispatch_blocker = function
   | Dispatchable -> None
   | Missing_request_body_cap { table_path } ->
@@ -616,7 +619,8 @@ let keeper_dispatch_blocker = function
 ;;
 
 (* Every materialized runtime a keeper could not be assigned to, in declaration
-   order, paired with the reason. Empty is the healthy state. *)
+   order, paired with the reason. Empty is the healthy state.
+   TEL-OK: pure filter; the boot path logs one line per entry it returns. *)
 let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
   List.filter_map
     (fun runtime ->

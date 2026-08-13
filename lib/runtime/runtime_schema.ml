@@ -108,6 +108,14 @@ type thinking_control_format =
   | Enable_thinking
 [@@deriving show, eq]
 
+type reasoning_streaming_format =
+  Llm_provider.Capabilities.reasoning_streaming_format =
+  | Default_reasoning_streaming
+  | No_reasoning_streaming
+  | Delta_reasoning_field of string
+  | Template_reasoning_streaming
+[@@deriving show, eq]
+
 (** Per-model capabilities, mirroring AGENT_CORE [Llm_provider.Capabilities] for the
     fields callers branch on. Fields already present on {!model_spec}
     ([tools_support]/[thinking_support]/[max_context]/[streaming]) are not
@@ -120,7 +128,10 @@ type model_capabilities =
   ; supports_parallel_tool_calls : bool
   ; supports_extended_thinking : bool
   ; supports_reasoning_budget : bool
+  ; declared_supports_reasoning_budget : bool option
   ; thinking_control_format : thinking_control_format
+  ; declared_thinking_control_format : thinking_control_format option
+  ; reasoning_streaming_format : reasoning_streaming_format option
   ; supports_image_input : bool
   ; supports_audio_input : bool
   ; supports_video_input : bool
@@ -149,7 +160,10 @@ let model_capabilities_default =
   ; supports_parallel_tool_calls = false
   ; supports_extended_thinking = false
   ; supports_reasoning_budget = false
+  ; declared_supports_reasoning_budget = None
   ; thinking_control_format = No_thinking_control
+  ; declared_thinking_control_format = None
+  ; reasoning_streaming_format = None
   ; supports_image_input = false
   ; supports_audio_input = false
   ; supports_video_input = false

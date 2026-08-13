@@ -322,10 +322,15 @@ let assert_ollama_cloud_seed_runtime runtimes case =
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
-       let expected_thinking_format =
-         if case.thinking
-         then Runtime_schema.Reasoning_effort
-         else Runtime_schema.No_thinking_control
+       let expected_reasoning_budget, expected_thinking_format =
+         match case.runtime_id with
+         | "ollama_cloud.ollama-cloud-qwen3-5-397b" ->
+           false, Runtime_schema.No_thinking_control
+         | _ ->
+           ( case.thinking
+           , if case.thinking
+             then Runtime_schema.Reasoning_effort
+             else Runtime_schema.No_thinking_control )
        in
        check bool (case.runtime_id ^ " forced tool_choice disabled") false
          caps.supports_tool_choice;
@@ -335,7 +340,7 @@ let assert_ollama_cloud_seed_runtime runtimes case =
          caps.supports_multimodal_inputs;
        check bool (case.runtime_id ^ " extended thinking") case.thinking
          caps.supports_extended_thinking;
-       check bool (case.runtime_id ^ " reasoning budget") case.thinking
+       check bool (case.runtime_id ^ " reasoning budget") expected_reasoning_budget
          caps.supports_reasoning_budget;
        check bool (case.runtime_id ^ " thinking control") true
          (Runtime_schema.equal_thinking_control_format

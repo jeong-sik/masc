@@ -98,10 +98,22 @@ type heartbeat_event_intake = {
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store and logs only after consumption is known.
     A transient Board read returns [Stimulus_retry_later] without incrementing
-    the consumed counter. *)
+    the consumed counter.
+
+    [?connector_attention_items] (RFC-0377 P1-1): for a [Connector_attention]
+    stimulus, a preloaded (event_id, item) association to resolve [stim]'s
+    recorded item from instead of a fresh
+    {!Keeper_external_attention.load_events} scan. The caller supplies this
+    when consuming a batch of Connector_attention stimuli (the primary plus
+    same-conversation companions) so the whole batch costs one scan
+    ({!Keeper_external_attention.recorded_items_by_event_ids}) rather than
+    one scan per stimulus. Omitted (or [None]), this falls back to the
+    original one-id-at-a-time lookup — unchanged for every non-batched
+    call. Ignored for every other payload kind. *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta
+  -> ?connector_attention_items:(string * Keeper_external_attention.item) list
   -> Keeper_event_queue.stimulus
   -> stimulus_intake_result
 

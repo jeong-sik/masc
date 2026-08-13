@@ -168,6 +168,26 @@ type connector_attention_outcome =
   | Attention_resolved
   | Attention_ignored
 
+type batch_disposition =
+  | Batch_ack_completed of
+      { connector_attention_outcome : connector_attention_outcome }
+  | Batch_quarantine of { detail : string }
+  | Batch_defer of { reason : string }
+  | Batch_no_action
+
+val batch_disposition_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
+(** RFC-0377: the single queue action ([Batch_ack_completed] /
+    [Batch_quarantine] / [Batch_defer] / [Batch_no_action]) a turn's
+    [cycle_outcome] implies for every stimulus admitted into that turn — the
+    primary selection plus any Connector_attention batch companions. The
+    caller applies the returned action uniformly to every admitted
+    selection ([List.for_all]/[List.iter] over
+    [heartbeat_event_intake.consumed_selections]); this function decides
+    only *what* to do, never *to which* selection, so a batch of any size
+    shares one disposition by construction. Pure: composes the route ->
+    [connector_attention_outcome] mapping with {!failed_source_disposition},
+    both already pure. *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

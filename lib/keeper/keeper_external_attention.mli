@@ -155,6 +155,21 @@ val load_events_result :
 
 val load_events : base_path:string -> keeper_name:string -> event list
 
+val recorded_items_by_event_ids :
+  base_path:string -> keeper_name:string -> event_ids:string list ->
+  (string * item) list
+(** One-scan batch counterpart to [load_events] +
+    per-id [Recorded] lookup: loads the event log exactly once, then
+    resolves every id in [event_ids] against that one in-memory load
+    (first [Recorded] match per id, same semantics as looking each id up
+    individually). An id with no [Recorded] entry is simply absent from
+    the result; the returned pairs preserve [event_ids]' order. Calling
+    [load_events] once per id here is the same O(file)-per-call trap the
+    [dedup_window_bytes] comment above documents for [record]'s dedup
+    scan — this is the read-side counterpart, for RFC-0377's turn-batched
+    Connector_attention intake (N companions must not cost N full-file
+    reads). *)
+
 val load_recent_evidence_events :
   base_path:string -> keeper_name:string -> event list
 (** Read a bounded recent tail sized for prompt evidence rather than connector

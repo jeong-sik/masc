@@ -55,6 +55,58 @@ let enqueue_exn ~base_path keeper_name source =
   | Error detail -> failf "durable enqueue failed: %s" detail
 ;;
 
+(* --- cycle_outcome fixtures for Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome ---
+
+   These build the minimum valid [Keeper_heartbeat_loop_cycle.cycle_outcome]
+   payload for each branch under test. [Manual_compaction_failed] /
+   [Manual_compaction_not_applied] / [Manual_compaction_applied] are not
+   fixture-built here: [batch_disposition_of_cycle_outcome]'s arms for them
+   ignore their payload entirely (always Batch_quarantine / Batch_ack_completed
+   regardless of failure/receipt detail), and their payload types nest deep
+   unrelated fixtures (checkpoint installation, post-install lifecycle) with
+   no additional signal for what this suite is pinning. Exhaustiveness is the
+   guard for those three arms, not a fixture test. *)
+
+let completed_outcome ~addressed meta : Keeper_heartbeat_loop_cycle.cycle_outcome =
+  Keeper_heartbeat_loop_cycle.Completed
+    { meta
+    ; continuation_route =
+        (if addressed
+         then Keeper_unified_turn.Continuation_route_addressed
+         else Keeper_unified_turn.Continuation_route_not_addressed)
+    }
+;;
+
+let failed_outcome ~source_disposition ~route ~deferred_runtime_lane meta
+  : Keeper_heartbeat_loop_cycle.cycle_outcome
+  =
+  Keeper_heartbeat_loop_cycle.Failed
+    { meta
+    ; failure =
+        { Keeper_unified_turn.error = Agent_core.Error.Internal "test fixture"
+        ; runtime_id = "test-runtime"
+        ; route
+        ; source_disposition
+        ; deferred_runtime_lane
+        }
+    }
+;;
+
+let transient_retry_route =
+  Keeper_runtime_failure_route.Retry_after_observed
+    { retry_class = Keeper_runtime_failure_route.Network_transient
+    ; retry_after = None
+    }
+;;
+
+let deterministic_route ~detail =
+  Keeper_runtime_failure_route.Exhausted_visible_alive
+    { terminal = Keeper_runtime_failure_route.Deterministic_request
+    ; provenance = Keeper_runtime_failure_route.Agent_core_api_error
+    ; detail
+    }
+;;
+
 let discord_surface ~channel_id =
   A.Discord
     { guild_id = Some "guild-batch"
@@ -192,6 +244,89 @@ let with_ctx keeper_name f =
   f ~base_path ~keeper_name ~meta ~ctx
 ;;
 
+(* Adversarial review P1-2: the turn-completion/failure batch disposition
+   was inline in keeper_heartbeat_loop.ml's closure, reachable only through
+   the full Eio ctx + durable registry harness — a regression from
+   per-selection disposition back to primary-only would still pass every
+   selection/consumption test in this file, because none of them drove the
+   actual decision function. Now that the decision is the pure
+   [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome], pin its
+   branches directly: no queue, no Eio, no registry. *)
+let test_batch_disposition_of_cycle_outcome_pure_branches () =
+  let meta = test_meta "batch-disposition-pure" in
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some (completed_outcome ~addressed:true meta))
+   with
+   | Keeper_heartbeat_loop.Batch_ack_completed
+       { connector_attention_outcome = Keeper_heartbeat_loop.Attention_resolved }
+     -> ()
+   | _ ->
+     fail "Completed + addressed route must drive Batch_ack_completed/Attention_resolved");
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some (completed_outcome ~addressed:false meta))
+   with
+   | Keeper_heartbeat_loop.Batch_ack_completed
+       { connector_attention_outcome = Keeper_heartbeat_loop.Attention_ignored }
+     -> ()
+   | _ ->
+     fail
+       "Completed + not-addressed route must drive Batch_ack_completed/Attention_ignored");
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some
+          (failed_outcome
+             ~source_disposition:Keeper_unified_turn.Follow_failure_route
+             ~route:transient_retry_route
+             ~deferred_runtime_lane:None
+             meta))
+   with
+   | Keeper_heartbeat_loop.Batch_defer { reason = "transient_turn_failure" } -> ()
+   | _ ->
+     fail
+       "a transient retry route with no deferred lane must drive \
+        Batch_defer \"transient_turn_failure\"");
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some
+          (failed_outcome
+             ~source_disposition:Keeper_unified_turn.Follow_failure_route
+             ~route:(deterministic_route ~detail:"deterministic rejection")
+             ~deferred_runtime_lane:None
+             meta))
+   with
+   | Keeper_heartbeat_loop.Batch_quarantine { detail = "deterministic rejection" } -> ()
+   | _ ->
+     fail
+       "a deterministic-rejection route with no deferred lane must drive \
+        Batch_quarantine with the route's detail");
+  (match
+     Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+       (Some
+          (failed_outcome
+             ~source_disposition:
+               (Keeper_unified_turn.Pause_after_transcript_corruption
+                  { detail = "corrupt transcript" })
+             ~route:transient_retry_route
+             ~deferred_runtime_lane:None
+             meta))
+   with
+   | Keeper_heartbeat_loop.Batch_no_action -> ()
+   | _ -> fail "transcript-corruption pause must drive Batch_no_action, not ack/defer/quarantine");
+  List.iter
+    (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
+       match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with
+       | Keeper_heartbeat_loop.Batch_no_action -> ()
+       | _ -> fail "a non-terminal or absent cycle outcome must drive Batch_no_action")
+    [ None
+    ; Some (Keeper_heartbeat_loop_cycle.Checkpointed meta)
+    ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
+    ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
+    ; Some (Keeper_heartbeat_loop_cycle.Skipped meta)
+    ]
+;;
+
 (* RFC-0377 S5.1: channel A has 3 pending Connector_attention + channel B
    has 2, interleaved on the queue (A1, B1, A2, B2, A3) so the batch filter
    must select past channel B's entries, not just take a prefix. One intake
@@ -314,14 +449,19 @@ let test_batch_skips_a_non_connector_entry_between_matches () =
          (Q.to_list queued)))
 ;;
 
-(* RFC-0377 S5.2: batch admitted, then the turn fails. The disposition
-   [keeper_heartbeat_loop.ml] applies on a transient turn failure
-   ([Defer_to_queue_tail]) must run over every entry in
+(* RFC-0377 S5.2: batch admitted, then the turn fails with a transient
+   provider failure. Unlike the earlier version of this test (which
+   assumed [Defer_to_queue_tail] and drove [defer_pending_result]
+   directly), the disposition here comes from a REAL
+   [Keeper_heartbeat_loop_cycle.cycle_outcome] fixture through
+   [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome] — the exact
+   function [keeper_heartbeat_loop.ml] now calls. A regression in that
+   function (e.g. reverting to primary-only, or a match-arm mistake) fails
+   this test even though nothing here re-implements the loop's own control
+   flow (adversarial review P1-2). The action must run over every entry in
    [consumed_selections], not only the primary, or a companion is silently
    stranded — acked by nobody, deferred by nobody, yet also never retried
-   because it no longer looks "new". This pins: applying that exact
-   disposition to the whole batch loses nothing (no partial ack) and every
-   member is independently re-selectable afterward. *)
+   because it no longer looks "new". *)
 let test_batch_turn_failure_leaves_every_member_queued () =
   with_ctx "connector-batch-failure" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let a1 =
@@ -346,22 +486,40 @@ let test_batch_turn_failure_leaves_every_member_queued () =
     check int "all 3 admitted as one batch" 3 intake.consumed_stimulus_count;
     check int "consumed_selections mirrors the batch" 3
       (List.length intake.consumed_selections);
-    (* Simulate the [Defer_to_queue_tail] failure disposition
-       [keeper_heartbeat_loop.ml] now applies to every [consumed_selections]
-       member on a transient turn failure (RFC-0377): nothing is acked,
-       every member is deferred to the tail of its urgency lane. *)
-    List.iter
-      (fun (selection : Keeper_event_queue_state.pending_selection) ->
-         match
-           Keeper_registry_event_queue.defer_pending_result
-             ~base_path
-             keeper_name
-             ~selection
-         with
-         | Ok _ -> ()
-         | Error detail ->
-           failf "defer failed for %s: %s" selection.source.Q.post_id detail)
-      intake.consumed_selections;
+    let failed_cycle_outcome =
+      failed_outcome
+        ~source_disposition:Keeper_unified_turn.Follow_failure_route
+        ~route:transient_retry_route
+        ~deferred_runtime_lane:None
+        meta
+    in
+    (match
+       Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+         (Some failed_cycle_outcome)
+     with
+     | Keeper_heartbeat_loop.Batch_defer { reason } ->
+       (* This is the loop's own application step (List.iter over
+          consumed_selections), reproduced here only because
+          defer_selection_to_queue_tail itself is a private closure inside
+          run_keepalive_turn — the DECISION under test already came from
+          the real function above. *)
+       List.iter
+         (fun (selection : Keeper_event_queue_state.pending_selection) ->
+            match
+              Keeper_registry_event_queue.defer_pending_result
+                ~base_path
+                keeper_name
+                ~selection
+            with
+            | Ok _ -> ()
+            | Error detail ->
+              failf "defer failed for %s: %s" selection.source.Q.post_id detail)
+         intake.consumed_selections;
+       check string "deferred for the expected reason" "transient_turn_failure" reason
+     | Keeper_heartbeat_loop.Batch_ack_completed _
+     | Keeper_heartbeat_loop.Batch_quarantine _
+     | Keeper_heartbeat_loop.Batch_no_action ->
+       fail "the transient-failure fixture must drive Batch_defer");
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
       | Ok queue -> queue
@@ -374,6 +532,73 @@ let test_batch_turn_failure_leaves_every_member_queued () =
       "no partial ack: the exact same 3 events remain, none dropped"
       (List.sort String.compare [ a1.Q.post_id; a2.Q.post_id; a3.Q.post_id ])
       (connector_event_ids_of_queue queued))
+;;
+
+(* RFC-0377: the completion counterpart to the failure test above — batch
+   admitted, then the turn completes. This is genuinely new coverage: no
+   prior test in this suite exercised the completion-ack path at all.
+   Drives the same real [batch_disposition_of_cycle_outcome] function,
+   then applies its [Batch_ack_completed] action to every
+   [consumed_selections] member the way [remove_completed_selections]
+   does (List.for_all over terminalize_completed_selection), proving a
+   turn completion acks the WHOLE admitted batch, not only the primary. *)
+let test_batch_completion_acks_every_member () =
+  with_ctx "connector-batch-completion" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let a1 =
+      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"chan-A"
+        ~message_id:"a1" ~arrived_at:1.0 ~content:"MARK-DONE-1"
+    in
+    let a2 =
+      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"chan-A"
+        ~message_id:"a2" ~arrived_at:2.0 ~content:"MARK-DONE-2"
+    in
+    let a3 =
+      connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"chan-A"
+        ~message_id:"a3" ~arrived_at:3.0 ~content:"MARK-DONE-3"
+    in
+    List.iter (enqueue_exn ~base_path keeper_name) [ a1; a2; a3 ];
+    let intake =
+      Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx
+        ~meta_after_triage:meta
+        ~pending_board_events:[]
+    in
+    check int "all 3 admitted as one batch" 3 intake.consumed_stimulus_count;
+    check int "consumed_selections mirrors the batch" 3
+      (List.length intake.consumed_selections);
+    (match
+       Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
+         (Some (completed_outcome ~addressed:true meta))
+     with
+     | Keeper_heartbeat_loop.Batch_ack_completed _ ->
+       let acked =
+         List.for_all
+           (fun (selection : Keeper_event_queue_state.pending_selection) ->
+              match
+                Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+                  ~base_path
+                  keeper_name
+                  ~current_owner_nonce:meta.Keeper_meta_contract.runtime.nonce
+                  ~applied_at:1000.0
+                  ~selection
+              with
+              | Ok _ -> true
+              | Error detail ->
+                failf "ack failed for %s: %s" selection.source.Q.post_id detail)
+           intake.consumed_selections
+       in
+       check bool "every batch member acks cleanly" true acked
+     | Keeper_heartbeat_loop.Batch_quarantine _
+     | Keeper_heartbeat_loop.Batch_defer _
+     | Keeper_heartbeat_loop.Batch_no_action ->
+       fail "a completed, addressed outcome must drive Batch_ack_completed");
+    let queued =
+      match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+      | Ok queue -> queue
+      | Error detail -> failf "queue reload failed: %s" detail
+    in
+    check int "turn completion acks all 3 batch members: none remain queued" 0
+      (Q.length queued))
 ;;
 
 let () =
@@ -393,6 +618,16 @@ let () =
             "turn failure defers the whole batch: no partial ack"
             `Quick
             test_batch_turn_failure_leaves_every_member_queued
+        ; test_case
+            "turn completion acks every batch member, not only the primary"
+            `Quick
+            test_batch_completion_acks_every_member
+        ] )
+    ; ( "batch_disposition_of_cycle_outcome (P1-2)"
+      , [ test_case
+            "pins every branch of the pure disposition function"
+            `Quick
+            test_batch_disposition_of_cycle_outcome_pure_branches
         ] )
     ]
 ;;

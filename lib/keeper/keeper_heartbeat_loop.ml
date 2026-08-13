@@ -341,6 +341,59 @@ let failed_source_disposition
            | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail)))
 ;;
 
+(* RFC-0377 batch disposition: the queue action a turn outcome implies for
+   every stimulus admitted into that turn (the primary plus any
+   Connector_attention companions), extracted as a pure function of
+   [cycle_outcome] alone. Before this extraction the decision lived inline
+   in [run_keepalive_turn]'s closure, reachable only through the full Eio
+   ctx + durable-registry harness, so a regression from "ack the whole
+   batch" back to "ack only the primary" would still pass every existing
+   test (nothing exercised the decision directly — see
+   test_keeper_connector_attention_batch_disposition.ml). One turn always
+   produces one disposition applied uniformly to every admitted selection:
+   the outcome is a property of the turn, not of any individual stimulus. *)
+type batch_disposition =
+  | Batch_ack_completed of
+      { connector_attention_outcome : connector_attention_outcome }
+  | Batch_quarantine of { detail : string }
+  | Batch_defer of { reason : string }
+  | Batch_no_action
+
+let batch_disposition_of_cycle_outcome
+      (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
+  : batch_disposition
+  =
+  match cycle_outcome with
+  | Some (Cycle.Completed completion) ->
+    Batch_ack_completed
+      { connector_attention_outcome =
+          connector_attention_outcome_of_route completion.continuation_route
+      }
+  | Some (Cycle.Manual_compaction_applied _) ->
+    Batch_ack_completed { connector_attention_outcome = Attention_ignored }
+  | Some (Cycle.Failed { failure; _ }) ->
+    (match failed_source_disposition failure with
+     | Quarantine_source { detail } -> Batch_quarantine { detail }
+     | Defer_to_queue_tail -> Batch_defer { reason = "transient_turn_failure" }
+     | Preserve_for_deferred_runtime | Pause_keeper_for_integrity _ ->
+       Batch_no_action)
+  | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
+    Batch_quarantine { detail = Keeper_manual_compaction.failure_to_string failure }
+  | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
+    Batch_quarantine
+      { detail =
+          Keeper_post_turn.compaction_recovery_error_to_string
+            (Keeper_post_turn.No_compaction no_compaction)
+      }
+  | Some
+      ( Cycle.Checkpointed _
+      | Cycle.Input_required _
+      | Cycle.Cancelled _
+      | Cycle.Skipped _ )
+  | None ->
+    Batch_no_action
+;;
+
 
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
@@ -875,52 +928,18 @@ let run_keepalive_unified_turn
                    ~keeper_name:meta_after_triage.name
                    event_ids)
            in
-           match !cycle_outcome_ref with
-           | Some (Cycle.Completed completion) ->
-             remove_completed_selections
-               ~connector_attention_outcome:
-                 (connector_attention_outcome_of_route
-                    completion.continuation_route)
-           | Some (Cycle.Manual_compaction_applied _) ->
-             remove_completed_selections
-               ~connector_attention_outcome:Attention_ignored
-           | Some (Cycle.Failed { failure; _ }) ->
-             (match failed_source_disposition failure with
-                | Quarantine_source { detail } ->
-                  List.iter
-                    (fun selection -> terminalize_failed_selection ~selection ~detail)
-                    selections
-                | Defer_to_queue_tail ->
-                  List.iter
-                    (fun selection ->
-                       defer_selection_to_queue_tail
-                         ~selection
-                         ~reason:"transient_turn_failure")
-                    selections
-                | Preserve_for_deferred_runtime
-                | Pause_keeper_for_integrity _ ->
-                  ())
-           | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
-             let detail = Keeper_manual_compaction.failure_to_string failure in
+           match batch_disposition_of_cycle_outcome !cycle_outcome_ref with
+           | Batch_ack_completed { connector_attention_outcome } ->
+             remove_completed_selections ~connector_attention_outcome
+           | Batch_quarantine { detail } ->
              List.iter
                (fun selection -> terminalize_failed_selection ~selection ~detail)
                selections
-           | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
-             let detail =
-               Keeper_post_turn.compaction_recovery_error_to_string
-                 (Keeper_post_turn.No_compaction no_compaction)
-             in
+           | Batch_defer { reason } ->
              List.iter
-               (fun selection -> terminalize_failed_selection ~selection ~detail)
+               (fun selection -> defer_selection_to_queue_tail ~selection ~reason)
                selections
-           | Some
-               ( Cycle.Checkpointed _
-               | Cycle.Input_required _
-               | Cycle.Cancelled _ ) ->
-             ()
-           | Some (Cycle.Skipped _) -> ()
-           | None ->
-             ());
+           | Batch_no_action -> ());
       (let compaction_outcomes =
          match !cycle_outcome_ref with
          | Some outcome -> compaction_outcomes_of_cycle_outcome outcome

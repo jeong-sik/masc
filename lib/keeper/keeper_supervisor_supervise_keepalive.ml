@@ -33,6 +33,21 @@ open Keeper_types_profile
 open Keeper_execution
 module Startup_helpers = Keeper_supervisor_startup_helpers
 
+let same_offline_generation
+      ~(expected : Keeper_registry.registry_entry)
+      (current : Keeper_registry.registry_entry)
+  =
+  Keeper_lane.Id.equal
+    (Keeper_lane.id current.lane)
+    (Keeper_lane.id expected.lane)
+  && current.phase = Keeper_state_machine.Offline
+  && Int.equal current.transition_seq expected.transition_seq
+;;
+
+module For_testing = struct
+  let same_offline_generation = same_offline_generation
+end
+
 let supervise_keepalive
       ~(publish_lifecycle :
          event:Keeper_lifecycle_events.lifecycle_event ->
@@ -258,10 +273,8 @@ let supervise_keepalive
             ~expected_generation:reg.transition_seq
             ~register:(fun _token ->
               match Keeper_registry.get ~base_path meta.name with
-              | Some current
-                when Keeper_lane.Id.equal
-                       (Keeper_lane.id current.lane)
-                       (Keeper_lane.id reg.lane) -> Ok current
+              | Some current when same_offline_generation ~expected:reg current ->
+                Ok current
               | Some current -> Error (`Occupied current)
               | None -> Error (`Occupied reg))
             ~rollback:Keeper_keepalive_launch_transaction.rollback_retain_registered

@@ -967,6 +967,32 @@ let test_supervise_keepalive_retains_sweep_owned_entries () =
        (fun (name, phase) -> name, KSM.phase_to_string phase)
        !launched)
 
+let test_supervise_recovery_requires_same_offline_generation () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun _env ->
+  let base_dir = Filename.dirname config_dir in
+  Fun.protect
+    ~finally:(fun () -> Reg.For_testing.clear ())
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      let name = "recoverable-offline-generation" in
+      let entry =
+        Reg.For_testing.register ~base_path:config.base_path name (make_meta name)
+      in
+      check bool "same Offline generation remains launchable" true
+        (KSS.For_testing.same_offline_generation ~expected:entry entry);
+      (match Reg.dispatch_event_exact entry KSM.Fiber_started with
+       | Ok _ -> ()
+       | Error error -> fail (KSM.transition_error_to_string error));
+      match Reg.get ~base_path:config.base_path name with
+      | None -> fail "generation fixture disappeared"
+      | Some running ->
+        check bool "advanced generation cannot be launched again" false
+          (KSS.For_testing.same_offline_generation ~expected:entry running))
+
 let test_supervise_keepalive_wakes_ready_operation_drain () =
   Eio_main.run @@ fun env ->
   ensure_test_runtime ();
@@ -2595,6 +2621,8 @@ let () =
         test_reconcile_supervise_exception_continues;
       test_case "recoverable sweep-owned entries are not relaunched" `Quick
         test_supervise_keepalive_retains_sweep_owned_entries;
+      test_case "recoverable launch requires same Offline generation" `Quick
+        test_supervise_recovery_requires_same_offline_generation;
       test_case "supervised readiness wakes queued owner operation" `Quick
         test_supervise_keepalive_wakes_ready_operation_drain;
     ];

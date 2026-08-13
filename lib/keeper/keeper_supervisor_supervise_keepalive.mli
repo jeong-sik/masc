@@ -1,5 +1,12 @@
 (** Keepalive supervision entry point for the keeper supervisor. *)
 
+module For_testing : sig
+  val same_offline_generation :
+    expected:Keeper_registry.registry_entry ->
+    Keeper_registry.registry_entry ->
+    bool
+end
+
 val supervise_keepalive :
   publish_lifecycle:
     (event:Keeper_lifecycle_events.lifecycle_event ->

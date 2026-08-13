@@ -607,14 +607,21 @@ let cleanup_tracking ~base_path name =
   | None -> ()
 ;;
 
+let cleanup_tracking_entry current =
+  { current with
+    board_wakeups = StringMap.empty
+  ; tool_usage = StringMap.empty
+  ; board_cursor_ts = 0.0
+  ; board_cursor_post_id = None
+  }
+;;
+
 let cleanup_tracking_exact (entry : registry_entry) =
-  update_entry_exact entry (fun current ->
-    { current with
-      board_wakeups = StringMap.empty
-    ; tool_usage = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
-    })
+  update_entry_exact entry cleanup_tracking_entry
+;;
+
+let cleanup_tracking_exact_for_lifecycle token (entry : registry_entry) =
+  update_entry_exact_for_lifecycle token entry cleanup_tracking_entry
 ;;
 
 let clear () =

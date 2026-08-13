@@ -383,6 +383,16 @@ let prepare_dormant
 ;;
 
 let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
+  match operation.phase with
+  | Joining_lanes -> enter_joining_lanes ~config operation
+  | Prepared
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Blocked _
+  | Superseded _ ->
   match current_entry ~config entry with
   | Error error -> Error error
   | Ok current

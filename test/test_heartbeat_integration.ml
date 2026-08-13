@@ -50,6 +50,7 @@ module Dashboard_purge = Masc.Keeper_dashboard_purge
 module Dashboard_delete = Server_dashboard_http_delete_actions
 
 exception Librarian_executor_cancel
+exception Cancel_direct_keepalive_parent
 
 let bp = "/tmp/test-heartbeat-integ"
 
@@ -707,6 +708,60 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
          | Some (`Crashed reason) ->
            fail ("expected stopped promise, got crashed: " ^ reason)
          | None -> fail "expected done_p to resolve on stop"))
+
+let test_direct_start_terminalizes_fork_rejection_under_launch_reservation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  R.For_testing.clear ();
+  Memory_lane.For_testing.reset ();
+  let base_dir = temp_dir "direct-keepalive-fork-reject" in
+  let keeper_name = "direct-fork-reject" in
+  Fun.protect
+    ~finally:(fun () ->
+      Memory_lane.For_testing.reset ();
+      R.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      ensure_default_runtime ();
+      let config = Masc.Workspace.default_config base_dir in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
+      let meta = make_meta keeper_name in
+      seed_keeper_sandbox_profile ~base_dir keeper_name;
+      let launch_outcome = ref None in
+      (try
+         Eio.Switch.run @@ fun cancelling_sw ->
+         let ctx : _ Keeper_types_profile.context =
+           { config
+           ; agent_name = "tester"
+           ; sw = cancelling_sw
+           ; clock = Eio.Stdenv.clock env
+           ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+           ; net = None
+           ; publication_recovery_provider =
+               Masc_test_deps.publication_recovery_provider
+                 (publication_recovery_registry env cancelling_sw config)
+           }
+         in
+         Eio.Switch.fail cancelling_sw Cancel_direct_keepalive_parent;
+         launch_outcome := Some (Masc.Keeper_keepalive.start_keepalive ctx meta)
+       with
+       | Cancel_direct_keepalive_parent -> ());
+      (match !launch_outcome with
+       | Some (Masc.Keeper_keepalive.Keepalive_fork_rejected _) -> ()
+       | Some outcome ->
+         failf
+           "cancelled parent returned unexpected launch outcome: %s"
+           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome)
+       | None -> fail "cancelled parent did not return a launch outcome");
+      match R.get ~base_path:config.base_path keeper_name with
+      | None -> fail "fork-rejected direct lane disappeared"
+      | Some entry ->
+        check string "fork rejection is durably crashed" "crashed"
+          (KSM.phase_to_string entry.phase);
+        (match Eio.Promise.peek entry.done_p with
+         | Some (`Crashed _) -> ()
+         | Some `Stopped -> fail "fork rejection resolved as stopped"
+         | None -> fail "fork rejection left the terminal promise unresolved"))
 
 let test_direct_stop_resolves_done_after_librarian_drain_failure () =
   Eio_main.run @@ fun env ->
@@ -2787,6 +2842,7 @@ let test_keeper_shutdown_blocks_join_replay_after_record_failure () =
        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
        | Ok _ -> fail "missing shutdown record did not fail final join persistence");
       Unix.rename held_path operation_path;
+      R.For_testing.unregister ~base_path:config.base_path name;
       let blocked =
         match Shutdown_prepare_join.join_prepared ~config ~entry ~operation:joining with
         | Error (Shutdown_prepare_join.Join_failed blocked) -> blocked
@@ -4629,6 +4685,8 @@ let () =
     "direct_keepalive", [
       test_case "stop resolves done after lane exit" `Quick
         test_direct_start_keepalive_resolves_done_on_stop;
+      test_case "fork rejection terminalizes under launch reservation" `Quick
+        test_direct_start_terminalizes_fork_rejection_under_launch_reservation;
       test_case "stop resolves done after Librarian drain failure" `Quick
         test_direct_stop_resolves_done_after_librarian_drain_failure;
       test_case "lane join waits for children and cleanup" `Quick

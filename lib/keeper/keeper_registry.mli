@@ -522,6 +522,9 @@ val cleanup_tracking : base_path:string -> string -> unit
 (** Reset tracking only if [entry]'s lane still owns its registry key. *)
 val cleanup_tracking_exact : registry_entry -> exact_update_result
 
+val cleanup_tracking_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token -> registry_entry -> exact_update_result
+
 (** Get board event cursor token. Returns [(0.0, None)] if not found. *)
 val get_board_cursor : base_path:string -> string -> float * string option
 

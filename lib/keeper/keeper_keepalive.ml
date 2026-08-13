@@ -619,10 +619,17 @@ let resolve_registry_done
 ;;
 
 let dispatch_event_exact_unit
+      ?lifecycle_token
       (entry : Keeper_registry.registry_entry)
       event
   =
-  match Keeper_registry.dispatch_event_exact entry event with
+  let result =
+    match lifecycle_token with
+    | None -> Keeper_registry.dispatch_event_exact entry event
+    | Some token ->
+      Keeper_registry.dispatch_event_exact_for_lifecycle token entry event
+  in
+  match result with
   | Ok _ -> true
   | Error error ->
     Otel_metric_store.inc_counter
@@ -638,6 +645,7 @@ let dispatch_event_exact_unit
 ;;
 
 let record_keeper_stopped
+      ?lifecycle_token
       (entry : Keeper_registry.registry_entry)
       ~base_path:_
       ~keeper_name
@@ -646,10 +654,20 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
-    (match dispatch_event_exact_unit entry Keeper_state_machine.Stop_requested with
+    (match
+       dispatch_event_exact_unit
+         ?lifecycle_token
+         entry
+         Keeper_state_machine.Stop_requested
+     with
      | false -> ()
      | true ->
-       (match dispatch_event_exact_unit entry Keeper_state_machine.Drain_complete with
+       (match
+          dispatch_event_exact_unit
+            ?lifecycle_token
+            entry
+            Keeper_state_machine.Drain_complete
+        with
         | true | false -> ()));
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Stopped
@@ -661,6 +679,7 @@ let record_keeper_stopped
 ;;
 
 let record_keeper_crashed
+      ?lifecycle_token
       (entry : Keeper_registry.registry_entry)
       ~base_path:_
       ~keeper_name
@@ -671,22 +690,36 @@ let record_keeper_crashed
   if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
   then (
     let outcome = reason in
+    let update_exact f =
+      match lifecycle_token with
+      | None -> Keeper_registry.update_entry_exact entry f
+      | Some token -> Keeper_registry.update_entry_exact_for_lifecycle token entry f
+    in
     ignore
-      (Keeper_registry.set_failure_reason_exact entry (Some failure_reason)
+      (update_exact (fun current ->
+         { current with last_failure_reason = Some failure_reason })
        |> Keeper_registry.exact_update_succeeded
             entry
             ~site:"record_keeper_crashed.failure_reason");
     ignore
       (dispatch_event_exact_unit
+         ?lifecycle_token
          entry
          (Keeper_state_machine.Fiber_terminated
             { outcome; provider_id = None; http_status = None }));
     ignore
-      (Keeper_registry.record_crash_exact entry (Time_compat.now ()) reason
+      (update_exact (fun current ->
+         Keeper_registry_error_tracking.record_crash_entry
+           current
+           (Time_compat.now ())
+           reason)
        |> Keeper_registry.exact_update_succeeded
             entry
             ~site:"record_keeper_crashed.crash_log");
-    Keeper_registry_error_recording.record_exact entry reason;
+    (match lifecycle_token with
+     | None -> Keeper_registry_error_recording.record_exact entry reason
+     | Some token ->
+       Keeper_registry_error_recording.record_exact_for_lifecycle token entry reason);
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Crashed
       ~keeper_name
@@ -1104,6 +1137,7 @@ let start_keepalive
         then (
           let failure_reason = Keeper_registry.Exception "lane_ownership_lost_before_fork" in
           record_keeper_crashed
+            ~lifecycle_token:launch_token
             reg
             ~base_path:ctx.config.base_path
             ~keeper_name:live_meta.name
@@ -1137,6 +1171,7 @@ let start_keepalive
         in
         let record_crash failure_reason =
           record_keeper_crashed
+            ~lifecycle_token:launch_token
             reg
             ~base_path:ctx.config.base_path
             ~keeper_name:live_meta.name
@@ -1145,6 +1180,7 @@ let start_keepalive
         let record_stopped detail =
           ignore
             (record_keeper_stopped
+               ~lifecycle_token:launch_token
                reg
                ~base_path:ctx.config.base_path
                ~keeper_name:live_meta.name
@@ -1229,7 +1265,11 @@ let start_keepalive
           in
           let tracking_result =
           try
-            (match Keeper_registry.cleanup_tracking_exact reg with
+            (match
+               Keeper_registry.cleanup_tracking_exact_for_lifecycle
+                 launch_token
+                 reg
+             with
              | Keeper_registry.Exact_updated
              | Keeper_registry.Exact_update_missing -> Ok ()
              | Keeper_registry.Exact_update_replaced ->
@@ -1318,6 +1358,7 @@ let start_keepalive
          | Error error ->
            let detail = Keeper_lane.start_error_to_string error in
            record_keeper_crashed
+             ~lifecycle_token:launch_token
              reg
              ~base_path:ctx.config.base_path
              ~keeper_name:live_meta.name

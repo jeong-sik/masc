@@ -129,6 +129,10 @@ let resolve_annotation_post_address ~state ~uri ~file_path =
   | Ok
       ( Ide_paths.No_canonical_url | Ide_paths.Unmatched | Ide_paths.Base_unresolved
       | Ide_paths.Legacy_default ) ->
+    (* Unreachable today: the mutation resolver rejects keeper_lane and the
+       two remaining scopes always resolve By_url. The arm keeps this
+       function total over the 5-variant partition type and dies with that
+       type in rung E. *)
     Error
       (ide_error
          "codebase_scope_required"

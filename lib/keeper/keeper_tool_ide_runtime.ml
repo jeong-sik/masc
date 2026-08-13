@@ -36,7 +36,11 @@ let handle_ide_annotate_with_outcome
     |> Agent_observation.annotation_references_of_json
   in
   if String.trim codebase = ""
-  then reject "codebase is required for ide_annotate — hand back the slug the co-view context names"
+  then
+    reject
+      "codebase is required for ide_annotate — hand back the slug the co-view context \
+       names. If the co-view carried codebase_unavailable instead, this repository has \
+       no canonical remote and cannot be annotated."
   else if String.trim file_path = ""
   then reject "file_path is required for ide_annotate"
   else if line_start < 1

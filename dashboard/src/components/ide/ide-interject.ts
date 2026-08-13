@@ -19,6 +19,7 @@ import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper
 import { activeIdeFocus } from './ide-state'
 import { ideEditorSelection } from './ide-editor-selection'
 import { buildIdeInterjectSurfaceContext } from './ide-interject-surface-context'
+import { getIdeDataWorkspaceStore } from './ide-workspace-singleton'
 
 // The input and button states flow through the same store/dispatch boundary
 // that live active-keeper wiring uses. Send remains disabled until a concrete
@@ -32,6 +33,10 @@ async function dispatchInterject(request: InterjectDispatchRequest): Promise<voi
     surfaceContext: buildIdeInterjectSurfaceContext({
       focus: activeIdeFocus.value,
       selection: ideEditorSelection.value,
+      codebaseForRepo: repoId =>
+        getIdeDataWorkspaceStore()
+          .repositories()
+          .find(repository => repository.id === repoId)?.codebase ?? null,
     }),
   })
 }

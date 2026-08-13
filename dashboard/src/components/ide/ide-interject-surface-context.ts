@@ -13,6 +13,12 @@ import type { IdeEditorSelection } from './ide-editor-selection'
 export interface IdeInterjectContextInputs {
   readonly focus: IdeFileFocus | null
   readonly selection: IdeEditorSelection | null
+  /** RFC-0378 §5.3b: dispatch-time lookup of the server-minted codebase
+   *  slug for a repository. The identity snapshot can predate the
+   *  repository list (it is built inside the fetch effect, which reads
+   *  the list non-reactively), so the co-view resolves the slug at send
+   *  time — when the list is loaded — instead of trusting the snapshot. */
+  readonly codebaseForRepo?: (repoId: string) => string | null
 }
 
 interface SurfaceContextField {
@@ -48,8 +54,19 @@ export function buildIdeInterjectSurfaceContext(
   if (identity?.kind === 'repository') {
     fields.push({ k: 'repo', v: identity.repoId })
     // RFC-0378 §5.3: the codebase slug is the anchor vocabulary the keeper
-    // hands back to keeper_ide_annotate verbatim.
-    if (identity.codebase) fields.push({ k: 'codebase', v: identity.codebase })
+    // hands back to keeper_ide_annotate verbatim. Absence is stated, not
+    // omitted — a keeper that never saw the field cannot know whether the
+    // repository lacks a canonical remote or the context dropped it.
+    const codebase =
+      inputs.codebaseForRepo?.(identity.repoId) ?? identity.codebase ?? null
+    if (codebase) {
+      fields.push({ k: 'codebase', v: codebase })
+    } else {
+      fields.push({
+        k: 'codebase_unavailable',
+        v: 'repository has no canonical remote; keeper_ide_annotate cannot anchor here',
+      })
+    }
   } else if (identity?.kind === 'keeper') {
     fields.push({ k: 'workspace_keeper', v: identity.keeper })
   }

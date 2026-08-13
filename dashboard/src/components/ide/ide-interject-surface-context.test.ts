@@ -12,6 +12,37 @@ function focusOn(path: string, workspace_identity: IdeFileFocus['workspace_ident
 }
 
 describe('buildIdeInterjectSurfaceContext', () => {
+
+  // RFC-0378 §5.3/§5.3b — the codebase slug is the anchor contract.
+  it('carries the codebase slug for a repository identity', () => {
+    const context = buildIdeInterjectSurfaceContext({
+      focus: focusOn('lib/a.ml', { kind: 'repository', repoId: 'masc', codebase: null }),
+      selection: null,
+      codebaseForRepo: repoId => (repoId === 'masc' ? 'github.com_jeong-sik_masc' : null),
+    })
+    expect(context?.fields).toContainEqual({ k: 'codebase', v: 'github.com_jeong-sik_masc' })
+  })
+
+  it('states codebase absence instead of omitting the field', () => {
+    const context = buildIdeInterjectSurfaceContext({
+      focus: focusOn('lib/a.ml', { kind: 'repository', repoId: 'localonly', codebase: null }),
+      selection: null,
+      codebaseForRepo: () => null,
+    })
+    const fields = (context?.fields ?? []) as ReadonlyArray<{ k: string; v: string }>
+    const keys = fields.map(field => field.k)
+    expect(keys).toContain('codebase_unavailable')
+    expect(keys).not.toContain('codebase')
+  })
+
+  it('prefers the dispatch-time lookup over a stale identity snapshot', () => {
+    const context = buildIdeInterjectSurfaceContext({
+      focus: focusOn('lib/a.ml', { kind: 'repository', repoId: 'masc', codebase: null }),
+      selection: null,
+      codebaseForRepo: () => 'github.com_jeong-sik_masc',
+    })
+    expect(context?.fields).toContainEqual({ k: 'codebase', v: 'github.com_jeong-sik_masc' })
+  })
   it('returns undefined when the IDE holds no anchor', () => {
     expect(buildIdeInterjectSurfaceContext({ focus: null, selection: null })).toBeUndefined()
   })

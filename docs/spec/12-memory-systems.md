@@ -36,6 +36,24 @@ bytes and is used only for retention references, duplicate rejection, recall
 evidence, and observability. The complete snapshot carries its revision,
 direct writer trace/generation, and exact added/removed/retained delta.
 
+The same claim store owns durable counterpart and relationship knowledge. It
+does not add a parallel people graph or a `person` category: the existing
+category describes what kind of knowledge the sentence carries, while the
+claim text keeps the stable actor reference and the Keeper-relative fact. An
+external actor is anchored by the connector-authored
+`channel + workspace_id + user_id` tuple; a display name is only a mutable
+label. The authenticated owner/operator is a role when no external actor
+identity exists. The librarian may retain an explicitly stated preference,
+stable responsibility, ongoing commitment, or jointly validated history, but
+must not infer a personality, sensitive trait, or motive from an isolated
+exchange. A changed relationship is ordinary explicit replacement: drop the
+superseded claim with a reason and add the corrected claim.
+
+`Keeper_person_notes` remains a deliberate, keeper-authored annotation for the
+surface roster (RFC-0229), not an automatic semantic-memory writer and not a
+second Memory OS authority. There is no automatic migration or synchronization
+between that UI annotation and current-memory claims.
+
 Assistant reply text is never parsed into goal, progress, future work,
 questions, constraints, or any other memory category. An ordinary reply may
 remain in agent core checkpoint history, but it cannot become durable MASC memory

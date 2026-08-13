@@ -1619,8 +1619,9 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.31.0 --activate
           pnpm install --frozen-lockfile
-          pnpm exec playwright install --with-deps chromium
           node --test e2e/keeper-composition-browser-evidence.test.mjs
+          ../scripts/build-dashboard-if-needed.sh
+          pnpm exec playwright install --with-deps chromium
 
       - name: Run five-Keeper real-world collaboration gate
         env:

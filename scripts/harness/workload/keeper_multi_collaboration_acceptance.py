@@ -165,6 +165,14 @@ def parse_json_maybe(text: str) -> Any:
     return value
 
 
+def parse_json_exact(text: str) -> Any:
+    """Decode the tool's exact JSON envelope without unwrapping its result field."""
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return text
+
+
 def text_contains(value: Any, needle: str) -> bool:
     return needle.lower() in json.dumps(value, ensure_ascii=False).lower()
 
@@ -859,10 +867,12 @@ class MissionRun:
                 composition_instruction
                 + "keeper_compose_background-snapshot을 정확히 한 번 제출하고 request_id를 보존하세요. "
                 + f"Mission {self.marker}. masc_fusion으로 'How should five resident agents preserve "
-                "progress when one work source fails?'를 비동기로 시작하세요. 기다리거나 polling하지 말고 "
+                "progress when one work source fails?'를 비동기로 시작하세요. Fusion을 기다리거나 polling하지 말고 "
                 f"즉시 exact Task {self.task_ids['researcher']}를 claim하고, Board post {post_id}에 "
                 "FUSION_STARTED와 run_id를 comment한 뒤 Task evidence를 제출하세요. 마지막으로 보존한 "
-                "request_id로 keeper_composition_status를 정확히 한 번 호출하고 status=done을 확인하세요."
+                "request_id로 keeper_composition_status를 호출하세요. status가 queued 또는 running이면 "
+                "동일한 request_id만 사용해 터미널 상태가 될 때까지 상태를 다시 확인하고, "
+                "done이 되면 즉시 중단하세요. 외부 composition을 다시 제출하지 마세요."
             ),
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -1267,10 +1277,8 @@ class MissionRun:
         ]
         async_request_id: str | None = None
         async_outer_terminal = False
-        if len(async_submit_rows) == 1 and len(async_status_rows) == 1:
+        if len(async_submit_rows) == 1 and async_status_rows:
             submission_output = parse_json_maybe(async_submit_rows[0].get("output", ""))
-            status_input = async_status_rows[0].get("input")
-            status_output = parse_json_maybe(async_status_rows[0].get("output", ""))
             candidate_request_id = (
                 submission_output.get("request_id")
                 if isinstance(submission_output, dict)
@@ -1278,13 +1286,29 @@ class MissionRun:
             )
             if isinstance(candidate_request_id, str) and candidate_request_id:
                 async_request_id = candidate_request_id
+                ordered_status_rows = sorted(
+                    async_status_rows, key=lambda row: float(row.get("ts", 0.0))
+                )
+                status_evidence = [
+                    (row.get("input"), parse_json_exact(row.get("output", "")))
+                    for row in ordered_status_rows
+                ]
+                final_output = status_evidence[-1][1]
                 async_outer_terminal = (
-                    isinstance(status_input, dict)
-                    and status_input.get("request_id") == async_request_id
-                    and isinstance(status_output, dict)
-                    and status_output.get("request_id") == async_request_id
-                    and status_output.get("status") == "done"
-                    and status_output.get("ok") is True
+                    all(
+                        isinstance(status_input, dict)
+                        and status_input.get("request_id") == async_request_id
+                        and isinstance(status_output, dict)
+                        and status_output.get("request_id") == async_request_id
+                        and status_output.get("status") in {"queued", "running", "done"}
+                        for status_input, status_output in status_evidence
+                    )
+                    and all(
+                        status_output.get("status") in {"queued", "running"}
+                        for _, status_output in status_evidence[:-1]
+                    )
+                    and final_output.get("status") == "done"
+                    and final_output.get("ok") is True
                 )
 
         coordinator_runtime_turn_ids: dict[str, int] = {}

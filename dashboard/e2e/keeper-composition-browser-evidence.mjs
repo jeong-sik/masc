@@ -15,4 +15,3 @@ export function selectCompleteInlineRun(rows) {
       && runRows.every(row => row.execution === 'inline' && row.disposition === 'completed')
   }) ?? null
 }
-

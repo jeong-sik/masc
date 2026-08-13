@@ -31,6 +31,11 @@ if (health?.paths?.effective_base_path !== expectedBasePath) {
     `refusing non-isolated backend: expected=${expectedBasePath} observed=${health?.paths?.effective_base_path}`,
   )
 }
+if (health?.dashboard_surface?.status !== 'ok') {
+  throw new Error(
+    `dashboard surface is not built and fresh: ${JSON.stringify(health?.dashboard_surface)}`,
+  )
+}
 
 const browser = await chromium.launch({ headless: true })
 try {
@@ -41,7 +46,8 @@ try {
   route.hash = `monitoring?section=agents&keeper=${encodeURIComponent(keeperName)}`
   await page.goto(route.toString())
   await page.getByLabel('메시지 입력').waitFor()
-  await page.getByRole('button', { name: '상세', exact: true }).click()
+  await page.getByTestId('kw-chat-command-menu-toggle').click()
+  await page.getByTestId('kw-chat-command-detail').click()
   await page.getByRole('tab', { name: '진단', exact: true }).click()
 
   const runtimeDiagnostics = page.locator('details').filter({

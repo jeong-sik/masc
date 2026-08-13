@@ -17,7 +17,6 @@ test('selects one exact completed inline composition run', () => {
   assert.equal(selected?.[0], 'run-complete')
   assert.deepEqual(selected?.[1], completeRows)
 })
-
 test('rejects duplicate, failed, deferred, and async rows', () => {
   assert.equal(selectCompleteInlineRun([...completeRows, completeRows[0]]), null)
   assert.equal(selectCompleteInlineRun(
@@ -30,4 +29,3 @@ test('rejects duplicate, failed, deferred, and async rows', () => {
     completeRows.map(row => ({ ...row, execution: 'async' })),
   ), null)
 })
-

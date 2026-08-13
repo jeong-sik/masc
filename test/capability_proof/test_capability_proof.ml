@@ -316,9 +316,7 @@ let test_baseline_covers_every_capability_for_each_target () =
 ;;
 
 let test_baseline_preserves_policy_exclusions_as_cells () =
-  let agentworld =
-    target ~model_id:"agentworld-35b-a3b" "ollama.agentworld-35b-a3b"
-  in
+  let agentworld = target "AgentWorld" in
   match baseline [ agentworld ] with
   | Error error -> failf "unexpected baseline error: %s" (baseline_error_to_string error)
   | Ok cases ->

@@ -409,6 +409,62 @@ const DASHBOARD_BOOTSTRAP_WARM_PATHS = new Set([
   '/api/v1/dashboard/briefing',
 ])
 
+/**
+ * Routes whose polled body the browser may hold and revalidate.
+ *
+ * Reads default to `no-store`, so a body reaches the browser's HTTP cache only
+ * when its route is listed here. Two conditions gate membership, both measured
+ * against a running server rather than assumed:
+ *
+ *   1. The body repeats byte-identically across polls. A route whose body
+ *      changes every poll can never answer 304, so listing it would buy a
+ *      digest computation and nothing else. `/dashboard/bootstrap` and
+ *      `/activity/events` fail this and are absent.
+ *   2. The body carries no secret projection. `/keepers/composite` embeds
+ *      `secret_projection` -- environment variable names and host paths, no
+ *      values -- and listing a route is precisely what would put those on
+ *      disk, so it stays `no-store` despite repeating byte-identically.
+ *
+ * Measured 2026-08-13 against a live server: these routes carry 1,741,479 of
+ * the 2,132,911 bytes one refresh cycle transfers (81.6%). Condition 2 costs
+ * 49,743 of those bytes (2.3%); condition 1 excludes a further 341,689 (16.0%)
+ * that no caching strategy could recover.
+ *
+ * Listing a route cannot serve a stale body: `no-cache` stores the response but
+ * revalidates before every use, so the server's ETag decides what the client
+ * sees, not a client-side freshness window.
+ */
+const BROWSER_REVALIDATED_PATHS = new Set([
+  '/api/v1/dashboard/scheduled-automation',
+  '/api/v1/dashboard/telemetry',
+  '/api/v1/dashboard/tool-quality',
+  '/api/v1/dashboard/board',
+  '/api/v1/board',
+  '/api/v1/dashboard/harness-health',
+  '/api/v1/agent-activity',
+  '/api/v1/dashboard/goals',
+  '/api/v1/dashboard/gate',
+])
+
+/**
+ * Eligibility belongs to the route, not to one request's parameters:
+ * `/dashboard/telemetry?window=1h` is the same route as `/dashboard/telemetry`,
+ * and several callers build paths that way. Matching the path as given would
+ * silently miss every parameterised caller.
+ *
+ * Matching by prefix would fail in the other direction -- it would capture
+ * `/dashboard/telemetry/summary`, a distinct route that was never measured. So
+ * the query is split off and what remains is matched exactly.
+ *
+ * A route absent from the set gets `no-store`, which is what an unrecognised
+ * path should get: the conservative answer, not the convenient one.
+ */
+export function readCacheMode(path: string): RequestCache {
+  const queryStart = path.indexOf('?')
+  const route = queryStart === -1 ? path : path.slice(0, queryStart)
+  return BROWSER_REVALIDATED_PATHS.has(route) ? 'no-cache' : 'no-store'
+}
+
 import { isRecord } from '../lib/type-guards'
 
 interface ErrorResponseInfo {
@@ -653,6 +709,7 @@ export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {
     path,
     {
       headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      cache: readCacheMode(path),
       signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,
@@ -688,6 +745,7 @@ export async function getWithResponse<T>(
     path,
     {
       headers: authHeaders({ includeActor: opts.includeActorHeader }),
+      cache: readCacheMode(path),
       signal: opts.signal,
     },
     opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS,

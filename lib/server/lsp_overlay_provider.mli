@@ -16,43 +16,43 @@
     which is the workspace tree the reader opened — a different directory.
     Only the entry points that return LSP [Location]s need it. *)
 
-val codelenses : base_dir:string -> partition:Ide_paths.partition option -> file_path:string -> Yojson.Safe.t list
+val codelenses : base_dir:string -> codebase:string option -> file_path:string -> Yojson.Safe.t list
 (** Generate LSP CodeLens entries for a file from MASC annotations. *)
 
 val diagnostics :
   base_dir:string ->
-  partition:Ide_paths.partition option ->
+  codebase:string option ->
   file_path:string ->
   lsp_diagnostics:Yojson.Safe.t list ->
   Yojson.Safe.t list
 (** Merge MASC annotation diagnostics with LSP server diagnostics. *)
 
-val invalidate_cache : base_dir:string -> partition:Ide_paths.partition option -> file_path:string -> unit
+val invalidate_cache : base_dir:string -> codebase:string option -> file_path:string -> unit
 (** Remove cached annotations for a specific file. Call on didSave. *)
 
 val clear_cache : unit -> unit
 (** Remove all cached annotations. *)
 
 val enrich_hover :
-  base_dir:string -> partition:Ide_paths.partition option -> file_path:string -> line:int -> Yojson.Safe.t -> Yojson.Safe.t
+  base_dir:string -> codebase:string option -> file_path:string -> line:int -> Yojson.Safe.t -> Yojson.Safe.t
 (** Append MASC annotation context to an LSP Hover response.
     Handles all Hover.contents forms: MarkupContent, MarkedString, MarkedString[].
     Returns the original response unchanged if no annotations overlap. *)
 
-val has_annotations_at_line : base_dir:string -> partition:Ide_paths.partition option -> file_path:string -> line:int -> bool
+val has_annotations_at_line : base_dir:string -> codebase:string option -> file_path:string -> line:int -> bool
 (** Check if any MASC annotations overlap the given LSP position (0-based line). *)
 
-val completion_items : base_dir:string -> partition:Ide_paths.partition option -> file_path:string -> line:int -> Yojson.Safe.t list
+val completion_items : base_dir:string -> codebase:string option -> file_path:string -> line:int -> Yojson.Safe.t list
 (** Generate CompletionItem[] for MASC annotation snippets.
     Used by textDocument/completion. *)
 
 val code_actions :
-  base_dir:string -> partition:Ide_paths.partition option -> file_path:string -> line:int -> diagnostics:Yojson.Safe.t list ->
+  base_dir:string -> codebase:string option -> file_path:string -> line:int -> diagnostics:Yojson.Safe.t list ->
   Yojson.Safe.t list
 (** Generate CodeAction[] for annotation operations.
     Used by textDocument/codeAction. *)
 
-val folding_ranges : base_dir:string -> partition:Ide_paths.partition option -> file_path:string -> Yojson.Safe.t list
+val folding_ranges : base_dir:string -> codebase:string option -> file_path:string -> Yojson.Safe.t list
 (** Generate FoldingRange[] for consecutive annotation blocks.
     Used by textDocument/foldingRange. *)
 

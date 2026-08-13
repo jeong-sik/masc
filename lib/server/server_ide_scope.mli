@@ -20,25 +20,23 @@ val nonempty_query_param : Uri.t -> string -> string option
 (** Query parameter with surrounding whitespace trimmed, [None] when absent
     or blank. A blank scope parameter is an absent one, never a match. *)
 
-(** RFC-0378 §5.3b: one wire key. [Scope_codebase] carries the canonical
-    slug itself — the partitioned store's directory name and the value the
-    co-view context hands the keeper. Full-URL and repo_id spellings are
-    projection labels, not addresses, and are not scopes. *)
-type ide_scope =
-  | Scope_codebase of { slug : string }
-  | Scope_keeper_lane of { keeper_id : string }
+(** RFC-0378 §5.3b/§5.2: one wire key, one store. [Scope_codebase]
+    carries the canonical slug itself — the store directory name and the
+    value the co-view context hands the keeper. Full-URL and repo_id
+    spellings are projection labels, not addresses. The keeper-lane
+    scope died with the orphan store it existed to reach. *)
+type ide_scope = Scope_codebase of { slug : string }
 
-val partition_of_ide_scope : ide_scope -> Ide_paths.partition
-(** The store partition the scope addresses. *)
+val codebase_of_ide_scope : ide_scope -> string
+(** The slug the scope addresses — the store directory name. *)
 
 val resolve_ide_scope_for_query
   :  state:Mcp_server.server_state
   -> uri:Uri.t
   -> (ide_scope, ide_error) result
-(** Resolve exactly one of [codebase] / [keeper_lane] from [uri]. Absent,
-    conflicting, and unresolvable scopes are all typed errors: there is no
-    default scope, because guessing one is how a reader silently addresses
-    the wrong partition. *)
+(** Resolve [codebase] from [uri]. Absent and unresolvable scopes are
+    typed errors: there is no default scope, because guessing one is how
+    a reader silently addresses the wrong store. *)
 
 val resolve_optional_ide_scope_for_query
   :  state:Mcp_server.server_state

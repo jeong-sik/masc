@@ -17,18 +17,18 @@ val store_path : base_dir:string -> string
     flat directory). For partition-aware paths see
     {!Ide_paths.partition_store_dir}. *)
 
-val store_file : base_dir:string -> partition:Ide_paths.partition -> unit -> string
-(** [store_file ~base_dir ~partition ()] is the append-only
+val store_file : base_dir:string -> codebase:string -> unit -> string
+(** [store_file ~base_dir ~codebase ()] is the append-only
     [annotations.jsonl] inside the partition's directory. Exposed so a
     reader can observe the store's revision (its byte length, since every
     mutation is an append) without restating the file name. *)
 
-val ensure_store : base_dir:string -> partition:Ide_paths.partition -> unit -> unit
+val ensure_store : base_dir:string -> codebase:string -> unit -> unit
 (** Create the partition's directory if absent. Idempotent. *)
 
 val create
   :  base_dir:string
-  -> partition:Ide_paths.partition
+  -> codebase:string
   -> keeper_id:string
   -> file_path:string
   -> line_start:int
@@ -44,7 +44,7 @@ val create
 
 val list
   :  base_dir:string
-  -> partition:Ide_paths.partition
+  -> codebase:string
   -> filter:annotation_filter
   -> unit
   -> annotation list
@@ -53,7 +53,7 @@ val list
 
 val delete
   :  base_dir:string
-  -> partition:Ide_paths.partition
+  -> codebase:string
   -> id:string
   -> keeper_id:string
   -> ?expected_version:int64
@@ -69,7 +69,7 @@ val delete
     with a ["version mismatch"] error when the stored value differs.
     Omitting it keeps the legacy delete-by-id contract. *)
 
-val compact : base_dir:string -> partition:Ide_paths.partition -> unit -> unit
+val compact : base_dir:string -> codebase:string -> unit -> unit
 (** Append a compaction snapshot marker that lets readers ignore earlier
     tombstoned state while replaying records written during the compaction
     window. *)

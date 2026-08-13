@@ -231,12 +231,11 @@ type conn_state =
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
-(* The [.masc-ide/] partition this connection addresses. Threaded into every
-   overlay read so the reader cannot land in a partition the client never
-   named — the defect that had overlay reads served from [_orphan/] while
-   keeper writes accumulated under [by-url/<slug>/]. *)
-let overlay_partition cs =
-  Option.map Server_ide_scope.partition_of_ide_scope cs.store_scope
+(* The store directory this connection addresses. Threaded into every
+   overlay read so the reader cannot land in a store the client never
+   named — the defect that had overlay reads served from the orphan
+   directory while keeper writes accumulated under [by-url/<slug>/]. *)
+let overlay_codebase cs = Option.map Server_ide_scope.codebase_of_ide_scope cs.store_scope
 ;;
 
 (* What this connection addresses, read from its URL before the socket is
@@ -796,7 +795,7 @@ let forward_document_sync_notification cs method_ params =
     then
       Lsp_overlay_provider.invalidate_cache
         ~base_dir:cs.base_path
-        ~partition:(overlay_partition cs)
+        ~codebase:(overlay_codebase cs)
         ~file_path:request.relative_path;
     (match request.language with
      | Unknown_lang -> ()
@@ -871,7 +870,7 @@ let handle_codelens cs params id =
   | Ok request ->
     let base = cs.base_path in
     let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
+    let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative in
     (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->
@@ -905,7 +904,7 @@ let handle_diagnostic cs params id =
       let diags =
         Lsp_overlay_provider.diagnostics
           ~base_dir:base
-          ~partition:(overlay_partition cs)
+          ~codebase:(overlay_codebase cs)
           ~file_path:relative
           ~lsp_diagnostics:[]
       in
@@ -917,7 +916,7 @@ let handle_diagnostic cs params id =
         let diags =
           Lsp_overlay_provider.diagnostics
             ~base_dir:base
-            ~partition:(overlay_partition cs)
+            ~codebase:(overlay_codebase cs)
             ~file_path:relative
             ~lsp_diagnostics:[]
         in
@@ -941,7 +940,7 @@ let handle_diagnostic cs params id =
            let merged =
              Lsp_overlay_provider.diagnostics
                ~base_dir:base
-               ~partition:(overlay_partition cs)
+               ~codebase:(overlay_codebase cs)
                ~file_path:relative
                ~lsp_diagnostics:existing
            in
@@ -963,13 +962,13 @@ let handle_hover cs params id =
        | Some line
          when Lsp_overlay_provider.has_annotations_at_line
                 ~base_dir:base
-                ~partition:(overlay_partition cs)
+                ~codebase:(overlay_codebase cs)
                 ~file_path:relative
                 ~line ->
          let enriched =
            Lsp_overlay_provider.enrich_hover
              ~base_dir:base
-             ~partition:(overlay_partition cs)
+             ~codebase:(overlay_codebase cs)
              ~file_path:relative
              ~line
              (`Assoc
@@ -991,13 +990,13 @@ let handle_hover cs params id =
          | Some line
            when Lsp_overlay_provider.has_annotations_at_line
                   ~base_dir:base
-                  ~partition:(overlay_partition cs)
+                  ~codebase:(overlay_codebase cs)
                   ~file_path:relative
                   ~line ->
            send_response cs id
              (Lsp_overlay_provider.enrich_hover
                 ~base_dir:base
-                ~partition:(overlay_partition cs)
+                ~codebase:(overlay_codebase cs)
                 ~file_path:relative
                 ~line
                 (`Assoc
@@ -1022,7 +1021,7 @@ let handle_hover cs params id =
               send_response cs id
                 (Lsp_overlay_provider.enrich_hover
                    ~base_dir:base
-                   ~partition:(overlay_partition cs)
+                   ~codebase:(overlay_codebase cs)
                    ~file_path:relative
                    ~line
                    result)
@@ -1039,7 +1038,7 @@ let handle_completion cs params id =
     let masc =
       match request.line with
       | Some line ->
-        Lsp_overlay_provider.completion_items ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative ~line
+        Lsp_overlay_provider.completion_items ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative ~line
       | None -> []
     in
     (match request.language with
@@ -1073,7 +1072,7 @@ let handle_code_action cs params id =
       match request.line with
       | Some line ->
         Lsp_overlay_provider.code_actions
-          ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative ~line ~diagnostics:[]
+          ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative ~line ~diagnostics:[]
       | None -> []
     in
     (match request.language with
@@ -1102,7 +1101,7 @@ let handle_folding_range cs params id =
   | Ok request ->
     let base = cs.base_path in
     let relative = request.relative_path in
-    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~partition:(overlay_partition cs) ~file_path:relative in
+    let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~codebase:(overlay_codebase cs) ~file_path:relative in
     (match request.language with
      | Unknown_lang -> send_response cs id (`List masc)
      | Known_lang lang_id ->

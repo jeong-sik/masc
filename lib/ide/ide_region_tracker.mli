@@ -37,7 +37,7 @@ val extract_region_from_full_file :
 
 val regions_file
   :  base_dir:string
-  -> partition:Ide_paths.partition
+  -> codebase:string
   -> unit
   -> string
 (** Append-only region store path under the chosen
@@ -45,14 +45,14 @@ val regions_file
 
 val append_region
   :  base_dir:string
-  -> partition:Ide_paths.partition
+  -> codebase:string
   -> code_region
   -> unit
 (** Append one region to the chosen partition's [regions.jsonl]. *)
 
 val ingest_tool_call
   :  base_dir:string
-  -> partition:Ide_paths.partition
+  -> codebase:string
   -> keeper_id:string
   -> turn:int
   -> Yojson.Safe.t
@@ -63,7 +63,7 @@ val ingest_tool_call
 
 val read_regions
   :  base_dir:string
-  -> partition:Ide_paths.partition
+  -> codebase:string
   -> ?file_path:string
   -> unit
   -> code_region list

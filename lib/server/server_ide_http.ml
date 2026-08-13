@@ -41,65 +41,10 @@ let respond_ide_error ~status ~request err reqd =
 ;;
 
 
-type ide_scope = Server_ide_scope.ide_scope =
-  | Scope_codebase of { slug : string }
-  | Scope_keeper_lane of { keeper_id : string }
+type ide_scope = Server_ide_scope.ide_scope = Scope_codebase of { slug : string }
 
-let partition_of_ide_scope = Server_ide_scope.partition_of_ide_scope
+let codebase_of_ide_scope = Server_ide_scope.codebase_of_ide_scope
 let resolve_ide_scope_for_query = Server_ide_scope.resolve_ide_scope_for_query
-
-(* Mutations stay repo-scoped: an observation write without repo identity
-   is exactly the orphan-bucket growth the keeper-lane read scope exists
-   to expose, so the API refuses to mint more of it. *)
-let resolve_partition_for_mutation ~state ~uri =
-  match resolve_ide_scope_for_query ~state ~uri with
-  | Ok (Scope_keeper_lane _) ->
-    Error
-      (ide_error
-         "keeper_lane_read_only"
-         "keeper_lane is a read-only scope; mutations require a codebase scope (codebase=<slug>)")
-  | Ok scope -> Ok (partition_of_ide_scope scope)
-  | Error _ as err -> err
-;;
-
-(* The lane keeper is the mandatory filter for keeper-lane reads; a
-   contradictory explicit [keeper_id] param is a caller bug surfaced as a
-   typed error instead of silently returning another keeper's data. *)
-let keeper_filter_for_scope ~scope ~requested_keeper_id =
-  match scope with
-  | Scope_keeper_lane { keeper_id = lane } ->
-    (match requested_keeper_id with
-     | Some k when not (String.equal k lane) ->
-       Error
-         (ide_error
-            "keeper_lane_filter_conflict"
-            "keeper_id filter must match the keeper_lane scope")
-     | Some _ | None -> Ok (Some lane))
-  | Scope_codebase _ -> Ok requested_keeper_id
-;;
-
-let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
-  match scope with
-  | Scope_codebase _ -> continue ()
-  | Scope_keeper_lane { keeper_id = lane } ->
-    let base_path = base_path_of_state state in
-    (match
-       authorize_token_bound_permission_request
-         ~base_path
-         ~permission:Masc_domain.CanReadState
-         request
-     with
-     | Error err -> respond_auth_error request reqd err
-     | Ok agent_name when String.equal agent_name lane -> continue ()
-     | Ok _ ->
-       respond_ide_error
-         ~status:`Forbidden
-         ~request
-         (ide_error
-            "keeper_lane_forbidden"
-            "keeper_lane reads require a bearer token for the requested keeper")
-         reqd)
-;;
 
 (* RFC-0378 §5.3 — the human half of the anchor contract goes through
    the same mint as the keeper half: the mutation scope names the
@@ -107,9 +52,10 @@ let with_keeper_lane_read_auth ~state ~request ~reqd ~scope continue =
    directly. The catalog re-derivation from the raw path string — the
    third attribution vocabulary — is gone with its error taxonomy. *)
 let resolve_annotation_post_address ~state ~uri ~file_path =
-  match resolve_partition_for_mutation ~state ~uri with
+  match resolve_ide_scope_for_query ~state ~uri with
   | Error _ as err -> err
-  | Ok (Ide_paths.By_url slug) ->
+  | Ok scope ->
+    let slug = codebase_of_ide_scope scope in
     (match Agent_observation.Code_address.v ~codebase:slug ~path:file_path with
      | Ok address -> Ok address
      | Error invalid ->
@@ -119,13 +65,6 @@ let resolve_annotation_post_address ~state ~uri ~file_path =
             (Printf.sprintf
                "file_path must be repo-root-relative (%s)"
                (Agent_observation.Code_address.invalid_to_string invalid))))
-  | Ok
-      ( Ide_paths.No_canonical_url | Ide_paths.Unmatched | Ide_paths.Base_unresolved
-      | Ide_paths.Legacy_default ) ->
-    Error
-      (ide_error
-         "codebase_scope_required"
-         "annotation and cursor writes require a codebase scope (codebase=<slug>)")
 ;;
 
 let ide_memory_source_kind = "ide_annotation"
@@ -440,17 +379,14 @@ let build_presence_snapshot state =
     ]
 ;;
 
-(* [keeper_id] is scope-resolved by the caller ([keeper_filter_for_scope]):
-   a keeper-lane scope forces its lane keeper, repo scopes pass the optional
-   [?keeper_id] query filter through unchanged. *)
-let build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset =
+let build_cursor_snapshot state uri ~codebase ~keeper_id ~limit ~offset =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
   let file_path = file_path_param uri in
   let cursors =
     Ide_bridge.list_cursors
       ~base_path:base
-      ~partition
+      ~codebase
       ?keeper_id
       ?file_path
       ~limit
@@ -555,29 +491,15 @@ let add_routes router =
          match resolve_ide_scope_for_query ~state ~uri with
          | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
          | Ok scope ->
-           (match keeper_filter_for_scope ~scope ~requested_keeper_id:keeper_id with
-            | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-            | Ok keeper_id ->
-              with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-              let partition = partition_of_ide_scope scope in
+           (let codebase = codebase_of_ide_scope scope in
               let filter =
                 { Ide_annotation_types.file_path; keeper_id; goal_id; task_id }
               in
-              let annotations =
-                Ide_annotations.list
-                  ~base_dir:base
-                  ~partition
-                  ~filter
-                  ()
-              in
+              let annotations = Ide_annotations.list ~base_dir:base ~codebase ~filter () in
               let json =
                 `List (List.map Ide_annotation_types.annotation_to_json annotations)
               in
-              Http.Response.json_value
-                ~compress:true
-                ~request
-                (json_ok json)
-                reqd)))
+              Http.Response.json_value ~compress:true ~request (json_ok json) reqd))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
@@ -687,9 +609,7 @@ let add_routes router =
                            (match
                               Ide_annotations.create
                                 ~base_dir:base
-                                ~partition:
-                                  (Ide_paths.By_url
-                                     (Agent_observation.Code_address.codebase address))
+                                ~codebase:(Agent_observation.Code_address.codebase address)
                                 ~keeper_id
                                 ~file_path:(Agent_observation.Code_address.path address)
                                 ~line_start
@@ -786,11 +706,16 @@ let add_routes router =
                (json_error msg)
                reqd
            | Ok keeper_id ->
-             (match resolve_partition_for_mutation ~state ~uri with
+             (match resolve_ide_scope_for_query ~state ~uri with
               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-              | Ok partition ->
+              | Ok scope ->
                 (match
-                   Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id ()
+                   Ide_annotations.delete
+                     ~base_dir:base
+                     ~codebase:(codebase_of_ide_scope scope)
+                     ~id
+                     ~keeper_id
+                     ()
                  with
                  | Ok () -> Http.Response.empty ~status:`No_content reqd
                  | Error msg ->
@@ -824,34 +749,12 @@ let add_routes router =
          match resolve_ide_scope_for_query ~state ~uri with
          | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
          | Ok scope ->
-           with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-           let partition = partition_of_ide_scope scope in
+           let codebase = codebase_of_ide_scope scope in
            let regions =
-             Ide_region_tracker.read_regions
-               ~base_dir:base
-               ~partition
-               ?file_path
-               ()
-           in
-           (* [read_regions] has no keeper filter; a keeper-lane read
-              narrows to the lane keeper here so it never exposes another
-              keeper's lane data under this scope. *)
-           let regions =
-             match scope with
-             | Scope_keeper_lane { keeper_id } ->
-               List.filter
-                 (fun (r : Ide_annotation_types.code_region) ->
-                   String.equal r.keeper_id keeper_id)
-                 regions
-             | Scope_codebase _ -> regions
+             Ide_region_tracker.read_regions ~base_dir:base ~codebase ?file_path ()
            in
            let json = `List (List.map Ide_annotation_types.region_to_json regions) in
-           Http.Response.json_value
-             ~compress:true
-             ~request
-             (json_ok json)
-             reqd)
-      )
+           Http.Response.json_value ~compress:true ~request (json_ok json) reqd)
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/events" (fun request reqd ->
@@ -878,20 +781,12 @@ let add_routes router =
               (match resolve_ide_scope_for_query ~state ~uri with
                | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
                | Ok scope ->
-                 (match
-                    keeper_filter_for_scope
-                      ~scope
-                      ~requested_keeper_id:(keeper_id_param uri)
-                  with
-                  | Error err ->
-                    respond_ide_error ~status:`Bad_request ~request err reqd
-                  | Ok keeper_id ->
-                    with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-                    let partition = partition_of_ide_scope scope in
+                 (let keeper_id = keeper_id_param uri in
+                    let codebase = codebase_of_ide_scope scope in
                     let events =
                       Ide_bridge.list_events
                         ~base_path:base
-                        ~partition
+                        ~codebase
                         ?kind
                         ?keeper_id
                         ~limit
@@ -916,7 +811,7 @@ let add_routes router =
                       ~compress:true
                       ~request
                       (json_ok result)
-                      reqd)))))
+                      reqd))))
       request
       reqd)
   (* [build_presence_snapshot] extracted in main — conflict resolved by taking
@@ -947,23 +842,16 @@ let add_routes router =
            (match resolve_ide_scope_for_query ~state ~uri with
             | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
             | Ok scope ->
-              (match
-                 keeper_filter_for_scope
-                   ~scope
-                   ~requested_keeper_id:(keeper_id_param uri)
-               with
-               | Error err -> respond_ide_error ~status:`Bad_request ~request err reqd
-               | Ok keeper_id ->
-                 with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-                 let partition = partition_of_ide_scope scope in
+              (let keeper_id = keeper_id_param uri in
+                 let codebase = codebase_of_ide_scope scope in
                  let snapshot =
-                   build_cursor_snapshot state uri ~partition ~keeper_id ~limit ~offset
+                   build_cursor_snapshot state uri ~codebase ~keeper_id ~limit ~offset
                  in
                  Http.Response.json_value
                    ~compress:true
                    ~request
                    (json_ok snapshot)
-                   reqd))))
+                   reqd)))
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
@@ -1044,9 +932,7 @@ let add_routes router =
                               ~file_path:(Agent_observation.Code_address.path address)
                               ~line
                               ?column
-                              ~partition:
-                                (Ide_paths.By_url
-                                   (Agent_observation.Code_address.codebase address))
+                              ~codebase:(Agent_observation.Code_address.codebase address)
                               ?focus_mode
                               ~source
                               ()
@@ -1095,16 +981,11 @@ let add_routes router =
            (match resolve_ide_scope_for_query ~state ~uri with
             | Error err -> respond_ide_error ~status:`Bad_request ~request err inner_reqd
             | Ok scope ->
-              (match keeper_filter_for_scope ~scope ~requested_keeper_id:keeper_id with
-               | Error err ->
-                 respond_ide_error ~status:`Bad_request ~request err inner_reqd
-               | Ok keeper_id ->
-              with_keeper_lane_read_auth ~state ~request ~reqd:inner_reqd ~scope (fun () ->
-              let partition = partition_of_ide_scope scope in
+              (let codebase = codebase_of_ide_scope scope in
               let filter : Ide_annotation_types.annotation_filter =
                 { file_path = None; keeper_id; goal_id = None; task_id = None }
               in
-              let annotations = Ide_annotations.list ~base_dir:base ~partition ~filter () in
+              let annotations = Ide_annotations.list ~base_dir:base ~codebase ~filter () in
               let entries =
                 List.map (fun (a : Ide_annotation_types.annotation) ->
                   `Assoc [
@@ -1142,7 +1023,7 @@ let add_routes router =
               in
               let body = Yojson.Safe.to_string result in
               let response = Httpun.Response.create ~headers `OK in
-              Httpun.Reqd.respond_with_string inner_reqd response body))))
+              Httpun.Reqd.respond_with_string inner_reqd response body)))
       request
       reqd)
 ;;

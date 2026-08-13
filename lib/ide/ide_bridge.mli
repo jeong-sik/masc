@@ -11,7 +11,7 @@ val event_kind_to_string : event_kind -> string
 
 val list_events :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  codebase:string ->
   ?kind:event_kind ->
   ?keeper_id:string ->
   ?limit:int ->
@@ -21,7 +21,7 @@ val list_events :
 
 val list_cursors :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  codebase:string ->
   ?keeper_id:string ->
   ?file_path:string ->
   ?limit:int ->
@@ -42,7 +42,7 @@ val register_cursor_changed_sink : (keeper_id:string -> unit) -> unit
     context and uses the provided [source] label as the tool_name field. *)
 val ingest_cursor_event :
   base_path:string ->
-  ?partition:Ide_paths.partition ->
+  codebase:string ->
   keeper_id:string ->
   file_path:string ->
   line:int ->
@@ -66,7 +66,7 @@ val observation_snapshot_json : take:bool -> Yojson.Safe.t
 
 val ingest_tool_event :
   base_path:string ->
-  partition:Ide_paths.partition ->
+  codebase:string ->
   tool_name:string ->
   keeper_id:string ->
   turn_id:string ->

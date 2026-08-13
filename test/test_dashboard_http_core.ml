@@ -1452,10 +1452,11 @@ let test_scheduled_automation_reads_its_cache_key () =
    projection stays a function of the clock it is handed. *)
 let test_schedule_exact_lookup_rejects_blank_id () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let now = 1_700_000_000.0 in
   let body =
     Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
       config
-      ~now:1_700_000_000.0
+      ~now
       ~schedule_id:"   "
   in
   let field name =
@@ -1469,7 +1470,12 @@ let test_schedule_exact_lookup_rejects_blank_id () =
     (option string)
     "the echoed id is the caller's, untrimmed"
     (Some "   ")
-    (field "schedule_id")
+    (field "schedule_id");
+  check
+    (option string)
+    "generated_at uses the same injected projection clock"
+    (Some (Masc_domain.iso8601_of_unix_seconds now))
+    (field "generated_at")
 
 (* The window selects which rows the scan covers, so two windows must not share
    an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)

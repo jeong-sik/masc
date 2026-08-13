@@ -967,11 +967,11 @@ let exact_lookup_status_to_string = function
   | Invalid_id -> "invalid_id"
 ;;
 
-let exact_lookup_json ~schedule_id status fields =
+let exact_lookup_json ~now ~schedule_id status fields =
   `Assoc
     ([ "schema", `String "masc.dashboard.scheduled_automation.lookup.v1"
      ; "source", `String "schedule_store"
-     ; "generated_at", `String (Masc_domain.now_iso ())
+     ; "generated_at", `String (Masc_domain.iso8601_of_unix_seconds now)
      ; "status", `String (exact_lookup_status_to_string status)
      ; "schedule_id", `String schedule_id
      ]
@@ -982,6 +982,7 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
   if String.trim raw_schedule_id = ""
   then
     exact_lookup_json
+      ~now
       ~schedule_id:raw_schedule_id
       Invalid_id
       [ "reason", `String "schedule_id must be non-empty" ]
@@ -993,6 +994,7 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
          "schedule store read failed: " ^ Schedule_store.read_error_to_string err
        in
        exact_lookup_json
+         ~now
          ~schedule_id
          Unavailable
          [ "reason", `String reason ]
@@ -1003,7 +1005,7 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
                String.equal request.schedule_id schedule_id)
             state.schedules
         with
-        | None -> exact_lookup_json ~schedule_id Not_found []
+        | None -> exact_lookup_json ~now ~schedule_id Not_found []
         | Some request ->
           let requests =
             schedule_request_rows_dashboard_json
@@ -1014,9 +1016,10 @@ let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule
           in
           (match requests with
            | [ request_json ] ->
-             exact_lookup_json ~schedule_id Found [ "request", request_json ]
+             exact_lookup_json ~now ~schedule_id Found [ "request", request_json ]
            | [] | _ :: _ :: _ ->
              exact_lookup_json
+               ~now
                ~schedule_id
                Unavailable
                [ "reason", `String "exact schedule projection cardinality mismatch" ])))

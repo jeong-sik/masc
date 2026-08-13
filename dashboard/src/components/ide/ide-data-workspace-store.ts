@@ -10,6 +10,7 @@ import {
   sameIdeWorkspaceIdentity,
   synchronizeIdeWorkspaceIdentity,
 } from './ide-state'
+import { publishLspScope } from './ide-lsp-client'
 import { activeKeeperName } from '../../keeper-state'
 import { route } from '../../router'
 import { selectedTask } from '../goals/task-detail-selection'
@@ -472,6 +473,11 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
           scope: ideScopeFromKeeperLane(keeperParam),
           signal,
         }
+    // The LSP connection needs the same scope: it picks both the annotation
+    // partition the overlay reads and the tree our repo-relative document
+    // paths resolve against. Publishing it here keeps the socket addressing
+    // the rows these REST reads address.
+    publishLspScope({ repoId: repoId ?? null, keeper: keeperParam ?? null })
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath: requestedFilePath,
       keeper: keeperParam ?? null,

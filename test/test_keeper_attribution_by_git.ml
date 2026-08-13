@@ -194,6 +194,37 @@ let test_non_checkout_inside_a_playground_is_unresolved () =
         (partition_label partition)))
 ;;
 
+let test_failed_origin_lookup_recovers_after_negative_ttl () =
+  with_temp_base_dir (fun base_dir ->
+    let checkout = playground_checkout ~base_dir ~keeper:"tester" ~rel:"work/retry" in
+    Fs_compat.mkdir_p checkout;
+    ignore (git_or_fail ~cwd:checkout [ "init"; "-b"; "fixture" ]);
+    let file = Filename.concat checkout "lib/foo.ml" in
+    write_file file "let x = 1\n";
+    let now = ref 100.0 in
+    Masc.Keeper_tool_filesystem_runtime.For_testing.with_origin_cache_clock
+      (fun () -> !now)
+      (fun () ->
+         with_flag true (fun () ->
+           let partition, _ = resolve ~base_dir ~file_path:file in
+           check string "missing origin is unresolved" "base_unresolved"
+             (partition_label partition);
+           ignore
+             (git_or_fail
+                ~cwd:checkout
+                [ "remote"; "add"; "origin"; "https://github.com/owner/retry.git" ]);
+           now := 120.0;
+           let partition, _ = resolve ~base_dir ~file_path:file in
+           check string "negative entry suppresses an immediate retry" "base_unresolved"
+             (partition_label partition);
+           now := 131.0;
+           let partition, rel = resolve ~base_dir ~file_path:file in
+           check string "expired failure is retried"
+             "by_url:github.com_owner_retry"
+             (partition_label partition);
+           check string "recovered relative path" "lib/foo.ml" rel)))
+;;
+
 let () =
   run
     "keeper_attribution_by_git"
@@ -210,6 +241,8 @@ let () =
             test_paths_outside_a_playground_are_left_alone
         ; test_case "non-checkout inside a playground is unresolved" `Quick
             test_non_checkout_inside_a_playground_is_unresolved
+        ; test_case "failed origin lookup recovers after negative TTL" `Quick
+            test_failed_origin_lookup_recovers_after_negative_ttl
         ] )
     ]
 ;;

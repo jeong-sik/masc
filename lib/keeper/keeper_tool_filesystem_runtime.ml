@@ -597,12 +597,11 @@ let apply_patch ~old_string ~new_string ~replace_all text =
    measured across 12 keepers is 12 (2026-08-13). 64 leaves room without
    letting a pathological tree grow this without limit.
 
-   The failure is remembered too. A checkout that cannot answer — no remote, a
-   detached inspection, a stalled filesystem — answers the same way every time,
-   and every write is a call: caching only the successes would spend a
-   subprocess per write on exactly the checkouts that are already the most
-   expensive to ask. The entry is the resolver's whole answer, so a repeat costs
-   what a hit costs.
+   Failures use a short negative TTL. That prevents every write from spawning
+   another process while a checkout is unhealthy, without turning one transient
+   timeout into [Base_unresolved] until the keeper process restarts. Successful
+   origins remain stable for the process lifetime because changing a remote is
+   an explicit operator action followed by a restart.
 
    Full means stop inserting, not start over. [Hashtbl.reset] at the cap
    discards all 64 on the insert that crosses it, so a tree that legitimately
@@ -610,21 +609,50 @@ let apply_patch ~old_string ~new_string ~replace_all text =
    at the moment there are the most checkouts to serve. Declining the insert
    keeps the entries that are already answering; the bound is held either way,
    and only this one degrades gracefully. *)
-let origin_cache : (string, (string, string) result) Hashtbl.t = Hashtbl.create 16
+type origin_cache_entry =
+  { answer : (string, string) result
+  ; expires_at : float option
+  }
+
+let origin_cache : (string, origin_cache_entry) Hashtbl.t = Hashtbl.create 16
 let origin_cache_mu = Stdlib.Mutex.create ()
 let origin_cache_capacity = 64
+let origin_cache_negative_ttl_sec = 30.0
+let origin_cache_now : (unit -> float) Atomic.t = Atomic.make Unix.gettimeofday
+
+let clear_origin_cache () =
+  Stdlib.Mutex.protect origin_cache_mu (fun () -> Hashtbl.clear origin_cache)
+;;
+
+let prune_expired_origin_cache ~now =
+  Hashtbl.filter_map_inplace
+    (fun _ entry ->
+       match entry.expires_at with
+       | Some expires_at when Float.compare expires_at now <= 0 -> None
+       | Some _ | None -> Some entry)
+    origin_cache
+;;
 
 let cached_origin_url ~checkout_root =
+  let now = (Atomic.get origin_cache_now) () in
   match
     Stdlib.Mutex.protect origin_cache_mu (fun () ->
+      prune_expired_origin_cache ~now;
       Hashtbl.find_opt origin_cache checkout_root)
   with
-  | Some answer -> answer
+  | Some entry -> entry.answer
   | None ->
     let answer = Repo_git.get_origin_url ~local_path:checkout_root in
+    let cached_at = (Atomic.get origin_cache_now) () in
+    let expires_at =
+      match answer with
+      | Ok _ -> None
+      | Error _ -> Some (cached_at +. origin_cache_negative_ttl_sec)
+    in
     Stdlib.Mutex.protect origin_cache_mu (fun () ->
+      prune_expired_origin_cache ~now:cached_at;
       if Hashtbl.length origin_cache < origin_cache_capacity
-      then Hashtbl.replace origin_cache checkout_root answer);
+      then Hashtbl.replace origin_cache checkout_root { answer; expires_at });
     answer
 ;;
 
@@ -2983,5 +3011,15 @@ module For_testing = struct
 
   let with_created_directory_fault fault f =
     Eio.Fiber.with_binding created_directory_dispatch_fault_key fault f
+  ;;
+
+  let with_origin_cache_clock clock f =
+    let previous = Atomic.exchange origin_cache_now clock in
+    clear_origin_cache ();
+    Fun.protect
+      ~finally:(fun () ->
+        clear_origin_cache ();
+        Atomic.set origin_cache_now previous)
+      f
   ;;
 end

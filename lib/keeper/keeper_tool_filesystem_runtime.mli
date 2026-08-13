@@ -108,4 +108,8 @@ module For_testing : sig
     :  created_directory_fault
     -> (unit -> 'a)
     -> 'a
+
+  val with_origin_cache_clock : (unit -> float) -> (unit -> 'a) -> 'a
+  (** Run with an isolated origin cache and caller-controlled clock. The cache
+      and clock are restored even when the callback raises. *)
 end

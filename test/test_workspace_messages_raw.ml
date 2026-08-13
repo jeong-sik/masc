@@ -320,7 +320,26 @@ let test_malformed_outbox_is_quarantined_before_successor_delivery () =
         receipt.quarantine_name
     in
     Alcotest.(check bool) "quarantine evidence committed" true
-      (Sys.file_exists quarantine_path)))
+      (Sys.file_exists quarantine_path);
+    let evidence = Workspace_utils.read_json config quarantine_path in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "quarantine evidence schema"
+      "masc.workspace_mention_outbox_quarantine.v1"
+      (evidence |> member "schema" |> to_string);
+    Alcotest.(check string) "quarantine evidence source"
+      "malformed.json"
+      (evidence |> member "source_name" |> to_string);
+    Alcotest.(check string) "quarantine evidence reason"
+      "malformed_filename"
+      (evidence |> member "reason" |> to_string);
+    Alcotest.(check string) "quarantine evidence raw digest"
+      receipt.raw_sha256
+      (evidence |> member "raw_sha256" |> to_string);
+    let encoded_raw = evidence |> member "raw_base64" |> to_string in
+    Alcotest.(check string) "quarantine evidence preserves raw row"
+      (Yojson.Safe.to_string (`Assoc [ "unexpected", `Bool true ]))
+      (encoded_raw |> Base64.decode_exn |> Yojson.Safe.from_string
+       |> Yojson.Safe.to_string)))
 
 let test_startup_schema_preflight_rejects_unpurged_message () =
   with_test_env (fun config ->

@@ -197,7 +197,7 @@ let log_annotation_delete_rejected ~auth_identity ~id ~reason =
     reason
 ;;
 
-(* task-1736 (IDE Observation Plane v2, axis B3) — bind an annotation
+(* task-1736 — bind an annotation
    mutation's keeper_id to the authenticated identity.
 
    Before B3 the POST/DELETE handlers read keeper_id from a

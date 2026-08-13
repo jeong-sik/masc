@@ -393,15 +393,24 @@ let string_field json key =
 (* Divergence analysis                                               *)
 (* ================================================================ *)
 
+(* Row bounds for the two windowed calibration readers. Both branches of each
+   reader use its bound: the filtered branch previously had none. *)
+let divergence_scan_rows = 1000
+let calibration_scan_rows = 5000
+
 let find_divergences ?(since = "") ?(until = "") () : divergence list =
   let store = get_store () in
   let records =
     if since = "" && until = "" then
-      Dated_jsonl.read_recent store 1000
+      Dated_jsonl.read_recent store divergence_scan_rows
     else
+      (* Same bound as the unfiltered branch above. [read_range] carries no
+         row bound, so supplying a date -- which narrows the request -- used to
+         remove the cap, and a one-sided date widens it further because the
+         missing side is filled with 2020-01-01 / 2099-12-31 below. *)
       let s = if since = "" then "2020-01-01" else since in
       let u = if until = "" then "2099-12-31" else until in
-      Dated_jsonl.read_range store ~since:s ~until:u
+      Dated_jsonl.read_range_recent store ~since:s ~until:u divergence_scan_rows
   in
   (* Separate verdicts and labels *)
   let (verdicts, labels) : Yojson.Safe.t StringMap.t * Yojson.Safe.t StringMap.t =
@@ -487,11 +496,12 @@ let calibration_stats ?(since = "") ?(until = "") () : Yojson.Safe.t =
   let store = get_store () in
   let records =
     if since = "" && until = "" then
-      Dated_jsonl.read_recent store 5000
+      Dated_jsonl.read_recent store calibration_scan_rows
     else
+      (* Same bound as the unfiltered branch; see [find_divergences]. *)
       let s = if since = "" then "2020-01-01" else since in
       let u = if until = "" then "2099-12-31" else until in
-      Dated_jsonl.read_range store ~since:s ~until:u
+      Dated_jsonl.read_range_recent store ~since:s ~until:u calibration_scan_rows
   in
   let max_failure_reasons = 5 in
   let evaluator_failure_tags =

@@ -118,7 +118,11 @@ let run
         ~finally:(fun () ->
           if owns_token then Eio.Cancel.protect (fun () -> release_owned token))
         (fun () ->
-           match register token intake_token with
+           (* Registration may load durable state before committing its final
+              registry CAS. Keep the callback cancellation-protected so the
+              transaction always obtains the exact entry needed for rollback
+              after that commit. *)
+           match Eio.Cancel.protect (fun () -> register token intake_token) with
            | Error error -> Error (Registration_failed error)
            | Ok reg ->
              (match
@@ -149,13 +153,14 @@ let run
                      Eio.Cancel.protect (fun () ->
                        match rollback with
                        | Retain_registered ->
-                         (* This is an existing Offline authority intended for
-                            a later retry. Rejecting its not-yet-started lane
-                            made the registry retain an entry that could never
-                            fork. If the callback crossed the start boundary,
-                            the same choice also leaves terminal cleanup with
-                            its exact registry and Librarian ownership. *)
-                         None, None
+                         (* Retain the registry authority in both cases, but a
+                            pre-start callback failure owns no live fiber that
+                            can settle the Librarian lifecycle. Close that
+                            lifecycle so the exact Offline lane is retryable.
+                            A started lane keeps terminal cleanup ownership. *)
+                         if Keeper_lane.crossed_start_boundary reg.lane
+                         then None, None
+                         else abort_open_lifecycle (), None
                        | Remove_registered | Restore_previous _ ->
                          (match reject_for_rollback reg with
                           | Error detail -> None, Some detail

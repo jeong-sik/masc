@@ -2753,6 +2753,82 @@ let test_launch_callback_cancellation_rolls_back_restart_transaction () =
        | _ -> fail "cancelled launch left Librarian admission open")
 ;;
 
+let test_register_cancellation_rolls_back_restart_transaction () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  ensure_test_runtime ();
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.For_testing.clear ();
+      Memory_lane.For_testing.reset ();
+      Masc.Keeper_shutdown_intake_fence.For_testing.reset ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
+       Memory_lane.For_testing.reset ();
+       let name = "librarian-register-cancellation-rollback" in
+       let meta = make_meta name in
+       let crashed = crashed_restart_fixture ~base_path:config.base_path name meta in
+       let cancel_context, resolve_cancel_context = Eio.Promise.create () in
+       let registered, resolve_registered = Eio.Promise.create () in
+       let continue_registration, resolve_continue_registration = Eio.Promise.create () in
+       let cancelled, resolve_cancelled = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let saw_cancellation =
+           try
+             Eio.Cancel.sub (fun context ->
+               Eio.Promise.resolve resolve_cancel_context context;
+               ignore
+                 (Launch_transaction.run
+                    ~base_path:config.base_path
+                    ~keeper_name:name
+                    ~expected_generation:crashed.transition_seq
+                    ~register:(fun token intake_token ->
+                      match
+                        register_restart
+                          ~base_path:config.base_path
+                          ~name
+                          ~meta
+                          token
+                          intake_token
+                      with
+                      | Error _ as error -> error
+                      | Ok replacement as ok ->
+                        Eio.Promise.resolve resolve_registered replacement;
+                        Eio.Promise.await continue_registration;
+                        ok)
+                    ~rollback:(Launch_transaction.Restore_previous crashed)
+                    (fun _intake_token _token _replacement ->
+                      Eio.Fiber.yield ();
+                      failwith "pending registration cancellation was not delivered")
+                  : (_, _) result);
+               false)
+           with
+           | Eio.Cancel.Cancelled _ -> true
+         in
+         Eio.Promise.resolve resolve_cancelled saw_cancellation);
+       let context = Eio.Promise.await cancel_context in
+       let replacement = Eio.Promise.await registered in
+       Eio.Cancel.cancel context (Failure "cancel injected after registration commit");
+       Eio.Promise.resolve resolve_continue_registration ();
+       check bool "registration cancellation propagates after rollback" true
+         (Eio.Promise.await cancelled);
+       (match Reg.get ~base_path:config.base_path name with
+        | Some current ->
+          check bool "registration cancellation restores exact crashed authority" true
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id crashed.lane));
+          check bool "registration cancellation removed replacement authority" false
+            (Lane.Id.equal (Lane.id current.lane) (Lane.id replacement.lane))
+        | None -> fail "registration cancellation removed durable restart authority");
+       match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+       | Memory_lane.Rejected_draining -> ()
+       | _ -> fail "registration cancellation left Librarian admission open")
+;;
+
 let test_started_launch_exception_retains_registered_lane () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2839,6 +2915,9 @@ let test_offline_launch_exception_retains_retryable_lane () =
                { librarian_abort_error = None; rollback_error = None; _ }) -> ()
         | Error _ -> fail "offline callback failure produced the wrong transaction outcome"
         | Ok _ -> fail "offline callback failure unexpectedly committed");
+       (match Memory_lane.submit ~base_path:config.base_path ~keeper_name:name ignore with
+        | Memory_lane.Rejected_draining -> ()
+        | _ -> fail "pre-start Offline failure left Librarian admission open");
        let forked = ref false in
        (match
           run (fun _intake_token _token entry ->
@@ -3038,6 +3117,8 @@ let () =
         test_launch_callback_failure_rolls_back_restart_transaction;
       test_case "launch callback cancellation rolls back restart transaction" `Quick
         test_launch_callback_cancellation_rolls_back_restart_transaction;
+      test_case "register cancellation rolls back restart transaction" `Quick
+        test_register_cancellation_rolls_back_restart_transaction;
       test_case "started launch exception retains registered lane" `Quick
         test_started_launch_exception_retains_registered_lane;
       test_case "offline launch exception retains retryable lane" `Quick

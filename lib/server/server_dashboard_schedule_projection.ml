@@ -978,7 +978,7 @@ let exact_lookup_json ~schedule_id status fields =
      @ fields)
 ;;
 
-let scheduled_automation_exact_lookup_json config ~schedule_id:raw_schedule_id =
+let scheduled_automation_exact_lookup_json config ~now ~schedule_id:raw_schedule_id =
   if String.trim raw_schedule_id = ""
   then
     exact_lookup_json
@@ -1008,7 +1008,7 @@ let scheduled_automation_exact_lookup_json config ~schedule_id:raw_schedule_id =
           let requests =
             schedule_request_rows_dashboard_json
               ~config
-              ~now:(Unix.gettimeofday ())
+              ~now
               state
               [ request ]
           in

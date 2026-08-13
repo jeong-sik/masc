@@ -24,7 +24,7 @@ val scheduled_automation_dashboard_json : Workspace.config -> Yojson.Safe.t
     as unknown rather than as zero schedules. *)
 
 val scheduled_automation_exact_lookup_json :
-  Workspace.config -> schedule_id:string -> Yojson.Safe.t
+  Workspace.config -> now:float -> schedule_id:string -> Yojson.Safe.t
 (** Renders one exact schedule through the same request-row encoder as the
     aggregate projection. The closed [status] is [found], [not_found],
     [unavailable], or [invalid_id]. *)

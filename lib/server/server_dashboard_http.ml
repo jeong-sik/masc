@@ -314,6 +314,9 @@ let dashboard_scheduled_automation_query_http_json
     Domain_pool_ref.submit_io_or_inline (fun () ->
       Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
         config
+        (* NDT-OK: the request boundary is where wall-clock enters, so the
+           projection stays a pure function of (state, now). *)
+        ~now:(Unix.gettimeofday ())
         ~schedule_id)
 ;;
 

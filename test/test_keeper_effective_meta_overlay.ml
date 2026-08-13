@@ -317,6 +317,52 @@ sandbox_profile = "docker"
         "none"
         (Profile.network_mode_to_string meta.network_mode)
 
+(* The direct-turn path holds profile defaults it loaded once and overlays with
+   them, rather than re-reading the profile per use: two reads inside one turn
+   could otherwise disagree. That is why the overlay is reachable on its own and
+   not only through [effective_meta_result], which loads and applies together.
+
+   Persisted runtime meta omits TOML-owned fields, so a turn reading it raw sees
+   the wrong sandbox — the overlay is what makes the turn's meta effective. *)
+let test_profile_defaults_overlay_applies_without_reloading () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "overlay-once" in
+  write_keeper_agent ~keepers_dir ~name "Analyze carefully.";
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+sandbox_profile = "docker"
+|};
+  let config = Workspace.default_config base in
+  let persisted = seed_runtime_meta config name in
+  match Profile.load_keeper_profile_defaults ~config ~keeper_name:name with
+  | Error error ->
+    Alcotest.failf
+      "profile defaults load failed: %s"
+      (Profile.keeper_toml_load_error_to_string error)
+  | Ok defaults ->
+    (match
+       Masc.Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
+     with
+     | Error error -> Alcotest.failf "overlay failed: %s" error
+     | Ok effective ->
+       Alcotest.(check string)
+         "overlay carries the TOML sandbox onto persisted meta"
+         "docker"
+         (Profile.sandbox_profile_to_string effective.sandbox_profile);
+       (* The same defaults applied twice must land on the same meta: the turn
+          reuses one load, so the overlay cannot depend on when it runs. *)
+       (match
+          Masc.Keeper_meta_contract.effective_meta_of_profile_defaults defaults persisted
+        with
+        | Error error -> Alcotest.failf "second overlay failed: %s" error
+        | Ok again ->
+          Alcotest.(check string)
+            "reapplying the same defaults is stable"
+            (Profile.sandbox_profile_to_string effective.sandbox_profile)
+            (Profile.sandbox_profile_to_string again.sandbox_profile)))
+;;
+
 let test_keeper_instructions_reach_meta_json () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "probe" in
@@ -1225,6 +1271,9 @@ let () =
         [
           Alcotest.test_case "TOML sandbox overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
+          Alcotest.test_case
+            "profile-defaults overlay applies without reloading the profile"
+            `Quick test_profile_defaults_overlay_applies_without_reloading;
           Alcotest.test_case "keeper_exists_config answers existence typed"
             `Quick test_keeper_exists_config_answers_typed;
           Alcotest.test_case

@@ -175,6 +175,19 @@ let rec mkdir_p path =
     Unix.mkdir path 0o755
   end
 
+(* The example keeper must satisfy the fail-closed profile contract
+   (#24144/#24226): a TOML without inline instructions requires a non-empty
+   keepers/<name>/AGENT.md, and a keeper whose profile fails to load is
+   excluded from autoboot/bootable targets entirely — which silently removed
+   "example" from every blocked-target expectation below (#28485 layer 2). *)
+let write_example_keeper config =
+  write_file
+    (Filename.concat config "keepers/example.toml")
+    "[keeper]\nautoboot_enabled = true\n";
+  let example_dir = Filename.concat (Filename.concat config "keepers") "example" in
+  mkdir_p example_dir;
+  write_file (Filename.concat example_dir "AGENT.md") "example instructions\n"
+
 let make_config_root root =
   let config = Filename.concat root "config" in
   mkdir_p (Filename.concat config "prompts");
@@ -185,9 +198,7 @@ let make_config_root root =
   write_file (Filename.concat root "agent-core-models.toml") "legacy full catalog must be ignored";
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.md") "prompt";
-  write_file
-    (Filename.concat config "keepers/example.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+  write_example_keeper config;
   config
 
 let make_base_path_config_root root =
@@ -201,9 +212,7 @@ let make_base_path_config_root root =
     repo_model_catalog_overlay_toml;
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
   write_file (Filename.concat config "prompts/keeper.md") "prompt";
-  write_file
-    (Filename.concat config "keepers/example.toml")
-    "[keeper]\nautoboot_enabled = true\n";
+  write_example_keeper config;
   config
 
 let test_model_catalog_configuration_installs_explicit_env_override () =

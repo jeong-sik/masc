@@ -38,6 +38,7 @@ paused_targets=(
 
 normal_targets=(
   @test/runtest-test_board_dispatch
+  @test/runtest-test_keeper_latched_reason_wiring
   @test/runtest-test_dedup_rules
   @test/runtest-test_exec_command_gate_log_sink
   @test/runtest-test_file_kind_vocabulary
@@ -148,6 +149,7 @@ normal_targets=(
   @test/runtest-test_keeper_gate_effect_coverage
   @test/runtest-test_keeper_gate_replay
   @test/runtest-test_workspace
+  @test/runtest-test_http_server_eio
   @test/runtest-test_verification
   @test/runtest-test_dashboard_verification
   @test/runtest-test_tool_schema_constraint_enforcement
@@ -231,6 +233,7 @@ normal_targets=(
   @test/runtest-test_keeper_sandbox_docker_route
   @test/runtest-test_dashboard_dev_token_host_gate
   @test/runtest-test_dashboard_harness_health
+  @test/runtest-test_eval_calibration
   @test/runtest-test_telemetry_unified_keeper_fan_in
   @test/runtest-test_dated_jsonl
   @test/runtest-test_audit_log

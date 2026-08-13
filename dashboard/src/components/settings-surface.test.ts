@@ -223,22 +223,26 @@ function makeRuntimeResolved(
       id: 'rt-a', provider: 'P', model: 'm1',
       effective_max_context: 128000, max_context_source: 'override',
       max_output_tokens: null, is_local: false, is_default: true,
+      keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
     },
     runtimes: [
       {
         id: 'rt-a', provider: 'P', model: 'm1',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: true,
+        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
       {
         id: 'rt-b', provider: 'P', model: 'm2',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false,
+        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
       {
         id: 'rt-c', provider: 'P', model: 'm3',
         effective_max_context: 128000, max_context_source: 'override',
         max_output_tokens: null, is_local: false, is_default: false,
+        keeper_dispatchable: true, keeper_dispatch_blocked_reason: null,
       },
     ],
     lanes: [],

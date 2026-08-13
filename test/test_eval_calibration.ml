@@ -73,6 +73,41 @@ let test_notes_hash_known_vector () =
 (* Record verdict tests                                              *)
 (* ================================================================ *)
 
+(* Both windowed readers capped their unfiltered branch and left the filtered
+   one on [Dated_jsonl.read_range], which carries no row bound — so supplying a
+   date, which narrows the request, removed the cap. [Dashboard_harness_health]
+   passes user-supplied dates straight into [calibration_stats].
+
+   The assertion is the invariant, not the constant: a date filter must not
+   widen the read. Pinning 5000 would break on any future tuning of the bound
+   and the test would stop being read. *)
+let test_a_date_filter_does_not_remove_the_row_cap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir () in
+  Cal.For_testing.set_store ~base_dir:dir;
+  Fun.protect ~finally:Cal.For_testing.reset_store (fun () ->
+    Cal.record_verdict ~task_id:"cap-seed" ~req:(make_req ()) ~result:(make_result ()) ();
+    (* Replicate the row the public API just wrote rather than hand-writing the
+       record schema, so this test survives changes to that shape. *)
+    let template =
+      match Dated_jsonl.read_recent (Cal.get_store ()) 1 with
+      | [ row ] -> Yojson.Safe.to_string row
+      | _ -> fail "expected exactly one seeded record"
+    in
+    let seeded = 6000 in
+    let store = Cal.get_store () in
+    for _ = 1 to seeded do
+      Dated_jsonl.append store (Yojson.Safe.from_string template)
+    done;
+    let total stats = Yojson.Safe.Util.(stats |> member "total_verdicts" |> to_int) in
+    let unfiltered = total (Cal.calibration_stats ()) in
+    let filtered = total (Cal.calibration_stats ~since:"2020-01-01" ()) in
+    check bool "the unfiltered read is capped below what was seeded" true
+      (unfiltered <= seeded);
+    check int "a date filter reads no more than an unfiltered read" unfiltered
+      filtered)
+
 let test_record_verdict_writes () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -620,6 +655,8 @@ let () =
     ];
     "record_verdict", [
       test_case "writes to store" `Quick test_record_verdict_writes;
+      test_case "a date filter does not remove the row cap" `Quick
+        test_a_date_filter_does_not_remove_the_row_cap;
       test_case "reject verdict" `Quick test_record_verdict_reject;
       test_case "hash matches" `Quick test_record_verdict_hash_matches;
     ];

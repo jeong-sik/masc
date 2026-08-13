@@ -2438,6 +2438,110 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
         (String_util.contains_substring msg "disabled by runtime.toml"))
 ;;
 
+(* masc#28404. Same config the test above proves must still boot: [local.sample]
+   is routed and capped, [local.dormant] is declared, materialized, and cannot
+   carry a keeper turn. Boot staying up is correct; the runtime being blocked
+   with nothing anywhere saying so is the defect. Seven live runtimes were in
+   this state on 2026-08-12 and finding them took a script that re-parsed the
+   TOML, because the runtime list reported them exactly like the assignable
+   ones. *)
+let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.dormant]\n\
+     api-name = \"dormant\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [local.dormant]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg ->
+      failf "an unassigned uncapped runtime must not fail the load: %s" msg
+    | Ok (runtimes, _, _, _, _, _) ->
+      check (list string) "both runtimes materialize"
+        [ "local.sample"; "local.dormant" ]
+        (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes);
+      (match Runtime.keeper_dispatch_blocked runtimes with
+       | [ (blocked, reason) ] ->
+         check string "the uncapped runtime is the blocked one" "local.dormant"
+           blocked.id;
+         check bool "reason names the table to edit" true
+           (String_util.contains_substring reason "[local.dormant]");
+         check bool "reason names the missing field" true
+           (String_util.contains_substring reason "max-request-body-bytes")
+       | blocked ->
+         failf
+           "expected exactly the uncapped runtime to be blocked; got [%s]"
+           (String.concat "; "
+              (List.map (fun ((r : Runtime.t), _) -> r.id) blocked)));
+      (* The routed runtime is judged by the same predicate, so a projection
+         that reported everything blocked would fail here rather than read as a
+         fleet-wide outage. *)
+      check bool "the routed runtime is dispatchable" true
+        (match
+           List.find_opt
+             (fun (runtime : Runtime.t) -> String.equal runtime.id "local.sample")
+             runtimes
+         with
+         | Some runtime ->
+           Runtime.keeper_dispatch_readiness runtime = Runtime.Dispatchable
+         | None -> false))
+;;
+
+(* An official-client runtime declares no body cap by design — the spawned
+   vendor client owns its own context window — so it must not be reported as
+   blocked. Without this, the projection would tell operators to add a field
+   that boot validation deliberately does not require of it. *)
+let test_official_client_runtime_is_dispatchable_without_a_body_cap () =
+  let runtime_toml =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [providers.claude_code]\n\
+     protocol = \"claude-code\"\n\
+     command = \"claude\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.official]\n\
+     api-name = \"claude-sonnet-5\"\n\
+     max-context = 200000\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 65536\n\
+     \n\
+     [claude_code.official]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  with_temp_runtime_toml runtime_toml (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "official-client runtime should load: %s" msg
+    | Ok (runtimes, _, _, _, _, _) ->
+      check (list string) "no runtime is reported blocked" []
+        (List.map
+           (fun ((runtime : Runtime.t), _) -> runtime.id)
+           (Runtime.keeper_dispatch_blocked runtimes)))
+;;
+
 (* masc#28403. The runtime this declares — [local.typo] — cannot exist, because
    no [models.typo] row does. Nothing references it, which is the whole point:
    before this was a load error the only way a dangling binding surfaced was an
@@ -4097,6 +4201,12 @@ let () =
             "runtime config allows uncapped dormant lane candidate"
             `Quick
             test_runtime_config_validation_allows_uncapped_dormant_lane_candidate;
+          test_case
+            "declared uncapped runtime reports its dispatch blocker"
+            `Quick test_declared_uncapped_runtime_reports_its_dispatch_blocker;
+          test_case
+            "official-client runtime is dispatchable without a body cap"
+            `Quick test_official_client_runtime_is_dispatchable_without_a_body_cap;
           test_case "non-positive max-request-body-bytes is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case

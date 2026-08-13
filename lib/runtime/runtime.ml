@@ -634,6 +634,66 @@ let validate_request_body_cap ~runtime_id
     Error (Missing_or_non_positive_request_body_cap { runtime_id })
 ;;
 
+(* Whether a materialized runtime could carry a keeper turn if one were routed
+   to it, independent of whether anything routes to it today.
+
+   Boot validation deliberately checks only reachable ids — refusing to start
+   over a runtime nobody is assigned to would be wrong — but that left the
+   blocked state with no observer at all: a runtime declared in runtime.toml,
+   materialized, listed by /api/v1/runtime/resolved, and impossible to assign,
+   with nothing anywhere saying why. Seven live runtimes were in that state on
+   2026-08-12 and finding them required a separate script that re-parsed the
+   TOML (masc#28404). The readiness is the same predicate boot validation uses,
+   named once so the operator-facing projection and the fail-closed gate cannot
+   disagree. *)
+type keeper_dispatch_readiness =
+  | Dispatchable
+  | Missing_request_body_cap of { table_path : string }
+
+(* TEL-OK: pure predicate over an already-materialized runtime; the boot logger
+   and the resolved projection own its observability. *)
+let keeper_dispatch_readiness (runtime : t) : keeper_dispatch_readiness =
+  (* Only Agent_core is judged, because only Agent_core builds the request whose
+     size this bounds. An official-client turn hands its conversation to a
+     spawned vendor client that owns its own context window and refuses an
+     oversized one in a typed terminal. *)
+  match runtime.execution with
+  | Runtime_execution.Agent_core provider_config ->
+    (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
+     | Ok _ -> Dispatchable
+     | Error _ ->
+       Missing_request_body_cap
+         { table_path =
+             Otoml.string_of_path
+               [ runtime.binding.provider_id; runtime.binding.model_id ]
+         })
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ -> Dispatchable
+;;
+
+(* TEL-OK: pure rendering of the variant above; callers decide where it lands. *)
+let keeper_dispatch_blocker = function
+  | Dispatchable -> None
+  | Missing_request_body_cap { table_path } ->
+    Some
+      (Printf.sprintf
+         "no positive max-request-body-bytes; declare [%s].max-request-body-bytes"
+         table_path)
+;;
+
+(* Every materialized runtime a keeper could not be assigned to, in declaration
+   order, paired with the reason. Empty is the healthy state.
+   TEL-OK: pure filter; the boot path logs one line per entry it returns. *)
+let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
+  List.filter_map
+    (fun runtime ->
+      Option.map
+        (fun reason -> runtime, reason)
+        (keeper_dispatch_blocker (keeper_dispatch_readiness runtime)))
+    runtimes
+;;
+
 (* Keeper provider attempts originate at the configured default, an explicit
    keeper assignment, an explicit media-failover runtime, or cross verifier. A lane is
    reachable only when its id shadows one of the configured routes; a merely
@@ -697,27 +757,18 @@ let validate_keeper_dispatch_request_caps
   let runtime_by_id id =
     List.find_opt (fun (runtime : t) -> String.equal runtime.id id) runtimes
   in
-  (* Only Agent_core is checked here, because only Agent_core builds the
-     request whose size this bounds. An official-client turn hands its
-     conversation to a spawned vendor client that owns its own context window
-     and refuses an oversized one in a typed terminal; the shrink sequence
-     consumes that terminal and retries with less. Requiring a declared
-     max-prompt-bytes there added a second authority over the same window,
+  (* Same predicate {!keeper_dispatch_readiness} reports to operators. Only
+     reachable ids are judged here — a declared-but-unassigned runtime must not
+     refuse boot — but the two must never disagree about what "blocked" means,
+     which is why the decision has one definition and this is a projection of
+     it. The official-client arms are Dispatchable there: requiring a declared
+     max-prompt-bytes for them added a second authority over the same window,
      measured in wire bytes rather than tokens, and made its absence a boot
-     refusal — so a deployment could not choose to let the provider decide. *)
+     refusal, so a deployment could not choose to let the provider decide. *)
   let missing_ceiling runtime =
-    match runtime.execution with
-    | Runtime_execution.Agent_core provider_config ->
-      (match validate_request_body_cap ~runtime_id:runtime.id provider_config with
-       | Ok _ -> None
-       | Error _ ->
-         Some
-           ( runtime
-           , Otoml.string_of_path
-               [ runtime.binding.provider_id; runtime.binding.model_id ] ))
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _ -> None
+    match keeper_dispatch_readiness runtime with
+    | Dispatchable -> None
+    | Missing_request_body_cap { table_path } -> Some (runtime, table_path)
   in
   match List.find_map (fun id -> Option.bind (runtime_by_id id) missing_ceiling) ids with
   | None -> Ok ()

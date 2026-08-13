@@ -71,7 +71,7 @@ async function fetchWaterfallSources(
   const [trajectory, toolCalls, runtimeTrace] = await Promise.all([
     settleSource<TrajectoryResponse>(
       'trajectory',
-      fetchKeeperTrajectory(keeperName, 200, true, true),
+      fetchKeeperTrajectory(keeperName, 200),
     ),
     settleSource<ToolCallsResponse>(
       'tool-calls',

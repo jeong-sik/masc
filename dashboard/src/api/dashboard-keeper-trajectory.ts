@@ -41,23 +41,13 @@ export type TrajectoryResponse = {
 export function fetchKeeperTrajectory(
   name: string,
   limit?: number,
-  includeThinking = true,
-  fullOutput = false,
 ): Promise<TrajectoryResponse> {
   const params = new URLSearchParams()
   if (limit != null) params.set('limit', String(limit))
-  // Always send include_thinking explicitly — backend defaults to false,
-  // so omitting the param means "don't include".
-  params.set('include_thinking', includeThinking ? 'true' : 'false')
-  // Request full output for session trace detail view.
-  // content_max_len=0 → no cap: surface the COMPLETE reasoning text in the
-  // detail view (남김없이). The backend persists thinking untruncated and
-  // treats 0 as "no truncation"; size is intentionally accepted here, this is
-  // the drill-in surface (the timeline list keeps the default preview cap).
-  if (fullOutput) {
-    params.set('result_max_len', '10000')
-    params.set('content_max_len', '0')
-  }
+  // Hidden chain-of-thought is not dashboard data. Keep this explicit so a
+  // backend default change cannot make raw reasoning cross the HTTP boundary.
+  // A separate typed metadata projection may expose presence/counts later.
+  params.set('include_thinking', 'false')
   const qs = params.toString()
   return get<TrajectoryResponse>(
     `/api/v1/keepers/${encodeURIComponent(name)}/trajectory${qs ? `?${qs}` : ''}`,

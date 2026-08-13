@@ -141,11 +141,14 @@ let test_merge_result_inherits_current_base_version () =
 
 let test_default_version_ref_still_checks_exact_head () =
   with_stale_feature_and_merge_result (fun ~repo ~script ~feature_sha ->
-      let code, _stdout, stderr = run_guard ~repo ~script ~feature_sha [] in
+      let code, stdout, stderr = run_guard ~repo ~script ~feature_sha [] in
       check bool "stale package truth fails without merge result" true (code <> 0);
+      check bool "defaults evaluated version ref to exact head" true
+        (String_util.contains_substring stdout ("version_ref=" ^ feature_sha));
+      check bool "reports base package floor" true
+        (String_util.contains_substring stderr "package 0.22.0");
       check bool "reports evaluated head version" true
-        (String_util.contains_substring stderr
-           ("evaluated result " ^ feature_sha ^ " is still 0.21.2")))
+        (String_util.contains_substring stderr "0.21.2"))
 
 let () =
   run "pr_sync_script"

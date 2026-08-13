@@ -448,7 +448,11 @@ jobs:
         if: github.event_name == 'pull_request' && github.base_ref == 'main'
         env:
           BASE_REF: origin/${{ github.base_ref }}
-          HEAD_REF: ${{ github.event.pull_request.head.sha }}
+          # actions/checkout checks out the pull request's synthetic merge
+          # commit.  Release truth must be evaluated on that merge result:
+          # an untouched stale head legitimately inherits dune-project from
+          # current main, while a real downgrade remains present in HEAD.
+          HEAD_REF: HEAD
         run: |
           chmod +x scripts/check-release-train-guard.sh
           # No --depth here. This guard only runs `git show` and `git tag`, so

@@ -6,14 +6,19 @@ HEAD_BRANCH=""
 EXPECTED_HEAD_SHA=""
 PR_NUMBER=""
 BASE_REF=""
+VERSION_REF=""
 
 usage() {
   cat <<'EOF'
 Usage: scripts/check-pr-sync.sh --head-branch <branch> --expected-head-sha <sha> [--pr-number <num>] [--remote <remote>]
-or --base-ref <ref>
+       [--base-ref <ref>] [--version-ref <ref>]
 
 Checks that the current pull-request run is still aligned with the latest remote branch head.
 Fails when the branch has advanced since the workflow payload was created.
+
+When --base-ref is provided, package-version drift is evaluated against --version-ref.
+The version ref defaults to the exact PR head for standalone callers; pull-request CI should
+pass the checked-out synthetic merge commit so unchanged files inherit current base truth.
 EOF
 }
 
@@ -39,6 +44,10 @@ while [[ $# -gt 0 ]]; do
       BASE_REF="${2:-}"
       shift 2
       ;;
+    --version-ref)
+      VERSION_REF="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -55,6 +64,10 @@ if [[ -z "$HEAD_BRANCH" || -z "$EXPECTED_HEAD_SHA" ]]; then
   echo "--head-branch and --expected-head-sha are required" >&2
   usage >&2
   exit 2
+fi
+
+if [[ -z "$VERSION_REF" ]]; then
+  VERSION_REF="$EXPECTED_HEAD_SHA"
 fi
 
 extract_dune_project_version() {
@@ -117,6 +130,7 @@ echo "[pr-sync] remote=${REMOTE}"
 echo "[pr-sync] head_branch=${HEAD_BRANCH}"
 echo "[pr-sync] expected_head_sha=${EXPECTED_HEAD_SHA}"
 echo "[pr-sync] remote_head_sha=${REMOTE_HEAD_SHA}"
+echo "[pr-sync] version_ref=${VERSION_REF}"
 
 if [[ "$REMOTE_HEAD_SHA" != "$EXPECTED_HEAD_SHA" ]]; then
   echo "::warning title=Stale PR run detected::workflow payload head ${EXPECTED_HEAD_SHA} is stale; remote ${HEAD_BRANCH} is now ${REMOTE_HEAD_SHA}"
@@ -161,7 +175,7 @@ if [[ -n "$BASE_REF" ]]; then
   # package floor, fail fast with a clear remediation instead of letting
   # later guard stages decide the outcome.
   BASE_VERSION="$(extract_dune_project_version "$BASE_REF")"
-  HEAD_VERSION="$(extract_dune_project_version "$EXPECTED_HEAD_SHA")"
+  VERSION_REF_VERSION="$(extract_dune_project_version "$VERSION_REF")"
 
   # Fail loud instead of warning-only: with a shallow checkout (default
   # actions/checkout depth 1) neither origin/<base> nor the head commit
@@ -173,14 +187,14 @@ if [[ -n "$BASE_REF" ]]; then
     exit 1
   fi
 
-  if [[ -z "$HEAD_VERSION" ]]; then
-    echo "::error title=PR head package version unreadable::Could not read version from ${EXPECTED_HEAD_SHA}:dune-project. Ensure the PR head commit is fetched locally."
+  if [[ -z "$VERSION_REF_VERSION" ]]; then
+    echo "::error title=PR package version unreadable::Could not read version from ${VERSION_REF}:dune-project. Ensure the version ref is fetched locally."
     exit 1
   fi
 
-  if version_gt "$BASE_VERSION" "$HEAD_VERSION"; then
-    echo "::error title=PR base package version drift::Base (${BASE_REF}) is on package ${BASE_VERSION} but PR head ${EXPECTED_HEAD_SHA} is still ${HEAD_VERSION}."
-    echo "  Rebase this branch onto ${BASE_REF}, then re-run CI."
+  if version_gt "$BASE_VERSION" "$VERSION_REF_VERSION"; then
+    echo "::error title=PR base package version drift::Base (${BASE_REF}) is on package ${BASE_VERSION} but evaluated result ${VERSION_REF} is still ${VERSION_REF_VERSION}."
+    echo "  Update the branch so its merge result preserves package version ${BASE_VERSION} or newer, then re-run CI."
 
     if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
       {
@@ -188,9 +202,9 @@ if [[ -n "$BASE_REF" ]]; then
         echo ""
         echo "- Branch: \`${HEAD_BRANCH}\`"
         echo "- PR base reference: \`${BASE_REF}\` (${BASE_VERSION})"
-        echo "- PR head: \`${EXPECTED_HEAD_SHA}\` (${HEAD_VERSION})"
-        echo "- Failure: package version in PR head is behind base"
-        echo "- Recommended fix: rebase branch onto ${BASE_REF}"
+        echo "- Package version ref: \`${VERSION_REF}\` (${VERSION_REF_VERSION})"
+        echo "- Failure: package version in the evaluated result is behind base"
+        echo "- Recommended fix: update the branch so its merge result preserves package version ${BASE_VERSION} or newer"
       } >> "$GITHUB_STEP_SUMMARY"
     fi
     exit 1

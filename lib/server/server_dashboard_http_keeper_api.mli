@@ -84,6 +84,22 @@ include module type of Server_dashboard_http_keeper_api_types
     moved to Server_dashboard_http_keeper_api_types — re-exported via
     [include module type of] above. *)
 
+(** {1 Chat history paging} *)
+
+val keeper_chat_history_page_json :
+  Workspace.config -> string -> before:float option -> Yojson.Safe.t
+(** Body for [GET /chat/history/page]: direct-conversation rows older than
+    [before], newest window when [before] is [None].
+
+    Autonomous turns are not included. They are bounded by
+    {!Masc.Keeper_raw_trace_retention.history_limit} rather than by this window,
+    so [GET /chat/history] already carried every one that exists; repeating them
+    per page would duplicate rows the caller holds.
+
+    [next_before] is the cursor for the following page — the oldest [ts] among
+    the returned rows, or [`Null] for an empty page. A caller must stop on a
+    null cursor rather than resend the previous one. *)
+
 (** {1 Checkpoint inventory} *)
 
 val stat_json_of_path : string -> Yojson.Safe.t

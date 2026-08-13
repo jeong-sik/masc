@@ -173,10 +173,19 @@ and handle_transition ~tool_name ~start_time ctx args =
   | Some result -> result
   | None ->
   let completion_state_error =
-    if (=) action Masc_domain.Done_action then
+    (* Submit_for_verification carries the same preconditions as the legacy
+       Done action — only the current owner of a Claimed/InProgress task may
+       file its completion evidence. keeper_task_done now routes through
+       submit, and without this arm those denials fell through to the generic
+       transition rejection ("task_transition_invalid_state"), losing the
+       typed rule the keeper can act on (own it first / not yours). *)
+    match action with
+    | Masc_domain.Done_action | Masc_domain.Submit_for_verification ->
       completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
-    else
-      None
+    | Masc_domain.Claim
+    | Masc_domain.Start
+    | Masc_domain.Release
+    | Masc_domain.Cancel -> None
   in
   match completion_state_error with
   | Some err ->

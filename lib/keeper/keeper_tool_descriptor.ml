@@ -1092,6 +1092,7 @@ let in_process_descriptor_with_schema_source
 
 let in_process_descriptor ~keeper_model_projection ~id ~name ~description
       ~input_schema ~policy ?ordinary_execution_mode ~handler
+      ()
   =
   in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
@@ -1495,6 +1496,7 @@ let internal_descriptors : t list =
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_time_now
+      ()
   ; (in_process_descriptor
        ~keeper_model_projection:Internal_name
        ~id:"keeper.tools_list"
@@ -1507,6 +1509,7 @@ let internal_descriptors : t list =
        ~input_schema:empty_object_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tools_list
+       ()
      |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor
@@ -1520,6 +1523,7 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
+      ()
   ; (in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -1564,6 +1568,7 @@ let internal_descriptors : t list =
       ~input_schema:library_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_search
+      ()
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
       ~id:"keeper.library.read"
@@ -1572,6 +1577,7 @@ let internal_descriptors : t list =
       ~input_schema:library_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
+      ()
     (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
   ; (in_process_descriptor
        ~keeper_model_projection:Internal_name
@@ -1586,6 +1592,7 @@ let internal_descriptors : t list =
        ~input_schema:surface_read_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_surface_read
+       ()
      |> with_eval_tags [ "surface_context_read" ])
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -1595,6 +1602,7 @@ let internal_descriptors : t list =
       ~input_schema:surface_post_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post
+      ()
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
       ~id:"keeper.person.note_set"
@@ -1607,6 +1615,7 @@ let internal_descriptors : t list =
       ~input_schema:person_note_set_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_person_note_set
+      ()
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity

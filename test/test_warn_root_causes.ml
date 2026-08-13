@@ -308,7 +308,7 @@ let test_explicit_concurrent_tools_enter_one_agent_core_batch () =
             let entered_schedules_mu = Stdlib.Mutex.create () in
             let both_entered, resolve_both_entered = Eio.Promise.create () in
             let release, resolve_release = Eio.Promise.create () in
-            let wrap tool =
+            let wrap (tool : Agent_core.Tool.t) =
               { tool with
                 handler =
                   (fun execution_env _input ->

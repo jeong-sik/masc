@@ -890,7 +890,7 @@ let add_routes router =
                      match find_string "source" with
                      | Some source -> source
                      | None ->
-                       (* DET-OK: absent source preserves legacy cursor telemetry. *)
+                       (* DET-OK: an absent source names the editor surface. *)
                        "editor"
                    in
                    (match cursor_focus_mode_field json with

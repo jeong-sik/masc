@@ -203,7 +203,10 @@ let probe_invocation ~sw ~net ?clock ~now ~runtime_id ~tool ~prompt () =
         | Runtime_execution.Claude_code _ ->
           Error (Not_agent_core_lane (Runtime_execution.label rt.Runtime.execution))
         | Runtime_execution.Agent_core _ ->
-    (match Runtime_agent_core_runner.resolve_runtime_providers ~runtime_id () with
+    (* [_for_turn], not the bare resolver: the bare one yields the provider
+       binding without the runtime's inference seed, and a probe that measures a
+       request no keeper turn would send measures itself (masc#28473). *)
+    (match Runtime_agent_core_runner.resolve_runtime_providers_for_turn ~runtime_id () with
      | Error detail -> Error (Unresolvable_runtime detail)
      | Ok [] ->
        Error (Unresolvable_runtime (Printf.sprintf "%s resolved no provider" runtime_id))

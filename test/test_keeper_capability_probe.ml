@@ -8,6 +8,7 @@ open Alcotest
 
 module Probe = Masc.Keeper_capability_probe
 module Descriptor = Masc.Keeper_tool_descriptor
+module Runner = Runtime_agent_core_runner
 
 let verdict = testable (Fmt.of_to_string Probe.verdict_to_string) ( = )
 
@@ -238,6 +239,64 @@ let test_lane_guard_refuses_an_official_client_runtime () =
       | Error e -> failf "expected Not_agent_core_lane, got: %s" (Probe.invocation_error_to_string e))
 ;;
 
+(* The seed overlay is what makes the probe's request match a keeper turn's.
+   Without it agentworld-35b-a3b scored 0/12 while actually calling the tool
+   every time: an absent enable_thinking makes Backend_ollama omit the wire
+   [think] field, the model's chat template defaults to thinking-on, and the
+   call arrives as prose past the budget (masc#28473).
+
+   Built from a bare provider config so removing the overlay in the probe would
+   leave these red -- asserting against Runtime_inference output would make the
+   expectation a restatement of the function under test. *)
+let bare_config () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Ollama
+    ~model_id:"agentworld:UD-Q4_K_XL"
+    ~base_url:"http://127.0.0.1:11434"
+    ()
+;;
+
+let bool_opt = testable (Fmt.of_to_string (function
+  | None -> "None"
+  | Some b -> Printf.sprintf "Some %b" b))
+  ( = )
+
+let test_declared_thinking_off_reaches_the_config () =
+  let seed =
+    { Runtime_inference.thinking_budget = None
+    ; thinking_enabled = Some false
+    ; preserve_thinking = None
+    }
+  in
+  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  (* Some false, not None: None is what omits the wire field. *)
+  check bool_opt "declared thinking-off reaches the request" (Some false) out.enable_thinking
+;;
+
+let test_declared_thinking_on_reaches_the_config () =
+  let seed =
+    { Runtime_inference.thinking_budget = None
+    ; thinking_enabled = Some true
+    ; preserve_thinking = Some true
+    }
+  in
+  let out = Runner.apply_inference_seed ~seed (bare_config ()) in
+  check bool_opt "declared thinking-on reaches the request" (Some true) out.enable_thinking;
+  check bool_opt "preserve_thinking rides along" (Some true) out.preserve_thinking
+;;
+
+let test_undeclared_seed_leaves_the_binding_alone () =
+  let seed =
+    { Runtime_inference.thinking_budget = None
+    ; thinking_enabled = None
+    ; preserve_thinking = None
+    }
+  in
+  let base = { (bare_config ()) with Llm_provider.Provider_config.enable_thinking = Some true } in
+  let out = Runner.apply_inference_seed ~seed base in
+  check bool_opt "an absent seed does not clear the binding" (Some true) out.enable_thinking
+;;
+
 let () =
   run
     "keeper_capability_probe"
@@ -257,6 +316,11 @@ let () =
       , [ test_case "operator-only costs no turn" `Quick test_operator_only_costs_no_turn
         ; test_case "unknown runtime is named" `Quick test_unknown_runtime_is_named
         ; test_case "lane guard refuses an official-client runtime" `Quick test_lane_guard_refuses_an_official_client_runtime
+        ] )
+    ; ( "inference seed overlay"
+      , [ test_case "declared thinking-off reaches the request" `Quick test_declared_thinking_off_reaches_the_config
+        ; test_case "declared thinking-on reaches the request" `Quick test_declared_thinking_on_reaches_the_config
+        ; test_case "absent seed leaves the binding alone" `Quick test_undeclared_seed_leaves_the_binding_alone
         ] )
     ]
 ;;

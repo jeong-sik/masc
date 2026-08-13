@@ -109,3 +109,29 @@ let resolve_runtime_providers ~runtime_id () =
            "requested runtime %S not found among configured runtimes \
             (no silent fallback to default — RFC-0206 §2.1)"
            runtime_id)
+
+let apply_inference_seed
+      ~(seed : Runtime_inference.seed)
+      (config : Llm_provider.Provider_config.t)
+  : Llm_provider.Provider_config.t
+  =
+  (* A declared seed value wins; an absent one leaves the provider binding
+     alone, so this can only add what the runtime actually declares. Mirrors
+     [Keeper_turn_driver.attempt_inference_policy], whose fallback is the
+     caller's value — here the resolved binding plays that role. *)
+  let declared_or_kept current = function
+    | Some _ as declared -> declared
+    | None -> current
+  in
+  { config with
+    enable_thinking = declared_or_kept config.enable_thinking seed.thinking_enabled
+  ; preserve_thinking = declared_or_kept config.preserve_thinking seed.preserve_thinking
+  }
+;;
+
+let resolve_runtime_providers_for_turn ~runtime_id () =
+  Result.map
+    (List.map
+       (apply_inference_seed ~seed:(Runtime_inference.for_runtime ~name:runtime_id)))
+    (resolve_runtime_providers ~runtime_id ())
+;;

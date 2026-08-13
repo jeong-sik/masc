@@ -507,10 +507,6 @@ let ingest_turn_event
    | exn ->
      Printf.eprintf "Ide_bridge.ingest_turn_event error: %s\n%!" (Printexc.to_string exn))
 
-let cursor_file_path_of_input input =
-  Tool_input_path.tool_input_file_path input
-;;
-
 let cursor_line_of_input input =
   match int_field "line" input with
   | Some n -> Some n
@@ -587,16 +583,21 @@ let cursor_event_json
   `Assoc (List.rev fields)
 ;;
 
+(* The cursor derived from a tool call names the same document as the tool row
+   beside it — same call, same file — so it takes the resolved [file_path]
+   rather than re-reading the raw argument, which would put the two rows in
+   different path vocabularies. *)
 let ingest_cursor_event_from_hook
     ~base_path
     ~partition
+    ~file_path
     ~tool_name
     ~keeper_id
     ~turn_id
     ~timestamp_ms
     ~(input : Yojson.Safe.t)
   =
-  match cursor_file_path_of_input input, cursor_line_of_input input, focus_mode_of_tool_input input with
+  match file_path, cursor_line_of_input input, focus_mode_of_tool_input input with
   | Some file_path, Some line, Some focus_mode when line >= 1 ->
     let column =
       match int_field "column" input with
@@ -703,6 +704,7 @@ let ingest_cursor_event
 let ingest_tool_event_from_hook
     ~base_path
     ~partition
+    ~file_path
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -712,7 +714,11 @@ let ingest_tool_event_from_hook
     ~output_text
     ~(input : Yojson.Safe.t)
   =
-  let file_path = Tool_input_path.tool_input_file_path input in
+  (* [file_path] arrives resolved, from the same helper that decided
+     [partition]. Re-deriving it from [input] here is what put absolute host
+     paths, sandbox-rooted [repos/<id>/…] paths, and repo-relative paths in one
+     partition, none of which a reader can join against the region and
+     annotation rows the same resolver produced (masc#28582). *)
   let summary =
     String_util.utf8_safe ~max_bytes:200 ~suffix:"" output_text
     |> String_util.to_string
@@ -736,6 +742,7 @@ let ingest_tool_event_from_hook
   ingest_cursor_event_from_hook
     ~base_path
     ~partition
+    ~file_path
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -765,6 +772,7 @@ let install_agent_observation_sinks () =
         ingest_tool_event_from_hook
           ~base_path:event.base_path
           ~partition:event.partition
+          ~file_path:event.file_path
           ~tool_name:event.tool_name
           ~keeper_id:event.keeper_id
           ~turn_id:event.turn_id

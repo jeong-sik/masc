@@ -39,6 +39,18 @@ let terminal_externalization_failure
     None
 ;;
 
+let initial_terminal_effect_state = function
+  | Some
+      { Keeper_tools_agent_core.outcome =
+          ( Keeper_gate_replay.Applied _
+          | Keeper_gate_replay.Applied_with_warning _ )
+      ; terminal_effect_receipt = Some receipt
+      ; _
+      } ->
+    Keeper_tools_agent_core.Terminal_effect_completed receipt
+  | Some _ | None -> Keeper_tools_agent_core.Terminal_effect_open
+;;
+
 let make_tool_bundle_for_descriptors
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -85,8 +97,8 @@ let make_tool_bundle_for_descriptors
           ; _
           }
       , Some grant ) ->
-      let outcome =
-        Keeper_gate_replay.replay_approved_effect
+      let replay_execution =
+        Keeper_gate_replay.replay_approved_effect_with_receipt
            ~config
            ~meta
            ~publication_recovery
@@ -97,6 +109,7 @@ let make_tool_bundle_for_descriptors
            ~approval_id
            ()
       in
+      let outcome = replay_execution.Keeper_gate_replay.outcome in
       (match outcome with
        | Keeper_gate_replay.Not_applicable -> ()
        | Keeper_gate_replay.Applied _ as outcome ->
@@ -124,7 +137,12 @@ let make_tool_bundle_for_descriptors
            "gate replay approval=%s %s"
            approval_id
            (Keeper_gate_replay.outcome_to_string outcome));
-      Some Keeper_tools_agent_core.{ approval_id; outcome }
+      Some
+        Keeper_tools_agent_core.
+          { approval_id
+          ; outcome
+          ; terminal_effect_receipt = replay_execution.terminal_effect_receipt
+          }
     | _ -> None
   in
   let record_gate_result =
@@ -146,11 +164,15 @@ let make_tool_bundle_for_descriptors
      after the whole tool batch and checkpoint sink have completed. A generic
      deferred tool transition retains the existing durable-stimulus checkpoint;
      only a typed external-effect defer stops the provider loop until Gate's
-     durable resolution wakes a later turn. A terminal completion supersedes a
-     defer in the same batch; a proven terminal failure dominates every state
-     regardless of callback order. Failure is sticky so its first diagnostic
-     remains authoritative. *)
-  let terminal_effect_state = Atomic.make Terminal_effect_open in
+     durable resolution wakes a later turn. An already-applied connector replay
+     seeds this same state from its producer-owned receipt, so finalization does
+     not mistake the post-effect continuation for another visible reply. A
+     terminal completion supersedes a defer in the same batch; a proven terminal
+     failure dominates every state regardless of callback order. Failure is
+     sticky so its first diagnostic remains authoritative. *)
+  let terminal_effect_state =
+    Atomic.make (initial_terminal_effect_state gate_replay_delivery)
+  in
   let mark_deferred_tool_result () =
     ignore
       (Atomic.compare_and_set
@@ -350,6 +372,8 @@ module For_testing = struct
     | Terminal_effect -> true
     | Continue_after_success -> false
   ;;
+
+  let initial_terminal_effect_state = initial_terminal_effect_state
 
   let terminal_externalization_failure =
     terminal_externalization_failure

@@ -47,6 +47,12 @@ val connector_post_replay_of_gate_input :
     and used for one-shot Gate consumption; content and blocks are never
     truncated or reconstructed for replay. *)
 
+val connector_post_replay_target :
+  connector_post_replay -> Keeper_surface_post.post_target
+(** Recover the exact terminal surface target carried by the durable request.
+    Host replay uses this receipt to settle the enclosing turn as an external
+    effect instead of delivering a second assistant reply. *)
+
 val replay_connector_post_with_outcome :
   config:Workspace.config ->
   meta:keeper_meta ->

@@ -2684,6 +2684,105 @@ let test_approved_memory_write_replays_without_model_resubmission () =
        | Ok None -> fail "host replay persisted no memory snapshot"
        | Error detail -> fail detail)
 
+let test_durable_connector_replay_settles_terminal_turn () =
+  with_exec_fixture "keeper_durable_connector_replay_terminal"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let input =
+         `Assoc
+           [ "connector", `String "discord"
+           ; "channel_id", `String "D-approved"
+           ; "content", `String "approved reply already delivered"
+           ]
+       in
+       let approval_id =
+         match
+           Masc.Keeper_approval_queue.submit_pending
+             ~keeper_name:meta.name
+             ~tool_name:"connector_post"
+             ~input
+             ~base_path:config.base_path
+             ()
+         with
+         | Ok submission -> submission.approval_id
+         | Error error ->
+           fail (Masc.Keeper_approval_queue.storage_error_to_string error)
+       in
+       (match
+          Masc.Keeper_approval_queue.resolve_with_policy
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~decision:Keeper_approval_queue_rules_types.Decision.Approve
+            ~source:Keeper_approval_queue_rules_types.Auto_judge
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.resolve_error_to_string error));
+       (match
+          Masc.Keeper_approval_queue.consume_approved_resolution
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~keeper_name:meta.name
+            ~tool_name:"connector_post"
+            ~input
+        with
+        | Ok (Masc.Keeper_approval_queue.Consumption_committed _)
+        | Ok Masc.Keeper_approval_queue.Consumption_already_committed ->
+          ()
+        | Ok Masc.Keeper_approval_queue.Consumption_not_matching ->
+          fail "exact connector approval did not match"
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+       let output_ref =
+         Tool_blob_store.put_durable
+           (Tool_blob_store.create ~base_path:config.base_path)
+           ~bytes:(Masc.Keeper_surface_post.ok_json ~surface:"discord" ())
+           ~mime:"application/json"
+       in
+       (match
+          Masc.Keeper_approval_queue.record_consumed_resolution_replay
+            ~base_path:config.base_path
+            ~id:approval_id
+            ~outcome:(Masc.Keeper_approval_queue.Replay_applied output_ref)
+        with
+        | Ok Masc.Keeper_approval_queue.Replay_recorded
+        | Ok Masc.Keeper_approval_queue.Replay_already_recorded ->
+          ()
+        | Error error ->
+          fail (Masc.Keeper_approval_queue.grant_error_to_string error));
+       let resolution : Keeper_event_queue.hitl_resolution =
+         { approval_id
+         ; decision = Keeper_event_queue.Hitl_approved
+         ; channel =
+             Keeper_continuation_channel.unrouted
+               "durable connector replay terminal test"
+         }
+       in
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~hitl_resolution:resolution
+           ()
+       in
+       Fun.protect ~finally:bundle.cleanup @@ fun () ->
+       match bundle.terminal_effect_state () with
+       | Masc.Keeper_tools_agent_core.Terminal_effect_completed
+           (Masc.Keeper_tool_execution.Surface_post_completed
+              (Masc.Keeper_surface_post.To_discord { channel_id })) ->
+         check string
+           "durable replay settles the exact approved target"
+           "D-approved"
+           channel_id
+       | ( Masc.Keeper_tools_agent_core.Terminal_effect_open
+         | Masc.Keeper_tools_agent_core.Deferred_tool_result
+         | Masc.Keeper_tools_agent_core.External_effect_deferred
+         | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+         | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
+         fail "durable connector replay remained eligible for visible delivery")
+
 let approved_web_search_resolution
       ~config
       ~meta
@@ -4318,6 +4417,8 @@ let () =
         test_approved_web_search_replays_without_model_resubmission;
       test_case "approved memory write replays without model resubmission" `Quick
         test_approved_memory_write_replays_without_model_resubmission;
+      test_case "durable connector replay settles terminal turn" `Quick
+        test_durable_connector_replay_settles_terminal_turn;
       test_case "blob failure repairs journal without second effect" `Quick
         test_blob_failure_repairs_journal_without_second_effect;
       test_case "journal failure retries only persistence" `Quick

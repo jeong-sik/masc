@@ -25,6 +25,8 @@ type terminal_effect_state =
 type gate_replay_delivery =
   { approval_id : string
   ; outcome : Keeper_gate_replay.outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
   }
 
 type tool_bundle =

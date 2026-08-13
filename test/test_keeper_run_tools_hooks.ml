@@ -46,20 +46,35 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Local) name =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok m -> m
+  (* [sandbox_profile] is not a persisted meta field — it comes from the
+     keeper's TOML profile — so the fixture JSON cannot carry it, and passing
+     it there is rejected as outside the current schema. Set it on the record
+     the fixture returns instead. Before this, the parameter was accepted and
+     dropped: a case asking for [Docker] got a Local keeper, and
+     [keeper_observation_host_path_of_visible_path] returns early for
+     non-Docker profiles, so the container->host mapping the Docker case is
+     named for never ran. *)
+  | Ok m -> { m with Masc.Keeper_meta_contract.sandbox_profile }
   | Error e -> Alcotest.fail e
 ;;
 
 (* #23469: relative tool paths anchor at the keeper's playground sandbox
    root, mirroring the file tools' own resolution; absolute paths pass
-   through and pathless calls stay at [base_path]. *)
+   through. masc#28582: a pathless call answers [None] — it names no
+   document, and standing the project root in for one is what let a
+   coordination tool's observation claim a file it never touched. *)
 let sandbox_root = "/sandbox/tester"
 
-let observed_path fields =
+let observed_path_opt fields =
   Masc.Keeper_run_tools_hooks.observation_file_path_from_tool_input
-    ~base_path:"/tmp/masc-base"
     ~sandbox_root
     (`Assoc fields)
+;;
+
+let observed_path fields =
+  match observed_path_opt fields with
+  | Some path -> path
+  | None -> Alcotest.fail "expected the tool input to name a file"
 ;;
 
 let test_explicit_cwd_scopes_relative_file_path () =
@@ -71,11 +86,17 @@ let test_explicit_cwd_scopes_relative_file_path () =
        [ "file_path", `String "lib/foo.ml"; "cwd", `String "repos/masc" ])
 ;;
 
-let test_scratch_path_stays_sandbox_rooted_with_repo_cwd () =
+(* #28533 dropped "scratch" from the sandbox-rooted prefix list, in the same
+   change that removed the tool-schema sentence teaching it: no code ever
+   created that directory, so the only paths shaped like it were ones a model
+   invented from the sentence. A [scratch/…] path is therefore an ordinary
+   relative path now and anchors at the typed [cwd] like any other. "repos"
+   deliberately stays in that list. *)
+let test_scratch_path_anchors_at_cwd_like_any_relative_path () =
   check
     string
     "scratch/file_path"
-    "/sandbox/tester/scratch/notes.md"
+    "/sandbox/tester/repos/masc/scratch/notes.md"
     (observed_path
        [ "file_path", `String "scratch/notes.md"; "cwd", `String "repos/masc" ])
 ;;
@@ -195,7 +216,10 @@ let test_files_list_uses_first_object_file_path () =
 ;;
 
 let test_missing_path_falls_back_to_base_path () =
-  check string "base fallback" "/tmp/masc-base" (observed_path [])
+  (* A tool call that names no file has no document to attribute. It used to
+     answer the project root, which the observation then stored as the edited
+     file. *)
+  check (option string) "pathless call names no document" None (observed_path_opt [])
 ;;
 
 let with_partition_fixture ?sandbox_profile f =
@@ -225,6 +249,18 @@ let resolve_partition ~config ~meta fields =
    #23469 regression this case pins: before the sandbox anchor, this
    input re-anchored at the server base path and only matched because
    the same repo happened to be registered at [repos/masc] there. *)
+(* A coordination tool names no file, so the observation has a partition but
+   no document. The helper used to answer the project root here, which the
+   consumer then stored as the edited file — a broadcast claiming a document
+   it never touched (masc#28582). *)
+let test_partition_resolution_leaves_pathless_calls_without_a_document () =
+  with_partition_fixture (fun ~config ~meta ->
+    let _partition, rel_path =
+      resolve_partition ~config ~meta [ "message", `String "fixing: CI" ]
+    in
+    check (option string) "pathless call names no document" None rel_path)
+;;
+
 let test_partition_resolution_uses_project_root_for_masc_base_path () =
   with_partition_fixture (fun ~config ~meta ->
     let partition, rel_path =
@@ -233,7 +269,7 @@ let test_partition_resolution_uses_project_root_for_masc_base_path () =
         ~meta
         [ "cwd", `String "repos/masc"; "path", `String "lib/foo.ml" ]
     in
-    check string "repo-relative path" "lib/foo.ml" rel_path;
+    check (option string) "repo-relative path" (Some "lib/foo.ml") rel_path;
     match partition with
     | Agent_observation.By_url slug ->
       check string "slug" "github.com_jeong-sik_masc" slug
@@ -273,7 +309,7 @@ let test_partition_docker_visible_path_maps_to_playground_repo () =
        let partition, rel_path =
          resolve_partition ~config ~meta [ "path", `String container_repo_path ]
        in
-       check string "repo-relative path" "lib/docker.ml" rel_path;
+       check (option string) "repo-relative path" (Some "lib/docker.ml") rel_path;
        match partition with
        | Agent_observation.By_url slug ->
          check string "slug" "github.com_jeong-sik_masc" slug
@@ -568,9 +604,9 @@ let () =
             `Quick
             test_explicit_cwd_scopes_relative_file_path
         ; test_case
-            "scratch path stays sandbox-rooted with repo cwd"
+            "scratch path anchors at cwd like any relative path"
             `Quick
-            test_scratch_path_stays_sandbox_rooted_with_repo_cwd
+            test_scratch_path_anchors_at_cwd_like_any_relative_path
         ; test_case
             "sandbox-rooted file_path ignores cwd"
             `Quick
@@ -623,6 +659,10 @@ let () =
         ] )
     ; ( "observation_partition"
       , [ test_case
+            "pathless call names no document"
+            `Quick
+            test_partition_resolution_leaves_pathless_calls_without_a_document
+        ; test_case
             "uses project root when config base is .masc"
             `Quick
             test_partition_resolution_uses_project_root_for_masc_base_path

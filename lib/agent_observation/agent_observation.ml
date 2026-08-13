@@ -20,6 +20,7 @@ type codebase_partition =
 type tool_event =
   { base_path : string
   ; partition : codebase_partition
+  ; file_path : string option
   ; tool_name : string
   ; keeper_id : string
   ; turn_id : string

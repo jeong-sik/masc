@@ -144,6 +144,15 @@ val replayable_of_operation : string -> replayable option
     call. Exposed because a decode function that exists but is never dispatched
     to is indistinguishable from a working replay at the boundary. *)
 
+type replay_execution =
+  { outcome : outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
+  }
+(** The durable replay outcome plus the turn-settlement receipt owned by a
+    successfully applied connector post. Other replayable operations and
+    unapplied or indeterminate connector effects carry [None]. *)
+
 (** Replay the approved effect behind [approval_id] exactly once.
 
     Covers operations whose approvals a Keeper must otherwise re-earn by
@@ -173,6 +182,21 @@ val replay_approved_effect :
   approval_id:string ->
   unit ->
   outcome
+
+val replay_approved_effect_with_receipt :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  grant:Keeper_gate.cycle_grant ->
+  approval_id:string ->
+  unit ->
+  replay_execution
+(** Replay exactly once and retain the typed connector-post receipt needed by
+    turn finalization. [replay_approved_effect] is the outcome-only projection
+    for callers that do not own a turn boundary. *)
 
 module For_testing : sig
   val persist_replay_artifact :

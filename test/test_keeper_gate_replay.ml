@@ -780,6 +780,30 @@ let test_slack_connector_post_retains_thread_ts () =
   | Error detail -> Alcotest.fail detail
 ;;
 
+let test_connector_post_replay_retains_terminal_target () =
+  let open Masc.Keeper_tool_in_process_runtime in
+  let input =
+    `Assoc
+      [ "connector", `String "discord"
+      ; "channel_id", `String "D-exact"
+      ; "content", `String "approved reply"
+      ]
+  in
+  match connector_post_replay_of_gate_input input with
+  | Ok connector_post ->
+    (match connector_post_replay_target connector_post with
+     | Masc.Keeper_surface_post.To_discord { channel_id } ->
+       Alcotest.check
+         Alcotest.string
+         "terminal target remains the approved channel"
+         "D-exact"
+         channel_id
+     | ( Masc.Keeper_surface_post.To_dashboard
+       | Masc.Keeper_surface_post.To_slack _ ) ->
+       Alcotest.fail "Discord replay produced the wrong terminal target")
+  | Error detail -> Alcotest.fail detail
+;;
+
 let test_connector_post_rejects_heuristic_or_truncated_input () =
   List.iter
     (fun input ->
@@ -912,6 +936,10 @@ let () =
             "slack connector request retains thread_ts"
             `Quick
             test_slack_connector_post_retains_thread_ts
+        ; Alcotest.test_case
+            "connector replay retains terminal target"
+            `Quick
+            test_connector_post_replay_retains_terminal_target
         ; Alcotest.test_case
             "memory write replay keeps exact input"
             `Quick

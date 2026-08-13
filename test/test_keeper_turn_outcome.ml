@@ -249,6 +249,77 @@ let test_terminal_effect_defer_kinds_remain_distinct () =
     Masc.Keeper_tools_agent_core.External_effect_deferred
     "external_effect_deferred"
 
+let test_applied_gate_replay_seeds_terminal_settlement () =
+  let output_ref =
+    match
+      Tool_output.make_artifact_ref
+        ~sha256:(String.make 64 'a')
+        ~bytes:2
+        ~preview:""
+        ~mime:"application/json"
+    with
+    | Ok output_ref -> output_ref
+    | Error error -> fail (Tool_output.make_error_to_string error)
+  in
+  let receipt =
+    Masc.Keeper_tool_execution.Surface_post_completed
+      (Masc.Keeper_surface_post.To_discord { channel_id = "D-approved" })
+  in
+  let replay_delivery : Masc.Keeper_tools_agent_core.gate_replay_delivery =
+    { approval_id = "approval-terminal"
+    ; outcome =
+        Masc.Keeper_gate_replay.Applied
+          { operation = "connector_post"
+          ; output_ref
+          ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+          }
+    ; terminal_effect_receipt = Some receipt
+    }
+  in
+  let state =
+    Masc.Keeper_tools_agent_core_bundle.For_testing.initial_terminal_effect_state
+      (Some replay_delivery)
+  in
+  (match state with
+   | Masc.Keeper_tools_agent_core.Terminal_effect_completed
+       (Masc.Keeper_tool_execution.Surface_post_completed
+          (Masc.Keeper_surface_post.To_discord { channel_id })) ->
+     check string "receipt keeps the approved target" "D-approved" channel_id
+   | ( Masc.Keeper_tools_agent_core.Terminal_effect_open
+     | Masc.Keeper_tools_agent_core.Deferred_tool_result
+     | Masc.Keeper_tools_agent_core.External_effect_deferred
+     | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+     | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
+     fail "applied connector replay did not seed terminal completion");
+  let non_terminal_replay =
+    { replay_delivery with
+      outcome =
+        Masc.Keeper_gate_replay.Applied
+          { operation = "network_read"
+          ; output_ref
+          ; journal = Masc.Keeper_gate_replay.Replay_journal_recorded
+          }
+    ; terminal_effect_receipt = None
+    }
+  in
+  (match
+     Masc.Keeper_tools_agent_core_bundle.For_testing.initial_terminal_effect_state
+       (Some non_terminal_replay)
+   with
+   | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+   | ( Masc.Keeper_tools_agent_core.Deferred_tool_result
+     | Masc.Keeper_tools_agent_core.External_effect_deferred
+     | Masc.Keeper_tools_agent_core.Terminal_effect_completed _
+     | Masc.Keeper_tools_agent_core.Terminal_effect_failed _ ) ->
+     fail "non-terminal Gate replay acquired a terminal boundary");
+  match Masc.Keeper_agent_run.terminal_effect_boundary_decision state with
+  | Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed) -> ()
+  | Ok Runtime_agent.Continue ->
+    fail "applied connector replay re-entered ordinary visible delivery"
+  | Ok (Runtime_agent.Yield _) ->
+    fail "applied connector replay selected the wrong yield boundary"
+  | Error error -> fail (Agent_core.Error.to_string error)
+
 let tool_call ?(input = Some "input") ?(output = Some "output") tool_name
     : Masc.Keeper_agent_result.tool_call_detail =
   { tool_name
@@ -727,6 +798,8 @@ let () =
             test_external_effect_status_becomes_persisted_chat_block;
           test_case "terminal effect defer kinds remain distinct" `Quick
             test_terminal_effect_defer_kinds_remain_distinct;
+          test_case "applied Gate replay seeds terminal settlement" `Quick
+            test_applied_gate_replay_seeds_terminal_settlement;
           test_case "repeated exact tool call boundary" `Quick
             test_repeated_exact_tool_call_boundary;
           test_case "autonomous yield boundary contract" `Quick

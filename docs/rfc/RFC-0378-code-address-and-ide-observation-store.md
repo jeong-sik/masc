@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0343", "keeper-workspace-root-only", "0233"]
-implementation_prs: []
+implementation_prs: ["28649", "28664", "28671", "28676", "28682", "28684"]
 ---
 
 # RFC-0378: Code fact 는 태어날 때 주소를 받는다
@@ -136,7 +136,11 @@ and unaddressed =
 - `codebase_partition` 의 실패 4변형(`No_canonical_url`/`Unmatched`/`Base_unresolved`/`Legacy_default`)은 **삭제**. 실패는 store 의 파티션이 아니라 fact 의 종류다.
 - turn event 는 정의상 `Keeper` fact. 저장소 타임라인은 `Code(address, turn_id)` 조인으로 파생 — 스키마 추가 없음.
 - 효과 분리(원칙 4/17): 주소 발행은 순수, append 는 가장자리.
-- 경로 정규화는 손 구현 대신 이미 의존성에 있는 `fpath` 를 쓴다 (`lib/server/dune:123`, 원칙 19).
+- 경로 containment 는 resolver 의 lexical segment stack 으로 판정한다. `.` 은 버리고,
+  `..` 은 stack 이 비어 있으면 root escape 로 reject, 아니면 한 segment 를 pop 한다.
+  `Fpath.normalize` 는 선행 `..` 을 보존하므로 "정규화된 문자열"은 만들 수 있어도
+  repo root 안이라는 증명은 만들지 못한다. 따라서 A2 의 stack 은 편의용 path helper 가
+  아니라 containment reject 를 수행하는 `Code_address.v` 앞단의 보안 경계다.
 
 ### 5.2 Store 는 code fact 전용 — `_orphan` 소멸, keeper store 신설 없음
 
@@ -187,7 +191,7 @@ ide store 의 keeper-fact 절반은 **더 약한 스키마의 중복 투영**이
 
 - `selectPreferredIdeRepositoryId` 의 경로 모양 휴리스틱(절대경로·`/.masc/` 포함 여부로 "사람의 repo" 추측)은 삭제. 현재 이 추측의 답(wkbl)은 code fact 0행 파티션이다.
 - 첫 진입은 명시 선택, 선택은 viewer 클라이언트에 지속 (localStorage — 서버 설정이 아니므로 TOML/env 비대상, 원칙 24).
-- 저장소 목록의 **모집합도 실측**이다: 선택지는 카탈로그(repositories.toml)가 아니라 `code/by-url/` 에 실존하는 파티션에서 온다. workspace-root-only 하에서 slug 는 git remote 실측으로 발행되므로 **카탈로그 미등록 repo 의 파티션도 정당하게 생긴다** — 카탈로그를 모집합으로 쓰면 그 작업은 기록되고도 선택 불가능해진다. 카탈로그는 등록 repo 의 표시 이름을 빌려주는 projection 으로만 참여한다.
+- 저장소 목록의 **모집합도 실측**이다: 선택지는 카탈로그(repositories.toml)가 아니라 `by-url/` 에 실존하는 파티션에서 온다. workspace-root-only 하에서 slug 는 git remote 실측으로 발행되므로 **카탈로그 미등록 repo 의 파티션도 정당하게 생긴다** — 카탈로그를 모집합으로 쓰면 그 작업은 기록되고도 선택 불가능해진다. 카탈로그는 등록 repo 의 표시 이름을 빌려주는 projection 으로만 참여한다.
 - 목록의 **정렬**은 실측(파티션별 code fact 최근성)으로 — 그것도 projection 이라 허용.
 - 빈 파티션은 정직한 empty state: "이 저장소에서 keeper 작업 기록 없음".
 
@@ -209,7 +213,7 @@ ide store 의 keeper-fact 절반은 **더 약한 스키마의 중복 투영**이
 | annotate sandbox-root 앵커링 | owner probe 2건 매장 | 계약 교체로 소멸 (§5.3) |
 | "IDE Observation Plane v2" 죽은 포인터 | repo 에 문서 부재 | 주석에서 제거 |
 
-**살아남는 것**: regions gutter 마커, tool/turn 타임라인, CodeLens + hover, annotation rail, anchored interject, REST annotations CRUD (사람 쪽 절반 — 단 귀속은 §5.3 의 공유 생성자로), `canonical_url_of_remote`, 그리고 `ide_annotation_types.ml` 의 on-disk JSON 코덱. 코덱의 경계: `Code_address` 는 in-process 증명 타입이고 디스크 표현은 지금처럼 slug=디렉터리·path=문자열 필드다 — 코덱은 그 문자열을 주소로 재승격하지 않고 read path 의 질의 키로만 쓴다.
+**살아남는 것**: regions gutter 마커, addressed tool 타임라인, 기존 keeper 대시보드의 turn 타임라인, CodeLens + hover, annotation rail, anchored interject, REST annotations CRUD (사람 쪽 절반 — 단 귀속은 §5.3 의 공유 생성자로), `canonical_url_of_remote`, 그리고 `ide_annotation_types.ml` 의 on-disk JSON 코덱. 코덱의 경계: `Code_address` 는 in-process 증명 타입이고 디스크 표현은 지금처럼 slug=디렉터리·path=문자열 필드다 — 코덱은 그 문자열을 주소로 재승격하지 않고 read path 의 질의 키로만 쓴다.
 
 annotation 의 존재 이유는 축소 재정의된다: **(a)** anchored interject 에 대한 keeper 의 anchored reply, **(b)** 기존 decision/task record 의 code-anchored projection. "keeper 가 아무 때나 남기는 노트"는 평생 4행으로 반증됐다.
 
@@ -229,7 +233,7 @@ annotation 의 존재 이유는 축소 재정의된다: **(a)** anchored interje
 | V1 | IDE 진입 → 저장소 명시 선택 → keeper 쓰기 1회 후 해당 파일 열기 | gutter 마커 표시, store 의 해당 행과 주소 일치 |
 | V2 | **owner probe 재실행**: co-view interject at file:line → keeper annotate | 같은 (repo, path, line) 에 마커 + rail 표시. `_orphan` 부재이므로 매장 불가 |
 | V3 | scope 선택 → reload | 선택 유지, 재추측 없음 |
-| V4 | cut 이후 store 전수 스캔 **+ LSP 응답 재확인** | code fact 전수가 addressed, keeper fact 전수가 keeper/ 아래 (스크립트 출력 = 증거). 추가로 cut 직후 pre-cut 파일을 겨냥한 LSP 질의가 빈 결과 반환 — 디스크 스캔은 §5.6 의 메모리 epoch 혼입을 못 잡으므로 (버그가 서버 메모리에 있음) |
+| V4 | cut 이후 store 전수 스캔 **+ LSP 응답 재확인** | IDE store 전수가 addressed code fact 이고 `_orphan`/`keeper` bucket 이 없음 (스크립트 출력 = 증거). keeper fact 의 durable 증거는 turn-records/tool_calls 에만 존재한다. 추가로 cut 직후 pre-cut 파일을 겨냥한 LSP 질의가 빈 결과 반환 — 디스크 스캔은 §5.6 의 메모리 epoch 혼입을 못 잡으므로 (버그가 서버 메모리에 있음) |
 
 feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는 만들지 않는다. 신규 테스트는 CI focused suite 에 배선한다 — masc CI 는 named suite 만 실행하므로 배선 없는 테스트는 컴파일만 된다.
 
@@ -241,7 +245,7 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 
 ## 7. 구현 순서 — stacked PR 사다리 (원칙 16)
 
-각 단계 ≤20k output tokens. 인접 단계 사이 적대적 리뷰 에이전트 병렬 → 리뷰 대응 에이전트 병렬. 로컬 빌드 없이 CI 로 판정.
+각 단계 ≤20k output tokens. 인접 단계 사이 적대적 리뷰 에이전트 병렬 → 리뷰 대응 에이전트 병렬.
 
 | PR | 내용 | 성격 |
 |---|---|---|
@@ -251,6 +255,19 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 | C [#28676](https://github.com/jeong-sik/masc/pull/28676) | annotate/anchor 계약 + keeper 프롬프트 + owner-probe feature test + cursor REST POST 의 생성자 흡수 (§5.3) | N2 왕복 완성 |
 | D [#28682](https://github.com/jeong-sik/masc/pull/28682) | read path 잔존분 + dashboard scope 명시화(선택 지속·휴리스틱 삭제) + empty state | N1 가시화 |
 | E [#28684](https://github.com/jeong-sik/masc/pull/28684) | kill list 집행 (overlay 5표면 절제·타입/어휘 숙청·keeper-lane scope 와 dashboard `IdeScope` 미러 동반 소멸) + 구 테스트 삭제 + 데이터 cut (dry-run 선행) | 청소 |
+
+### 7.1 As-built deviations
+
+리뷰 snapshot 에서 구현하며 확인된 차이는 설계로 되돌려 기록한다:
+
+- **A2 path containment** — 초안의 `fpath` 정규화 대신 lexical segment stack 을
+  사용한다. 선행 `..` 을 보존하는 `Fpath.normalize` 로는 repo-root escape 를 reject 할
+  수 없기 때문이다. 구현은 escape 를 수선하지 않고 거부한다 (§5.1).
+- **B keeper fact 배치** — `keeper/<id>/` partition 을 만들거나 그쪽으로 옮기지 않았다.
+  IDE `turn_events` 는 이미 존재하는 turn-records/tool_calls 보다 약한 중복 projection
+  이므로 방출과 sink 를 삭제했다. IDE store 는 addressed code fact 만 소유한다 (§5.2).
+- **E current-only cut** — 구 scope/type/data 와 Dashboard 의 mirror producer/reader 를
+  같은 누적 diff 에서 제거한다. 호환 reader, fallback, dual-read 기간은 없다.
 
 **착륙 계약 — 단계별 rollout 은 없다.** A~E 는 review 와 충돌 반경을 줄이기 위한
 stacked branch 단위일 뿐, 어느 중간 rung 도 main 에 독립적으로 merge 하지 않는다.
@@ -262,7 +279,7 @@ producer/reader/writer/caller 및 구 partition 타입·호환 reader·fallback 
 
 순서 제약과 머지 지점 일관성:
 
-- **A 시점** — 낙진 실측 두 겹 (2026-08-14, 독립 이중 측정): constructor 이름 grep 은 lib 13파일 · ~40사이트 · dashboard TS 0 을 주지만 **이것은 하한이다**. 타입 등식 재수출(`ide_paths.ml` 의 `type partition = Agent_observation.codebase_partition = …`)과 constructor 를 이름짓지 않는 타입 소비자 — 대표적으로 `lsp_overlay_provider.ml` 의 `Cache.key` 가 `partition_store_dir` 를 호출하며 이는 13개 LSP 진입점 전부의 공유 캐시 키다 — 는 이름 grep 에 잡히지 않는다 (적대 리뷰 P0-1). 그래서 **A 는 variant enum 을 삭제하지 않는다**: bus 이벤트·producer·sink write-path 시그니처만 fact / `Code_address.t option` 으로 바꾸고 (`Some` → by-url, `None` → 현행 `_orphan` 디렉터리, 배치 불변), 구 partition 타입은 **read-path 전용 어휘**로 D 까지 생존한다 — produce 측 역할만 상실. 모든 리더가 무변경으로 컴파일된다. optional 기본값 11사이트 중 write 측이 A 에서 required 가 된다. 20k 상한 근접 시 A1(타입+producer) / A2(sink 시그니처) 분할.
+- **A review snapshot** — 낙진 실측 두 겹 (2026-08-14, 독립 이중 측정): constructor 이름 grep 은 lib 13파일 · ~40사이트 · dashboard TS 0 을 주지만 **이것은 하한이다**. 타입 등식 재수출(`ide_paths.ml` 의 `type partition = Agent_observation.codebase_partition = …`)과 constructor 를 이름짓지 않는 타입 소비자 — 대표적으로 `lsp_overlay_provider.ml` 의 `Cache.key` 가 `partition_store_dir` 를 호출하며 이는 13개 LSP 진입점 전부의 공유 캐시 키다 — 는 이름 grep 에 잡히지 않는다 (적대 리뷰 P0-1). A~D 의 개별 branch 에서는 review 가능한 누적 diff 를 유지했지만, 최종 착륙은 E 의 current-only cut 을 포함한다. optional 기본값 11사이트 중 write 측이 A 에서 required 가 된다.
 - **D 시점**: 리더가 slug/keeper 어휘로 이행하며 구 partition 타입의 마지막 소비자가 사라진다 — 구체적으로 `Ide_bridge` 의 list_* 시그니처, `Lsp_overlay_provider` 13개 진입점의 `partition option` 파라미터, REST scope 해석(`server_ide_scope.ml` 의 `scope_params` / `resolve_declared_scope` — 상호배타 검사 포함), dashboard snapshot, 그리고 그 규칙을 클라이언트에서 미러링하는 `api/ide.ts` resolveIdeScope 와 `ide-memory-panel.ts` 의 사전 검사. 서버 파라미터 개명은 미러 2곳과 한 PR 에서 움직인다. **A 에서는 이 read 시그니처들이 의도적으로 무변경이다** (타입이 살아 있으므로 컴파일 일관 — A2 는 sink write 시그니처의 분할 지점이지 리더 이행 지점이 아니다).
 - **B 시점**: sink 가 Addressed fact 만 영속하고 turn_events 방출 사슬이 죽는다 (§5.2 — keeper fact 는 기존 SSOT 가 소유). 이 순간부터 `_orphan` 에 새 쓰기 0.
 - **C 는 B 이후**: annotations 가 `code/` 에 떨어져야 V2 가 성립한다.

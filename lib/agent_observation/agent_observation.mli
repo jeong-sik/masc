@@ -83,6 +83,7 @@ module Code_address : sig
     | Malformed_codebase
     | Empty_path
     | Absolute_path
+    | Malformed_path
     | Unnormalized_path
 
   val invalid_to_string : invalid -> string
@@ -90,8 +91,8 @@ module Code_address : sig
   val v : codebase:string -> path:string -> (t, invalid) result
   (** Rejects rather than repairs: the codebase must already be a
       canonical slug and the path must already be a normalized relative
-      path — [.], [..], empty segments, and absolute paths are errors,
-      not inputs to fix. *)
+      path — malformed paths (including NUL bytes), [.], [..], empty
+      segments, and absolute paths are errors, not inputs to fix. *)
 
   val codebase : t -> string
   val path : t -> string

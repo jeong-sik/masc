@@ -93,6 +93,13 @@ let () =
             `Quick
             (check_rejected ~codebase:"github.com_x_y" ~path:"" A.Empty_path)
         ; Alcotest.test_case
+            "NUL byte"
+            `Quick
+            (check_rejected
+               ~codebase:"github.com_x_y"
+               ~path:"lib/\x00secret.ml"
+               A.Malformed_path)
+        ; Alcotest.test_case
             "empty codebase"
             `Quick
             (check_rejected ~codebase:"" ~path:"lib/x.ml" A.Empty_codebase)

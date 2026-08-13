@@ -1398,6 +1398,19 @@ interface KeeperConfigWorkspace {
   missing_active_goal_ids: string[]
 }
 
+export interface KeeperConfigOverrideFieldSource {
+  field: string
+  source: string | null
+  live_source: string | null
+  default_source: string | null
+  default_source_kind: 'toml' | null
+  default_manifest_path: string | null
+  default_manifest_exists: boolean | null
+  default_missing: boolean | null
+  default_value: unknown
+  live_value: unknown
+}
+
 interface KeeperConfigSources {
   live_meta_path: string
   default_manifest_path: string | null
@@ -1405,6 +1418,7 @@ interface KeeperConfigSources {
   precedence: string[]
   has_live_override: boolean
   override_fields: string[]
+  override_field_sources: KeeperConfigOverrideFieldSource[]
 }
 
 interface KeeperConfigMetrics {

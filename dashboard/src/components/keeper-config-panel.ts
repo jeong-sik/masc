@@ -331,6 +331,77 @@ export type RuntimeDraft = {
   autonomous_wake_prompt: string
 }
 
+export type KeeperConfigBooleanProjection =
+  | { kind: 'configured'; configured: boolean; live: boolean }
+  | {
+      kind: 'drift'
+      configured: boolean
+      live: boolean
+      defaultSource: 'toml'
+      defaultManifestPath: string | null
+    }
+  | { kind: 'live-only'; live: boolean }
+  | { kind: 'invalid-evidence'; live: boolean }
+
+type KeeperConfigBooleanField = 'autoboot_enabled' | 'proactive.enabled'
+
+/** Resolve an editable boolean against the same declarative config evidence
+ * the PATCH endpoint writes. The top-level value is live-meta state; when a
+ * typed source row proves that TOML differs, the editor must start from TOML
+ * rather than presenting the stale runtime overlay as the persisted policy. */
+export function keeperConfigBooleanProjection(
+  c: KeeperConfig,
+  field: KeeperConfigBooleanField,
+  live: boolean,
+): KeeperConfigBooleanProjection {
+  const evidence = c.sources.override_field_sources?.find(row => row.field === field)
+  if (!evidence || evidence.default_missing === true) return { kind: 'live-only', live }
+  if (
+    evidence.default_source_kind !== 'toml'
+    || typeof evidence.default_value !== 'boolean'
+    || typeof evidence.live_value !== 'boolean'
+  ) {
+    return { kind: 'invalid-evidence', live }
+  }
+  if (evidence.default_value === evidence.live_value) {
+    return { kind: 'configured', configured: evidence.default_value, live: evidence.live_value }
+  }
+  return {
+    kind: 'drift',
+    configured: evidence.default_value,
+    live: evidence.live_value,
+    defaultSource: 'toml',
+    defaultManifestPath: evidence.default_manifest_path,
+  }
+}
+
+function configuredBooleanValue(projection: KeeperConfigBooleanProjection): boolean {
+  return projection.kind === 'configured' || projection.kind === 'drift'
+    ? projection.configured
+    : projection.live
+}
+
+function proactiveConfigProjection(c: KeeperConfig): KeeperConfigBooleanProjection {
+  return keeperConfigBooleanProjection(c, 'proactive.enabled', c.proactive.enabled)
+}
+
+function proactiveConfigValue(c: KeeperConfig): boolean {
+  return configuredBooleanValue(proactiveConfigProjection(c))
+}
+
+function proactiveConfigHint(c: KeeperConfig): string {
+  const projection = proactiveConfigProjection(c)
+  if (projection.kind === 'drift') {
+    const configured = projection.configured ? 'ON' : 'OFF'
+    const live = projection.live ? 'ON' : 'OFF'
+    return `유휴 시 keeper 자가 기동 · TOML ${configured} / live meta ${live}`
+  }
+  if (projection.kind === 'invalid-evidence') {
+    return '유휴 시 keeper 자가 기동 · config source evidence invalid'
+  }
+  return '유휴 시 keeper 자가 기동'
+}
+
 // Mirror of the server contract
 // (Env_config_keeper.KeeperAutonomous.max_wake_prompt_bytes): the value is
 // appended to the durable checkpoint on every autonomous turn.
@@ -418,7 +489,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     mention_targets_text: c.workspace.mention_targets.join('\n'),
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
-    proactive_enabled: c.proactive.enabled,
+    proactive_enabled: proactiveConfigValue(c),
     autonomous_wake_prompt: c.autonomous_wake_prompt ?? '',
   }
 }
@@ -573,6 +644,7 @@ export function keeperConfigControlInventory(
             'sources.precedence',
             'sources.has_live_override',
             'sources.override_fields',
+            'sources.override_field_sources',
           ]),
         },
       ]
@@ -667,6 +739,7 @@ export function keeperConfigControlInventory(
           [
             'autoboot_enabled',
             'proactive.enabled',
+            'sources.override_field_sources',
           ],
         ),
         keeperRuntimeControlItem(
@@ -889,7 +962,7 @@ export function buildRuntimePayloadResult(
   if (!sameStringArray(newPaths, origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
-  if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
+  if (draft.proactive_enabled !== proactiveConfigValue(orig)) payload.proactive_enabled = draft.proactive_enabled
   return { ok: true, payload }
 }
 
@@ -1911,6 +1984,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${KcfFacts} rows=${[
         ['기본 소스', c.sources.default_source_kind],
         ['라이브 오버라이드', c.sources.has_live_override ? 'ON' : 'OFF'],
+        ...(proactiveConfigProjection(c).kind === 'drift'
+          ? [[
+              '프로액티브 설정 드리프트',
+              `TOML ${proactiveConfigValue(c) ? 'ON' : 'OFF'} / live meta ${c.proactive.enabled ? 'ON' : 'OFF'}`,
+            ] as const]
+          : []),
       ]} />
     </${KcfSec}>
 
@@ -2001,7 +2080,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${SetToggle} ariaLabel="자동 부팅" on=${rd.autoboot_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('autoboot_enabled', v)} />
       </${SetRow}>
-      <${SetRow} label="활성" hint="유휴 시 keeper 자가 기동" dirty=${dirtyFlags.proactive_enabled}>
+      <${SetRow} label="활성" hint=${proactiveConfigHint(c)} dirty=${dirtyFlags.proactive_enabled}>
         <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
       </${SetRow}>
@@ -2019,7 +2098,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       </div>
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
-      <${BoolRow} label="활성" value=${c.proactive.enabled} />
+      <${BoolRow} label="활성" value=${proactiveConfigValue(c)} />
       <${ConfigRow} label="자율 턴 깨우기 프롬프트"
         value=${c.autonomous_wake_prompt ?? `(상속) ${c.prompt.unified_user_message_preview || 'Continue.'}`} />
     `}

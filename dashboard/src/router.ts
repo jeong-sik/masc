@@ -203,7 +203,11 @@ function hashLooksLikeQuery(rawHashBody: string): boolean {
 }
 
 function parsePathname(pathname: string, search: string): RouteState | null {
-  const segments = pathname.replace(/^\/+/, '').split('/').filter(Boolean)
+  const segments = pathname
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(Boolean)
+    .map(decodeSafe)
   // The server serves the dashboard at both / and /dashboard, so a link
   // written as /?tab=monitoring is the same request as /dashboard?tab=…. It
   // used to fall through to the default route, which is a silent answer to a

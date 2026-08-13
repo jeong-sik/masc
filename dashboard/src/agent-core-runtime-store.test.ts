@@ -479,6 +479,57 @@ describe('agent-core-runtime-store', () => {
     ])
   })
 
+  it('releases queued live events when the latest replay finishes before a stale fetch', async () => {
+    type ReplayResponse = Awaited<ReturnType<typeof fetchTelemetry>>
+    let resolveStale: ((response: ReplayResponse) => void) | undefined
+    let resolveLatest: ((response: ReplayResponse) => void) | undefined
+    fetchTelemetryMock
+      .mockImplementationOnce(() => new Promise(resolve => {
+        resolveStale = resolve
+      }))
+      .mockImplementationOnce(() => new Promise(resolve => {
+        resolveLatest = resolve
+      }))
+
+    const staleReplay = replayAgentCoreRuntimeTelemetry()
+    const latestReplay = replayAgentCoreRuntimeTelemetry()
+    expect(applyAgentCoreRuntimeEvent({
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-live-after-stale-replay',
+      payload: {
+        agent_a: 'latest-live-agent',
+        agent_b: 'latest-live-peer',
+        trust_score: 0.9,
+      },
+    })).toBe(true)
+
+    resolveLatest?.({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 0,
+      offset: 0,
+      total_matching_entries: 0,
+      has_more: false,
+      entries: [],
+    })
+    await latestReplay
+
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
+    expect(agentCoreAgentEvents.value[0]?.event_id).toBe('evt-live-after-stale-replay')
+
+    resolveStale?.({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 0,
+      offset: 0,
+      total_matching_entries: 0,
+      has_more: false,
+      entries: [],
+    })
+    await staleReplay
+
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
+    expect(agentCoreAgentEvents.value[0]?.event_id).toBe('evt-live-after-stale-replay')
+  })
+
   it('increments total events above the replay baseline for live arrivals', async () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',

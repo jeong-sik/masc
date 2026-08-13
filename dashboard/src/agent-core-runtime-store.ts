@@ -55,7 +55,7 @@ let loadedUnidentifiedReplayEventCount = 0
 let replayGeneration = 0
 let initialReplayPromise: Promise<void> | null = null
 let replayFetchedAgentCoreEventCount = 0
-let fullReplayHydrationsInFlight = 0
+let activeFullReplayGeneration: number | null = null
 let queuedLiveRuntimeEvents: QueuedLiveRuntimeEvent[] = []
 
 function emptyEvidenceRefSets(): EvidenceRefSets {
@@ -569,20 +569,21 @@ function applyCoercedAgentCoreRuntimeEvent(
 export function applyAgentCoreRuntimeEvent(raw: unknown, opts?: IngestOptions): boolean {
   const event = coerceAgentCoreRuntimeEnvelope(raw)
   if (!event) return false
-  if (opts?.origin !== 'replay' && fullReplayHydrationsInFlight > 0) {
+  if (opts?.origin !== 'replay' && activeFullReplayGeneration !== null) {
     queuedLiveRuntimeEvents.push({ event, opts })
     return true
   }
   return applyCoercedAgentCoreRuntimeEvent(event, opts)
 }
 
-function beginFullReplayHydration(): void {
-  fullReplayHydrationsInFlight += 1
+function beginFullReplayHydration(generation: number): void {
+  activeFullReplayGeneration = generation
 }
 
-function finishFullReplayHydration(): void {
-  fullReplayHydrationsInFlight -= 1
-  if (fullReplayHydrationsInFlight > 0 || queuedLiveRuntimeEvents.length === 0) return
+function finishFullReplayHydration(generation: number): void {
+  if (activeFullReplayGeneration !== generation) return
+  activeFullReplayGeneration = null
+  if (queuedLiveRuntimeEvents.length === 0) return
   const pending = queuedLiveRuntimeEvents
   queuedLiveRuntimeEvents = []
   for (const { event, opts } of pending) {
@@ -630,7 +631,7 @@ export function appendAgentCoreRuntimeFromTelemetryEntries(
 
 export async function replayAgentCoreRuntimeTelemetry(signal?: AbortSignal): Promise<void> {
   const generation = ++replayGeneration
-  beginFullReplayHydration()
+  beginFullReplayHydration(generation)
   try {
     const response = await fetchTelemetry({
       source: 'agent_core_event',
@@ -645,7 +646,7 @@ export async function replayAgentCoreRuntimeTelemetry(signal?: AbortSignal): Pro
       truncated: response.has_more ?? response.truncated ?? false,
     })
   } finally {
-    finishFullReplayHydration()
+    finishFullReplayHydration(generation)
   }
 }
 

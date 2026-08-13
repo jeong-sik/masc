@@ -22,7 +22,12 @@ import type {
 type AgentCoreRuntimeEnvelope = Record<string, unknown> & {
   type: string
   payload: Record<string, unknown>
+  dashboard_event_key?: string
 }
+
+type RuntimeEventIdentity =
+  | { kind: 'stable'; key: string }
+  | { kind: 'unidentified' }
 
 type IngestOptions = {
   includeLiveTrace?: boolean
@@ -40,6 +45,7 @@ type EvidenceRefSets = {
 }
 
 const seenAgentCoreEventKeys = new Set<string>()
+let unidentifiedAgentCoreEventSequence = 0
 let replayGeneration = 0
 let initialReplayPromise: Promise<void> | null = null
 
@@ -206,41 +212,31 @@ function runtimeEventType(event: AgentCoreRuntimeEnvelope): string {
   return asString(event.event_type) ?? event.type
 }
 
-function runtimeEventKey(event: AgentCoreRuntimeEnvelope): string {
+function stableRuntimeEventIdentity(event: AgentCoreRuntimeEnvelope): RuntimeEventIdentity {
   const payload = eventPayload(event)
-  const type = runtimeEventType(event)
-  const correlationId = asString(event.correlation_id)
-  const runId = asString(event.run_id)
-  const reportedTsUnix = eventReportedUnixSeconds(event)
-  const agentName =
-    asString(event.agent_name)
-    ?? asString(payload.agent_name)
-    ?? asString(payload.agent)
-    ?? asString(payload.keeper_name)
-    ?? ''
-  const taskId = asString(event.task_id) ?? asString(payload.task_id) ?? ''
-  const toolName = asString(event.tool_name) ?? asString(payload.tool_name) ?? ''
-  const turn = asNumber(event.turn) ?? asNumber(payload.turn)
-  if (correlationId || runId || reportedTsUnix != null) {
-    return [
-      type,
-      agentName,
-      correlationId ?? '',
-      runId ?? '',
-      reportedTsUnix != null ? String(reportedTsUnix) : '',
-      taskId,
-      toolName,
-      turn != null ? String(turn) : '',
-    ].join('|')
+  const runId = asString(event.run_id) ?? asString(payload.run_id)
+  const eventId = asString(event.event_id) ?? asString(payload.event_id)
+  if (eventId) {
+    const scope = runId ?? asString(event.correlation_id) ?? asString(payload.correlation_id) ?? ''
+    return { kind: 'stable', key: `event:${scope}|${eventId}` }
   }
-  return JSON.stringify({
-    type,
-    agentName,
-    taskId,
-    toolName,
-    turn: turn ?? null,
-    payload,
-  })
+
+  const seq = asNumber(event.seq) ?? asNumber(payload.seq)
+  if (runId && seq != null && Number.isSafeInteger(seq) && seq >= 0) {
+    return { kind: 'stable', key: `run:${runId}|seq:${seq}` }
+  }
+
+  return { kind: 'unidentified' }
+}
+
+function runtimeEventKey(event: AgentCoreRuntimeEnvelope): string {
+  if (event.dashboard_event_key) return event.dashboard_event_key
+  const identity = stableRuntimeEventIdentity(event)
+  const key = identity.kind === 'stable'
+    ? identity.key
+    : `unidentified:${++unidentifiedAgentCoreEventSequence}`
+  event.dashboard_event_key = key
+  return key
 }
 
 function traceDetail(
@@ -534,23 +530,23 @@ function coerceAgentCoreRuntimeEnvelope(raw: unknown): AgentCoreRuntimeEnvelope 
 export function applyAgentCoreRuntimeEvent(raw: unknown, opts?: IngestOptions): boolean {
   const event = coerceAgentCoreRuntimeEnvelope(raw)
   if (!event) return false
-  const key = runtimeEventKey(event)
-  if (seenAgentCoreEventKeys.has(key)) {
-    return false
-  }
-  seenAgentCoreEventKeys.add(key)
-  ingestRuntimeProjection(event, opts)
-  if (opts?.origin === 'replay') {
-    agentCoreTotalEvents.value = seenAgentCoreEventKeys.size
+  const identity = stableRuntimeEventIdentity(event)
+  if (identity.kind === 'stable') {
+    if (seenAgentCoreEventKeys.has(identity.key)) return false
+    seenAgentCoreEventKeys.add(identity.key)
+    event.dashboard_event_key = identity.key
   } else {
-    agentCoreTotalEvents.value = Math.max(seenAgentCoreEventKeys.size, agentCoreTotalEvents.value + 1)
+    runtimeEventKey(event)
   }
+  ingestRuntimeProjection(event, opts)
+  agentCoreTotalEvents.value += 1
   return true
 }
 
 export function hydrateAgentCoreRuntimeFromTelemetryEntries(entries: TelemetryEntry[]): void {
   resetAgentCoreRuntimeSignals()
   seenAgentCoreEventKeys.clear()
+  unidentifiedAgentCoreEventSequence = 0
   const ordered = [...entries].sort((a, b) => {
     const left = coerceAgentCoreRuntimeEnvelope(a)
     const right = coerceAgentCoreRuntimeEnvelope(b)

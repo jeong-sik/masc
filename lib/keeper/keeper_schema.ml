@@ -179,6 +179,10 @@ let schemas : tool_schema list = [
           ("type", `String "integer");
           ("description", `String "Optional: absolute context token limit override for this keeper. Use 0 to clear the override.");
         ]);
+        ("autonomous_wake_prompt", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Optional: user message this keeper's autonomous turns are woken with, overriding the fleet autonomous.wake_prompt. Non-blank, at most 2048 bytes; it is appended to the durable checkpoint every autonomous turn. Use null to clear.");
+        ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
           ("description", `String "If true, scheduled keeper cycles may produce proactive responses.");

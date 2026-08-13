@@ -2808,6 +2808,7 @@ describe('fetchKeeperConfig', () => {
       active_goal_ids: ['goal-runtime'],
       autoboot_enabled: 'false',
       max_context_override: 64_000,
+      autonomous_wake_prompt: '백로그를 확인하고 하나 진행해.',
       sandbox_profile: 'docker',
       network_mode: 'none',
       sandbox_last_error: 'sandbox docker exec failed',
@@ -2908,6 +2909,7 @@ describe('fetchKeeperConfig', () => {
     expect(result.allowed_paths).toEqual(['/tmp/workspace'])
     expect(result.autoboot_enabled).toBe(false)
     expect(result.max_context_override).toBe(64000)
+    expect(result.autonomous_wake_prompt).toBe('백로그를 확인하고 하나 진행해.')
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')
@@ -2967,6 +2969,19 @@ describe('fetchKeeperConfig', () => {
     await expect(fetchKeeperConfig('keeper-sangsu')).rejects.toThrowError(
       'Invalid keeper config response: max_context_override must be a positive safe integer or null',
     )
+  })
+
+  it('decodes an absent autonomous_wake_prompt as inherit (null)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"name":"keeper-sangsu","max_context_override":null}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperConfig('keeper-sangsu')
+    expect(result.autonomous_wake_prompt).toBeNull()
   })
 
   it('tracks raw keeper config field presence before defaults are normalized', async () => {

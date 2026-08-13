@@ -9,6 +9,7 @@ open Alcotest
 module Probe = Masc.Keeper_capability_probe
 module Descriptor = Masc.Keeper_tool_descriptor
 module Runner = Runtime_agent_core_runner
+module Turn_driver = Masc.Keeper_turn_driver
 
 let verdict = testable (Fmt.of_to_string Probe.verdict_to_string) ( = )
 
@@ -256,10 +257,17 @@ let bare_config () =
     ()
 ;;
 
-let bool_opt = testable (Fmt.of_to_string (function
+let show_bool_opt = function
   | None -> "None"
-  | Some b -> Printf.sprintf "Some %b" b))
-  ( = )
+  | Some b -> Printf.sprintf "Some %b" b
+;;
+
+let bool_opt = testable (Fmt.of_to_string show_bool_opt) ( = )
+
+(* Any id that resolves no declared seed: the agreement under test is between
+   the two functions, and a runtime whose seed came from config would make the
+   loop assert the same triple three times. *)
+let bool_opts = [ Some true; Some false; None ]
 
 let test_declared_thinking_off_reaches_the_config () =
   let seed =
@@ -297,6 +305,54 @@ let test_undeclared_seed_leaves_the_binding_alone () =
   check bool_opt "an absent seed does not clear the binding" (Some true) out.enable_thinking
 ;;
 
+(* The pin the review asked for (#28530): seed application now exists twice —
+   [Runner.apply_inference_seed] on the probe path and
+   [Keeper_turn_driver.For_testing.attempt_inference_policy] on the turn path.
+   Two implementations of "what does this runtime actually send" is the shape of
+   the defect this PR fixes, so their agreement is asserted rather than assumed.
+
+   Both are driven from the same runtime id, because the turn path resolves the
+   seed itself — handing the probe a synthetic seed the turn path never sees
+   would compare two different questions. The binding is what varies, over every
+   declaration combination, which is also where the disagreement lives: an
+   undeclared seed axis leaves the turn path writing [None] and the probe path
+   keeping the binding's value. *)
+let seed_free_runtime_id = "masc-test-no-such-runtime"
+
+let test_probe_and_turn_agree_on_the_seed () =
+  let seed = Runtime_inference.for_runtime ~name:seed_free_runtime_id in
+  List.iter
+    (fun binding_enable ->
+      List.iter
+        (fun binding_preserve ->
+          let binding =
+            { (bare_config ()) with
+              Llm_provider.Provider_config.enable_thinking = binding_enable
+            ; preserve_thinking = binding_preserve
+            }
+          in
+          let probe = Runner.apply_inference_seed ~seed binding in
+          let turn =
+            Turn_driver.For_testing.attempt_inference_policy
+              ~runtime_id:seed_free_runtime_id
+              ~fallback_enable_thinking:binding_enable
+              ()
+          in
+          let label field =
+            Printf.sprintf
+              "%s: binding(enable=%s preserve=%s)"
+              field
+              (show_bool_opt binding_enable)
+              (show_bool_opt binding_preserve)
+          in
+          check bool_opt (label "enable_thinking")
+            turn.attempt_enable_thinking probe.enable_thinking;
+          check bool_opt (label "preserve_thinking")
+            turn.attempt_preserve_thinking probe.preserve_thinking)
+        bool_opts)
+    bool_opts
+;;
+
 let () =
   run
     "keeper_capability_probe"
@@ -321,6 +377,8 @@ let () =
       , [ test_case "declared thinking-off reaches the request" `Quick test_declared_thinking_off_reaches_the_config
         ; test_case "declared thinking-on reaches the request" `Quick test_declared_thinking_on_reaches_the_config
         ; test_case "absent seed leaves the binding alone" `Quick test_undeclared_seed_leaves_the_binding_alone
+        ; test_case "probe and turn agree on every declaration combination" `Quick
+            test_probe_and_turn_agree_on_the_seed
         ] )
     ]
 ;;

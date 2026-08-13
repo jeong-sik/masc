@@ -223,6 +223,8 @@ describe('resolveActiveIdeRepositoryId', () => {
 
 describe('IDE focus workspace provenance', () => {
   it('keeps the newest repository refresh when the startup list resolves late', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-b')
     const startupList = deferred<ReadonlyArray<Repository>>()
     const scannedList = deferred<ReadonlyArray<Repository>>()
     repositoryApiMocks.fetchRepositoriesList
@@ -253,6 +255,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('reselects observed focus for repo B and invalidates the repo A document before B resolves', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     const repoBTree = deferred<WorkspaceTreeResult>()
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
@@ -333,6 +337,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('ignores a repo A file completion that arrives after repo B owns the focus', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     const staleRepoAFile = deferred<WorkspaceFileResponse | null>()
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
@@ -394,7 +400,9 @@ describe('IDE focus workspace provenance', () => {
     }
   })
 
-  it('drops project auto-focus when a late repository list selects a repository', async () => {
+  it('drops project auto-focus when a late repository list restores the persisted selection', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-b')
     const repositories = deferred<ReadonlyArray<Repository>>()
     const repoTree = deferred<WorkspaceTreeResult>()
     repositoryApiMocks.fetchRepositoriesList.mockReturnValue(repositories.promise)
@@ -505,6 +513,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('keeps explicit provenance but materializes not-found when the target repo lacks the path', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
       repo('repo-b', '/workspace/repo-b'),
@@ -566,6 +576,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('terminates explicit validation as unavailable on transport failure without claiming not-found', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
     ])
@@ -610,6 +622,8 @@ describe('IDE focus workspace provenance', () => {
   })
 
   it('does not misclassify an unavailable observed file as an explicit not-found focus', async () => {
+    // RFC-0378 §5.4: selection is explicit — seed the persisted choice.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
       repo('repo-a', '/workspace/repo-a'),
     ])

@@ -711,6 +711,8 @@ describe('IdeShell', () => {
   })
 
   it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {
+    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -1091,6 +1093,8 @@ describe('IdeShell', () => {
 
 
   it('switches the IDE right rail tabs and renders cursor push focus', async () => {
+    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },

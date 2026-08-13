@@ -542,6 +542,33 @@ let test_n_limits_output () =
   in
   Alcotest.(check int) "limited to 10" 10 (List.length entries)
 
+let test_offset_windows_final_page () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_offset_final_page" in
+  let telemetry_dir = Filename.concat dir ".masc/telemetry" in
+  Fs_compat.mkdir_p telemetry_dir;
+  write_jsonl telemetry_dir
+    (List.init 3 (fun i ->
+       `Assoc [ "timestamp", `Float (Float.of_int i); "i", `Int i ]));
+  let read offset =
+    Telemetry_unified.read_unified_result
+      ~base_path:dir
+      ~masc_root:(masc_root dir)
+      ~sources:[ Telemetry_unified.Agent_event ]
+      ~limit:(Telemetry_unified.read_limit_of_int 2)
+      ~offset
+      ()
+  in
+  let final_page = read 2 in
+  Alcotest.(check int) "total remains pre-page" 3
+    final_page.total_matching_entries;
+  Alcotest.(check bool) "final page is not truncated" false final_page.truncated;
+  Alcotest.(check (list int)) "offset drops the preceding rows" [ 0 ]
+    (List.map (json_int_field "i") final_page.entries);
+  Alcotest.(check int) "offset at end is empty" 0
+    (List.length (read 3).entries)
+
 let test_time_window_reports_total_before_limit () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1530,6 +1557,8 @@ let () =
             test_keeper_metrics_fast_path_sets_truncated_with_marker;
           Alcotest.test_case "sorted newest first" `Quick test_sorted_newest_first;
           Alcotest.test_case "n limits output" `Quick test_n_limits_output;
+          Alcotest.test_case "offset windows final page" `Quick
+            test_offset_windows_final_page;
           Alcotest.test_case "time window reports total before limit" `Quick
             test_time_window_reports_total_before_limit;
           Alcotest.test_case "time window reads matching day files" `Quick

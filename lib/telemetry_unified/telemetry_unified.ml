@@ -797,10 +797,7 @@ let read_unified_result ~base_path ~masc_root ?(sources = all_sources)
   (* Sort by timestamp descending (newest first) *)
   let sorted = sort_newest_first filtered in
   let total_matching_entries = List.length sorted in
-  let entries =
-    if total_matching_entries <= offset + n then sorted
-    else sorted |> List.drop offset |> take_first n
-  in
+  let entries = sorted |> List.drop offset |> take_first n in
   { entries; total_matching_entries; truncated = total_matching_entries > offset + n }
 
 let read_unified ~base_path ~masc_root ?sources ?keeper_name ?session_id

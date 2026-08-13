@@ -3,19 +3,15 @@
 let line_ts = function
   | Trajectory.Tool_call entry -> entry.ts
   | Trajectory.Thinking entry -> entry.ts
+  | Trajectory.Withheld_thinking entry -> entry.ts
 ;;
 
 module Thinking_key = struct
-  type t = float * bool * string
+  type t =
+    | Persisted_content of float * bool * string
+    | Withheld_observation of int * int * Trajectory.withheld_reasoning_kind
 
-  let compare (ts1, r1, c1) (ts2, r2, c2) =
-    let c_ts = Float.compare ts1 ts2 in
-    if c_ts <> 0
-    then c_ts
-    else
-      let c_r = Bool.compare r1 r2 in
-      if c_r <> 0 then c_r else String.compare c1 c2
-  ;;
+  let compare = Stdlib.compare
 end
 
 module Thinking_set = Set.Make (Thinking_key)
@@ -29,7 +25,15 @@ let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
          match line with
          | Trajectory.Tool_call _ -> seen, line :: acc
          | Trajectory.Thinking entry ->
-           let key = entry.ts, entry.redacted, entry.content in
+           let key = Thinking_key.Persisted_content (entry.ts, entry.redacted, entry.content) in
+           if Thinking_set.mem key seen
+           then seen, acc
+           else Thinking_set.add key seen, line :: acc
+         | Trajectory.Withheld_thinking entry ->
+           let key =
+             Thinking_key.Withheld_observation
+               (entry.turn, entry.block_index, entry.reasoning_kind)
+           in
            if Thinking_set.mem key seen
            then seen, acc
            else Thinking_set.add key seen, line :: acc)
@@ -127,6 +131,8 @@ let merge_lines ~internal_lines (trajectory_lines : Trajectory.trajectory_line l
       match left, right with
       | Trajectory.Thinking _, Trajectory.Tool_call _ -> -1
       | Trajectory.Tool_call _, Trajectory.Thinking _ -> 1
+      | Trajectory.Withheld_thinking _, Trajectory.Tool_call _ -> -1
+      | Trajectory.Tool_call _, Trajectory.Withheld_thinking _ -> 1
       | _ -> 0)
 ;;
 
@@ -159,6 +165,14 @@ let trajectory_line_to_chat_trace_step = function
          ; content_withheld = false
          ; ts = Some entry.ts_iso
          ; agent_core_block_index = None
+         })
+  | Trajectory.Withheld_thinking entry ->
+    Some
+      (Keeper_chat_blocks.Trace_think
+         { text = ""
+         ; content_withheld = true
+         ; ts = Some entry.ts_iso
+         ; agent_core_block_index = Some entry.block_index
          })
   | Trajectory.Tool_call entry ->
     let result =
@@ -245,6 +259,7 @@ let chat_trace_block_by_turn_ref ~max_lines ~max_internal_lines
         all_lines
         |> List.filter (function
              | Trajectory.Thinking entry -> entry.turn = absolute_turn
+             | Trajectory.Withheld_thinking entry -> entry.turn = absolute_turn
              | Trajectory.Tool_call entry -> entry.turn = absolute_turn)
         |> List.filter_map trajectory_line_to_chat_trace_step
       in

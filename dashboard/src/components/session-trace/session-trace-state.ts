@@ -708,17 +708,28 @@ function trajectoryEntryToTrace(
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
+    const contentWithheld = entry.content_withheld === true || entry.observation === 'withheld'
+    if (contentWithheld) {
+      detail.content_withheld = true
+      if (entry.reasoning_kind) detail.reasoning_kind = entry.reasoning_kind
+      if (entry.char_count != null) detail.char_count = entry.char_count
+      if (entry.identity?.source === 'trajectory_block') {
+        detail.agent_core_block_index = entry.identity.block_index
+      }
+    }
     return {
       id: `tj-${ts}-thinking-T${entry.turn}-${index}`,
       ts,
       ts_iso: entry.ts_iso,
       kind: 'thinking',
       sourceLane: 'masc',
-      summary: entry.redacted ? '[비공개 사고]' : (entry.content?.slice(0, 120) ?? ''),
+      summary: contentWithheld || entry.redacted
+        ? '[비공개 사고]'
+        : (entry.content?.slice(0, 120) ?? ''),
       detail,
       turn: entry.turn,
-      thinkingContent: entry.content,
-      thinkingRedacted: entry.redacted,
+      thinkingContent: contentWithheld ? undefined : (entry.content ?? undefined),
+      thinkingRedacted: contentWithheld || entry.redacted,
     }
   }
 

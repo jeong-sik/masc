@@ -24,8 +24,14 @@ export type TrajectoryEntry = {
   duration_ms?: number
   error?: string | null
   // Thinking-specific fields
-  content?: string
+  content?: string | null
   content_length?: number
+  content_withheld?: boolean
+  observation?: 'withheld'
+  reasoning_kind?: 'thinking' | 'reasoning_details' | 'redacted_thinking'
+  present?: boolean
+  char_count?: number
+  identity?: { source: 'trajectory_block'; block_index: number }
   redacted?: boolean
 }
 

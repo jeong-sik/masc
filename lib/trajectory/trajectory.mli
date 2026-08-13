@@ -71,10 +71,29 @@ type thinking_entry = {
   redacted : bool;
 }
 
-(** Tagged union for reading mixed JSONL (tool calls + thinking). *)
+type withheld_reasoning_kind =
+  | Thinking_block
+  | Reasoning_details
+  | Redacted_thinking
+
+type withheld_thinking_entry = {
+  ts : float;
+  ts_iso : string;
+  turn : int;
+  block_index : int;
+  reasoning_kind : withheld_reasoning_kind;
+  char_count : int;
+}
+(** Metadata for one newly observed reasoning block. The type cannot carry
+    hidden content or provider replay signatures. *)
+
+(** Tagged union for reading mixed JSONL (tool calls + thinking). Historical
+    trajectory and internal-assistant rows remain [Thinking]; new MASC
+    trajectory observations are [Withheld_thinking]. *)
 type trajectory_line =
   | Tool_call of tool_call_entry
   | Thinking of thinking_entry
+  | Withheld_thinking of withheld_thinking_entry
 
 (** {1 Cost estimation} *)
 
@@ -102,6 +121,7 @@ val tool_call_entry_of_json :
     persisted value rather than the legacy default. Exposed for
     RFC-0233 consumers that join rows on [execution_id]. *)
 val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
+val withheld_thinking_entry_to_json : withheld_thinking_entry -> Yojson.Safe.t
 val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
@@ -123,6 +143,12 @@ val append_summary :
 val append_thinking :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   thinking_entry -> unit
+
+val append_withheld_thinking :
+  masc_root:string -> keeper_name:string -> trace_id:string ->
+  withheld_thinking_entry -> unit
+(** Persist one metadata-only reasoning observation. [content] is always JSON
+    null at this writer boundary. *)
 
 val read_entries :
   masc_root:string -> keeper_name:string -> trace_id:string ->

@@ -797,12 +797,14 @@ let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
 let check_thinking_content label expected = function
   | Trajectory.Thinking entry ->
       Alcotest.(check string) label expected entry.Trajectory.content
-  | Trajectory.Tool_call _ -> Alcotest.fail (label ^ ": expected thinking line")
+  | Trajectory.Tool_call _ | Trajectory.Withheld_thinking _ ->
+    Alcotest.fail (label ^ ": expected persisted thinking line")
 
 let check_tool_call label expected = function
   | Trajectory.Tool_call entry ->
       Alcotest.(check string) label expected entry.Trajectory.tool_name
-  | Trajectory.Thinking _ -> Alcotest.fail (label ^ ": expected tool call line")
+  | Trajectory.Thinking _ | Trajectory.Withheld_thinking _ ->
+    Alcotest.fail (label ^ ": expected tool call line")
 
 let test_dedupe_thinking_lines_uses_structural_key () =
   let tool_call =
@@ -829,7 +831,8 @@ let test_dedupe_thinking_lines_uses_structural_key () =
   (match List.nth deduped 3 with
    | Trajectory.Thinking entry ->
        Alcotest.(check bool) "redacted variant preserved" true entry.Trajectory.redacted
-   | Trajectory.Tool_call _ -> Alcotest.fail "expected redacted thinking line")
+   | Trajectory.Tool_call _ | Trajectory.Withheld_thinking _ ->
+     Alcotest.fail "expected redacted persisted thinking line")
 
 (* ================================================================ *)
 (* Runner                                                            *)

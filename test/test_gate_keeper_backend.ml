@@ -906,6 +906,7 @@ let agent_core_interleaving_event_label = function
 
 let trajectory_interleaving_label = function
   | Trajectory.Thinking entry -> "thinking:" ^ entry.Trajectory.content
+  | Trajectory.Withheld_thinking _ -> "thinking:[withheld]"
   | Trajectory.Tool_call entry -> "tool:" ^ entry.Trajectory.tool_name
 
 let receipt_detail_of_provider_call

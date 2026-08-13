@@ -106,6 +106,8 @@ let test_converter_decodes_content_blocks () =
     check string "content" "hello world" entry.content;
     check int "content_length" (String.length "hello world") entry.content_length;
     check (float 0.0) "ts" 2.0 entry.ts
+  | Some (T.Withheld_thinking _) ->
+    fail "internal_assistant rows must preserve persisted content"
   | Some (T.Tool_call _) -> fail "expected Thinking, got Tool_call"
   | None -> fail "content_blocks row must decode to a Thinking line"
 ;;

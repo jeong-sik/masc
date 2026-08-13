@@ -2451,7 +2451,7 @@ let handle_keeper_get_subroutes state req request reqd =
                  if include_thinking then all_lines
                  else List.filter (function
                    | Trajectory.Tool_call _ -> true
-                   | Trajectory.Thinking _ -> false) all_lines
+                   | Trajectory.Thinking _ | Trajectory.Withheld_thinking _ -> false) all_lines
                in
                let total = List.length lines in
                let recent =

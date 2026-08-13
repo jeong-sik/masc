@@ -247,7 +247,7 @@ feature 왕복만 테스트한다 (원칙 20). 경로 헬퍼 단위 테스트는
 |---|---|---|
 | A | `Code_address` + fact 이분 타입 + producer 컴파일 낙진 (필요시 A1/A2 분할) | 최대 낙진, 행동 불변 |
 | B | sink 를 Addressed-only 영속으로 전환 + turn_events 방출 사슬 삭제 (§5.2) | 쓰기 전환 |
-| C | annotate/anchor 계약 + keeper 프롬프트 + owner-probe feature test | N2 왕복 완성 |
+| C | annotate/anchor 계약 + keeper 프롬프트 + owner-probe feature test. **cursor REST POST 포함** — `ingest_cursor_event` 는 게시된 file_path 에서 attribution 을 아직 해석하지 않는다고 자인하는 defer 주석을 갖고 있고(§5.3 "사람 쪽 절반도 같은 생성자"의 미이행 지점), C 에서 같은 생성자로 흡수한다 | N2 왕복 완성 |
 | D | read path 잔존분 + dashboard scope 명시화 + empty state | N1 가시화 |
 | E | kill list 집행 + 구 테스트 삭제 + 데이터 cut (dry-run 선행) | 청소 |
 

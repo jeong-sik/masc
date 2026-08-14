@@ -929,6 +929,7 @@ let execute_prepared_lane_current
         ~run_id
         ~outcome
         ~elapsed_s:(Time_compat.now () -. started_at)
+        ~selected_slot:None
         ~output
     with
     | Ok () -> ()

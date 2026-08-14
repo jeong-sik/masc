@@ -191,6 +191,7 @@ let test_exact_lane_completion_against_registration () =
                  ~run_id:"exact-first"
                  ~outcome:Ex.Succeeded
                  ~elapsed_s:1.0
+                 ~selected_slot:None
                  ~output:(`Assoc [])))
           (fun () -> register_exact t ~run_id:"exact-second"));
       check

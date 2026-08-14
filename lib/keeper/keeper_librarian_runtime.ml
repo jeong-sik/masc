@@ -126,7 +126,10 @@ type extraction_error =
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
   | Domain_output_invalid of string
-  | Memory_snapshot_write_failed of string
+  | Memory_snapshot_write_failed of
+      { detail : string
+      ; selected_slot : string
+      }
 
 let extraction_error_kind : extraction_error -> Keeper_memory_os_current.librarian_failure_kind
   = function
@@ -176,8 +179,18 @@ let extraction_error_to_string = function
       detail
   | Domain_output_invalid detail ->
     "librarian domain output invalid: " ^ detail
-  | Memory_snapshot_write_failed detail ->
+  | Memory_snapshot_write_failed { detail; selected_slot = _ } ->
     "memory os current snapshot write failed: " ^ detail
+;;
+
+let selected_slot_of_extraction_error = function
+  | Memory_snapshot_write_failed { selected_slot; _ } -> Some selected_slot
+  | Prompt_render_failed _
+  | Execution_clock_unavailable
+  | Exact_setup_failed _
+  | Exact_execution_failed _
+  | Domain_output_invalid _ ->
+    None
 ;;
 
 let should_record_cadence_backoff_after_error = function
@@ -356,7 +369,13 @@ let execute_exact_output_classified
       ~validate
       attempt
   with
-  | Ok success -> Ok success.accepted
+  | Ok success ->
+    let selected_slot =
+      success.transport_success
+      |> Exact_output.flow_success_candidate
+      |> fun candidate -> candidate.visit.identity.candidate_id
+    in
+    Ok (success.accepted, selected_slot)
   | Error (Exact_output.Flow_execution_terminal { cause; _ }) ->
     Error (Exact_execution_failed (exact_execution_error cause))
   | Error
@@ -501,15 +520,18 @@ let run_best_effort
                   ; ( "max_recall_fact_bytes"
                     , `Int prompt_input.max_recall_fact_bytes )
                   ]));
-        let complete outcome output =
-          match
+        let complete ?selected_slot outcome output =
+          let elapsed_s = Eio.Time.now clock -. started_at_monotonic in
+          let completion =
             Exact_lane_run_registry.mark_completed
               registry
               ~run_id
               ~outcome
-              ~elapsed_s:(Eio.Time.now clock -. started_at_monotonic)
+              ~elapsed_s
+              ~selected_slot
               ~output
-          with
+          in
+          match completion with
           | Ok () -> ()
           | Error error ->
             Log.Keeper.error
@@ -525,7 +547,7 @@ let run_best_effort
                render_librarian_prompt prompt_input
                |> Result.map_error (fun detail -> Prompt_render_failed detail)
              in
-             let* selection, exact_output =
+             let* (selection, exact_output), selected_slot =
                execute_exact_output_classified
                  ~clock
                  ~net
@@ -548,13 +570,14 @@ let run_best_effort
                ~facts:selection.facts
                ()
              |> Result.map_error (fun detail ->
-               Memory_snapshot_write_failed detail)
+               Memory_snapshot_write_failed { detail; selected_slot })
              in
-             snapshot, exact_output
+             snapshot, exact_output, selected_slot
            in
            match result with
-           | Ok (snapshot, exact_output) ->
+           | Ok (snapshot, exact_output, selected_slot) ->
              complete
+               ~selected_slot
                Exact_lane_run_registry.Succeeded
                (completed_output ~inp ~exact_output snapshot);
              cadence_record_success ~keeper_id ~trace_id;
@@ -568,6 +591,7 @@ let run_best_effort
            | Error error ->
              let detail = extraction_error_to_string error in
              complete
+               ?selected_slot:(selected_slot_of_extraction_error error)
                (Exact_lane_run_registry.Failed
                   { code = "librarian_failed"
                   ; detail =

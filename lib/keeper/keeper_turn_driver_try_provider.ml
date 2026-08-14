@@ -490,7 +490,9 @@ let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
    window stays ahead of [ctx.model_input_projection] so that projection's
    projected-prefix precondition keeps holding against the list it
    receives. *)
-let budgeted_model_input_projection (ctx : try_provider_ctx)
+let budgeted_model_input_projection
+      (ctx : try_provider_ctx)
+      ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
   let reserved_bytes =
@@ -519,6 +521,27 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
      confirms every lookup with physical equality. *)
   let measure_message_bytes = memoize_message_measurement measure_message_bytes in
   fun messages ->
+    (* Measure the history the wire will carry, not the history the checkpoint
+       holds. [Keeper_context_core.message_to_json] is the durable encoder — it
+       must keep reasoning verbatim — but a dialect that replays none of it
+       deletes every such block before serialization. Budgeting against the
+       durable shape charges the window for bytes the provider never receives,
+       and the room they take comes out of transmitted conversation: 23.6% of
+       it on a live 2026-08-14 GLM trace.
+
+       The projection is the same one the serializer runs, through the same
+       per-codec function, and it is idempotent — the backend applying it again
+       to this output finds nothing left to drop. *)
+    let projected =
+      Result.map_error
+        Agent_core.Llm_provider.Reasoning_history_projection.error_to_string
+        (Agent_core.Llm_provider.Complete_common.transmitted_history
+           ~config:provider_config
+           messages)
+    in
+    match projected with
+    | Error error -> Error error
+    | Ok messages ->
     let planned_and_windowed =
       offload_model_input_cpu (fun () ->
         let raw_cut candidate =
@@ -677,7 +700,6 @@ let run_try_provider
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
-          ; model_input_projection = Some (budgeted_model_input_projection ctx)
             (* The serialized request body is the quantity the provider admits
                against [max_request_body_bytes]. AGENT_CORE's provider-specific
                serialization boundary reports every admitted request; a typed
@@ -712,6 +734,19 @@ let run_try_provider
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
+    (* Installed here rather than on the record above because the projection
+       needs the provider config that record is still producing: it measures
+       the history that config's serializer will carry, and asking a config
+       that does not exist yet would mean measuring something else. *)
+    let config =
+      { config with
+        Runtime_agent.model_input_projection =
+          Some
+            (budgeted_model_input_projection
+               ctx
+               ~provider_config:config.Runtime_agent.provider_cfg)
+      }
+    in
     (* Explicit stream stall detection is handled by AGENT_CORE's
        [stream_idle_timeout_s]; [None] deliberately leaves it disabled.
        No separate liveness FSM for the common case — provider stall is

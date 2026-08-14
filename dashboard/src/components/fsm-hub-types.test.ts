@@ -11,6 +11,7 @@ import {
   MAX_OBSERVATIONS,
   MAX_TRANSITION_HISTORY,
   initialHubState,
+  operatorDispositionReasonLabel,
 } from './fsm-hub-types'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
 
@@ -182,6 +183,14 @@ describe('failureReasonLabel', () => {
     expect(failureReasonLabel(undefined)).toBeNull()
     expect(failureReasonLabel('')).toBeNull()
     expect(failureReasonLabel('   ')).toBeNull()
+  })
+})
+
+describe('operatorDispositionReasonLabel', () => {
+  it('labels a fenced provider effect without exposing the raw token', () => {
+    expect(operatorDispositionReasonLabel('provider_attempt_effect_fenced')).toBe(
+      'Provider 효과 결과 확인 필요',
+    )
   })
 })
 

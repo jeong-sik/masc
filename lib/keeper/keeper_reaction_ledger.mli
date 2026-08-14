@@ -22,6 +22,7 @@ type stimulus_kind =
   | Completion_authority_rejected
       (** System completion authority rejected Keeper evidence. *)
   | Task_cancelled
+  | Monitor_fired
       (** Another Keeper cancelled a Task this Keeper authored. *)
 
 type reaction_kind =

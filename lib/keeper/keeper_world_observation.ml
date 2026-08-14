@@ -24,6 +24,7 @@ type pending_board_event_kind =
   | Board_reaction_changed of board_reaction_event
   | Fusion_completed
   | Schedule_due of Keeper_event_queue.scheduled_wake
+  | Monitor_fired of Keeper_event_queue.monitor_wake
   | External_attention of Keeper_counterpart_observation.t
   | Goal_assigned
   | Goal_reconciliation_ready
@@ -63,7 +64,7 @@ let is_board_activity_event (event : pending_board_event) =
   | Goal_reconciliation_ready -> true
   (* Neither carries a Board post, so routing either here would count a
      non-existent post in [board_activity_count]. Each has its own renderer. *)
-  | Completion_authority_rejected _ | Task_cancelled _ -> false
+  | Completion_authority_rejected _ | Task_cancelled _ | Monitor_fired _ -> false
 ;;
 
 let is_scheduled_automation_event (event : pending_board_event) =
@@ -77,7 +78,8 @@ let is_scheduled_automation_event (event : pending_board_event) =
   | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected _
-  | Task_cancelled _ -> false
+  | Task_cancelled _
+  | Monitor_fired _ -> false
 ;;
 
 let is_completion_authority_rejection_event (event : pending_board_event) =
@@ -91,7 +93,8 @@ let is_completion_authority_rejection_event (event : pending_board_event) =
   | External_attention _
   | Goal_assigned
   | Goal_reconciliation_ready
-  | Task_cancelled _ -> false
+  | Task_cancelled _
+  | Monitor_fired _ -> false
 ;;
 
 (* A cancellation of a Task this Keeper authored. Kept off the Board Activity
@@ -108,7 +111,25 @@ let is_task_cancellation_event (event : pending_board_event) =
   | External_attention _
   | Goal_assigned
   | Goal_reconciliation_ready
-  | Completion_authority_rejected _ -> false
+  | Completion_authority_rejected _
+  | Monitor_fired _ -> false
+;;
+
+(* RFC-0379: rendered by its own section inside the automation layer; not
+   Board activity (no post exists) and not a schedule dispatch. *)
+let is_monitor_fired_event (event : pending_board_event) =
+  match event.event_kind with
+  | Monitor_fired _ -> true
+  | Board_post_created
+  | Board_comment_added
+  | Board_reaction_changed _
+  | Fusion_completed
+  | Schedule_due _
+  | External_attention _
+  | Goal_assigned
+  | Goal_reconciliation_ready
+  | Completion_authority_rejected _
+  | Task_cancelled _ -> false
 ;;
 
 type scheduled_automation_item =
@@ -166,6 +187,7 @@ type event_queue_trigger =
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
+  | Monitor_fired_stimulus
   | Manual_compaction_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
@@ -177,6 +199,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
+  | Monitor_fired_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -535,6 +558,43 @@ let pending_board_event_of_fusion_completion
 
 let scheduled_automation_actor = "scheduled_automation"
 
+let monitor_fired_actor = "monitor"
+
+let monitor_payload_preview (payload : Yojson.Safe.t) =
+  match payload with
+  | `String text -> text
+  | other -> Yojson.Safe.to_string other
+;;
+
+let pending_board_event_of_monitor_wake
+      ~meta:(_ : keeper_meta)
+      ~post_id
+      ~(arrived_at : float)
+      (mw : Keeper_event_queue.monitor_wake)
+  : pending_board_event
+  =
+  { event_kind = Monitor_fired mw
+  ; post_id
+  ; author = monitor_fired_actor
+  ; title =
+      Printf.sprintf
+        "Monitor %s fired: %s -> %s"
+        mw.mw_monitor_id
+        (Monitor_domain.observation_label mw.mw_from)
+        (Monitor_domain.observation_label mw.mw_to)
+  ; preview = monitor_payload_preview mw.mw_payload
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 0
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+;;
+
 let pending_board_event_of_scheduled_wake
       ~meta:(_ : keeper_meta)
       ~post_id
@@ -809,6 +869,14 @@ let pending_board_event_of_stimulus
          (pending_board_event_of_task_cancellation
             ~arrived_at:stimulus.arrived_at
             cancellation))
+  | Keeper_event_queue.Monitor_fired mw ->
+    Ok
+      (Some
+         (pending_board_event_of_monitor_wake
+            ~meta
+            ~post_id:stimulus.post_id
+            ~arrived_at:stimulus.arrived_at
+            mw))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
@@ -1304,6 +1372,10 @@ let has_pending_task_cancellation (observation : world_observation) =
   List.exists is_task_cancellation_event observation.pending_board_events
 ;;
 
+let has_pending_monitor_fired (observation : world_observation) =
+  List.exists is_monitor_fired_event observation.pending_board_events
+;;
+
 let keeper_cycle_decision
       ?(event_queue_triggers = [])
       ~(meta : keeper_meta)
@@ -1350,6 +1422,7 @@ let keeper_cycle_decision
                  | Connector_attention_pending
                  | Hitl_resolved_pending
                  | Task_cancellation_pending
+                 | Monitor_fired_pending
                  | Manual_compaction_pending
                  | Scheduled_autonomous_turn
                  | Scheduled_automation_due
@@ -1366,6 +1439,15 @@ let keeper_cycle_decision
     if has_pending_task_cancellation observation
        && not (List.mem Task_cancellation_pending triggers)
     then triggers @ [ Task_cancellation_pending ]
+    else triggers
+    (* RFC-0379: same attribution rule as the two injections above — a
+       monitor-fired observation whose stimulus was consumed by an earlier
+       cycle still names this turn, or the wake reads as an unexplained
+       autonomous tick. *)
+  |> fun triggers ->
+    if has_pending_monitor_fired observation
+       && not (List.mem Monitor_fired_pending triggers)
+    then triggers @ [ Monitor_fired_pending ]
     else triggers
   in
   let blocked_channel =

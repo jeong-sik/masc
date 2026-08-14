@@ -108,6 +108,14 @@ type stimulus_payload =
           with no Goal link reaches no one. The cancelling Keeper's reason is
           carried here because it is the author's only account of why the work
           it asked for stopped. *)
+  | Monitor_fired of monitor_wake
+      (** RFC-0379: a keeper-registered monitor observed its condition
+          transition. Edge-triggered by construction — the runner fires only
+          on an observed state change, never on a baseline observation — and
+          one-shot by default, so the default lifecycle delivers at most one
+          wake per registered monitor. Carries the keeper's opaque payload and
+          the exact transition; the default one-shot record is already deleted
+          when this stimulus is enqueued. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -211,6 +219,23 @@ and task_cancellation = {
 (** Payload for [Task_cancelled]. [tc_reason] is [None] when the canceller gave
     none; it is not defaulted to a placeholder, so the author can tell "no
     reason was given" from "the reason was empty text". *)
+
+and monitor_wake = {
+  mw_monitor_id : string;
+  mw_from : Monitor_domain.observation;
+  mw_to : Monitor_domain.observation;
+  mw_observed_at : float;
+  mw_payload : Yojson.Safe.t;
+}
+(** Payload for [Monitor_fired]. [mw_payload] is the keeper-authored opaque
+    value given to [masc_monitor_create], carried verbatim; the transition pair
+    reuses the typed observation vocabulary of [Monitor_domain]. *)
+
+val monitor_fired_post_id : monitor_wake -> post_id
+(** Dedup/correlation id for [Monitor_fired]:
+    ["monitor-fired:<monitor_id>:<observed_at>"]. The timestamp component
+    keeps distinct fires of a [max_fires > 1] monitor distinct while repeated
+    enqueues of one fire still collapse. *)
 
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always

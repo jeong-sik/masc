@@ -27,6 +27,7 @@
  (flags
   (:standard -w +33))
  (libraries
+  masc_monitor
   masc.agent_core
   masc.agent_core.llm_provider
   eio

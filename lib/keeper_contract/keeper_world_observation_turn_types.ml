@@ -48,6 +48,11 @@ type event_queue_trigger =
       (** Another Keeper cancelled a Task this Keeper authored. A distinct
           reactive input: it is not Board activity (no post exists), not
           scheduled work, and not a completion-authority decision. *)
+  | Monitor_fired_stimulus
+      (** RFC-0379: a monitor this Keeper registered observed its condition
+          cross the requested edge. A distinct reactive input with its own
+          turn reason, so the wake is distinguishable from an autonomous
+          tick and from scheduled work. *)
   | Manual_compaction_stimulus
 
 type turn_reason =
@@ -59,6 +64,7 @@ type turn_reason =
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
+  | Monitor_fired_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
@@ -90,6 +96,7 @@ let turn_reason_to_string = function
   | Completion_authority_rejection_pending ->
     "completion_authority_rejection_pending"
   | Task_cancellation_pending -> "task_cancellation_pending"
+  | Monitor_fired_pending -> "monitor_fired_pending"
   | Manual_compaction_pending -> "manual_compaction_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
@@ -105,6 +112,7 @@ let turn_reason_of_event_queue_trigger = function
   | Completion_authority_rejection_stimulus ->
     Completion_authority_rejection_pending
   | Task_cancellation_stimulus -> Task_cancellation_pending
+  | Monitor_fired_stimulus -> Monitor_fired_pending
   | Manual_compaction_stimulus -> Manual_compaction_pending
 ;;
 

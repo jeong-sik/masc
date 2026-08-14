@@ -12,6 +12,7 @@
   server_schedule_runner_policy)
  (flags :standard -open Masc -w +33)
  (libraries
+  masc_monitor
   masc
   masc.agent_observation
   masc.markup_document

@@ -82,6 +82,10 @@ val max_active_monitors_per_keeper : int
 
 val trigger_to_yojson : trigger -> Yojson.Safe.t
 val trigger_of_yojson : Yojson.Safe.t -> (trigger, string) result
+val observation_label : observation -> string
+(** Stable short label per observation kind, identical to the codec's
+    ["kind"] value: reachable / unreachable / file_snapshot / file_absent. *)
+
 val observation_to_yojson : observation -> Yojson.Safe.t
 val observation_of_yojson : Yojson.Safe.t -> (observation, string) result
 

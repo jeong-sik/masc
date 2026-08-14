@@ -110,6 +110,13 @@ let pending_page ~after ~limit pending =
                @ (match cancellation.tc_reason with
                   | None -> []
                   | Some reason -> [ "cancelled_reason", `String reason ])
+             | Keeper_event_queue.Monitor_fired wake ->
+               [ "monitor_id", `String wake.mw_monitor_id
+               ; ( "monitor_from"
+                 , `String (Monitor_domain.observation_label wake.mw_from) )
+               ; ( "monitor_to"
+                 , `String (Monitor_domain.observation_label wake.mw_to) )
+               ]
              | Keeper_event_queue.Board_signal _
              | Keeper_event_queue.Board_attention _
              | Keeper_event_queue.Bootstrap

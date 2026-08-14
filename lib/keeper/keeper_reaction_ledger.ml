@@ -12,6 +12,8 @@ type stimulus_kind =
   | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
+  | Monitor_fired
+      (* RFC-0379: a registered monitor observed its condition transition. *)
 
 type reaction_kind =
   | Turn_started
@@ -39,6 +41,7 @@ let stimulus_kind_to_string = function
   | Goal_reconciliation_ready -> "goal_reconciliation_ready"
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
+  | Monitor_fired -> "monitor_fired"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -57,6 +60,7 @@ let stimulus_kind_of_string = function
   | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
+  | "monitor_fired" -> Some Monitor_fired
   | _ -> None
 ;;
 
@@ -94,6 +98,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
+  | Keeper_event_queue.Monitor_fired _ -> Monitor_fired
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -103,6 +108,7 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _, Board_signal ->
     board_stimulus_id ~post_id:stimulus.post_id
   | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
+  | Keeper_event_queue.Monitor_fired _, Monitor_fired -> stimulus.post_id
   | Keeper_event_queue.Completion_authority_rejected _, Completion_authority_rejected ->
     stimulus.post_id
   | _, kind ->
@@ -205,6 +211,12 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "task_cancelled task_id=%s cancelled_by=%s"
       cancellation.tc_task_id
       cancellation.tc_cancelled_by
+  | Keeper_event_queue.Monitor_fired wake ->
+    Printf.sprintf
+      "monitor_fired monitor_id=%s from=%s to=%s"
+      wake.mw_monitor_id
+      (Monitor_domain.observation_label wake.mw_from)
+      (Monitor_domain.observation_label wake.mw_to)
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -225,6 +237,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Goal_reconciliation_ready _ -> None
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
+    | Keeper_event_queue.Monitor_fired _ -> None
   in
   `Assoc
     (base_fields
@@ -837,7 +850,8 @@ let decode_current_row ~keeper_name row =
         | Goal_assigned
         | Goal_reconciliation_ready
         | Completion_authority_rejected
-        | Task_cancelled ),
+        | Task_cancelled
+        | Monitor_fired ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1307,7 +1321,8 @@ let board_stimulus_token metadata stimulus_kind =
   | Goal_assigned
   | Goal_reconciliation_ready
   | Completion_authority_rejected
-  | Task_cancelled -> None
+  | Task_cancelled
+  | Monitor_fired -> None
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =

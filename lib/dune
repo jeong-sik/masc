@@ -66,6 +66,7 @@
   masc.time_codec
   masc.sse_wire
   masc_schedule
+  masc_monitor
   ;; Shared leaf helpers extracted out of include_subdirs-unqualified ownership.
   masc.lockfree_atomic
   masc.run_registry_core

@@ -30,6 +30,11 @@ type pending_board_event_kind =
           wake, not its only copy. Carrying the record mirrors
           {!Keeper_event_queue.Connector_attention}'s pointer discipline and
           {!Completion_authority_rejected}'s payload-carrying shape below. *)
+  | Monitor_fired of Keeper_event_queue.monitor_wake
+      (** RFC-0379: a keeper-registered monitor observed its condition cross
+          the requested edge. Kept typed like [Schedule_due]; the flat
+          [title]/[preview] are a rendering of the wake, and the payload is
+          the keeper-authored instruction recorded at creation. *)
   | External_attention of Keeper_counterpart_observation.t
       (** A typed projection of the host-authored connector identity and the
           untrusted speaker content. Unlike the flat event preview, it keeps
@@ -102,6 +107,11 @@ val is_scheduled_automation_event : pending_board_event -> bool
 val is_completion_authority_rejection_event : pending_board_event -> bool
 
 val is_task_cancellation_event : pending_board_event -> bool
+
+val is_monitor_fired_event : pending_board_event -> bool
+(** RFC-0379: a monitor-fired wake. Rendered by its own section inside the
+    automation layer; not Board activity (no post exists) and not a schedule
+    dispatch. *)
 (** A cancellation of a Task this Keeper authored. Disjoint from the Board
     Activity and Scheduled Automation predicates: it has no Board post to point
     at and no schedule behind it. *)
@@ -199,6 +209,7 @@ type event_queue_trigger =
   | Hitl_resolved_stimulus
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
+  | Monitor_fired_stimulus
   | Manual_compaction_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
@@ -212,6 +223,7 @@ type turn_reason =
   | Hitl_resolved_pending
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
+  | Monitor_fired_pending
   | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due

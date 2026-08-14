@@ -214,6 +214,7 @@ let board_event_kind_label = function
   | Keeper_world_observation.Completion_authority_rejected _ ->
     "completion_authority_rejected"
   | Keeper_world_observation.Task_cancelled _ -> "task_cancelled"
+  | Keeper_world_observation.Monitor_fired _ -> "monitor_fired"
 ;;
 
 let quote_prompt_field value =
@@ -303,7 +304,8 @@ let board_event_note_fields = function
   | Keeper_world_observation.Goal_assigned
   | Keeper_world_observation.Goal_reconciliation_ready
   | Keeper_world_observation.Completion_authority_rejected _
-  | Keeper_world_observation.Task_cancelled _ -> []
+  | Keeper_world_observation.Task_cancelled _
+  | Keeper_world_observation.Monitor_fired _ -> []
 ;;
 
 let board_event_fields
@@ -475,10 +477,57 @@ let format_scheduled_wake_observations
          | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready
          | Keeper_world_observation.Completion_authority_rejected _
-         | Keeper_world_observation.Task_cancelled _ -> ())
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Monitor_fired _ -> ())
       events;
     Buffer.add_char ubuf '\n';
     Some (Buffer.contents ubuf))
+;;
+
+(* RFC-0379: monitor-fired wakes render as their own block inside the
+   automation layer. The payload row is the keeper-authored instruction
+   recorded at masc_monitor_create; for a default one-shot the monitor record
+   is already consumed when this renders. *)
+let format_monitor_fired_observations
+    (events : Keeper_world_observation.pending_board_event list) =
+  let rows =
+    List.filter_map
+      (fun (event : Keeper_world_observation.pending_board_event) ->
+         match event.event_kind with
+         | Keeper_world_observation.Monitor_fired wake ->
+           Some
+             (format_prompt_row
+                [ "monitor_id", wake.Keeper_event_queue.mw_monitor_id
+                ; "from", Monitor_domain.observation_label wake.mw_from
+                ; "to", Monitor_domain.observation_label wake.mw_to
+                ; ( "payload"
+                  , match wake.mw_payload with
+                    | `String text -> text
+                    | other -> Yojson.Safe.to_string other )
+                ]
+              ^ "\n")
+         | Keeper_world_observation.Board_post_created
+         | Keeper_world_observation.Board_comment_added
+         | Keeper_world_observation.Board_reaction_changed _
+         | Keeper_world_observation.Fusion_completed
+         | Keeper_world_observation.Schedule_due _
+         | Keeper_world_observation.External_attention _
+         | Keeper_world_observation.Goal_assigned
+         | Keeper_world_observation.Goal_reconciliation_ready
+         | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Task_cancelled _ -> None)
+      events
+  in
+  match rows with
+  | [] -> None
+  | _ ->
+    Some
+      ("### Monitor Fired ("
+       ^ string_of_int (List.length rows)
+       ^ ")\nA condition this Keeper registered crossed its requested edge. \
+          The payload row is the exact instruction recorded at \
+          masc_monitor_create.\n"
+       ^ String.concat "" rows)
 ;;
 
 let format_completion_authority_rejection_observations
@@ -508,7 +557,8 @@ let format_completion_authority_rejection_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready
-         | Keeper_world_observation.Task_cancelled _ -> None)
+         | Keeper_world_observation.Task_cancelled _
+         | Keeper_world_observation.Monitor_fired _ -> None)
       events
   in
   match rows with
@@ -560,7 +610,8 @@ let format_task_cancellation_observations
          | Keeper_world_observation.External_attention _
          | Keeper_world_observation.Goal_assigned
          | Keeper_world_observation.Goal_reconciliation_ready
-         | Keeper_world_observation.Completion_authority_rejected _ -> None)
+         | Keeper_world_observation.Completion_authority_rejected _
+         | Keeper_world_observation.Monitor_fired _ -> None)
       events
   in
   match rows with
@@ -1181,6 +1232,9 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
             (List.filter
                Keeper_world_observation.is_scheduled_automation_event
                observation.pending_board_events)
+          (* RFC-0379: monitor wakes share the automation layer position but
+             keep their own section vocabulary — a monitor is not a schedule. *)
+        ; format_monitor_fired_observations observation.pending_board_events
         ]
     (* 5b. Completion-authority decisions — a distinct system LLM boundary.
        These rows are not Board activity and must not be routed through the

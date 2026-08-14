@@ -77,6 +77,7 @@ type stimulus_payload =
      Goal_reconciliation_ready targets the Goal owner — a Task with no Goal
      link reaches no one. This carries the cancellation to the Task's author. *)
   | Task_cancelled of task_cancellation
+  | Monitor_fired of monitor_wake
 
 and board_attention = {
   candidate_id : string;
@@ -165,7 +166,19 @@ and task_cancellation = {
   tc_reason : string option;
 }
 
+and monitor_wake = {
+  mw_monitor_id : string;
+  mw_from : Monitor_domain.observation;
+  mw_to : Monitor_domain.observation;
+  mw_observed_at : float;
+  mw_payload : Yojson.Safe.t;
+}
+
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
+
+let monitor_fired_post_id (mw : monitor_wake) =
+  Printf.sprintf "monitor-fired:%s:%.3f" mw.mw_monitor_id mw.mw_observed_at
+;;
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
 
@@ -230,6 +243,13 @@ let identity_payload = function
        retries of the same cancellation; identity is the task and who ended
        it. *)
     Task_cancelled { cancellation with tc_reason = None }
+  | Monitor_fired wake ->
+    (* One monitor crossing one edge is one event: the keeper-authored
+       payload is carried content and the observation timestamp varies per
+       probe, so identity is which monitor crossed which edge. A second
+       identical edge while the first wake is still queued adds no
+       information — a wake means "go look", not a counter. *)
+    Monitor_fired { wake with mw_observed_at = 0.; mw_payload = `Null }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested | Goal_reconciliation_ready _
@@ -352,6 +372,7 @@ let payload_kind_label = function
   | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
+  | Monitor_fired _ -> "monitor_fired"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
@@ -359,7 +380,7 @@ let is_board_signal = function
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested | Goal_assigned _
   | Goal_reconciliation_ready _ | Completion_authority_rejected _
-  | Task_cancelled _ ->
+  | Task_cancelled _ | Monitor_fired _ ->
     false
 
 (* RFC-0377: the batch-intake predicate needs the routed channel without
@@ -371,7 +392,7 @@ let connector_attention_channel = function
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
   | Goal_assigned _ | Goal_reconciliation_ready _
-  | Completion_authority_rejected _ | Task_cancelled _ ->
+  | Completion_authority_rejected _ | Task_cancelled _ | Monitor_fired _ ->
     None
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -606,6 +627,15 @@ let payload_to_yojson = function
         , match cancellation.tc_reason with
           | None -> `Null
           | Some reason -> `String reason )
+      ]
+  | Monitor_fired wake ->
+    `Assoc
+      [ "kind", `String "monitor_fired"
+      ; "monitor_id", `String wake.mw_monitor_id
+      ; "from", Monitor_domain.observation_to_yojson wake.mw_from
+      ; "to", Monitor_domain.observation_to_yojson wake.mw_to
+      ; "observed_at", `Float wake.mw_observed_at
+      ; "payload", wake.mw_payload
       ]
 
 let continuation_channel_field fields =
@@ -882,6 +912,34 @@ let payload_of_yojson json =
     Ok
       (Task_cancelled
          { tc_task_id = task_id; tc_cancelled_by = cancelled_by; tc_reason = reason })
+  | "monitor_fired" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "monitor_id"; "from"; "to"; "observed_at"; "payload" ]
+        fields
+    in
+    let* monitor_id = string_field ~context "monitor_id" fields in
+    let* from_json = required_field ~context:"stimulus.payload.monitor_fired" "from" fields in
+    let* mw_from = Monitor_domain.observation_of_yojson from_json in
+    let* to_json = required_field ~context:"stimulus.payload.monitor_fired" "to" fields in
+    let* mw_to = Monitor_domain.observation_of_yojson to_json in
+    let* observed_at =
+      match List.assoc_opt "observed_at" fields with
+      | Some (`Float value) -> Ok value
+      | Some (`Int value) -> Ok (float_of_int value)
+      | Some _ -> Error (context ^ ".observed_at must be a number")
+      | None -> Error (context ^ ".observed_at is missing")
+    in
+    let* mw_payload = required_field ~context:"stimulus.payload.monitor_fired" "payload" fields in
+    Ok
+      (Monitor_fired
+         { mw_monitor_id = monitor_id
+         ; mw_from
+         ; mw_to
+         ; mw_observed_at = observed_at
+         ; mw_payload
+         })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =
@@ -952,5 +1010,6 @@ let continuation_channel_of_payload = function
   | Goal_assigned _
   | Goal_reconciliation_ready _
   | Completion_authority_rejected _
-  | Task_cancelled _ -> None
+  | Task_cancelled _
+  | Monitor_fired _ -> None
 ;;

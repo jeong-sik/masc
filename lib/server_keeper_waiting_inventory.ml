@@ -27,6 +27,7 @@ type wake_producer =
   | External_attention_store
   | Schedule_store
   | Schedule_runner
+  | Monitor_runner
   | Operator_pending_confirm_store
   | Keeper_goal_assignment
   | Keeper_goal_reconciliation
@@ -95,6 +96,7 @@ let wake_producer_to_string = function
   | External_attention_store -> "external_attention_store"
   | Schedule_store -> "schedule_store"
   | Schedule_runner -> "schedule_runner"
+  | Monitor_runner -> "monitor_runner"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
   | Keeper_goal_reconciliation -> "keeper_goal_reconciliation"
@@ -111,6 +113,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Bootstrap -> Keeper_supervisor
   | Fusion_completed _ -> Fusion_sink
   | Schedule_due _ -> Schedule_runner
+  | Monitor_fired _ -> Monitor_runner
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
   | Manual_compaction_requested -> Keeper_compaction_request

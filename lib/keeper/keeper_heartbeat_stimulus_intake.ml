@@ -66,7 +66,8 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _ ->
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Monitor_fired _ ->
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta:meta_after_triage
       stim
@@ -220,6 +221,11 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
      the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
   | Keeper_event_queue.Task_cancelled _ ->
     Some Keeper_world_observation.Task_cancellation_stimulus
+  (* RFC-0379: dedicated turn_reason for the same reason as cancellations —
+     the keeper must be able to tell "my monitor fired" from an autonomous
+     tick, or the wake reads as noise. *)
+  | Keeper_event_queue.Monitor_fired _ ->
+    Some Keeper_world_observation.Monitor_fired_stimulus
 ;;
 
 let consume_single_heartbeat_stimulus
@@ -252,6 +258,14 @@ let consume_single_heartbeat_stimulus
         "turn entry: scheduled wake delivered schedule_id=%s due_at=%.3f (keeper=%s)"
         sw.schedule_id
         sw.due_at
+        meta_after_triage.name;
+      pending_board_events_of_stimulus_result ~meta_after_triage stim
+    | Keeper_event_queue.Monitor_fired mw ->
+      Log.Keeper.info
+        "turn entry: monitor fired monitor_id=%s from=%s to=%s (keeper=%s)"
+        mw.mw_monitor_id
+        (Monitor_domain.observation_label mw.mw_from)
+        (Monitor_domain.observation_label mw.mw_to)
         meta_after_triage.name;
       pending_board_events_of_stimulus_result ~meta_after_triage stim
     | Keeper_event_queue.Goal_assigned ga ->
@@ -384,7 +398,8 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _ ->
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Monitor_fired _ ->
     true
 ;;
 
@@ -404,7 +419,7 @@ let reconcile_spent_selection
       (selection : Keeper_event_queue_state.pending_selection)
   =
   match selection.source.Keeper_event_queue.payload with
-  | Schedule_due _ -> Ok Selection_actionable
+  | Schedule_due _ | Monitor_fired _ -> Ok Selection_actionable
   | Hitl_resolved
       { approval_id; decision = Keeper_event_queue.Hitl_approved; _ } ->
     (* An approved grant is one-shot, but consumption alone is not terminal:
@@ -515,7 +530,8 @@ let heartbeat_event_intake
       | Keeper_event_queue.Goal_assigned _
       | Keeper_event_queue.Goal_reconciliation_ready _
       | Keeper_event_queue.Completion_authority_rejected _
-      | Keeper_event_queue.Task_cancelled _ ->
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Monitor_fired _ ->
         false
     in
     match select_pending_matching manual_compaction_ready with
@@ -585,7 +601,8 @@ let heartbeat_event_intake
     | Keeper_event_queue.Goal_assigned _
     | Keeper_event_queue.Goal_reconciliation_ready _
     | Keeper_event_queue.Completion_authority_rejected _
-    | Keeper_event_queue.Task_cancelled _ ->
+    | Keeper_event_queue.Task_cancelled _
+    | Keeper_event_queue.Monitor_fired _ ->
       None
   in
   (* RFC-0377 P1-1: preload every batch member's recorded attention item in
@@ -741,7 +758,8 @@ let heartbeat_event_intake
             | Keeper_world_observation.Goal_assigned
             | Keeper_world_observation.Goal_reconciliation_ready
             | Keeper_world_observation.Completion_authority_rejected _
-            | Keeper_world_observation.Task_cancelled _ ->
+            | Keeper_world_observation.Task_cancelled _
+            | Keeper_world_observation.Monitor_fired _ ->
               Log.Keeper.info
                 "turn entry: promoted queued observation post_id=%s keeper=%s"
                 event.Keeper_world_observation.post_id

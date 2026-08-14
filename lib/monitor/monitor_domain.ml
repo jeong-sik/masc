@@ -163,6 +163,13 @@ let int_field name fields =
   | _ -> Error (Printf.sprintf "monitor field %S must be an integer" name)
 ;;
 
+let observation_label = function
+  | Reachable -> "reachable"
+  | Unreachable -> "unreachable"
+  | File_snapshot _ -> "file_snapshot"
+  | File_absent -> "file_absent"
+;;
+
 let trigger_to_yojson = function
   | Port_up { host; port } ->
     `Assoc [ "kind", `String "port_up"; "host", `String host; "port", `Int port ]

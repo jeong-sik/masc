@@ -728,6 +728,242 @@ let test_spawn_failure_is_pre_dispatch () =
                        attempt.effect_disposition))))))
 ;;
 
+let plain_user_message text : Agent_core.Types.message =
+  { role = User
+  ; content = [ Text text ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+;;
+
+let capacity_projection ~declared_max_prompt_bytes ~system_prompt ~goal source =
+  Keeper_antigravity_runtime.For_testing.capacity_bounded_model_input_projection
+    ~declared_max_prompt_bytes
+    ~system_prompt
+    ~goal
+    source
+;;
+
+let test_capacity_undeclared_passes_source_through () =
+  (match
+     capacity_projection
+       ~declared_max_prompt_bytes:None
+       ~system_prompt:"system"
+       ~goal:"goal"
+       None
+   with
+   | Ok None -> ()
+   | Ok (Some _) -> fail "undeclared capacity invented a projection"
+   | Error error -> fail (Agent_core.Error.to_string error));
+  let marker = plain_user_message "source-projection-marker" in
+  let source = Some (fun messages -> Ok (messages @ [ marker ])) in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:None
+      ~system_prompt:"system"
+      ~goal:"goal"
+      source
+  with
+  | Ok (Some project) ->
+    (match project [ plain_user_message "only" ] with
+     | Ok projected ->
+       check int "source projection untouched" 2 (List.length projected)
+     | Error detail -> fail detail)
+  | Ok None -> fail "undeclared capacity dropped the source projection"
+  | Error error -> fail (Agent_core.Error.to_string error)
+;;
+
+let test_capacity_windows_history_to_tail () =
+  let history =
+    List.init 10 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
+  in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 8192)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error detail -> fail detail
+     | Ok windowed ->
+       let kept = List.length windowed in
+       check bool "capacity drops oldest history" true (kept < 10);
+       check bool "capacity keeps a non-empty tail" true (kept > 0);
+       let tail_of_history =
+         List.filteri (fun index _ -> index >= 10 - kept) history
+       in
+       check
+         bool
+         "kept messages are the newest suffix"
+         true
+         (List.for_all2
+            (fun (kept_message : Agent_core.Types.message)
+                 (expected : Agent_core.Types.message) ->
+              kept_message.content = expected.content)
+            windowed
+            tail_of_history))
+;;
+
+let test_capacity_bounds_an_appending_source_projection () =
+  let history =
+    List.init 10 (fun index ->
+      plain_user_message
+        (Printf.sprintf "history-%02d:%s" index (String.make 1024 'x')))
+  in
+  let marker = plain_user_message "source-projection-marker" in
+  let source = Some (fun messages -> Ok (messages @ [ marker ])) in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 8192)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      source
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error detail -> fail detail
+     | Ok projected ->
+       let prompt_bytes =
+         match
+           Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+             ~system_prompt:"system"
+             ~goal:"goal"
+             projected
+         with
+         | Ok bytes -> bytes
+         | Error detail -> fail detail
+       in
+       check
+         bool
+         "actual rendered prompt is inside the declared capacity"
+         true
+         (prompt_bytes <= 8192);
+       (match List.rev projected with
+        | last :: _ ->
+          check
+            bool
+            "the appended newest material survives the window"
+            true
+            (last.Agent_core.Types.content = marker.content)
+        | [] -> fail "projection emptied the history"))
+;;
+
+let test_capacity_counts_rendered_role_framing () =
+  let history = List.init 100 (fun _ -> plain_user_message "") in
+  let unprojected_prompt_bytes =
+    match
+      Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+        ~system_prompt:"system"
+        ~goal:"goal"
+        history
+    with
+    | Ok bytes -> bytes
+    | Error detail -> fail detail
+  in
+  (* One byte below the exact unprojected prompt is a structural boundary:
+     retaining every message is impossible. A payload-only estimator used to
+     admit the whole history here because it omitted every rendered role label
+     and separator. *)
+  let capacity_bytes = unprojected_prompt_bytes - 1 in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some capacity_bytes)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error detail -> fail detail
+     | Ok projected ->
+       check bool "role framing forces a history cut" true
+         (List.length projected < List.length history);
+       let prompt_bytes =
+         match
+           Keeper_antigravity_runtime.For_testing.start_prompt_bytes
+             ~system_prompt:"system"
+             ~goal:"goal"
+             projected
+         with
+         | Ok bytes -> bytes
+         | Error detail -> fail detail
+       in
+       check bool "role-framed prompt stays inside capacity" true
+         (prompt_bytes <= capacity_bytes))
+;;
+
+let test_capacity_below_preamble_constant_is_a_typed_refusal () =
+  let history = List.init 100 (fun _ -> plain_user_message "") in
+  (* One byte above the admission reserve is the smallest capacity that gets a
+     projection at all (at or below it the fixed sections are refused before
+     any window exists). The rendered empty-history prompt is two bytes less
+     than the reserve — it joins its two sections with one separator while the
+     reserve charges both — so that one-byte history budget cannot fit the
+     window's constant undroppable omission preamble. *)
+  let capacity_bytes =
+    Keeper_antigravity_runtime.For_testing.reserved_prompt_bytes
+      ~system_prompt:"system"
+      ~goal:"goal"
+    + 1
+  in
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some capacity_bytes)
+      ~system_prompt:"system"
+      ~goal:"goal"
+      None
+  with
+  | Error error -> fail (Agent_core.Error.to_string error)
+  | Ok None -> fail "declared capacity produced no projection"
+  | Ok (Some project) ->
+    (match project history with
+     | Error _ -> ()
+     | Ok projected ->
+       fail
+         (Printf.sprintf
+            "a capacity below the undroppable preamble constant admitted %d messages"
+            (List.length projected)))
+;;
+
+let test_capacity_refuses_oversized_fixed_sections () =
+  match
+    capacity_projection
+      ~declared_max_prompt_bytes:(Some 128)
+      ~system_prompt:(String.make 256 's')
+      ~goal:"goal"
+      None
+  with
+  | Error error ->
+    let detail = Agent_core.Error.to_string error in
+    let contains ~needle haystack =
+      let needle_len = String.length needle in
+      let limit = String.length haystack - needle_len in
+      let rec probe index =
+        index <= limit
+        && (String.equal (String.sub haystack index needle_len) needle
+            || probe (index + 1))
+      in
+      probe 0
+    in
+    check
+      bool
+      "refusal names the declared capacity field"
+      true
+      (contains ~needle:"max_prompt_bytes" detail)
+  | Ok _ -> fail "oversized fixed prompt sections were admitted"
+;;
+
 let () =
   run
     "keeper_antigravity_runtime"
@@ -744,6 +980,32 @@ let () =
               "spawn failure is pre-dispatch"
               `Quick
               test_spawn_failure_is_pre_dispatch
+        ] )
+    ; ( "prompt capacity"
+        , [ test_case
+              "undeclared capacity passes source through"
+              `Quick
+              test_capacity_undeclared_passes_source_through
+          ; test_case
+              "declared capacity windows history to the newest tail"
+              `Quick
+              test_capacity_windows_history_to_tail
+          ; test_case
+              "an appending source projection stays inside the window"
+              `Quick
+              test_capacity_bounds_an_appending_source_projection
+          ; test_case
+              "role framing is charged to the prompt capacity"
+              `Quick
+              test_capacity_counts_rendered_role_framing
+          ; test_case
+              "a capacity below the preamble constant is refused"
+              `Quick
+              test_capacity_below_preamble_constant_is_a_typed_refusal
+          ; test_case
+              "oversized fixed sections are refused"
+              `Quick
+              test_capacity_refuses_oversized_fixed_sections
         ] )
     ]
 ;;

@@ -26,3 +26,38 @@ val run :
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.antigravity_cli ->
   attempt_outcome
+
+module For_testing : sig
+  val capacity_bounded_model_input_projection
+    :  declared_max_prompt_bytes:int option
+    -> system_prompt:string
+    -> goal:string
+    -> Agent_core.Agent.model_input_projection option
+    -> (Agent_core.Agent.model_input_projection option, Agent_core.Error.t) result
+  (** The admission contract over the provider-bound history. [None] declared
+      capacity passes the source projection through unchanged. A declared
+      capacity returns a projection that runs the source projection first
+      (the production source appends a bounded typed Gate replay reference)
+      and then windows the result to the capacity minus the bytes the fixed
+      prompt sections always occupy, refusing with a typed config error when
+      those fixed sections alone leave no room. agy truncates oversized stdin
+      prompts silently instead of refusing them, so this window is the only
+      bound the turn gets. *)
+
+  val start_prompt_bytes :
+    system_prompt:string ->
+    goal:string ->
+    Agent_core.Types.message list ->
+    (int, string) result
+  (** Render through the production start-turn formatter and return the exact
+      transmitted prompt byte count. *)
+
+  val reserved_prompt_bytes : system_prompt:string -> goal:string -> int
+  (** The bytes the admission contract reserves for the fixed prompt sections
+      out of a declared capacity. One byte more than this is the smallest
+      admissible declared capacity; the tail window can still refuse such a
+      capacity when its constant undroppable preamble does not fit in what
+      remains. Not the rendered empty-history prompt: the reserve charges
+      both separators (the with-history worst case), while an empty-history
+      render joins its two sections with one. *)
+end

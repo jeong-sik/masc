@@ -45,7 +45,7 @@ export function buildIdeInterjectSurfaceContext(
   // lines always refer to the file they were selected in.
   const file = selectionPath ?? focusPath
   if (file) {
-    fields.push({ k: 'file', v: file })
+    fields.push({ k: 'file_path', v: file })
   }
   if (selection && selectionPath) {
     fields.push({ k: 'lines', v: selectionLinesLabel(selection) })

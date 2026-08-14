@@ -656,12 +656,12 @@ let test_post_cursors_honors_canonical_url_scope () =
 
 let test_post_cursors_resolves_partition_from_file_path () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
-    let masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
+    let _masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
     (* POST cursor with a file_path that belongs to the scoped repo: the
        server must resolve the write partition from the posted file_path
        (task-1733) and scope it to the repo the file actually belongs to. *)
-    let file_path = Filename.concat masc_path "lib/a.ml" in
+    let file_path = "lib/a.ml" in
     let body =
       Yojson.Safe.to_string
         (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])

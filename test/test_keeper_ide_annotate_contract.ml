@@ -52,6 +52,27 @@ let annotate ~config ~meta args =
 let probe_slug = "github.com_jeong-sik_masc"
 let probe_path = "lib/ide/ide_annotations.ml"
 
+let seed_probe_repository (config : Masc.Workspace.config) =
+  let repository : Repo_manager_types.repository =
+    { id = "masc"
+    ; name = "masc"
+    ; url = "https://github.com/jeong-sik/masc.git"
+    ; local_path = config.base_path
+    ; aliases = []
+    ; default_branch = "main"
+    ; keepers = []
+    ; status = Repo_manager_types.Active
+    ; auto_sync = false
+    ; sync_interval = 0
+    ; created_at = Int64.zero
+    ; updated_at = Int64.zero
+    }
+  in
+  match Repo_store.save_all ~base_path:config.base_path [ repository ] with
+  | Ok () -> ()
+  | Error message -> failf "seed repository catalog: %s" message
+;;
+
 let test_owner_probe_round_trip () =
   with_temp_base_path (fun base_path ->
     (* The ide sink installs via Ide_bridge's module initializer, which
@@ -60,6 +81,7 @@ let test_owner_probe_round_trip () =
     Agent_observation.reset_for_testing ();
     Ide_bridge.install_agent_observation_sinks ();
     let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
+    seed_probe_repository config;
     let meta = make_meta "analyst" in
     let raw =
       annotate
@@ -154,6 +176,23 @@ let test_out_of_tree_path_is_a_typed_reject () =
     |> expect_reject ~needle:"anchor rejected")
 ;;
 
+let test_unknown_codebase_is_a_typed_reject () =
+  with_temp_base_path (fun base_path ->
+    let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
+    seed_probe_repository config;
+    let meta = make_meta "analyst" in
+    annotate
+      ~config
+      ~meta
+      (`Assoc
+         [ "codebase", `String "github.com_jeong-sik_macs"
+         ; "file_path", `String probe_path
+         ; "line_start", `Int 1
+         ; "content", `String "unknown codebase"
+         ])
+    |> expect_reject ~needle:"not present in the repository catalog")
+;;
+
 let () =
   run
     "keeper_ide_annotate_contract"
@@ -167,6 +206,10 @@ let () =
             "out-of-tree path is a typed reject"
             `Quick
             test_out_of_tree_path_is_a_typed_reject
+        ; test_case
+            "unknown codebase is a typed reject"
+            `Quick
+            test_unknown_codebase_is_a_typed_reject
         ] )
     ]
 ;;

@@ -88,6 +88,29 @@ let handle_ide_annotate_with_outcome
             repo-root-relative path exactly as the co-view context names them"
            (Agent_observation.Code_address.invalid_to_string invalid))
     | Ok address ->
+    (* Syntax alone cannot prove that the co-view minted this slug.  Anchor
+       admission to the repository catalog SSOT before the IDE sink can create
+       a by-url partition that no repository-scoped reader will ever query. *)
+    (match Repo_store.load_all ~base_path:config.base_path with
+     | Error message ->
+       reject
+         ~class_:Tool_result.Runtime_failure
+         (Printf.sprintf "ide_annotate repository catalog unavailable: %s" message)
+     | Ok repositories ->
+       let registered =
+         List.exists
+           (fun (repository : Repo_manager_types.repository) ->
+             match Agent_observation.canonical_url_of_remote repository.url with
+             | Some registered_codebase -> String.equal registered_codebase codebase
+             | None -> false)
+           repositories
+       in
+       if not registered
+       then
+         reject
+           "ide_annotate codebase is not present in the repository catalog — pass the \
+            server-minted codebase from the current co-view"
+       else
     match
       Agent_observation.emit_annotation_request
         { base_path = base_dir
@@ -112,7 +135,7 @@ let handle_ide_annotate_with_outcome
                ; "line_start", `Int annotation.line_start
                ; "line_end", `Int annotation.line_end
                ]))
-    | Error msg -> reject ~class_:Tool_result.Runtime_failure msg
+    | Error msg -> reject ~class_:Tool_result.Runtime_failure msg)
 ;;
 
 let handle_ide_annotate ~config ~meta ~args =

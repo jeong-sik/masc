@@ -82,7 +82,7 @@ describe('buildIdeInterjectSurfaceContext', () => {
       scene: 'ide_interject',
       fields: [
         { k: 'surface', v: 'ide' },
-        { k: 'file', v: 'lib/web_dashboard.ml' },
+        { k: 'file_path', v: 'lib/web_dashboard.ml' },
       ],
     })
   })
@@ -109,8 +109,8 @@ describe('buildIdeInterjectSurfaceContext', () => {
       focus: focusOn('lib/stale.ml'),
       selection: { filePath: 'lib/actual.ml', lineStart: 7, lineEnd: 8 },
     })
-    expect(context?.fields).toContainEqual({ k: 'file', v: 'lib/actual.ml' })
-    expect(context?.fields).not.toContainEqual({ k: 'file', v: 'lib/stale.ml' })
+    expect(context?.fields).toContainEqual({ k: 'file_path', v: 'lib/actual.ml' })
+    expect(context?.fields).not.toContainEqual({ k: 'file_path', v: 'lib/stale.ml' })
   })
 
   it('carries a repository workspace identity as repo', () => {
@@ -134,7 +134,7 @@ describe('buildIdeInterjectSurfaceContext', () => {
       focus: null,
       selection: { filePath: 'lib/only-selection.ml', lineStart: 1, lineEnd: 2 },
     })
-    expect(context?.fields).toContainEqual({ k: 'file', v: 'lib/only-selection.ml' })
+    expect(context?.fields).toContainEqual({ k: 'file_path', v: 'lib/only-selection.ml' })
     expect(context?.fields).toContainEqual({ k: 'lines', v: 'L1-L2' })
   })
 })

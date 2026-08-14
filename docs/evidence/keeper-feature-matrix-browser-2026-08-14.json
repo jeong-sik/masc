@@ -1,6 +1,6 @@
 {
   "schema": "masc.keeper_feature_matrix.browser_render_evidence.v1",
-  "captured_at": "2026-08-14T11:39:21+09:00",
+  "captured_at": "2026-08-14T07:07:53Z",
   "browser": "chromium",
   "viewport": {
     "width": 1440,
@@ -16,25 +16,24 @@
     "team_scenario_row_count": 12,
     "feature_status_counts": {
       "verified": 1,
-      "partial": 26,
-      "source_only": 6,
-      "missing_proof": 2,
-      "blocked": 9
-    },
-    "interaction_checks": {
-      "feature_search": "#28701 -> exactly one visible feature-matrix row: Parallel Tool",
-      "status_and_domain_filter": "blocked + Execution -> exactly one visible feature-matrix row: Parallel Tool / BLOCKED",
-      "evidence_navigation": "new-process health evidence link opened and exposed schema masc.keeper_feature_matrix.live_refresh.v1"
+      "partial": 27,
+      "source": 6,
+      "missing": 2,
+      "blocked": 8
     },
     "body_horizontal_overflow": false,
+    "interaction_checks": {
+      "feature_search": "#28713 -> visible rows: Parallel Tool",
+      "status_filter_blocked": "blocked -> 8 rows: Coordination/Board, Coordination/Drain Queue, Memory/Memory OS recall, Memory/Librarian, Surface/Discord, Surface/Dashboard, Operations/Observability, Operations/Keeper create admission"
+    },
     "console_errors": [],
     "page_errors": []
   },
   "screenshot": {
-    "path": "/Users/dancer/me/reports/masc-keeper-feature-state-matrix-20260814-1140.png",
-    "sha256": "5029875bd23c029816c5e70355a84f201b8a4217fb96dcd8fed7aec9546189e2",
+    "path": "/Users/dancer/me/reports/keeper-feature-state-matrix-render-20260814T070753Z.png",
+    "sha256": "2374d00394b2781f94a4879e8c53dc7f57064db0f36d2473604039fbaaea87eb",
     "pixel_width": 1440,
-    "pixel_height": 12008
+    "pixel_height": 11442
   },
   "verdict": "pass"
 }

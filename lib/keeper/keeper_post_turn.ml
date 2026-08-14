@@ -355,6 +355,8 @@ type rejection_disposition =
 let rejection_disposition = function
   | Keeper_compact_policy.No_eligible_history ->
     Terminal_no_compaction Keeper_compaction_outcome.No_eligible_history
+  | No_reducible_boundary ->
+    Terminal_no_compaction Keeper_compaction_outcome.No_reducible_boundary
   | Invalid_structure _ ->
     Terminal_no_compaction Keeper_compaction_outcome.Invalid_structural_source
   | Exact_execution_terminal terminal ->

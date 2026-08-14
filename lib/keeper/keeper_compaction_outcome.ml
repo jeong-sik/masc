@@ -22,6 +22,7 @@ type exact_execution_terminal =
 
 type no_compaction_reason =
   | No_eligible_history
+  | No_reducible_boundary
   | Invalid_structural_source
   | Exact_lane_unconfigured
   | Exact_execution_terminal of exact_execution_terminal
@@ -62,6 +63,7 @@ let exact_execution_terminal_to_string terminal =
 
 let no_compaction_reason_label = function
   | No_eligible_history -> "no_eligible_history"
+  | No_reducible_boundary -> "no_reducible_boundary"
   | Invalid_structural_source -> "invalid_structural_source"
   | Exact_lane_unconfigured -> "exact_lane_unconfigured"
   | Exact_execution_terminal terminal ->

@@ -33,6 +33,7 @@ type exact_execution_terminal =
 
 type no_compaction_reason =
   | No_eligible_history
+  | No_reducible_boundary
   | Invalid_structural_source
   | Exact_lane_unconfigured
       (** The configured runtime has no exact-output lane for compaction. This

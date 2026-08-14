@@ -266,6 +266,7 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
 let append_to_store_result (entry : append_entry) =
   try
     Dated_jsonl.append entry.store entry.json;
+    (* fire-and-forget: pre-increment count is unused; committed_revision () reads the counter directly. *)
     ignore (Atomic.fetch_and_add committed_revision_ref 1 : int);
     Ok ()
   with

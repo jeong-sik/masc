@@ -871,6 +871,14 @@
  (modules test_runtime_modality_reroute)
  (libraries masc_test_deps))
 
+; A terminal-contract tool completion is a success carrying its receipt's
+; provider response, never runtime_agent_terminal_tool_completion_unsupported.
+
+(test
+ (name test_runtime_agent_advanced_outcome)
+ (modules test_runtime_agent_advanced_outcome)
+ (libraries masc_test_deps))
+
 ; A keeper must not be offered its own authored tasks as claimable work —
 ; otherwise a routing/report keeper re-triggers on its own output.
 

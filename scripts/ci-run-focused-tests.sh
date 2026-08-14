@@ -270,6 +270,7 @@ normal_targets=(
   @test/runtest-test_keeper_turn_driver_accept
   @test/runtest-test_keeper_vision_tool
   @test/runtest-test_runtime_modality_reroute
+  @test/runtest-test_runtime_agent_advanced_outcome
   @test/runtest-test_runtime_model_input_tail_window
   @test/runtest-test_keeper_context_overflow_shrink
   @test/runtest-test_keeper_provider_call_deadline

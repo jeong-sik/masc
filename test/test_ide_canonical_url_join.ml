@@ -14,8 +14,8 @@
 
     Invariant: when the keeper "writes" inside the sandbox clone, the
     record must be retrievable when the IDE reads from the working
-    tree clone — both must resolve to the same [By_url <slug>]
-    partition. The repo URLs use different transports (HTTPS vs SSH)
+    tree clone — both must resolve to the same codebase slug and thus
+    the same store. The repo URLs use different transports (HTTPS vs SSH)
     on purpose to also exercise the normalisation join test from
     {!Ide_paths.canonical_url_of_remote}. *)
 
@@ -201,7 +201,7 @@ let test_blank_url_lands_in_no_canonical_url () =
 (* RFC-0128 PR-6 — sandbox playground path resolution. Keeper writes
    inside the sandbox land at [<base>/.masc/playground/<keeper>/repos/
    <repo_id>/<rel>], which is NOT a registered repo prefix. The
-   resolver should still produce the same [By_url <slug>] as a write
+   resolver should still produce the same codebase slug as a write
    in the working-tree clone. *)
 let test_sandbox_playground_path_joins_with_worktree () =
   with_temp_base_dir (fun base_dir ->

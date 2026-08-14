@@ -13,7 +13,7 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
  * This is the single source of truth for "which composite snapshot
  * belongs to this keeper" — shared by the agent roster and the IDE
  * keeper work panel so the two views cannot drift onto different
- * resolution rules (task-1740, IDE Observation Plane v2 axis C3).
+ * resolution rules (task-1740).
  */
 export function compositeSnapshotForKeeper(
   keeper: Keeper | null | undefined,

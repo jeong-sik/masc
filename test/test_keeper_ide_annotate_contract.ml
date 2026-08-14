@@ -3,7 +3,7 @@
    Feature under test: the exact loop the 2026-08-11 owner probe ran.
    The IDE co-view hands the keeper [(codebase slug, repo-root-relative
    path, line)]; the keeper hands it back verbatim; the annotation must
-   land in that codebase's partition at that line — retrievable by the
+   land in that codebase's store at that line — retrievable by the
    same repo-scoped read the IDE uses — and never in the orphan store.
    The probe's actual burial (analyst's annotation filed under its
    sandbox root, id 528e6fd6-…) is the regression this suite pins shut.
@@ -83,14 +83,14 @@ let test_owner_probe_round_trip () =
     (match
        Ide_annotations.list
          ~base_dir:base_path
-         ~partition:(Ide_paths.By_url probe_slug)
+         ~codebase:(probe_slug)
          ~filter
          ()
      with
      | [ annotation ] ->
        check string "path is the co-view path" probe_path annotation.file_path;
        check int "line is the co-view line" 39 annotation.line_start
-     | rows -> failf "expected the probe annotation in the by-url partition, got %d" (List.length rows));
+     | rows -> failf "expected the probe annotation in the codebase store, got %d" (List.length rows));
     (* And nothing was buried where repo-scoped reads cannot see it. *)
     check
       int
@@ -99,7 +99,7 @@ let test_owner_probe_round_trip () =
       (List.length
          (Ide_annotations.list
             ~base_dir:base_path
-            ~partition:Ide_paths.Legacy_default
+            ~codebase:"github.com_other_repo"
             ~filter:{ file_path = None; keeper_id = None; goal_id = None; task_id = None }
             ())))
 ;;

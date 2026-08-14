@@ -45,8 +45,6 @@ import {
 } from './file-tree-store'
 import {
   fetchIdeAnnotations,
-  ideScopeFromKeeperLane,
-  type IdeApiOptions,
   type IdeAnnotation,
 } from '../../api/ide'
 import { registerIdeWorkspaceRefresh } from '../../sse-store'
@@ -472,25 +470,12 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
 
     const keeperParam = keeper || undefined
     const opts = { keeper: keeperParam, repoId, signal, includeDiff: true }
-    // IDE observation routes require one explicit scope. Repository scope is
-    // authoritative when configured; otherwise a selected keeper can read its
-    // own orphan observation lane without fabricating a repository identity.
-    const ideOpts: IdeApiOptions = repoId
-      ? { keeper: keeperParam, codebase: selectedCodebase, signal }
-      : {
-          keeper: keeperParam,
-          scope: ideScopeFromKeeperLane(keeperParam),
-          signal,
-        }
-    // The LSP connection needs the same scope: it picks both the annotation
-    // partition the overlay reads and the tree our repo-relative document
-    // paths resolve against. Publishing it here keeps the socket addressing
-    // the rows these REST reads address.
-    publishLspScope({
-      repoId: repoId ?? null,
-      codebase: selectedCodebase,
-      keeper: keeperParam ?? null,
-    })
+    const codebase = selectedCodebase
+    // IDE observations have one address: the server-issued codebase slug.
+    // A keeper-only workspace still loads its tree, but does not invent an
+    // observation store when no repository is selected.
+    const ideOpts = { keeper: keeperParam, codebase, signal }
+    publishLspScope({ repoId: repoId ?? null, codebase, keeper: keeperParam ?? null })
     workspaceIssuesSignal.value = retainCurrentWorkspaceFetchIssues(currentWorkspaceIssues(), {
       filePath: requestedFilePath,
       keeper: keeperParam ?? null,
@@ -816,20 +801,27 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       diffRowsSignal.value = []
     }
 
-    // Load annotations
-    fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
-      if (signal.aborted) return
-      clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
-      annotationsSignal.value = annotations
-    }).catch(error => {
-      if (signal.aborted) return
-      recordIssue('annotations', error, {
-        filePath,
-        keeper: keeperParam ?? null,
-        repoId,
-        fallbackMessage: 'IDE annotations fetch failed',
+    // Annotations are code facts. Without a server-issued codebase slug there
+    // is no store to query, so fail closed locally instead of issuing an
+    // unscoped request that the server must reject.
+    if (codebase) {
+      fetchIdeAnnotations({ file_path: filePath, goal_id: task?.goal_id ?? undefined, task_id: task?.id ?? undefined }, ideOpts).then(annotations => {
+        if (signal.aborted) return
+        clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
+        annotationsSignal.value = annotations
+      }).catch(error => {
+        if (signal.aborted) return
+        recordIssue('annotations', error, {
+          filePath,
+          keeper: keeperParam ?? null,
+          repoId,
+          fallbackMessage: 'IDE annotations fetch failed',
+        })
       })
-    })
+    } else {
+      annotationsSignal.value = []
+      clearIssue('annotations', { filePath, keeper: keeperParam ?? null, repoId })
+    }
   }
 
   // Re-run fetches on navigation-signal changes. Reading the signals

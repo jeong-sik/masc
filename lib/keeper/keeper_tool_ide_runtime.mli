@@ -16,7 +16,7 @@ val handle_ide_annotate_with_outcome :
 (** Handle [keeper_ide_annotate] tool call. Creates a line-bound
     annotation in the [.masc-ide/] store and returns the created
     record's id and positions on success, or an error message.
-    Relative [file_path] inputs are anchored at the keeper's playground
-    sandbox root before partition resolution (#23469), so annotations on
-    playground repo clones land in the repo's [By_url] bucket with a
-    repo-relative [file_path]. *)
+    RFC-0378 §5.3: the caller hands back the [(codebase slug,
+    repo-root-relative path)] pair the co-view context names, verbatim;
+    the pair is minted into a [Code_address] and a failed mint is a
+    typed reject — nothing is re-derived from sandbox roots. *)

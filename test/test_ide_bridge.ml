@@ -30,7 +30,7 @@ let test_ingest_tool_event () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"fs_write"
       ~keeper_id:"keeper-alpha"
       ~turn_id:"turn-123"
@@ -41,7 +41,7 @@ let test_ingest_tool_event () =
       ~file_path:(Some "lib/test.ml")
       ~timestamp_ms:1717400000000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "file exists" true (Sys.file_exists path);
     let ic = open_in path in
@@ -67,7 +67,7 @@ let rec mkdir_p path =
 ;;
 
 let seed_turn_row ~base_dir ~turn_id ~keeper_id ~phase ~timestamp_ms =
-  let dir = Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default in
+  let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo" in
   mkdir_p dir;
   let row =
     Ide_event_types.ide_event_to_json
@@ -100,7 +100,13 @@ let test_turn_rows_remain_readable () =
       ~keeper_id:"keeper-beta"
       ~phase:"completed"
       ~timestamp_ms:1717400000000L;
-    match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Turn () with
+    match
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
+        ~kind:Ide_bridge.Turn
+        ()
+    with
     | [ event ] ->
       let field key = Yojson.Safe.Util.(member key event |> to_string) in
       check string "turn_id" "turn-456" (field "turn_id");
@@ -112,7 +118,7 @@ let test_ingest_multiple_events () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"fs_write"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -125,7 +131,7 @@ let test_ingest_multiple_events () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t1"
@@ -136,7 +142,7 @@ let test_ingest_multiple_events () =
       ~file_path:None
       ~timestamp_ms:2000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -170,7 +176,7 @@ let test_list_events_filters_keeper_and_pages () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-old"
@@ -183,7 +189,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"read_file"
       ~keeper_id:"k2"
       ~turn_id:"t-other"
@@ -196,7 +202,7 @@ let test_list_events_filters_keeper_and_pages () =
       ();
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-new"
@@ -210,6 +216,7 @@ let test_list_events_filters_keeper_and_pages () =
     let events =
       Ide_bridge.list_events
         ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
         ~kind:Ide_bridge.Tool
         ~keeper_id:"k1"
         ~limit:1
@@ -226,7 +233,7 @@ let test_list_events_merges_kinds_newest_first () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"execute"
       ~keeper_id:"k1"
       ~turn_id:"t-tool"
@@ -243,14 +250,20 @@ let test_list_events_merges_kinds_newest_first () =
       ~keeper_id:"k1"
       ~phase:"completed"
       ~timestamp_ms:3000L;
-    let events = Ide_bridge.list_events ~base_path:base_dir ~limit:2 () in
+    let events =
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
+        ~limit:2
+        ()
+    in
     check (list string) "newest-first types" [ "turn"; "tool" ]
       (List.map (json_string "type") events);
     check (list int64) "newest-first timestamps" [ 3000L; 1000L ]
       (List.map (json_intlit "timestamp_ms") events))
 ;;
 
-(* masc#28582: the row carries the path the partition resolver named, not the
+(* masc#28582: the row carries the path the attribution resolver named, not the
    argument the keeper typed. The two differ whenever the keeper addressed a
    file through its sandbox — which is the normal case — and a consumer that
    joins on [file_path] can only match one of them. Both the event and the
@@ -282,7 +295,7 @@ let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
     (match
        Ide_bridge.list_events
          ~base_path:base_dir
-         ~partition:(Ide_paths.By_url "github.com_x_y")
+         ~codebase:("github.com_x_y")
          ~kind:Ide_bridge.Tool
          ()
      with
@@ -292,7 +305,7 @@ let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
     match
       Ide_bridge.list_cursors
         ~base_path:base_dir
-        ~partition:(Ide_paths.By_url "github.com_x_y")
+        ~codebase:("github.com_x_y")
         ()
     with
     | [ cursor ] ->
@@ -317,11 +330,19 @@ let test_pathless_hook_stores_no_document () =
       ~input:(`Assoc [ "message", `String "hello"; "focus_mode", `String "editing" ]);
     (* RFC-0378 §5.2: nothing is persisted — the keeper-timeline record of
        a pathless call lives in the tool_calls store, not here. *)
-    (match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool () with
+    (match
+       Ide_bridge.list_events
+         ~base_path:base_dir
+         ~codebase:"github.com_x_y"
+         ~kind:Ide_bridge.Tool
+         ()
+     with
      | [] -> ()
      | events ->
        Alcotest.failf "pathless call must persist nothing, got %d" (List.length events));
-    check int "no cursor" 0 (List.length (Ide_bridge.list_cursors ~base_path:base_dir ()))
+    check int "no cursor" 0
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ()))
   )
 ;;
 
@@ -346,11 +367,19 @@ let test_unaddressed_hook_persists_nothing () =
            ; "line_start", `Int 1
            ; "focus_mode", `String "editing"
            ]);
-    (match Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool () with
+    (match
+       Ide_bridge.list_events
+         ~base_path:base_dir
+         ~codebase:"github.com_x_y"
+         ~kind:Ide_bridge.Tool
+         ()
+     with
      | [] -> ()
      | events ->
        Alcotest.failf "unaddressed call must persist nothing, got %d" (List.length events));
-    check int "no cursor" 0 (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
+    check int "no cursor" 0
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
 ;;
 
 let test_cursor_from_hook_uses_real_file_and_line () =
@@ -378,7 +407,7 @@ let test_cursor_from_hook_uses_real_file_and_line () =
     match
       Ide_bridge.list_cursors
         ~base_path:base_dir
-        ~partition:(Ide_paths.By_url "github.com_x_y")
+        ~codebase:("github.com_x_y")
         ()
     with
     | [ cursor ] ->
@@ -425,7 +454,7 @@ let test_cursor_from_hook_notifies_after_persist () =
           (List.length
              (Ide_bridge.list_cursors
                 ~base_path:base_dir
-                ~partition:(Ide_paths.By_url "github.com_x_y")
+                ~codebase:("github.com_x_y")
                 ()))))
 ;;
 
@@ -468,6 +497,7 @@ let test_cursor_notifications_reraise_cancellation () =
           raises_cancel (fun () ->
             Ide_bridge.ingest_cursor_event
               ~base_path:base_dir
+              ~codebase:"github.com_x_y"
               ~keeper_id:"k1"
               ~file_path:"lib/test.ml"
               ~line:13
@@ -493,7 +523,8 @@ let test_cursor_from_hook_skips_missing_line () =
       ~output_text:"annotated"
       ~input;
     check int "no cursor without line" 0
-      (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
 ;;
 
 let test_cursor_from_hook_skips_missing_focus_mode () =
@@ -513,7 +544,8 @@ let test_cursor_from_hook_skips_missing_focus_mode () =
       ~output_text:"annotated"
       ~input;
     check int "no cursor without explicit focus mode" 0
-      (List.length (Ide_bridge.list_cursors ~base_path:base_dir ())))
+      (List.length
+         (Ide_bridge.list_cursors ~base_path:base_dir ~codebase:"github.com_x_y" ())))
 ;;
 
 
@@ -536,8 +568,8 @@ let test_hook_no_file_path () =
       ~output_text:"file1.ml\nfile2.ml"
       ~input;
     (* RFC-0378 §5.2: a pathless call is a keeper fact — the ide store
-       persists nothing for it, in any partition. *)
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+       persists nothing for it, in any store. *)
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     check bool "pathless call persists no ide row" false (Sys.file_exists path))
 ;;
@@ -558,9 +590,9 @@ let test_hook_summary_truncation () =
       ~output_text:long_output
       ~input;
     let dir =
-      Ide_paths.partition_store_dir
+      Ide_paths.code_store_dir
         ~base_dir:base_dir
-        (Ide_paths.By_url "github.com_x_y")
+        ~codebase:"github.com_x_y"
     in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
@@ -586,9 +618,9 @@ let test_hook_typed_outcome_mapping () =
       ~output_text:"command failed"
       ~input;
     let dir =
-      Ide_paths.partition_store_dir
+      Ide_paths.code_store_dir
         ~base_dir:base_dir
-        (Ide_paths.By_url "github.com_x_y")
+        ~codebase:"github.com_x_y"
     in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
@@ -607,7 +639,7 @@ let test_concurrent_ingest () =
       fun () ->
         Ide_bridge.ingest_tool_event
           ~base_path:base_dir
-          ~partition:Ide_paths.Legacy_default
+          ~codebase:"github.com_other_repo"
           ~tool_name:"fs_write"
           ~keeper_id:"k1"
           ~turn_id:(Printf.sprintf "t-%d" i)
@@ -624,7 +656,7 @@ let test_concurrent_ingest () =
       Eio.Switch.run (fun sw ->
         List.iter (fun f -> Eio.Fiber.fork ~sw f) fibers));
     (* Verify all events were written *)
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir:base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let ic = open_in path in
     let count = ref 0 in
@@ -774,7 +806,7 @@ let test_list_events_reads_across_segments () =
   with_temp_dir (fun base_dir ->
     Ide_bridge.ingest_tool_event
       ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
+      ~codebase:"github.com_other_repo"
       ~tool_name:"write_file"
       ~keeper_id:"k1"
       ~turn_id:"t-live"
@@ -785,7 +817,7 @@ let test_list_events_reads_across_segments () =
       ~file_path:None
       ~timestamp_ms:5000L
       ();
-    let dir = Ide_paths.partition_store_dir ~base_dir Ide_paths.Legacy_default in
+    let dir = Ide_paths.code_store_dir ~base_dir ~codebase:"github.com_other_repo" in
     let path = Filename.concat dir "tool_events.jsonl" in
     let oc = open_out (path ^ ".1") in
     output_string oc
@@ -793,7 +825,12 @@ let test_list_events_reads_across_segments () =
        ^ "\n");
     close_out oc;
     let events =
-      Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool ~limit:10 ()
+      Ide_bridge.list_events
+        ~base_path:base_dir
+        ~codebase:"github.com_other_repo"
+        ~kind:Ide_bridge.Tool
+        ~limit:10
+        ()
     in
     check int "reads both live and archived segments" 2 (List.length events);
     check (list string) "newest-first across segments" [ "t-live"; "t-arch" ]
@@ -865,14 +902,11 @@ let test_queue_writer_drains () =
     check int "writer drained all jobs" n (Atomic.get ran))
 ;;
 
-(* task-1733 regression: a partition threaded through the hook path (as the
-   agent-observation sink now does with [event.partition]) must route the tool
-   event AND its derived cursor into that partition's store — not the orphan
-   [Legacy_default]. This is the exact split that left dashboard by-url reads
-   empty while data piled up in _orphan. *)
-let test_partition_routes_tool_event_and_cursor_by_url () =
+(* The typed codebase carried through the hook path must route the tool event
+   and its derived cursor into the same store. *)
+let test_codebase_routes_tool_event_and_cursor () =
   with_temp_dir (fun base_dir ->
-    let by_url = Ide_paths.By_url "github.com_jeong-sik_wkbl" in
+    let by_url = "github.com_jeong-sik_wkbl" in
     let input =
       `Assoc
         [ "file_path", `String "lib/test.ml"
@@ -893,35 +927,28 @@ let test_partition_routes_tool_event_and_cursor_by_url () =
       ~input;
     (* Scoped (by-url) reads see both the tool event and the cursor. *)
     let by_url_events =
-      Ide_bridge.list_events ~base_path:base_dir ~partition:by_url ()
+      Ide_bridge.list_events ~base_path:base_dir ~codebase:by_url ()
     in
-    check bool "by-url partition holds the tool event" true
+    check bool "codebase holds the tool event" true
       (List.length by_url_events >= 1);
     let by_url_cursors =
-      Ide_bridge.list_cursors ~base_path:base_dir ~partition:by_url ()
+      Ide_bridge.list_cursors ~base_path:base_dir ~codebase:by_url ()
     in
-    check bool "by-url partition holds the derived cursor" true
+    check bool "codebase holds the derived cursor" true
       (List.length by_url_cursors >= 1);
-    (* The orphan partition (what an unscoped read used to fall back to) stays
-       empty for a scoped write — proving the write is no longer hardcoded to
-       Legacy_default. *)
-    let orphan_events =
+    let other_events =
       Ide_bridge.list_events ~base_path:base_dir
-        ~partition:Ide_paths.Legacy_default ()
+        ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan partition has no scoped tool event" 0
-      (List.length orphan_events);
-    let orphan_cursors =
+    check int "other codebase has no tool event" 0 (List.length other_events);
+    let other_cursors =
       Ide_bridge.list_cursors ~base_path:base_dir
-        ~partition:Ide_paths.Legacy_default ()
+        ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan partition has no scoped cursor" 0
-      (List.length orphan_cursors))
+    check int "other codebase has no cursor" 0 (List.length other_cursors))
 ;;
 
-(* Backward compat: an explicit [Legacy_default] write still lands in the orphan
-   store and is invisible to a by-url read (partitions are isolated). *)
-let test_partition_legacy_default_isolated_from_by_url () =
+let test_codebases_are_isolated () =
   with_temp_dir (fun base_dir ->
     let input =
       `Assoc
@@ -944,16 +971,16 @@ let test_partition_legacy_default_isolated_from_by_url () =
     let by_url_events =
       Ide_bridge.list_events
         ~base_path:base_dir
-        ~partition:(Ide_paths.By_url "github.com_x_y")
+        ~codebase:("github.com_x_y")
         ()
     in
-    check bool "addressed write lands in its by-url partition" true
+    check bool "addressed write lands in its codebase" true
       (List.length by_url_events >= 1);
-    let orphan_events =
-      Ide_bridge.list_events ~base_path:base_dir ~partition:Ide_paths.Legacy_default ()
+    let other_events =
+      Ide_bridge.list_events ~base_path:base_dir ~codebase:"github.com_other_repo" ()
     in
-    check int "orphan read does not see the addressed write" 0
-      (List.length orphan_events))
+    check int "other codebase does not see the addressed write" 0
+      (List.length other_events))
 ;;
 
 let () =
@@ -964,11 +991,10 @@ let () =
         ; test_case "seeded turn rows remain readable" `Quick test_turn_rows_remain_readable
         ; test_case "multiple events" `Quick test_ingest_multiple_events
         ] )
-    ; ( "partition_attribution"
-      , [ test_case "by-url routes tool event + cursor" `Quick
-            test_partition_routes_tool_event_and_cursor_by_url
-        ; test_case "addressed write isolated from orphan" `Quick
-            test_partition_legacy_default_isolated_from_by_url
+    ; ( "codebase attribution"
+      , [ test_case "routes tool event + cursor" `Quick
+            test_codebase_routes_tool_event_and_cursor
+        ; test_case "codebases are isolated" `Quick test_codebases_are_isolated
         ] )
     ; ( "read"
       , [ test_case "filters keeper and pages" `Quick test_list_events_filters_keeper_and_pages

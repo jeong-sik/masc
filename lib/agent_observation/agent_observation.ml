@@ -1,22 +1,3 @@
-type codebase_partition =
-  | By_url of string
-      (** canonical URL 정상 resolved: host_path slug. *)
-  | No_canonical_url
-      (** [canonical_url_of_remote] returned None: blank [repo.url] or malformed
-          remote. IDE Observation Plane v2 §7 "(1) 빈 repo/remote 없음". *)
-  | Unmatched
-      (** Caller passed [repo_id] but the repository store could not resolve it
-          (not-found / empty-url / load-error). v2 §7 "(2) repo_id unmatched". *)
-  | Base_unresolved
-      (** [file_path] falls under no registered repo [local_path] (unregistered
-          worktree, outside [.masc/playground]). v2 §7 "(4) base 경로 소실" —
-          the write-path [unregistered_repo] producer is the live instance. *)
-  | Legacy_default
-      (** Neither [canonical_url] nor [repo_id] was supplied, or the record
-          carries no [partition] field at all (tool/turn,
-          annotation_request). Structural ceiling, NOT a soft fallback.
-          v2 §7 "(3) default 미갱신". *)
-
 (* RFC-0128 §4.1 neutral codebase slug derivation.
 
    Kept below the Keeper/IDE boundary so runtime producers can route
@@ -127,7 +108,7 @@ let canonical_url_of_remote raw =
 (* RFC-0378 §5.1: a code fact's address, minted once where the write is
    attributed and carried as a parsed value from then on. Consumers never
    re-derive either half from tool input or store layout — [v] is the only
-   way in, and it rejects every shape the partitioned store cannot join on
+   way in, and it rejects every shape the per-codebase store cannot join on
    instead of repairing it. *)
 module Code_address = struct
   type t =
@@ -188,7 +169,7 @@ end
 
 (* Typed reasons a write's file path failed attribution to a codebase.
    RFC-0378 §5.1: attribution failure is a fact kind, not a store
-   partition — the reason rides the fact as a queryable field.
+   location — the reason rides the fact as a queryable field.
    RFC-keeper-workspace-root-only 2a owns this vocabulary's evolution
    once attribution moves to git observation. *)
 module Unattributed = struct
@@ -247,7 +228,7 @@ type tool_event =
     (* RFC-0378 §5.1: the address is minted where the write is attributed
        and carried as a parsed value. Producers must not hand consumers a
        raw tool argument — a consumer re-deriving the path from [input]
-       produced three incompatible shapes in one partition (masc#28582). *)
+       produced three incompatible shapes in one store (masc#28582). *)
   ; tool_name : string
   ; keeper_id : string
   ; turn_id : string

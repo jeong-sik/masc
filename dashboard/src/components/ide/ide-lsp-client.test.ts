@@ -392,14 +392,14 @@ describe('LspConnection', () => {
     conn.dispose()
   })
 
-  it('declares a keeper lane as both the partition and the tree', () => {
+  it('declares a keeper workspace without fabricating an overlay scope', () => {
     installWebSocketMock()
     publishLspScope({ repoId: null, codebase: null, keeper: 'analyst' })
     const conn = new LspConnection(() => {}, () => {})
     conn.connect()
     const url = mockSockets[0]!.url
-    expect(url).toContain('keeper_lane=analyst')
     expect(url).toContain('keeper=analyst')
+    expect(url).not.toContain('codebase=')
     conn.dispose()
   })
 

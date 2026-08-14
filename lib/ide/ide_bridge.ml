@@ -1,24 +1,19 @@
 (** IDE Bridge — collects Keeper activity events and surfaces them in
-    the [.masc-ide/] partition structure for IDE consumption. *)
+    the [.masc-ide/] store for IDE consumption.
+
+    RFC-0378 §5.2: the store holds addressed code facts only, keyed by
+    the codebase slug. The sinks below persist [Addressed] facts and let
+    everything else stay on the bus — the durable record of keeper facts
+    is the keeper tool_calls/turn-records stores. *)
 
 open Ide_event_types
 
-let default_partition = Ide_paths.Legacy_default
-
-(* RFC-0378 A rung: storage routing from attribution with the layout
-   unchanged — an addressed fact goes to its by-url partition, anything
-   else to the orphan directory. The directory split for keeper facts
-   ([keeper/<id>/]) is the B rung. *)
-let storage_partition_of_file_attribution = function
-  | Agent_observation.Addressed { address; _ } ->
-    Ide_paths.By_url (Agent_observation.Code_address.codebase address)
-  | Agent_observation.Unaddressed _ -> default_partition
+let codebase_of_addressed (addressed : Agent_observation.addressed) =
+  Agent_observation.Code_address.codebase addressed.address
 ;;
 
-let file_path_of_file_attribution = function
-  | Agent_observation.Addressed { address; _ } ->
-    Agent_observation.Code_address.path address
-  | Agent_observation.Unaddressed { attempted_path; _ } -> attempted_path
+let file_path_of_addressed (addressed : Agent_observation.addressed) =
+  Agent_observation.Code_address.path addressed.address
 ;;
 
 type event_kind =
@@ -48,7 +43,7 @@ let event_kind_of_event = function
   | Turn_event _ -> Turn
 ;;
 
-(* ── Segment rotation + tail-read (IDE Observation Plane v2 A2/A3) ───────
+(* ── Segment rotation + tail-read ────────────────────────────────────────
    The event store was a single append-only [<kind>_events.jsonl] with no
    rotation, so it grew without bound (~4.2 MB/day) and every read folded
    the whole file (a live 143 MB tool_events.jsonl stalled the main Eio
@@ -58,15 +53,15 @@ let event_kind_of_event = function
 
    Size-based rotation on the flat layout is chosen over date-sharding
    because it keeps the live filename stable (existing readers/tests still
-   observe [<kind>_events.jsonl]) and because the pre-existing oversized
-   file is rotated out on its first oversized append and then ages off
-   under retention — no separate migration of legacy data is needed. *)
+   observe [<kind>_events.jsonl]) and because an oversized file rotates
+   out on its first oversized append and then ages off under
+   retention. *)
 
 let default_max_segment_bytes = 32 * 1024 * 1024
 
 (* Retain this many archived segments beyond the live one; older archives
    are pruned. Segment-count (not byte-budget) retention keeps rotation
-   math trivial and lets a legacy oversized segment age out over N
+   math trivial and lets an oversized segment age out over N
    rotations rather than persisting forever. *)
 let default_max_retained_segments = 8
 
@@ -204,8 +199,8 @@ let tail_read_lines ~path ~budget =
     loop (segment_paths_newest_first ~path) [] budget)
 ;;
 
-let append_event ~base_dir ~partition ~(event : ide_event) =
-  let dir = Ide_paths.partition_store_dir ~base_dir partition in
+let append_event ~base_dir ~codebase ~(event : ide_event) =
+  let dir = Ide_paths.code_store_dir ~base_dir ~codebase in
   Fs_compat.mkdir_p dir;
   let file_name = event_file_name (event_kind_of_event event) in
   let path = Filename.concat dir file_name in
@@ -216,8 +211,8 @@ let append_event ~base_dir ~partition ~(event : ide_event) =
     ~max_retained_segments:default_max_retained_segments
     json
 
-let append_cursor ~base_dir ~partition json =
-  let dir = Ide_paths.partition_store_dir ~base_dir partition in
+let append_cursor ~base_dir ~codebase json =
+  let dir = Ide_paths.code_store_dir ~base_dir ~codebase in
   Fs_compat.mkdir_p dir;
   let path = Filename.concat dir cursor_file_name in
   Fs_compat.append_jsonl path json
@@ -361,8 +356,8 @@ let now_ms () =
    Replaces the previous whole-file [fold_jsonl_lines] fold (O(file size))
    with a segment tail-read (O(scan_budget)). Order of the result is not
    significant — [list_events] sorts by timestamp before paging. *)
-let list_kind_events ~base_path ~partition ~kind ?keeper_id ~scan_budget () =
-  let dir = Ide_paths.partition_store_dir ~base_dir:base_path partition in
+let list_kind_events ~base_path ~codebase ~kind ?keeper_id ~scan_budget () =
+  let dir = Ide_paths.code_store_dir ~base_dir:base_path ~codebase in
   let path = Filename.concat dir (event_file_name kind) in
   let lines = tail_read_lines ~path ~budget:scan_budget in
   let jsons, _malformed = Fs_compat.parse_jsonl_lines ~source:path lines in
@@ -387,14 +382,14 @@ let latest_cursor_per_keeper cursors =
 
 let list_cursors
     ~base_path
-    ?(partition = default_partition)
+    ~codebase
     ?keeper_id
     ?file_path
     ?limit
     ?offset
     ()
   =
-  let dir = Ide_paths.partition_store_dir ~base_dir:base_path partition in
+  let dir = Ide_paths.code_store_dir ~base_dir:base_path ~codebase in
   let path = Filename.concat dir cursor_file_name in
   let cursors =
     Fs_compat.fold_jsonl_lines
@@ -413,7 +408,7 @@ let list_cursors
 
 let list_events
     ~base_path
-    ?(partition = default_partition)
+    ~codebase
     ?kind
     ?keeper_id
     ?limit
@@ -437,7 +432,7 @@ let list_events
   in
   let events =
     List.concat_map
-      (fun kind -> list_kind_events ~base_path ~partition ~kind ?keeper_id ~scan_budget ())
+      (fun kind -> list_kind_events ~base_path ~codebase ~kind ?keeper_id ~scan_budget ())
       kinds
     |> List.sort compare_event_json
   in
@@ -445,7 +440,7 @@ let list_events
 
 let ingest_tool_event
     ~base_path
-    ~partition
+    ~codebase
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -478,7 +473,7 @@ let ingest_tool_event
       ; timestamp_ms
       }
   in
-  (try append_event ~base_dir:base_path ~partition ~event
+  (try append_event ~base_dir:base_path ~codebase ~event
    with
    | Eio.Cancel.Cancelled _ as e ->
      Printexc.raise_with_backtrace e (Printexc.get_raw_backtrace ())
@@ -567,7 +562,7 @@ let cursor_event_json
    different path vocabularies. *)
 let ingest_cursor_event_from_hook
     ~base_path
-    ~partition
+    ~codebase
     ~file_path
     ~tool_name
     ~keeper_id
@@ -602,7 +597,7 @@ let ingest_cursor_event_from_hook
         ()
     in
     (try
-       append_cursor ~base_dir:base_path ~partition json;
+       append_cursor ~base_dir:base_path ~codebase json;
        notify_cursor_changed ~keeper_id
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -614,7 +609,7 @@ let ingest_cursor_event_from_hook
 
 let ingest_cursor_event
     ~base_path
-    ?(partition = default_partition)
+    ~codebase
     ~keeper_id
     ~file_path
     ~line
@@ -629,12 +624,9 @@ let ingest_cursor_event
      [open Ide_event_types], whose [exit_semantics] also has an [Error of
      string] constructor, so a bare [Error msg] arm would otherwise infer
      [exit_semantics] and reject the sibling [Ok ()]. *)
-  (* DEFER (task-1733): this is the human-IDE direct path (server_ide_http.ml
-     POST /api/v1/ide/cursors). [partition] is accepted so the caller CAN scope
-     the write, but the server call site does not yet resolve one from the
-     posted file_path (that resolver lives in lib/keeper and server must not
-     depend on it directly). Until the server layer wires a resolver, the
-     default keeps prior behavior. Real attribution here is a task-1733
+  (* Human-IDE direct path (server_ide_http.ml POST /api/v1/ide/cursors).
+     RFC-0378 §5.3: the server mints the address from the mutation scope
+     and the posted repo-relative path, and hands the codebase slug here
      follow-up at the server call site. *)
   let column = Option.value column ~default:0 in
   let focus_mode =
@@ -663,7 +655,7 @@ let ingest_cursor_event
         ()
     in
     (try
-       append_cursor ~base_dir:base_path ~partition json;
+       append_cursor ~base_dir:base_path ~codebase json;
        notify_cursor_changed ~keeper_id;
        Ok ()
      with
@@ -691,10 +683,10 @@ let ingest_tool_event_from_hook
     ~output_text
     ~(input : Yojson.Safe.t)
   =
-  (* The attribution arrives minted (RFC-0378 §5.1); storage partition and
+  (* The attribution arrives minted (RFC-0378 §5.1); store directory and
      file path are both projections of it. Re-deriving the path from
      [input] here is what put absolute host paths, sandbox-rooted
-     [repos/<id>/…] paths, and repo-relative paths in one partition, none
+     [repos/<id>/…] paths, and repo-relative paths in one store, none
      of which a reader can join against the region and annotation rows
      the same resolver produced (masc#28582).
 
@@ -704,9 +696,9 @@ let ingest_tool_event_from_hook
   match attribution with
   | Agent_observation.Pathless
   | Agent_observation.File (Agent_observation.Unaddressed _) -> ()
-  | Agent_observation.File (Agent_observation.Addressed _ as addressed) ->
-  let partition = storage_partition_of_file_attribution addressed in
-  let file_path = Some (file_path_of_file_attribution addressed) in
+  | Agent_observation.File (Agent_observation.Addressed addressed) ->
+  let codebase = codebase_of_addressed addressed in
+  let file_path = Some (file_path_of_addressed addressed) in
   let summary =
     String_util.utf8_safe ~max_bytes:200 ~suffix:"" output_text
     |> String_util.to_string
@@ -714,7 +706,7 @@ let ingest_tool_event_from_hook
   let timestamp_ms = now_ms () in
   ingest_tool_event
     ~base_path
-    ~partition
+    ~codebase
     ~tool_name
     ~keeper_id
     ~turn_id
@@ -725,11 +717,11 @@ let ingest_tool_event_from_hook
     ~file_path
     ~timestamp_ms
     ();
-  (* The hook cursor inherits the tool event's resolved partition: same tool
+  (* The hook cursor inherits the tool event's codebase: same tool
      call, same edited file, so the cursor belongs in the same repo scope. *)
   ingest_cursor_event_from_hook
     ~base_path
-    ~partition
+    ~codebase
     ~file_path
     ~tool_name
     ~keeper_id
@@ -776,10 +768,10 @@ let install_agent_observation_sinks () =
            (* RFC-0378 §5.2: not persisted here — the durable record of an
               unattributed write is the keeper tool_calls store. *)
            ()
-         | Agent_observation.Addressed _ as addressed ->
+         | Agent_observation.Addressed addressed ->
            Ide_region_tracker.ingest_tool_call
              ~base_dir:event.base_path
-             ~partition:(storage_partition_of_file_attribution addressed)
+             ~codebase:(codebase_of_addressed addressed)
              ~keeper_id:event.keeper_id
              ~turn:event.turn
              event.tool_call_json);
@@ -807,20 +799,20 @@ let install_agent_observation_sinks () =
       match attribution with
       | Agent_observation.Unaddressed { reason; attempted_path } ->
         (* RFC-0378 §5.3: an annotation that fails attribution is a typed
-           reject, never an ok:true burial in a partition no repo-scoped
+           reject, never an ok:true burial in a directory no codebase-scoped
            read can see. *)
         Error
           (Printf.sprintf
              "annotation target failed attribution (%s): %s"
              (Agent_observation.Unattributed.reason_to_string reason)
              attempted_path)
-      | Agent_observation.Addressed _ as addressed ->
+      | Agent_observation.Addressed addressed ->
       match
         Ide_annotations.create
           ~base_dir:base_path
-          ~partition:(storage_partition_of_file_attribution addressed)
+          ~codebase:(codebase_of_addressed addressed)
           ~keeper_id
-          ~file_path:(file_path_of_file_attribution addressed)
+          ~file_path:(file_path_of_addressed addressed)
           ~line_start
           ~line_end
           ~kind

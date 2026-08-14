@@ -24,16 +24,7 @@ export interface IdeApiOptions extends GetOptions {
   readonly codebase?: string | null
 }
 
-export type IdeScope =
-  | { readonly kind: 'codebase'; readonly codebase: string }
-  /**
-   * Read-only scope over the repo-unattributed observation lane. Keeper
-   * turn/coordination events carry no file, so the server stores them
-   * outside any repo partition; this scope is the only address for that
-   * data. Mutations sent with it are refused server-side
-   * (keeper_lane_read_only).
-   */
-  | { readonly kind: 'keeper_lane'; readonly keeperId: string }
+export type IdeScope = { readonly kind: 'codebase'; readonly codebase: string }
 
 export type IdeScopeOptions = Pick<IdeApiOptions, 'scope' | 'codebase'>
 
@@ -141,18 +132,13 @@ export function ideScopeFromCodebase(codebase: string | null | undefined): IdeSc
   return trimmed ? { kind: 'codebase', codebase: trimmed } : null
 }
 
-export function ideScopeFromKeeperLane(keeperId: string | null | undefined): IdeScope | null {
-  const trimmed = trimmedNonEmpty(keeperId)
-  return trimmed ? { kind: 'keeper_lane', keeperId: trimmed } : null
-}
-
 function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
   const candidates: IdeScope[] = []
   if (opts.scope) candidates.push(opts.scope)
   const codebaseScope = ideScopeFromCodebase(opts.codebase)
   if (codebaseScope) candidates.push(codebaseScope)
   if (candidates.length > 1) {
-    throw new Error('IDE scope must resolve to exactly one of codebase or keeper_lane')
+    throw new Error('IDE scope must resolve to exactly one codebase')
   }
   return candidates[0] ?? null
 }
@@ -160,14 +146,7 @@ function resolveIdeScope(opts: IdeScopeOptions): IdeScope | null {
 export function appendIdeScopeParams(params: URLSearchParams, opts: IdeScopeOptions): void {
   const scope = resolveIdeScope(opts)
   if (!scope) return
-  switch (scope.kind) {
-    case 'codebase':
-      params.set('codebase', scope.codebase)
-      break
-    case 'keeper_lane':
-      params.set('keeper_lane', scope.keeperId)
-      break
-  }
+  params.set('codebase', scope.codebase)
 }
 
 function appendWorkspaceParams(

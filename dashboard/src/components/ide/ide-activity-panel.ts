@@ -159,11 +159,6 @@ export interface IdeActivityPanelProps {
   readonly activeFile?: string | null
   /** RFC-0378 §5.3b: canonical codebase slug — the wire key. */
   readonly codebase?: string | null
-  /**
-   * Keeper whose repo-unattributed lane (turn/coordination events) is
-   * merged into the feed alongside repo-scoped events.
-   */
-  readonly keeperLane?: string | null
   readonly annotations?: ReadonlyArray<IdeAnnotation>
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly pollMs?: number
@@ -209,10 +204,9 @@ function mapApiEvent(event: ApiActivityEvent, workspaceId: string): RunActivityE
 
 async function fetchActivityEvents(
   codebase?: string | null,
-  keeperLane?: string | null,
 ): Promise<ActivityFetchResult> {
   const graph = await fetchActivityGraphEvents()
-  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase, keeperLane)
+  const bridge = await fetchIdeBridgeRunActivityEvents(graph.workspaceId, codebase)
   return {
     workspaceId: graph.workspaceId,
     // A bridge fetch failure must degrade the refresh tone instead of
@@ -243,26 +237,14 @@ interface BridgeFetchResult {
   readonly ok: boolean
 }
 
-/**
- * Repo-scoped events cover file-attributed observations; the keeper lane
- * covers turn/coordination events that carry no file and live in the
- * repo-unattributed bucket, unreachable through any repo scope. Both
- * sources are queried, and a failure in either is reported through
- * [ok=false] rather than silently collapsing to an empty feed.
- */
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
   codebase?: string | null,
-  keeperLane?: string | null,
 ): Promise<BridgeFetchResult> {
   const sources: Array<Promise<ReadonlyArray<IdeBridgeEvent>>> = []
   const scoped = codebase?.trim()
   if (scoped) sources.push(fetchIdeEvents({ limit: 50, codebase: scoped }))
-  const lane = keeperLane?.trim()
-  if (lane) {
-    sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
-  }
-  // Neither scope is set: there is nothing to query, not a request that
+  // No codebase is set: there is nothing to query, not a request that
   // happened to find zero events. The caller derives the visible no-scope
   // state from the current props, before any asynchronous response arrives.
   if (sources.length === 0) return { events: EMPTY_ACTIVITY, ok: true }
@@ -451,19 +433,18 @@ function normalizedPollMs(value: number | undefined): number | null {
   return Math.floor(value)
 }
 
-function activityScopeKey(codebase?: string | null, keeperLane?: string | null): string {
-  return JSON.stringify([codebase?.trim() || null, keeperLane?.trim() || null])
+function activityScopeKey(codebase?: string | null): string {
+  return codebase?.trim() || ''
 }
 
-function hasActivityBridgeScope(codebase?: string | null, keeperLane?: string | null): boolean {
-  return Boolean(codebase?.trim()) || Boolean(keeperLane?.trim())
+function hasActivityBridgeScope(codebase?: string | null): boolean {
+  return Boolean(codebase?.trim())
 }
 
 export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
   const {
     activeFile: rawActiveFile = '',
     codebase = null,
-    keeperLane = null,
     annotations = EMPTY_ANNOTATIONS,
     diffRows = EMPTY_DIFF_ROWS,
     pollMs = 0,
@@ -476,8 +457,8 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
     return store
   }, [])
   const [refreshState, setRefreshState] = useState<ActivityRefreshState>(INITIAL_REFRESH_STATE)
-  const requestedScopeKey = activityScopeKey(codebase, keeperLane)
-  const bridgeScoped = hasActivityBridgeScope(codebase, keeperLane)
+  const requestedScopeKey = activityScopeKey(codebase)
+  const bridgeScoped = hasActivityBridgeScope(codebase)
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null)
   const loadedScopeKeyRef = useRef<string | null>(null)
   const [compactInsightsOpen, setCompactInsightsOpen] = useState(false)
@@ -500,7 +481,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
         lastAttemptMs: attemptMs,
         tone: prev.lastOkMs === null && prev.failedCount === 0 ? 'loading' : prev.tone,
       }))
-      const { events, workspaceId, ok } = await fetchActivityEvents(codebase, keeperLane)
+      const { events, workspaceId, ok } = await fetchActivityEvents(codebase)
       if (cancelled) return
       if (ok) {
         store.reset(workspaceId)
@@ -529,7 +510,7 @@ export function IdeActivityPanel(props: IdeActivityPanelProps = {}) {
       cancelled = true
       if (timer !== null) clearTimeout(timer)
     }
-  }, [store, refreshMs, codebase, keeperLane, requestedScopeKey])
+  }, [store, refreshMs, codebase, requestedScopeKey])
 
   useStoreSubscription(store.subscribe)
   useSignalValue(globalPresenceSnapshot)

@@ -10,8 +10,6 @@ const workspaceApiMocks = vi.hoisted(() => ({
 const ideApiMocks = vi.hoisted(() => ({
   fetchIdeAnnotations: vi.fn(),
   fetchIdeRegions: vi.fn(),
-  ideScopeFromKeeperLane: vi.fn((keeperId: string | undefined) =>
-    keeperId ? { kind: 'keeper_lane' as const, keeperId } : null),
 }))
 const repositoryApiMocks = vi.hoisted(() => ({
   discoverRepositories: vi.fn(),
@@ -774,7 +772,7 @@ describe('workspace fetch diagnostics', () => {
           'lib/scheduler/round.ml',
           expect.objectContaining({
             keeper: 'sangsu',
-            scope: { kind: 'keeper_lane', keeperId: 'sangsu' },
+            codebase: null,
           }),
         )
       })

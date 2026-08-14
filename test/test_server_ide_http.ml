@@ -133,10 +133,10 @@ let scoped_ide_path path =
   path ^ separator ^ masc_scope_query
 ;;
 
-let masc_partition () =
+let masc_codebase () =
   match Ide_paths.canonical_url_of_remote masc_remote with
-  | Some slug -> Ide_paths.By_url slug
-  | None -> fail "test remote must produce a canonical IDE partition slug"
+  | Some slug -> slug
+  | None -> fail "test remote must produce a canonical IDE codebase slug"
 ;;
 
 let with_env name value f =
@@ -654,39 +654,7 @@ let test_post_cursors_honors_canonical_url_scope () =
     | [] -> fail "expected scoped cursor")
 ;;
 
-let test_post_cursors_resolves_partition_from_file_path () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let masc_path, _agent_core_path = seed_annotation_scope_repos base_path in
-    let token = create_worker_token base_path "alice" in
-    (* POST cursor with a file_path that belongs to the scoped repo: the
-       server must resolve the write partition from the posted file_path
-       (task-1733) and scope it to the repo the file actually belongs to. *)
-    let file_path = Filename.concat masc_path "lib/a.ml" in
-    let body =
-      Yojson.Safe.to_string
-        (`Assoc [ "file_path", `String file_path; "line", `Int 9 ])
-    in
-    let scoped_path =
-      "/api/v1/ide/cursors?codebase=github.com_jeong-sik_masc"
-    in
-    let post_request =
-      http_request ~meth:`POST ~path:scoped_path ~body ~token:(Some token) ()
-    in
-    let post_response = dispatch router post_request in
-    check_status "POST cursor with matching file_path returns 201" 201 post_response;
-    let get_request = http_request ~meth:`GET ~path:scoped_path () in
-    let get_response = dispatch router get_request in
-    check_status "GET scoped cursors after file_path-resolved POST succeeds" 200 get_response;
-    let json = get_response |> response_body |> Yojson.Safe.from_string in
-    let data = Json.member "data" json in
-    match json_list_member "scoped cursor snapshot" "cursors" data with
-    | cursor :: _ ->
-      check string "scoped cursor file" "lib/a.ml"
-        (json_string_member "cursor" "file_path" cursor)
-    | [] -> fail "expected file_path-resolved cursor")
-;;
-
-let test_post_cursors_rejects_file_path_scope_mismatch () =
+let test_post_cursors_rejects_absolute_file_path () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
@@ -741,12 +709,12 @@ let test_post_annotations_accepts_matching_repo_scope () =
     check_status "POST annotation with a codebase scope returns 201" 201 response;
     check
       int
-      "matching annotation is visible in requested partition"
+      "matching annotation is visible in the requested codebase"
       1
       (annotation_count router "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc");
     check
       int
-      "matching annotation is not written to other partition"
+      "matching annotation is not written to another codebase"
       0
       (annotation_count router "/api/v1/ide/annotations?codebase=example.com_agent-core"))
 ;;
@@ -756,7 +724,7 @@ let test_post_annotations_rejects_absolute_file_path () =
     let _masc_path, agent_core_path = seed_annotation_scope_repos base_path in
     let token = create_worker_token base_path "alice" in
     (* RFC-0378 §5.3: an absolute path is not the co-view vocabulary —
-       typed reject at the mint, and nothing lands in any partition. *)
+       typed reject at the mint, and nothing lands in any store. *)
     let file_path = Filename.concat agent_core_path "lib/a.ml" in
     let request =
       http_request
@@ -775,12 +743,12 @@ let test_post_annotations_rejects_absolute_file_path () =
       (error_code_of_response response);
     check
       int
-      "rejected annotation is not written to the scoped partition"
+      "rejected annotation is not written to the scoped codebase"
       0
       (annotation_count router "/api/v1/ide/annotations?codebase=github.com_jeong-sik_masc");
     check
       int
-      "rejected annotation is not written to any other partition"
+      "rejected annotation is not written to any other codebase"
       0
       (annotation_count router "/api/v1/ide/annotations?codebase=example.com_agent-core"))
 ;;
@@ -832,7 +800,7 @@ let test_read_annotations_rejects_missing_scope () =
     check
       string
       "missing scope error"
-      "IDE scope is required; pass codebase or keeper_lane"
+      "IDE scope is required; pass codebase=<slug>"
       (error_message_of_response response);
     check
       string
@@ -844,7 +812,7 @@ let test_read_annotations_rejects_missing_scope () =
 let test_read_cursors_accepts_unknown_codebase_as_empty () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     (* RFC-0378 §5.4: the scope universe is store-measured, not the
-       catalog — an unknown slug is a legitimate empty partition, not a
+       catalog — an unknown slug is a legitimate empty store, not a
        registry miss. *)
     let request =
       http_request ~meth:`GET ~path:"/api/v1/ide/cursors?codebase=github.com_x_missing" ()
@@ -893,7 +861,7 @@ let test_memory_response_declares_annotation_source_contract () =
     (match
        Ide_annotations.create
          ~base_dir:base_path
-         ~partition:(masc_partition ())
+         ~codebase:(masc_codebase ())
          ~keeper_id:"alice"
          ~file_path:"lib/a.ml"
          ~line_start:1
@@ -951,7 +919,7 @@ let test_memory_response_honors_canonical_url_scope () =
     (match
        Ide_annotations.create
          ~base_dir:base_path
-         ~partition:(masc_partition ())
+         ~codebase:(masc_codebase ())
          ~keeper_id:"alice"
          ~file_path:"lib/scoped.ml"
          ~line_start:4
@@ -989,185 +957,6 @@ let test_memory_response_honors_canonical_url_scope () =
         "lib/scoped.ml"
         (json_string_member "scoped memory entry" "file_path" entry)
     | [] -> fail "expected scoped memory entry")
-;;
-
-(* ── keeper-lane scope ───────────────────────────────────────────────
-   Turn/coordination events carry no file, so keepers write them to the
-   repo-unattributed lane bucket ([Ide_paths.Legacy_default]). These tests
-   pin the read contract: [?keeper_lane=<id>] reads that bucket filtered
-   to the lane keeper, conflicts with repo scopes, and never authorizes
-   mutations. *)
-
-(* RFC-0378 B: the bus carries no turn events; lane-read tests seed the
-   stored row directly — standing in for the pre-existing data the read
-   path serves until rung E. *)
-let rec seed_mkdir_p path =
-  if path = "" || path = "/" || Sys.file_exists path
-  then ()
-  else (
-    seed_mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-;;
-
-let seed_lane_turn_event ~base_path ~keeper_id ~turn_id ~timestamp_ms =
-  let dir = Ide_paths.partition_store_dir ~base_dir:base_path Ide_paths.Legacy_default in
-  seed_mkdir_p dir;
-  let row =
-    Ide_event_types.ide_event_to_json
-      (Ide_event_types.Turn_event
-         { turn_id
-         ; keeper_id
-         ; phase = "completed"
-         ; model_used = None
-         ; tools_used = []
-         ; stop_reason = None
-         ; duration_ms = Some 10
-         ; timestamp_ms
-         })
-  in
-  let oc =
-    open_out_gen
-      [ Open_append; Open_creat ]
-      0o644
-      (Filename.concat dir "turn_events.jsonl")
-  in
-  output_string oc (Yojson.Safe.to_string row ^ "\n");
-  close_out oc
-;;
-
-let test_events_keeper_lane_returns_only_lane_events () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
-      ~timestamp_ms:1700000000000L;
-    seed_lane_turn_event ~base_path ~keeper_id:"bob" ~turn_id:"turn-bob-1"
-      ~timestamp_ms:1700000001000L;
-    let request =
-      http_request
-        ~meth:`GET
-        ~path:"/api/v1/ide/events?keeper_lane=alice"
-        ~token:(Some token)
-        ()
-    in
-    let response = dispatch router request in
-    check_status "GET keeper-lane events succeeds" 200 response;
-    let json = response |> response_body |> Yojson.Safe.from_string in
-    let data = Json.member "data" json in
-    match json_list_member "lane events" "events" data with
-    | [ event ] ->
-      check string "lane keeper only" "alice"
-        (json_string_member "lane event" "keeper_id" event)
-    | events -> failf "expected exactly alice's event, got %d" (List.length events))
-;;
-
-let test_events_keeper_lane_conflicts_with_repo_scope () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let request =
-      http_request
-        ~meth:`GET
-        ~path:"/api/v1/ide/events?keeper_lane=alice&codebase=github.com_jeong-sik_masc"
-        ()
-    in
-    let response = dispatch router request in
-    check_status "keeper_lane + codebase returns 400" 400 response;
-    check string "conflict code" "conflicting_ide_scope" (error_code_of_response response))
-;;
-
-let test_events_keeper_lane_rejects_mismatched_keeper_filter () =
-  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
-    let request =
-      http_request
-        ~meth:`GET
-        ~path:"/api/v1/ide/events?keeper_lane=alice&keeper_id=bob"
-        ()
-    in
-    let response = dispatch router request in
-    check_status "mismatched keeper filter returns 400" 400 response;
-    check
-      string
-      "filter conflict code"
-      "keeper_lane_filter_conflict"
-      (error_code_of_response response))
-;;
-
-let test_events_keeper_lane_rejects_other_keeper_token () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "bob" in
-    seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
-      ~timestamp_ms:1700000000000L;
-    let request =
-      http_request
-        ~meth:`GET
-        ~path:"/api/v1/ide/events?keeper_lane=alice"
-        ~token:(Some token)
-        ()
-    in
-    let response = dispatch router request in
-    check_status "other keeper token returns 403" 403 response;
-    check
-      string
-      "keeper lane forbidden code"
-      "keeper_lane_forbidden"
-      (error_code_of_response response))
-;;
-
-let test_cursors_keeper_lane_filters_to_lane_keeper () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    (let seed keeper_id line =
-       match
-         Ide_bridge.ingest_cursor_event
-           ~base_path
-           ~partition:Ide_paths.Legacy_default
-           ~keeper_id
-           ~file_path:"lib/a.ml"
-           ~line
-           ~source:"editor"
-           ()
-       with
-       | Ok () -> ()
-       | Error msg -> failf "seed cursor for %s failed: %s" keeper_id msg
-     in
-     seed "alice" 1;
-     seed "bob" 2);
-    let request =
-      http_request
-        ~meth:`GET
-        ~path:"/api/v1/ide/cursors?keeper_lane=alice"
-        ~token:(Some token)
-        ()
-    in
-    let response = dispatch router request in
-    check_status "GET keeper-lane cursors succeeds" 200 response;
-    let json = response |> response_body |> Yojson.Safe.from_string in
-    let data = Json.member "data" json in
-    match json_list_member "lane cursors" "cursors" data with
-    | [ cursor ] ->
-      check string "lane cursor keeper" "alice"
-        (json_string_member "lane cursor" "keeper_id" cursor)
-    | cursors -> failf "expected exactly alice's cursor, got %d" (List.length cursors))
-;;
-
-let test_post_cursors_rejects_keeper_lane_scope () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
-    let token = create_worker_token base_path "alice" in
-    let body = {|{"file_path":"lib/a.ml","line":3}|} in
-    let request =
-      http_request
-        ~meth:`POST
-        ~path:"/api/v1/ide/cursors?keeper_lane=alice"
-        ~body
-        ~token:(Some token)
-        ()
-    in
-    let response = dispatch router request in
-    check_status "POST cursor with keeper_lane returns 400" 400 response;
-    check
-      string
-      "read-only scope code"
-      "keeper_lane_read_only"
-      (error_code_of_response response))
 ;;
 
 let test_get_events_rejects_invalid_limit () =
@@ -1250,20 +1039,6 @@ let () =
             `Quick
             test_memory_response_honors_canonical_url_scope
         ] )
-    ; ( "keeper_lane_scope"
-      , [ test_case "GET events keeper_lane returns only lane events" `Quick
-            test_events_keeper_lane_returns_only_lane_events
-        ; test_case "keeper_lane conflicts with repo scope" `Quick
-            test_events_keeper_lane_conflicts_with_repo_scope
-        ; test_case "keeper_lane rejects mismatched keeper filter" `Quick
-            test_events_keeper_lane_rejects_mismatched_keeper_filter
-        ; test_case "keeper_lane rejects other keeper token" `Quick
-            test_events_keeper_lane_rejects_other_keeper_token
-        ; test_case "GET cursors keeper_lane filters to lane keeper" `Quick
-            test_cursors_keeper_lane_filters_to_lane_keeper
-        ; test_case "POST cursor rejects keeper_lane scope" `Quick
-            test_post_cursors_rejects_keeper_lane_scope
-        ] )
     ; ( "query_parsing"
       , [ test_case "GET events rejects invalid limit" `Quick
             test_get_events_rejects_invalid_limit
@@ -1291,6 +1066,10 @@ let () =
             test_hook_cursors_broadcast_ws_invalidation
         ; test_case "POST cursor honors canonical_url scope" `Quick
             test_post_cursors_honors_canonical_url_scope
+        ; test_case
+            "POST cursor rejects an absolute file_path"
+            `Quick
+            test_post_cursors_rejects_absolute_file_path
         ; test_case "POST annotation accepts matching repo scope" `Quick
             test_post_annotations_accepts_matching_repo_scope
         ; test_case "POST annotation rejects an absolute file_path" `Quick

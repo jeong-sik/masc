@@ -116,7 +116,7 @@ describe('IdeAnnotationComposer', () => {
     expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()
   })
 
-  it('disables the entry button without a repo scope (keeper_lane is read-only)', () => {
+  it('disables the entry button without a repository-backed codebase', () => {
     const el = mount(composer({ repoId: null }))
     const button = el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-open"]')
     expect(button?.disabled).toBe(true)

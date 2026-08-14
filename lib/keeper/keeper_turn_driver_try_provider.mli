@@ -69,6 +69,19 @@ type try_provider_ctx =
        body_bytes:int ->
        unit)
         option
+  ; on_model_input_window_observation :
+      (Runtime_model_input_tail_window.window_observation -> unit) option
+        (** Called with the cut the model-input projection selected, before the
+            request is serialized. Sits beside
+            {!on_request_wire_observation}: that one reports how many bytes the
+            provider admitted, this one reports how much of the keeper's own
+            history those bytes carried. A turn issues one provider request
+            (7,763 API calls over 7,646 turns on a live 2026-08-14 trace), so a
+            later call within one turn belongs to a failover attempt and
+            supersedes the earlier one. Never invoked when the projection
+            refuses — the turn carries a typed budget error instead, and
+            reporting a cut that was never dispatched would fabricate
+            evidence. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

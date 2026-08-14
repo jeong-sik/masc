@@ -130,6 +130,8 @@ type try_provider_ctx =
        body_bytes:int ->
        unit)
         option
+  ; on_model_input_window_observation :
+      (Runtime_model_input_tail_window.window_observation -> unit) option
   ; (* Event bus *)
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -526,12 +528,6 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
             ~reserved_bytes
             candidate
         in
-        let cut candidate =
-          Result.map
-            (fun projection ->
-               projection.Runtime_model_input_tail_window.messages)
-            (raw_cut candidate)
-        in
         (* RFC-0363: the unmodified history chooses the authoritative cut first.
            Demotion rewrites only atoms omitted by that cut, so appending a turn
            cannot move the rewrite boundary unless the raw cut itself moves. *)
@@ -549,9 +545,9 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
                 messages
           in
           (match planned.Keeper_model_input_demotion.pending with
-           | [] -> Ok (planned, raw_projection.messages)
+           | [] -> Ok (planned, raw_projection)
            | _ ->
-             (match cut planned.Keeper_model_input_demotion.messages with
+             (match raw_cut planned.Keeper_model_input_demotion.messages with
               | Error error ->
                 Error
                   (Runtime_model_input_tail_window.budget_error_to_string error)
@@ -559,7 +555,7 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
     in
     let windowed =
       match planned_and_windowed with
-      | Error _ as error -> error
+      | Error error -> Error error
       | Ok (planned, windowed) ->
         (match planned.Keeper_model_input_demotion.pending with
          | [] -> Ok windowed
@@ -570,16 +566,23 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
              Keeper_model_input_demotion.materialize
                ~store:(Tool_blob_store.create ~base_path:ctx.base_path)
                ~pending
-               windowed
+               windowed.Runtime_model_input_tail_window.messages
            in
            if outcome.Keeper_model_input_demotion.reverted = 0
-           then Ok outcome.Keeper_model_input_demotion.messages
+           then
+             (* Materialization rewrites bodies inside the already-chosen cut;
+                it neither adds nor removes atoms, so the counts still hold. *)
+             Ok
+               { windowed with
+                 Runtime_model_input_tail_window.messages =
+                   outcome.Keeper_model_input_demotion.messages
+               }
            else
              (* A restored body is larger than the measured placeholder, so the
                 final cut must be selected again against the actual payload. *)
              (match
                 offload_model_input_cpu (fun () ->
-                  Runtime_model_input_tail_window.project
+                  Runtime_model_input_tail_window.project_with_drop
                     ~measure_message_bytes:
                       (memoize_message_measurement measure_message_bytes)
                     ~capacity_bytes:ctx.model_input_capacity_bytes
@@ -592,8 +595,12 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
                   (Runtime_model_input_tail_window.budget_error_to_string error)))
     in
     match windowed with
-    | Error _ as error -> error
+    | Error error -> Error error
     | Ok windowed ->
+      Option.iter
+        (fun observe -> observe (Runtime_model_input_tail_window.observe windowed))
+        ctx.on_model_input_window_observation;
+      let windowed = windowed.Runtime_model_input_tail_window.messages in
       (match ctx.model_input_projection with
        | None -> Ok windowed
        | Some inner -> inner windowed)

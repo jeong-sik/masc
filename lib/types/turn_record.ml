@@ -43,6 +43,11 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type model_input_window =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  }
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -76,6 +81,7 @@ type t =
   ; request_latency_ms : int option
   ; ttfrc_ms : float option
   ; request_wire_observation : request_wire_observation option
+  ; model_input_window : model_input_window option
   ; raw_trace_run_ref : raw_trace_run_ref option
   ; sampling : sampling
   ; usage : usage
@@ -141,6 +147,12 @@ let to_json (r : t) : Yojson.Safe.t =
       `String observation.runtime_profile, `Int observation.body_bytes
     | None -> `Null, `Null
   in
+  let transmitted_atoms, total_atoms =
+    match r.model_input_window with
+    | Some window ->
+      `Int window.transmitted_atoms, `Int window.total_atoms
+    | None -> `Null, `Null
+  in
   `Assoc
     ([ ( "execution_ids"
        , `List (List.map Ids.Execution_id.to_yojson r.execution_ids) )
@@ -160,6 +172,8 @@ let to_json (r : t) : Yojson.Safe.t =
      ; ("runtime_profile", `String r.runtime_profile)
      ; "request_runtime_profile", request_runtime_profile
      ; "request_body_bytes", request_body_bytes
+     ; "transmitted_atoms", transmitted_atoms
+     ; "total_atoms", total_atoms
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
@@ -425,6 +439,8 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "runtime_profile"
             ; "request_runtime_profile"
             ; "request_body_bytes"
+            ; "transmitted_atoms"
+            ; "total_atoms"
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
@@ -519,6 +535,24 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             "turn_record: request_runtime_profile and request_body_bytes must \
              both be present or both be null"
       in
+      let* transmitted_atoms =
+        nullable "transmitted_atoms" fields as_nonnegative_int
+      in
+      let* total_atoms = nullable "total_atoms" fields as_nonnegative_int in
+      let* model_input_window =
+        match transmitted_atoms, total_atoms with
+        | Some transmitted_atoms, Some total_atoms ->
+          if transmitted_atoms > total_atoms
+          then
+            Error
+              "turn_record: transmitted_atoms cannot exceed total_atoms"
+          else Ok (Some { transmitted_atoms; total_atoms })
+        | None, None -> Ok None
+        | Some _, None | None, Some _ ->
+          Error
+            "turn_record: transmitted_atoms and total_atoms must both be \
+             present or both be null"
+      in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =
         match raw_trace_run_ref_json with
@@ -574,6 +608,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; request_latency_ms
         ; ttfrc_ms
         ; request_wire_observation
+        ; model_input_window
         ; raw_trace_run_ref
         ; sampling = { temperature; top_p; max_tokens; thinking_budget; enable_thinking }
         ; usage =

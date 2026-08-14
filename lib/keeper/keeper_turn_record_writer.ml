@@ -15,6 +15,7 @@ let write
       ~request_latency_ms
       ~ttfrc_ms
       ~request_wire_observation
+      ~model_input_window
       ~raw_trace_run_ref
       ~sampling
       ~usage
@@ -43,6 +44,7 @@ let write
     ; request_latency_ms
     ; ttfrc_ms
     ; request_wire_observation
+    ; model_input_window
     ; raw_trace_run_ref
     ; sampling
     ; usage

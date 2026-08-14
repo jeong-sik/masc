@@ -107,6 +107,14 @@ export type TurnRecordEntry = {
   // runtime is unknown or the operator left runtime.toml unset; the inspector
   // renders "미상" (unknown) rather than a fabricated 200K / Claude $3·$15.
   context_window?: number
+  // How much of the keeper's own history the dispatched request carried, in
+  // atoms (one user message, or one assistant message plus the tool messages
+  // answering it). Reported beside request_body_bytes, which counts the bytes
+  // the provider admitted — neither substitutes for the other. Absent when no
+  // model-input projection ran for the turn; that is not a zero-length
+  // history, so the inspector renders absence rather than 0.
+  transmitted_atoms?: number
+  total_atoms?: number
   price_input_per_million?: number
   price_output_per_million?: number
   // RFC-0233 §9 — wall-clock duration of the provider call (ms), sourced from
@@ -501,6 +509,8 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'input_components',
     'request_runtime_profile',
     'request_body_bytes',
+    'transmitted_atoms',
+    'total_atoms',
     'runtime_profile',
     'selected_model',
     'finish_reason',
@@ -554,6 +564,9 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const selected_model = decodeOptionalField(raw, 'selected_model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
   const context_window = decodeOptionalField(raw, 'context_window', decodeNonNegativeSafeInteger)
+  const transmitted_atoms =
+    decodeOptionalField(raw, 'transmitted_atoms', decodeNonNegativeSafeInteger)
+  const total_atoms = decodeOptionalField(raw, 'total_atoms', decodeNonNegativeSafeInteger)
   const price_input_per_million =
     decodeOptionalField(raw, 'price_input_per_million', decodeFiniteNumber)
   const price_output_per_million =
@@ -644,6 +657,12 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     cache_creation_input_tokens,
     cache_read_input_tokens,
     context_window,
+    // A turn whose runtime assembles its own input emits these as null, which
+    // is an observation that no cut was selected — not a failed decode. Folding
+    // null into undefined keeps that turn's record instead of rejecting it, and
+    // reaches the inspector as absence rather than a fabricated 0.
+    transmitted_atoms: transmitted_atoms ?? undefined,
+    total_atoms: total_atoms ?? undefined,
     price_input_per_million,
     price_output_per_million,
     request_latency_ms,

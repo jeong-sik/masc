@@ -1231,6 +1231,20 @@ function TurnRow({
           ? (() => {
               const components = sortedInputComponents(record)
               const totalBytes = components.reduce((sum, c) => sum + c.bytes, 0)
+              // How much conversation those bytes were. Built here rather than
+              // inline so the template holds no nested literal.
+              const transmitted = record.transmitted_atoms
+              const total = record.total_atoms
+              const atomsLabel =
+                transmitted != null && total != null && total > 0
+                  ? '· 이력 '
+                    + transmitted.toLocaleString()
+                    + ' / '
+                    + total.toLocaleString()
+                    + ' atom ('
+                    + ((transmitted / total) * 100).toFixed(1)
+                    + '% 전송)'
+                  : null
               return html`
                 <div data-testid="turn-input-components">
                   <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
@@ -1242,6 +1256,9 @@ function TurnRow({
                     <span class="text-[var(--color-fg-muted)]">합계 ${formatComponentBytes(totalBytes)}</span>
                     ${record.request_body_bytes != null
                       ? html`<span class="text-[var(--color-fg-disabled)]">· wire ${formatComponentBytes(record.request_body_bytes)} (방언 투영 후 실제 요청 본문)</span>`
+                      : null}
+                    ${atomsLabel != null
+                      ? html`<span data-testid="turn-transmitted-atoms" class="text-[var(--color-fg-disabled)]">${atomsLabel}</span>`
                       : null}
                   </div>
                 </div>

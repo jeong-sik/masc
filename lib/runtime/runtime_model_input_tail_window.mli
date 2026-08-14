@@ -131,7 +131,26 @@ type projection =
         (** Exact raw-history cut chosen for [messages]. Projection stages that
             rewrite historical bytes use this as their cache-stable anchor: the
             rewrite boundary moves only when the authoritative cut moves. *)
+  ; atom_count : int
+        (** Atoms the input history contained, before the cut. [atom_count -
+            dropped_atoms] is what the provider receives. Both are reported
+            because a share is not recoverable from the transmitted list alone:
+            the dropped atoms leave no trace in [messages], so an observer
+            given only the result cannot tell a keeper that transmitted all of
+            a short history from one that transmitted the tail of a long one.
+            Pinned messages are not atoms and are counted in neither. *)
   }
+
+type window_observation =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  }
+(** How much of a history one projection carried, kept without the messages so
+    an observer can hold it for the length of a turn. *)
+
+val observe : projection -> window_observation
+(** Read the counts off a projection. The only arithmetic is [total_atoms -
+    dropped_atoms]; nothing here re-derives a cut. *)
 
 val budget_error_to_string : budget_error -> string
 (** Diagnostic rendering carrying the measured values. Suitable as the

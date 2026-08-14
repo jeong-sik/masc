@@ -371,6 +371,66 @@ let test_exact_cut_when_no_quantized_cut_fits () =
   fits_budget ~capacity_bytes ~reserved_bytes:0 projected
 ;;
 
+(* The keeper's own history is the thing being reported on, so the assertion is
+   stated against the input the caller handed in — not against a number the
+   projection also produced. A share computed only from the transmitted list
+   would be vacuous: dropped atoms leave no trace there. *)
+let test_projection_reports_how_much_history_it_carried () =
+  let history = atoms (4 * k) in
+  let capacity_bytes = total_bytes history / 8 in
+  let projected =
+    match
+      Window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        history
+    with
+    | Ok projection -> projection
+    | Error error ->
+      Alcotest.failf "reported cut: %s" (Window.budget_error_to_string error)
+  in
+  let observed = Window.observe projected in
+  Alcotest.(check int)
+    "total is the history the caller handed in"
+    (count_atoms history)
+    observed.Window.total_atoms;
+  Alcotest.(check int)
+    "transmitted is what came back"
+    (count_atoms projected.Window.messages)
+    observed.Window.transmitted_atoms;
+  Alcotest.(check bool)
+    "a cut history reports less than it held" true
+    (observed.Window.transmitted_atoms < observed.Window.total_atoms);
+  fits_budget ~capacity_bytes ~reserved_bytes:0 projected.Window.messages
+;;
+
+(* Absence of a cut has to be reportable as such. Without this the dashboard
+   cannot tell "sent everything" from "no observation", and both would render
+   as a full history. *)
+let test_uncut_history_reports_everything_carried () =
+  let history = atoms 3 in
+  let projected =
+    match
+      Window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes:unbounded_capacity
+        ~reserved_bytes:0
+        history
+    with
+    | Ok projection -> projection
+    | Error error ->
+      Alcotest.failf "uncut: %s" (Window.budget_error_to_string error)
+  in
+  let observed = Window.observe projected in
+  Alcotest.(check int)
+    "nothing was dropped" observed.Window.total_atoms observed.Window.transmitted_atoms;
+  Alcotest.(check int)
+    "and that total is the whole history"
+    (count_atoms history)
+    observed.Window.total_atoms
+;;
+
 let test_tool_results_stay_with_their_call () =
   let history = atoms (4 * k) in
   let projected =
@@ -591,6 +651,10 @@ let () =
             test_cut_point_is_stable_while_the_budget_holds
         ; Alcotest.test_case "exact cut when no quantized cut fits" `Quick
             test_exact_cut_when_no_quantized_cut_fits
+        ; Alcotest.test_case "projection reports how much history it carried"
+            `Quick test_projection_reports_how_much_history_it_carried
+        ; Alcotest.test_case "uncut history reports everything carried" `Quick
+            test_uncut_history_reports_everything_carried
         ; Alcotest.test_case "tool results stay with their call" `Quick
             test_tool_results_stay_with_their_call
         ; Alcotest.test_case "preamble on assistant head" `Quick

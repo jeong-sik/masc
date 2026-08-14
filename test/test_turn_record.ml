@@ -246,6 +246,7 @@ let test_codec_optional_fields_absent () =
     ; request_latency_ms = None
     ; ttfrc_ms = None
     ; request_wire_observation = None
+    ; model_input_window = None
     ; sampling =
         { temperature = None
         ; top_p = None
@@ -370,7 +371,66 @@ let test_codec_requires_current_observation_fields () =
     ; "input_components"
     ; "request_runtime_profile"
     ; "request_body_bytes"
+    ; "transmitted_atoms"
+    ; "total_atoms"
     ]
+
+(* The record has to carry how much of its own history the turn transmitted,
+   because nothing downstream can recover it: the request itself keeps no trace
+   of what was cut. *)
+let test_record_carries_transmitted_history_share () =
+  let record =
+    { (sample_record ()) with
+      Turn_record.model_input_window =
+        Some { Turn_record.transmitted_atoms = 7; total_atoms = 7_700 }
+    }
+  in
+  match Turn_record.of_json (Turn_record.to_json record) with
+  | Error message -> failf "roundtrip rejected the share: %s" message
+  | Ok decoded ->
+    (match decoded.Turn_record.model_input_window with
+     | None -> failf "roundtrip dropped the share"
+     | Some window ->
+       check int "transmitted survives" 7 window.Turn_record.transmitted_atoms;
+       check int "total survives" 7_700 window.Turn_record.total_atoms)
+
+(* A share above 1 is not a large number, it is a contradiction: the reader
+   would render a keeper transmitting more history than it holds. *)
+let test_codec_rejects_transmitting_more_than_held () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("transmitted_atoms", `Int 9)
+         :: ("total_atoms", `Int 8)
+         :: List.remove_assoc "transmitted_atoms"
+              (List.remove_assoc "total_atoms" fields))
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> failf "decoded a row transmitting more atoms than it held"
+  | Error message ->
+    check bool "error names the contradiction" true
+      (Astring.String.is_infix ~affix:"transmitted_atoms" message)
+
+(* Half an observation is not an observation. Accepting one side would let the
+   reader compute a share against a fabricated denominator. *)
+let test_codec_rejects_half_an_observation () =
+  let json =
+    match Turn_record.to_json (sample_record ()) with
+    | `Assoc fields ->
+      `Assoc
+        (("transmitted_atoms", `Int 7)
+         :: ("total_atoms", `Null)
+         :: List.remove_assoc "transmitted_atoms"
+              (List.remove_assoc "total_atoms" fields))
+    | other -> other
+  in
+  match Turn_record.of_json json with
+  | Ok _ -> failf "decoded a row with only one of the two counts"
+  | Error message ->
+    check bool "error says both or neither" true
+      (Astring.String.is_infix ~affix:"total_atoms" message)
 
 let test_codec_rejects_mismatched_turn_ref () =
   let json =
@@ -723,6 +783,12 @@ let () =
         ; test_case "rejects malformed rows" `Quick test_codec_rejects_malformed
         ; test_case "current observation fields required" `Quick
             test_codec_requires_current_observation_fields
+        ; test_case "record carries transmitted history share" `Quick
+            test_record_carries_transmitted_history_share
+        ; test_case "transmitting more than held rejected" `Quick
+            test_codec_rejects_transmitting_more_than_held
+        ; test_case "half an observation rejected" `Quick
+            test_codec_rejects_half_an_observation
         ; test_case "mismatched turn_ref rejected" `Quick
             test_codec_rejects_mismatched_turn_ref
         ; test_case "mismatched raw trace session rejected" `Quick

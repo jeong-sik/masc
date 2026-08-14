@@ -1306,7 +1306,7 @@ let thinking_control_token_for_model_id_with_manifest manifest model_id =
   | None -> thinking_control_token_for_model_id_catalog model_id
 ;;
 
-let thinking_control_token_for_model_id model_id =
+let[@warning "-32"] thinking_control_token_for_model_id model_id =
   match Model_catalog.global () with
   | Some catalog ->
     (match Model_catalog.lookup catalog model_id with
@@ -1472,7 +1472,7 @@ let test_catalog_entry id_prefix : Model_catalog.model_entry =
   }
 ;;
 
-let test_manifest_entry id_prefix : Capability_manifest.entry =
+let[@warning "-32"] test_manifest_entry id_prefix : Capability_manifest.entry =
   { id_prefix
   ; base_label = None
   ; max_context_tokens = None
@@ -1707,7 +1707,7 @@ let test_catalog : Model_catalog.t = Model_catalog.of_model_entries test_catalog
 
 (* Installs [test_catalog] as the runtime override for the duration of [f],
    then clears the override so subsequent lookups use the embedded catalog. *)
-let with_test_catalog f =
+let[@warning "-32"] with_test_catalog f =
   Model_catalog.set_global test_catalog;
   Fun.protect ~finally:Model_catalog.clear_global f
 ;;

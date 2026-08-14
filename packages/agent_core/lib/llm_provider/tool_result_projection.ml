@@ -183,13 +183,13 @@ let content resolved = resolved.content
 
 [@@@coverage off]
 
-let message role content : Types.message =
+let[@warning "-32"] message role content : Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
 
-let tool_use id name = ToolUse { id; name; input = `Assoc [] }
+let[@warning "-32"] tool_use id name = ToolUse { id; name; input = `Assoc [] }
 
-let tool_result id =
+let[@warning "-32"] tool_result id =
   ToolResult
     { tool_use_id = id
     ; content = "ok"
@@ -199,7 +199,7 @@ let tool_result id =
     }
 ;;
 
-let projected_tool_names projection =
+let[@warning "-32"] projected_tool_names projection =
   projection |> messages |> List.concat_map content |> List.filter_map snd
 ;;
 

@@ -62,7 +62,7 @@ let sanitize s =
 (* === Inline tests === *)
 
 (** Every sanitized output is, by construction, valid UTF-8. *)
-let is_valid out = String.is_valid_utf_8 out
+let[@warning "-32"] is_valid out = String.is_valid_utf_8 out
 
 let%test "ascii only unchanged" =
   let s = "Hello, world 123" in

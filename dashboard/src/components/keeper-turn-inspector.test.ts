@@ -332,6 +332,50 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(text).toContain('wire 547.4KB')
   })
 
+  // The share is the answer to "can this keeper still see what it did 10 turns
+  // ago". It is carried by its own observation, so it has to survive a turn
+  // whose input-component attribution was unavailable — the shape
+  // keeper_agent_run logs as "turn input composition unavailable".
+  it('shows how much history a turn transmitted even without input components', async () => {
+    const records = turnRecordsWithMemoryOs()
+    const latestRow = records.entries.at(-1)
+    if (!latestRow) throw new Error('fixture must carry a latest turn')
+    const latest = latestRow.record
+    latest.input_components = null
+    latest.transmitted_atoms = 800
+    latest.total_atoms = 5000
+    fetchKeeperTurnRecordsMock.mockResolvedValue(records)
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    expect(container.querySelector('[data-testid="turn-input-components"]')).toBeNull()
+    const atoms = container.querySelector('[data-testid="turn-transmitted-atoms"]')
+    expect(atoms).toBeTruthy()
+    const text = atoms?.textContent ?? ''
+    expect(text).toContain('800')
+    expect(text).toContain('5,000')
+    expect(text).toContain('16.0%')
+  })
+
+  // Absence has to read as absence: a turn on a runtime that assembles its own
+  // input carries no observation, and rendering 0 would say the keeper saw
+  // nothing.
+  it('renders nothing when the turn recorded no window observation', async () => {
+    fetchKeeperTurnRecordsMock.mockResolvedValue(turnRecordsWithMemoryOs())
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')).toBeNull()
+  })
+
   it('matches an initial timestamp to the closest retained turn row', () => {
     const response = turnRecordsWithMemoryOs()
     const nearTurn42 = new Date((1_781_587_560 + 12) * 1000).toISOString()

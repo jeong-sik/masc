@@ -88,9 +88,10 @@ type model_input_window =
     counts the bytes the provider admitted, this one counts how much
     conversation the turn reached back over. The two do not decompose into each
     other — the admitted bytes also carry pinned context, the synthetic
-    preamble, and anything the per-turn assembler appends, none of which is
-    history and none of which is an atom. [input_components] answers a third
-    question: which block kinds the bytes went to.
+    preamble, and anything the per-turn assembler appends after the window
+    stage has run, none of which these atoms cover.
+    [input_components] answers a third question: which block kinds the bytes
+    went to.
 
     Both counts are recorded because a share cannot be recovered from the
     transmitted messages alone: dropped atoms leave no trace, so a reader given

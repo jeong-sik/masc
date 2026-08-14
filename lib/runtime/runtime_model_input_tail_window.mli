@@ -172,9 +172,10 @@ val observe : history_atom_count:int -> projection -> window_observation
     pipeline cuts, materializes, and on a storage failure re-cuts the
     surviving sublist — and that last projection's own [atom_count] is the
     size of the sublist, not of the turn's history. Reading the denominator
-    from it would report a keeper that transmitted 800 of 5,000 atoms as
-    having transmitted 800 of 1,000. Supply the [atom_count] of the first cut,
-    which is the only one taken against the full history. *)
+    from it inflates the share by whatever the earlier cuts already removed:
+    a keeper that reached over 800 of 5,000 atoms would report 800 of 1,000
+    (illustrative shape, not a measured trace). Supply the [atom_count] of the
+    first cut, which is the only one taken against the full history. *)
 
 val budget_error_to_string : budget_error -> string
 (** Diagnostic rendering carrying the measured values. Suitable as the

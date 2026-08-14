@@ -1091,7 +1091,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   // Health pills (fl-hpill) read from the same band counts as the rows. No title
   // here — the shell's SurfaceLead owns the "Keeper Fleet" header for this
   // surface (dashboard-shell SURFACE_OWN_LEAD).
-  const healthRun = counts.active
+  const healthNormal = counts.active
   const healthTransient = counts.transient
   const healthPaused = counts.paused
   const healthOffline = counts.offline
@@ -1268,7 +1268,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <h1 class="fl-title">Keeper Fleet</h1>
         </div>
         <div class="fl-health">
-          <span class="fl-hpill ok">런타임 가능 <b>${healthRun}</b></span>
+          <span class="fl-hpill ok">정상 <b>${healthNormal}</b></span>
           ${healthTransient > 0 ? html`<span class="fl-hpill busy">${KEEPER_TRANSIENT_LABEL_KO} <b>${healthTransient}</b></span>` : null}
           <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
           <span class="fl-hpill">${KEEPER_STATUS_LABEL_KO.offline} <b>${healthOffline}</b></span>
@@ -1283,7 +1283,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           onClick=${() => navigate('registry', {})}
         >＋ 새 Keeper</button>
         <div class="fl-meta"><span class="live">● live</span><span>${namespaceName}</span></div>
-        <span class="sr-only">실행 rows ${healthRun} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 중지 rows ${healthOffline}</span>
+        <span class="sr-only">정상 rows ${healthNormal} · 전이 rows ${healthTransient} · 일시정지 rows ${healthPaused} · 중지 rows ${healthOffline}</span>
       </header>
 
       ${showExecutionFallbackState
@@ -1549,7 +1549,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       </div>
 
       <div class="fl-foot">
-        <span class="fl-tick"><span class="k">runtime rows</span><span class="v">active ${healthRun}/${rosterRows.length}</span></span>
+        <span class="fl-tick"><span class="k">normal rows</span><span class="v">${healthNormal}/${rosterRows.length}</span></span>
         <span class="fl-tick"><span class="k">transient rows</span><span class="v">${healthTransient}</span></span>
         <span class="fl-tick"><span class="k">paused rows</span><span class="v">${healthPaused}</span></span>
         <span class="fl-tick"><span class="k">offline rows</span><span class="v">${healthOffline}</span></span>

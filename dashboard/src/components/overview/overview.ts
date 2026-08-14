@@ -73,10 +73,6 @@ import {
 import {
   OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
 } from '../../config/constants'
-import {
-  dashboardFullHealth,
-  subscribeDashboardFullHealthRefresh,
-} from '../dashboard-full-health-state'
 
 // ─── Attention / Keeper v2 helpers ───────────────────────────────────────────
 

@@ -126,7 +126,10 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-let schema_version = 3
+(* v4: post_created candidate identity became the typed event key
+   (keeper, kind, post_id) — v3 rows hash volatile fields and fail the
+   read-time identity check, so v3 ledgers are retired at deploy, not read. *)
+let schema_version = 4
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"
@@ -275,15 +278,52 @@ let keeper_context_to_yojson (meta : Keeper_meta_contract.keeper_meta) =
          ])
 ;;
 
-let candidate_id_of_signal ~keeper_name signal =
+let candidate_id_of_signal ~keeper_name (signal : Board_dispatch.board_signal) =
   let identity =
-    `Assoc
-      [ "keeper_name", `String keeper_name
-      ; "signal", signal_to_yojson signal
-      ]
-    |> Yojson.Safe.to_string
+    match signal.kind with
+    | Board_dispatch.Board_post_created ->
+      (* Identity is the typed event key only. The world-observation backlog
+         scanner re-synthesizes [Board_post_created] with the post's *current*
+         [updated_at] on every cycle, so any volatile field (updated_at,
+         content) in this hash defeats [Candidate_already_present] idempotence:
+         one post minted 68 candidates = 68 model judgments (#28607). *)
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "kind", `String (signal_kind_to_string signal.kind)
+        ; "post_id", `String signal.post_id
+        ]
+    | Board_dispatch.Board_comment_added
+    | Board_dispatch.Board_reaction_changed _ ->
+      `Assoc
+        [ "keeper_name", `String keeper_name
+        ; "signal", signal_to_yojson signal
+        ]
   in
-  Digestif.SHA256.(digest_string identity |> to_hex)
+  Digestif.SHA256.(digest_string (Yojson.Safe.to_string identity) |> to_hex)
+;;
+
+(* Must stay in lockstep with [candidate_id_of_signal]: two signals are
+   identity-equal exactly when that function hashes them identically for the
+   same keeper. [record] uses this to converge a re-scanned signal whose
+   volatile fields (updated_at, content) drifted onto the persisted candidate. *)
+let signal_identity_equal
+      (left : Board_dispatch.board_signal)
+      (right : Board_dispatch.board_signal)
+  =
+  match left.kind, right.kind with
+  | Board_dispatch.Board_post_created, Board_dispatch.Board_post_created ->
+    String.equal left.post_id right.post_id
+  | Board_dispatch.Board_comment_added, Board_dispatch.Board_comment_added ->
+    left = right
+  | Board_dispatch.Board_reaction_changed _, Board_dispatch.Board_reaction_changed _ ->
+    left = right
+  | Board_dispatch.Board_post_created,
+    (Board_dispatch.Board_comment_added | Board_dispatch.Board_reaction_changed _)
+  | Board_dispatch.Board_comment_added,
+    (Board_dispatch.Board_post_created | Board_dispatch.Board_reaction_changed _)
+  | Board_dispatch.Board_reaction_changed _,
+    (Board_dispatch.Board_post_created | Board_dispatch.Board_comment_added) ->
+    false
 ;;
 
 let of_board_evidence
@@ -1516,11 +1556,12 @@ let record ~base_path candidate =
          (fun candidates ->
             match find_candidate candidates candidate.candidate_id with
             | None -> Ok (Some candidate, Recorded candidate)
-            | Some existing when existing.signal = candidate.signal ->
+            | Some existing
+              when signal_identity_equal existing.signal candidate.signal ->
               Ok (None, Duplicate existing)
             | Some _ ->
               Error
-                "candidate identity conflict: the same candidate_id has a different Board signal")
+                "candidate identity conflict: the same candidate_id has a different Board signal identity")
      with
      | Ok result -> result
      | Error detail -> Record_error detail)

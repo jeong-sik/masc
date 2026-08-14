@@ -157,15 +157,7 @@ let comment_of_signal (signal : Board_dispatch.board_signal) : Board.comment =
 let candidate post_id : Candidate.candidate =
   let signal = signal post_id in
   let keeper_name = "sangsu" in
-  let candidate_id =
-    `Assoc
-      [ "keeper_name", `String keeper_name
-      ; "signal", Candidate.signal_to_yojson signal
-      ]
-    |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
+  let candidate_id = Candidate.candidate_id_of_signal ~keeper_name signal in
   { candidate_id
   ; keeper_name
   ; signal

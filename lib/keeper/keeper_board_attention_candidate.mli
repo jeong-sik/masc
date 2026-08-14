@@ -175,6 +175,14 @@ val status_view : status -> status_view
     quarantine provenance without forcing callers to inspect [status] again. *)
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
 
+val candidate_id_of_signal :
+  keeper_name:string -> Board_dispatch.board_signal -> string
+(** Typed event identity of a Board signal for one keeper. [Board_post_created]
+    hashes (keeper, kind, post_id) only — volatile post fields (updated_at,
+    content) must not participate, or the backlog scanner's re-synthesized
+    signals mint a fresh candidate per post update (#28607). Exported so test
+    fixtures derive ids from this function instead of copying the formula. *)
+
 val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
 (** Validate the current durable request schema and its outer candidate,
     Keeper, and signal identity, then return the one-item exact-flow input.

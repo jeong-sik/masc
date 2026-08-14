@@ -14,6 +14,20 @@ let pp_error fmt = function
       Format.fprintf fmt "Slack API error: %s" error
   | Other msg -> Format.fprintf fmt "Other: %s" msg
 
+let effect_disposition = function
+  | Slack_api _ -> Tool_result.Proven_pre_effect
+  | Network _ | Http_status _ -> Tool_result.Effect_outcome_unknown
+  | Other _ ->
+    (* [Other] carries two facts the wire type does not separate: a
+       non-JSON response (nothing proven) and [ok=true] with no [ts]
+       (the message was posted). Reporting the weaker
+       [Effect_outcome_unknown] is sound for both — it only ever
+       withholds correction, never permits a retry of a committed send.
+       Separating them belongs with a split of the [Other] constructor in
+       {!Slack_rest_client}. *)
+    Tool_result.Effect_outcome_unknown
+;;
+
 let slack_message_limit = 4000
 let slack_max_blocks = 50
 let slack_block_text_limit = 3000

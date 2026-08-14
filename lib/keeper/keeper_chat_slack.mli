@@ -16,6 +16,15 @@ type error =
 
 val pp_error : Format.formatter -> error -> unit
 
+val effect_disposition : error -> Tool_result.failure_effect_disposition
+(** [effect_disposition error] states what the Slack transport proves about
+    the requested send. Slack answers every Web API call with HTTP 200 and
+    [{ ok, error? }] (RFC-0317, {!Slack_rest_client}), so [Slack_api] is a
+    logical refusal of a request Slack fully received and declined to act on
+    — the message was not posted. Callers turn this into
+    {!Tool_result.Proven_pre_effect} so the refusal stays correctable inside
+    the provider turn instead of reaching the terminal effect boundary. *)
+
 val send_message :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->

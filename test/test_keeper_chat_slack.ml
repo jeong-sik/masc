@@ -543,10 +543,49 @@ let test_native_activity_failure_does_not_affect_delivery () =
     (List.rev !sends);
   check bool "delivery still succeeds" true (outcomes = [ Ok () ])
 
+let disposition_testable =
+  testable
+    (fun fmt disposition ->
+      Format.pp_print_string fmt
+        (Tool_result.failure_effect_disposition_to_string disposition))
+    ( = )
+
+(* Slack answers logical refusals with HTTP 200 and [{ok:false,error}]
+   (Slack_rest_client, RFC-0317), so a refused post never happened.
+   Keeper_tools_agent_core_handler skips mark_terminal_effect_failed on
+   Proven_pre_effect, so this mapping is what keeps an invalid_blocks refusal
+   correctable inside the provider turn instead of ending it. *)
+let test_slack_api_refusal_is_proven_pre_effect () =
+  check disposition_testable "invalid_blocks"
+    Tool_result.Proven_pre_effect
+    (Masc.Keeper_chat_slack.effect_disposition
+       (Masc.Keeper_chat_slack.Slack_api { error = "invalid_blocks" }))
+
+let test_unproven_slack_failures_stay_unknown () =
+  let unknown = Tool_result.Effect_outcome_unknown in
+  check disposition_testable "network"
+    unknown
+    (Masc.Keeper_chat_slack.effect_disposition
+       (Masc.Keeper_chat_slack.Network "connection reset"));
+  check disposition_testable "http status"
+    unknown
+    (Masc.Keeper_chat_slack.effect_disposition
+       (Masc.Keeper_chat_slack.Http_status { code = 503; body = "" }));
+  check disposition_testable "other"
+    unknown
+    (Masc.Keeper_chat_slack.effect_disposition
+       (Masc.Keeper_chat_slack.Other "ok=true but missing 'ts'"))
+
 let () =
   run "keeper_chat_slack"
     [
-      ( "audio-url"
+      ( "effect-disposition"
+      , [ test_case "Slack refusal proves no post" `Quick
+            test_slack_api_refusal_is_proven_pre_effect
+        ; test_case "unproven failures stay unknown" `Quick
+            test_unproven_slack_failures_stay_unknown
+        ] )
+    ; ( "audio-url"
       , [ test_case "uses base URL" `Quick test_public_voice_audio_url_uses_base_url
         ; test_case "strips trailing slash" `Quick
             test_public_voice_audio_url_strips_trailing_slash

@@ -532,16 +532,32 @@ let budgeted_model_input_projection
        The projection is the same one the serializer runs, through the same
        per-codec function, and it is idempotent — the backend applying it again
        to this output finds nothing left to drop. *)
-    let projected =
-      Result.map_error
-        Agent_core.Llm_provider.Reasoning_history_projection.error_to_string
-        (Agent_core.Llm_provider.Complete_common.transmitted_history
-           ~config:provider_config
-           messages)
+    let messages =
+      match
+        Agent_core.Llm_provider.Complete_common.transmitted_history
+          ~config:provider_config
+          messages
+      with
+      | Ok transmitted -> transmitted
+      | Error error ->
+        (* A refusal here must not become the turn's refusal. The projection
+           validates reasoning provenance across the whole list it is given,
+           and it is given the whole checkpoint — so one malformed tag anywhere
+           in a keeper's lifetime would otherwise abort every later turn, with
+           no typed overflow for the shrink retry to catch. Before this budget
+           existed the same check ran only over the windowed tail, inside the
+           backend, and still does: falling back to the durable shape restores
+           exactly that scope. The cost is the narrower window this refinement
+           was added to widen, which is the previous behaviour, not a new
+           failure. *)
+        Log.Keeper.warn
+          "%s: model input measured against durable shape; reasoning \
+           projection declined: %s"
+          ctx.keeper_name
+          (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string
+             error);
+        messages
     in
-    match projected with
-    | Error error -> Error error
-    | Ok messages ->
     let planned_and_windowed =
       offload_model_input_cpu (fun () ->
         let raw_cut candidate =

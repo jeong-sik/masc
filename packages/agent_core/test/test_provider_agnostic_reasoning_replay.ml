@@ -445,6 +445,34 @@ let test_every_codec_answers_its_own_contract () =
     ]
 ;;
 
+(* The projection validates reasoning provenance across the whole list it is
+   handed, so a caller that hands it a keeper's entire checkpoint inherits a
+   failure mode the serializer never had: one malformed tag anywhere aborts the
+   projection, including tags on messages far outside any transmission window.
+   Pinned here so a caller knows this is a refusal it has to absorb rather than
+   propagate. *)
+let test_a_malformed_tag_anywhere_refuses_the_projection () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:non_replaying_capabilities
+      ()
+  in
+  let source = source_for_config config in
+  (* Reasoning provenance on a User message: the tag says a role carried
+     reasoning that cannot have produced it. *)
+  let messages =
+    [ with_source source User [ Text "first request" ]
+    ; message Assistant [ Text "answer" ]
+    ]
+  in
+  match Complete_common.transmitted_history ~config messages with
+  | Ok _ -> Alcotest.fail "expected the malformed tag to refuse the projection"
+  | Error _ -> ()
+;;
+
 let test_explicit_preserve_promotes_latest_user_policy_to_full_history () =
   let config =
     Provider_config.make
@@ -1124,6 +1152,10 @@ let () =
             "transmitted history keeps what the wire keeps"
             `Quick
             test_transmitted_history_keeps_what_the_wire_keeps
+        ; Alcotest.test_case
+            "a malformed tag anywhere refuses the projection"
+            `Quick
+            test_a_malformed_tag_anywhere_refuses_the_projection
         ; Alcotest.test_case
             "every codec answers its own contract"
             `Quick

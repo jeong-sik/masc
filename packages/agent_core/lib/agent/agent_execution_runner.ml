@@ -108,7 +108,8 @@ let reraise_after_abort_failure exn backtrace abort_detail =
     Printexc.raise_with_backtrace reserved backtrace
 ;;
 
-let capture_traceln_for_inline_test f =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] capture_traceln_for_inline_test f =
   Eio_main.run
   @@ fun env ->
   let buffer = Buffer.create 256 in

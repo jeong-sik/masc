@@ -305,7 +305,8 @@ let make_tool_results results =
 
 (* === make_tool_results inline tests === *)
 
-let mock_result ?(is_error = false) ~id content : Agent_tools.tool_execution_result =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] mock_result ?(is_error = false) ~id content : Agent_tools.tool_execution_result =
   let schedule : Tool_contract.schedule =
     { planned_index = 0
     ; batch_index = 0
@@ -333,7 +334,8 @@ let mock_result ?(is_error = false) ~id content : Agent_tools.tool_execution_res
   }
 ;;
 
-let single_tool_result = function
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] single_tool_result = function
   | [ ToolResult { tool_use_id; content; outcome; _ } ] ->
     Some (tool_use_id, content, Types.tool_result_outcome_is_error outcome)
   | []

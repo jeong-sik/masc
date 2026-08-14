@@ -1274,7 +1274,8 @@ let openai_sse_parse_result_to_events state = function
   | Openai_parse_failed { reason; raw } -> [ SSEParseFailed { reason; raw } ], None
 ;;
 
-let test_tool_use_start_with_name = function
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] test_tool_use_start_with_name = function
   | ContentBlockStart { index; content_type = "tool_use"; tool_name; _ } ->
     Some (index, tool_name)
   | MessageStart _
@@ -1296,7 +1297,8 @@ let test_tool_use_start_with_name = function
   | StreamIncomplete _ -> None
 ;;
 
-let test_tool_use_start = function
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] test_tool_use_start = function
   | ContentBlockStart { content_type = "tool_use"; _ } -> Some ()
   | MessageStart _
   | ContentBlockStart _
@@ -1317,7 +1319,8 @@ let test_tool_use_start = function
   | StreamIncomplete _ -> None
 ;;
 
-let test_input_json_delta = function
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] test_input_json_delta = function
   | ContentBlockDelta { index; delta = InputJsonDelta s } -> Some (index, s)
   | MessageStart _
   | ContentBlockStart _

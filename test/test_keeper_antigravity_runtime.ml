@@ -600,24 +600,17 @@ let test_blank_success_requires_fresh_conversation () =
                   (match run () with
                    | Error error ->
                      (match Keeper_turn_driver.classify_masc_internal_error error with
-                      | Some
-                          (Keeper_turn_driver.Provider_attempt_effect_fenced
-                             { runtime_id = "antigravity.gemini"
-                             ; effect_disposition =
-                                 Keeper_provider_attempt_effect
-                                 .Observation_unavailable
-                             ; diagnostic
-                             }) ->
+                      | None ->
                         check bool
-                          "effect fence retains the blank-success provider diagnostic"
+                          "blank success remains a provider failure before any tool effect"
                           true
                           (String_util.contains_substring
-                             diagnostic
+                             (Agent_core.Error.to_string error)
                              "successful result response has no deliverable content")
                       | Some other ->
                         fail
                           (Keeper_turn_driver.kind_of_masc_internal_error other)
-                      | None -> fail (Agent_core.Error.to_string error))
+                      )
                    | Ok _ -> fail "blank Antigravity result settled as success");
                   let failed_session =
                     Keeper_official_client_session_store.load

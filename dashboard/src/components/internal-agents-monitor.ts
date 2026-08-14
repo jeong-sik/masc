@@ -626,6 +626,9 @@ export function InternalAgentsMonitor() {
                     <span class="min-w-0">
                       <strong class="block text-xs text-[var(--color-fg-primary)]">${laneLabel(row)}</strong>
                       <code class="block truncate text-3xs text-[var(--color-fg-muted)]" title=${subject(row)}>${subject(row)}</code>
+                      ${row.source === 'exact' && row.run.lane === 'librarian_exact'
+                        ? html`<code translate="no" class="block truncate text-3xs text-[var(--color-fg-muted)]" title=${row.run.runId}>run_id · ${row.run.runId}</code>`
+                        : null}
                     </span>
                     <span class="text-right text-3xs text-[var(--color-fg-muted)]">
                       <span class="block">${actor(row)}</span>

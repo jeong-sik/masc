@@ -476,6 +476,15 @@ let log_call
         | Some n -> [ "result_bytes", `Int n ]
         | None -> []
       in
+      (* The dated log itself clamps [output_text] to [max_output_len].  Derive
+         the observation truncation marker here when callers supplied exact
+         producer bytes but no stricter upstream clamp.  This keeps direct and
+         composed invocations on the same metric contract. *)
+      let truncated_to =
+        match truncated_to, result_bytes with
+        | None, Some n when n > max_output_len -> Some max_output_len
+        | explicit, _ -> explicit
+      in
       let truncated_to_field =
         match truncated_to with
         | Some n -> [ "truncated_to", `Int n ]

@@ -37,6 +37,8 @@ export type ToolCallEntry = {
   lane?: string
   // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
   execution_id?: string
+  result_bytes?: number
+  truncated_to?: number
   // RFC-0233 PR-2: provider call id (agent-core-event join key). Equals the chat tool
   // row's tool_call_id for the same execution, so the chat ToolCallBubble can
   // join this entry's output onto the transcript. Absent when the call carried
@@ -111,6 +113,8 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
     execution_id: asString(raw.execution_id),
+    result_bytes: asNumber(raw.result_bytes),
+    truncated_to: asNumber(raw.truncated_to),
     tool_use_id: typeof raw.tool_use_id === 'string' ? raw.tool_use_id : undefined,
     planned_index: asNumber(raw.planned_index),
     batch_index: asNumber(raw.batch_index),

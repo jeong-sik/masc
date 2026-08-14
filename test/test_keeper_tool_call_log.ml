@@ -1391,6 +1391,30 @@ let test_output_inline_string_preserved () =
         "small inline result" s
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_output_preview_derives_truncation_metadata () =
+  with_tmp_log (fun () ->
+    let output_text = String.make 5000 'x' in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k"
+      ~tool_name:"tool_large"
+      ~input:(`Assoc [])
+      ~output_text
+      ~result_bytes:(String.length output_text)
+      ~success:true
+      ~duration_ms:1.0
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ `Assoc fields ] ->
+      Alcotest.(check (option int))
+        "producer bytes retained"
+        (Some 5000)
+        (List.assoc_opt "result_bytes" fields |> Option.map Yojson.Safe.Util.to_int);
+      Alcotest.(check (option int))
+        "log preview clamp is explicit"
+        (Some 4000)
+        (List.assoc_opt "truncated_to" fields |> Option.map Yojson.Safe.Util.to_int)
+    | _ -> Alcotest.fail "expected exactly one object entry")
+
 let test_string_input_keeps_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1583,6 +1607,8 @@ let () =
             test_output_blob_marker_normalized
         ; eio_test "inline string output stays a JSON string"
             test_output_inline_string_preserved
+        ; eio_test "large output records preview truncation"
+            test_output_preview_derives_truncation_metadata
         ] )
     ; ( "action_radius",
         [ eio_test "string input does not break action radius"

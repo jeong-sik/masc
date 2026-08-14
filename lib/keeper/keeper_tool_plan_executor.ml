@@ -109,6 +109,7 @@ let outer_completion plan =
 
 type node_result =
   { node_id : Keeper_tool_plan.Node_id.t
+  ; execution_id : Ids.Execution_id.t
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
@@ -116,6 +117,8 @@ type node_result =
   ; tool_use_id : string option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
+  ; result_bytes : int
+  ; truncated_to : int option
   }
 
 type dispatch_result =
@@ -123,10 +126,25 @@ type dispatch_result =
   ; tool_use_id : string option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
+  ; result_bytes : int option
+  ; truncated_to : int option
   }
 
-let dispatch_result ?tool_use_id ?failure_effect_disposition ?deferred_kind result =
-  { result; tool_use_id; failure_effect_disposition; deferred_kind }
+let dispatch_result
+      ?tool_use_id
+      ?failure_effect_disposition
+      ?deferred_kind
+      ?result_bytes
+      ?truncated_to
+      result
+  =
+  { result
+  ; tool_use_id
+  ; failure_effect_disposition
+  ; deferred_kind
+  ; result_bytes
+  ; truncated_to
+  }
 ;;
 
 type cause =
@@ -204,8 +222,14 @@ let execute_one ~plan ~run_id ~outputs ~dispatch ?observe_node_result scheduled 
              ~schedule:scheduled.schedule
              ~input)
     in
+    let result_bytes =
+      Option.value
+        ~default:(String.length (Tool_result.message result.result))
+        result.result_bytes
+    in
     let node_result =
       { node_id
+      ; execution_id = Ids.Execution_id.generate ()
       ; tool_name = node.tool_name
       ; input
       ; schedule = scheduled.schedule
@@ -213,6 +237,8 @@ let execute_one ~plan ~run_id ~outputs ~dispatch ?observe_node_result scheduled 
       ; tool_use_id = result.tool_use_id
       ; failure_effect_disposition = result.failure_effect_disposition
       ; deferred_kind = result.deferred_kind
+      ; result_bytes
+      ; truncated_to = result.truncated_to
       }
     in
     let observation_error =
@@ -458,17 +484,29 @@ let execute_keeper
         ~completion:Agent_core.Tool_contract.Continue_after_success
     in
     let result = handler ~agent_core_invocation:invocation input in
+    let original_bytes, truncated_to =
+      Keeper_tool_call_log.consume_truncation_info ~invocation ()
+    in
+    let result_bytes =
+      if original_bytes > 0
+      then original_bytes
+      else String.length (Tool_result.message result)
+    in
     match !execution_evidence with
     | Some (failure_effect_disposition, deferred_kind) ->
       { result
       ; tool_use_id = Some (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
       ; failure_effect_disposition
       ; deferred_kind
+      ; result_bytes = Some result_bytes
+      ; truncated_to
       }
     | None ->
       dispatch_result
         ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
         ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+        ~result_bytes
+        ?truncated_to
         result
   in
   execute ~plan ~run_id ~dispatch ?observe_node_result ()

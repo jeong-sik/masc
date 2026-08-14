@@ -231,7 +231,10 @@ let test_broadcast_message () =
   let _ = Workspace.init config ~agent_name:(Some "claude") in
 
   (* Broadcast *)
-  let result = Workspace.broadcast config ~from_agent:"claude" ~content:"Hello @gemini!" in
+  let result =
+    Workspace.broadcast config ~from_agent:"claude" ~content:"Hello @gemini!"
+    |> Result.get_ok
+  in
   Alcotest.(check bool) "broadcast success" true (String.contains result.rendered '[');
 
   (* Get messages *)
@@ -297,6 +300,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   in
   let result =
     Workspace.broadcast config ~from_agent:"taskmaster-jade-heron" ~content:stale_message
+    |> Result.get_ok
   in
   Alcotest.(check bool)
     "broadcast reports invalidation"
@@ -337,6 +341,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   in
   let normal_result =
     Workspace.broadcast config ~from_agent:"taskmaster-jade-heron" ~content:normal_update
+    |> Result.get_ok
   in
   Alcotest.(check bool)
     "normal task mention is not invalidated"
@@ -344,6 +349,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     (str_contains normal_result.rendered "[cache_invalidated]");
   let operator_result =
     Workspace.broadcast config ~from_agent:"operator" ~content:stale_message
+    |> Result.get_ok
   in
   Alcotest.(check bool)
     "non-taskmaster stale-looking prose is not invalidated"
@@ -364,7 +370,10 @@ let test_event_log () =
   let _ = Workspace.init config ~agent_name:None in
 
   (* Broadcast should create event log *)
-  let result = Workspace.broadcast config ~from_agent:"claude" ~content:"Test event" in
+  let result =
+    Workspace.broadcast config ~from_agent:"claude" ~content:"Test event"
+    |> Result.get_ok
+  in
 
   (* Verify broadcast returned a valid response (contains timestamp marker) *)
   Alcotest.(check bool) "broadcast returns response" true (String.length result.rendered > 0);
@@ -575,7 +584,10 @@ let test_special_chars_in_message () =
   with_test_env (fun config ->
     (* Test special characters, unicode, JSON-unsafe chars *)
     let msg = "Hello \"world\" with 'quotes' and\nnewlines\tand\t한글!" in
-    let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
+    let result =
+      Workspace.broadcast config ~from_agent:"claude" ~content:msg
+      |> Result.get_ok
+    in
     Alcotest.(check bool) "special chars handled" true (String.length result.rendered > 0)
   )
 
@@ -1025,7 +1037,10 @@ let test_emoji_in_message () =
   with_test_env (fun config ->
     (* Emoji characters should be preserved *)
     let msg = "🚀 Launching feature! 🎉" in
-    let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
+    let result =
+      Workspace.broadcast config ~from_agent:"claude" ~content:msg
+      |> Result.get_ok
+    in
     Alcotest.(check bool) "emoji preserved" true (str_contains result.rendered "🚀")
   )
 
@@ -1083,7 +1098,10 @@ let test_reinit_after_reset () =
 let test_very_long_message () =
   with_test_env (fun config ->
     let long_msg = String.make 10000 'x' in
-    let result = Workspace.broadcast config ~from_agent:"claude" ~content:long_msg in
+    let result =
+      Workspace.broadcast config ~from_agent:"claude" ~content:long_msg
+      |> Result.get_ok
+    in
     Alcotest.(check bool) "long message handled" true (String.length result.rendered > 0)
   )
 
@@ -1091,7 +1109,10 @@ let test_message_with_json_chars () =
   with_test_env (fun config ->
     (* JSON special characters should be escaped properly *)
     let msg = "{\"key\": \"value\", \"array\": [1,2,3]}" in
-    let result = Workspace.broadcast config ~from_agent:"claude" ~content:msg in
+    let result =
+      Workspace.broadcast config ~from_agent:"claude" ~content:msg
+      |> Result.get_ok
+    in
     Alcotest.(check bool) "json chars handled" true (String.length result.rendered > 0)
   )
 
@@ -1150,7 +1171,10 @@ let test_xss_in_message () =
   with_test_env (fun config ->
     ignore (Workspace.bind_session config ~agent_name:"tester" ~capabilities:[] ());
     let xss_payload = "<script>alert('xss')</script>" in
-    let result = Workspace.broadcast config ~from_agent:"tester" ~content:xss_payload in
+    let result =
+      Workspace.broadcast config ~from_agent:"tester" ~content:xss_payload
+      |> Result.get_ok
+    in
     (* Check that raw script tags are not in the result *)
     let has_raw_script =
       str_contains result.rendered "<script>"

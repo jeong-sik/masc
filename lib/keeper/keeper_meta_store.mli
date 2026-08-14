@@ -23,6 +23,16 @@ val persisted_keeper_names : Workspace.config -> string list
 val persisted_keeper_name_for_agent_name :
   Workspace.config -> agent_name:string -> (string option, string) result
 
+(** Resolve an exact configured [mention_target] against effective metadata.
+    The canonical filename and the same TOML-overlaid metadata snapshot are
+    returned together so delivery and pending-message classification use one
+    authority. Duplicate claims, configuration errors, and metadata read
+    failures are explicit errors. *)
+val persisted_keeper_for_mention_target :
+  Workspace.config ->
+  mention_target:string ->
+  ((string * Keeper_meta_contract.keeper_meta) option, string) result
+
 (** List keeper names declared in TOML config (overlay sources). *)
 val configured_keeper_names : Workspace.config -> string list
 

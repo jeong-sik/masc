@@ -95,7 +95,7 @@ let test_repeated_mention_delivers_each_canonical_event () =
         in
         activities := (kind, subject) :: !activities);
     Workspace_broadcast.set_on_broadcast_mention
-      (fun mention -> wakes := mention :: !wakes);
+      (fun delivery -> wakes := delivery.mention :: !wakes);
     let content = "@gemini review the canonical event" in
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
@@ -147,6 +147,73 @@ let test_repeated_mention_delivers_each_canonical_event () =
     Alcotest.(check (list (option string))) "mention wake hooks"
       [ Some "gemini"; Some "gemini" ] (List.rev !wakes))
 
+let test_failed_authoritative_write_suppresses_fanout () =
+  with_test_env (fun config ->
+    let previous_activity = Atomic.get Workspace_hooks.activity_emit_fn in
+    let previous_observer =
+      Atomic.get Workspace_hooks.workspace_broadcast_observed_fn
+    in
+    let previous_mention =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention ignore
+    in
+    let previous_write =
+      Workspace_broadcast.For_testing.replace_write_json_commit
+        (fun _config _path _json -> Error "injected authoritative failure")
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set Workspace_hooks.activity_emit_fn previous_activity;
+        Atomic.set
+          Workspace_hooks.workspace_broadcast_observed_fn
+          previous_observer;
+        Workspace_broadcast.set_on_broadcast_mention previous_mention;
+        let (_ :
+          Workspace_utils_backend_setup.config ->
+          string ->
+          Yojson.Safe.t ->
+          (Workspace_utils.write_json_commit, string) result) =
+          Workspace_broadcast.For_testing.replace_write_json_commit
+            previous_write
+        in
+        ())
+      (fun () ->
+        let publications = ref 0 in
+        let activities = ref 0 in
+        let mentions = ref 0 in
+        let observations = ref 0 in
+        (match
+           Workspace.backend_subscribe
+             config
+             ~channel:(Workspace.broadcast_channel config)
+             ~callback:(fun _ -> incr publications)
+         with
+         | Ok () -> ()
+         | Error error ->
+           Alcotest.failf "subscribe failed: %s" (Backend_types.show_error error));
+        Atomic.set Workspace_hooks.activity_emit_fn
+          (fun _config ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () ->
+            incr activities);
+        Atomic.set Workspace_hooks.workspace_broadcast_observed_fn
+          (fun ~msg_type:_ ~elapsed_s:_ -> incr observations);
+        Workspace_broadcast.set_on_broadcast_mention (fun _ -> incr mentions);
+        (match
+           Workspace.broadcast
+             config
+             ~from_agent:"claude"
+             ~content:"@gemini must not fan out"
+         with
+         | Error (Workspace_broadcast.Broadcast_not_persisted detail) ->
+           Alcotest.(check string)
+             "typed write failure"
+             "injected authoritative failure"
+             detail
+         | Ok _ -> Alcotest.fail "failed write reported a committed broadcast");
+        Alcotest.(check int) "backend publication suppressed" 0 !publications;
+        Alcotest.(check int) "activity suppressed" 0 !activities;
+        Alcotest.(check int) "mention callback suppressed" 0 !mentions;
+        Alcotest.(check int) "success latency observation suppressed" 0 !observations))
+;;
+
 let () =
   Alcotest.run "Workspace raw message regression" [
     ("messages_raw", [
@@ -158,5 +225,7 @@ let () =
         test_get_messages_raw_large_history_keeps_newest_window;
       Alcotest.test_case "identical mentions each deliver" `Quick
         test_repeated_mention_delivers_each_canonical_event;
+      Alcotest.test_case "failed write suppresses fanout" `Quick
+        test_failed_authoritative_write_suppresses_fanout;
     ]);
   ]

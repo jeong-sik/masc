@@ -30,8 +30,10 @@ let handle_broadcast state agent_name reqd body_str =
     match Json_util.assoc_member_opt "message" json with
     | Some (`String message) ->
         let config = (Mcp_server.workspace_config state) in
-        let _ = Workspace.broadcast config ~from_agent:agent_name ~content:message in
-        reply true None
+        (match Workspace.broadcast config ~from_agent:agent_name ~content:message with
+         | Ok _ -> reply true None
+         | Error error ->
+           reply false (Some (Workspace.broadcast_error_to_string error)))
     | Some `Null -> reply false (Some "missing required field: message")
     | None | Some _ -> reply false (Some "field 'message' must be a string")
   with

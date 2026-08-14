@@ -79,8 +79,9 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
         require_payload_field request.payload "message"
           "payload.message is required"
       in
-      let result = Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message in
-      workspace_action_result request (`String result.rendered)
+      (match Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message with
+       | Ok result -> workspace_action_result request (`String result.rendered)
+       | Error error -> Error (Workspace.broadcast_error_to_string error))
   | "namespace_pause" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let reason =

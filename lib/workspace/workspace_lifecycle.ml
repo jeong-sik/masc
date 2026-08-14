@@ -29,6 +29,16 @@ let agent_parse_error_snapshot ~agent_name ~agent_file =
       if raw_head = "" then `Null else `String raw_head);
   ]
 
+let log_lifecycle_broadcast_result ~operation ~agent_name = function
+  | Ok _ -> ()
+  | Error error ->
+    Log.Workspace.error
+      "agent lifecycle committed but broadcast was not persisted operation=%s agent=%s detail=%s"
+      operation
+      agent_name
+      (broadcast_error_to_string error)
+;;
+
 (** Bind agent session - with auto-generated nickname and metadata *)
 let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
     ?(pid=None) ?(hostname=None) ?(tty=None)
@@ -106,11 +116,12 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
            let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
            { s with active_agents = agents }
          ) in
-         let _ =
-           broadcast config ~from_agent:nickname
-             ~msg_type:"session_rebound"
-             ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
-         in
+         broadcast config ~from_agent:nickname
+           ~msg_type:"session_rebound"
+           ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
+         |> log_lifecycle_broadcast_result
+              ~operation:"session_rebound"
+              ~agent_name:nickname;
          log_event config (`Assoc [
            ("type", `String "agent_session_bound");
            ("agent", `String nickname);
@@ -175,11 +186,12 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   ) in
 
   (* Broadcast session binding *)
-  let _ =
-    broadcast config ~from_agent:nickname
-      ~msg_type:"session_bound"
-      ~content:(Printf.sprintf "%s bound the namespace session" nickname)
-  in
+  broadcast config ~from_agent:nickname
+    ~msg_type:"session_bound"
+    ~content:(Printf.sprintf "%s bound the namespace session" nickname)
+  |> log_lifecycle_broadcast_result
+       ~operation:"session_bound"
+       ~agent_name:nickname;
 
   (* Log event with metadata *)
   log_event config (`Assoc [
@@ -241,11 +253,12 @@ let end_session config ~agent_name =
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
 
-    let _ =
-      broadcast config ~from_agent:"system"
-        ~msg_type:"session_ended"
-        ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
-    in
+    broadcast config ~from_agent:"system"
+      ~msg_type:"session_ended"
+      ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
+    |> log_lifecycle_broadcast_result
+         ~operation:"session_ended"
+         ~agent_name:actual_name;
 
     (* Log event *)
     log_event config (`Assoc [

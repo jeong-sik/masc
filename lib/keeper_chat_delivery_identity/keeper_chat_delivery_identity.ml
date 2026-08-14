@@ -34,6 +34,7 @@ end
 type delivery_key =
   | Operation of Request_id.t
   | Fusion_run of Request_id.t
+  | Workspace_message of Request_id.t
 
 type transcript_slot =
   | Accepted_user
@@ -90,6 +91,11 @@ let delivery_key_to_yojson = function
       [ "kind", `String "fusion_run"
       ; "request_id", `String (Request_id.to_string request_id)
       ]
+  | Workspace_message request_id ->
+    `Assoc
+      [ "kind", `String "workspace_message"
+      ; "request_id", `String (Request_id.to_string request_id)
+      ]
 ;;
 
 let delivery_key_of_yojson = function
@@ -116,6 +122,16 @@ let delivery_key_of_yojson = function
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
        Ok (Fusion_run request_id)
+     | "workspace_message" ->
+       let* () =
+         validate_fields
+           ~context:"workspace message delivery identity"
+           ~expected:[ "kind"; "request_id" ]
+           fields
+       in
+       let* request_id = string_field "request_id" fields in
+       let* request_id = Request_id.of_string request_id in
+       Ok (Workspace_message request_id)
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
@@ -124,7 +140,10 @@ let delivery_key_equal left right =
   match left, right with
   | Operation left, Operation right -> Request_id.equal left right
   | Fusion_run left, Fusion_run right -> Request_id.equal left right
-  | Operation _, Fusion_run _ | Fusion_run _, Operation _ -> false
+  | Workspace_message left, Workspace_message right -> Request_id.equal left right
+  | (Operation _ | Fusion_run _ | Workspace_message _),
+    (Operation _ | Fusion_run _ | Workspace_message _) ->
+    false
 ;;
 
 let transcript_slot_to_yojson = function

@@ -71,8 +71,13 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
           in
           mention_prefix ^ " " ^ req.message)
       in
-      let _msg = Workspace.broadcast workspace_config ~from_agent:req.agent_name ~content in
-      T.BroadcastResponse.{ success = true; seq = now_ms () }
+      (match Workspace.broadcast workspace_config ~from_agent:req.agent_name ~content with
+       | Ok _ -> T.BroadcastResponse.{ success = true; seq = now_ms () }
+       | Error error ->
+         Log.Transport.error
+           "gRPC broadcast was not persisted: %s"
+           (Workspace.broadcast_error_to_string error);
+         T.BroadcastResponse.{ success = false; seq = 0L })
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->

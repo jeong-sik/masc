@@ -119,6 +119,16 @@ val keeper_persistence_claim_error_to_string :
 val keeper_persistence_start_error_to_string :
   keeper_persistence_start_error -> string
 
+type broadcast_mention_delivery_outcome =
+  | Broadcast_without_target
+  | Broadcast_target_missing_meta of string
+  | Broadcast_target_meta_unavailable of string * string
+  | Broadcast_target_invalid of string
+  | Broadcast_request_invalid of string * string
+  | Broadcast_intake_failed of string * string
+  | Broadcast_persisted_and_woken of string
+  | Broadcast_persisted_wake_deferred of string
+
 val start_keeper_loops :
   claimed_persistence:claimed_keeper_persistence ->
   sw:Eio.Switch.t ->
@@ -145,6 +155,14 @@ module For_testing : sig
 
   val broadcast_mention_wakeup_action :
     string option -> [ `Suppress_no_target | `Wake_keeper of string ]
+
+  val deliver_broadcast_mention :
+    config:Workspace.config ->
+    base_path:string ->
+    is_running:(string -> bool) ->
+    wakeup:(string -> unit) ->
+    Workspace_broadcast.broadcast_delivery ->
+    broadcast_mention_delivery_outcome
 
   val reset_keeper_persistence_lifecycle : unit -> unit
 

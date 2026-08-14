@@ -52,6 +52,7 @@ export interface KeeperRuntimeProjectionRuntimeInput {
   readonly workspace_git_commit?: string | null
   readonly build?: {
     readonly commit?: string | null
+    readonly binary_commit?: string | null
     readonly started_at?: string | null
   } | null
 }
@@ -180,18 +181,18 @@ export function deriveKeeperRuntimeProjection({
         ? `${formatDuration(keeper.last_turn_ago_s)} since turn`
         : 'idle age unknown'
   const runtimeReason = compactToken(opState.displaySummary, 'no blocker reason')
-  const runtimeCommit =
-    shortCommit(runtimeResolution?.server_repo_git_commit)
-    ?? shortCommit(runtimeResolution?.build?.commit)
+  const runtimeCommit = shortCommit(runtimeResolution?.build?.binary_commit)
   const workspaceCommit = shortCommit(runtimeResolution?.workspace_git_commit)
   const runtimeBuildLabel = runtimeCommit
-    ? workspaceCommit && workspaceCommit !== runtimeCommit
-      ? `${runtimeCommit} vs workspace ${workspaceCommit}`
-      : runtimeCommit
-    : null
-  const runtimeRepoLabel = runtimeResolution?.server_repo_path?.path
+  const runtimeRepoPath = runtimeResolution?.server_repo_path?.path
     ? runtimeResolution.server_repo_path.path.split('/').slice(-2).join('/')
     : null
+  const runtimeRepoCommit = shortCommit(runtimeResolution?.server_repo_git_commit)
+  const runtimeRepoLabel = [
+    runtimeRepoPath,
+    runtimeRepoCommit ? `head ${runtimeRepoCommit}` : null,
+    workspaceCommit ? `workspace ${workspaceCommit}` : null,
+  ].filter((value): value is string => value !== null).join(' · ') || null
 
   const signals = buildProjectionSignals({
     opState,

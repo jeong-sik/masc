@@ -69,6 +69,11 @@ describe('refreshNamespaceTruth', () => {
     expect(mergedBuild?.build).toEqual({
       release_version: '2.148.0',
       commit: '2897da06',
+      commit_source: null,
+      binary_commit: null,
+      binary_commit_source: null,
+      repo_head_commit: null,
+      repo_head_commit_source: null,
       started_at: '2026-03-25T08:05:54Z',
       uptime_seconds: 588,
     })

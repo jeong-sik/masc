@@ -493,7 +493,7 @@ function RuntimeTruthPanel({ runtimeResolution }: { runtimeResolution: Dashboard
         <${RuntimeMetaRow} label="effective base" value=${runtimeResolution.resolved_base_path.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="effective .masc" value=${runtimeResolution.data_root.path ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="server repo" value=${runtimeResolution.server_repo_path?.path ?? MISSING_DATA_DASH} />
-        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.commit ?? MISSING_DATA_DASH} />
+        <${RuntimeMetaRow} label="executable commit" value=${runtimeResolution.build.binary_commit ?? MISSING_DATA_DASH} />
         <${RuntimeMetaRow} label="keeper fibers" value=${String(fleet?.keeper_fibers ?? MISSING_DATA_DASH)} />
         <${RuntimeMetaRow} label="fd active operations" value=${activeOperations == null ? MISSING_DATA_DASH : String(activeOperations)} />
         <${RuntimeMetaRow} label="fd resource errors (total)" value=${resourceErrors == null ? MISSING_DATA_DASH : String(resourceErrors)} />
@@ -808,7 +808,7 @@ export function ConfigResolutionPanel({
                 <${RuntimeMetaRow} label="server repo head" value=${runtimeResolution.server_repo_git_commit ?? MISSING_DATA_DASH} />
                 <${RuntimeMetaRow} label="workspace head" value=${runtimeResolution.workspace_git_commit ?? MISSING_DATA_DASH} />
                 <${RuntimeMetaRow} label="resolved base head" value=${runtimeResolution.resolved_base_git_commit ?? MISSING_DATA_DASH} />
-                <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.commit ?? runtimeResolution.build.release_version} />
+                <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.binary_commit ?? MISSING_DATA_DASH} />
                 <${RuntimeMetaRow} label="started at" value=${runtimeResolution.build.started_at} />
               </div>
 

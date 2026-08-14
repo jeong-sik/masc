@@ -15,6 +15,12 @@ import type { Message } from './types'
 const configItem = { path: '/tmp/masc', source: 'test', exists: true }
 const build = {
   release_version: 'dev',
+  commit: 'checkout-fallback',
+  commit_source: 'runtime_repo_head',
+  binary_commit: null,
+  binary_commit_source: null,
+  repo_head_commit: 'checkout-fallback',
+  repo_head_commit_source: 'runtime_repo_head',
   started_at: '2026-05-17T00:00:00Z',
   uptime_seconds: 12,
 }
@@ -255,6 +261,19 @@ describe('mergeMessages', () => {
 })
 
 describe('normalizeDashboardRuntimeResolution fleet safety', () => {
+  it('preserves binary and checkout identities as separate runtime facts', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw())
+
+    expect(result?.build).toMatchObject({
+      commit: 'checkout-fallback',
+      commit_source: 'runtime_repo_head',
+      binary_commit: null,
+      binary_commit_source: null,
+      repo_head_commit: 'checkout-fallback',
+      repo_head_commit_source: 'runtime_repo_head',
+    })
+  })
+
   it('projects only the active stream and body timeout fields', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
       keeper_runtime: {

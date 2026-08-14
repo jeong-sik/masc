@@ -447,6 +447,11 @@ export interface DashboardNamespaceTruthResponse {
 export interface ServerBuildIdentity {
   release_version: string
   commit?: string | null
+  commit_source?: string | null
+  binary_commit?: string | null
+  binary_commit_source?: string | null
+  repo_head_commit?: string | null
+  repo_head_commit_source?: string | null
   started_at: string
   uptime_seconds: number
 }

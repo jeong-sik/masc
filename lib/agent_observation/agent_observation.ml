@@ -136,11 +136,17 @@ module Code_address = struct
 
   (* Same closed character set and leading-[..] guard as
      [path_segment_to_slug], so every slug [canonical_url_of_remote] can
-     emit is accepted and nothing outside that alphabet is. *)
+     emit is accepted and nothing outside that alphabet is. Structure is
+     part of the acceptance too: every canonical slug joins a host and at
+     least one path segment with ['_'], so a bare token ("github") is not
+     an address. Live proof 2026-08-14: minutes after the RFC-0378 cut a
+     bare-token scope probe passed this check and seeded a second store
+     directory beside the canonical one. *)
   let valid_codebase slug =
     not (String.equal slug ".")
     && not (String.length slug >= 2 && String.sub slug 0 2 = "..")
     && String.for_all is_slug_char slug
+    && String.contains slug '_'
   ;;
 
   let v ~codebase ~path =

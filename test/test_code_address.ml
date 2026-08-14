@@ -115,6 +115,10 @@ let () =
             "dot codebase"
             `Quick
             (check_rejected ~codebase:"." ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "bare token codebase"
+            `Quick
+            (check_rejected ~codebase:"github" ~path:"lib/x.ml" A.Malformed_codebase)
         ] )
     ]
 ;;

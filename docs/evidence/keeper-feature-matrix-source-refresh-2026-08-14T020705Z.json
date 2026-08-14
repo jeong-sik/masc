@@ -1,6 +1,7 @@
 {
   "schema": "masc.keeper_feature_matrix.source_refresh.v1",
   "captured_at": "2026-08-14T02:07:05Z",
+  "last_updated_at": "2026-08-14T02:27:20Z",
   "source_truth": {
     "upstream_main": "686007ea1d02002b201c881aea4b409a385c3b8b",
     "recent_merges": {
@@ -13,8 +14,24 @@
     "repair_pr": {
       "number": 28701,
       "head": "a3a3ef8c480b475fd0dd7a1c4c22bc33d188ae7d",
-      "state": "open_draft_mergeable_ci_running_adversarial_review",
-      "repair": "replace cancellation shield with cancellable exception-safe observer serialization"
+      "state": "open_draft_mergeable_clean_source_approved_exact_ci_pass",
+      "repair": "replace cancellation shield with cancellable exception-safe observer serialization",
+      "ci": {
+        "run_id": 31762643047,
+        "conclusion": "success",
+        "passed": [
+          "Build and Test",
+          "focused OCaml behavior suites",
+          "transport harness suite",
+          "contract harness suite",
+          "Meta Guards",
+          "Health",
+          "TLA+ Model Checking",
+          "CI Regression Gate",
+          "Keeper Real-World Gate",
+          "CI Gate"
+        ]
+      }
     },
     "matrix_pr": {
       "number": 28698,

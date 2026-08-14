@@ -45,22 +45,51 @@ let keeper_config_json (config : Workspace.config) (name : string)
       (`Not_found,
        `Assoc [ ("error", `String (Printf.sprintf "keeper %S not found" name)) ])
   | Ok (Some (m : Keeper_meta_contract.keeper_meta)) ->
+      let raw_meta = m in
       (* bootstrap_runtime is called at server startup — skip here to
          avoid blocking the HTTP handler with Eio.Mutex + file I/O (#3335). *)
-      let defaults, profile_config_error =
+      let effective_meta =
         match
           Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
             ~base_path:config.base_path
             m.name
         with
-        | Ok defaults -> defaults, None
+        | Ok defaults ->
+          (match Keeper_meta_contract.effective_meta_of_profile_defaults defaults m with
+           | Ok meta -> Ok (defaults, meta)
+           | Error detail ->
+             let keeper_path =
+               Option.value
+                 ~default:(Keeper_types_profile.keeper_meta_path config m.name)
+                 defaults.manifest_path
+             in
+             Error
+               { Keeper_types_profile.keeper_name = m.name
+               ; keeper_path
+               ; failing_path = keeper_path
+               ; kind = Keeper_types_profile.Profile_error
+               ; detail
+               })
         | Error error ->
-          ( Keeper_types_profile.empty_keeper_profile_defaults
-          , Some
-              (Keeper_types_profile.keeper_toml_config_error_of_load_error
-                 ~keeper_name:m.name
-                 error) )
+          Error
+            (Keeper_types_profile.keeper_toml_config_error_of_load_error
+               ~keeper_name:m.name
+               error)
       in
+      (match effective_meta with
+       | Error config_error ->
+         let body =
+           `Assoc
+             [ "name", `String raw_meta.name
+             ; "effective_config", `Null
+             ; ( "config_error"
+               , Keeper_types_profile.keeper_toml_config_error_to_json
+                   config_error )
+             ; "sources", source_provenance_json config raw_meta
+             ]
+         in
+         `OK, with_keeper_config_field_presence body
+       | Ok (defaults, m) ->
       let active_goals =
         List.filter_map
           (fun goal_id ->
@@ -278,21 +307,28 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ( "autonomous_wake_prompt",
            Json_util.string_opt_to_json
              defaults.Keeper_types_profile.autonomous_wake_prompt );
-         ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
-         ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
-         ("allowed_paths",
-           `List (List.map (fun s -> `String s) m.allowed_paths));
-	         ("effective_allowed_paths",
-	           `List (List.map (fun s -> `String s)
-	             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
-	         ("pipeline_stage", `String pipeline_stage);
-	         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
-	         ("pipeline_stage_detail", `String pipeline_stage_detail);
+         ( "sandbox_profile"
+         , `String
+             (Keeper_types_profile_sandbox.sandbox_profile_to_string
+                m.sandbox_profile) );
+         ( "network_mode"
+         , `String
+             (Keeper_types_profile_sandbox.network_mode_to_string
+                m.network_mode) );
+         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ( "allowed_paths"
+         , `List (List.map (fun s -> `String s) m.allowed_paths) );
+         ( "effective_allowed_paths"
+         , `List
+             (List.map
+                (fun s -> `String s)
+                (Keeper_alerting_path.effective_allowed_paths ~meta:m)) );
+         ("pipeline_stage", `String pipeline_stage);
+         ("lifecycle_phase", Json_util.string_opt_to_json lifecycle_phase);
+         ("pipeline_stage_detail", `String pipeline_stage_detail);
 	         ("state_diagram", `String state_diagram);
          ( "config_error",
-           Json_util.option_to_yojson
-             Keeper_types_profile.keeper_toml_config_error_to_json
-             profile_config_error );
+           `Null );
          ("prompt", prompt);
          ("execution", execution);
          ("proactive", proactive);
@@ -301,11 +337,11 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);
          ("workspace", workspace);
-         ("sources", source_provenance_json config m);
+         ("sources", source_provenance_json config raw_meta);
          ("metrics", metrics);
        ]
       in
-      (`OK, with_keeper_config_field_presence body)
+      (`OK, with_keeper_config_field_presence body))
 
 (** Per-keeper cost/latency aggregates for the O4 cost dashboard.
 

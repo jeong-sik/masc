@@ -193,6 +193,13 @@ module For_testing : sig
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
 
+  val apply_official_client_accept :
+    runtime_id:string ->
+    accept:(Agent_core.Types.api_response -> bool) ->
+    terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
+    Runtime_agent.run_result ->
+    (Runtime_agent.run_result, Agent_core.Error.t) result
+
   val first_runtime_after_modality_reroute :
     keeper_name:string ->
     assignment_id:string ->

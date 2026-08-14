@@ -80,6 +80,19 @@ let selected_runtime_result (runtime : Runtime.t) result =
     result
 ;;
 
+let apply_official_client_accept ~runtime_id ~accept ~terminal_effect_state
+    (run_result : Runtime_agent.run_result) =
+  match run_result.stop_reason, terminal_effect_state () with
+  | ( Runtime_agent.Completed
+    , Keeper_tools_agent_core.Terminal_effect_completed _ ) ->
+    Ok run_result
+  | _ ->
+    Keeper_turn_driver_try_provider.apply_accept
+      ~runtime_id
+      ~accept
+      run_result
+;;
+
 type deferred_runtime_lane =
   { assignment_id : string
   ; failed_runtime_id : string
@@ -932,14 +945,16 @@ let run_named
                  when String.trim text = "" ->
                  Ok run_result
                | _ ->
-                 Keeper_turn_driver_try_provider.apply_accept
+                 apply_official_client_accept
                    ~runtime_id:attempt_runtime_id
                    ~accept
+                   ~terminal_effect_state
                    run_result)
             | Keeper_codex_runtime.No_successful_tool_completion ->
-              Keeper_turn_driver_try_provider.apply_accept
+              apply_official_client_accept
                 ~runtime_id:attempt_runtime_id
                 ~accept
+                ~terminal_effect_state
                 run_result)
         in
         (match codex_result with
@@ -1013,9 +1028,10 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let antigravity_result =
           Result.bind antigravity_attempt.result (fun run_result ->
-            Keeper_turn_driver_try_provider.apply_accept
+            apply_official_client_accept
               ~runtime_id:attempt_runtime_id
               ~accept
+              ~terminal_effect_state
               run_result)
         in
         (match antigravity_result with
@@ -1093,9 +1109,10 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let claude_result =
           Result.bind claude_attempt.result (fun run_result ->
-            Keeper_turn_driver_try_provider.apply_accept
+            apply_official_client_accept
               ~runtime_id:attempt_runtime_id
               ~accept
+              ~terminal_effect_state
               run_result)
         in
         (match claude_result with
@@ -1265,6 +1282,7 @@ module For_testing = struct
     resolve_runtime_candidate_for_attempt
 
   let selected_runtime_result = selected_runtime_result
+  let apply_official_client_accept = apply_official_client_accept
 
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
 	  let attempt_inference_policy = attempt_inference_policy

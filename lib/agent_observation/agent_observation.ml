@@ -143,10 +143,31 @@ module Code_address = struct
      bare-token scope probe passed this check and seeded a second store
      directory beside the canonical one. *)
   let valid_codebase slug =
-    not (String.equal slug ".")
+    (* [canonical_url_of_remote] joins a non-empty host and at least one
+       non-empty repository path segment with [_]. Requiring both the join
+       marker and the shortest possible [a_b] shape keeps callers from
+       inventing host-only partitions that the resolver can never emit. *)
+    let joins =
+      String.fold_left
+        (fun count char -> if Char.equal char '_' then count + 1 else count)
+        0
+        slug
+    in
+    let single_join_suffix_is_dotdot =
+      match String.index_opt slug '_' with
+      | Some join when joins = 1 && String.length slug - join - 1 >= 2 ->
+        String.sub slug (join + 1) 2 = ".."
+      | Some _ | None -> false
+    in
+    let rec has_interior_join index =
+      index < String.length slug - 1
+      && (Char.equal slug.[index] '_' || has_interior_join (index + 1))
+    in
+    String.length slug >= 3
+    && has_interior_join 1
+    && not single_join_suffix_is_dotdot
     && not (String.length slug >= 2 && String.sub slug 0 2 = "..")
     && String.for_all is_slug_char slug
-    && String.contains slug '_'
   ;;
 
   let v ~codebase ~path =

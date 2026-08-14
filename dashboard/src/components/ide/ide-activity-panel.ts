@@ -4,6 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useSignalValue, useStoreSubscription } from './use-signal-value'
 import { get } from '../../api/core'
 import { fetchIdeEvents, type IdeBridgeEvent } from '../../api/ide'
+import {
+  fetchKeeperTurnRecords,
+  type TurnRecordRow,
+} from '../../api/dashboard-turn-records'
 import { asRecord, isPositiveSafeInteger } from '../common/normalize'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
@@ -243,23 +247,30 @@ interface BridgeFetchResult {
 }
 
 /**
- * Repo-scoped events cover file-attributed observations; the keeper lane
- * covers turn/coordination events that carry no file and live in the
- * repo-unattributed bucket, unreachable through any repo scope. Both
- * sources are queried, and a failure in either is reported through
- * [ok=false] rather than silently collapsing to an empty feed.
+ * Repo-scoped events cover addressed code observations. Keeper turns are
+ * projected from their durable turn-record store; the IDE observation store
+ * deliberately stopped persisting a second copy in RFC-0378 B. A failure in
+ * either source is reported through [ok=false] rather than silently
+ * collapsing to an empty feed.
  */
 async function fetchIdeBridgeRunActivityEvents(
   workspaceId: string,
   repoId?: string | null,
   keeperLane?: string | null,
 ): Promise<BridgeFetchResult> {
-  const sources: Array<Promise<ReadonlyArray<IdeBridgeEvent>>> = []
+  const sources: Array<Promise<ReadonlyArray<RunActivityEvent>>> = []
   const repo = repoId?.trim()
-  if (repo) sources.push(fetchIdeEvents({ limit: 50, repoId: repo }))
+  if (repo) {
+    sources.push(
+      fetchIdeEvents({ limit: 50, repoId: repo })
+        .then(events => events.map((event, index) =>
+          mapIdeBridgeEvent(event, workspaceId, index),
+        )),
+    )
+  }
   const lane = keeperLane?.trim()
   if (lane) {
-    sources.push(fetchIdeEvents({ limit: 50, scope: { kind: 'keeper_lane', keeperId: lane } }))
+    sources.push(fetchKeeperTurnActivityEvents(workspaceId, lane))
   }
   // Neither scope is set: there is nothing to query, not a request that
   // happened to find zero events. The caller derives the visible no-scope
@@ -271,13 +282,47 @@ async function fetchIdeBridgeRunActivityEvents(
   for (const result of settled) {
     if (result.status === 'fulfilled') {
       for (const event of result.value) {
-        events.push(mapIdeBridgeEvent(event, workspaceId, events.length))
+        events.push(event)
       }
     } else {
       ok = false
     }
   }
   return { events, ok }
+}
+
+async function fetchKeeperTurnActivityEvents(
+  workspaceId: string,
+  keeperId: string,
+): Promise<ReadonlyArray<RunActivityEvent>> {
+  const response = await fetchKeeperTurnRecords(keeperId, 50)
+  return response.entries.map(row => mapKeeperTurnRecord(row, workspaceId))
+}
+
+function mapKeeperTurnRecord(
+  row: TurnRecordRow,
+  workspaceId: string,
+): RunActivityEvent {
+  const record = row.record
+  const detail = [record.finish_reason, record.model]
+    .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    .join(' · ')
+  const context: MutableRunActivityContext = { log_id: record.turn_ref }
+  if (record.raw_trace_run_ref?.worker_run_id) {
+    context.worker_run_id = record.raw_trace_run_ref.worker_run_id
+  }
+  return {
+    id: `turn-record-${record.turn_ref}`,
+    run_id: workspaceId,
+    timestamp_ms: record.ts * 1_000,
+    keeper_id: record.keeper,
+    verb: 'noted',
+    target: `turn:${record.absolute_turn}`,
+    detail: detail || record.turn_kind,
+    kind: 'keeper.turn_record.completed',
+    tags: [`turn:${record.turn_ref}`, `turn-kind:${record.turn_kind}`],
+    context,
+  }
 }
 
 function mergeRunActivityEvents(

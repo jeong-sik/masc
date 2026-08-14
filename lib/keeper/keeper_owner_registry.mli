@@ -126,12 +126,17 @@ val commit_turn_runtime
     to the actor's current snapshot; callers cannot overwrite the record. *)
 
 val create_meta
-  :  base_path:string
+  :  ?intake_token:Keeper_shutdown_intake_fence.intake_token
+  -> base_path:string
   -> Keeper_meta_contract.keeper_meta
   -> (Keeper_meta_contract.keeper_meta option, command_error) result
-(** Install an empty actor for a new Keeper, then commit its first snapshot via
-    the closed [Create] command.  A failed commit leaves the empty actor in
-    place so same-name retries remain mailbox-linearized. *)
+(** Under the durable-intake fence, install an empty actor for a new Keeper,
+    then commit its first snapshot via the closed [Create] command. A failed
+    commit leaves the empty actor in place so same-name retries remain
+    mailbox-linearized. An active shutdown reservation rejects creation before
+    an empty actor is installed. When [intake_token] is supplied, the caller's
+    already-open exact-name intake transaction is reused instead of reacquiring
+    the same fence. *)
 
 val exact_operation
   :  base_path:string

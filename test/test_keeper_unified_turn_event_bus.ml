@@ -10,11 +10,11 @@ module EB = Masc.Keeper_unified_turn_event_bus
 
 let dummy_event payload =
   { Agent_core.Event_bus.meta =
-      { correlation_id = "c"
-      ; run_id = "r"
-      ; ts = 0.0
-      ; caused_by = None
-      }
+      Agent_core.Event_bus.mk_envelope
+        ~event_id:"event"
+        ~correlation_id:"c"
+        ~run_id:"r"
+        ()
   ; payload
   }
 ;;

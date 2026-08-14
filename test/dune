@@ -212,6 +212,7 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
+  test_keeper_create_admission_transaction
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -511,6 +512,7 @@
   test_keeper_playground_checkout_discovery
   test_keeper_meta_cwd_resilience
   test_keeper_effective_meta_overlay
+  test_keeper_create_admission_transaction
   test_metrics_rotation
   test_tool_error
   test_tool_token
@@ -2010,6 +2012,8 @@
 
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
 
+(include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
+
 (include stanzas/test_log_file_sink_self_heal.inc)
 
 (include stanzas/test_limit_schema_widen.inc)
@@ -2017,6 +2021,8 @@
 (include stanzas/test_parse_outcome.inc)
 
 (include stanzas/test_pr_open_script.inc)
+
+(include stanzas/test_pr_sync_script.inc)
 
 
 (include stanzas/test_release_train_guard_script.inc)

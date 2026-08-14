@@ -68,7 +68,7 @@ type t =
   ; blocks : prompt_block list
   ; input_components : input_component list option
   ; runtime_profile : string
-  ; model : string option
+  ; selected_model : string option
   ; finish_reason : string option
   ; context_window : int option
   ; price_input_per_million : float option
@@ -165,7 +165,7 @@ let to_json (r : t) : Yojson.Safe.t =
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
          | None -> `Null )
      ]
-    @ opt_field "model" (fun v -> `String v) r.model
+    @ opt_field "selected_model" (fun v -> `String v) r.selected_model
     @ opt_field "finish_reason" (fun v -> `String v) r.finish_reason
     @ opt_field "context_window" (fun v -> `Int v) r.context_window
     @ opt_field "price_input_per_million" (fun v -> `Float v) r.price_input_per_million
@@ -426,7 +426,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "request_runtime_profile"
             ; "request_body_bytes"
             ; "raw_trace_run_ref"
-            ; "model"
+            ; "selected_model"
             ; "finish_reason"
             ; "context_window"
             ; "price_input_per_million"
@@ -532,7 +532,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
           in
           Ok (Some run_ref)
       in
-      let* model = opt_member "model" fields as_string in
+      let* selected_model = opt_member "selected_model" fields as_nonempty_string in
       let* finish_reason = opt_member "finish_reason" fields as_string in
       let* context_window = opt_member "context_window" fields as_int in
       let* price_input_per_million = opt_member "price_input_per_million" fields as_float in
@@ -566,7 +566,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         ; blocks
         ; input_components
         ; runtime_profile
-        ; model
+        ; selected_model
         ; finish_reason
         ; context_window
         ; price_input_per_million

@@ -438,7 +438,7 @@ function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number | null, tokIn:
     : `미상   (${tokIn.toLocaleString()} / 미상 tok, runtime 미구성)`
   return `# world snapshot
 fsm.state      = n/a
-model          = ${record.model ?? 'n/a'}
+selected model = ${record.selected_model ?? 'n/a'}
 finish_reason  = ${record.finish_reason ?? 'n/a'}
 ctx.window     = ${ctxLine}
 keeper.turn    = T${record.absolute_turn}
@@ -970,7 +970,7 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
       </div>
       <div class="kti-sec-h" style=${{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
       <div class="kti-kv">
-        <span class="k">model</span><span class="v">${record.model ?? 'n/a'}</span>
+        <span class="k">selected model</span><span class="v">${record.selected_model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
         <span class="k">fsm.state</span><span class="v">n/a</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>

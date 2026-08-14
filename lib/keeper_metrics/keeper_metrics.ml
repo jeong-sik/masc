@@ -136,6 +136,7 @@ type t =
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
+  | MemoryLaneRejectedDraining
   | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight
@@ -203,9 +204,6 @@ type t =
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
-      (* counter: RFC-0320 W3c continuation delivery outcome; label=outcome_tag
-         (Delivered/Skipped_unrouted/Skipped_already_replied/Skipped_empty/Failed).
-         G5 observability — a dropped/unrouted continuation must never be silent. *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -347,6 +345,8 @@ let to_string = function
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
   | MemoryLaneRanInline -> "masc_keeper_memory_lane_ran_inline_total"
   | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
+  | MemoryLaneRejectedDraining ->
+    "masc_keeper_memory_lane_rejected_draining_total"
   | MemoryLaneCoalesced -> "masc_keeper_memory_lane_coalesced_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"

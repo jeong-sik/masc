@@ -92,11 +92,14 @@ normal_targets=(
   @test/runtest-test_file_kind_vocabulary
   @test/runtest-test_http_auth_strict_flag
   @test/runtest-test_keeper_chat_broadcast
+  @test/runtest-test_keeper_memory_lane
   @test/runtest-test_server_dashboard_http_keeper_chat_page
   @test/runtest-test_keeper_codex_effort_clamp
   @test/runtest-test_keeper_codex_error_carriage
   @test/runtest-test_keeper_persistence_span_history
   @test/runtest-test_keeper_rotation_eligibility_census
+  @test/runtest-test_keeper_shutdown_ownerless_admission_release
+  @test/runtest-test_keeper_create_admission_transaction
   @test/runtest-test_keeper_toml_accessor_matrix
   @test/runtest-test_keeper_turn_dispatch_authority
   @test/runtest-test_runtime_quota_window
@@ -208,6 +211,7 @@ normal_targets=(
   @test/runtest-test_tool_call_quality_benchmark
   @test/runtest-test_client_identity
   @test/runtest-test_mcp_session_task_lifecycle
+  @test/runtest-test_mcp_server_eio
   @test/runtest-test_keeper_sandbox_docker_cwd_response
   @test/runtest-test_goal_store
   @test/runtest-test_keeper_goal_phase_projection

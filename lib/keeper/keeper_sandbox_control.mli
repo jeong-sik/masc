@@ -56,6 +56,21 @@ val repository_checkouts_json :
     checkout directory; freshness is measured against the local tracking ref.
     Missing or ambiguous evidence is returned as an explicit typed state. *)
 
+module For_testing : sig
+  val repository_checkouts_json_with_budget :
+    inspection_budget_sec:float ->
+    config:Workspace.config ->
+    meta:keeper_meta ->
+    Yojson.Safe.t
+
+  val repository_checkouts_json_with_budget_after_discovery :
+    before_git_inspection:(unit -> unit) ->
+    inspection_budget_sec:float ->
+    config:Workspace.config ->
+    meta:keeper_meta ->
+    Yojson.Safe.t
+end
+
 val live_status_json :
   ?include_preflight:bool ->
   ?preflight_override:Yojson.Safe.t option ->

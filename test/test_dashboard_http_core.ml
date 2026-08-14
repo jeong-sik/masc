@@ -173,6 +173,11 @@ let test_keeper_sensitive_get_permissions_are_exact () =
     [ "raw-traces"; "raw-trace"; "memory-journal" ];
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/idealist/checkpoints" = Some Masc_domain.CanAdmin);
+  check bool "turn records require authenticated state read" true
+    (permission "/api/v1/keepers/idealist/turn-records"
+     = Some Masc_domain.CanReadState);
+  check bool "turn records route rejects trailing segment" true
+    (permission "/api/v1/keepers/idealist/turn-records/extra" = None);
   check bool "ordinary keeper read stays public" true
     (permission "/api/v1/keepers/idealist/trajectory" = None)
 
@@ -182,6 +187,13 @@ let test_internal_exact_lane_registry_is_admin_only () =
     true
     (Server_routes_http_routes_dashboard.For_testing.exact_lane_run_permission
      = Masc_domain.CanAdmin)
+
+let test_runtime_probe_route_owns_read_permission () =
+  check bool
+    "metadata-only runtime probe remains a read route"
+    true
+    (Server_routes_http_routes_dashboard.For_testing.runtime_probe_read_permission
+     = Masc_domain.CanReadState)
 
 let test_event_queue_operator_routes_are_exact () =
   check (option string) "event operator route is exact" (Some "idealist")
@@ -1445,6 +1457,37 @@ let test_scheduled_automation_reads_its_cache_key () =
         "scheduled-automation is served from its cache key"
         (cache_sentinel cache_key)
         (Server_dashboard_http.dashboard_scheduled_automation_http_json ~config))
+
+(* The exact lookup answers with a closed status, so a blank id is a named
+   outcome rather than a not_found that reads like "no such schedule". Pin the
+   two the caller can reach without a store: an empty id is invalid_id, and the
+   projection stays a function of the clock it is handed. *)
+let test_schedule_exact_lookup_rejects_blank_id () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let now = 1_700_000_000.0 in
+  let body =
+    Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+      config
+      ~now
+      ~schedule_id:"   "
+  in
+  let field name =
+    match body with
+    | `Assoc fields ->
+      (match List.assoc_opt name fields with Some (`String s) -> Some s | _ -> None)
+    | _ -> None
+  in
+  check (option string) "blank id is named, not not_found" (Some "invalid_id") (field "status");
+  check
+    (option string)
+    "the echoed id is the caller's, untrimmed"
+    (Some "   ")
+    (field "schedule_id");
+  check
+    (option string)
+    "generated_at uses the same injected projection clock"
+    (Some (Masc_domain.iso8601_of_unix_seconds now))
+    (field "generated_at")
 
 (* The window selects which rows the scan covers, so two windows must not share
    an entry. Seeding only the 24 h key and asking for 1 h has to miss. *)
@@ -3615,6 +3658,8 @@ let () =
             test_keeper_sensitive_get_permissions_are_exact;
           test_case "internal exact lane registry is Admin-only" `Quick
             test_internal_exact_lane_registry_is_admin_only;
+          test_case "runtime probe route owns read permission" `Quick
+            test_runtime_probe_route_owns_read_permission;
           test_case "event queue operator routes are exact" `Quick
             test_event_queue_operator_routes_are_exact;
           test_case "event operator keeps exact source refs across queue changes" `Quick
@@ -3645,6 +3690,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_submission_index;
           test_case "scheduled-automation reads its cache key" `Quick
             test_scheduled_automation_reads_its_cache_key;
+          test_case "schedule exact lookup names a blank id" `Quick
+            test_schedule_exact_lookup_rejects_blank_id;
           test_case "agent-activity keys on its window" `Quick
             test_agent_activity_keys_on_its_window;
           test_case "execution trust uses narrow Keeper projection" `Quick

@@ -19,6 +19,7 @@ let append_decision_record
     ~(observation : Keeper_world_observation.world_observation)
     ~(latency_ms : int)
     ~(outcome : string)
+    ?channel
     ?(degraded_retry_applied = false)
     ?degraded_retry_runtime
     ?fallback_reason
@@ -28,6 +29,11 @@ let append_decision_record
     ?terminal_reason
     () : unit =
   let now_ts = Time_compat.now () in
+  let channel =
+    Option.value
+      ~default:(decision_channel_of_observation observation)
+      channel
+  in
   let claimable_task_count = Keeper_world_observation.claimable_task_count observation in
   let trigger_signals = observed_triggers_of_observation observation in
   let affordances = observed_affordances_of_observation observation in
@@ -143,7 +149,7 @@ let append_decision_record
         ( "channel",
           `String
             (Keeper_world_observation.channel_to_string
-               (decision_channel_of_observation observation)) );
+               channel) );
         ("outcome", `String outcome);
         ("degraded_retry_applied", `Bool degraded_retry_applied);
         ( "degraded_retry_runtime",

@@ -201,6 +201,7 @@ let authorize_durable_intake_owner ~base_path ~keeper_name =
        | Keeper_shutdown_types.Retain_dead_tombstone -> false)
     | Keeper_shutdown_types.Finalized { meta_removed = false; _ }
     | Keeper_shutdown_types.Prepared
+    | Keeper_shutdown_types.Joining_lanes
     | Keeper_shutdown_types.Joined_idle
     | Keeper_shutdown_types.Finalizing_tasks _
     | Keeper_shutdown_types.Cleanup_ready _

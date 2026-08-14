@@ -14,6 +14,11 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { DashboardScheduledAutomation } from '../../api'
+import {
+  fetchDashboardScheduledAutomationLookup,
+  type DashboardScheduledAutomationLookup,
+} from '../../api/dashboard-scheduled-automation'
+import { replaceRoute, route } from '../../router'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
 import { StatusChip } from '../common/status-chip'
@@ -43,6 +48,12 @@ import {
 import { pruneSchedules } from '../../api/dashboard-schedule'
 
 type ScheduleView = 'calendar' | 'list'
+
+type ExactScheduleState =
+  | { kind: 'idle' }
+  | { kind: 'loading'; scheduleId: string }
+  | { kind: 'resolved'; lookup: DashboardScheduledAutomationLookup }
+  | { kind: 'failed'; scheduleId: string; reason: string }
 
 function countLabel(count: number | null): string {
   return count === null ? '—' : count.toLocaleString()
@@ -97,6 +108,10 @@ export function ScheduleSurface() {
     ? null
     : dueCount + runningCount
   const requests = automation?.requests ?? []
+  const routeScheduleId = route.value.params.schedule_id ?? null
+  const inPageRequest = routeScheduleId === null
+    ? null
+    : requests.find(request => request.schedule_id === routeScheduleId) ?? null
   const totalCount = page?.totalCount ?? null
   const cadCounts = cadenceCounts(requests)
   // Scheduled keeper wakes that were dispatched but are in neither queue AND
@@ -106,9 +121,8 @@ export function ScheduleSurface() {
   const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
   const [pruning, setPruning] = useState(false)
-  // Detail-overlay selection is lifted here so the calendar view, the list
-  // panel, and the operations aside all drive the same overlay.
-  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+  const selectedScheduleId = routeScheduleId
+  const [exactSchedule, setExactSchedule] = useState<ExactScheduleState>({ kind: 'idle' })
   // Keeper-lane wake evidence + background are large operator diagnostics
   // (a card per keeper, dozens of lane rows). Collapsed AND unmounted by default
   // so the schedule stays the light, primary content; the panels only mount when
@@ -122,10 +136,43 @@ export function ScheduleSurface() {
     return stopScheduleRefresh
   }, [])
 
+  useEffect(() => {
+    if (
+      selectedScheduleId === null
+      || projection?.state !== 'available'
+      || inPageRequest !== null
+    ) {
+      setExactSchedule({ kind: 'idle' })
+      return
+    }
+    const controller = new AbortController()
+    setExactSchedule({ kind: 'loading', scheduleId: selectedScheduleId })
+    void fetchDashboardScheduledAutomationLookup(selectedScheduleId, {
+      signal: controller.signal,
+    })
+      .then(lookup => { setExactSchedule({ kind: 'resolved', lookup }) })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return
+        setExactSchedule({
+          kind: 'failed',
+          scheduleId: selectedScheduleId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      })
+    return () => { controller.abort() }
+  }, [selectedScheduleId, projection?.state, inPageRequest !== null])
+
+  function selectSchedule(scheduleId: string | null) {
+    const params = { ...route.value.params }
+    if (scheduleId === null) delete params.schedule_id
+    else params.schedule_id = scheduleId
+    replaceRoute('schedule', params)
+  }
+
   function switchView(next: ScheduleView) {
     // Clear selection so a drawer opened in one view does not linger into the
     // other (the list panel renders its own overlay from the same id).
-    setSelectedScheduleId(null)
+    selectSchedule(null)
     setView(next)
   }
 
@@ -152,10 +199,33 @@ export function ScheduleSurface() {
   }
   // In the calendar view the list panel is unmounted, so the surface owns the
   // overlay; the list panel renders its own overlay from the same selection.
-  const selectedRequest =
-    view === 'calendar' && selectedScheduleId
-      ? requests.find(request => request.schedule_id === selectedScheduleId) ?? null
+  const exactRequest =
+    exactSchedule.kind === 'resolved'
+    && exactSchedule.lookup.status === 'found'
+    && exactSchedule.lookup.scheduleId === selectedScheduleId
+      ? exactSchedule.lookup.request
       : null
+  const selectedRequest =
+    view === 'calendar' && selectedScheduleId !== null
+      ? inPageRequest ?? exactRequest
+      : null
+  const exactLookupMessage = (() => {
+    if (selectedScheduleId === null) return null
+    if (exactSchedule.kind === 'loading' && exactSchedule.scheduleId === selectedScheduleId) {
+      return '정확한 예약을 조회하는 중입니다.'
+    }
+    if (exactSchedule.kind === 'failed' && exactSchedule.scheduleId === selectedScheduleId) {
+      return exactSchedule.reason
+    }
+    if (
+      exactSchedule.kind !== 'resolved'
+      || exactSchedule.lookup.scheduleId !== selectedScheduleId
+      || exactSchedule.lookup.status === 'found'
+    ) return null
+    return exactSchedule.lookup.status === 'not_found'
+      ? 'schedule store에서 정확한 예약을 찾지 못했습니다.'
+      : exactSchedule.lookup.reason
+  })()
 
   return html`
     <main class="ov ov-2col sch-surf" data-screen-label="예약" data-testid="schedule-surface">
@@ -216,6 +286,14 @@ export function ScheduleSurface() {
             `
           : null}
 
+        ${exactLookupMessage
+          ? html`
+              <div class="ov-card mb-3 text-xs text-[var(--color-fg-muted)]" data-testid="schedule-exact-lookup-status">
+                <span class="mono">${selectedScheduleId}</span> · ${exactLookupMessage}
+              </div>
+            `
+          : null}
+
         ${blockingError
           ? html`
               <div class="ov-card mb-4 text-sm text-[var(--color-fg-muted)]" data-testid="schedule-ledger-unknown">
@@ -253,13 +331,14 @@ export function ScheduleSurface() {
                 requests=${requests}
                 nowMs=${Date.now()}
                 cadenceFilter=${cadenceFilter}
-                onOpen=${setSelectedScheduleId}
+                onOpen=${selectSchedule}
               />`
             : html`<${ScheduledAutomationPanel}
                 automation=${automation ? filterAutomationByCadence(automation, cadenceFilter) : automation}
                 variant="v2"
                 selectedScheduleId=${selectedScheduleId}
-                onSelectSchedule=${setSelectedScheduleId}
+                selectedRequest=${inPageRequest ?? exactRequest}
+                onSelectSchedule=${selectSchedule}
               />`}
 
         ${'' /* Secondary diagnostics live BELOW the schedule and are unmounted
@@ -307,13 +386,13 @@ export function ScheduleSurface() {
         ? html`<${ScheduleAside}
             requests=${automation.requests ?? []}
             sum=${{ scheduled: scheduledCount, dueRunning, total: totalCount }}
-            onOpen=${setSelectedScheduleId}
+            onOpen=${selectSchedule}
           />`
         : null}
       ${selectedRequest
         ? html`<${SchDetail}
             request=${selectedRequest}
-            onClose=${() => setSelectedScheduleId(null)}
+            onClose=${() => selectSchedule(null)}
           />`
         : null}
     </main>

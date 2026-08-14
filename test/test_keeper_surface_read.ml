@@ -35,7 +35,7 @@ let msg ?ts ?lane ?speaker ~role content : Store.chat_message =
     kind = Store.Row_kind.Utterance;
     turn_ref = None;
     stream_lifecycle = None;
-    delivery_key = None;
+    delivery_provenance = None;
   }
 
 let external_speaker ?name id : Store.speaker =

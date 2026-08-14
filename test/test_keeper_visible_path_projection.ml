@@ -250,6 +250,78 @@ let test_repository_checkout_projection_ignores_symlinked_directory () =
   Alcotest.(check int) "symlink checkout excluded" 0 (List.length entries)
 ;;
 
+let test_repository_checkout_projection_shares_inspection_budget () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let fake_bin = Filename.concat playground "fake-bin" in
+  ensure_dir fake_bin;
+  let fake_git = Filename.concat fake_bin "git" in
+  write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+  Unix.chmod fake_git 0o755;
+  List.iter
+    (fun name ->
+       ensure_dir (Filename.concat playground ("repos/" ^ name ^ "/.git")))
+    [ "stalled-a"; "stalled-b" ];
+  let old_path = Sys.getenv "PATH" in
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv "PATH" old_path)
+    (fun () ->
+       Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+       let started_at = Unix.gettimeofday () in
+       let projection =
+         Keeper_sandbox_control.For_testing.repository_checkouts_json_with_budget
+           ~inspection_budget_sec:0.2
+           ~config
+           ~meta
+       in
+       let elapsed = Unix.gettimeofday () -. started_at in
+       Alcotest.(check string)
+         "projection reports the exhausted request budget"
+         "inspection_budget_exhausted"
+         (projection |> Json.member "state" |> Json.to_string);
+       Alcotest.(check int)
+         "both checkout identities remain visible"
+         2
+         (projection |> Json.member "entries" |> Json.to_list |> List.length);
+       Alcotest.(check bool)
+         "two stalled checkouts share one wall-clock budget"
+         true
+         (elapsed < 1.0))
+;;
+
+let test_repository_checkout_budget_starts_after_discovery () =
+  setup
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let checkout = Filename.concat playground "repos/fast-checkout" in
+  ensure_dir checkout;
+  ignore (run_git_or_fail ~cwd:checkout [ "init"; "-b"; "main" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.email"; "test@example.com" ]);
+  ignore (run_git_or_fail ~cwd:checkout [ "config"; "user.name"; "Test" ]);
+  ignore
+    (run_git_or_fail ~cwd:checkout [ "commit"; "--allow-empty"; "-m"; "initial" ]);
+  ignore
+    (run_git_or_fail
+       ~cwd:checkout
+       [ "remote"; "add"; "origin"; "https://example.invalid/fast-checkout.git" ]);
+  let projection =
+    Keeper_sandbox_control.For_testing
+    .repository_checkouts_json_with_budget_after_discovery
+      ~before_git_inspection:(fun () -> Unix.sleepf 0.6)
+      ~inspection_budget_sec:0.5
+      ~config
+      ~meta
+  in
+  Alcotest.(check string)
+    "catalog and filesystem discovery do not spend Git inspection budget"
+    "available"
+    (projection |> Json.member "state" |> Json.to_string);
+  let entry = projection |> Json.member "entries" |> Json.to_list |> List.hd in
+  Alcotest.(check string)
+    "fast checkout remains inspectable after slow discovery"
+    "available"
+    (entry |> Json.member "inspection_state" |> Json.to_string)
+;;
+
 let test_visible_scratch_read_resolves_to_private_storage () =
   setup
   @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
@@ -577,6 +649,14 @@ let () =
             "ignores symlinked checkout directories"
             `Quick
             test_repository_checkout_projection_ignores_symlinked_directory
+        ; Alcotest.test_case
+            "shares one inspection budget across checkouts"
+            `Quick
+            test_repository_checkout_projection_shares_inspection_budget
+        ; Alcotest.test_case
+            "starts inspection budget after discovery"
+            `Quick
+            test_repository_checkout_budget_starts_after_discovery
         ] )
     ]
 ;;

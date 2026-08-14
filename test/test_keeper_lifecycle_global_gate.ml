@@ -348,6 +348,71 @@ let test_durable_demand_does_not_require_proactive () =
      | Readiness.Unknown _ -> false)
 ;;
 
+let test_durable_demand_bypasses_autoboot_only_for_live_running_owner () =
+  without_overrides @@ fun () ->
+  let autoboot_disabled = { (ready_meta ()) with autoboot_enabled = false } in
+  let classify ?(shutdown_operation_id = None) runtime =
+    Readiness.classify_durable_demand_execution
+      ~shutdown_operation_id
+      ~runtime
+      (Ok autoboot_disabled)
+  in
+  check bool "live running owner accepts persisted demand" true
+    (match
+       classify (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+     with
+     | Readiness.Executable -> true
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false);
+  let remains_autoboot_disabled runtime =
+    match classify runtime with
+    | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
+    | Readiness.Executable
+    | Readiness.Recoverable
+    | Readiness.Retained_disabled _
+    | Readiness.Paused_dead _
+    | Readiness.Shutdown_fenced _
+    | Readiness.Unknown _ -> false
+  in
+  check bool "absent owner is not autobooted" true
+    (remains_autoboot_disabled Readiness.Owner_unregistered);
+  check bool "dead fiber is not treated as executable" true
+    (remains_autoboot_disabled
+       (owner_runtime ~phase:State_machine.Running ~live_fiber:false));
+  check bool "terminal owner is not treated as executable" true
+    (remains_autoboot_disabled
+       (owner_runtime ~phase:State_machine.Stopped ~live_fiber:true));
+  let operation_id = Shutdown_types.Operation_id.generate () in
+  check bool "shutdown fence still dominates the live-owner exception" true
+    (match
+       classify
+         ~shutdown_operation_id:(Some operation_id)
+         (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+     with
+     | Readiness.Shutdown_fenced actual ->
+       Shutdown_types.Operation_id.equal operation_id actual
+     | Readiness.Executable
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Unknown _ -> false);
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
+  check bool "global autonomous kill-switch still dominates" true
+    (match
+       classify (owner_runtime ~phase:State_machine.Running ~live_fiber:true)
+     with
+     | Readiness.Retained_disabled Readiness.Retained_autoboot_disabled -> true
+     | Readiness.Executable
+     | Readiness.Recoverable
+     | Readiness.Retained_disabled _
+     | Readiness.Paused_dead _
+     | Readiness.Shutdown_fenced _
+     | Readiness.Unknown _ -> false)
+;;
+
 let test_owner_execution_shutdown_fence_blocks_boot () =
   without_overrides @@ fun () ->
   let operation_id = Shutdown_types.Operation_id.generate () in
@@ -588,6 +653,8 @@ let () =
             test_owner_execution_requires_live_fiber
         ; test_case "durable demand bypasses proactive policy" `Quick
             test_durable_demand_does_not_require_proactive
+        ; test_case "durable demand bypasses autoboot only for live owner" `Quick
+            test_durable_demand_bypasses_autoboot_only_for_live_running_owner
         ; test_case "shutdown fence blocks boot" `Quick
             test_owner_execution_shutdown_fence_blocks_boot
         ; test_case "unknown owner truth fails closed" `Quick

@@ -32,16 +32,16 @@ let advance_outcome_label = function
    [Error] because the fetch itself succeeded and refs are current. *)
 let advance_working_tree ~repository : advance_outcome =
   let target_ref = "origin/" ^ repository.default_branch in
-  match Repo_git.ahead_behind ~repository ~target_ref with
+  match Repo_git.ahead_behind ~repository ~target_ref () with
   | Error reason -> Advance_inspect_failed { reason }
   | Ok (0, _ahead) -> Already_current
   | Ok (behind, _ahead) -> (
-      match Repo_git.current_branch ~repository with
+      match Repo_git.current_branch ~repository () with
       | Error reason -> Advance_inspect_failed { reason }
       | Ok current when not (String.equal current repository.default_branch) ->
           Skipped_not_on_default_branch { current }
       | Ok _default -> (
-          match Repo_git.status_summary ~repository with
+          match Repo_git.status_summary ~repository () with
           | Error reason -> Advance_inspect_failed { reason }
           | Ok summary
             when summary.Repo_git.staged_files > 0

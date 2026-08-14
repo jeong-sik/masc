@@ -14,7 +14,7 @@
 추가 지표:
 
 - `initialize + notifications/initialized` 세션 생성 비용은 별도 추적
-- raw local runtime 비용은 `masc_runtime_verify`로 MCP read-path와 분리해서 읽음
+- raw local runtime 비용은 Admin-only effectful diagnostic인 `masc_runtime_verify`로 MCP read-path와 분리해서 측정
 
 ### REST API
 - /api/v1/status P95 < 150ms
@@ -56,13 +56,16 @@ agent core RFC-agent core-020이 요구하는 consumer SLO를 추가하려면 ag
 - `benchmark.sh`는 `session`, `read`, `workspace collaboration`, `runtime`, `a2a`, `lock` lane을 분리하고 `avg/p50/p95/max`를 CSV로 남긴다.
 - `benchmark.sh`는 기본적으로 tool lane당 warmup 1회를 제외하고, 결과 CSV 옆에 metadata와 baseline diff를 같이 남긴다.
 - `runtime` lane 숫자는 MCP transport가 아니라 local runtime ceiling 영향을 크게 받는다.
+- 인증이 켜진 서버에서 `quick-bench.sh` 또는 `runtime` lane을 실행할 때는
+  `MASC_TOKEN`에 Admin credential이 필요하다. `masc_runtime_verify`는 endpoint마다
+  실제 chat completion을 호출하므로 read-only benchmark가 아니다.
 - `local64`는 target runtime profile 이름이지 achieved fact가 아니다. 실제 용량은 `masc_runtime_verify`의 `configured_capacity`, `healthy_runtime_count`로 확인한다.
 
 환경 변수:
 ```
 MASC_URL=http://127.0.0.1:8935/mcp
 MASC_AGENT=bench
-MASC_TOKEN=<optional>
+MASC_TOKEN=<Admin token required for quick-bench/runtime lane when auth is enabled>
 ```
 
 ## 경고 기준

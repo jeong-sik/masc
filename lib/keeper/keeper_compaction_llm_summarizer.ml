@@ -77,6 +77,7 @@ type summarization_failure =
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
+  | No_reducible_boundary
   | Invalid_plan
 
 type summarizer =
@@ -796,6 +797,11 @@ let prepare_lane
         empty_lane_id;
       Error Exact_target_selection_failed
   | Ok { selected_slots } ->
+    let* () =
+      if planning_window_has_valid_boundary window
+      then Ok ()
+      else Error No_reducible_boundary
+    in
     let* window =
       largest_fitting_window ~keeper_name ~selected_slots window
     in
@@ -882,6 +888,7 @@ let summarization_failure_detail = function
   | Exact_flow_already_started -> "exact_flow_already_started"
   | Exact_execution_terminal terminal ->
     Keeper_compaction_outcome.exact_execution_terminal_to_string terminal
+  | No_reducible_boundary -> "no_reducible_boundary"
   | Invalid_plan -> "invalid_plan"
 ;;
 
@@ -929,6 +936,7 @@ let execute_prepared_lane_current
         ~run_id
         ~outcome
         ~elapsed_s:(Time_compat.now () -. started_at)
+        ~selected_slot:None
         ~output
     with
     | Ok () -> ()

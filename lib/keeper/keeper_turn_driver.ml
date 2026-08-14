@@ -181,6 +181,9 @@ let lane_should_retry
        last candidate still returns the typed error, keeping the typed
        overflow observation (blocker label, failure route) intact. *)
     true
+  else if Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next error
+  then
+    true
   else
     match Keeper_turn_driver_try_runtime.core_error_to_http_error error with
     | Some http_err -> Runtime_attempt_fsm.should_try_next http_err
@@ -884,6 +887,8 @@ let run_named
                         }))
             ; effect_disposition =
                 Keeper_provider_attempt_effect.No_effect_observed
+            ; successful_tool_completion =
+                Keeper_codex_runtime.No_successful_tool_completion
             }
           | None, checkpoint ->
             (* The official-client session store is the start-or-resume
@@ -914,10 +919,25 @@ let run_named
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let codex_result =
           Result.bind codex_attempt.result (fun run_result ->
-            Keeper_turn_driver_try_provider.apply_accept
-              ~runtime_id:attempt_runtime_id
-              ~accept
-              run_result)
+            match codex_attempt.successful_tool_completion with
+            | Keeper_codex_runtime.Successful_tool_completion ->
+              (match
+                 run_result.Runtime_agent.stop_reason,
+                 run_result.response.content
+               with
+               | Runtime_agent.Completed, [ Agent_core.Types.Text text ]
+                 when String.trim text = "" ->
+                 Ok run_result
+               | _ ->
+                 Keeper_turn_driver_try_provider.apply_accept
+                   ~runtime_id:attempt_runtime_id
+                   ~accept
+                   run_result)
+            | Keeper_codex_runtime.No_successful_tool_completion ->
+              Keeper_turn_driver_try_provider.apply_accept
+                ~runtime_id:attempt_runtime_id
+                ~accept
+                run_result)
         in
         (match codex_result with
          | Ok run_result ->

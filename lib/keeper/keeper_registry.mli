@@ -27,6 +27,7 @@ val register_offline : base_path:string -> string -> keeper_meta -> registry_ent
 
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_intake_token_not_live
   | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Registration_invalid of registry_entry_validation_error
   | Registration_event_queue_unavailable of
@@ -36,14 +37,18 @@ type registration_error =
 
 (** Production registration gate: the final registry CAS is serialized with
     Keeper shutdown reservation. Event-queue loading remains outside the
-    non-yielding fence critical section. *)
+    non-yielding fence critical section. A live [intake_token] preserves an
+    already-open create transaction through registry installation without
+    reacquiring the same per-Keeper intake mutex. *)
 val register_offline_if_admitted :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   base_path:string ->
   string ->
   keeper_meta ->
   (registry_entry, registration_error) result
 
 val register_offline_if_admitted_for_lifecycle :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   Keeper_lifecycle_reservation.token ->
   base_path:string ->
   string ->
@@ -52,6 +57,7 @@ val register_offline_if_admitted_for_lifecycle :
 
 type register_restarting_error =
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_intake_token_not_live
   | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
       { keeper_name : string
@@ -63,6 +69,12 @@ type register_restarting_error =
     replacement fiber launches. Durable pause or Dead-tombstone admission is
     checked by the caller before this registration CAS. *)
 val register_restarting :
+  base_path:string -> string -> keeper_meta ->
+  (registry_entry, register_restarting_error) result
+
+val register_restarting_for_lifecycle :
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
+  Keeper_lifecycle_reservation.token ->
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result
 
@@ -360,14 +372,7 @@ val get_turn_failures : base_path:string -> string -> int
 (** Record a crash entry in the crash log (keeps last 5). *)
 val record_crash : base_path:string -> string -> float -> string -> unit
 
-(** Failure mutations scoped to the exact lane captured by [entry]. *)
-val set_failure_reason_exact :
-  registry_entry -> failure_reason option -> exact_update_result
-
 val set_last_error_exact : registry_entry -> string -> exact_update_result
-
-val record_crash_exact :
-  registry_entry -> float -> string -> exact_update_result
 
 (** Observe an exact-lane update without discarding why it did not commit.
     Returns [true] only for [Exact_updated]; all other outcomes are logged with
@@ -509,8 +514,8 @@ val restore_supervisor_state :
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
 
-(** Reset tracking only if [entry]'s lane still owns its registry key. *)
-val cleanup_tracking_exact : registry_entry -> exact_update_result
+val cleanup_tracking_exact_for_lifecycle :
+  Keeper_lifecycle_reservation.token -> registry_entry -> exact_update_result
 
 (** Get board event cursor token. Returns [(0.0, None)] if not found. *)
 val get_board_cursor : base_path:string -> string -> float * string option
@@ -539,7 +544,8 @@ val tool_usage_of : base_path:string -> string ->
 (** Replace (or insert) a single per-tool usage entry on a registered keeper.
     Goes through the registry's CAS retry loop. Used by
     [Keeper_registry_tool_usage_persistence.restore] to replay persisted
-    counters on re-registration. *)
+    counters outside a lifecycle transaction. Launch-time replay uses the
+    exact, token-qualified update exposed to the persistence module. *)
 val set_tool_usage_entry :
   base_path:string -> name:string -> tool_name:string
   -> Keeper_types.tool_call_entry -> unit

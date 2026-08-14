@@ -505,6 +505,26 @@ let remove_meta_file ~config operation cleanup =
      | Error error -> Error (Keeper_owner_registry.command_error_to_string error))
 ;;
 
+let admission_already_released_by_removal ~(config : Workspace.config) operation error =
+  match
+    meta_disposition_of_cleanup_reason operation.cleanup_intent.reason,
+    error
+  with
+  | ( Remove_meta
+    , Keeper_owner_registry.Command_lookup_failed
+        (Keeper_owner_registry.Owner_not_found _) ) ->
+    (match Keeper_meta_store.read_meta config operation.keeper_name with
+     | Ok None ->
+       Log.Keeper.info
+         "shutdown owner admission already released by Keeper removal: keeper=%s operation=%s"
+         operation.keeper_name
+         (Operation_id.to_string operation.operation_id);
+       true
+     | Ok (Some _) | Error _ -> false)
+  | (Retain_operator_pause | Retain_dead_tombstone), _
+  | Remove_meta, _ -> false
+;;
+
 let remove_session_dir ~config operation =
   if operation.cleanup_intent.remove_session
   then (
@@ -581,16 +601,36 @@ let unregister_retired_exact ~base_path operation entry =
             (Keeper_lifecycle_reservation.snapshot_to_string owner)))
 ;;
 
-let release_finalized_admission ~(config : Workspace.config) operation =
-  match
-    Keeper_owner_registry.rollback_shutdown
-      ~base_path:config.base_path
-      ~keeper_name:operation.keeper_name
-      ~operation_id:operation.operation_id
-  with
-  | Ok Keeper_owner.Shutdown_rolled_back
-  | Ok Keeper_owner.Shutdown_not_reserved -> Ok operation
-  | Ok (Keeper_owner.Shutdown_reserved_by_other operation_id) ->
+let release_finalized_admission
+    ~(config : Workspace.config)
+    ?successor_operation_id
+    operation
+  =
+  let release_result =
+    match successor_operation_id with
+    | None ->
+      Keeper_owner_registry.rollback_shutdown
+        ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name
+        ~operation_id:operation.operation_id
+      |> Result.map (function
+        | Keeper_owner.Shutdown_rolled_back ->
+          Keeper_owner.Shutdown_transition_applied
+        | Keeper_owner.Shutdown_not_reserved ->
+          Keeper_owner.Shutdown_transition_already_applied
+        | Keeper_owner.Shutdown_reserved_by_other operation_id ->
+          Keeper_owner.Shutdown_transition_reserved_by_other operation_id)
+    | Some _ ->
+      Keeper_owner_registry.transition_shutdown
+        ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name
+        ~from_operation_id:operation.operation_id
+        ~to_operation_id:successor_operation_id
+  in
+  match release_result with
+  | Ok Keeper_owner.Shutdown_transition_applied
+  | Ok Keeper_owner.Shutdown_transition_already_applied -> Ok operation
+  | Ok (Keeper_owner.Shutdown_transition_reserved_by_other operation_id) ->
     Log.Keeper.warn
       "finalized Keeper shutdown found a newer admission owner: keeper=%s finalized_operation=%s current_operation=%s"
       operation.keeper_name
@@ -598,9 +638,28 @@ let release_finalized_admission ~(config : Workspace.config) operation =
     (Operation_id.to_string operation_id);
     Ok operation
   | Error error ->
-    Error
-      (Admission_release_failed
-         (operation, Keeper_owner_registry.command_error_to_string error))
+    if admission_already_released_by_removal ~config operation error
+    then
+      (match
+         Keeper_shutdown_intake_fence.transition_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:operation.keeper_name
+           ~from_operation_id:operation.operation_id
+           ~to_operation_id:successor_operation_id
+       with
+       | Keeper_shutdown_intake_fence.Transition_applied
+       | Keeper_shutdown_intake_fence.Transition_already_applied -> Ok operation
+       | Keeper_shutdown_intake_fence.Transition_reserved_by_other existing ->
+         Error
+           (Admission_release_failed
+              ( operation
+              , Printf.sprintf
+                  "shutdown intake fence is reserved by another operation: existing=%s"
+                  (Operation_id.to_string existing) )))
+    else
+      Error
+        (Admission_release_failed
+           (operation, Keeper_owner_registry.command_error_to_string error))
 ;;
 
 let invoke_completion_handler ~config operation action =
@@ -609,11 +668,11 @@ let invoke_completion_handler ~config operation action =
   | exn -> Error (Printexc.to_string exn)
 ;;
 
-let deliver_finalized_completion ~config operation =
+let deliver_finalized_completion ~config ?successor_operation_id operation =
   match operation.phase with
   | Finalized { completion = Completion_not_requested; _ }
   | Finalized { completion = Completion_delivered _; _ } ->
-    release_finalized_admission ~config operation
+    release_finalized_admission ~config ?successor_operation_id operation
   | Finalized ({ completion = Completion_pending action; _ } as evidence) ->
     (match invoke_completion_handler ~config operation action with
      | Error detail -> Error (Completion_failed (operation, detail))
@@ -628,8 +687,13 @@ let deliver_finalized_completion ~config operation =
        in
        (match replace ~config delivered with
         | Error _ as error -> error
-        | Ok persisted -> release_finalized_admission ~config persisted))
+        | Ok persisted ->
+          release_finalized_admission
+            ~config
+            ?successor_operation_id
+            persisted))
   | Prepared
+  | Joining_lanes
   | Joined_idle
   | Finalizing_tasks _
   | Cleanup_ready _
@@ -638,7 +702,13 @@ let deliver_finalized_completion ~config operation =
   | Superseded _ -> Error Unsupported_phase
 ;;
 
-let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
+let complete_cleanup
+    ~(config : Workspace.config)
+    ~entry
+    ?successor_operation_id
+    operation
+    cleanup
+  =
   let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()
@@ -716,7 +786,10 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
          match replace ~config finalized with
          | Error _ as error -> error
          | Ok persisted_finalized ->
-           deliver_finalized_completion ~config persisted_finalized)
+           deliver_finalized_completion
+             ~config
+             ?successor_operation_id
+             persisted_finalized)
   in
   match validate_exact_registry_generation ~base_path:config.base_path operation entry with
   | Error detail -> block ~config operation Registry_unregister detail
@@ -734,7 +807,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
         | Ok registry_unregistered -> finish registry_unregistered))
 ;;
 
-let run ~config ~entry operation =
+let run ~config ~entry ?successor_operation_id operation =
   match operation.phase with
   | Joined_idle ->
     (match read_operation_meta ~config operation with
@@ -747,7 +820,13 @@ let run ~config ~entry operation =
            | Error _ as error -> error
            | Ok ready ->
              (match ready.phase with
-              | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
+              | Cleanup_ready cleanup ->
+                complete_cleanup
+                  ~config
+                  ~entry
+                  ?successor_operation_id
+                  ready
+                  cleanup
               | _ -> Error Unsupported_phase))))
   | Finalizing_tasks settled_task_ids ->
     (match read_operation_meta ~config operation with
@@ -760,11 +839,25 @@ let run ~config ~entry operation =
            | Error _ as error -> error
            | Ok ready ->
              (match ready.phase with
-              | Cleanup_ready cleanup -> complete_cleanup ~config ~entry ready cleanup
+              | Cleanup_ready cleanup ->
+                complete_cleanup
+                  ~config
+                  ~entry
+                  ?successor_operation_id
+                  ready
+                  cleanup
               | _ -> Error Unsupported_phase))))
-  | Cleanup_ready cleanup -> complete_cleanup ~config ~entry operation cleanup
-  | Finalized _ -> deliver_finalized_completion ~config operation
+  | Cleanup_ready cleanup ->
+    complete_cleanup
+      ~config
+      ~entry
+      ?successor_operation_id
+      operation
+      cleanup
+  | Finalized _ ->
+    deliver_finalized_completion ~config ?successor_operation_id operation
   | Prepared
+  | Joining_lanes
   | Reconciliation_required _
   | Blocked _
   | Superseded _ -> Error Unsupported_phase

@@ -9,6 +9,7 @@ import { keepers } from '../store'
 import { DASHBOARD_NAV_ITEMS } from '../config/navigation'
 import { isSubmitEnter } from '../lib/keyboard'
 import { streamKeeperMessage } from '../api/keeper'
+import { newKeeperChatOperationId } from '../keeper-delivery-provenance'
 import { currentDashboardActor } from '../api/core'
 import { KeeperBadge } from './keeper-badge'
 import type { Keeper } from '../types'
@@ -264,6 +265,7 @@ export function useCopilotDock() {
       dockStreaming.value = { keeperId: kid, shown: '', full: '', sug: [] }
       let replyText = ''
       streamKeeperMessage(kid, text.trim(), {
+        operationId: newKeeperChatOperationId(),
         signal: abortController.signal,
         channel: 'copilot',
         channelWorkspaceId: currentDashboardActor(),

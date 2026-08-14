@@ -29,8 +29,6 @@ val make_tools
   -> Agent_core.Tool.t list
 
 module For_testing : sig
-  val is_terminal_effect_handler : Keeper_tool_descriptor.runtime_handler -> bool
-
   val initial_terminal_effect_state :
     Keeper_tools_agent_core.gate_replay_delivery option ->
     Keeper_tools_agent_core.terminal_effect_state

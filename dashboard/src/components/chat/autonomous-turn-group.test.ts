@@ -204,6 +204,7 @@ describe('foldAutonomousRuns', () => {
 
 describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
   const autonomousRow = {
+    id: 'msg-autonomous-41',
     role: 'assistant',
     content: 'no work this cycle',
     ts: 1785770777,
@@ -263,8 +264,8 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
     // autonomous row between them must not consume that pairing.
     const entries = chatHistoryEntriesFromRest('lane-smith', [
       autonomousRow,
-      { role: 'user', content: 'PR 상태 정리해줘', ts: 1785770800 },
-      { role: 'assistant', content: '3건 확인했습니다', ts: 1785770801 },
+      { id: 'msg-direct-user', role: 'user', content: 'PR 상태 정리해줘', ts: 1785770800 },
+      { id: 'msg-direct-assistant', role: 'assistant', content: '3건 확인했습니다', ts: 1785770801 },
     ])
     expect(entries.map((e) => e.source)).toEqual([
       'autonomous_turn',
@@ -276,7 +277,7 @@ describe('chatHistoryEntriesFromRest — autonomous turn rows', () => {
   it('drops a row whose autonomous_turn payload carries no turn id', () => {
     // Unknown shape is not rendered as an empty bubble.
     const entries = chatHistoryEntriesFromRest('lane-smith', [
-      { role: 'assistant', content: 'x', ts: 1785770777, autonomous_turn: {} },
+      { id: 'msg-malformed-autonomous', role: 'assistant', content: 'x', ts: 1785770777, autonomous_turn: {} },
     ])
     expect(entries).toEqual([])
   })

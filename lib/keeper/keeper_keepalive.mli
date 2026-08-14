@@ -106,6 +106,8 @@ type start_keepalive_outcome =
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
+  | Keepalive_memory_lane_not_ready of Keeper_memory_lane.lifecycle_open_error
+  | Keepalive_launch_callback_failed of string
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
 
@@ -113,10 +115,12 @@ val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
 
 (** Launch one keeper lane and return the exact typed admission/launch
     outcome. Rejections remain logged and observable, but are never collapsed
-    into [unit]; lifecycle transactions use the result to commit or roll back. *)
+    into [unit]; lifecycle transactions use the result to commit or roll back.
+    [intake_token] keeps a create transaction live through registry handoff. *)
 val start_keepalive :
   ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  ?intake_token:Keeper_shutdown_intake_fence.intake_token ->
   'a context ->
   keeper_meta ->
   start_keepalive_outcome

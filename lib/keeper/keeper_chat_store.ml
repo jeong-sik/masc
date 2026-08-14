@@ -228,12 +228,13 @@ type chat_message = {
          stream response represented by this row. [None] means pre-K1f row or
          no lifecycle proof. Malformed persisted values are reported and read
          as [None], keeping the row valid. *)
-  delivery_key : Keeper_chat_delivery_identity.delivery_key option;
-      (* The exact delivery identity persisted by the idempotent append-once
-         paths.  [None] on rows written by the plain append paths and on rows
-         written before this field existed.  A malformed persisted value is
-         reported as a persistence read drop and reads as [None]; the row
-         stays valid. *)
+  delivery_provenance :
+    Keeper_chat_delivery_identity.delivery_provenance option;
+      (* The exact delivery identity and transcript slot persisted atomically
+         by the idempotent append-once paths.  [None] on rows written by the
+         plain append paths and on rows written before this pair existed.  A
+         malformed persisted value is reported as a persistence read drop and
+         reads as [None]; the row stays valid. *)
 }
 
 let redaction_for ~base_dir ~keeper_name =
@@ -1512,7 +1513,7 @@ let parse_line ~file_path (line : string) : chat_message option =
       | Some stream_lifecycle_json ->
           parse_stream_lifecycle ~path:file_path stream_lifecycle_json
     in
-    let delivery_key =
+    let delivery_provenance =
       (* Same read-drop convention as [turn_ref]: a malformed persisted
          value is surfaced and reads as [None] — the row stays valid.
          This reader only renders, so it can carry on without the
@@ -1526,8 +1527,7 @@ let parse_line ~file_path (line : string) : chat_message option =
             Keeper_chat_delivery_identity.delivery_provenance_of_fields fields
           with
           | Ok None -> None
-          | Ok (Some { Keeper_chat_delivery_identity.delivery_key; _ }) ->
-              Some delivery_key
+          | Ok (Some provenance) -> Some provenance
           | Error detail ->
               report_persistence_read_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
@@ -1577,7 +1577,8 @@ let parse_line ~file_path (line : string) : chat_message option =
                  { id; role; content; ts; attachments; tool_call_id;
                    tool_call_name; surface; conversation_id;
                    external_message_id; workspace_id; speaker; audio; blocks;
-                   mentions; kind; turn_ref; stream_lifecycle; delivery_key })
+                   mentions; kind; turn_ref; stream_lifecycle;
+                   delivery_provenance })
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -1596,11 +1597,11 @@ let is_tool_message (msg : chat_message) = Role.equal msg.role Role.Tool
 
 (* Old rows without either causal identity can become unrenderable when a
    window evicts their owning user row. Current tool-only continuations carry
-   [turn_ref] or an idempotent [delivery_key] and remain valid even when they
+   [turn_ref] or idempotent [delivery_provenance] and remain valid even when they
    are the first retained row. *)
 let drop_leading_orphan_tool_messages messages =
   let rec split anonymous_tools = function
-    | ({ turn_ref = None; delivery_key = None; _ } as msg) :: rest
+    | ({ turn_ref = None; delivery_provenance = None; _ } as msg) :: rest
       when is_tool_message msg ->
       split (msg :: anonymous_tools) rest
     | rest -> List.rev anonymous_tools, rest
@@ -1946,15 +1947,14 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
               @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
               @ Json_util.string_field_if_present "turn_ref"
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)
-              (* Expose the persisted delivery identity so the dashboard can
-                 reconcile a history reload against its optimistic turn rows
-                 on the exact [delivery_key.request_id]. *)
-              @ (match m.delivery_key with
+              (* Preserve the persisted provenance pair at the HTTP boundary.
+                 Dashboard convergence uses the same atomic identity as the
+                 append-once store instead of reconstructing a slot from role. *)
+              @ (match m.delivery_provenance with
                  | None -> []
-                 | Some key ->
-                     [ ( "delivery_key"
-                       , Keeper_chat_delivery_identity.delivery_key_to_yojson
-                           key ) ])))
+                 | Some provenance ->
+                     Keeper_chat_delivery_identity.delivery_provenance_fields
+                       provenance)))
        messages)
 
 (* RFC-0233 §7: a turn's transcript derived by an exact join on the

@@ -171,9 +171,12 @@ let of_raw_trace_records (records : Raw_trace.record list) : trajectory =
            { st with p_agent_name = r.agent_name; p_model; p_started_at = r.ts; p_prompt }
          | Assistant_block ->
            (match r.block_kind with
-            | Some "thinking" ->
+            | Some ("thinking" | "reasoning_details" | "redacted_thinking") ->
               let content =
                 match r.assistant_block with
+                | Some (`Assoc fields)
+                  when List.assoc_opt "observation" fields = Some (`String "withheld") ->
+                  ""
                 | Some json ->
                   (try Yojson.Safe.Util.(json |> member "content" |> to_string) with
                    | Yojson.Safe.Util.Type_error _ | Not_found ->

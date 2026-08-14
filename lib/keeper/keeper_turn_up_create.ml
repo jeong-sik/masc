@@ -13,8 +13,13 @@ open Keeper_execution
 open Keeper_turn_up_args
 
 
-let write_initial_meta config meta =
-  match Keeper_owner_registry.create_meta ~base_path:config.Workspace.base_path meta with
+let write_initial_meta ~intake_token config meta =
+  match
+    Keeper_owner_registry.create_meta
+      ~intake_token
+      ~base_path:config.Workspace.base_path
+      meta
+  with
   | Ok (Some _) -> Ok ()
   | Ok None -> Error "Keeper owner removed metadata during create"
   | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
@@ -115,6 +120,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                   Progress.stop_tracking task_id;
                   tool_result_error "internal keeper trace_id generation failed"
               | Ok trace_id_t ->
+                  (match
+                     Keeper_shutdown_intake_fence.run_durable_intake_if_open
+                       ~base_path:ctx.config.base_path
+                       ~keeper_name:p.name
+                       (fun intake_token ->
                   let base_dir = session_base_dir ctx.config in
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
                   ignore (Keeper_fs.ensure_dir (Filename.concat base_dir trace_id));
@@ -326,7 +336,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            (Printf.sprintf "declarative keeper config write failed: %s" e)
        | Ok _ ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_initial_meta ctx.config meta with
+      match write_initial_meta ~intake_token ctx.config meta with
       | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
@@ -341,7 +351,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
-        let launch_outcome = start_keepalive ctx meta in
+        let launch_outcome = start_keepalive ~intake_token ctx meta in
         (match launch_outcome with
          | Keepalive_started _ ->
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
@@ -362,10 +372,33 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
            | Keepalive_identity_unrepairable
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _
+           | Keepalive_memory_lane_not_ready _
+           | Keepalive_launch_callback_failed _
            | Keepalive_lane_ownership_lost
            | Keepalive_fork_rejected _ ) as rejected ->
            Progress.stop_tracking task_id;
            tool_result_error
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
-                (start_keepalive_outcome_to_string rejected)))))
+                (start_keepalive_outcome_to_string rejected))))))
+                   with
+                   | Keeper_shutdown_intake_fence.Intake_committed result ->
+                     result
+                   | Keeper_shutdown_intake_fence.Intake_shutdown_reserved
+                       operation_id ->
+                     let detail =
+                       Printf.sprintf
+                         "keeper creation rejected by shutdown admission: keeper=%s operation=%s"
+                         p.name
+                         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+                     in
+                     Otel_metric_store.inc_counter
+                       Keeper_metrics.(to_string LifecycleDispatchRejections)
+                       ~labels:
+                         [ ("keeper", p.name)
+                         ; ("event", "create_shutdown_admission")
+                         ]
+                       ();
+                     Log.Keeper.warn "%s" detail;
+                     Progress.stop_tracking task_id;
+                     tool_result_error detail)

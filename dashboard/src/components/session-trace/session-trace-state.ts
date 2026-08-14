@@ -426,6 +426,10 @@ function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Reco
   if (entry.lane) detail.lane = entry.lane
   if (entry.model) detail.model = entry.model
   if (entry.execution_id) detail.execution_id = entry.execution_id
+  if (entry.planned_index != null) detail.planned_index = entry.planned_index
+  if (entry.batch_index != null) detail.batch_index = entry.batch_index
+  if (entry.batch_size != null) detail.batch_size = entry.batch_size
+  if (entry.execution_mode) detail.execution_mode = entry.execution_mode
   return detail
 }
 
@@ -700,7 +704,7 @@ function trajectoryEntryToTrace(
   entry: TrajectoryEntry,
   index: number,
   traceId?: string,
-): UnifiedTraceEvent {
+): UnifiedTraceEvent | null {
   // Backend sends `ts` in seconds (Unix float); normalize to milliseconds for sorting.
   const ts = typeof entry.ts === 'number' ? entry.ts * 1000 : safeTimestamp(entry.ts_iso)
   const detail: Record<string, unknown> = traceId ? { trace_id: traceId, trace_origin: 'trajectory' } : { trace_origin: 'trajectory' }
@@ -708,17 +712,25 @@ function trajectoryEntryToTrace(
 
   // Handle thinking entries (type === 'thinking')
   if (entry.type === 'thinking') {
+    const contentWithheld = entry.content_withheld === true || entry.observation === 'withheld'
+    if (!contentWithheld) return null
+    detail.content_withheld = true
+    if (entry.reasoning_kind) detail.reasoning_kind = entry.reasoning_kind
+    if (entry.char_count != null) detail.char_count = entry.char_count
+    if (entry.identity?.source === 'trajectory_block') {
+      detail.agent_core_block_index = entry.identity.block_index
+    }
     return {
       id: `tj-${ts}-thinking-T${entry.turn}-${index}`,
       ts,
       ts_iso: entry.ts_iso,
       kind: 'thinking',
       sourceLane: 'masc',
-      summary: entry.redacted ? '[비공개 사고]' : (entry.content?.slice(0, 120) ?? ''),
+      summary: '[비공개 사고]',
       detail,
       turn: entry.turn,
-      thinkingContent: entry.content,
-      thinkingRedacted: entry.redacted,
+      thinkingContent: undefined,
+      thinkingRedacted: true,
     }
   }
 
@@ -753,9 +765,10 @@ export function buildTraceEvents(
 ): UnifiedTraceEvent[] {
   const timelineTraces = (timeline.events ?? []).map(timelineEventToTrace)
   const trajectoryTraces = trajectory
-    ? (trajectory.entries ?? []).map((entry, index) =>
-        trajectoryEntryToTrace(entry, index, trajectory.trace_id),
-      )
+    ? (trajectory.entries ?? []).flatMap((entry, index) => {
+        const event = trajectoryEntryToTrace(entry, index, trajectory.trace_id)
+        return event === null ? [] : [event]
+      })
     : []
   const toolCallEntries = toolCalls?.entries ?? []
   const usedToolCallIndexes = new Set<number>()

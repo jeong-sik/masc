@@ -368,6 +368,7 @@ type done_resolution = [ `Stopped | `Crashed of string ]
 
 type lifecycle_transaction_purpose =
   | Paused_work_disposition
+  | Keepalive_launch
 
 type lifecycle_reservation_snapshot =
   { owner_id : string

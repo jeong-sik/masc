@@ -95,8 +95,10 @@ val classify_durable_demand_execution :
   (Keeper_meta_contract.keeper_meta, string) result ->
   owner_execution_truth
 (** Classify activation for an already-persisted explicit demand such as a due
-    schedule or HITL continuation. Lifecycle, shutdown, and autoboot policy
-    still apply, but [proactive_enabled] does not: that flag controls
-    unsolicited scheduled-autonomous turns, not reactive durable work. *)
+    schedule or HITL continuation. Lifecycle and shutdown policy still apply.
+    [autoboot_enabled] controls recovery of an absent owner, but does not block
+    an owner that is already running. [proactive_enabled] does not apply: that
+    flag controls unsolicited scheduled-autonomous turns, not reactive durable
+    work. *)
 
 val to_yojson : t -> Yojson.Safe.t

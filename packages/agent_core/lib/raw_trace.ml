@@ -129,7 +129,10 @@ type active_run =
 
 exception Trace_error of Error.t
 
-let trace_version = 2
+(* v3 is a privacy hard cut: assistant reasoning is metadata-only at every
+   nesting depth, including structured ToolResult content. v2 rows are not
+   migrated or rewritten and the exact-version decoder rejects them. *)
+let trace_version = 3
 let json_parse_error = Util.json_parse_error
 
 let safe_name name =
@@ -593,19 +596,102 @@ let start_run
   active
 ;;
 
+type assistant_block_observation =
+  | Observable_block of
+      { block_kind : string
+      ; json : Yojson.Safe.t
+      }
+  | Withheld_reasoning of
+      { block_kind : string
+      ; char_count : int
+      ; redacted : bool
+      }
+
+let assistant_block_observation_to_pair = function
+  | Observable_block { block_kind; json } -> block_kind, json
+  | Withheld_reasoning { block_kind; char_count; redacted } ->
+    ( block_kind
+    , `Assoc
+        [ "type", `String "reasoning_observation"
+        ; "observation", `String "withheld"
+        ; "reasoning_kind", `String block_kind
+        ; "present", `Bool true
+        ; "char_count", `Int char_count
+        ; "redacted", `Bool redacted
+        ; "content", `Null
+        ] )
+;;
+
+let withheld_reasoning_json ~block_kind ~char_count ~redacted =
+  Withheld_reasoning { block_kind; char_count; redacted }
+  |> assistant_block_observation_to_pair
+  |> snd
+;;
+
+let rec raw_trace_content_block_to_json block =
+  match block with
+  | Thinking { content; _ } ->
+    withheld_reasoning_json
+      ~block_kind:"thinking"
+      ~char_count:(String.length content)
+      ~redacted:false
+  | ReasoningDetails { reasoning_content; details } ->
+    let projected = Types.reasoning_details_text ~reasoning_content ~details in
+    withheld_reasoning_json
+      ~block_kind:"reasoning_details"
+      ~char_count:(String.length projected)
+      ~redacted:false
+  | RedactedThinking _ ->
+    withheld_reasoning_json
+      ~block_kind:"redacted_thinking"
+      ~char_count:0
+      ~redacted:true
+  | ToolResult { content_blocks = Some blocks; _ } ->
+    (match Llm_provider.Api_common.content_block_to_json block with
+     | `Assoc fields ->
+       `Assoc
+         (List.map
+            (fun (key, value) ->
+              if String.equal key "content"
+              then key, `List (List.map raw_trace_content_block_to_json blocks)
+              else key, value)
+            fields)
+     | json -> json)
+  | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ ->
+    Llm_provider.Api_common.content_block_to_json block
+;;
+
+let observe_assistant_block block =
+  match block with
+  | Thinking { content; _ } ->
+    Withheld_reasoning
+      { block_kind = "thinking"; char_count = String.length content; redacted = false }
+  | ReasoningDetails { reasoning_content; details } ->
+    let projected = Types.reasoning_details_text ~reasoning_content ~details in
+    Withheld_reasoning
+      { block_kind = "reasoning_details"
+      ; char_count = String.length projected
+      ; redacted = false
+      }
+  | RedactedThinking _ ->
+    Withheld_reasoning
+      { block_kind = "redacted_thinking"; char_count = 0; redacted = true }
+  | Text _ -> Observable_block { block_kind = "text"; json = raw_trace_content_block_to_json block }
+  | ToolUse _ ->
+    Observable_block { block_kind = "tool_use"; json = raw_trace_content_block_to_json block }
+  | ToolResult _ ->
+    Observable_block { block_kind = "tool_result"; json = raw_trace_content_block_to_json block }
+  | Image _ ->
+    Observable_block { block_kind = "image"; json = raw_trace_content_block_to_json block }
+  | Document _ ->
+    Observable_block { block_kind = "document"; json = raw_trace_content_block_to_json block }
+  | Audio _ ->
+    Observable_block { block_kind = "audio"; json = raw_trace_content_block_to_json block }
+;;
+
 let record_assistant_block active ~block_index block =
-  let json = Llm_provider.Api_common.content_block_to_json block in
-  let block_kind =
-    match block with
-    | Text _ -> "text"
-    | Thinking _ -> "thinking"
-    | ReasoningDetails _ -> "reasoning_details"
-    | RedactedThinking _ -> "redacted_thinking"
-    | ToolUse _ -> "tool_use"
-    | ToolResult _ -> "tool_result"
-    | Image _ -> "image"
-    | Document _ -> "document"
-    | Audio _ -> "audio"
+  let block_kind, json =
+    observe_assistant_block block |> assistant_block_observation_to_pair
   in
   append_record
     active

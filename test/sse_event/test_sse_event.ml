@@ -572,7 +572,7 @@ let test_slot_scheduler_observed_byte_equal () =
     typed
 ;;
 
-(* === PR-3b byte-equal cases: agent_completed (Ok + Error), agent_failed.
+(* === PR-3b byte-equal cases: agent_completed (Ok + Error), agent_failed payload.
 
    These three cases pin the caller-supplied-addendum splice path
    (Sse_event.merge_addendum_into_record) against the pre-PR-3b
@@ -600,23 +600,12 @@ let baseline_agent_completed ~agent_name ~task_id ~elapsed_s ~result_fields =
 ;;
 
 let baseline_agent_failed ~agent_name ~task_id ~elapsed_s ~error_fields =
-  let payload =
-    `Assoc
-      ([ "agent_name", `String agent_name
-       ; "task_id", `String task_id
-       ; "elapsed_s", `Float elapsed_s
-       ]
-       @ error_fields)
-  in
-  baseline_wrap_event
-    ~ts:common_ts
-    ~correlation_id:common_corr
-    ~run_id:common_run
-    ~event_type:"agent_failed"
-    ~payload
-    ~agent_name
-    ~task_id
-    ()
+  `Assoc
+    ([ "agent_name", `String agent_name
+     ; "task_id", `String task_id
+     ; "elapsed_s", `Float elapsed_s
+     ]
+     @ error_fields)
 ;;
 
 let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
@@ -719,7 +708,7 @@ let test_agent_completed_error_byte_equal () =
     typed
 ;;
 
-let test_agent_failed_byte_equal () =
+let test_agent_failed_payload_byte_equal () =
   let baseline =
     Yojson.Safe.to_string
       (baseline_agent_failed
@@ -730,10 +719,7 @@ let test_agent_failed_byte_equal () =
   in
   let typed =
     Yojson.Safe.to_string
-      (Sse_event.agent_failed
-         ~ts_unix:common_ts
-         ~correlation_id:common_corr
-         ~run_id:common_run
+      (Sse_event.agent_failed_payload
          ~agent_name:"alpha"
          ~task_id:"task_42"
          ~elapsed_s:3.5
@@ -741,8 +727,7 @@ let test_agent_failed_byte_equal () =
          ~error_domain:agent_failed_error_domain
          ~error_code:agent_failed_error_code
          ~error_retryable:agent_failed_error_retryable
-         ~error_detail:agent_failed_error_detail
-         ())
+         ~error_detail:agent_failed_error_detail)
   in
   Alcotest.(check string) "agent_failed typed == baseline" baseline typed
 ;;
@@ -828,7 +813,8 @@ let () =
             test_agent_completed_ok_byte_equal
         ; Alcotest.test_case "agent_completed (Error)" `Quick
             test_agent_completed_error_byte_equal
-        ; Alcotest.test_case "agent_failed" `Quick test_agent_failed_byte_equal
+        ; Alcotest.test_case "agent_failed payload" `Quick
+            test_agent_failed_payload_byte_equal
         ; Alcotest.test_case "agent_completed (empty addendum)" `Quick
             test_agent_completed_empty_addendum_byte_equal
         ] )

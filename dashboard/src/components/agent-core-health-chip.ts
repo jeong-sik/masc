@@ -46,8 +46,11 @@ function describeAgentEvent(evt: AgentCoreAgentEvent): string {
 }
 
 function describeTotalEventsDetail(summary: Pick<AgentCoreHealthSummary,
-  'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated'
+  'replayLoadedEvents' | 'replayTotalMatchingEvents' | 'replayTruncated' | 'replayCapped'
 >): string {
+  if (summary.replayCapped) {
+    return `최근 ${summary.replayLoadedEvents}개 표시 중 (서버 조회 한도)`
+  }
   if (summary.replayTruncated) {
     return `최근 ${summary.replayLoadedEvents}개 표시 중 (전체 ${summary.replayTotalMatchingEvents})`
   }

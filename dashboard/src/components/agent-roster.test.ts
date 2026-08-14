@@ -868,7 +868,38 @@ describe('AgentRoster live-only cards', () => {
     expect(text).not.toMatch(/항목 \d+개 표시/)
     // the real, data-backed health pills stay.
     expect(container.querySelector('.fl-health')).not.toBeNull()
-    expect(text).toContain('runtime rows')
+    expect(text).toContain('normal rows')
+  })
+
+  it('labels active-band rows as normal instead of claiming all runtime-capable keepers', async () => {
+    keepers.value = [
+      {
+        name: 'healthy',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+      {
+        name: 'needs-attention',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        runtime_blocker_class: 'fiber_unresolved',
+        runtime_blocker_summary: 'fiber_unresolved',
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const summary = container.querySelector('.fl-health')?.textContent ?? ''
+    expect(summary).toContain('정상 1')
+    expect(summary).toContain('주의 1')
+    expect(summary).not.toContain('런타임 가능')
   })
 
   it('renders the exact inference observation from the live operator projection', async () => {

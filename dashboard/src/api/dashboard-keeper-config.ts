@@ -156,8 +156,41 @@ function normalizeOverrideFieldSources(raw: unknown): KeeperConfigOverrideFieldS
     .filter((row): row is KeeperConfigOverrideFieldSource => row !== null)
 }
 
+function keeperConfigUnavailableMessage(raw: unknown): string {
+  if (!isRecord(raw)) {
+    throw new Error('Invalid keeper config response: config_error must be a typed object')
+  }
+  const keeper = asNullableString(raw.keeper)
+  const keeperPath = asNullableString(raw.keeper_path)
+  const kind = asNullableString(raw.kind)
+  const failingPath = asNullableString(raw.failing_path)
+  const detail = asNullableString(raw.detail)
+  const validKind = kind === 'read_error'
+    || kind === 'parse_error'
+    || kind === 'profile_error'
+    || kind === 'invalid_name'
+  if (
+    !keeper
+    || !keeperPath
+    || !validKind
+    || !failingPath
+    || !detail
+    || raw.terminal_reason !== 'config_invalid'
+    || raw.severity !== 'error'
+    || raw.blocking !== true
+    || raw.operator_action_required !== true
+    || raw.next_action !== 'fix_keeper_toml_config'
+  ) {
+    throw new Error('Invalid keeper config response: config_error must be a typed object')
+  }
+  return `Keeper config unavailable for ${keeper}: ${kind} at ${failingPath}: ${detail}`
+}
+
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
   const data = isRecord(raw) ? raw : {}
+  if (data.config_error !== undefined && data.config_error !== null) {
+    throw new Error(keeperConfigUnavailableMessage(data.config_error))
+  }
   const prompt = isRecord(data.prompt) ? data.prompt : {}
   const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
   const execution = isRecord(data.execution) ? data.execution : {}

@@ -7,6 +7,10 @@
 
 type invalid_request_reason =
   | Json_parse_error
+  | Attempt_rejected
+      (** The selected provider binding rejected the prepared request before
+          dispatch. A caller with an ordered runtime lane may try a different
+          binding, while retrying the same binding cannot change the result. *)
   | Request_body_too_large of
       { actual_bytes : int
       ; limit_bytes : int

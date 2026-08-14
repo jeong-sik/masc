@@ -2,6 +2,7 @@
 
 type invalid_request_reason =
   | Json_parse_error
+  | Attempt_rejected
   | Request_body_too_large of
       { actual_bytes : int
       ; limit_bytes : int
@@ -61,6 +62,7 @@ let network_error_kind_label = function
 
 let invalid_request_reason_to_string = function
   | Json_parse_error -> "json_parse_error"
+  | Attempt_rejected -> "attempt_rejected"
   | Request_body_too_large { actual_bytes; limit_bytes } ->
     Printf.sprintf "request_body_too_large(actual=%d,limit=%d)" actual_bytes limit_bytes
   | Request_body_refused_by_provider { status } ->
@@ -384,7 +386,8 @@ let%test "is_retryable: flat Ollama provider prose is not retryable" =
     not (is_retryable err)
   | InvalidRequest
       { reason =
-          Json_parse_error | Request_body_too_large _ | Request_body_refused_by_provider _
+          Json_parse_error | Attempt_rejected | Request_body_too_large _
+          | Request_body_refused_by_provider _
       ; _
       } -> false
   | RateLimited _
@@ -408,7 +411,8 @@ let%test "HTTP 400 prose does not synthesize ContextOverflow" =
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
   | InvalidRequest
       { reason =
-          Json_parse_error | Request_body_too_large _ | Request_body_refused_by_provider _
+          Json_parse_error | Attempt_rejected | Request_body_too_large _
+          | Request_body_refused_by_provider _
       ; _
       }
   | ContextOverflow _
@@ -570,7 +574,8 @@ let%test "classify_error returns Unknown InvalidRequest for non-overflow 400" =
   | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
   | InvalidRequest
       { reason =
-          Json_parse_error | Request_body_too_large _ | Request_body_refused_by_provider _
+          Json_parse_error | Attempt_rejected | Request_body_too_large _
+          | Request_body_refused_by_provider _
       ; _
       } -> false
   | RateLimited _

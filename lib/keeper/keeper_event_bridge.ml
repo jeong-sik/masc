@@ -8,14 +8,15 @@
     to a uniform JSON format with an "agent_core:" prefix so consumers can
     distinguish them from MASC-originated events.
 
-    Since AGENT_CORE 0.123.0 every event carries an envelope with
-    [correlation_id], [run_id], and [ts]. These are always emitted
-    in the SSE JSON so downstream consumers can join events into
-    causal chains offline.
+    Every event carries the canonical [Event_envelope] with a producer-owned
+    [event_id], correlation/run scope, event and observation time, and causal
+    pointers. The exact envelope is emitted into both durable JSONL and SSE so
+    downstream consumers can join and deduplicate one occurrence without
+    inspecting content.
 
     @since 2.96.0
     @modified 2.255.0 — accept AGENT_CORE native events (#5620)
-    @modified 2.260.0 — emit envelope correlation_id/run_id (agent-core boundary) *)
+    @modified 2.260.0 — emit canonical producer event identity *)
 
 open Keeper_event_bridge_inference
 open Keeper_event_bridge_error_json
@@ -136,16 +137,22 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
   | Agent_core.Event_bus.Custom _ -> ()
 ;;
 
-(** Build the SSE JSON wrapper. [correlation_id] and [run_id] are
-    mandatory (from the envelope); all other fields are optional.
+(** Build the durable/SSE JSON wrapper from the canonical event envelope.
+    [event_id], [correlation_id], and [run_id] are producer-owned mandatory
+    identity; adapters must not reconstruct them from content or timestamps.
     [caused_by] is the envelope's causation pointer (agent-core boundary) — for
     [agent_core:tool_completed] it equals the matching [agent_core:tool_called] row's
     [run_id], the only key that pairs the two rows. *)
 let wrap_event
-      ~ts
+      ~event_id
+      ~event_time
+      ~observed_at
       ~correlation_id
       ~run_id
+      ?seq
+      ?parent_event_id
       ?caused_by
+      ~source_clock
       ~event_type
       ~payload
       ?agent_name
@@ -157,10 +164,15 @@ let wrap_event
   `Assoc
     [ "type", `String ("agent_core:" ^ event_type)
     ; "event_type", `String event_type
-    ; "ts_unix", `Float ts
+    ; "event_id", `String event_id
+    ; "ts_unix", `Float event_time
+    ; "observed_at", `Float observed_at
     ; "correlation_id", `String correlation_id
     ; "run_id", `String run_id
+    ; "seq", Option.fold ~none:`Null ~some:(fun value -> `Int value) seq
+    ; "parent_event_id", Json_util.string_opt_to_json_trimmed parent_event_id
     ; "caused_by", Json_util.string_opt_to_json_trimmed caused_by
+    ; "source_clock", `String (Agent_core.Event_envelope.source_clock_to_string source_clock)
     ; "agent_name", Json_util.string_opt_to_json_trimmed agent_name
     ; "task_id", Json_util.string_opt_to_json_trimmed task_id
     ; "turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn
@@ -174,15 +186,43 @@ let wrap_event
     compile-time update requirement at this boundary. *)
 let invocation_payload_fields invocation =
   let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
+  let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
   [ "turn", `Int (Agent_core.Tool_contract.Invocation.turn invocation)
-  ; "planned_index", `Int (Agent_core.Tool_contract.Invocation.planned_index invocation)
+  ; "planned_index", `Int schedule.planned_index
+  ; "batch_index", `Int schedule.batch_index
+  ; "batch_size", `Int schedule.batch_size
+  ; ( "execution_mode"
+    , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
   ]
   @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
 ;;
 
 let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t option =
-  let { Agent_core.Event_bus.correlation_id; run_id; ts; caused_by; _ } = evt.meta in
-  let wrap = wrap_event ~ts ~correlation_id ~run_id ?caused_by in
+  let
+    { Agent_core.Event_envelope.event_id
+    ; correlation_id
+    ; run_id
+    ; event_time
+    ; observed_at
+    ; seq
+    ; parent_event_id
+    ; caused_by
+    ; source_clock
+    }
+    = evt.meta
+  in
+  let wrap =
+    wrap_event
+      ~event_id
+      ~event_time
+      ~observed_at
+      ~correlation_id
+      ~run_id
+      ?seq
+      ?parent_event_id
+      ?caused_by
+      ~source_clock
+  in
   match evt.payload with
   | Agent_core.Event_bus.AgentStarted { agent_name; task_id } ->
     let payload =
@@ -254,21 +294,19 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
       (wrap ~event_type:"agent_input_required" ~payload ~agent_name ~task_id ())
   | Agent_core.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
     let projection = agent_failed_error_projection error in
+    let payload =
+      Sse_event.agent_failed_payload
+        ~agent_name
+        ~task_id
+        ~elapsed_s:elapsed
+        ~error:projection.error
+        ~error_domain:projection.error_domain
+        ~error_code:projection.error_code
+        ~error_retryable:projection.error_retryable
+        ~error_detail:projection.error_detail
+    in
     Some
-      (Sse_event.agent_failed
-         ?caused_by
-         ~ts_unix:ts
-         ~correlation_id
-         ~run_id
-         ~agent_name
-         ~task_id
-         ~elapsed_s:elapsed
-         ~error:projection.error
-         ~error_domain:projection.error_domain
-         ~error_code:projection.error_code
-         ~error_retryable:projection.error_retryable
-         ~error_detail:projection.error_detail
-         ())
+      (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
   | Agent_core.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
     (* tool_called publishes before execution, so the keeper hook has not
        minted an execution_id yet — this row carries the provider call id
@@ -280,16 +318,11 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
   | Agent_core.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
-    (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
-       tool_use_id ↔ execution_id pair before AGENT_CORE published this event,
-       so the lookup is deterministic. A miss means the execution did not
-       go through a keeper hook (worker/eval lanes), not a failure. *)
-    let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
+    (* RFC-0233 PR-2: the keeper post_tool_use hook registered this exact
+       immutable invocation before AGENT_CORE published the event. Physical
+       invocation identity keeps blank/repeated provider ids distinct. *)
     let execution_id_fields =
-      match
-        if tool_use_id = "" then None
-        else Keeper_execution_join.take ~tool_use_id
-      with
+      match Keeper_execution_join.take ~invocation with
       | Some execution_id -> [ "execution_id", `String execution_id ]
       | None -> []
     in

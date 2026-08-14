@@ -18,6 +18,7 @@ val add_routes :
 
 module For_testing : sig
   val exact_lane_run_permission : Masc_domain.permission
+  val runtime_probe_read_permission : Masc_domain.permission
 
   type gate_mode_recovery =
     | Recovery_completed of Keeper_gate.operator_recovery_report

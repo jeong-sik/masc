@@ -4,6 +4,7 @@ import {
   agentCoreReplayLoadedEvents,
   agentCoreReplayTotalMatchingEvents,
   agentCoreReplayTruncated,
+  agentCoreReplayCapped,
   agentCoreTotalLlmCalls,
   agentCoreTotalErrors,
   agentCoreLastLlmCallTs,
@@ -41,6 +42,7 @@ describe('agentCoreHealthSummary', () => {
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(0)
     expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(0)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(false)
     expect(agentCoreHealthSummary.value.totalLlmCalls).toBe(4)
     expect(agentCoreHealthSummary.value.totalErrors).toBe(2)
     expect(agentCoreHealthSummary.value.evidenceRefsCount).toBe(0)
@@ -61,6 +63,20 @@ describe('agentCoreHealthSummary', () => {
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(500)
     expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(1842)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(false)
+  })
+
+  it('marks a server-capped replay window without offering another page', () => {
+    noteAgentCoreReplayWindow({
+      loadedEvents: 5499,
+      totalMatchingEvents: 6000,
+      truncated: false,
+      capped: true,
+    })
+
+    expect(agentCoreReplayCapped.value).toBe(true)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(true)
+    expect(agentCoreHealthSummary.value.hasMore).toBe(false)
   })
 
   it('reflects agent event buffer length', () => {
@@ -119,6 +135,7 @@ describe('agentCoreHealthSummary', () => {
     expect(s.replayLoadedEvents).toBe(0)
     expect(s.replayTotalMatchingEvents).toBe(0)
     expect(s.replayTruncated).toBe(false)
+    expect(s.replayCapped).toBe(false)
     expect(s.totalLlmCalls).toBe(0)
     expect(s.totalErrors).toBe(0)
     expect(s.agentEventsCount).toBe(0)

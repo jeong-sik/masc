@@ -497,6 +497,73 @@ let cleanup_dir path =
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 ;;
 
+let test_tool_usage_restore_uses_lifecycle_authority () =
+  let dir = temp_dir "registry_tool_usage_restore" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let meta = make_meta "lifecycle-restore" in
+       let registered = KR.For_testing.register ~base_path:dir meta.name meta in
+       let path =
+         Filename.concat
+           dir
+           ".masc/keepers/tool_usage/lifecycle-restore.json"
+       in
+       Fs_compat.mkdir_p (Filename.dirname path);
+       Fs_compat.save_file
+         path
+         (Yojson.Safe.to_string
+            (`Assoc
+              [ "schema_version", `Int 2
+              ; "keeper", `String meta.name
+              ; "flushed_at", `Float 1.0
+              ; ( "tools"
+                , `List
+                    [ `Assoc
+                        [ "tool", `String "masc_status"
+                        ; "count", `Int 1
+                        ; "successes", `Int 1
+                        ; "deferred", `Int 0
+                        ; "failures", `Int 0
+                        ; "last_used_at", `Float 1.0
+                        ]
+                    ] )
+              ])
+          ^ "\n");
+       let token =
+         match
+           Reservation.acquire
+             ~base_path:dir
+             ~keeper_name:meta.name
+             ~expected_generation:registered.transition_seq
+             ~purpose:Reservation.Keepalive_launch
+         with
+         | Ok token -> token
+         | Error _ -> fail "failed to reserve Keeper launch lifecycle"
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           ignore (Reservation.release token : Reservation.release_outcome))
+         (fun () ->
+            Masc.Keeper_registry_tool_usage_persistence.restore
+              ~base_path:dir
+              meta.name;
+            check (list string) "name-only restore is fenced" []
+              (KR.tool_usage_of ~base_path:dir meta.name |> List.map fst);
+            Masc.Keeper_registry_tool_usage_persistence.restore_for_lifecycle
+              token
+              registered;
+            check (option int) "token-qualified restore keeps exact count" (Some 1)
+              (KR.tool_usage_of ~base_path:dir meta.name
+               |> List.assoc_opt "masc_status"
+               |> Option.map (fun entry -> entry.Keeper_types.count))))
+;;
+
 let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
   let dir = temp_dir "registry_reactive_offline_wakeup" in
   Fun.protect
@@ -1390,6 +1457,12 @@ let () =
             "rejects fork on an already-cancelling switch"
             `Quick
             test_lane_fork_rejects_cancelling_switch
+        ] )
+    ; ( "tool_usage_restore"
+      , [ test_case
+            "uses exact lifecycle authority"
+            `Quick
+            test_tool_usage_restore_uses_lifecycle_authority
         ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )

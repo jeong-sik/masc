@@ -510,7 +510,7 @@ let roster_message ~surface ~speaker_id : Store.chat_message =
   ; kind = Store.Row_kind.Utterance
   ; turn_ref = None
   ; stream_lifecycle = None
-  ; delivery_key = None
+  ; delivery_provenance = None
   }
 
 let test_mentions_require_exact_resolved_target_roster () =
@@ -572,6 +572,113 @@ let test_mentions_require_exact_resolved_target_roster () =
   | Error _ -> ()
   | Ok () -> fail "participant from another Slack thread was mentionable"
 
+(* ── thread_ts / blocks tool args ───────────────────────────────── *)
+
+let block ?(block_type = "section") () =
+  `Assoc [ ("type", `String block_type); ("text", `String "t") ]
+
+let test_thread_ts_args_decode () =
+  check (result (option string) string) "absent decodes to None" (Ok None)
+    (SP.thread_ts_of_args ~surface:"slack" (`Assoc []));
+  check (result (option string) string) "value decodes trimmed"
+    (Ok (Some "1755134336.123456"))
+    (SP.thread_ts_of_args ~surface:"slack"
+       (`Assoc [ ("thread_ts", `String " 1755134336.123456 ") ]));
+  (match
+     SP.thread_ts_of_args ~surface:"slack"
+       (`Assoc [ ("thread_ts", `String "  ") ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "blank thread_ts was accepted");
+  (match
+     SP.thread_ts_of_args ~surface:"discord"
+       (`Assoc [ ("thread_ts", `String "1755134336.123456") ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "thread_ts on a non-Slack surface was accepted");
+  match
+    SP.thread_ts_of_args ~surface:"slack" (`Assoc [ ("thread_ts", `Int 3) ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "non-string thread_ts was accepted"
+
+let test_blocks_args_decode () =
+  check bool "absent decodes to None" true
+    (SP.blocks_of_args ~surface:"slack" (`Assoc []) = Ok None);
+  (match
+     SP.blocks_of_args ~surface:"slack"
+       (`Assoc [ ("blocks", `List [ block () ]) ])
+   with
+   | Ok (Some [ _ ]) -> ()
+   | Ok _ | Error _ -> fail "one valid block was rejected");
+  (match
+     SP.blocks_of_args ~surface:"discord"
+       (`Assoc [ ("blocks", `List [ block () ]) ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "blocks on a non-Slack surface were accepted");
+  (match
+     SP.blocks_of_args ~surface:"slack" (`Assoc [ ("blocks", `List []) ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "empty blocks array was accepted");
+  (match
+     SP.blocks_of_args ~surface:"slack"
+       (`Assoc [ ("blocks", `List [ `String "not-a-block" ]) ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "non-object block was accepted");
+  (match
+     SP.blocks_of_args ~surface:"slack"
+       (`Assoc [ ("blocks", `List [ `Assoc [ ("text", `String "x") ] ]) ])
+   with
+   | Error _ -> ()
+   | Ok _ -> fail "block without a type member was accepted");
+  let too_many =
+    List.init (SP.max_rich_blocks + 1) (fun _ -> block ())
+  in
+  match
+    SP.blocks_of_args ~surface:"slack" (`Assoc [ ("blocks", `List too_many) ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "more than max_rich_blocks blocks were accepted"
+
+let test_resolve_explicit_thread_ts_wins_over_continuation () =
+  let continuation_channel =
+    match
+      Keeper_continuation_channel.slack
+        ~team_id:(Some "team")
+        ~channel_id:"BBB"
+        ~thread_ts:(Some "continuation-thread")
+        ~user_id:"user"
+    with
+    | Ok channel -> channel
+    | Error message -> fail message
+  in
+  check (result target string) "explicit thread_ts wins"
+    (Ok
+       (SP.To_slack
+          { channel_id = "BBB"
+          ; thread_ts = Some "explicit-thread"
+          ; blocks = None
+          }))
+    (resolve ~surface:"slack" ~channel_id:None ~continuation_channel
+       ~requested_thread_ts:"explicit-thread"
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "BBB" ] ())
+
+let test_resolve_explicit_thread_ts_without_continuation () =
+  check (result target string) "explicit thread_ts travels alone"
+    (Ok
+       (SP.To_slack
+          { channel_id = "AAA"
+          ; thread_ts = Some "explicit-thread"
+          ; blocks = None
+          }))
+    (resolve ~surface:"slack" ~channel_id:None
+       ~requested_thread_ts:"explicit-thread"
+       ~bound_discord_channels:[] ~bound_slack_channels:[ "AAA" ] ())
+
+
 let () =
   run "keeper_surface_post"
     [
@@ -624,6 +731,17 @@ let () =
             test_dashboard_rejects_nonempty_mentions
         ; test_case "requires exact resolved target roster" `Quick
             test_mentions_require_exact_resolved_target_roster
+        ] );
+      ( "thread and blocks args",
+        [
+          test_case "thread_ts decode closes its domain" `Quick
+            test_thread_ts_args_decode;
+          test_case "blocks decode closes its domain" `Quick
+            test_blocks_args_decode;
+          test_case "explicit thread_ts wins over continuation" `Quick
+            test_resolve_explicit_thread_ts_wins_over_continuation;
+          test_case "explicit thread_ts travels without continuation" `Quick
+            test_resolve_explicit_thread_ts_without_continuation;
         ] );
       ( "terminal receipt",
         [

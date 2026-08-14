@@ -1235,6 +1235,7 @@ let spawn_with
           ~run_id
           ~outcome
           ~elapsed_s:(Time_compat.now () -. started_at)
+          ~selected_slot:None
           ~output
       with
       | Ok () -> ()

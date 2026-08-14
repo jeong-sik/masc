@@ -109,7 +109,11 @@ let summarize_run run_ref =
     |> List.find_opt (fun (record : Raw_trace.record) ->
       record.record_type = Run_finished)
   in
-  let thinking_block_count = count_block_kind "thinking" in
+  let thinking_block_count =
+    count_block_kind "thinking"
+    + count_block_kind "reasoning_details"
+    + count_block_kind "redacted_thinking"
+  in
   let text_block_count = count_block_kind "text" in
   let tool_use_block_count = count_block_kind "tool_use" in
   let tool_result_block_count = count_block_kind "tool_result" in

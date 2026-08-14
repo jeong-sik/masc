@@ -419,17 +419,6 @@ let test_autonomous_yield_boundary_contract () =
      | Runtime_agent.Yielded_after_repeated_tool_call _
      | Runtime_agent.InputRequired _ -> false)
 
-let test_terminal_effect_handler_contract () =
-  let is_terminal =
-    Masc.Keeper_tools_agent_core_bundle.For_testing.is_terminal_effect_handler
-  in
-  check bool "surface post is a terminal effect" true
-    (is_terminal Masc.Keeper_tool_descriptor.Tool_surface_post);
-  check bool "surface read is not a terminal effect" false
-    (is_terminal Masc.Keeper_tool_descriptor.Tool_surface_read);
-  check bool "filesystem write is not a reply terminal" false
-    (is_terminal Masc.Keeper_tool_descriptor.Tool_write_file)
-
 let test_terminal_externalization_failure_contract () =
   let classify =
     Masc.Keeper_tools_agent_core_bundle.For_testing.terminal_externalization_failure
@@ -804,8 +793,6 @@ let () =
             test_repeated_exact_tool_call_boundary;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
-          test_case "terminal effect handler contract" `Quick
-            test_terminal_effect_handler_contract;
           test_case "terminal externalization failure contract" `Quick
             test_terminal_externalization_failure_contract;
         ] );

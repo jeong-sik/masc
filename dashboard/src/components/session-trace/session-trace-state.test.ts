@@ -228,8 +228,12 @@ describe('scheduleSessionTraceReload', () => {
         ts: 1712400000,
         ts_iso: '2024-04-06T10:40:00Z',
         turn: 12,
-        content: 'new keeper thought',
-        content_length: 18,
+        content: null,
+        content_withheld: true,
+        observation: 'withheld',
+        reasoning_kind: 'thinking',
+        char_count: 18,
+        identity: { source: 'trajectory_block', block_index: 0 },
         redacted: false,
       }],
     })
@@ -247,7 +251,7 @@ describe('scheduleSessionTraceReload', () => {
 
     expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
     expect(dashboardApiMocks.fetchKeeperTrajectory).toHaveBeenCalledTimes(1)
-    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('new keeper thought')
+    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('[비공개 사고]')
   })
 
   it('ignores reload requests for closed trace slots', async () => {
@@ -372,6 +376,10 @@ describe('buildTraceEvents', () => {
           keeper_turn_id: 1,
           task_id: 'task-1',
           lane: 'runtime_mcp',
+          planned_index: 4,
+          batch_index: 1,
+          batch_size: 2,
+          execution_mode: 'concurrent',
         }],
       },
     )
@@ -381,6 +389,10 @@ describe('buildTraceEvents', () => {
     expect(toolEvents[0]!.toolResult).toBe('full file contents')
     expect(toolEvents[0]!.detail.trace_origin).toBe('trajectory+tool_call_log')
     expect(toolEvents[0]!.detail.lane).toBe('runtime_mcp')
+    expect(toolEvents[0]!.detail.planned_index).toBe(4)
+    expect(toolEvents[0]!.detail.batch_index).toBe(1)
+    expect(toolEvents[0]!.detail.batch_size).toBe(2)
+    expect(toolEvents[0]!.detail.execution_mode).toBe('concurrent')
   })
 
   it('preserves trajectory duration when the richer tool-call row has no duration', () => {
@@ -466,6 +478,10 @@ describe('buildTraceEvents', () => {
           keeper_turn_id: 3,
           task_id: 'task-2',
           lane: 'runtime_mcp',
+          planned_index: 5,
+          batch_index: 2,
+          batch_size: 1,
+          execution_mode: 'serial',
         }],
       },
     )
@@ -474,6 +490,10 @@ describe('buildTraceEvents', () => {
     expect(events[0]!.toolName).toBe('Execute')
     expect(events[0]!.error).toBe('command exited 1')
     expect(events[0]!.detail.trace_origin).toBe('tool_call_log')
+    expect(events[0]!.detail.planned_index).toBe(5)
+    expect(events[0]!.detail.batch_index).toBe(2)
+    expect(events[0]!.detail.batch_size).toBe(1)
+    expect(events[0]!.detail.execution_mode).toBe('serial')
     expect(events[0]!.detail.lane).toBe('runtime_mcp')
   })
 

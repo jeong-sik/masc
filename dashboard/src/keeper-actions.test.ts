@@ -120,8 +120,8 @@ describe('noteKeeperChatAppended', () => {
     // A subsequent append for the open panel must converge (drop -> re-fetch)
     // rather than be skipped until the panel remounts.
     fetchKeeperChatHistory.mockResolvedValueOnce([
-      { role: 'user', content: 'hi', ts: 1_780_000_000 },
-      { role: 'assistant', content: 'recovered', ts: 1_780_000_000 },
+      { id: 'msg-recovered-user', role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { id: 'msg-recovered-assistant', role: 'assistant', content: 'recovered', ts: 1_780_000_000 },
     ])
     noteKeeperChatAppended('echo')
     await vi.runAllTimersAsync()
@@ -134,7 +134,7 @@ describe('noteKeeperChatAppended', () => {
 
   it('debounces a burst of appends into one forced refetch', async () => {
     fetchKeeperChatHistory.mockResolvedValue([
-      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { id: 'msg-debounce-user', role: 'user', content: 'hi', ts: 1_780_000_000 },
     ])
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
@@ -151,8 +151,8 @@ describe('noteKeeperChatAppended', () => {
 
   it('still refreshes history when an audio clip is attached', async () => {
     fetchKeeperChatHistory.mockResolvedValue([
-      { role: 'user', content: 'hi', ts: 1_780_000_000 },
-      { role: 'assistant', content: 'hello there', ts: 1_780_000_000 },
+      { id: 'msg-audio-user', role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { id: 'msg-audio-assistant', role: 'assistant', content: 'hello there', ts: 1_780_000_000 },
     ])
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
@@ -179,8 +179,8 @@ describe('hydrateKeeperChatHistory', () => {
 
   it('merges the server transcript into the thread', async () => {
     fetchKeeperChatHistory.mockResolvedValue([
-      { role: 'user', content: 'hi', ts: 1_780_000_000 },
-      { role: 'assistant', content: 'hello there', ts: 1_780_000_000 },
+      { id: 'msg-hydrate-user', role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { id: 'msg-hydrate-assistant', role: 'assistant', content: 'hello there', ts: 1_780_000_000 },
     ])
 
     await hydrateKeeperChatHistory('echo')
@@ -198,6 +198,7 @@ describe('hydrateKeeperChatHistory', () => {
   it('keeps backend stream contracts when hydrating server history', async () => {
     fetchKeeperChatHistory.mockResolvedValue([
       {
+        id: 'msg-contract-assistant',
         role: 'assistant',
         content: 'done',
         ts: 1_780_000_000,
@@ -292,7 +293,7 @@ describe('hydrateKeeperChatHistory', () => {
   it('allows a retry after a failed fetch', async () => {
     fetchKeeperChatHistory.mockRejectedValueOnce(new Error('HTTP 502'))
     fetchKeeperChatHistory.mockResolvedValueOnce([
-      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { id: 'msg-retry-user', role: 'user', content: 'hi', ts: 1_780_000_000 },
     ])
 
     await hydrateKeeperChatHistory('echo')
@@ -355,6 +356,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
     keeperStreamLastEventAt.value = {}
+    _resetChatHydrationForTests()
     _clearTrackedKeeperChatOperationsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
@@ -374,7 +376,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
       _name: string,
       _message: string,
       opts: {
-        requestId: string
+        operationId: string
         onEvent: (event: KeeperChatStreamEvent) => void
       },
     ) => {
@@ -382,7 +384,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
         type: 'CUSTOM',
         name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
         value: {
-          operation_id: opts.requestId,
+          operation_id: opts.operationId,
           state,
           queued_count: state === 'Queued' ? 1 : 0,
         },
@@ -402,7 +404,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
     ])
 
     expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
-    const operationIds = streamKeeperMessage.mock.calls.map(call => call[2].requestId)
+    const operationIds = streamKeeperMessage.mock.calls.map(call => call[2].operationId)
     expect(new Set(operationIds).size).toBe(2)
     expect(operationIds.every(id => id.startsWith('kmsg-'))).toBe(true)
   })
@@ -412,10 +414,10 @@ describe('sendKeeperThreadMessage operation stream', () => {
     // where the accept handler never runs and the placeholders are left with
     // whatever identity they were created with. The backend still accepted the
     // message, so history comes back carrying the operation's request id.
-    let submittedRequestId = ''
+    let submittedOperationId = ''
     streamKeeperMessage.mockImplementation(
-      async (_name: string, _message: string, opts: { requestId: string }) => {
-        submittedRequestId = opts.requestId
+      async (_name: string, _message: string, opts: { operationId: string }) => {
+        submittedOperationId = opts.operationId
         return { terminal: true }
       },
     )
@@ -424,16 +426,26 @@ describe('sendKeeperThreadMessage operation stream', () => {
 
     fetchKeeperChatHistory.mockResolvedValue([
       {
+        id: 'msg-disconnected-user',
         role: 'user',
         content: 'hi',
         ts: 1_780_000_000,
-        delivery_key: { kind: 'operation', request_id: submittedRequestId },
+        delivery_provenance: {
+          delivery_key: { kind: 'operation', operation_id: submittedOperationId },
+          transcript_slot: { kind: 'accepted_user' },
+        },
+        delivery_provenance_status: 'valid',
       },
       {
+        id: 'msg-disconnected-assistant',
         role: 'assistant',
         content: 'hello there',
         ts: 1_780_000_001,
-        delivery_key: { kind: 'operation', request_id: submittedRequestId },
+        delivery_provenance: {
+          delivery_key: { kind: 'operation', operation_id: submittedOperationId },
+          transcript_slot: { kind: 'terminal_assistant' },
+        },
+        delivery_provenance_status: 'valid',
       },
     ])
     await hydrateKeeperChatHistory('echo')
@@ -445,7 +457,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
 
   it('does not abort the running operation when a second operation is accepted', async () => {
     const streams: Array<{
-      requestId: string
+      operationId: string
       signal: AbortSignal
       resolve: (value: { terminal: boolean }) => void
     }> = []
@@ -453,7 +465,7 @@ describe('sendKeeperThreadMessage operation stream', () => {
       _name: string,
       _message: string,
       opts: {
-        requestId: string
+        operationId: string
         signal: AbortSignal
         onEvent: (event: KeeperChatStreamEvent) => void
       },
@@ -462,13 +474,13 @@ describe('sendKeeperThreadMessage operation stream', () => {
         type: 'CUSTOM',
         name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
         value: {
-          operation_id: opts.requestId,
+          operation_id: opts.operationId,
           state: streams.length === 0 ? 'Running' : 'Queued',
           queued_count: streams.length,
         },
       })
       return new Promise<{ terminal: boolean }>(resolve => {
-        streams.push({ requestId: opts.requestId, signal: opts.signal, resolve })
+        streams.push({ operationId: opts.operationId, signal: opts.signal, resolve })
       })
     })
 
@@ -492,15 +504,15 @@ describe('sendKeeperThreadMessage operation stream', () => {
 
   it('releases only the pre-acceptance stream that ended', async () => {
     const streams: Array<{
-      requestId: string
+      operationId: string
       resolve: (value: { terminal: boolean }) => void
     }> = []
     streamKeeperMessage.mockImplementation(async (
       _name: string,
       _message: string,
-      opts: { requestId: string },
+      opts: { operationId: string },
     ) => new Promise<{ terminal: boolean }>(resolve => {
-      streams.push({ requestId: opts.requestId, resolve })
+      streams.push({ operationId: opts.operationId, resolve })
     }))
 
     const first = sendKeeperThreadMessage('echo', 'first')
@@ -508,8 +520,8 @@ describe('sendKeeperThreadMessage operation stream', () => {
     const second = sendKeeperThreadMessage('echo', 'second')
     await Promise.resolve()
 
-    const firstId = streams[0]?.requestId ?? ''
-    const secondId = streams[1]?.requestId ?? ''
+    const firstId = streams[0]?.operationId ?? ''
+    const secondId = streams[1]?.operationId ?? ''
     expect(liveSendOwnsRequest(firstId)).toBe(true)
     expect(liveSendOwnsRequest(secondId)).toBe(true)
 
@@ -529,17 +541,17 @@ describe('sendKeeperThreadMessage operation stream', () => {
       _name: string,
       _message: string,
       opts: {
-        requestId: string
+        operationId: string
         signal: AbortSignal
         onEvent: (event: KeeperChatStreamEvent) => void
       },
     ) => {
-      acceptedOperationId = opts.requestId
+      acceptedOperationId = opts.operationId
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
         value: {
-          operation_id: opts.requestId,
+          operation_id: opts.operationId,
           state: 'Running',
           queued_count: 0,
         },
@@ -598,14 +610,14 @@ describe('sendKeeperThreadMessage operation stream', () => {
       _name: string,
       _message: string,
       opts: {
-        requestId: string
+        operationId: string
         onEvent: (event: KeeperChatStreamEvent) => void
       },
     ) => {
       opts.onEvent({
         type: 'CUSTOM',
         name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
-        value: { operation_id: opts.requestId, state: 'Running', queued_count: 0 },
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
       })
       opts.onEvent({
         type: 'CUSTOM',

@@ -1319,6 +1319,23 @@ let handle_surface_post_with_outcome
       ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json message)
   | Ok mention_user_ids ->
+    match Keeper_surface_post.thread_ts_of_args ~surface args with
+    | Error message ->
+      fail
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        (Keeper_surface_post.error_json message)
+    | Ok requested_thread_ts ->
+    match Keeper_surface_post.blocks_of_args ~surface args with
+    | Error message ->
+      fail
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        (Keeper_surface_post.error_json message)
+    | Ok requested_blocks ->
+    let requested_blocks =
+      Option.map
+        (List.map (Keeper_secret_redaction.redact_json redaction))
+        requested_blocks
+    in
     match
       Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
     with
@@ -1340,6 +1357,7 @@ let handle_surface_post_with_outcome
        match
          Keeper_surface_post.resolve_target ~surface ~channel_id
            ?continuation_channel
+           ?requested_thread_ts
            ~bound_slack_channels ~bound_discord_channels ()
        with
       | Error message ->
@@ -1347,6 +1365,7 @@ let handle_surface_post_with_outcome
           ~effect_disposition:Tool_result.Proven_pre_effect
           (Keeper_surface_post.error_json message)
       | Ok target ->
+        let target = Keeper_surface_post.set_blocks target requested_blocks in
         let messages =
           Keeper_chat_store.load
             ~base_dir:config.Workspace.base_path
@@ -1402,9 +1421,12 @@ let handle_surface_post_with_outcome
         (Replay_discord_post
            { input; channel_id; content = safe_content; mention_user_ids })
       |> Keeper_tool_execution.with_surface_post_receipt target
-         | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks = _ } ->
+         | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks } ->
       let slack_blocks =
-        Keeper_chat_slack.message_blocks_of_text ~mention_user_ids safe_content
+        match blocks with
+        | Some blocks -> blocks
+        | None ->
+          Keeper_chat_slack.message_blocks_of_text ~mention_user_ids safe_content
       in
       let input =
         connector_post_gate_input

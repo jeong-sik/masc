@@ -17,6 +17,7 @@ type error =
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
   | Join_failed of Keeper_shutdown_types.t
+  | Join_phase_mismatch of Keeper_shutdown_types.t
   | Join_record_update_failed of Keeper_shutdown_store.error
 
 let error_to_string = function
@@ -44,6 +45,10 @@ let error_to_string = function
     Printf.sprintf
       "Keeper shutdown join blocked in operation %s"
       (Operation_id.to_string operation.operation_id)
+  | Join_phase_mismatch operation ->
+    Printf.sprintf
+      "Keeper shutdown operation is not joinable at revision %d"
+      operation.revision
   | Join_record_update_failed error -> Keeper_shutdown_store.error_to_string error
 ;;
 
@@ -158,6 +163,44 @@ let cancellation_error ~config operation stage detail =
   match persist_blocked ~config operation stage detail with
   | Ok blocked -> Error (Cancellation_failed blocked)
   | Error error -> Error (Join_record_update_failed error)
+;;
+
+let join_error ~config operation detail =
+  match persist_blocked ~config operation Lane_join detail with
+  | Ok blocked -> Error (Join_failed blocked)
+  | Error error -> Error (Join_record_update_failed error)
+;;
+
+let enter_joining_lanes ~config operation =
+  match operation.phase with
+  | Joining_lanes ->
+    join_error
+      ~config
+      operation
+      "a prior live lane-join attempt ended without a durable terminal receipt; refusing to replay safety-sensitive turn cancellation"
+  | Prepared ->
+    let joining =
+      { operation with
+        revision = operation.revision + 1
+      ; phase = Joining_lanes
+      ; updated_at = Masc_domain.now_iso ()
+      }
+    in
+    (match
+       Keeper_shutdown_store.replace
+         ~config
+         ~expected_revision:operation.revision
+         joining
+     with
+     | Ok () -> Ok joining
+     | Error error -> Error (Join_record_update_failed error))
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Blocked _
+  | Superseded _ -> Error (Join_phase_mismatch operation)
 ;;
 
 let lane_outcome = function
@@ -340,6 +383,16 @@ let prepare_dormant
 ;;
 
 let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
+  match operation.phase with
+  | Joining_lanes -> enter_joining_lanes ~config operation
+  | Prepared
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Finalized _
+  | Blocked _
+  | Superseded _ ->
   match current_entry ~config entry with
   | Error error -> Error error
   | Ok current
@@ -349,6 +402,9 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
               Keeper_lane.Id.equal (Keeper_lane.id current.lane) lane_id
             | Dormant_meta -> false) -> Error Registry_lane_replaced
   | Ok current ->
+    (match enter_joining_lanes ~config operation with
+     | Error _ as error -> error
+     | Ok operation ->
     Keeper_keepalive.request_entry_stop current;
     let turn_cancel = Keeper_registry.interrupt_current_turn_exact current in
     let turn_cancel_error =
@@ -382,9 +438,11 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
                ~keeper_name:current.name
            with
            | Error error ->
-             Error
-               (Owner_command_failed
-                  (Keeper_owner_registry.command_error_to_string error))
+             join_error
+               ~config
+               operation
+               ("Keeper Owner shutdown command failed: "
+                ^ Keeper_owner_registry.command_error_to_string error)
            | Ok () ->
           let lane_exit = Keeper_lane.await_exit current.lane in
           (match lane_exit.outcome with
@@ -410,13 +468,14 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
            | Keeper_lane.Failed _ -> ());
           let memory_join_error =
             match
-              Keeper_memory_lane.cancel_and_join_librarian
+              Keeper_memory_lane.drain_and_join_librarian
                 ~base_path:config.Workspace.base_path
                 ~keeper_name:current.name
             with
-            | Keeper_memory_lane.No_librarian_work
-            | Keeper_memory_lane.Librarian_joined _ -> None
-            | Keeper_memory_lane.Librarian_join_failed detail -> Some detail
+            | Ok Keeper_memory_lane.No_librarian_work
+            | Ok Keeper_memory_lane.Librarian_drained -> None
+            | Error error ->
+              Some (Keeper_memory_lane.librarian_drain_error_to_string error)
           in
           let cleanup_error =
             match lane_exit.cleanup_error, memory_join_error with
@@ -430,22 +489,7 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
                    memory_detail)
           in
           (match cleanup_error with
-           | Some detail ->
-             let blocked =
-               { operation with
-                 revision = operation.revision + 1
-               ; phase = Blocked { stage = Lane_join; detail }
-               ; updated_at = Masc_domain.now_iso ()
-               }
-             in
-             (match
-                Keeper_shutdown_store.replace
-                  ~config
-                  ~expected_revision:operation.revision
-                  blocked
-              with
-              | Ok () -> Error (Join_failed blocked)
-              | Error error -> Error (Join_record_update_failed error))
+           | Some detail -> join_error ~config operation detail
            | None ->
           let terminal_result = Eio.Promise.await current.done_p in
           let evidence =
@@ -494,7 +538,7 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
                joined
            with
            | Ok () -> Ok joined
-           | Error error -> Error (Join_record_update_failed error))))))
+           | Error error -> Error (Join_record_update_failed error)))))))
 ;;
 
 let run ~config ~entry ~request =

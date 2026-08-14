@@ -17,7 +17,7 @@ val write :
   trace_id:string ->
   absolute_turn:int ->
   runtime_profile:string ->
-  model:string option ->
+  selected_model:string option ->
   finish_reason:string option ->
   context_window:int option ->
   price_input_per_million:float option ->

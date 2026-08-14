@@ -57,6 +57,17 @@ type input_schema_source =
 
 type readonly_of_input = Yojson.Safe.t -> bool option
 
+type ordinary_execution_mode =
+  | Serial
+  | Concurrent
+
+type execution =
+  | Ordinary of ordinary_execution_mode
+  | Terminal
+(** Descriptor-owned execution contract. Read-only classification does not
+    imply concurrency safety, and terminal concurrent execution is not
+    representable. *)
+
 type identity_validation =
   | Validate_once_before_translation
   | Validate_once_after_translation
@@ -135,6 +146,7 @@ type t =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; model_output_projection : Tool_output.model_projection
+  ; execution : execution
   ; policy : policy
   ; executor : executor
   ; backend : backend

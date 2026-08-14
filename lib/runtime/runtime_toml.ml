@@ -698,6 +698,23 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
            retired_native_streaming_key)
   in
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+  let b_opt key = Otoml.find_opt tbl Otoml.get_boolean [ key ] in
+  let reasoning_streaming_format_result =
+    match typed_find "string" path tbl "reasoning-streaming-format" Otoml.get_string with
+    | Error errors -> Error errors
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+      (match Llm_provider.Capability_vocab.reasoning_streaming_format_of_string raw with
+       | Some format -> Ok (Some format)
+       | None ->
+         Error
+           (error
+              (path ^ ".reasoning-streaming-format")
+              (Printf.sprintf
+                 "unknown reasoning-streaming-format %S — expected %s"
+                 raw
+                 Llm_provider.Capability_vocab.reasoning_streaming_format_syntax)))
+  in
   let b_default_true key = Otoml.find_or ~default:true tbl Otoml.get_boolean [ key ] in
   let positive_int_opt_field key =
     match Otoml.find_opt tbl Otoml.get_integer [ key ] with
@@ -727,11 +744,11 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
                \"chat-template-token\""))
     | Ok (Some raw), Ok token -> parse_thinking_control_format ~path ~token raw
   in
-  match thinking_control_format_result, retired_key_errors with
-  | Error errors, retired_key_errors ->
+  match thinking_control_format_result, reasoning_streaming_format_result, retired_key_errors with
+  | Error errors, _, retired_key_errors | _, Error errors, retired_key_errors ->
     Error (errors @ retired_key_errors)
-  | Ok _, _ :: _ -> Error retired_key_errors
-  | Ok thinking_control_format, [] ->
+  | Ok _, Ok _, _ :: _ -> Error retired_key_errors
+  | Ok thinking_control_format, Ok reasoning_streaming_format, [] ->
     Ok
       { Runtime_schema.max_output_tokens = positive_int_opt_field "max-output-tokens"
       ; supports_tool_choice = b "supports-tool-choice"
@@ -740,7 +757,13 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
       ; supports_parallel_tool_calls = b "supports-parallel-tool-calls"
       ; supports_extended_thinking = b "supports-extended-thinking"
       ; supports_reasoning_budget = b "supports-reasoning-budget"
+      ; declared_supports_reasoning_budget = b_opt "supports-reasoning-budget"
       ; thinking_control_format
+      ; declared_thinking_control_format =
+          (match Otoml.find_opt tbl Fun.id [ "thinking-control-format" ] with
+           | None -> None
+           | Some _ -> Some thinking_control_format)
+      ; reasoning_streaming_format
       ; supports_image_input = b "supports-image-input"
       ; supports_audio_input = b "supports-audio-input"
       ; supports_video_input = b "supports-video-input"

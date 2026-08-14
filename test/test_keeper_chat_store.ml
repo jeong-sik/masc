@@ -820,7 +820,7 @@ let test_identified_tool_only_history_is_not_trimmed () =
         Alcotest.(check string) "identified tool-only row survives" "tool"
           (K.Role.to_label tool.role);
         Alcotest.(check bool) "durable identity remains available" true
-          (Option.is_some tool.delivery_key)
+          (Option.is_some tool.delivery_provenance)
       | messages ->
         Alcotest.failf "expected one identified tool row, got %d"
           (List.length messages))
@@ -1900,7 +1900,7 @@ let test_half_provenance_reads_none () =
            Alcotest.(check bool) "row survives the half pair" true
              (String.equal m.K.content "x");
            Alcotest.(check bool) "half pair reads as None" true
-             (m.K.delivery_key = None)
+             (m.K.delivery_provenance = None)
        | messages ->
            Alcotest.failf "expected 1 message, got %d" (List.length messages));
       Alcotest.(check (float 0.001)) "drop counted as invalid payload"
@@ -1910,7 +1910,7 @@ let test_half_provenance_reads_none () =
 (* The same undecodable row is not cosmetic: the append-once reader must
    fail rather than skip it, because skipping would report "not appended
    yet" for a delivery that may already be on disk. This pins the
-   [chat_message.delivery_key] contract in the .mli. *)
+   [chat_message.delivery_provenance] contract in the .mli. *)
 let test_half_provenance_blocks_append_once () =
   let base_dir = temp_base_path "keeper-chat-store-half-provenance-append" in
   Fun.protect
@@ -1938,10 +1938,9 @@ let test_half_provenance_blocks_append_once () =
           Alcotest.fail
             "append-once accepted a file holding an undecodable provenance row")
 
-(* The idempotent append-once paths persist the exact delivery identity on
-   the row; load decodes it back and to_json_array exposes it verbatim so the
-   dashboard can reconcile a history reload against its optimistic turn rows
-   on the exact [delivery_key.operation_id]. *)
+(* The idempotent append-once paths persist the exact delivery provenance on
+   the row; load and [to_json_array] preserve both the delivery key and the
+   transcript slot so every consumer uses the append-once SSOT. *)
 let test_delivery_key_round_trip_to_json_array () =
   let base_dir = temp_base_path "keeper-chat-store-delivery-key" in
   Fun.protect
@@ -1979,15 +1978,17 @@ let test_delivery_key_round_trip_to_json_array () =
       Alcotest.(check int) "two rows loaded" 2 (List.length messages);
       List.iter
         (fun (m : K.chat_message) ->
-          match m.delivery_key with
-          | Some key ->
+          match m.delivery_provenance with
+          | Some provenance ->
               Alcotest.(check bool)
                 (Printf.sprintf "delivery_key on %s row"
                    (K.Role.to_label m.role))
                 true
-                (Keeper_chat_delivery_identity.delivery_key_equal key
+                (Keeper_chat_delivery_identity.delivery_key_equal
+                   provenance.delivery_key
                    delivery_key)
-          | None -> Alcotest.fail "missing delivery_key on append-once row")
+          | None ->
+              Alcotest.fail "missing delivery_provenance on append-once row")
         messages;
       let open Yojson.Safe.Util in
       match K.to_json_array messages with
@@ -1999,7 +2000,15 @@ let test_delivery_key_round_trip_to_json_array () =
                 (key_json |> member "kind" |> to_string);
               Alcotest.(check string) "delivery_key operation_id"
                 "kmsg-turn-identity-1"
-                (key_json |> member "operation_id" |> to_string))
+                (key_json |> member "operation_id" |> to_string);
+              let slot_kind = row |> member "transcript_slot" |> member "kind" |> to_string in
+              let expected_slot =
+                match row |> member "role" |> to_string with
+                | "user" -> "accepted_user"
+                | "assistant" -> "terminal_assistant"
+                | role -> Alcotest.failf "unexpected role %s" role
+              in
+              Alcotest.(check string) "transcript slot kind" expected_slot slot_kind)
             rows
       | _ -> Alcotest.fail "to_json_array must return a list")
 
@@ -2017,7 +2026,7 @@ let test_delivery_key_absent_on_plain_append () =
       List.iter
         (fun (m : K.chat_message) ->
           Alcotest.(check bool) "plain append row has no delivery_key" true
-            (m.delivery_key = None))
+            (m.delivery_provenance = None))
         messages;
       let open Yojson.Safe.Util in
       match K.to_json_array messages with
@@ -2025,7 +2034,9 @@ let test_delivery_key_absent_on_plain_append () =
           List.iter
             (fun row ->
               Alcotest.(check bool) "delivery_key field omitted" true
-                (row |> member "delivery_key" |> ( = ) `Null))
+                (row |> member "delivery_key" |> ( = ) `Null);
+              Alcotest.(check bool) "transcript_slot field omitted" true
+                (row |> member "transcript_slot" |> ( = ) `Null))
             rows
       | _ -> Alcotest.fail "to_json_array must return a list")
 
@@ -2048,7 +2059,7 @@ let test_delivery_key_malformed_reads_none () =
       (match K.load ~base_dir ~keeper_name with
        | [ m ] ->
            Alcotest.(check bool) "malformed delivery_key reads as None" true
-             (m.delivery_key = None)
+             (m.delivery_provenance = None)
        | messages ->
            Alcotest.failf "expected 1 message, got %d" (List.length messages));
       Alcotest.(check (float 0.001)) "drop counted as invalid payload" 1.0

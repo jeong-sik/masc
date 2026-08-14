@@ -9,6 +9,7 @@ import { chatHistoryEntriesFromRest } from '../keeper-state'
 
 const rawHistory = [
   {
+    id: 'msg-fixture-autonomous-1',
     role: 'assistant',
     content: null,
     ts: 1785770777,
@@ -29,6 +30,7 @@ const rawHistory = [
     },
   },
   {
+    id: 'msg-fixture-autonomous-2',
     role: 'assistant',
     content: 'Observed one healthy follow-up.',
     ts: 1785770837,

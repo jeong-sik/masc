@@ -433,6 +433,7 @@ let update_entry_if_registered ~base_path name f =
 
 type registration_error =
   | Registration_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Registration_intake_token_not_live
   | Registration_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Registration_invalid of registry_entry_validation_error
   | Registration_event_queue_unavailable of
@@ -442,6 +443,7 @@ type registration_error =
 
 let register_with_state_result
       ?lifecycle_token
+      ?intake_token
       ~respect_shutdown_fence
       ~base_path
       name
@@ -526,15 +528,28 @@ let register_with_state_result
      | Some _ | None -> ());
     put_entry_key_locked ?lifecycle_token ~base_path name entry
   in
-  (* The key lock is taken OUTSIDE the admission fence. Nesting it inside
-     [commit_registration_if_open] would suspend the fiber while it owns the
-     admission slot's [Stdlib.Mutex], wedging the whole domain. The fence check
-     and the registry install still happen together under that mutex, so
-     shutdown reservation and same-name lane installation stay totally
-     ordered. *)
+  (* Ordinary registration takes the key lock before the non-yielding
+     [commit_registration_if_open] state check. A caller-supplied intake token
+     already owns the fiber-aware per-Keeper intake mutex, so it validates that
+     exact transaction and commits without trying to reacquire the same gate.
+     In both paths the registry install remains ordered with shutdown. *)
   let commit_result =
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      if respect_shutdown_fence
+      if Option.is_some intake_token
+      then (
+        match intake_token with
+        | Some token
+          when Keeper_shutdown_intake_fence.intake_token_matches
+                 token
+                 ~base_path
+                 ~keeper_name:name ->
+          (match commit_key_locked () with
+           | Ok () -> Ok ()
+           | Error (Lifecycle_transaction_reserved owner) ->
+             Error (Registration_lifecycle_reserved owner)
+           | Error validation_error -> Error (Registration_invalid validation_error))
+        | Some _ | None -> Error Registration_intake_token_not_live)
+      else if respect_shutdown_fence
       then (
         match
           Keeper_shutdown_intake_fence.commit_registration_if_open
@@ -589,6 +604,8 @@ let register_with_state ~base_path name meta ~phase ~conditions =
          detail)
   | Error (Registration_shutdown_reserved _) ->
     invalid_arg "unchecked registry registration observed a shutdown fence"
+  | Error Registration_intake_token_not_live ->
+    invalid_arg "unchecked registry registration observed an inactive intake token"
   | Error (Registration_lifecycle_reserved owner) ->
     invalid_arg
       (Printf.sprintf
@@ -616,7 +633,7 @@ let register_offline ~base_path name meta =
   register_with_state ~base_path name meta ~phase ~conditions
 ;;
 
-let register_offline_if_admitted ~base_path name meta =
+let register_offline_if_admitted ?intake_token ~base_path name meta =
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
@@ -624,6 +641,7 @@ let register_offline_if_admitted ~base_path name meta =
   in
   let phase = Keeper_state_machine.derive_phase conditions in
   register_with_state_result
+    ?intake_token
     ~respect_shutdown_fence:true
     ~base_path
     name
@@ -632,7 +650,13 @@ let register_offline_if_admitted ~base_path name meta =
     ~conditions
 ;;
 
-let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
+let register_offline_if_admitted_for_lifecycle
+      ?intake_token
+      token
+      ~base_path
+      name
+      meta
+  =
   let conditions =
     { Keeper_state_machine.default_conditions with
       launch_pending = true
@@ -641,6 +665,7 @@ let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
   let phase = Keeper_state_machine.derive_phase conditions in
   register_with_state_result
     ~lifecycle_token:token
+    ?intake_token
     ~respect_shutdown_fence:true
     ~base_path
     name
@@ -651,13 +676,14 @@ let register_offline_if_admitted_for_lifecycle token ~base_path name meta =
 
 type register_restarting_error =
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Restart_intake_token_not_live
   | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
       { keeper_name : string
       ; detail : string
       }
 
-let register_restarting ~base_path name meta
+let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name meta
   : (registry_entry, register_restarting_error) result
   =
   let base_path = canonical_base_path_exn base_path in
@@ -666,7 +692,11 @@ let register_restarting ~base_path name meta
   in
   let key = registry_key ~base_path name in
   match
-    Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name ()
+    Keeper_lifecycle_reservation.authorize
+      ?token:lifecycle_token
+      ~base_path
+      ~keeper_name:name
+      ()
   with
   | Error owner -> Error (Restart_lifecycle_reserved owner)
   | Ok () ->
@@ -736,29 +766,62 @@ let register_restarting ~base_path name meta
   in
   (* Runs with the lifecycle key lock already held, so it never suspends. *)
   let guarded_loop_key_locked () =
-    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    match
+      Keeper_lifecycle_reservation.authorize
+        ?token:lifecycle_token
+        ~base_path
+        ~keeper_name:name
+        ()
+    with
     | Error owner -> Error (Restart_lifecycle_reserved owner)
     | Ok () -> loop ()
   in
-  (* Key lock outside the admission fence — see the register path for why
-     nesting it inside would wedge the domain. *)
-  match
+  (* The launch transaction already owns the durable-intake epoch when it
+     supplies [intake_token]. Validate that exact ownership instead of
+     reacquiring/checking the shutdown slot midway through the transaction. *)
+  let commit_result =
     Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
-      Keeper_shutdown_intake_fence.commit_registration_if_open
-        ~base_path
-        ~keeper_name:name
-        guarded_loop_key_locked)
-  with
-  | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
-    Error (Restart_shutdown_reserved operation_id)
-  | Keeper_shutdown_intake_fence.Registration_committed (Error _ as error) -> error
-  | Keeper_shutdown_intake_fence.Registration_committed (Ok registered) ->
+      match intake_token with
+      | Some token
+        when Keeper_shutdown_intake_fence.intake_token_matches
+               token
+               ~base_path
+               ~keeper_name:name ->
+        guarded_loop_key_locked ()
+      | Some _ -> Error Restart_intake_token_not_live
+      | None ->
+        (match
+           Keeper_shutdown_intake_fence.commit_registration_if_open
+             ~base_path
+             ~keeper_name:name
+             guarded_loop_key_locked
+         with
+         | Keeper_shutdown_intake_fence.Registration_shutdown_reserved operation_id ->
+           Error (Restart_shutdown_reserved operation_id)
+         | Keeper_shutdown_intake_fence.Registration_committed result -> result))
+  in
+  match commit_result with
+  | Error _ as error -> error
+  | Ok registered ->
     Log.Keeper.info
       "registry: registering keeper name=%s base_path=%s phase=%s"
       name
       base_path
       (Keeper_state_machine.phase_to_string phase);
     Ok registered
+;;
+
+let register_restarting ~base_path name meta =
+  register_restarting_internal ~base_path name meta
+;;
+
+let register_restarting_for_lifecycle ?intake_token token ~base_path name meta =
+  register_restarting_internal
+    ~lifecycle_token:token
+    ?intake_token
+    ~base_path
+    name
+    meta
 ;;
 
 type unregister_exact_result =

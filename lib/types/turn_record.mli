@@ -101,10 +101,11 @@ type t =
        never substituted for, [request_wire_observation]. [None] means exact
        attribution was unavailable; an observed empty input is [Some []]. *)
   ; runtime_profile : string
-  ; model : string option
-    (* RFC-0233 §2.2/§2.3 — boundary-redacted runtime model label, the
-       same value the execution receipt surfaces (RFC-0132 redaction
-       SSOT). [None] on error turns before runtime grounding; the inspector
+  ; selected_model : string option
+    (* RFC-0233 §2.2/§2.3 — exact model selected by the successful runtime
+       attempt, sourced from that attempt's [Runtime_observation]. This is
+       durable operator evidence, not an aggregate telemetry label. [None]
+       when the turn completed without selected-model evidence; the inspector
        renders absence rather than a fabricated name. *)
   ; finish_reason : string option
     (* RFC-0233 §2.3 — keeper turn stop reason, serialized via the

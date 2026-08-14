@@ -1,6 +1,6 @@
 # MASC
 
-[![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
+[![OCaml](https://img.shields.io/badge/OCaml-5.5-orange.svg)](https://ocaml.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [English version](README.md)
@@ -12,7 +12,7 @@
 
 **MASC는 agent 작업을 위한 로컬 조율·관찰 레이어입니다.** 저장소 옆에서 MCP 서버로 돌면서 coding agent와 상주 Keeper가 goal, task, board 글, repository ownership, approval state를 같은 workspace에서 공유하게 합니다. 대시보드와 turn receipt로 agent의 결정과 실패를 들여다봅니다.
 
-빠르게 일을 끝내는 도구라기보다, 속도 대신 조율·관찰성·장기 실행 keeper 기반 agent 실험을 택한 도구입니다. 어떤 결정은 실용적이었고, 어떤 결정은 그냥 재미로 해본 실험입니다. 우연한 농담, 이상한 이름, 작은 설정놀음도 프로젝트 취향의 일부입니다. 그런 것들은 구조적 필연이라서가 아니라 재미있어서 남아 있습니다.
+빠르게 일을 끝내는 도구라기보다, 속도 대신 조율·관찰성·장기 실행 keeper 기반 agent 실험을 택한 도구입니다.
 
 > **개발 상태:** MASC는 아직 pre-1.0 실험입니다. 생산성 도구, production service,
 > 또는 security boundary가 아닙니다. 지금은 로컬 실험과 관찰 용도로만 사용하세요.
@@ -21,11 +21,7 @@
 > 믿으면 안 됩니다. 현재 목표는 agent 실패를 충분히 보이게 만들어 어떤 workflow가
 > 쓸모 있어질 수 있는지 찾는 것입니다.
 
-**Keeper**는 MASC가 관리하는 선택적 상주 agent입니다. 서버가 살아 있는 동안 상주하며, heartbeat 주기로 스스로 turn을 돌거나 멘션·메시지를 받으면 반응합니다.
-
-### 왜 Keeper인가 / Why "Keeper"
-
-이 환경의 에이전트를 **Keeper**라고 부릅니다. 불프로그(피터 몰리뉴)의 게임 *던전 키퍼*에서 따온 애칭입니다. 프로젝트 안에서 쓰는 용어이자 장난스럽게 붙인 이름이지, 별도의 거창한 아키텍처 주장은 아닙니다. 우연한 농담과 캐릭터 같은 이름을 일부러 조금 남기는 프로젝트입니다.
+**Keeper**는 MASC가 관리하는 선택적 상주 agent입니다. 서버가 살아 있는 동안 상주하며, heartbeat 주기로 스스로 turn을 돌거나 멘션·메시지를 받으면 반응합니다. 이름은 불프로그의 *던전 키퍼*에서 따왔습니다. 프로젝트 용어일 뿐 아키텍처 주장은 아닙니다.
 
 ---
 
@@ -58,25 +54,25 @@
 | **OpenTelemetry** | 🟡 | OTLP HTTP exporter + GenAI semconv span/metric은 동작하나, 아직 수집되지 않는 signal과 instrumentation 공백이 많음 | `OTEL_EXPORTER_OTLP_ENDPOINT` |
 | **Goal + Task** | 🟡 | Goal/Task CRUD·전이·검증·프롬프트 주입은 동작. 자동 스케줄링은 미구현 | `masc_goal_*` / `masc_*task*` 툴 |
 | **Multi-Runtime** | 🟡 | Keeper별 provider×model 라우팅 | `runtime.toml` |
-| **Provider Failover** | ❌ | provider 장애 시 자동 failover 없음; 수동 설정 변경 + 서버 재시작 필요 | `runtime.toml` |
-| **Fusion (+ JoJ)** | 🟡 | 여러 모델에 같은 질문 후 심판 모델이 종합. Simple/Refine/Conditional 동작, JoJ 미배선 | `masc_fusion` 툴 |
-| **Multi-Channel** | 🟡 | 외부 채널 메시지로 turn 시작/응답. 현재는 Discord만 라이브로 동작하고, Slack/Telegram은 사이드카 필요 | `POST /api/v1/gate/message` |
+| **Provider Failover** | 🟡 | `[runtime.lanes]`로 순서 있는 failover 그룹 지원; health 기반 자동 회전은 미구현 | `runtime.toml` `[runtime.lanes]` |
+| **Fusion (+ JoJ)** | 🟡 | 여러 모델에 같은 질문 후 심판 모델이 종합. Simple/Refine/Conditional 동작, JoJ는 `runtime.toml`의 judges preset 필요 | `masc_fusion` 툴 |
+| **Multi-Channel** | 🟡 | 외부 채널 메시지로 turn 시작/응답. Discord·Slack 라이브 동작, Telegram은 사이드카 필요 | `POST /api/v1/gate/message` |
 
 ### 현재 동작과 한계
 
-- **Keepers** — 각 Keeper는 서버가 살아 있는 동안 상주하는 장기 실행 에이전트입니다. heartbeat로 깨어나 turn을 돌고, 메모리·결정 로그는 디스크에 남아 재시작에도 복원됩니다. **한 Keeper는 한 번에 turn 하나만 돕니다**(동시에 두 일을 하지 않음) — 병렬은 여러 Keeper가 함께 도는 데서 옵니다. `[autonomous] concurrency`는 죽은 레거시 키이며, MASC는 전역 active-Keeper 상한을 강제하지 않습니다.
+- **Keepers** — 각 Keeper는 서버가 살아 있는 동안 상주하는 장기 실행 에이전트입니다. heartbeat로 깨어나 turn을 돌고, 메모리·결정 로그는 디스크에 남아 재시작에도 복원됩니다. **한 Keeper는 한 번에 turn 하나만 돕니다**(동시에 두 일을 하지 않음) — 병렬은 여러 Keeper가 함께 도는 데서 옵니다. MASC는 전역 active-Keeper 상한을 강제하지 않습니다.
 - **Gate / HITL** — 디스패치 경계는 opaque operation identity와 complete typed input을 하나의 Gate에 보냅니다. Workspace/Keeper Always Allow는 즉시 진행하고 Auto Judge는 비동기로 판단하며 Manual은 HITL request를 영속화합니다. Deferred request는 promise를 기다리지 않고 Keeper로 반환되며, 결정 후 깨어난 해당 Keeper lane에서 exact 승인 request가 한 번만 소비됩니다. Gate는 승인 workflow이며 sandbox나 credential boundary가 아닙니다.
 - **Sandbox** — `docker run --rm`을 실제로 호출하고 cap-drop / no-new-privileges / read-only rootfs를 적용합니다. MASC는 Docker 동작을 관측하지만 전역 spawn slot으로 사전 허가하지 않습니다. 네트워크는 keeper의 `network_mode`로 제어합니다(기본 `inherit`, `none`으로 격리 가능). *한계*: 모든 Keeper가 docker가 아닙니다(일부는 `local`=호스트 실행). 이미지가 없고 playground 안이면 host 실행으로 강등됩니다(텔레메트리 기록). security boundary로 취급하지 마세요.
 - **Multi-Runtime** — `runtime.toml`의 `runtime.assignments`에 `keeper = provider.model` 한 줄이면 그 Keeper의 매 turn이 해당 provider로 갑니다.
-- **Provider Failover** — provider 장애 시 순서 failover는 미구현입니다. 장애가 나면 default/assignment를 손으로 고치고 서버를 재시작해야 합니다.
-- **Fusion + JoJ** — Keeper가 `masc_fusion`을 호출하면 패널 모델들이 같은 질문에 각자 답고 심판 모델이 합의/모순/맹점을 종합합니다. *한계*: JoJ(Judge of Judges) 위상은 코드·호출 경로가 있으나, 라이브 설정에 1차 심판 목록이 없어 호출 시 **fail-closed로 에러를 반환합니다**. 결과 registry는 in-memory라 재시작 시 사라집니다.
+- **Provider Failover** — `runtime.toml`의 `[runtime.lanes]`가 순서 있는 failover 그룹을 정의하며, 현재 runtime이 거부되면 Keeper는 lane의 다음 runtime으로 넘어갑니다. provider health 기반 자동 회전은 미구현입니다.
+- **Fusion + JoJ** — Keeper가 `masc_fusion`을 호출하면 패널 모델들이 같은 질문에 각자 답고 심판 모델이 합의/모순/맹점을 종합합니다. *한계*: JoJ(Judge of Judges) 위상은 `config/runtime.toml`의 judges preset(RFC-0283)이 설정돼 있지 않으면 fail-closed로 에러를 반환합니다. run 결과는 `.masc/fusion-runs.jsonl`에 영속됩니다.
 - **Goal + Task** — Goal/Task는 MCP 툴로 만들고 상태 전이하며, active goal은 Keeper system prompt에 주입됩니다. turn은 채널/이벤트로 구동됩니다. (goal-loop OODA 기계는 2026-07-21 전면 은퇴 — RFC-0352 Path B: Goal 엔티티·MCP tool·task linkage는 유지, 스케줄러 스크립트·서버 broadcast·대시보드 패널은 제거)
-- **OpenTelemetry** — OTLP HTTP exporter와 GenAI semconv span/metric이 동작합니다. *한계*: 아직 수집되지 않는 signal과 instrumentation 공백이 많습니다. 예를 들어 Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등은 부분적으로만 커버됩니다.
+- **OpenTelemetry** — OTLP HTTP exporter와 GenAI semconv span/metric이 동작합니다. *한계*: 아직 수집되지 않는 signal과 instrumentation 공백이 많습니다. 예를 들어 Keeper turn 낮은 수준 이벤트, fusion 내부 metric, provider별 latency breakdown 등은 부분적으로만 커버됩니다.
 - **CODE / IDE (관망형, 미동작)** — 사람이 코드를 직접 수정하지 않고 에이전트에게 명령만 내리는 관망형 IDE를 지향합니다. LSP 프록시·주석 오버레이·대시보드 CODE 셸은 구현되어 있으나, **관망형 명령 흐름이 검증되지 않아 현재 실사용 가능한 상태가 아닙니다.**
 
 ---
 
-## 빠른 시작 (5분) / Quick Start
+## 빠른 시작 / Quick Start
 
 ```bash
 # 1. 바이너리 설치 (macOS arm64 / Linux x86_64)
@@ -148,7 +144,7 @@ opam install . --deps-only
 scripts/dune-local.sh build @default
 ```
 
-요구 사항: OCaml ≥ 5.4, opam ≥ 2.0, dune ≥ 3.22. 빌드/테스트/CI 세부는 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고해 주세요.
+요구 사항: OCaml 5.5.0 (`dune-project`에 고정), opam ≥ 2.0, dune ≥ 3.22. 빌드/테스트/CI 세부는 [`CONTRIBUTING.md`](CONTRIBUTING.md)를 참고해 주세요.
 
 ---
 
@@ -195,7 +191,6 @@ cd dashboard && pnpm install && pnpm dev   # vite가 로컬 서버로 프록시
 | 파일 | 역할 |
 |------|------|
 | `runtime.toml` | provider/model 카탈로그 + `[runtime].default`. 기동에 필요: 파일(또는 `[runtime].default`)이 없으면 서버는 `refusing to boot` 로그를 남기고 status 1로 종료합니다 — 환경 기본값 폴백 없음 |
-⚠️ **레거시 / 미사용 키**: `runtime.toml`에 `[autonomous] concurrency` 또는 `[bootstrap] max_active_keepers`가 있다면 제거하세요. 두 키 모두 실행을 제어하지 않습니다.
 
 **에이전트를 만들 때**
 
@@ -223,7 +218,6 @@ Keeper 정의 예시 (`keepers/<name>.toml`):
 
 ```toml
 [keeper]
-name = "albini"
 name = "albini"
 goal = "흐름이 끊긴 task의 owner를 호명해 추궁합니다. 본인은 코드를 만들지 않습니다."
 active_goal_ids = ["goal-pm-flow"]
@@ -275,11 +269,6 @@ masc/
 
 ---
 
-## 관련 프로젝트
-
-이전 README에는 다른 agent runtime과의 상세 비교표가 있었습니다. 그 표는 당시 스냅샷으로는 유용했지만, 지금은 upstream의 실시간 inventory로 유지하지 않습니다. 현재 MASC의 로컬 계약은 위에서 설명한 범위로 읽으면 됩니다: repo-local MCP workspace, Keeper turn, dashboard/receipt 관찰성, `<base-path>/.masc/` 파일 상태, 그리고 `runtime.toml`을 통한 runtime assignment.
-
----
 
 ## Dashboard
 
@@ -301,7 +290,7 @@ masc/
 | Settings | Keeper 설정 운영 콘솔 |
 | Logs | 시스템 실행 로그 |
 
-레일 외부에서 접근 가능한 추가 서피스: Monitor (keeper fleet, 도구 모니터, 런타임, observatory), Command (개입·거버넌스·승인), Lab (도구 진단, safety harness, 성능, Memory OS, 키퍼 메모리 상태).
+레일 외부에서 접근 가능한 추가 서피스: Monitor (keeper fleet, 도구 모니터, 런타임, observatory), Command (개입·Gate·승인), Lab (도구 진단, safety harness, 성능, Memory OS, 키퍼 메모리 상태).
 
 라우트 예시: `dashboard#monitoring?section=agents`, `dashboard#monitoring?section=journey`, `dashboard#command?section=operations`, `dashboard#connectors?section=connector-status`, `dashboard#lab?section=memory-subsystems`, `dashboard#workspace?section=verification`.
 
@@ -317,7 +306,7 @@ masc/
 |---|---|---|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | 빌드/테스트/PR 기대치 | contributor workflow 문서이며 제품 홍보 문서가 아님 |
 | [`ROADMAP.md`](ROADMAP.md) | 6-8주 운영 관점 | 버전 헤더는 `dune-project`와 `CHANGELOG.md`에 맞는지 확인 |
-| [`docs/agent core-MASC-BOUNDARY.md`](docs/agent core-MASC-BOUNDARY.md) | MASC ↔ agent core 경계 | reference 문서; 오래된 본문보다 `last_verified`와 generated pin block 우선 |
+| [`docs/AGENT-CORE-BOUNDARY.md`](docs/AGENT-CORE-BOUNDARY.md) | MASC ↔ agent core 경계 | reference 문서; 오래된 본문보다 `last_verified`와 generated pin block 우선 |
 | [`docs/spec/SPEC-INDEX.md`](docs/spec/SPEC-INDEX.md) | spec suite 진입점 | living draft; 개별 spec에는 migration context가 남아 있을 수 있음 |
 | [`docs/KEEPER-USER-MANUAL.md`](docs/KEEPER-USER-MANUAL.md) | Keeper 개념과 운영 메모 | 오래된 manual; config truth는 [`docs/KEEPER-FILE-MODEL.md`](docs/KEEPER-FILE-MODEL.md), [`config/runtime.toml`](config/runtime.toml), live code 우선 |
 | [`docs/RELEASE-EVIDENCE.md`](docs/RELEASE-EVIDENCE.md) | release evidence bundle | 형식 문서; 사용 전 version line을 current release metadata와 맞출 것 |
@@ -332,17 +321,15 @@ masc/
 
 | # | 영역 | 남은 작업 | 상태 변화 예상 |
 |---|------|----------|---------------|
-| 1 | **Keepers / Fleet** | 배포된 `runtime.toml`에서 죽은 `[autonomous] concurrency` 키를 제거하고, 전역 상한이 없는 런타임 계약과 fleet 문서를 맞춥니다. | 🟡→✅ |
-| 2 | **Provider Failover** | provider healthcheck 기반 **자동 순서 failover**를 구현합니다. 장애 시 다음 후보 provider로 Keeper turn을 자동 전환하고, 복구 시 로그/메트릭을 남깁니다. | ❌→✅ |
-| 3 | **Fusion + JoJ** | `runtime.toml`에 JoJ(Judge of Judges)용 1차 심판 패널(`judges`) 설정을 추가하고, fusion 결과 registry를 디스크에 영속화합니다. | 🟡→✅ |
-| 4 | **Goal + Task** | (superseded) goal-loop OODA 기계는 전면 은퇴됨(2026-07-21, RFC-0352 Path B). goal 기반 wake는 이 행의 부활이 아니라 새 typed Scheduler 설계로만 가능. | RFC-0352 |
+| 2 | **Provider Failover** | 순서 있는 `[runtime.lanes]` 그룹 위에 provider health 기반 자동 회전을 얹고, 복구 로그/메트릭을 남깁니다. | 🟡→✅ |
+| 3 | **Fusion + JoJ** | 제공된 judges preset으로 staged judge-of-judges 경로를 끝까지 검증합니다. | 🟡→✅ |
 | 5 | **TUI** | `masc-tui`를 실제로 사용 가능한 상태로 만듭니다. 실행 파일은 있으나 CJK/emoji 레이아웃·스트리밍 진행·rich-block 렌더링 공백으로 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
 | 6 | **IDE** | 관망형 IDE를 실제로 사용 가능한 상태로 만듭니다. LSP 프록시·주석 오버레이·대시보드 IDE 셸은 있으나, 사람이 명령만 내리는 흐름이 검증되지 않아 현재는 사용할 수 없습니다. | ❌→🟡/✅ |
-| 7 | **Multi-Channel** | Slack·Telegram 등 Discord 외 채널용 **사이드카**를 추가하고, gate message 스키마를 채널별로 확장합니다. | 🟡→✅ |
+| 7 | **Multi-Channel** | Discord·Slack 외 채널(Telegram 등)용 사이드카를 추가하고, gate message 스키마를 채널별로 확장합니다. | 🟡→✅ |
 | 8 | **Sandbox** | docker 이미지 미설치·playground 내 fallback 시 host 실행 비율을 줄이고, `sandbox_profile=local` 사용처를 명시적으로 문서화합니다. | ✅ 안정화 |
 | 9 | **HITL** | 사람의 결정을 기다리는 동안 Keeper를 블로킹하지 않습니다. exact request를 영속화하고 다른 작업을 계속하며, 결정이 오면 해당 Keeper lane만 깨웁니다. | ✅ 안정화 |
 | 10 | **Gate** | Always Allow·LLM Auto Judge·HITL을 비계층 선택지로 유지합니다. 제품·명령·risk level을 분류하지 않고 exact 1회성 grant를 감사합니다. | ✅ 안정화 |
-| 11 | **OpenTelemetry** | Keeper turn 낮은 수준 이벤트, fusion 나이부 metric, provider별 latency breakdown 등 누락된 signal과 instrumentation을 추가합니다. | 🟡→✅ |
+| 11 | **OpenTelemetry** | Keeper turn 낮은 수준 이벤트, fusion 내부 metric, provider별 latency breakdown 등 누락된 signal과 instrumentation을 추가합니다. | 🟡→✅ |
 
 ---
 

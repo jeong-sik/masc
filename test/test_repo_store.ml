@@ -529,6 +529,122 @@ let test_discover_skips_registered () =
                 Alcotest.(check int) "skips already registered" 0
                   (List.length repos)))
 
+let test_discover_origin_budget_is_cumulative () =
+  with_temp_base_path (fun base_path ->
+    let fake_bin = Filename.concat base_path "fake-bin" in
+    Unix.mkdir fake_bin 0o755;
+    let fake_git = Filename.concat fake_bin "git" in
+    write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+    Unix.chmod fake_git 0o755;
+    List.iter
+      (fun name ->
+         let repo = Filename.concat base_path name in
+         Unix.mkdir repo 0o755;
+         Unix.mkdir (Filename.concat repo ".git") 0o755)
+      [ "stalled-a"; "stalled-b" ];
+    let old_path = Sys.getenv "PATH" in
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "PATH" old_path)
+      (fun () ->
+         Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+         let started_at = Unix.gettimeofday () in
+         let result =
+           Repo_store.For_testing.discover_repositories_with_budget
+             ~origin_budget_sec:0.2
+             ~base_path
+         in
+         let elapsed = Unix.gettimeofday () -. started_at in
+         (match result with
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "exhausted discovery budget returned a partial success");
+         Alcotest.(check bool)
+           "two stalled repositories share one request budget"
+           true
+           (elapsed < 1.0)))
+;;
+
+let test_discover_timeout_on_last_candidate_is_typed_failure () =
+  with_temp_base_path (fun base_path ->
+    let fake_bin = Filename.concat base_path "fake-bin" in
+    Unix.mkdir fake_bin 0o755;
+    let fake_git = Filename.concat fake_bin "git" in
+    write_file fake_git "#!/bin/sh\nexec sleep 30\n";
+    Unix.chmod fake_git 0o755;
+    let repo = Filename.concat base_path "stalled-only" in
+    Unix.mkdir repo 0o755;
+    Unix.mkdir (Filename.concat repo ".git") 0o755;
+    let old_path = Sys.getenv "PATH" in
+    Fun.protect
+      ~finally:(fun () -> Unix.putenv "PATH" old_path)
+      (fun () ->
+         Unix.putenv "PATH" (fake_bin ^ ":" ^ old_path);
+         let started_at = Unix.gettimeofday () in
+         let result =
+           Repo_store.For_testing.discover_repositories_with_budget
+             ~origin_budget_sec:0.2
+             ~base_path
+         in
+         let elapsed = Unix.gettimeofday () -. started_at in
+         (match result with
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "timed-out final origin was silently skipped");
+         Alcotest.(check bool) "still bounded by the budget" true (elapsed < 1.0)))
+;;
+
+let test_discover_skips_missing_origin_without_failing_request () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+      let without_origin = Filename.concat base_path "without-origin" in
+      Unix.mkdir without_origin 0o755;
+      init_git_repo without_origin "https://github.com/test/temporary";
+      (match Repo_git.run_git ~cwd:without_origin [ "remote"; "remove"; "origin" ] with
+       | Ok _ -> ()
+       | Error detail -> Alcotest.fail detail);
+      let with_origin = Filename.concat base_path "with-origin" in
+      Unix.mkdir with_origin 0o755;
+      init_git_repo with_origin "https://github.com/test/with-origin";
+      match Repo_store.discover_repositories ~base_path with
+      | Error detail ->
+        Alcotest.fail ("missing origin failed repository discovery: " ^ detail)
+      | Ok repos ->
+        Alcotest.(check (list string))
+          "missing-origin repository is skipped while valid candidates survive"
+          [ "with-origin" ]
+          (List.map (fun (repo : repository) -> repo.id) repos))
+;;
+
+let test_discover_origin_budget_starts_after_filesystem_scan () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+      let repo = Filename.concat base_path "fast-origin" in
+      Unix.mkdir repo 0o755;
+      init_git_repo repo "https://github.com/test/fast-origin";
+      match
+        Repo_store.For_testing.discover_repositories_with_budget_after_scan
+          ~before_origin_inspection:(fun () -> Unix.sleepf 0.25)
+          ~origin_budget_sec:0.2
+          ~base_path
+      with
+      | Error detail ->
+        Alcotest.fail ("filesystem discovery consumed origin budget: " ^ detail)
+      | Ok repos ->
+        Alcotest.(check int) "fast origin remains inspectable" 1 (List.length repos))
+;;
+
+let test_discovery_warning_escapes_untrusted_fields () =
+  let line =
+    Repo_store.For_testing.discovery_skip_log_line
+      ~abs_repo_dir:"/tmp/repo\nforged"
+      ~detail:"fatal:\027[31mred"
+  in
+  Alcotest.(check string)
+    "newline and terminal escape are rendered as quoted escapes"
+    "repo discovery skipped \"/tmp/repo\\nforged\": origin unavailable (\"fatal:\\027[31mred\")"
+    line
+;;
+
 let test_register_discovered_auto_adds () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -801,6 +917,16 @@ let () =
           Alcotest.test_case "relative base path keeps visible repos" `Quick
             test_discover_relative_base_path_keeps_visible_repos;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
+          Alcotest.test_case "skips missing origin without failing discovery" `Quick
+            test_discover_skips_missing_origin_without_failing_request;
+          Alcotest.test_case "shares one origin inspection budget" `Quick
+            test_discover_origin_budget_is_cumulative;
+          Alcotest.test_case "starts origin budget after filesystem scan" `Quick
+            test_discover_origin_budget_starts_after_filesystem_scan;
+          Alcotest.test_case "timeout on the last candidate is a typed failure" `Quick
+            test_discover_timeout_on_last_candidate_is_typed_failure;
+          Alcotest.test_case "escapes discovery warning fields" `Quick
+            test_discovery_warning_escapes_untrusted_fields;
         ] );
       ( "registration",
         [

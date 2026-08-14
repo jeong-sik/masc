@@ -16,11 +16,13 @@ describe('parseExactLaneRunsResponse', () => {
         started_at: 1,
         status: 'succeeded',
         elapsed_s: 0.4,
+        selected_slot: 'librarian-primary',
       }],
     })
     expect(parsed.runs[0]).toMatchObject({
       lane: 'librarian_exact',
       status: 'succeeded',
+      selectedSlot: 'librarian-primary',
     })
   })
 
@@ -90,6 +92,7 @@ describe('parseExactLaneRunsResponse', () => {
           intended_code: 'model_error',
           intended_detail: 'typed failure detail',
           elapsed_s: 0.4,
+          selected_slot: null,
           persistence_error: 'append rejected before commit',
           persistence_state: 'not_persisted',
         },
@@ -102,6 +105,7 @@ describe('parseExactLaneRunsResponse', () => {
           status: 'completion_durability_unknown',
           intended_status: 'succeeded',
           elapsed_s: 0.5,
+          selected_slot: 'librarian-secondary',
           persistence_error: 'rollback settlement failed',
           persistence_state: 'durability_unknown',
         },
@@ -113,11 +117,13 @@ describe('parseExactLaneRunsResponse', () => {
       intendedCode: 'model_error',
       intendedDetail: 'typed failure detail',
       persistenceState: 'not_persisted',
+      selectedSlot: null,
     })
     expect(parsed.runs[1]).toMatchObject({
       status: 'completion_durability_unknown',
       intendedStatus: 'succeeded',
       persistenceState: 'durability_unknown',
+      selectedSlot: 'librarian-secondary',
     })
   })
 
@@ -136,10 +142,29 @@ describe('parseExactLaneRunsResponse', () => {
         status: 'completion_persistence_failed',
         intended_status: 'succeeded',
         elapsed_s: 0.4,
+        selected_slot: null,
         persistence_error: 'append failed',
         persistence_state: 'durability_unknown',
       }],
     })).toThrow('persistence_state must be')
+  })
+
+  it('rejects a terminal row that omits the current selected-slot contract', () => {
+    expect(() => parseExactLaneRunsResponse({
+      generated_at: '2026-08-11T00:00:00Z',
+      count: 1,
+      total: 1,
+      has_more: false,
+      runs: [{
+        run_id: 'legacy-terminal',
+        lane: 'librarian_exact',
+        subject_id: 'trace',
+        actor: 'keeper-a',
+        started_at: 1,
+        status: 'succeeded',
+        elapsed_s: 0.4,
+      }],
+    })).toThrow('missing=[selected_slot]')
   })
 })
 
@@ -155,12 +180,14 @@ describe('parseExactLaneRunResponse', () => {
         started_at: 1,
         status: 'succeeded',
         elapsed_s: 0.4,
+        selected_slot: null,
         input: { kind: 'exact', payload: { message_count: 4 } },
         output: { fact_count: 3 },
       },
     })
     expect(run.input).toEqual({ kind: 'exact', payload: { message_count: 4 } })
     expect(run.output).toEqual({ fact_count: 3 })
+    expect(run.selectedSlot).toBeNull()
   })
 
   it('rejects removed research input instead of replaying it', () => {

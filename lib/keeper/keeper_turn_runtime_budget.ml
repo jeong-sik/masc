@@ -490,7 +490,8 @@ let capacity_transition_of_error
       (InputCapacity { reason = Token_measurement_unavailable _; _ }) ->
     Capacity_non_compacting Token_measurement_unavailable
   | Agent_core.Error.Api
-      (InvalidRequest { reason = Json_parse_error | Unknown_invalid_request; _ })
+      (InvalidRequest
+         { reason = Json_parse_error | Attempt_rejected | Unknown_invalid_request; _ })
   | Agent_core.Error.Api
       ( RateLimited _ | Overloaded _ | ServerError _ | AuthError _
       | AuthorizationError _ | PaymentRequired _ | NotFound _ | NetworkError _

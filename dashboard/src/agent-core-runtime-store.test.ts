@@ -7,8 +7,10 @@ vi.mock('./api/dashboard', () => ({
 import { fetchTelemetry, type TelemetryEntry } from './api/dashboard'
 import {
   applyAgentCoreRuntimeEvent,
+  appendAgentCoreRuntimeFromTelemetryEntries,
   hydrateAgentCoreRuntimeFromTelemetryEntries,
   replayAgentCoreRuntimeTelemetry,
+  loadMoreAgentCoreEvents,
 } from './agent-core-runtime-store'
 import {
   agentCoreAgentEvents,
@@ -116,6 +118,7 @@ describe('agent-core-runtime-store', () => {
   it('dedupes a live event already present in replayed telemetry', () => {
     const liveEvent = {
       type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-live-replay',
       ts_unix: 123,
       correlation_id: 'corr-live',
       run_id: 'run-live',
@@ -137,6 +140,7 @@ describe('agent-core-runtime-store', () => {
     expect(applyAgentCoreRuntimeEvent(liveEvent)).toBe(false)
     expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
     expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
+    expect(agentCoreAgentEvents.value[0]?.event_id).toBe('evt-live-replay')
   })
 
   it('hydrates keeper lifecycle phase from Agent Core payload', () => {
@@ -271,6 +275,7 @@ describe('agent-core-runtime-store', () => {
       const driftEvent = {
         source: 'agent_core_event',
         type: 'agent_core:durable:llm_request',
+        event_id: 'evt-drift',
         correlation_id: 'corr-drift',
         run_id: 'run-drift',
         payload: {
@@ -292,10 +297,103 @@ describe('agent-core-runtime-store', () => {
     }
   })
 
+  it('preserves identical strings from distinct event identities', () => {
+    const event = (eventId: string) => ({
+      type: 'agent_core:masc:trust_updated',
+      event_id: eventId,
+      ts_unix: 600,
+      correlation_id: 'corr-shared',
+      run_id: 'run-shared',
+      payload: {
+        agent_a: 'same-agent',
+        agent_b: 'same-peer',
+        trust_score: 0.5,
+        timestamp: 600,
+      },
+    })
+
+    expect(applyAgentCoreRuntimeEvent(event('evt-distinct-a'))).toBe(true)
+    expect(applyAgentCoreRuntimeEvent(event('evt-distinct-b'))).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+  })
+
+  it('treats a repeated producer event id as the same occurrence across run drift', () => {
+    const event = (runId: string) => ({
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-process-local',
+      run_id: runId,
+      payload: {
+        agent_a: 'same-agent',
+        agent_b: 'same-peer',
+        trust_score: 0.5,
+      },
+    })
+
+    expect(applyAgentCoreRuntimeEvent(event('run-a'))).toBe(true)
+    expect(applyAgentCoreRuntimeEvent(event('run-b'))).toBe(false)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
+  })
+
+  it('preserves envelopes that have no producer identity', () => {
+    const event = {
+      type: 'agent_core:masc:trust_updated',
+      ts_unix: 610,
+      correlation_id: 'corr-unidentified',
+      run_id: 'run-unidentified',
+      payload: {
+        agent_a: 'unidentified-agent',
+        agent_b: 'unidentified-peer',
+        trust_score: 0.4,
+        timestamp: 610,
+      },
+    }
+
+    hydrateAgentCoreRuntimeFromTelemetryEntries([
+      { source: 'agent_core_event', ...event } as TelemetryEntry,
+    ])
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+  })
+
+  it('preserves identical events with no producer identity', () => {
+    const event = {
+      type: 'agent_core:masc:trust_updated',
+      payload: {
+        agent_a: 'unidentified-agent',
+        agent_b: 'unidentified-peer',
+        trust_score: 0.4,
+      },
+    }
+
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+  })
+
+  it('dedupes one stable run sequence across replay and live delivery', () => {
+    const event = {
+      type: 'agent_core:masc:trust_updated',
+      run_id: 'run-sequenced',
+      seq: 7,
+      payload: {
+        agent_a: 'sequenced-agent',
+        agent_b: 'sequenced-peer',
+        trust_score: 0.7,
+      },
+    }
+
+    hydrateAgentCoreRuntimeFromTelemetryEntries([{ source: 'agent_core_event', ...event } as TelemetryEntry])
+    expect(applyAgentCoreRuntimeEvent(event)).toBe(false)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
+  })
+
   it('replays recent Agent Core telemetry via the dashboard API', async () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 0,
       total_matching_entries: 1200,
       truncated: true,
       entries: [
@@ -330,10 +428,113 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreAgentEvents.value[0]?.type).toBe('reputation_changed')
   })
 
+  it('preserves a live event accepted while initial replay hydration is in flight', async () => {
+    let resolveReplay: ((response: Awaited<ReturnType<typeof fetchTelemetry>>) => void) | undefined
+    fetchTelemetryMock.mockImplementation(() => new Promise(resolve => {
+      resolveReplay = resolve
+    }))
+
+    const replay = replayAgentCoreRuntimeTelemetry()
+    expect(applyAgentCoreRuntimeEvent({
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-live-during-replay',
+      ts_unix: 556,
+      run_id: 'run-live-during-replay',
+      payload: {
+        agent_a: 'live-agent',
+        agent_b: 'live-peer',
+        trust_score: 0.8,
+        timestamp: 556,
+      },
+    })).toBe(true)
+
+    resolveReplay?.({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 0,
+      total_matching_entries: 1,
+      has_more: false,
+      entries: [{
+        source: 'agent_core_event',
+        type: 'agent_core:masc:trust_updated',
+        event_id: 'evt-replayed-snapshot',
+        ts_unix: 555,
+        run_id: 'run-replayed-snapshot',
+        payload: {
+          agent_a: 'replayed-agent',
+          agent_b: 'replayed-peer',
+          trust_score: 0.7,
+          timestamp: 555,
+        },
+      } as TelemetryEntry],
+    })
+    await replay
+
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(1)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+    expect(agentCoreAgentEvents.value.map(event => event.event_id)).toEqual([
+      'evt-live-during-replay',
+      'evt-replayed-snapshot',
+    ])
+  })
+
+  it('releases queued live events when the latest replay finishes before a stale fetch', async () => {
+    type ReplayResponse = Awaited<ReturnType<typeof fetchTelemetry>>
+    let resolveStale: ((response: ReplayResponse) => void) | undefined
+    let resolveLatest: ((response: ReplayResponse) => void) | undefined
+    fetchTelemetryMock
+      .mockImplementationOnce(() => new Promise(resolve => {
+        resolveStale = resolve
+      }))
+      .mockImplementationOnce(() => new Promise(resolve => {
+        resolveLatest = resolve
+      }))
+
+    const staleReplay = replayAgentCoreRuntimeTelemetry()
+    const latestReplay = replayAgentCoreRuntimeTelemetry()
+    expect(applyAgentCoreRuntimeEvent({
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-live-after-stale-replay',
+      payload: {
+        agent_a: 'latest-live-agent',
+        agent_b: 'latest-live-peer',
+        trust_score: 0.9,
+      },
+    })).toBe(true)
+
+    resolveLatest?.({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 0,
+      offset: 0,
+      total_matching_entries: 0,
+      has_more: false,
+      entries: [],
+    })
+    await latestReplay
+
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
+    expect(agentCoreAgentEvents.value[0]?.event_id).toBe('evt-live-after-stale-replay')
+
+    resolveStale?.({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 0,
+      offset: 0,
+      total_matching_entries: 0,
+      has_more: false,
+      entries: [],
+    })
+    await staleReplay
+
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(1)
+    expect(agentCoreAgentEvents.value[0]?.event_id).toBe('evt-live-after-stale-replay')
+  })
+
   it('increments total events above the replay baseline for live arrivals', async () => {
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
       count: 1,
+      offset: 0,
       total_matching_entries: 1200,
       truncated: true,
       entries: [
@@ -372,5 +573,237 @@ describe('agent-core-runtime-store', () => {
 
     expect(agentCoreHealthSummary.value.totalEvents).toBe(1201)
     expect(agentCoreHealthSummary.value.agentEventsCount).toBe(2)
+  })
+
+  it('keeps live arrivals out of the replay-loaded page count', async () => {
+    const entry = (seq: number): TelemetryEntry => ({
+      source: 'agent_core_event',
+      type: 'agent_core:masc:trust_updated',
+      ts_unix: 700 + seq,
+      correlation_id: `corr-replay-${seq}`,
+      run_id: 'run-replay-pages',
+      seq,
+      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+    }) as TelemetryEntry
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 0,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [entry(1)],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    expect(applyAgentCoreRuntimeEvent({
+      type: 'agent_core:masc:trust_updated',
+      ts_unix: 999,
+      correlation_id: 'corr-live-between-pages',
+      run_id: 'run-live-between-pages',
+      payload: { agent_a: 'live', agent_b: 'peer', trust_score: 0.6 },
+    })).toBe(true)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 1,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [entry(2)],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 1,
+      signal: undefined,
+    })
+
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(3)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+    expect(agentCoreHealthSummary.value.totalEvents).toBe(4)
+  })
+
+  it('keeps loading more from retiring hasMore before the window is exhausted', async () => {
+    // A replayed row sits inside the server's total-matching count. Counting
+    // it again made loaded exceed total, and noteAgentCoreReplayWindow reads
+    // loaded >= total as "nothing left" — so the second page silently became
+    // the last one no matter how many rows the server still held.
+    const entry = (seq: number): TelemetryEntry =>
+      ({
+        source: 'agent_core_event',
+        type: 'agent_core:masc:trust_updated',
+        ts_unix: 500 + seq,
+        correlation_id: `corr-${seq}`,
+        run_id: 'run-page',
+        seq,
+        payload: {
+          agent_a: 'gamma',
+          agent_b: 'delta',
+          trust_score: 0.5,
+          timestamp: 500 + seq,
+        },
+      }) as TelemetryEntry
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 2,
+      offset: 0,
+      total_matching_entries: 1200,
+      truncated: true,
+      entries: [entry(1), entry(2)],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 2,
+      offset: 2,
+      total_matching_entries: 1200,
+      truncated: true,
+      entries: [entry(3), entry(4)],
+    })
+    await loadMoreAgentCoreEvents()
+
+    // Four distinct rows loaded out of 1200 — the operator must still be able
+    // to ask for the rest.
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(4)
+    expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(1200)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
+  })
+
+  it('pages by fetched replay rows rather than projected Agent Core rows', async () => {
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 0,
+      total_matching_entries: 2,
+      has_more: true,
+      entries: [{
+        source: 'agent_core_event',
+        type: 'agent_core:durable:llm_request',
+        event_id: 'evt-page-1',
+        run_id: 'run-page-offset',
+        payload: { agent_name: 'alpha', model: 'gpt-5', input_tokens: 10 },
+      } as TelemetryEntry],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    expect(agentCoreAgentEvents.value).toHaveLength(0)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 1,
+      total_matching_entries: 2,
+      has_more: false,
+      entries: [{
+        source: 'agent_core_event',
+        type: 'agent_core:durable:error_occurred',
+        event_id: 'evt-page-2',
+        run_id: 'run-page-offset',
+        payload: { agent_name: 'alpha', error_domain: 'tool' },
+      } as TelemetryEntry],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 1,
+      signal: undefined,
+    })
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(2)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
+  })
+
+  it('keeps the fetched cursor separate from the deduplicated displayed count', async () => {
+    const duplicated = {
+      source: 'agent_core_event',
+      type: 'agent_core:masc:trust_updated',
+      event_id: 'evt-page-overlap',
+      run_id: 'run-page-overlap',
+      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+    } as TelemetryEntry
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 0,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [duplicated],
+    })
+    await replayAgentCoreRuntimeTelemetry()
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      offset: 1,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [duplicated],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(1)
+
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 0,
+      offset: 2,
+      total_matching_entries: 3,
+      has_more: true,
+      entries: [],
+    })
+    await loadMoreAgentCoreEvents()
+
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 2,
+      signal: undefined,
+    })
+  })
+
+  it('stops at the telemetry offset cap without replaying a clamped page', async () => {
+    const entry = (seq: number): TelemetryEntry => ({
+      source: 'agent_core_event',
+      type: 'agent_core:masc:trust_updated',
+      event_id: `evt-cap-${seq}`,
+      run_id: 'run-cap',
+      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+    }) as TelemetryEntry
+
+    hydrateAgentCoreRuntimeFromTelemetryEntries([entry(1)])
+    fetchTelemetryMock.mockResolvedValue({
+      generated_at: '2026-04-15T12:00:00Z',
+      count: 1,
+      total_matching_entries: 6000,
+      offset: 5000,
+      has_more: true,
+      entries: [entry(2)],
+    })
+
+    // Simulate the first request beyond the server's 5000 offset cap.
+    appendAgentCoreRuntimeFromTelemetryEntries([], 5499)
+    await loadMoreAgentCoreEvents()
+
+    expect(fetchTelemetryMock).toHaveBeenLastCalledWith({
+      source: 'agent_core_event',
+      n: 500,
+      offset: 5499,
+      signal: undefined,
+    })
+    expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(1)
+    expect(agentCoreHealthSummary.value.replayTruncated).toBe(false)
+    expect(agentCoreHealthSummary.value.replayCapped).toBe(true)
+    expect(agentCoreHealthSummary.value.hasMore).toBe(false)
+    expect(agentCoreHealthSummary.value.agentEventsCount).toBe(1)
   })
 })

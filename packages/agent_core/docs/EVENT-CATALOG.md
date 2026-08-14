@@ -51,20 +51,29 @@ Event_bus payloads.
 Every event carries a common envelope:
 
 ```ocaml
-type envelope = {
-  correlation_id: string;       (* session-level, stable across a run *)
-  run_id: string;               (* per-run identifier *)
-  ts: float;                    (* Unix epoch seconds *)
-  caused_by: string option;     (* optional causation link (#877) *)
+type envelope = Event_envelope.t = {
+  event_id: string;              (* producer-owned occurrence identity *)
+  correlation_id: string;        (* session-level, stable across a run *)
+  run_id: string;                (* per-run identifier *)
+  event_time: float;             (* producer event time *)
+  observed_at: float;            (* producer observation time *)
+  seq: int option;
+  parent_event_id: string option;
+  caused_by: string option;
+  source_clock: source_clock;
 }
 ```
 
-**Contract**: `correlation_id` is constant for all events belonging to the
-same logical session. `run_id` is unique per agent run. `caused_by`, when
-`Some id`, points at the prior `run_id` (or `correlation_id`) that
-causally triggered this event — enabling A→B→C cascade reconstruction
-within a session. Root events and legacy producers set `caused_by =
-None`. Envelopes are filled by producers, never rewritten by subscribers.
+**Contract**: `event_id` is minted once from operating-system entropy by the
+producer for one occurrence and is preserved unchanged by durable, replay, and
+live-delivery adapters. Entropy failure is explicit; clocks, process IDs,
+paths, and event content are not identity fallbacks.
+`correlation_id` is constant for all events belonging to the same logical
+session. `run_id` is unique per agent run. `caused_by`, when `Some id`, points
+at the prior `run_id` (or `correlation_id`) that causally triggered this event
+— enabling A→B→C cascade reconstruction within a session. Root events set
+`caused_by = None`. Envelopes are filled by producers, never reconstructed or
+rewritten by subscribers.
 
 ### 2.2 Native payload variants
 
@@ -89,7 +98,8 @@ Pattern-matchable OCaml sum type. **Stable across every provider.**
 
 **Invariants**:
 - **I1 Provider-agnostic**: every native payload field is meaningful regardless of which provider serves the underlying LLM.
-- **I2 Stable envelope**: envelope field set is identical across providers.
+- **I2 Stable envelope**: envelope field set is identical across providers and
+  every occurrence has a non-empty, producer-owned `event_id`.
 - **I6 Multi-vendor**: a native variant is only added if its semantic exists in ≥2 vendor SDKs.
 
 ### 2.3 Custom namespaces (reserved)

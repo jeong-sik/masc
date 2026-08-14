@@ -143,6 +143,13 @@ type supersession =
 
 type phase =
   | Prepared
+  | Joining_lanes
+      (** The durable shutdown worker has committed its intent to join the
+          Keeper lane and its detached Librarian lane. This phase is visible
+          for the full cooperative wait; no implicit duration limit is added.
+          If the server process ends here, boot recovery preserves the
+          admission fence as [Blocked Lane_join] because Librarian completion
+          cannot be inferred from the process boundary. *)
   | Joined_idle
   | Finalizing_tasks of Keeper_id.Task_id.t list
   | Cleanup_ready of cleanup_evidence

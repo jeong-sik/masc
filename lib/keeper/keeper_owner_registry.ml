@@ -615,7 +615,7 @@ let cancel_queued_operation ~base_path ~keeper_name operation_id =
     Keeper_owner.cancel_queued_operation owner operation_id)
 ;;
 
-let create_meta ~base_path meta =
+let create_meta_unfenced ~base_path meta =
   match find_pool base_path with
   | Error error -> Error (Command_lookup_failed error)
   | Ok pool ->
@@ -634,9 +634,41 @@ let create_meta ~base_path meta =
            (match ensure_empty_in_pool pool meta.name with
             | Error error -> Error (Command_lookup_failed error)
             | Ok owner ->
-              (match Keeper_owner.apply_meta owner (Keeper_owner_reducer.Create meta) with
+              (match
+                 Keeper_owner.apply_meta owner (Keeper_owner_reducer.Create meta)
+               with
                | Error error -> Error (Command_rejected error)
                | Ok committed -> Ok committed)))
+;;
+
+let create_meta ?intake_token ~base_path meta =
+  match intake_token with
+  | Some token ->
+    if
+      Keeper_shutdown_intake_fence.intake_token_matches
+        token
+        ~base_path
+        ~keeper_name:meta.Keeper_meta_contract.name
+    then create_meta_unfenced ~base_path meta
+    else
+      Error
+        (shutdown_fence_error
+           (Printf.sprintf "keeper=%s create_meta_intake_token_not_live" meta.name))
+  | None ->
+    (match
+       Keeper_shutdown_intake_fence.run_durable_intake_if_open
+         ~base_path
+         ~keeper_name:meta.Keeper_meta_contract.name
+         (fun _intake_token -> create_meta_unfenced ~base_path meta)
+     with
+     | Keeper_shutdown_intake_fence.Intake_committed result -> result
+     | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
+       Error
+         (shutdown_fence_error
+            (Printf.sprintf
+               "keeper=%s create_meta_operation=%s"
+               meta.name
+               (Keeper_shutdown_types.Operation_id.to_string operation_id))))
 ;;
 
 let all_projections ~base_path =

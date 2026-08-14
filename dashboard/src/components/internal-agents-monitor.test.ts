@@ -133,6 +133,7 @@ describe('InternalAgentsMonitor', () => {
     expect(within(filters).getByRole('button', { name: 'Auto Judge 1' })).toBeTruthy()
     expect(within(filters).getByRole('button', { name: 'Board Attention 1' })).toBeTruthy()
     expect(container.textContent).not.toContain('Board Judge')
+    expect(container.querySelector('code[translate="no"]')).toBeNull()
 
     fireEvent.click(within(filters).getByRole('button', { name: 'Auto Judge 1' }))
     expect(screen.getByRole('button', { name: /Auto Judge approval-1/i })).toBeTruthy()
@@ -159,6 +160,7 @@ describe('InternalAgentsMonitor', () => {
         startedAt: 1786000000,
         status: 'succeeded',
         elapsedSeconds: 2,
+        selectedSlot: 'librarian-primary',
       }],
     })
     // The listing carries no payloads; opening the row is what fetches them.
@@ -170,6 +172,7 @@ describe('InternalAgentsMonitor', () => {
       startedAt: 1786000000,
       status: 'succeeded',
       elapsedSeconds: 2,
+      selectedSlot: 'librarian-primary',
       input: {
         kind: 'exact',
         payload: { current_fact_count: 1, message_count: 5 },
@@ -203,6 +206,9 @@ describe('InternalAgentsMonitor', () => {
 
     const { container } = render(html`<${InternalAgentsMonitor} />`)
     const run = await screen.findByRole('button', { name: /Librarian trace-1/i })
+    const runIdentity = container.querySelector('code[translate="no"]')
+    expect(runIdentity?.textContent).toContain('run_id · exact-lib-1')
+    expect(runIdentity?.getAttribute('title')).toBe('exact-lib-1')
     fireEvent.click(run)
 
     expect(await screen.findByText('추가된 기억 1건')).toBeTruthy()
@@ -211,6 +217,7 @@ describe('InternalAgentsMonitor', () => {
     expect(container.textContent).toContain('낡은 기억')
     expect(container.textContent).toContain('새 근거로 대체됨')
     expect(container.textContent).toContain('TOOL-FREE')
+    expect(container.textContent).toContain('선택 slot librarian-primary')
     expect(container.textContent).toContain('외부 research/RAW 입력을 받지 않습니다')
     expect(memoryApi.fetchKeeperMemoryJournal).toHaveBeenCalledWith(
       'kidsnote',

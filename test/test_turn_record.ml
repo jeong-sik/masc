@@ -71,7 +71,7 @@ let sample_record () : Turn_record.t =
         ; { component = Turn_record.Message_user; bytes = 256 }
         ]
   ; runtime_profile = "ollama_cloud.deepseek-v4-flash"
-  ; model = Some "deepseek-v4-flash"
+  ; selected_model = Some "deepseek-v4-flash"
   ; finish_reason = Some "completed"
   ; context_window = Some 131072
   ; price_input_per_million = Some 0.15
@@ -183,7 +183,7 @@ let test_codec_roundtrip () =
          (fun (component : Turn_record.input_component) -> component.bytes)
          (input_components_or_fail decoded.input_components));
     check string "runtime_profile" record.runtime_profile decoded.runtime_profile;
-    check (option string) "model" record.model decoded.model;
+    check (option string) "selected_model" record.selected_model decoded.selected_model;
     check (option string) "finish_reason" record.finish_reason decoded.finish_reason;
     check (option int) "context_window" record.context_window decoded.context_window;
     check (option (float 0.0001)) "price_input_per_million"
@@ -238,7 +238,7 @@ let test_codec_roundtrip () =
 let test_codec_optional_fields_absent () =
   let record =
     { (sample_record ()) with
-      model = None
+      selected_model = None
     ; finish_reason = None
     ; context_window = None
     ; price_input_per_million = None
@@ -263,14 +263,14 @@ let test_codec_optional_fields_absent () =
   in
   let json = Turn_record.to_json record in
   (* RFC-0233 §2.3/§8: absent meta fields are omitted from the wire, never
-     emitted as a fabricated value (no "stop", no placeholder model, no
+     emitted as a fabricated value (no "stop", no placeholder selected model, no
      fabricated 200K window or Claude $3/$15 price). *)
   (match json with
    | `Assoc fields ->
      check bool "finish_reason key omitted when None" false
        (List.mem_assoc "finish_reason" fields);
-     check bool "model key omitted when None" false
-       (List.mem_assoc "model" fields);
+     check bool "selected_model key omitted when None" false
+       (List.mem_assoc "selected_model" fields);
      check bool "top_p key omitted when None" false
        (List.mem_assoc "top_p" fields);
      check bool "max_tokens key omitted when None" false
@@ -295,7 +295,8 @@ let test_codec_optional_fields_absent () =
   match Turn_record.of_json json with
   | Error e -> failf "decode failed: %s" e
   | Ok decoded ->
-    check (option string) "model absent stays None" None decoded.model;
+    check (option string) "selected_model absent stays None" None
+      decoded.selected_model;
     check (option string) "finish_reason absent stays None (not \"stop\")" None
       decoded.finish_reason;
     check (option int) "context_window absent stays None" None decoded.context_window;
@@ -329,6 +330,19 @@ let test_codec_rejects_malformed () =
   (match Turn_record.of_json (`String "not a record") with
    | Ok _ -> fail "decoded a non-object"
    | Error _ -> ());
+  (match Turn_record.to_json (sample_record ()) with
+   | `Assoc fields ->
+     let blank_selected_model =
+       `Assoc
+         (("selected_model", `String " ")
+          :: List.remove_assoc "selected_model" fields)
+     in
+     (match Turn_record.of_json blank_selected_model with
+      | Ok _ -> fail "decoded a blank selected_model"
+      | Error message ->
+        check bool "blank selected_model is explicit" true
+          (Astring.String.is_infix ~affix:"selected_model" message))
+   | _ -> fail "sample turn record is not an object");
   match Turn_record.of_json (`Assoc [ ("keeper", `String "x") ]) with
   | Ok _ -> fail "decoded a row with missing fields"
   | Error msg ->
@@ -563,7 +577,7 @@ let test_codec_rejects_unknown_fields () =
   let record_json = Turn_record.to_json (sample_record ()) in
   let with_unknown_record_field =
     match record_json with
-    | `Assoc fields -> `Assoc (("retired_cursor", `String "old") :: fields)
+    | `Assoc fields -> `Assoc (("model", `String "runtime") :: fields)
     | other -> other
   in
   (match Turn_record.of_json with_unknown_record_field with

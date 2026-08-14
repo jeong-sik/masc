@@ -619,10 +619,17 @@ let resolve_registry_done
 ;;
 
 let dispatch_event_exact_unit
+      ?lifecycle_token
       (entry : Keeper_registry.registry_entry)
       event
   =
-  match Keeper_registry.dispatch_event_exact entry event with
+  let result =
+    match lifecycle_token with
+    | None -> Keeper_registry.dispatch_event_exact entry event
+    | Some token ->
+      Keeper_registry.dispatch_event_exact_for_lifecycle token entry event
+  in
+  match result with
   | Ok _ -> true
   | Error error ->
     Otel_metric_store.inc_counter
@@ -638,6 +645,7 @@ let dispatch_event_exact_unit
 ;;
 
 let record_keeper_stopped
+      ?lifecycle_token
       (entry : Keeper_registry.registry_entry)
       ~base_path:_
       ~keeper_name
@@ -646,10 +654,20 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry ~source:"keepalive_record_stopped" `Stopped
   then (
-    (match dispatch_event_exact_unit entry Keeper_state_machine.Stop_requested with
+    (match
+       dispatch_event_exact_unit
+         ?lifecycle_token
+         entry
+         Keeper_state_machine.Stop_requested
+     with
      | false -> ()
      | true ->
-       (match dispatch_event_exact_unit entry Keeper_state_machine.Drain_complete with
+       (match
+          dispatch_event_exact_unit
+            ?lifecycle_token
+            entry
+            Keeper_state_machine.Drain_complete
+        with
         | true | false -> ()));
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Stopped
@@ -661,6 +679,7 @@ let record_keeper_stopped
 ;;
 
 let record_keeper_crashed
+      ?lifecycle_token
       (entry : Keeper_registry.registry_entry)
       ~base_path:_
       ~keeper_name
@@ -671,22 +690,36 @@ let record_keeper_crashed
   if resolve_registry_done entry ~source:"keepalive_record_crashed" (`Crashed reason)
   then (
     let outcome = reason in
+    let update_exact f =
+      match lifecycle_token with
+      | None -> Keeper_registry.update_entry_exact entry f
+      | Some token -> Keeper_registry.update_entry_exact_for_lifecycle token entry f
+    in
     ignore
-      (Keeper_registry.set_failure_reason_exact entry (Some failure_reason)
+      (update_exact (fun current ->
+         { current with last_failure_reason = Some failure_reason })
        |> Keeper_registry.exact_update_succeeded
             entry
             ~site:"record_keeper_crashed.failure_reason");
     ignore
       (dispatch_event_exact_unit
+         ?lifecycle_token
          entry
          (Keeper_state_machine.Fiber_terminated
             { outcome; provider_id = None; http_status = None }));
     ignore
-      (Keeper_registry.record_crash_exact entry (Time_compat.now ()) reason
+      (update_exact (fun current ->
+         Keeper_registry_error_tracking.record_crash_entry
+           current
+           (Time_compat.now ())
+           reason)
        |> Keeper_registry.exact_update_succeeded
             entry
             ~site:"record_keeper_crashed.crash_log");
-    Keeper_registry_error_recording.record_exact entry reason;
+    (match lifecycle_token with
+     | None -> Keeper_registry_error_recording.record_exact entry reason
+     | Some token ->
+       Keeper_registry_error_recording.record_exact_for_lifecycle token entry reason);
     publish_keeper_phase_lifecycle
       ~phase:Keeper_state_machine.Crashed
       ~keeper_name
@@ -703,6 +736,8 @@ type start_keepalive_outcome =
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
+  | Keepalive_memory_lane_not_ready of Keeper_memory_lane.lifecycle_open_error
+  | Keepalive_launch_callback_failed of string
   | Keepalive_lane_ownership_lost
   | Keepalive_fork_rejected of Keeper_lane.start_error
 
@@ -723,6 +758,9 @@ let start_keepalive_outcome_to_string = function
       "shutdown operation %s owns keeper admission"
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
   | Keepalive_registration_rejected
+      Keeper_registry.Registration_intake_token_not_live ->
+    "registry registration rejected an inactive durable-intake token"
+  | Keepalive_registration_rejected
       (Keeper_registry.Registration_lifecycle_reserved owner) ->
     Printf.sprintf
       "keeper lifecycle reservation conflict: %s"
@@ -737,6 +775,9 @@ let start_keepalive_outcome_to_string = function
     Printf.sprintf
       "Fiber_started rejected: %s"
       (Keeper_state_machine.transition_error_to_string error)
+  | Keepalive_memory_lane_not_ready error ->
+    Keeper_memory_lane.lifecycle_open_error_to_string error
+  | Keepalive_launch_callback_failed detail -> detail
   | Keepalive_lane_ownership_lost -> "lane ownership lost before fiber fork"
   | Keepalive_fork_rejected error -> Keeper_lane.start_error_to_string error
 
@@ -795,6 +836,7 @@ let record_lifecycle_start_denial
 let start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
+      ?intake_token
       (ctx : _ context)
   (m : keeper_meta)
   : start_keepalive_outcome
@@ -898,43 +940,96 @@ let start_keepalive
         (Printf.sprintf "start_keepalive: skipped %s (already registered)" m.name);
       Keepalive_already_registered registered
     | None ->
-      (* Register in Keeper_registry first — single source of truth. *)
-      (match
-         match lifecycle_token with
-         | None ->
-           Keeper_registry.register_offline_if_admitted
-             ~base_path:ctx.config.base_path
-             m.name
-             m
-         | Some token ->
-           Keeper_registry.register_offline_if_admitted_for_lifecycle
-             token
-             ~base_path:ctx.config.base_path
-             m.name
-             m
+      let rec run_transaction () =
+        match
+         Keeper_keepalive_launch_transaction.run
+           ?lifecycle_token
+           ?intake_token
+           ~base_path:ctx.config.base_path
+           ~keeper_name:m.name
+           ~expected_generation:0
+           ~register:(fun token intake_token ->
+             match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
+             | Some current -> Error (`Already_registered current)
+             | None ->
+               Keeper_registry.register_offline_if_admitted_for_lifecycle
+                 ~intake_token
+                 token
+                 ~base_path:ctx.config.base_path
+                 m.name
+                 m
+               |> Result.map_error (fun error -> `Registration error))
+           ~rollback:Keeper_keepalive_launch_transaction.Remove_registered
+           launch_registered
        with
-       | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+       | Error (Keeper_keepalive_launch_transaction.Shutdown_reserved operation_id) ->
          Log.Keeper.warn
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
            m.name
            (Keeper_shutdown_types.Operation_id.to_string operation_id);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_shutdown_reserved operation_id)
-       | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+       | Error Keeper_keepalive_launch_transaction.Intake_token_not_live ->
+         Log.Keeper.error
+           "start_keepalive: inactive durable-intake token rejected %s"
+           m.name;
+         Keepalive_registration_rejected
+           Keeper_registry.Registration_intake_token_not_live
+       | Error
+           (Keeper_keepalive_launch_transaction.Reservation_unavailable owner) ->
          Log.Keeper.warn
            "start_keepalive: lifecycle reservation rejected %s: %s"
            m.name
            (Keeper_lifecycle_reservation.snapshot_to_string owner);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_lifecycle_reserved owner)
-       | Error (Keeper_registry.Registration_invalid validation_error) ->
+       | Error
+           (Keeper_keepalive_launch_transaction.Registration_failed
+              (`Already_registered current)) ->
+         wake_queued_owner_operations ~base_path:ctx.config.base_path m.name;
+         Keepalive_already_registered current
+       | Error
+           (Keeper_keepalive_launch_transaction.Registration_failed
+              (`Registration
+                 (Keeper_registry.Registration_shutdown_reserved operation_id))) ->
+         Log.Keeper.warn
+           "start_keepalive: skipped %s because shutdown operation %s owns admission"
+           m.name
+           (Keeper_shutdown_types.Operation_id.to_string operation_id);
+         Keepalive_registration_rejected
+           (Keeper_registry.Registration_shutdown_reserved operation_id)
+       | Error
+           (Keeper_keepalive_launch_transaction.Registration_failed
+              (`Registration Keeper_registry.Registration_intake_token_not_live)) ->
+         Log.Keeper.error
+           "start_keepalive: inactive durable-intake token rejected during registration %s"
+           m.name;
+         Keepalive_registration_rejected
+           Keeper_registry.Registration_intake_token_not_live
+       | Error
+           (Keeper_keepalive_launch_transaction.Registration_failed
+              (`Registration
+                 (Keeper_registry.Registration_lifecycle_reserved owner))) ->
+         Log.Keeper.warn
+           "start_keepalive: lifecycle reservation rejected %s: %s"
+           m.name
+           (Keeper_lifecycle_reservation.snapshot_to_string owner);
+         Keepalive_registration_rejected
+           (Keeper_registry.Registration_lifecycle_reserved owner)
+       | Error
+           (Keeper_keepalive_launch_transaction.Registration_failed
+              (`Registration (Keeper_registry.Registration_invalid validation_error))) ->
          Log.Keeper.error
            "start_keepalive: registry validation rejected %s: %s"
            m.name
            (Keeper_registry.registry_entry_validation_error_to_string validation_error);
          Keepalive_registration_rejected
            (Keeper_registry.Registration_invalid validation_error)
-       | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+       | Error
+           (Keeper_keepalive_launch_transaction.Registration_failed
+              (`Registration
+                 (Keeper_registry.Registration_event_queue_unavailable
+                    { keeper_name; detail }))) ->
          Log.Keeper.error
            "start_keepalive: registry event queue unavailable keeper=%s: %s"
            keeper_name
@@ -942,9 +1037,36 @@ let start_keepalive
          Keepalive_registration_rejected
            (Keeper_registry.Registration_event_queue_unavailable
               { keeper_name; detail })
-       | Ok reg ->
+       | Error
+           (Keeper_keepalive_launch_transaction.Lifecycle_open_failed
+              { error; rollback_error }) ->
+         let detail = Keeper_memory_lane.lifecycle_open_error_to_string error in
+         Log.Keeper.error
+           "start_keepalive: Librarian lifecycle not ready keeper=%s error=%s%s"
+           m.name
+           detail
+           (match rollback_error with
+            | None -> ""
+            | Some rollback -> "; rollback failed: " ^ rollback);
+         Keepalive_memory_lane_not_ready error
+       | Error
+           (Keeper_keepalive_launch_transaction.Launch_failed
+              { exception_detail; librarian_abort_error; rollback_error }) ->
+         let cleanup_detail label = function
+           | None -> ""
+           | Some detail -> "; " ^ label ^ " failed: " ^ detail
+         in
+         let detail =
+           "keepalive launch callback failed: " ^ exception_detail
+           ^ cleanup_detail "Librarian abort" librarian_abort_error
+           ^ cleanup_detail "registry rollback" rollback_error
+         in
+         Log.Keeper.error ~keeper_name:m.name "%s" detail;
+         Keepalive_launch_callback_failed detail
+       | Ok outcome -> outcome
+      and launch_registered _intake_token launch_token reg =
       (* Restore persisted tool usage stats from previous session *)
-      Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
+      Keeper_registry_tool_usage_persistence.restore_for_lifecycle launch_token reg;
       (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,
          grpc_close registration, live-meta bootstrap/update) must come after
          the registry FSM accepts [Fiber_started]. Starting the sidecar
@@ -952,15 +1074,11 @@ let start_keepalive
          rejected launch — the same half-commit class this change removes
          from the fiber-fork path. *)
       match
-        match lifecycle_token with
-        | None ->
-          dispatch_fiber_started ~base_path:ctx.config.base_path m.name
-        | Some token ->
-          dispatch_fiber_started
-            ~lifecycle_token:token
-            ~entry:reg
-            ~base_path:ctx.config.base_path
-            m.name
+        dispatch_fiber_started
+          ~lifecycle_token:launch_token
+          ~entry:reg
+          ~base_path:ctx.config.base_path
+          m.name
       with
       | Error err ->
         (* Fail closed: the registry FSM refused [Fiber_started], so no
@@ -973,18 +1091,32 @@ let start_keepalive
             "fiber_start_rejected: %s"
             (Keeper_state_machine.transition_error_to_string err)
         in
-        Keeper_registry.set_failure_reason
-          ~base_path:ctx.config.base_path
-          m.name
-          (Some (Keeper_registry.Exception reason));
-        Keeper_registry.record_crash
-          ~base_path:ctx.config.base_path
-          m.name
-          (Time_compat.now ())
-          reason;
-        Keeper_registry_error_recording.record
-          ~base_path:ctx.config.base_path
-          m.name
+        ignore
+          (Keeper_registry.update_entry_exact_for_lifecycle
+             launch_token
+             reg
+             (fun current ->
+                { current with
+                  last_failure_reason = Some (Keeper_registry.Exception reason)
+                })
+           |> Keeper_registry.exact_update_succeeded
+                reg
+                ~site:"keepalive_launch_rejected.failure_reason");
+        ignore
+          (Keeper_registry.update_entry_exact_for_lifecycle
+             launch_token
+             reg
+             (fun current ->
+                Keeper_registry_error_tracking.record_crash_entry
+                  current
+                  (Time_compat.now ())
+                  reason)
+           |> Keeper_registry.exact_update_succeeded
+                reg
+                ~site:"keepalive_launch_rejected.crash_log");
+        Keeper_registry_error_recording.record_exact_for_lifecycle
+          launch_token
+          reg
           reason;
         if resolve_registry_done reg ~source:"keepalive_launch_rejected" (`Crashed reason)
         then
@@ -1004,7 +1136,9 @@ let start_keepalive
       | Ok () ->
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
-        let live_meta = bootstrap_live_keeper_meta ?lifecycle_token ~ctx m in
+        let live_meta =
+          bootstrap_live_keeper_meta ~lifecycle_token:launch_token ~ctx m
+        in
         let live_meta_installed =
           match Keeper_registry.get ~base_path:ctx.config.base_path reg.name with
           | Some current ->
@@ -1017,6 +1151,7 @@ let start_keepalive
         then (
           let failure_reason = Keeper_registry.Exception "lane_ownership_lost_before_fork" in
           record_keeper_crashed
+            ~lifecycle_token:launch_token
             reg
             ~base_path:ctx.config.base_path
             ~keeper_name:live_meta.name
@@ -1050,6 +1185,7 @@ let start_keepalive
         in
         let record_crash failure_reason =
           record_keeper_crashed
+            ~lifecycle_token:launch_token
             reg
             ~base_path:ctx.config.base_path
             ~keeper_name:live_meta.name
@@ -1058,6 +1194,7 @@ let start_keepalive
         let record_stopped detail =
           ignore
             (record_keeper_stopped
+               ~lifecycle_token:launch_token
                reg
                ~base_path:ctx.config.base_path
                ~keeper_name:live_meta.name
@@ -1118,29 +1255,35 @@ let start_keepalive
            invokes it only after the child-owning switch and all children
            finish. *)
         let cleanup_tracking outcome =
-          let librarian_join_result =
-            match
-              Keeper_memory_lane.cancel_and_join_librarian
-                ~base_path:ctx.config.Workspace.base_path
-                ~keeper_name:live_meta.name
-            with
-            | Keeper_memory_lane.No_librarian_work
-            | Keeper_memory_lane.Librarian_joined _ -> Ok ()
-            | Keeper_memory_lane.Librarian_join_failed detail -> Error detail
+          let graceful_librarian_boundary =
+            match outcome with
+            | Keeper_lane.Completed
+            | Keeper_lane.Shutdown_before_start
+            | Keeper_lane.Shutdown_requested -> true
+            | Keeper_lane.Cancelled_by_parent _ ->
+              Atomic.get stop || Shutdown.is_shutting_down_global ()
+            | Keeper_lane.Shutdown_cancel_failed _
+            | Keeper_lane.Failed _ -> false
           in
-          let terminal_result =
-            match librarian_join_result with
-            | Error _ as error -> error
-            | Ok () ->
-              (try
-                 terminalize_lane outcome;
-                 Ok ()
-               with
-               | exn -> Error (Printexc.to_string exn))
+          let lifecycle_result =
+            Keeper_keepalive_launch_transaction.finish_lifecycle
+              ~boundary:
+                (if graceful_librarian_boundary
+                 then Keeper_keepalive_launch_transaction.Graceful
+                 else Keeper_keepalive_launch_transaction.Unexpected)
+              ~base_path:ctx.config.Workspace.base_path
+              ~keeper_name:live_meta.name
+              ~terminalize:(fun () ->
+                terminalize_lane outcome;
+                Ok ())
           in
           let tracking_result =
           try
-            (match Keeper_registry.cleanup_tracking_exact reg with
+            (match
+               Keeper_registry.cleanup_tracking_exact_for_lifecycle
+                 launch_token
+                 reg
+             with
              | Keeper_registry.Exact_updated
              | Keeper_registry.Exact_update_missing -> Ok ()
              | Keeper_registry.Exact_update_replaced ->
@@ -1174,15 +1317,18 @@ let start_keepalive
                  detail);
             Error detail
           in
-          match terminal_result, tracking_result with
-          | Ok (), Ok () -> Ok ()
-          | Error detail, Ok () | Ok (), Error detail -> Error detail
-          | Error terminal_detail, Error tracking_detail ->
-            Error
-              (Printf.sprintf
-                 "terminal cleanup failed: %s; tracking cleanup failed: %s"
-                 terminal_detail
-                 tracking_detail)
+          let errors =
+            [ "lifecycle cleanup", lifecycle_result
+            ; "tracking cleanup", tracking_result
+            ]
+            |> List.filter_map (fun (label, result) ->
+              match result with
+              | Ok () -> None
+              | Error detail -> Some (label ^ " failed: " ^ detail))
+          in
+          match errors with
+          | [] -> Ok ()
+          | errors -> Error (String.concat "; " errors)
         in
         publish_keeper_started ~live_meta;
         (match
@@ -1226,12 +1372,14 @@ let start_keepalive
          | Error error ->
            let detail = Keeper_lane.start_error_to_string error in
            record_keeper_crashed
+             ~lifecycle_token:launch_token
              reg
              ~base_path:ctx.config.base_path
              ~keeper_name:live_meta.name
              ~failure_reason:(Keeper_registry.Exception detail);
            Keepalive_fork_rejected error))
-        )
+      in
+      run_transaction ()
 ;;
 
 type joined_stop =

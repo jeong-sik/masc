@@ -595,7 +595,7 @@ let keeper_execution_snapshot config =
             Keeper_activation_readiness.Unknown
               (Keeper_owner_registry.lookup_error_to_string error)
           | Ok shutdown_operation_id ->
-            Keeper_activation_readiness.classify_owner_execution
+            Keeper_activation_readiness.classify_durable_demand_execution
               ~shutdown_operation_id
               ~runtime
               meta_result

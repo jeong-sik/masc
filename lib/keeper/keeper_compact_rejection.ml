@@ -62,5 +62,7 @@ let summarization_rejection = function
     Exact_flow_already_started
   | Keeper_compaction_llm_summarizer.Exact_execution_terminal terminal ->
     Exact_execution_terminal terminal
+  | Keeper_compaction_llm_summarizer.No_reducible_boundary ->
+    No_eligible_history
   | Keeper_compaction_llm_summarizer.Invalid_plan -> Invalid_compaction_plan
 ;;

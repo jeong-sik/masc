@@ -252,6 +252,12 @@ def get_changed_test_files():
 
 OCAML_SUFFIXES = {".ml", ".mli"}
 SLASH_COMMENT_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".css", ".scss"}
+# Config formats stay covered on purpose (see
+# .ci/test-coverage-non-code-suffixes.txt), and a runtime binding is where the
+# reason for a value belongs. Without this the gate counted every explanatory
+# line as new code, so writing down why a number changed cost more than
+# changing it silently.
+HASH_COMMENT_SUFFIXES = {".toml"}
 
 
 def comment_line_numbers(text, suffix):
@@ -267,6 +273,8 @@ def comment_line_numbers(text, suffix):
         openers, closers, line_comment = ["(*"], ["*)"], None
     elif suffix in SLASH_COMMENT_SUFFIXES:
         openers, closers, line_comment = ["/*"], ["*/"], "//"
+    elif suffix in HASH_COMMENT_SUFFIXES:
+        openers, closers, line_comment = [], [], "#"
     else:
         return set()
 
@@ -277,7 +285,11 @@ def comment_line_numbers(text, suffix):
         i = 0
         while i < len(line):
             two = line[i : i + 2]
-            if depth == 0 and line_comment and two == line_comment:
+            if (
+                depth == 0
+                and line_comment
+                and line[i : i + len(line_comment)] == line_comment
+            ):
                 break  # rest of the line is comment
             if two in openers:
                 depth += 1

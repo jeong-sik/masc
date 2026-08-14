@@ -480,9 +480,13 @@ let agent_message_of_item ~stage item =
   let* fields = assoc_at stage item in
   match List.assoc_opt "type" fields with
   | Some (`String "agentMessage") ->
-    let* text = required_string stage "text" fields in
+    (* The app-server schema requires [text] to be a string, not a non-empty
+       string. In particular, a tool-only turn may complete an agent-message
+       item with empty text after the tool result has been committed. Such an
+       item is valid protocol but is not a visible assistant-message candidate. *)
+    let* text = required_string_any stage "text" fields in
     let* phase = optional_string stage "phase" fields in
-    Ok (Some (phase, text))
+    if String.trim text = "" then Ok None else Ok (Some (phase, text))
   | Some (`String _) -> Ok None
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
@@ -567,14 +571,24 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback
       | "completed" ->
         let* items = required_member stage "items" turn_fields in
         let* terminal_final, terminal_fallback = messages_of_items ~stage items in
+        let visible_text = function
+          | Some text when String.trim text <> "" -> Some text
+          | Some _ | None -> None
+        in
         let text =
-          match terminal_final, seen_final, terminal_fallback, seen_fallback with
+          match
+            visible_text terminal_final,
+            visible_text seen_final,
+            visible_text terminal_fallback,
+            visible_text seen_fallback
+          with
           | Some text, _, _, _ | None, Some text, _, _
           | None, None, Some text, _ | None, None, None, Some text -> Some text
           | None, None, None, None -> None
         in
         (match text with
          | Some text -> Ok text
+         | None when tool_effect_attempted -> Ok ""
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -646,8 +660,15 @@ let rec await_turn_terminal io ~tools ~tool_call_count ~thread_id ~turn_id ~seen
       } ->
     let* delta = item_delta_notification ~method_ ~thread_id ~turn_id params
     in
-    if String.equal method_ "item/agentMessage/delta"
-    then emit_stream_event on_stream_event (Text_delta delta);
+    let seen_fallback =
+      if String.equal method_ "item/agentMessage/delta"
+      then (
+        emit_stream_event on_stream_event (Text_delta delta);
+        match seen_fallback with
+        | None -> Some delta
+        | Some text -> Some (text ^ delta))
+      else seen_fallback
+    in
     await_turn_terminal
       io
       ~tools

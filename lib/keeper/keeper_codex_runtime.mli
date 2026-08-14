@@ -1,12 +1,19 @@
 (** Keeper projection for the official Codex app-server turn runtime. *)
 
+type successful_tool_completion =
+  | No_successful_tool_completion
+  | Successful_tool_completion
+
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; effect_disposition : Keeper_provider_attempt_effect.t
+  ; successful_tool_completion : successful_tool_completion
   }
-(** One Codex candidate result plus the typed tool-effect fact observed while
-    producing it. The outer runtime-lane owner consumes [effect_disposition]
-    directly; provider error strings carry no retry authority. *)
+(** One Codex candidate result plus two distinct typed tool facts observed
+    while producing it. The outer runtime-lane owner consumes
+    [effect_disposition] as retry authority; [successful_tool_completion]
+    only proves that a handler returned a successful result and can therefore
+    support accepting a tool-only terminal. *)
 
 val run :
   runtime_id:string ->

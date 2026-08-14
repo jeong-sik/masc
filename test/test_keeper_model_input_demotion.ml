@@ -119,7 +119,7 @@ let a_turn_that_produced_nothing_demotes_everything_before_it () =
     (List.length planned.Demotion.pending)
 ;;
 
-(* SCRATCH — adversarial premise check (deleted after use). [earlier] ends
+(* [earlier] ends
    with an Assistant that issued a call whose Tool answer has not been
    recorded yet — the checkpoint captured a dangling tool cycle at the turn
    boundary, exactly the shape [Keeper_compaction_unit]'s [protected_suffix]
@@ -336,9 +336,9 @@ let raw_cut_retained_atoms_are_verbatim () =
        (markers planned.Demotion.messages))
 ;;
 
-(* --- 6. The demotion boundary moves only with the raw cut -------------- *)
+(* --- 6. [plan] honours whatever boundary it is handed ------------------- *)
 
-let boundary_moves_only_with_the_raw_cut () =
+let plan_honours_a_monotonic_boundary () =
   let body = String.make 4000 'a' in
   let build atoms =
     List.concat
@@ -456,7 +456,7 @@ let () =
             `Quick
             a_turn_that_produced_nothing_demotes_everything_before_it
         ; Alcotest.test_case
-            "SCRATCH a split atom at the boundary never gets demoted half"
+            "a split atom at the boundary never gets demoted half"
             `Quick
             a_split_atom_at_the_boundary_never_gets_demoted_half
         ] )
@@ -480,9 +480,9 @@ let () =
         ] )
     ; ( "stability"
       , [ Alcotest.test_case
-            "demotion boundary moves only with the raw cut"
+            "plan honours a monotonic boundary"
             `Quick
-            boundary_moves_only_with_the_raw_cut
+            plan_honours_a_monotonic_boundary
         ; Alcotest.test_case
             "projection reuses candidate measurements"
             `Quick

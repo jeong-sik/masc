@@ -143,9 +143,11 @@ type budget_error =
 type projection =
   { messages : Agent_core.Types.message list
   ; dropped_atoms : int
-        (** Exact raw-history cut chosen for [messages]. Projection stages that
-            rewrite historical bytes use this as their cache-stable anchor: the
-            rewrite boundary moves only when the authoritative cut moves. *)
+        (** Exact raw-history cut chosen for [messages]. Describes this cut and
+            nothing else: the stage that rewrites historical bytes used to
+            anchor its own boundary here, and now chooses one from the
+            conversation's structure instead, so a reader must not take this as
+            a boundary anyone else is required to share. *)
   ; atom_count : int
         (** Atoms the input history contained, before the cut. [atom_count -
             dropped_atoms] is what the provider receives. Both are reported

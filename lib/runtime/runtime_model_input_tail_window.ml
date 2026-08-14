@@ -119,8 +119,15 @@ let annotate (messages : Agent_core.Types.message list) :
 ;;
 
 let first_atom_at_or_after messages ~message_index =
-  ignore (messages, message_index);
-  0
+  let labelled, atom_count = annotate messages in
+  let rec scan position = function
+    | [] -> atom_count
+    | (_, label) :: rest ->
+      (match label with
+       | Atom index when position >= message_index -> index
+       | Atom _ | Pinned -> scan (position + 1) rest)
+  in
+  scan 0 labelled
 ;;
 
 (* [suffix.(i)] is the measured size of atoms [i .. atom_count - 1];

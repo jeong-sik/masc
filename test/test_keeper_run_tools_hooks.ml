@@ -1,6 +1,8 @@
 open Alcotest
 open Repo_manager_types
 
+let () = Mirage_crypto_rng_unix.use_default ()
+
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -648,6 +650,115 @@ let test_failed_tool_observer_releases_next_completion () =
   check bool "a reported observer failure does not poison later receipts" true !observed
 ;;
 
+let test_production_post_tool_hook_cancellation_releases_next_completion () =
+  with_temp_base_path @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_execution_join.For_testing.clear ();
+      Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Masc.Keeper_tool_call_log.init ~base_path ();
+       let config = Masc.Workspace.default_config base_path in
+       let meta_ref = ref (make_meta "cancelled-observer") in
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let serialize =
+         Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+       in
+       let first_entered, resolve_first_entered = Eio.Promise.create () in
+       let release_first, resolve_release_first = Eio.Promise.create () in
+       let first_body_completed = ref false in
+       let second_observed = ref false in
+       let observation_count = ref 0 in
+       let hooks =
+         Masc.Keeper_hooks_agent_core.make_hooks
+           ~config
+           ~meta_ref
+           ~turn_ctx_cell
+           ~generation:0
+           ~trace_id:"cancelled-observer-trace"
+           ~keeper_turn_id:1
+           ~on_after_turn_ordinal:ignore
+           ~on_tool_executed:
+             (fun
+               ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_
+               ~provider:_ ~typed_outcome:_ ->
+               serialize (fun () ->
+                 incr observation_count;
+                 if !observation_count = 1
+                 then begin
+                   Eio.Promise.resolve resolve_first_entered ();
+                   Eio.Promise.await release_first;
+                   first_body_completed := true
+                 end
+                 else
+                   second_observed := true))
+           ()
+       in
+       let post_tool_use =
+         match hooks.Agent_core.Hooks.post_tool_use with
+         | Some hook -> hook
+         | None -> fail "production Keeper hooks omitted post_tool_use"
+       in
+       let event planned_index =
+         let invocation =
+           Agent_core.Tool_contract.Invocation.create
+             ~tool_use_id:("cancel-observer-" ^ string_of_int planned_index)
+             ~turn:1
+             ~completion:Agent_core.Tool_contract.Continue_after_success
+             ~schedule:
+               { planned_index
+               ; batch_index = 0
+               ; batch_size = 1
+               ; execution_mode = Agent_core.Tool_contract.Serial
+               }
+         in
+         Agent_core.Hooks.PostToolUse
+           { invocation
+           ; tool_name = "keeper_time_now"
+           ; input = `Assoc []
+           ; output = Ok { Agent_core.Types.content = "ok"; _meta = None }
+           ; result_bytes = 2
+           ; duration_ms = 1.0
+           }
+       in
+       let worker_done, resolve_worker_done = Eio.Promise.create () in
+       let cancellation_ready, resolve_cancellation_ready = Eio.Promise.create () in
+       Eio.Switch.run @@ fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         Eio.Cancel.sub @@ fun cancellation ->
+         Eio.Promise.resolve resolve_cancellation_ready cancellation;
+         let outcome =
+           match post_tool_use (event 0) with
+           | _ -> `Returned
+           | exception Eio.Cancel.Cancelled _ -> `Cancelled
+         in
+         Eio.Promise.resolve resolve_worker_done outcome);
+       let cancellation = Eio.Promise.await cancellation_ready in
+       Eio.Promise.await first_entered;
+       Eio.Cancel.cancel cancellation (Failure "cancel production observer");
+       (* Give the cancelled worker a scheduling turn before releasing the
+          synthetic blocker. A cancellation-masked observer reaches the line
+          after [await]; a cancellable observer unwinds through the mutex
+          finalizer without completing the body. *)
+       Eio.Time.sleep (Eio.Stdenv.clock env) 0.05;
+       Eio.Promise.resolve resolve_release_first ();
+       (match Eio.Promise.await worker_done with
+        | `Cancelled -> ()
+        | `Returned -> fail "production post-tool hook swallowed cancellation");
+       check bool
+         "cancellation preempts the observation body"
+         false
+         !first_body_completed;
+       (match post_tool_use (event 1) with
+        | Agent_core.Hooks.Continue -> ()
+        | _ -> fail "later production post-tool hook did not continue");
+       check bool
+         "cancelled observer releases the mutex for the next production hook"
+         true
+         !second_observed)
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -741,6 +852,10 @@ let () =
             "releases the next completion after a reported failure"
             `Quick
             test_failed_tool_observer_releases_next_completion
+        ; test_case
+            "production hook cancellation releases the next completion"
+            `Quick
+            test_production_post_tool_hook_cancellation_releases_next_completion
         ] )
     ]
 ;;

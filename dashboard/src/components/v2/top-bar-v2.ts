@@ -7,7 +7,7 @@
 import { html } from 'htm/preact'
 import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
-import { executionLoaded, keepers, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
+import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
 import { gateData } from '../gate-signals'
 import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
@@ -165,7 +165,8 @@ function AttentionIndicatorV2() {
 
 export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
   const tab = route.value.tab
-  const shellKeeperFiberCount = typeof shellCounts.value?.keepers === 'number'
+  const shellKeeperFiberCount = serverStatus.value?.project !== 'initializing'
+    && typeof shellCounts.value?.keepers === 'number'
     ? shellCounts.value.keepers
     : null
   const fallbackRunningKeepers = keepers.value.filter((keeper) => keeperRowLooksRunning({

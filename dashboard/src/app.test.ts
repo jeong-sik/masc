@@ -11,7 +11,7 @@ import {
   shouldUseCompactDashboardChrome,
 } from './app'
 import { route } from './router'
-import { executionLoaded, keepers, shellCounts, shellRuntimeResolution } from './store'
+import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from './store'
 import { activeKeeperName } from './keeper-state'
 import type { Keeper } from './types'
 
@@ -26,6 +26,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
     executionLoaded.value = false
+    serverStatus.value = null
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
@@ -38,6 +39,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
     executionLoaded.value = false
+    serverStatus.value = null
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
@@ -148,6 +150,18 @@ describe('App v2 header chrome', () => {
 
   it('keeps a missing shell Keeper count unavailable instead of inventing zero fibers', () => {
     shellCounts.value = { agents: 2, tasks: 7 }
+
+    renderApp()
+
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 Keeper Fiber')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
+  })
+
+  it('keeps bootstrap fallback zero unavailable while the shell is initializing', () => {
+    serverStatus.value = { project: 'initializing' }
+    shellCounts.value = { agents: 0, tasks: 0, keepers: 0 }
 
     renderApp()
 

@@ -135,6 +135,17 @@ val invoke_turn_hook :
   Agent_core.Hooks.hook_event ->
   Agent_core.Hooks.hook_decision
 
+val invoke_turn_completion_hooks :
+  runtime_label:string ->
+  keeper_name:string ->
+  turn_count:int ->
+  hooks:Agent_core.Hooks.hooks ->
+  Agent_core.Types.api_response ->
+  (unit, Agent_core.Error.t) result
+(** Run the Agent Core [after_turn] and [on_stop] lifecycle for a completed
+    official-client turn. Host-stop projections use the same hook order as a
+    provider-emitted terminal before their durable session is settled. *)
+
 val measure_message_bytes : Agent_core.Types.message -> int
 (** Bytes one message contributes to the start-turn seed budget, in the
     canonical MASC encoding. At or above what any adapter's own rendering

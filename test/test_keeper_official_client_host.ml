@@ -529,6 +529,57 @@ let test_terminal_host_stop_preserves_completed_deferred_and_failed () =
   | Ok _ -> fail "terminal failure became a completed host stop"
 ;;
 
+let test_terminal_host_stop_runs_completion_hooks_in_order () =
+  let observed = ref [] in
+  let hooks =
+    { Agent_core.Hooks.empty with
+      after_turn =
+        Some
+          (function
+            | Agent_core.Hooks.AfterTurn { turn; response } ->
+              observed := Printf.sprintf "after:%d:%s" turn response.id :: !observed;
+              Continue
+            | _ -> fail "after_turn received the wrong event")
+    ; on_stop =
+        Some
+          (function
+            | Agent_core.Hooks.OnStop { response; _ } ->
+              observed := ("stop:" ^ response.id) :: !observed;
+              Continue
+            | _ -> fail "on_stop received the wrong event")
+    }
+  in
+  let projected =
+    Host.host_stop_result
+      ~model:"official-client-model"
+      ~session_id:"session-terminal"
+      ~turn_id:"turn-terminal"
+      ~turns_used:4
+      (Terminal_tool_boundary
+         { tool_name = "terminal"; outcome = Terminal_completed })
+  in
+  let response =
+    match projected with
+    | Ok result -> result.response
+    | Error error -> fail (Agent_core.Error.to_string error)
+  in
+  (match
+     Host.invoke_turn_completion_hooks
+       ~runtime_label:"Official client"
+       ~keeper_name:"keeper-terminal"
+       ~turn_count:4
+       ~hooks
+       response
+   with
+   | Ok () -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check
+    (list string)
+    "after_turn precedes on_stop for the synthetic terminal"
+    [ "after:4:turn-terminal"; "stop:turn-terminal" ]
+    (List.rev !observed)
+;;
+
 let msg role content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 ;;
@@ -983,6 +1034,10 @@ let () =
             "terminal host stop preserves exact outcome"
             `Quick
             test_terminal_host_stop_preserves_completed_deferred_and_failed
+        ; test_case
+            "terminal host stop runs completion hooks in order"
+            `Quick
+            test_terminal_host_stop_runs_completion_hooks_in_order
         ] )
     ; ( "history encoding"
       , [ test_case

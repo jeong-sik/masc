@@ -111,6 +111,38 @@ let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
     event
 ;;
 
+let invoke_turn_completion_hooks ~runtime_label ~keeper_name ~turn_count ~hooks
+    (response : Agent_core.Types.api_response) =
+  let* () =
+    match
+      invoke_turn_hook
+        ~keeper_name
+        ~turn_count
+        ~hook_name:"after_turn"
+        hooks.Agent_core.Hooks.after_turn
+        (Agent_core.Hooks.AfterTurn { turn = turn_count; response })
+    with
+    | Continue -> Ok ()
+    | HookFailed { stage; detail } ->
+      Error (hook_error ~runtime_label ~hook_name:"after_turn" ~stage detail)
+    | decision ->
+      Error (illegal_hook_decision ~runtime_label ~hook_name:"after_turn" decision)
+  in
+  match
+    invoke_turn_hook
+      ~keeper_name
+      ~turn_count
+      ~hook_name:"on_stop"
+      hooks.on_stop
+      (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
+  with
+  | Continue -> Ok ()
+  | HookFailed { stage; detail } ->
+    Error (hook_error ~runtime_label ~hook_name:"on_stop" ~stage detail)
+  | decision ->
+    Error (illegal_hook_decision ~runtime_label ~hook_name:"on_stop" decision)
+;;
+
 let lifecycle_outcome = function
   | Error error -> Agent_core.Agent_lifecycle_events.Failed error
   | Ok ({ response; stop_reason; _ } : Runtime_agent.run_result) ->

@@ -605,6 +605,25 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           | _, Turn_inflight { turn_id = Some _; _ } -> Ok ()
           | _, _ -> assert false
         in
+        let projected =
+          Host.host_stop_result
+            ~model:config.model
+            ~session_id
+            ~turn_id
+            ~turns_used:turn_count
+            stop
+        in
+        let* () =
+          match projected with
+          | Error _ -> Ok ()
+          | Ok result ->
+            Host.invoke_turn_completion_hooks
+              ~runtime_label
+              ~keeper_name
+              ~turn_count
+              ~hooks
+              result.response
+        in
         recovery_failure := Session_store.State_persistence_failed;
         let* settled =
           Session_store.settle
@@ -618,12 +637,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             internal_error ("Antigravity host-stop settlement failed: " ^ detail))
         in
         session_state := settled;
-        Host.host_stop_result
-          ~model:config.model
-          ~session_id
-          ~turn_id
-          ~turns_used:turn_count
-          stop
+        projected
       | Ready | Start _ | Active _ | Recovery_required _ | Settled _ ->
         Error
           (internal_error
@@ -784,34 +798,12 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
             }
           in
           let* () =
-            match
-              Host.invoke_turn_hook
-                ~keeper_name
-                ~turn_count:turn.num_turns
-                ~hook_name:"after_turn"
-                hooks.after_turn
-                (Agent_core.Hooks.AfterTurn { turn = turn.num_turns; response })
-            with
-            | Continue -> Ok ()
-            | HookFailed { stage; detail } ->
-              Error (Host.hook_error ~runtime_label ~hook_name:"after_turn" ~stage detail)
-            | decision ->
-              Error (Host.illegal_hook_decision ~runtime_label ~hook_name:"after_turn" decision)
-          in
-          let* () =
-            match
-              Host.invoke_turn_hook
-                ~keeper_name
-                ~turn_count:turn.num_turns
-                ~hook_name:"on_stop"
-                hooks.on_stop
-                (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
-            with
-            | Continue -> Ok ()
-            | HookFailed { stage; detail } ->
-              Error (Host.hook_error ~runtime_label ~hook_name:"on_stop" ~stage detail)
-            | decision ->
-              Error (Host.illegal_hook_decision ~runtime_label ~hook_name:"on_stop" decision)
+            Host.invoke_turn_completion_hooks
+              ~runtime_label
+              ~keeper_name
+              ~turn_count:turn.num_turns
+              ~hooks
+              response
           in
           recovery_failure := Session_store.State_persistence_failed;
           let* () =

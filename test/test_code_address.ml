@@ -135,6 +135,10 @@ let () =
             "single joined repository segment cannot start with dotdot"
             `Quick
             (check_rejected ~codebase:"a_..repo" ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "multi-join repository suffix cannot start with dotdot"
+            `Quick
+            (check_rejected ~codebase:"a_.._.." ~path:"lib/x.ml" A.Malformed_codebase)
         ] )
     ]
 ;;

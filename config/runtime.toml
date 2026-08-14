@@ -255,7 +255,18 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
-max-request-body-bytes = 262144
+# 262144 was inherited from [glm-coding.glm-4-7-coding], where it is justified
+# by that model's smaller serving window. This model declares max-context =
+# 203000 above, and the ceiling has to be read against that: measured on a live
+# 2026-08-14 request, 195,485 B carried 54,615 tokens, so 262144 B is about
+# 73,000 tokens — a third of what the model accepts.
+#
+# The keeper pays for the difference in memory. The window sizes history
+# against this ceiling, so on that same trace the keeper transmitted 14 of
+# 15,413 messages, roughly 7 turns of 7,650. 524288 B is about 146,000 tokens,
+# still under the declared window, and is the value #26145 established as
+# operative before it was reverted.
+max-request-body-bytes = 524288
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
 # operator use. Do not route provider-native structured-output lanes here unless

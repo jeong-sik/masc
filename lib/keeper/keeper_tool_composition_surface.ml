@@ -63,7 +63,7 @@ let node_result_to_json (result : Executor.node_result) =
     ; "input", result.input
     ; "schedule", schedule_to_json result.schedule
     ; "result", Tool_result.to_json result.result
-    ; "tool_use_id", Json_util.string_opt_to_json result.tool_use_id
+    ; "tool_use_id", `String result.tool_use_id
     ; ( "failure_effect_disposition"
       , failure_effect_disposition_to_json result.failure_effect_disposition )
     ; "deferred_kind", deferred_kind_to_json result.deferred_kind
@@ -100,7 +100,7 @@ let observe_node_result
       ?thinking_budget:context.thinking_budget
       ?prompt_fingerprint:context.prompt_fingerprint
       ~execution_id:result.execution_id
-      ?tool_use_id:result.tool_use_id
+      ~tool_use_id:result.tool_use_id
       ~planned_index:schedule.planned_index
       ~batch_index:schedule.batch_index
       ~batch_size:schedule.batch_size
@@ -158,11 +158,8 @@ let observe_node_result
       ; ( "execution_mode"
         , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
       ; "ts_unix", `Float (Time_compat.now ())
+      ; "tool_use_id", `String result.tool_use_id
       ]
-      @
-      match result.tool_use_id with
-      | Some tool_use_id -> [ "tool_use_id", `String tool_use_id ]
-      | None -> []
     in
     Sse.broadcast (`Assoc fields)
   in

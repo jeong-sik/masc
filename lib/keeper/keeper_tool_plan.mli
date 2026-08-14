@@ -276,7 +276,6 @@ val validate_output
   -> (output, execution_error) result
 
 val output_node_id : output -> Node_id.t
-val output_value : output -> Yojson.Safe.t
 
 (** Resolve a canonical plan node's input from already validated producer
     outputs, then validate the resolved value against the consumer's exact

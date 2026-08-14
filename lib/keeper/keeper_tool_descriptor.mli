@@ -176,7 +176,6 @@ val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
-val composable_output_to_json : composable_output -> Yojson.Safe.t
 val runtime_handler_to_string : runtime_handler -> string
 
 (** [public_descriptors] is the LLM-native public surface. Each descriptor has

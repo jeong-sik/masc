@@ -917,7 +917,6 @@ type execution_error =
       }
 
 let output_node_id output = output.node_id
-let output_value output = output.value
 
 let validate_output plan ~run_id ~node_id value =
   match node_for_id plan.nodes node_id with

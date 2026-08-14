@@ -114,27 +114,6 @@ val encode_history_message : Agent_core.Types.message -> string
     framing layer and typed block payloads, tool identities, structured result
     content, failure provenance, and message metadata remain visible. *)
 
-val hook_error :
-  runtime_label:string ->
-  hook_name:string ->
-  stage:Agent_core.Hooks.hook_stage ->
-  string ->
-  Agent_core.Error.t
-
-val illegal_hook_decision :
-  runtime_label:string ->
-  hook_name:string ->
-  Agent_core.Hooks.hook_decision ->
-  Agent_core.Error.t
-
-val invoke_turn_hook :
-  keeper_name:string ->
-  turn_count:int ->
-  hook_name:string ->
-  Agent_core.Hooks.hook option ->
-  Agent_core.Hooks.hook_event ->
-  Agent_core.Hooks.hook_decision
-
 val invoke_turn_completion_hooks :
   runtime_label:string ->
   keeper_name:string ->

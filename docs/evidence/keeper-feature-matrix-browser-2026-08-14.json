@@ -1,6 +1,6 @@
 {
   "schema": "masc.keeper_feature_matrix.browser_render_evidence.v1",
-  "captured_at": "2026-08-14T11:14:00+09:00",
+  "captured_at": "2026-08-14T11:23:00+09:00",
   "browser": "chromium",
   "viewport": {
     "width": 1440,
@@ -24,17 +24,17 @@
     "interaction_checks": {
       "feature_search": "#28701 -> exactly one visible feature-matrix row: Parallel Tool",
       "status_and_domain_filter": "blocked + Execution -> exactly one visible feature-matrix row: Parallel Tool / BLOCKED",
-      "evidence_navigation": "source-refresh evidence link opened and exposed schema masc.keeper_feature_matrix.source_refresh.v1"
+      "evidence_navigation": "new-process health evidence link opened and exposed schema masc.keeper_feature_matrix.live_refresh.v1"
     },
     "body_horizontal_overflow": false,
     "console_errors": [],
     "page_errors": []
   },
   "screenshot": {
-    "path": "/Users/dancer/me/reports/masc-keeper-feature-state-matrix-20260814-1110.png",
-    "sha256": "f0e906cb0c6b87df2d331db1681a8df468b285d06ce1b144f48a8db40b4838b4",
+    "path": "/Users/dancer/me/reports/masc-keeper-feature-state-matrix-20260814-1123.png",
+    "sha256": "a43d4e0370c6c3fada85aa517915eb7c6d72f48af04e573a41ba468af1ac55cf",
     "pixel_width": 1440,
-    "pixel_height": 11978
+    "pixel_height": 11920
   },
   "verdict": "pass"
 }

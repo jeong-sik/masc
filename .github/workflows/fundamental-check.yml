@@ -22,7 +22,9 @@ name: Fundamental Check
 
 on:
   pull_request:
-    branches: [main]
+    # No base filter, for the reason ci.yml carries: the filter matches the
+    # base branch, so these guards skipped every stacked PR — the exact PRs
+    # that reach review with the least evidence.
   push:
     branches: [main]
 

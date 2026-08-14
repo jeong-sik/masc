@@ -209,9 +209,9 @@ interface DashboardHealthInput {
   counts: {
     agents?: number
     tasks?: number
-    keepers: number
+    keepers?: number
     total_runtimes?: number
-    configured_keepers: number
+    configured_keepers?: number
   } | null
   namespaceTruthCounts?: {
     agents?: number

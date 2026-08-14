@@ -11,7 +11,7 @@ import {
   shouldUseCompactDashboardChrome,
 } from './app'
 import { route } from './router'
-import { executionLoaded, keepers, shellCounts, shellRuntimeResolution } from './store'
+import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution } from './store'
 import { activeKeeperName } from './keeper-state'
 import type { Keeper } from './types'
 
@@ -26,6 +26,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
     executionLoaded.value = false
+    serverStatus.value = null
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
@@ -38,6 +39,7 @@ describe('App v2 header chrome', () => {
     route.value = { tab: 'overview', params: {}, postId: null }
     keepers.value = []
     executionLoaded.value = false
+    serverStatus.value = null
     shellCounts.value = null
     shellRuntimeResolution.value = null
     activeKeeperName.value = ''
@@ -117,12 +119,11 @@ describe('App v2 header chrome', () => {
     expect(container.querySelector('.v2-statchip.live')).not.toBeNull()
   })
 
-  it('renders keeper breadcrumb tail and the live running-count chip', () => {
+  it('renders keeper breadcrumb tail without presenting partial rows as a running count', () => {
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
-    // Before runtime health hydrates, the shared runtime-count resolver falls
-    // back to the execution rows. Seed 7 running keepers so the chip reads
-    // "7 실행 중".
+    // Rows can hydrate before the execution projection is complete. Seed seven
+    // partial rows and keep executionLoaded=false: the chip must stay unknown.
     keepers.value = Array.from({ length: 7 }, (_, i): Keeper => ({
       name: `k${i}`,
       status: 'running',
@@ -135,20 +136,42 @@ describe('App v2 header chrome', () => {
     expect(crumb?.textContent).toContain('Keepers')
     expect(crumb?.textContent).toContain('albini')
 
-    // The live running-count chip is `.v2-statchip.live` in the top bar. The old
+    // The live count chip is `.v2-statchip.live` in the top bar. The old
     // `.v2-app-header-status` container, the separate server-status "scheduler"
     // chip ("서버"/"응답" text + its title), and the chip-title attributes were
     // removed by the v2 reskin — TopBarV2 emits an attention indicator + 예약
-    // button instead. The live-count + pulse coverage is preserved here.
+    // button instead. Partial rows carry neither an asserted zero nor a pulse.
     const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
     expect(liveChip).not.toBeNull()
-    expect(liveChip?.textContent).toContain('7 실행 중')
-    // Pulse is now carried by the StatusDot pip (`.dot2.pulse`), replacing the old
-    // `motion-safe:animate-pulse` utility class on an inner span.
-    expect(liveChip?.querySelector('.dot2.pulse')).not.toBeNull()
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 실행 중')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
   })
 
-  it('uses runtime health for the live running-count chip when rows are stale', () => {
+  it('keeps a missing shell Keeper count unavailable instead of inventing zero fibers', () => {
+    shellCounts.value = { agents: 2, tasks: 7 }
+
+    renderApp()
+
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 Keeper Fiber')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
+  })
+
+  it('keeps bootstrap fallback zero unavailable while the shell is initializing', () => {
+    serverStatus.value = { project: 'initializing' }
+    shellCounts.value = { agents: 0, tasks: 0, keepers: 0 }
+
+    renderApp()
+
+    const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
+    expect(liveChip?.textContent).toContain('— 미수집')
+    expect(liveChip?.textContent).not.toContain('0 Keeper Fiber')
+    expect(liveChip?.querySelector('.dot2.pulse')).toBeNull()
+  })
+
+  it('labels fresh runtime health as executable capacity when rows are stale', () => {
     window.innerWidth = 1280
     route.value = { tab: 'keepers', params: { keeper: 'albini' }, postId: null }
     keepers.value = Array.from({ length: 7 }, (_, i): Keeper => ({
@@ -174,7 +197,7 @@ describe('App v2 header chrome', () => {
 
     const liveChip = container.querySelector('.v2-statchip.live') as HTMLElement | null
     expect(liveChip).not.toBeNull()
-    expect(liveChip?.textContent).toContain('1 실행 중')
+    expect(liveChip?.textContent).toContain('1 실행 가능')
     expect(liveChip?.title).toContain('runtime health')
     expect(liveChip?.title).toContain('paused=3')
     expect(liveChip?.title).toContain('offline=0 (not derived from execution rows)')

@@ -7,7 +7,7 @@
 import { html } from 'htm/preact'
 import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
-import { executionLoaded, keepers, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
+import { executionLoaded, keepers, serverStatus, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
 import { gateData } from '../gate-signals'
 import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
@@ -15,6 +15,7 @@ import { TweaksPanelToggle } from '../tweaks-panel'
 import { StatusDot } from './primitives-v2'
 import { surfaceLabel } from './nav-rail-v2'
 import { configuredCountSourceLabel, keeperRowLooksRunning, resolveRuntimeCounts, runtimeCountSourceLabel } from '../../runtime-counts'
+import type { RuntimeCounts } from '../../runtime-counts'
 // Operational/safety chrome the v2 prototype omits but operators rely on
 // (connection state, transport telemetry, emergency stop, error inbox, auth,
 // build identity). Re-mounted into the v2 top bar so the reskin does not drop
@@ -26,6 +27,48 @@ import { EmergencyStopControl } from '../emergency-stop-control'
 import { TransportBeacon } from '../transport-beacon'
 
 const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead'])
+
+type TopBarKeeperCount =
+  | { kind: 'executable'; count: number }
+  | { kind: 'keeper-fiber'; count: number }
+  | { kind: 'running'; count: number }
+  | { kind: 'unavailable' }
+
+function projectTopBarKeeperCount({
+  counts,
+  shellKeeperFiberCount,
+  executionLoaded: hasExecutionSnapshot,
+  executionRunningKeepers,
+}: {
+  counts: RuntimeCounts
+  shellKeeperFiberCount: number | null
+  executionLoaded: boolean
+  executionRunningKeepers: number
+}): TopBarKeeperCount {
+  if (counts.source === 'runtime-health') {
+    return { kind: 'executable', count: counts.live.keepers }
+  }
+  if (shellKeeperFiberCount !== null) {
+    return { kind: 'keeper-fiber', count: shellKeeperFiberCount }
+  }
+  if (hasExecutionSnapshot) {
+    return { kind: 'running', count: executionRunningKeepers }
+  }
+  return { kind: 'unavailable' }
+}
+
+function topBarKeeperCountPresentation(count: TopBarKeeperCount) {
+  switch (count.kind) {
+    case 'executable':
+      return { value: String(count.count), label: '실행 가능', metric: 'executable', source: 'runtime-health' as const, pulse: true }
+    case 'keeper-fiber':
+      return { value: String(count.count), label: 'Keeper Fiber', metric: 'keeper_fibers', source: 'shell' as const, pulse: false }
+    case 'running':
+      return { value: String(count.count), label: '실행 중', metric: 'running', source: 'execution' as const, pulse: true }
+    case 'unavailable':
+      return { value: '—', label: '미수집', metric: 'unknown', source: 'unknown' as const, pulse: false }
+  }
+}
 
 interface AttentionAgg {
   approvals: number | null
@@ -122,6 +165,10 @@ function AttentionIndicatorV2() {
 
 export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
   const tab = route.value.tab
+  const shellKeeperFiberCount = serverStatus.value?.project !== 'initializing'
+    && typeof shellCounts.value?.keepers === 'number'
+    ? shellCounts.value.keepers
+    : null
   const fallbackRunningKeepers = keepers.value.filter((keeper) => keeperRowLooksRunning({
     status: keeper.status,
     phase: keeper.lifecycle_phase ?? keeper.phase,
@@ -132,22 +179,37 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: shellCounts.value?.agents ?? 0,
-    keepersCount: shellCounts.value?.keepers ?? fallbackRunningKeepers,
+    keepersCount: shellKeeperFiberCount ?? fallbackRunningKeepers,
     keeperRowsCount: keepers.value.length,
     shellCounts: shellCounts.value,
     shellConfiguredKeepers: shellCounts.value?.configured_keepers,
     runtimeFleetSafety: shellRuntimeResolution.value?.fleet_safety ?? null,
     runtimeHealthGeneratedAt: shellRuntimeResolution.value?.generated_at ?? null,
   })
-  const running = runtimeCounts.live.keepers
+  const keeperCount = projectTopBarKeeperCount({
+    counts: runtimeCounts,
+    shellKeeperFiberCount,
+    executionLoaded: executionLoaded.value,
+    executionRunningKeepers: fallbackRunningKeepers,
+  })
+  const countPresentation = topBarKeeperCountPresentation(keeperCount)
   const countTitle = [
-    `runtime count: ${runtimeCountSourceLabel(runtimeCounts.source)}`,
-    `running=${runtimeCounts.live.keepers}`,
-    `paused=${runtimeCounts.live.pausedKeepers}`,
-    runtimeCounts.source === 'runtime-health'
-      ? 'offline=0 (not derived from execution rows)'
-      : `offline=${runtimeCounts.live.offlineKeepers}`,
-    `configured=${runtimeCounts.configured.keepers} (${configuredCountSourceLabel(runtimeCounts.configured.source)})`,
+    `runtime count: ${runtimeCountSourceLabel(countPresentation.source)}`,
+    `${countPresentation.metric}=${countPresentation.value}`,
+    ...(keeperCount.kind === 'executable'
+      ? [
+          `paused=${runtimeCounts.live.pausedKeepers}`,
+          'offline=0 (not derived from execution rows)',
+        ]
+      : keeperCount.kind === 'running'
+        ? [
+            `paused=${runtimeCounts.live.pausedKeepers}`,
+            `offline=${runtimeCounts.live.offlineKeepers}`,
+          ]
+        : []),
+    runtimeCounts.configured.source === 'none'
+      ? 'configured=— (미수집)'
+      : `configured=${runtimeCounts.configured.keepers} (${configuredCountSourceLabel(runtimeCounts.configured.source)})`,
   ].join('; ')
   const crumbKeeper = tab === 'keepers' ? route.value.params.keeper?.trim() || activeKeeperName.value || '' : ''
   return html`
@@ -160,7 +222,7 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
       </div>
       <div class="v2-top-spacer"></div>
       <span class="v2-statchip live" title=${countTitle}>
-        <${StatusDot} status="run" pulse=${true} />${running} 실행 중
+        <${StatusDot} status=${keeperCount.kind === 'unavailable' ? 'idle' : 'run'} pulse=${countPresentation.pulse} />${countPresentation.value} ${countPresentation.label}
       </span>
       <${AttentionIndicatorV2} />
       <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">

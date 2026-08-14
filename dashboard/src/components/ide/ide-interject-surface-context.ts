@@ -57,8 +57,9 @@ export function buildIdeInterjectSurfaceContext(
     // hands back to keeper_ide_annotate verbatim. Absence is stated, not
     // omitted — a keeper that never saw the field cannot know whether the
     // repository lacks a canonical remote or the context dropped it.
-    const codebase =
-      inputs.codebaseForRepo?.(identity.repoId) ?? identity.codebase ?? null
+    const codebase = inputs.codebaseForRepo
+      ? inputs.codebaseForRepo(identity.repoId)
+      : identity.codebase ?? null
     if (codebase) {
       fields.push({ k: 'codebase', v: codebase })
     } else {

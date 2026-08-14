@@ -43,6 +43,24 @@ describe('buildIdeInterjectSurfaceContext', () => {
     })
     expect(context?.fields).toContainEqual({ k: 'codebase', v: 'github.com_jeong-sik_masc' })
   })
+
+  it('treats an explicit null dispatch-time lookup as authoritative', () => {
+    const result = buildIdeInterjectSurfaceContext({
+      focus: focusOn('lib/a.ml', {
+        kind: 'repository',
+        repoId: 'masc',
+        codebase: 'stale.example_owner_repo',
+      }),
+      selection: null,
+      codebaseForRepo: () => null,
+    })
+    const fields = result?.fields ?? []
+    expect(fields).toContainEqual({
+      k: 'codebase_unavailable',
+      v: 'repository has no canonical remote; keeper_ide_annotate cannot anchor here',
+    })
+    expect(fields).not.toContainEqual({ k: 'codebase', v: 'stale.example_owner_repo' })
+  })
   it('returns undefined when the IDE holds no anchor', () => {
     expect(buildIdeInterjectSurfaceContext({ focus: null, selection: null })).toBeUndefined()
   })

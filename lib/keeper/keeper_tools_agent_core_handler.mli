@@ -16,6 +16,8 @@
     descriptor's typed policy before dispatch. *)
 val make_keeper_tool_handler
   :  name:string
+  -> ?descriptor:Keeper_tool_descriptor.t
+  -> ?model_name:string
   -> input_schema:Yojson.Safe.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

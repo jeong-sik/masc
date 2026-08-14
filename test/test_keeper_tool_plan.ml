@@ -332,18 +332,12 @@ let test_plan_rejects_invalid_graphs_and_output_edges () =
 ;;
 
 let test_plan_rejects_unsupported_output_schema_keywords () =
-  let time = descriptor "keeper_time_now" in
-  let time_node = node ~id:"time" ~tool_name:"keeper_time_now" literal_object in
-  let with_schema schema =
-    { time with Descriptor.composable_output = Descriptor.Json_output { schema } }
-  in
   let enum_schema =
     `Assoc [ "type", `String "string"; "enum", `List [ `String "ok" ] ]
   in
-  (match Plan.create ~descriptors:[ with_schema enum_schema ] [ time_node ] with
+  (match Plan.validate_composable_schema enum_schema with
    | Error
-       (Plan.Invalid_output_schema
-         { error = Plan.Unsupported_schema_keyword { keyword = "enum"; _ }; _ }) -> ()
+       (Plan.Unsupported_schema_keyword { keyword = "enum"; _ }) -> ()
    | Error _ | Ok _ -> fail "unsupported enum output contract was accepted");
   let schema_valued_additional_properties =
     `Assoc
@@ -352,18 +346,66 @@ let test_plan_rejects_unsupported_output_schema_keywords () =
       ; "additionalProperties", `Assoc [ "type", `String "string" ]
       ]
   in
-  match
-    Plan.create
-      ~descriptors:[ with_schema schema_valued_additional_properties ]
-      [ time_node ]
-  with
+  match Plan.validate_composable_schema schema_valued_additional_properties with
   | Error
-      (Plan.Invalid_output_schema
-        { error = Plan.Invalid_schema_keyword_value
-            { keyword = "additionalProperties"; _ }
-        ; _
-        }) -> ()
+      (Plan.Invalid_schema_keyword_value
+        { keyword = "additionalProperties"; _ }) -> ()
   | Error _ | Ok _ -> fail "schema-valued additionalProperties was accepted"
+;;
+
+let test_terminal_node_is_unique_and_depends_on_every_prior_node () =
+  let terminal = descriptor "keeper_surface_post" in
+  let first = node ~id:"first" ~tool_name:"keeper_surface_post" literal_object in
+  let second = node ~id:"second" ~tool_name:"keeper_surface_post" literal_object in
+  (match Plan.create ~descriptors:[ terminal ] [ first; second ] with
+   | Error (Plan.Multiple_terminal_nodes [ first_id; second_id ])
+     when Plan.Node_id.equal first_id (node_id "first")
+          && Plan.Node_id.equal second_id (node_id "second") -> ()
+   | Error _ | Ok _ -> fail "multiple terminal nodes were accepted");
+  let ordinary = descriptor "masc_board_stats" in
+  let ordinary_node = node ~id:"ordinary" ~tool_name:"masc_board_stats" literal_object in
+  let lone_terminal = node ~id:"terminal" ~tool_name:"keeper_surface_post" literal_object in
+  (match
+     Plan.create ~descriptors:[ ordinary; terminal ] [ ordinary_node; lone_terminal ]
+   with
+   | Error
+       (Plan.Terminal_node_missing_dependency { terminal_node_id; node_id = missing })
+     when Plan.Node_id.equal terminal_node_id (node_id "terminal")
+          && Plan.Node_id.equal missing (node_id "ordinary") -> ()
+   | Error _ | Ok _ -> fail "terminal node without explicit ancestry was accepted");
+  let dependent_terminal =
+    node
+      ~id:"terminal"
+      ~tool_name:"keeper_surface_post"
+      ~after:[ node_id "ordinary" ]
+      literal_object
+  in
+  match
+    Plan.create ~descriptors:[ ordinary; terminal ] [ ordinary_node; dependent_terminal ]
+  with
+  | Ok _ -> ()
+  | Error _ -> fail "terminal node with complete explicit ancestry was rejected"
+;;
+
+let test_plan_uses_process_owned_descriptor_authority () =
+  let canonical = descriptor "keeper_time_now" in
+  let supplied =
+    { canonical with
+      Descriptor.execution = Descriptor.Ordinary Descriptor.Serial
+    ; input_schema = `Assoc [ "type", `String "string" ]
+    ; composable_output = Descriptor.Opaque_output
+    }
+  in
+  let time_node = node ~id:"time" ~tool_name:"keeper_time_now" literal_object in
+  match Plan.create ~descriptors:[ supplied ] [ time_node ] with
+  | Error _ -> fail "canonical descriptor id was not resolved"
+  | Ok plan ->
+    (match Plan.descriptor plan (node_id "time") with
+     | Some descriptor when descriptor == canonical ->
+       (match descriptor.Descriptor.execution, descriptor.composable_output with
+        | Descriptor.Ordinary Descriptor.Concurrent, Descriptor.Json_output _ -> ()
+        | _ -> fail "record-updated descriptor fields became plan authority")
+     | Some _ | None -> fail "plan did not retain process-owned descriptor authority")
 ;;
 
 let test_composable_output_registry_is_closed () =
@@ -417,6 +459,14 @@ let () =
             "unsupported output schema keywords"
             `Quick
             test_plan_rejects_unsupported_output_schema_keywords
+        ; test_case
+            "terminal dependency boundary"
+            `Quick
+            test_terminal_node_is_unique_and_depends_on_every_prior_node
+        ; test_case
+            "canonical descriptor authority"
+            `Quick
+            test_plan_uses_process_owned_descriptor_authority
         ] )
     ]
 ;;

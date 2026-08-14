@@ -15,6 +15,7 @@ type execution_result =
     [make_keeper_tool_handler] closure are passed explicitly. *)
 val execute_with_observers
   :  name:string
+  -> ?descriptor:Keeper_tool_descriptor.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:

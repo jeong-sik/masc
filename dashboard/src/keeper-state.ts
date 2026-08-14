@@ -792,6 +792,10 @@ function deliveryIdentityFromKey(raw: unknown): DeliveryIdentity {
     const requestId = asString(raw.operation_id)?.trim() ?? ''
     return { requestId: requestId || null }
   }
+  if (kind === 'workspace_message') {
+    const requestId = asString(raw.request_id)?.trim() ?? ''
+    return { requestId: requestId || null }
+  }
   return { requestId: null }
 }
 

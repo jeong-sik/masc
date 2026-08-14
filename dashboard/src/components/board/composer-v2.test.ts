@@ -26,6 +26,7 @@ const voiceInputState = vi.hoisted(() => ({
 vi.mock('../../api', () => ({
   currentDashboardActor: currentDashboardActorMock,
   sendBroadcast: sendBroadcastMock,
+  broadcastReceiptMessage: vi.fn(() => 'broadcast receipt'),
 }))
 
 vi.mock('../../operator-store', async (importOriginal) => {
@@ -124,7 +125,13 @@ describe('ComposerV2', () => {
   beforeEach(() => {
     currentDashboardActorMock.mockReturnValue('dashboard-test')
     sendBroadcastMock.mockReset()
-    sendBroadcastMock.mockResolvedValue(undefined)
+    sendBroadcastMock.mockResolvedValue({
+      ok: true,
+      requestId: 'wmsg-test',
+      deliveryKind: 'passive',
+      reason: null,
+      workspacePersisted: true,
+    })
     dispatchOperatorActionMock.mockReset()
     dispatchOperatorActionMock.mockResolvedValue({
       status: 'ok',

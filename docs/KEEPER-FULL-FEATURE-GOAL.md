@@ -150,9 +150,10 @@ framework, runtime-role policy, unused execution-store plumbing처럼 현재 기
 - 기능을 막는 새 admission 조건을 추가하지 않는다.
 - Runtime 이름이나 사용자 로컬 설정을 production OCaml variant로 만들지 않는다.
 - 빠르게 Draft로 발행하고 긴 CI를 기다리지 않고 다음 독립 기능으로 이동한다.
-- push 전 `git diff --check`, parser/format, 필요한 frontend typecheck와 focused test처럼
-  빠른 검사를 수행한다. 로컬 Dune build는 실행하지 않고 OCaml build와 넓은 동작 검증은
-  exact-head CI에서 판정한다.
+- push 전 `git diff --check`, parser/format, 필요한 frontend typecheck와 focused test를
+  수행한다. OCaml 코드나 공개 타입을 바꾸면 관련 Dune build와 focused test를
+  `scripts/dune-local.sh`로 실행하고, 넓은 경계를 바꾸면 영향 범위에 비례한 저장소 전체
+  검증도 수행한다. exact-head CI는 이 로컬 검증을 대체하지 않는 최종 판정이다.
 - Dashboard도 reducer, interaction, reconnect를 포함한 실제 UI 기능 고장만 수정한다.
 
 ## 7. Live 실행 경계

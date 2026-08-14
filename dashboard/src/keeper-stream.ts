@@ -430,9 +430,15 @@ export function applyKeeperOperationTurnEvent(
   // stamps the accepted operation id onto the bubble it is streaming into
   // (keeper-actions [stampPlaceholderRequestId]) and leaves it in 'streaming',
   // which is exactly the state this function treats as "still open, keep
-  // writing". Applying both transports to one bubble does not overwrite, it
-  // interleaves -- the two chunk the same text at different boundaries, so the
-  // operator sees every fragment twice ("오퍼레이터가 비" + "레이터가 비유/").
+  // writing". Both transports carry the same event: one Option.iter in
+  // server_routes_http_keeper_stream hands a single AG-UI event to
+  // Keeper_chat_broadcast.operation_event and publish_operation_live_event, so
+  // the deltas are byte-identical and TEXT_MESSAGE_CONTENT has no per-chunk
+  // sequence to dedupe on (messageId alone cannot: it is per message, not per
+  // chunk). Applying both to one bubble appends twice, and the broadcast copy
+  // starts after the direct stream has already written some deltas, so the two
+  // runs sit out of phase and the operator reads interleaved fragments
+  // ("오퍼레이터가 비" + "레이터가 비유/").
   // Live-send ownership already records which request this session is
   // streaming itself, so consult that rather than inferring it from state.
   if (liveSendOwnsRequest(operationId)) return null

@@ -91,26 +91,16 @@ let handle_ide_annotate_with_outcome
     (* Syntax alone cannot prove that the co-view minted this slug.  Anchor
        admission to the repository catalog SSOT before the IDE sink can create
        a by-url partition that no repository-scoped reader will ever query. *)
-    (match Repo_store.load_all ~base_path:config.base_path with
+    (match Ide_paths.codebase_is_registered ~base_path:base_dir ~codebase with
      | Error message ->
        reject
          ~class_:Tool_result.Runtime_failure
          (Printf.sprintf "ide_annotate repository catalog unavailable: %s" message)
-     | Ok repositories ->
-       let registered =
-         List.exists
-           (fun (repository : Repo_manager_types.repository) ->
-             match Agent_observation.canonical_url_of_remote repository.url with
-             | Some registered_codebase -> String.equal registered_codebase codebase
-             | None -> false)
-           repositories
-       in
-       if not registered
-       then
-         reject
-           "ide_annotate codebase is not present in the repository catalog — pass the \
-            server-minted codebase from the current co-view"
-       else
+     | Ok false ->
+       reject
+         "ide_annotate codebase is not present in the repository catalog — pass the \
+          server-minted codebase from the current co-view"
+     | Ok true ->
     match
       Agent_observation.emit_annotation_request
         { base_path = base_dir

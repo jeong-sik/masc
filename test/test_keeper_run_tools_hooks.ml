@@ -309,6 +309,24 @@ let test_annotate_uses_input_code_address_without_sandbox_resolution () =
       (Agent_observation.Code_address.path address))
 ;;
 
+let test_annotate_rejects_non_catalog_code_address () =
+  with_partition_fixture (fun ~config ~meta ->
+    match
+      resolve_attribution
+        ~tool_name:"keeper_ide_annotate"
+        ~config
+        ~meta
+        [ "codebase", `String "github.com_owner_reop"
+        ; "file_path", `String "lib/annotated.ml"
+        ]
+    with
+    | Agent_observation.File
+        (Agent_observation.Unaddressed
+           { reason = Agent_observation.Unattributed.Unregistered_path; _ }) ->
+      ()
+    | _ -> fail "non-catalog annotation hook observation remained addressed")
+;;
+
 let test_partition_unregistered_playground_repo_fails_with_repo_id () =
   with_partition_fixture (fun ~config ~meta ->
     match
@@ -700,6 +718,10 @@ let () =
             "annotate uses its input code address"
             `Quick
             test_annotate_uses_input_code_address_without_sandbox_resolution
+        ; test_case
+            "annotate rejects non-catalog code address"
+            `Quick
+            test_annotate_rejects_non_catalog_code_address
         ; test_case
             "unregistered playground repo fails with its repo id"
             `Quick

@@ -52,12 +52,12 @@ let annotate ~config ~meta args =
 let probe_slug = "github.com_jeong-sik_masc"
 let probe_path = "lib/ide/ide_annotations.ml"
 
-let seed_probe_repository (config : Masc.Workspace.config) =
+let seed_probe_repository ~base_path =
   let repository : Repo_manager_types.repository =
     { id = "masc"
     ; name = "masc"
     ; url = "https://github.com/jeong-sik/masc.git"
-    ; local_path = config.base_path
+    ; local_path = base_path
     ; aliases = []
     ; default_branch = "main"
     ; keepers = []
@@ -68,7 +68,7 @@ let seed_probe_repository (config : Masc.Workspace.config) =
     ; updated_at = Int64.zero
     }
   in
-  match Repo_store.save_all ~base_path:config.base_path [ repository ] with
+  match Repo_store.save_all ~base_path [ repository ] with
   | Ok () -> ()
   | Error message -> failf "seed repository catalog: %s" message
 ;;
@@ -81,7 +81,7 @@ let test_owner_probe_round_trip () =
     Agent_observation.reset_for_testing ();
     Ide_bridge.install_agent_observation_sinks ();
     let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
-    seed_probe_repository config;
+    seed_probe_repository ~base_path;
     let meta = make_meta "analyst" in
     let raw =
       annotate
@@ -179,7 +179,7 @@ let test_out_of_tree_path_is_a_typed_reject () =
 let test_unknown_codebase_is_a_typed_reject () =
   with_temp_base_path (fun base_path ->
     let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
-    seed_probe_repository config;
+    seed_probe_repository ~base_path;
     let meta = make_meta "analyst" in
     annotate
       ~config

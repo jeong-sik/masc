@@ -80,3 +80,10 @@ val canonical_url_of_remote : string -> string option
     The function is total (never raises) and deterministic. The same
     upstream resolves to the same slug regardless of which transport
     the remote was registered with. *)
+
+(** [codebase_is_registered ~base_path ~codebase] checks the canonical slug
+    against the repository catalog. This is the admission SSOT shared by
+    keeper annotation execution, hook observation, and HTTP mutation scopes;
+    catalog read failures remain explicit. *)
+val codebase_is_registered :
+  base_path:string -> codebase:string -> (bool, string) result

@@ -9,6 +9,10 @@ open Masc_domain
 module Http = Http_server_eio
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
+let project_base_path_of_state state =
+  Mcp_server.workspace_config state
+  |> Keeper_alerting_path.project_root_of_config
+;;
 let extract_path_param = Server_utils.extract_path_param
 
 (* The scope vocabulary is shared with the LSP proxy; both surfaces resolve
@@ -117,15 +121,28 @@ let resolve_annotation_post_address ~state ~uri ~file_path =
   match resolve_partition_for_mutation ~state ~uri with
   | Error _ as err -> err
   | Ok (Ide_paths.By_url slug) ->
-    (match Agent_observation.Code_address.v ~codebase:slug ~path:file_path with
-     | Ok address -> Ok address
-     | Error invalid ->
+    (match
+       Ide_paths.codebase_is_registered
+         ~base_path:(project_base_path_of_state state)
+         ~codebase:slug
+     with
+     | Error message ->
+       Error (ide_error "repository_catalog_unavailable" message)
+     | Ok false ->
        Error
          (ide_error
-            "invalid_file_path"
-            (Printf.sprintf
-               "file_path must be repo-root-relative (%s)"
-               (Agent_observation.Code_address.invalid_to_string invalid))))
+            "unmatched_canonical_url"
+            "canonical_url does not match a configured repository")
+     | Ok true ->
+       (match Agent_observation.Code_address.v ~codebase:slug ~path:file_path with
+        | Ok address -> Ok address
+        | Error invalid ->
+          Error
+            (ide_error
+               "invalid_file_path"
+               (Printf.sprintf
+                  "file_path must be repo-root-relative (%s)"
+                  (Agent_observation.Code_address.invalid_to_string invalid)))))
   | Ok
       ( Ide_paths.No_canonical_url | Ide_paths.Unmatched | Ide_paths.Base_unresolved
       | Ide_paths.Legacy_default ) ->

@@ -128,7 +128,7 @@ let observation_file_path_from_tool_input ~sandbox_root input =
    no file is [Pathless] — a keeper-timeline fact with no document — and
    never touches the resolver; a call that names one gets the resolver's
    attribution, minted once here and carried as a parsed value. *)
-let annotation_attribution_from_tool_input input =
+let annotation_attribution_from_tool_input ~config input =
   let codebase =
     match Yojson.Safe.Util.member "codebase" input with
     | `String value -> value
@@ -141,8 +141,23 @@ let annotation_attribution_from_tool_input input =
   in
   match Agent_observation.Code_address.v ~codebase ~path with
   | Ok address ->
-    Agent_observation.File
-      (Agent_observation.Addressed { address; checkout = None })
+    let base_path = Keeper_alerting_path.project_root_of_config config in
+    (match Ide_paths.codebase_is_registered ~base_path ~codebase with
+     | Ok true ->
+       Agent_observation.File
+         (Agent_observation.Addressed { address; checkout = None })
+     | Ok false ->
+       Agent_observation.File
+         (Agent_observation.Unaddressed
+            { reason = Agent_observation.Unattributed.Unregistered_path
+            ; attempted_path = path
+            })
+     | Error _ ->
+       Agent_observation.File
+         (Agent_observation.Unaddressed
+            { reason = Agent_observation.Unattributed.Repository_catalog_unavailable
+            ; attempted_path = path
+            }))
   | Error reason ->
     Agent_observation.File
       (Agent_observation.Unaddressed
@@ -153,7 +168,7 @@ let annotation_attribution_from_tool_input input =
 
 let observation_attribution_for_tool_input ?(tool_name = "") ~config ~meta input =
   if String.equal tool_name "keeper_ide_annotate"
-  then annotation_attribution_from_tool_input input
+  then annotation_attribution_from_tool_input ~config input
   else
   let base_dir = Keeper_alerting_path.project_root_of_config config in
   let sandbox_root =

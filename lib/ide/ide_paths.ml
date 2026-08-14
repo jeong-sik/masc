@@ -43,3 +43,14 @@ let partition_store_dir ~base_dir = function
 ;;
 
 let canonical_url_of_remote = Agent_observation.canonical_url_of_remote
+
+let codebase_is_registered ~base_path ~codebase =
+  Repo_store.load_all ~base_path
+  |> Result.map (fun repositories ->
+    List.exists
+      (fun (repository : Repo_manager_types.repository) ->
+         match canonical_url_of_remote repository.url with
+         | Some registered -> String.equal registered codebase
+         | None -> false)
+      repositories)
+;;

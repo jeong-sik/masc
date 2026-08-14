@@ -39,7 +39,10 @@ let partition_of_ide_scope = function
   | Scope_keeper_lane _ -> Ide_paths.Legacy_default
 ;;
 
-let base_path_of_state state = (Mcp_server.workspace_config state).base_path
+let base_path_of_state state =
+  Mcp_server.workspace_config state
+  |> Keeper_alerting_path.project_root_of_config
+;;
 
 (* One shape for the three declared scopes, so both the absent-scope and
    present-scope resolvers below classify identically. *)

@@ -507,6 +507,7 @@ let test_post_cursors_rejects_negative_column () =
 
 let test_post_cursors_persists_valid_focus_mode () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
+    ignore (seed_annotation_scope_repos base_path : string * string);
     let token = create_worker_token base_path "alice" in
     let body = {|{"file_path":"lib/a.ml","line":7,"focus_mode":"reviewing"}|} in
     let post_request =
@@ -538,6 +539,7 @@ let test_post_cursors_persists_valid_focus_mode () =
 
 let test_post_cursors_broadcasts_ws_invalidation () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
+    ignore (seed_annotation_scope_repos base_path : string * string);
     let token = create_worker_token base_path "alice" in
     let subscriber_id = "test-ide-cursor-ws-invalidation" in
     let received = ref [] in
@@ -621,6 +623,7 @@ let test_hook_cursors_broadcast_ws_invalidation () =
 
 let test_post_cursors_honors_canonical_url_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
+    ignore (seed_annotation_scope_repos base_path : string * string);
     let token = create_worker_token base_path "alice" in
     let scoped_path =
       "/api/v1/ide/cursors?canonical_url=https%3A%2F%2Fgithub.com%2Fjeong-sik%2Fmasc.git"
@@ -807,6 +810,29 @@ let test_post_annotations_rejects_escaping_file_path () =
       string
       "mint reject code"
       "invalid_file_path"
+      (error_code_of_response response))
+;;
+
+let test_post_annotations_rejects_unregistered_canonical_url () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let _repos = seed_annotation_scope_repos base_path in
+    let token = create_worker_token base_path "alice" in
+    let scoped_path =
+      "/api/v1/ide/annotations?canonical_url="
+      ^ Uri.pct_encode "https://github.com/owner/reop.git"
+    in
+    let response =
+      dispatch
+        router
+        (http_request
+           ~meth:`POST
+           ~path:scoped_path
+           ~body:(annotation_body ~file_path:"lib/a.ml")
+           ~token:(Some token)
+           ())
+    in
+    check_status "POST annotation with unknown canonical_url returns 400" 400 response;
+    check string "catalog reject code" "unmatched_canonical_url"
       (error_code_of_response response))
 ;;
 
@@ -1300,6 +1326,8 @@ let () =
             test_post_annotations_rejects_absolute_file_path
         ; test_case "POST annotation rejects an escaping file_path" `Quick
             test_post_annotations_rejects_escaping_file_path
+        ; test_case "POST annotation rejects unregistered canonical_url" `Quick
+            test_post_annotations_rejects_unregistered_canonical_url
         ; test_case "POST annotation requires auth" `Quick
             test_post_annotations_requires_auth
         ; test_case "DELETE annotation requires auth" `Quick

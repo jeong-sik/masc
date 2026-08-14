@@ -737,20 +737,25 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
          context-window rejection ("Prompt is too long" / "Input is too long
          for requested model", either status, or a 413 naming the window). A
          frame that carries the verdict is authoritative in both directions,
-         like the codex lane's [codexErrorInfo]. Frames from CLIs that predate
-         the enum carry no [terminal_reason]; only those fall back to the
-         historical exact-prefix 400, unchanged in scope (RFC amendment
-         2026-08-12). *)
+         like the codex lane's [codexErrorInfo].
+
+         Frames without the enum fall back to the CLI's own sentence table,
+         with no status requirement. The historical 400 requirement missed
+         real frames: on 2026-08-14 the CLI reported three resumed-session
+         overflows as [subtype=success, is_error=true] with no
+         [api_error_status] and no [terminal_reason] — only the sentence —
+         so the overflow fell to the generic-failure path and surfaced as an
+         unmapped internal error. Both sentences appear verbatim in the CLI
+         binary (2.1.232). *)
       match terminal_reason with
       | Some reason -> String.equal reason "prompt_too_long"
       | None ->
-        Option.equal Int.equal api_error_status (Some 400)
-        && Option.exists
-             (fun detail ->
-                String.starts_with
-                  ~prefix:"Prompt is too long"
-                  (String.trim detail))
-             result
+        Option.exists
+          (fun detail ->
+             let detail = String.trim detail in
+             String.starts_with ~prefix:"Prompt is too long" detail
+             || String.starts_with ~prefix:"Input is too long for requested model" detail)
+          result
     in
     if structurally_quota_blocked
     then Error (Quota_blocked { api_error_status; rate_limit })

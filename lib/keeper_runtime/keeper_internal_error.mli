@@ -4,9 +4,13 @@
 (** Canonical wire kind emitted for {!Capacity_backpressure}.  Receipt
     terminal projection and decoding consume this same value. *)
 val capacity_backpressure_kind : string
-val incomplete_tool_transcript_kind : string
 (** Canonical wire kind for structural transcript corruption rejected before
     provider dispatch. *)
+val incomplete_tool_transcript_kind : string
+
+(** Canonical wire kind for a provider-attempt failure whose effect disposition
+    forbids same-turn replay. *)
+val provider_attempt_effect_fenced_kind : string
 
 type provider_rejection = {
   provider_label : string;

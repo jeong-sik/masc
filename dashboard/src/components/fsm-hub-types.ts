@@ -396,11 +396,14 @@ const OPERATOR_DISPOSITION_REASON_LABELS: Record<string, string> = {
   degraded_retry: '저하 상태 재시도',
   runtime_fallback: '런타임 폴백',
   transient_runtime_retry: '일시적 런타임 재시도',
+  capacity_backpressure: 'Provider 수용량 부족',
   provider_runtime_error: '런타임 호출 오류',
   internal_error: '내부 오류',
   input_required: '사용자 입력 대기',
   cancelled: '취소됨',
   phase_skipped: 'phase 건너뜀',
+  transcript_corruption: '대화 기록 손상 - 초기화 필요',
+  provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 

@@ -4619,6 +4619,128 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             ()))
 ;;
 
+let composition_node_id value =
+  match Masc.Keeper_tool_plan.Node_id.make value with
+  | Ok id -> id
+  | Error Masc.Keeper_tool_plan.Node_id.Empty -> fail "composition node id is empty"
+;;
+
+let composition_descriptor name =
+  Masc.Keeper_tool_descriptor.all_descriptors ()
+  |> List.find_opt (fun descriptor ->
+    Masc.Keeper_tool_descriptor.keeper_model_names descriptor
+    |> List.exists (String.equal name))
+  |> function
+  | Some descriptor -> descriptor
+  | None -> fail ("composition descriptor missing: " ^ name)
+;;
+
+let composition_invocation ~completion =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id:"composition-parent"
+    ~turn:7
+    ~schedule:
+      { Agent_core.Tool_contract.planned_index = 0
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_core.Tool_contract.Serial
+      }
+    ~completion
+;;
+
+let test_composition_runtime_uses_canonical_descriptor () =
+  with_exec_fixture "composition-canonical-descriptor"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let canonical = composition_descriptor "keeper_time_now" in
+       let supplied =
+         { canonical with
+           Masc.Keeper_tool_descriptor.execution =
+             Masc.Keeper_tool_descriptor.Ordinary Masc.Keeper_tool_descriptor.Serial
+         ; input_schema = `Assoc [ "type", `String "string" ]
+         ; composable_output = Masc.Keeper_tool_descriptor.Opaque_output
+         }
+       in
+       let node =
+         Masc.Keeper_tool_plan.node
+           ~id:(composition_node_id "time")
+           ~tool_name:"keeper_time_now"
+           ~input:(Masc.Keeper_tool_plan.Json_template.literal (`Assoc []))
+           ()
+       in
+       let plan =
+         match Masc.Keeper_tool_plan.create ~descriptors:[ supplied ] [ node ] with
+         | Ok plan -> plan
+         | Error _ -> fail "canonicalized composition plan was rejected"
+       in
+       match
+         Masc.Keeper_tool_plan_executor.execute_keeper
+           ~plan
+           ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+           ~parent_invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       with
+       | Error _ -> fail "canonical exact-descriptor composition execution failed"
+       | Ok [ result ] ->
+         (match result.Masc.Keeper_tool_plan_executor.result with
+          | Tool_result.Completed _ -> ()
+          | Tool_result.Deferred _ | Tool_result.Failed _ ->
+            fail "canonical time descriptor did not complete");
+         check bool
+           "canonical concurrent schedule"
+           true
+           (result.schedule.execution_mode = Agent_core.Tool_contract.Concurrent)
+       | Ok _ -> fail "single-node composition settled an unexpected result count")
+;;
+
+let test_composition_terminal_requires_terminal_outer_invocation () =
+  with_exec_fixture "composition-terminal-outer-contract"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let descriptor = composition_descriptor "keeper_surface_post" in
+       let node =
+         Masc.Keeper_tool_plan.node
+           ~id:(composition_node_id "terminal")
+           ~tool_name:"keeper_surface_post"
+           ~input:(Masc.Keeper_tool_plan.Json_template.literal (`Assoc []))
+           ()
+       in
+       let plan =
+         match Masc.Keeper_tool_plan.create ~descriptors:[ descriptor ] [ node ] with
+         | Ok plan -> plan
+         | Error _ -> fail "terminal composition plan was rejected"
+       in
+       match
+         Masc.Keeper_tool_plan_executor.execute_keeper
+           ~plan
+           ~run_id:(Masc.Keeper_tool_plan.Run_id.fresh ())
+           ~parent_invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       with
+       | Error
+           { settled = []
+           ; cause =
+               Masc.Keeper_tool_plan_executor.Outer_completion_mismatch
+                 { expected =
+                     Agent_core.Tool_contract.Terminal_after_success
+                       Agent_core.Tool_contract.Effect_outcome_unknown
+                 ; actual = Agent_core.Tool_contract.Continue_after_success
+                 }
+           } -> ()
+       | Error _ | Ok _ ->
+         fail "terminal composition accepted an ordinary outer invocation")
+;;
+
 let () =
   Masc_test_deps.init_unified_tool_registry ();
   run "Keeper_tool_dispatch_runtime" [
@@ -4711,6 +4833,10 @@ let () =
         test_invalid_surface_post_input_stays_correction_capable;
       test_case "surface append failure is not terminal completion" `Quick
         test_surface_post_append_failure_does_not_complete_terminal_effect;
+      test_case "composition dispatch uses canonical descriptor authority" `Quick
+        test_composition_runtime_uses_canonical_descriptor;
+      test_case "terminal composition requires terminal outer invocation" `Quick
+        test_composition_terminal_requires_terminal_outer_invocation;
     ]);
     ("exact_registered_dispatch", [
       test_case "raw Board runtime respects typed projection" `Quick

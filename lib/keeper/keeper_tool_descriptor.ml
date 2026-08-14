@@ -1969,6 +1969,10 @@ let internal_descriptors : t list =
 
 let all_descriptors () = public_descriptors @ internal_descriptors
 
+let find_id id =
+  List.find_opt (fun descriptor -> String.equal descriptor.id id) (all_descriptors ())
+;;
+
 let model_schema_errors descriptor =
   match descriptor.input_schema_source, descriptor.input_schema with
   | (Descriptor_owned | Canonical_registry | Keeper_projection), `Assoc _ ->

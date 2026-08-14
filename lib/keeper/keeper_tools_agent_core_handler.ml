@@ -10,6 +10,8 @@ open Keeper_tools_agent_core_handler_telemetry
 
 let make_keeper_tool_handler
       ~(name : string)
+      ?descriptor
+      ?model_name
       ~(input_schema : Yojson.Safe.t)
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -26,15 +28,46 @@ let make_keeper_tool_handler
       ?on_deferred
       ?on_external_effect_deferred
       ?on_failed
-      ?(prepare_input = fun input ->
+      ?prepare_input
+      ()
+  : ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t -> Yojson.Safe.t -> Tool_result.result
+  =
+  let input_schema =
+    match descriptor with
+    | None -> input_schema
+    | Some supplied ->
+      (match Keeper_tool_descriptor.find_id supplied.Keeper_tool_descriptor.id with
+       | Some canonical
+         when canonical == supplied
+              && String.equal name canonical.Keeper_tool_descriptor.internal_name ->
+         canonical.input_schema
+       | Some _ | None ->
+         invalid_arg
+           "make_keeper_tool_handler: exact descriptor dispatch requires process-owned canonical authority")
+  in
+  let prepare_input =
+    match descriptor, model_name, prepare_input with
+    | Some canonical, Some model_name, _ ->
+      fun input ->
+        Keeper_tool_descriptor_resolution.prepare_model_input_for_descriptor
+          ~tool_name:model_name
+          canonical
+          ~input
+    | Some _, None, _ ->
+      invalid_arg
+        "make_keeper_tool_handler: exact descriptor dispatch requires its model-visible name"
+    | None, Some _, _ ->
+      invalid_arg
+        "make_keeper_tool_handler: model-visible name requires exact descriptor authority"
+    | None, None, Some prepare -> prepare
+    | None, None, None ->
+      fun input ->
         Tool_input_validation.validate_args
           ~schema:input_schema
           ~name
           ~args:input
-          ())
-      ()
-  : ?agent_core_invocation:Agent_core.Tool_contract.Invocation.t -> Yojson.Safe.t -> Tool_result.result
-  =
+          ()
+  in
   let record_result ~input result =
     Option.iter
       (fun record -> record ~operation:name ~input result)
@@ -159,6 +192,7 @@ let make_keeper_tool_handler
             let execution =
               Keeper_tools_agent_core_handler_exec.execute_with_observers
                 ~name
+                ?descriptor
                 ~config
                 ~meta
                 ~publication_recovery

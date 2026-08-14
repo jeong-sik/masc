@@ -21,6 +21,8 @@ let create_tool_observer_serialization () : tool_observer_serialization =
        reject every later completion. [Fun.protect] keeps the non-suspending
        unlock exception-safe without masking cancellation across the observer's
        file locks and durable writes. *)
+    (* fun-protect-finally-ok: [Eio.Mutex.unlock] is non-suspending and releases
+       only the observer-serialization mutex acquired immediately above. *)
     Fun.protect
       ~finally:(fun () -> Eio.Mutex.unlock mutex)
       observe

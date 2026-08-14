@@ -2022,6 +2022,8 @@
 
 (include stanzas/test_pr_open_script.inc)
 
+(include stanzas/test_pr_sync_script.inc)
+
 
 (include stanzas/test_release_train_guard_script.inc)
 

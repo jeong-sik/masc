@@ -190,17 +190,21 @@ run_gate() {
   if [[ -e "$candidates_root" || -L "$candidates_root" ]]; then
     [[ -d "$candidates_root" && ! -L "$candidates_root" ]] \
       || fail "board attention candidate store is not an exact directory: $candidates_root"
+    reject_symlinks_below "$candidates_root" "board attention candidate store"
     local candidate_ledger_path
     local stale_row_report
     while IFS= read -r -d '' candidate_ledger_path; do
+      [[ -f "$candidate_ledger_path" && ! -L "$candidate_ledger_path" ]] \
+        || fail "board attention candidate ledger is not an exact regular file: $candidate_ledger_path"
       if [[ ! -s "$candidate_ledger_path" ]]; then
         continue
       fi
       # -R + fromjson: a torn or non-JSON line is reported instead of skipped —
       # the runtime reader is fail-total per file, so it would stall on it too.
       stale_row_report="$(jq -Rr \
-        'select(test("\\S")) | try (fromjson | select(.schema_version != 4) | "schema_version=\(.schema_version)") catch "unparseable row"' \
-        "$candidate_ledger_path" | head -1)"
+        'first(select(test("\\S")) | try (fromjson | select(.schema_version != 4) | "schema_version=\(.schema_version)") catch "unparseable row") // empty' \
+        "$candidate_ledger_path")" \
+        || fail "board attention candidate ledger could not be inspected: $candidate_ledger_path"
       [[ -z "$stale_row_report" ]] \
         || fail "board attention candidate ledger has a pre-v4 or unreadable row ($stale_row_report): $candidate_ledger_path — retire the store before restart: mv $candidates_root ${runtime_root}/board_attention_candidates-retired-$(date +%Y%m%d)"
     done < <(find "$candidates_root" -name '*.jsonl' -print0)
@@ -271,6 +275,18 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
     fi
   }
 
+  expect_failure_contains() {
+    local case_name="$1"
+    local target_root="$2"
+    local expected_text="$3"
+    local output
+    if output="$("$0" --base-path "$target_root" 2>&1)"; then
+      fail "self-test expected failure: $case_name"
+    fi
+    [[ "$output" == *"$expected_text"* ]] \
+      || fail "self-test failure omitted expected detail for $case_name: $expected_text"
+  }
+
   safe_root="$fixture_root/safe"
   write_schedules "$safe_root" succeeded
   write_signal "$safe_root" true
@@ -326,6 +342,26 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   printf '{"schema_version": 3, "candidate_id": "fixture"}\n' \
     >"$stale_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
   expect_failure stale_board_attention_candidate_ledger "$stale_candidate_root"
+
+  many_stale_candidate_root="$fixture_root/candidate-many-pre-v4"
+  write_schedules "$many_stale_candidate_root" running
+  mkdir -p "$many_stale_candidate_root/.masc/board_attention_candidates"
+  jq -nc 'range(0; 5000) | {schema_version: 3, candidate_id: "fixture"}' \
+    >"$many_stale_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
+  expect_failure_contains \
+    many_stale_board_attention_candidate_rows \
+    "$many_stale_candidate_root" \
+    "retire the store before restart"
+
+  symlinked_candidate_root="$fixture_root/candidate-symlink"
+  write_schedules "$symlinked_candidate_root" running
+  mkdir -p "$symlinked_candidate_root/.masc/board_attention_candidates"
+  ln -s "$stale_candidate_root/.masc/board_attention_candidates/fixture.jsonl" \
+    "$symlinked_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
+  expect_failure_contains \
+    symlinked_board_attention_candidate_ledger \
+    "$symlinked_candidate_root" \
+    "board attention candidate store contains a symlink"
 
   torn_candidate_root="$fixture_root/candidate-torn"
   write_schedules "$torn_candidate_root" running

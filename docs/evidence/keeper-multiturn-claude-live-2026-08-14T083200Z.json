@@ -1,0 +1,159 @@
+{
+  "schema": "masc.keeper_feature_matrix.multiturn_evidence.v1",
+  "captured_at": "2026-08-14T08:32:00Z",
+  "purpose": "First live 10-turn semantic-continuity canary for the Claude Code Max Subscription runtime family (Runtime/Provider matrix row claude_code, previously NOT RUN). Reuses the exact 9-fact contract from docs/evidence/keeper-multiturn-codex-live-2026-08-13T155130Z.json for direct cross-runtime comparability.",
+  "daemon": {
+    "endpoint": "http://localhost:8935",
+    "version": "0.22.0",
+    "running_commit": "ff6a8fa6af"
+  },
+  "canary": "canary-multiturn-claude-20260814-0815",
+  "runtime": {
+    "assignment_source": "explicit",
+    "runtime_id": "claude_code.claude-sonnet-5",
+    "provider": "Claude Code Max Subscription",
+    "model": "claude-sonnet-5",
+    "family_size": 7,
+    "family_ids": [
+      "claude_code.claude-sonnet-5",
+      "claude_code.claude-opus-5",
+      "claude_code.claude-fable-5",
+      "claude_code.claude-haiku-4-5",
+      "claude_code.claude-opus-5-low",
+      "claude_code.claude-opus-5-high",
+      "claude_code.claude-opus-5-max"
+    ],
+    "selection_reason": "Base/default tier of the family (sonnet), matching the 'sonnet 계열' precedent set for representative selection.",
+    "resolved_catalog_check": {
+      "path": "/api/v1/runtime/resolved",
+      "keeper_dispatchable": true,
+      "keeper_dispatch_blocked_reason": null,
+      "effective_max_context": 1000000
+    }
+  },
+  "transcript": {
+    "path": "/Users/dancer/me/.masc/keeper_chat/canary-multiturn-claude-20260814-0815.jsonl",
+    "sha256": "e5ef72ccc543fa708fc5c8af56201bafd2f353c25754dbf36f700466997a283e",
+    "bytes": 11068,
+    "records": 20,
+    "user_records": 10,
+    "assistant_records": 10,
+    "turn_operation_ids": [
+      "cc-turn-1", "cc-turn-2", "cc-turn-3", "cc-turn-4", "cc-turn-5",
+      "cc-turn-6", "cc-turn-7", "cc-turn-8", "cc-turn-9", "cc-turn-10-recall"
+    ]
+  },
+  "configuration": {
+    "path": "/Users/dancer/me/.masc/config/keepers/canary-multiturn-claude-20260814-0815.toml",
+    "sandbox_profile": "local",
+    "network_mode": "inherit",
+    "proactive_enabled": false,
+    "autoboot_enabled": true,
+    "runtime_assignment_line": "\"canary-multiturn-claude-20260814-0815\" = \"claude_code.claude-sonnet-5\" (in [runtime.assignments], /Users/dancer/me/.masc/config/runtime.toml)"
+  },
+  "facts_established_in_turns_1_to_9": [
+    "The project codename is Aster Ledger.",
+    "The prototype city is Nacre Bay.",
+    "Cobalt tokens must be processed before amber tokens.",
+    "If sensor Delta-7 goes silent, pause the shipment but retain the queue.",
+    "Dr. Iona Vale owns the recovery decision.",
+    "Recovery is confirmed by three consecutive violet pulses.",
+    "After confirmation, the retained queue moves to Orchid Pier.",
+    "The final recovery notice goes to channel Harbor-3.",
+    "Amber tokens tagged glasswing are quarantined rather than shipped, while cobalt remains first."
+  ],
+  "stray_autonomous_turn_before_contract_started": {
+    "server_turn_index": 0,
+    "server_latency_ms": 3041,
+    "server_mode": "tool_use",
+    "note": "Keepalive heartbeat at boot, before proactive_enabled=false had propagated. Not part of the 9-fact contract; excluded from per_turn below and from the latency distribution. See setup_anomaly_stray_turn."
+  },
+  "per_turn": [
+    { "contract_turn": 1, "operation_id": "cc-turn-1", "client_elapsed_seconds": 9.44, "server_latency_ms": 9259, "server_mode": "text_response", "fact_established": "Aster Ledger" },
+    { "contract_turn": 2, "operation_id": "cc-turn-2", "client_elapsed_seconds": 11.19, "server_latency_ms": 10804, "server_mode": "text_response", "fact_established": "Nacre Bay" },
+    { "contract_turn": 3, "operation_id": "cc-turn-3", "client_elapsed_seconds": 12.12, "server_latency_ms": 11838, "server_mode": "text_response", "fact_established": "cobalt before amber" },
+    { "contract_turn": 4, "operation_id": "cc-turn-4", "client_elapsed_seconds": 9.67, "server_latency_ms": 9517, "server_mode": "text_response", "fact_established": "Delta-7 silent -> pause, retain queue" },
+    { "contract_turn": 5, "operation_id": "cc-turn-5", "client_elapsed_seconds": 8.68, "server_latency_ms": 8573, "server_mode": "text_response", "fact_established": "Iona Vale owns recovery decision" },
+    { "contract_turn": 6, "operation_id": "cc-turn-6", "client_elapsed_seconds": 10.89, "server_latency_ms": 10765, "server_mode": "text_response", "fact_established": "three violet pulses confirm recovery" },
+    { "contract_turn": 7, "operation_id": "cc-turn-7", "client_elapsed_seconds": 24.95, "server_latency_ms": 24784, "server_mode": "text_response", "fact_established": "retained queue moves to Orchid Pier" },
+    { "contract_turn": 8, "operation_id": "cc-turn-8", "client_elapsed_seconds": 10.05, "server_latency_ms": 9893, "server_mode": "text_response", "fact_established": "final notice on channel Harbor-3" },
+    { "contract_turn": 9, "operation_id": "cc-turn-9", "client_elapsed_seconds": 9.84, "server_latency_ms": 9724, "server_mode": "text_response", "fact_established": "glasswing amber quarantine exception" },
+    { "contract_turn": 10, "operation_id": "cc-turn-10-recall", "client_elapsed_seconds": 14.93, "server_latency_ms": 14825, "server_mode": "text_response", "note": "Recall of all 9 facts plus contradiction check." }
+  ],
+  "note_on_per_turn_indexing": "contract_turn 1-10 matches the 9-fact-plus-recall contract used by the codex precedent evidence. Server-side raw turn indices run one higher throughout this file (e.g. contract_turn 1 was raw server turn=1) because raw turn=0 was the excluded stray autonomous heartbeat above. All ten deliberate chat calls succeeded (RUN_FINISHED, run_error: null, no RUN_ERROR observed at any point).",
+  "turn_latency_distribution_ms_deliberate_turns_only": {
+    "n": 10,
+    "values_sorted": [8573, 9259, 9517, 9724, 9893, 10765, 10804, 11838, 14825, 24784],
+    "min": 8573,
+    "median": 10329,
+    "mean": 11998,
+    "max": 24784,
+    "note": "No requests failed or timed out. Latency is materially higher than the previously-measured ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 canary (3-13s/turn observed same day) and ballpark-comparable to the codex_subscription.gpt-5.4 precedent (elapsed 3.9-7.8s per successful pass in that record, though that record only logged 3 Librarian passes, not per-chat-turn latency, so the comparison is directional, not exact). Consistent with 'Claude Code CLI subprocess boot/turn latency' being the dominant per-turn cost for this runtime family, as anticipated in the mission brief."
+  },
+  "turn_10_assertions": {
+    "all_nine_distinct_facts_recalled": true,
+    "recalled_in_correct_order": true,
+    "complete_operational_sequence_reconstructed": true,
+    "contradiction_assessment": "Model correctly identified no contradiction, explicitly reasoning that fact 9 (glasswing amber quarantine) refines rather than conflicts with fact 3 (cobalt before amber) -- a more precise contradiction analysis than a bare 'no contradictions' assertion.",
+    "tool_use_requested": false,
+    "tool_use_observed_in_sse": false,
+    "sse_event_types_observed_across_all_10_turns": ["RUN_STARTED", "TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END", "RUN_FINISHED", "CUSTOM"],
+    "no_tool_call_start_events_at_any_turn": true
+  },
+  "per_fact_scoring": [
+    { "fact": "Aster Ledger (project codename)", "result": "PASS" },
+    { "fact": "Nacre Bay (prototype city)", "result": "PASS" },
+    { "fact": "cobalt before amber (token order)", "result": "PASS" },
+    { "fact": "Delta-7 silent -> pause shipment, retain queue", "result": "PASS" },
+    { "fact": "Dr. Iona Vale owns recovery decision", "result": "PASS" },
+    { "fact": "three consecutive violet pulses confirm recovery", "result": "PASS" },
+    { "fact": "retained queue moves to Orchid Pier after confirmation", "result": "PASS" },
+    { "fact": "final recovery notice on channel Harbor-3", "result": "PASS" },
+    { "fact": "glasswing-tagged amber quarantined, cobalt still first (exception, not contradiction)", "result": "PASS" }
+  ],
+  "score": "9/9 PASS",
+  "setup_anomaly_stray_turn": {
+    "detail": "As in the two prior canaries this session, POST /boot with body {name} only starts a fresh keeper with proactive_enabled defaulting to true. Before the proactive_enabled=false PATCH resolved, one autonomous keepalive turn ran (server turn=0, mode=tool_use, latency_ms=3041, at 08:16:02-06Z) on the fleet-default runtime (not yet claude_code.claude-sonnet-5, since the runtime assignment PATCH had not yet been applied either). This turn produced no facts and is excluded from the 9-fact contract and from the deliberate-turn latency distribution above.",
+    "current_task_id_at_capture": null,
+    "impact_on_validity": "None -- all 9 contract facts and the turn-10 recall come exclusively from the 10 deliberate chat calls (cc-turn-1 through cc-turn-10-recall), all of which ran on claude_code.claude-sonnet-5 after the runtime assignment PATCH succeeded."
+  },
+  "config_apply_latency_anomaly": {
+    "observation": "The proactive_enabled=false config PATCH, issued immediately after boot per this session's now-standard mitigation, did not return quickly (unlike the same call on the two prior canaries this session, both under 1s). This call was moved to background after exceeding a 300s client timeout and did not actually complete until 08:21:55Z.",
+    "request_started": "2026-08-14T08:16:0xZ (client-side call issued immediately after the 08:16:02Z boot)",
+    "request_completed": "2026-08-14T08:21:55Z",
+    "measured_duration": "approximately 5 minutes 53 seconds",
+    "http_result": "200 OK (eventually)",
+    "server_log_during_the_stall": "No ERROR or WARN log lines for this keeper appeared during the stall window (08:16:24Z-08:21:55Z); only periodic '[keepers_json:...] sub-op' timing lines with modest durations (300-500ms each), suggesting the daemon was repeatedly polling/re-deriving keeper state rather than being deadlocked, with something else (unidentified from these logs) gating the actual config-apply completion.",
+    "what_finally_happened": "At 08:21:55Z the call resolved via a full internal restart of the keeper's fiber: a Librarian snapshot commit (revision=1, facts=0), then registry phase transitions running -> draining -> stopped -> (stale-entry reclaim) -> offline -> running, i.e. update_keeper's runtime-sync path stopped and relaunched the fiber to apply the config change, rather than a lightweight in-place field update.",
+    "caveat": "This stall was observed on a config PATCH that only toggled proactive_enabled, issued before the runtime_id was set to claude_code.claude-sonnet-5 -- so it cannot be attributed to Claude Code CLI behavior specifically from this evidence alone. It is recorded as a live, reproducible anomaly (a ~6-minute keeper-admin-API stall on a shared production daemon) for follow-up, distinct from the 10-turn canary's own results, which were unaffected once the stall resolved and the runtime was subsequently set without incident (that PATCH returned promptly)."
+  },
+  "terminal_state": {
+    "path": "/Users/dancer/me/.masc/keepers/canary-multiturn-claude-20260814-0815.json",
+    "trace_id": "trace-1786695362848-0000a",
+    "generation": 1,
+    "total_turns": 11,
+    "paused": true,
+    "latched_reason": { "kind": "operator_paused", "actor": "keeper_down" },
+    "shutdown_operation_id": "shutdown-7edabb08-2e90-49d9-b2bc-de33a8fea848",
+    "shutdown_log_seq_started": 60732,
+    "shutdown_log_seq_finalized": 60734,
+    "shutdown_duration_ms": 30,
+    "remove_meta": false,
+    "remove_session": false
+  },
+  "verdict": "PASS",
+  "proves": [
+    "A Claude Code Max Subscription keeper (claude_code.claude-sonnet-5, sandboxed to a local, tool-free canary profile) completed ten consecutive user-assistant turns on one trace with zero failed or errored turns.",
+    "Turn 10 recalled all nine distinct facts verbatim and in order, and correctly reasoned that the ninth fact refines rather than contradicts the third.",
+    "No tool-call SSE events occurred on any of the ten deliberate turns, consistent with the AGENT.md 'never call tools' instruction and confirmed server-side by mode=text_response on all ten (versus mode=tool_use on the excluded stray autonomous turn).",
+    "Per-turn latency for this runtime family (8.6s-24.8s, median 10.3s) was captured across all ten turns with no timeouts, giving the matrix a first real latency baseline for claude_code alongside the existing ollama_cloud and ollama_cloud-vs-codex data points from this session.",
+    "The keeper reached a clean paused terminal state after a fast (30ms) graceful shutdown, with meta and session preserved (not deleted)."
+  ],
+  "does_not_prove": [
+    "Root cause of the ~6-minute config-apply stall observed before the 10-turn run began; it is recorded as an open anomaly, not attributed to the Claude Code runtime given it occurred before the runtime assignment was even applied.",
+    "Behavior of the other 6 claude_code family members (opus-5, fable-5, haiku-4-5, and the opus-5 effort variants) -- only claude-sonnet-5 was exercised.",
+    "Tool-use behavior under this runtime, since the canary's own instructions explicitly forbid tool calls; this run cannot speak to Claude Code's tool-calling reliability through the keeper stack.",
+    "Memory survives process restart or compaction for this runtime (out of scope for this mission; see the separate drain/restart canary for that property on a different runtime).",
+    "Multi-hour or high-concurrency stability of the claude_code runtime lane."
+  ]
+}

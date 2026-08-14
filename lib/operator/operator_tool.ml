@@ -41,7 +41,18 @@ let task_recovery_tool_name =
 
 let result_of_json ~tool_name ~start_time = function
   | Ok json ->
-      Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+      (match Json_util.assoc_string_opt "status" json with
+       | Some "deferred" ->
+         Tool_result.make_deferred ~tool_name ~start_time ~data:json ()
+       | Some "error" ->
+         Tool_result.make_err
+           ~tool_name
+           ~class_:Tool_result.Workflow_rejection
+           ~start_time
+           ~data:json
+           "Workspace message persisted, but Keeper delivery was rejected; do not resend"
+       | Some _ | None ->
+         Tool_result.make_ok ~tool_name ~start_time ~data:json ())
   | Error message ->
       let data = Tool_args.error_assoc [ "message", `String message ] in
       Tool_result.make_err

@@ -478,14 +478,25 @@ let handle_keeper_task_tool_with_outcome
           (error_json
              ("broadcast was not persisted: "
               ^ Workspace.broadcast_error_to_string error))
-      | Ok _ ->
-        Keeper_tool_execution.success
-          (Yojson.Safe.to_string
-             (`Assoc
-                [ "ok", `Bool true
-                ; "broadcast", `String message
-                ; "typed_outcome", Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress
-                ])))
+      | Ok delivery ->
+        let data = Workspace_broadcast.broadcast_delivery_to_yojson delivery in
+        (match delivery.mention_delivery with
+         | Workspace_broadcast.Passive
+         | Workspace_broadcast.Accepted
+         | Workspace_broadcast.Already_accepted ->
+           Keeper_tool_execution.success_data data
+         | Workspace_broadcast.Pending
+         | Workspace_broadcast.Deferred _ ->
+           Keeper_tool_execution.deferred_data data
+         | Workspace_broadcast.Rejected _ ->
+           Keeper_tool_execution.failure_data
+             ~class_:Tool_result.Workflow_rejection
+             ~effect_disposition:Tool_result.Proven_post_effect
+             ~message:
+               (Printf.sprintf
+                  "Broadcast persisted, but the explicit Keeper delivery was rejected; do not resend; request_id=%s"
+                  delivery.request_id)
+             data))
     | Task_create ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in

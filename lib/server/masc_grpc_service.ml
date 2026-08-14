@@ -61,7 +61,18 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
     decode_request_or_raise ~rpc:"Broadcast" T.BroadcastRequest.of_bytes_result bytes
   in
   let result =
-    try
+    if List.length req.mentions > 1
+    then
+      T.BroadcastResponse.
+        { success = false
+        ; seq = 0L
+        ; request_id = None
+        ; delivery_status = Delivery_not_persisted
+        ; delivery_reason = Some "multiple_mention_targets_unsupported"
+        ; workspace_persistence_status = Workspace_not_persisted
+        ; retry_disposition = Retry_allowed
+        }
+    else try
       let content =
         if req.mentions = []
         then req.message
@@ -72,17 +83,59 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
           mention_prefix ^ " " ^ req.message)
       in
       (match Workspace.broadcast workspace_config ~from_agent:req.agent_name ~content with
-       | Ok _ -> T.BroadcastResponse.{ success = true; seq = now_ms () }
+       | Ok delivery ->
+         let success =
+           match delivery.mention_delivery with
+           | Workspace_broadcast.Passive
+           | Workspace_broadcast.Accepted
+           | Workspace_broadcast.Already_accepted -> true
+           | Workspace_broadcast.Pending
+           | Workspace_broadcast.Deferred _
+           | Workspace_broadcast.Rejected _ -> false
+         in
+         T.BroadcastResponse.
+           { success
+           ; seq = Int64.of_int delivery.seq
+           ; request_id = Some delivery.request_id
+           ; delivery_status =
+               (match delivery.mention_delivery with
+                | Workspace_broadcast.Passive -> Delivery_passive
+                | Workspace_broadcast.Accepted -> Delivery_accepted
+                | Workspace_broadcast.Already_accepted -> Delivery_already_accepted
+                | Workspace_broadcast.Pending -> Delivery_pending
+                | Workspace_broadcast.Deferred _ -> Delivery_deferred
+                | Workspace_broadcast.Rejected _ -> Delivery_rejected)
+           ; delivery_reason =
+               Workspace_broadcast.mention_delivery_reason delivery.mention_delivery
+           ; workspace_persistence_status = Workspace_persisted
+           ; retry_disposition = Retry_do_not_resend
+           }
        | Error error ->
          Log.Transport.error
            "gRPC broadcast was not persisted: %s"
            (Workspace.broadcast_error_to_string error);
-         T.BroadcastResponse.{ success = false; seq = 0L })
+         T.BroadcastResponse.
+           { success = false
+           ; seq = 0L
+           ; request_id = None
+           ; delivery_status = Delivery_not_persisted
+           ; delivery_reason = Some (Workspace.broadcast_error_to_string error)
+           ; workspace_persistence_status = Workspace_not_persisted
+           ; retry_disposition = Retry_allowed
+           })
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Log.Transport.error "gRPC broadcast failed: %s" (Printexc.to_string exn);
-      T.BroadcastResponse.{ success = false; seq = 0L }
+      T.BroadcastResponse.
+        { success = false
+        ; seq = 0L
+        ; request_id = None
+        ; delivery_status = Delivery_outcome_unknown
+        ; delivery_reason = Some (Printexc.to_string exn)
+        ; workspace_persistence_status = Workspace_persistence_unknown
+        ; retry_disposition = Retry_outcome_unknown
+        }
   in
   T.BroadcastResponse.to_bytes result
 ;;

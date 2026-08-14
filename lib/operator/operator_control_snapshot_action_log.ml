@@ -22,10 +22,12 @@
 
 type action_result_status =
   | ActionOk
+  | ActionDeferred
   | ActionError
 
 let action_result_status_to_string = function
   | ActionOk -> "ok"
+  | ActionDeferred -> "deferred"
   | ActionError -> "error"
 ;;
 

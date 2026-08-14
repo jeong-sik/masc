@@ -383,18 +383,118 @@ module BroadcastRequest = struct
 end
 
 module BroadcastResponse = struct
+  type delivery_status =
+    | Delivery_passive
+    | Delivery_accepted
+    | Delivery_already_accepted
+    | Delivery_pending
+    | Delivery_deferred
+    | Delivery_rejected
+    | Delivery_not_persisted
+    | Delivery_outcome_unknown
+
+  type retry_disposition =
+    | Retry_do_not_resend
+    | Retry_allowed
+    | Retry_outcome_unknown
+
+  type workspace_persistence_status =
+    | Workspace_persisted
+    | Workspace_not_persisted
+    | Workspace_persistence_unknown
+
   type t =
     { success : bool
     ; seq : int64
+    ; request_id : string option
+    ; delivery_status : delivery_status
+    ; delivery_reason : string option
+    ; workspace_persistence_status : workspace_persistence_status
+    ; retry_disposition : retry_disposition
     }
+
+  let delivery_status_to_wire = function
+    | Delivery_passive -> "passive"
+    | Delivery_accepted -> "accepted"
+    | Delivery_already_accepted -> "already_accepted"
+    | Delivery_pending -> "pending"
+    | Delivery_deferred -> "deferred"
+    | Delivery_rejected -> "rejected"
+    | Delivery_not_persisted -> "not_persisted"
+    | Delivery_outcome_unknown -> "outcome_unknown"
+  ;;
+
+  let delivery_status_of_wire = function
+    | "passive" -> Delivery_passive
+    | "accepted" -> Delivery_accepted
+    | "already_accepted" -> Delivery_already_accepted
+    | "pending" -> Delivery_pending
+    | "deferred" -> Delivery_deferred
+    | "rejected" -> Delivery_rejected
+    | "not_persisted" -> Delivery_not_persisted
+    | "outcome_unknown" -> Delivery_outcome_unknown
+    | value -> invalid_arg (Printf.sprintf "unknown BroadcastResponse.delivery_status: %S" value)
+  ;;
+
+  let retry_disposition_to_wire = function
+    | Retry_do_not_resend -> "do_not_resend"
+    | Retry_allowed -> "retry_allowed"
+    | Retry_outcome_unknown -> "outcome_unknown"
+  ;;
+
+  let retry_disposition_of_wire = function
+    | "do_not_resend" -> Retry_do_not_resend
+    | "retry_allowed" -> Retry_allowed
+    | "outcome_unknown" -> Retry_outcome_unknown
+    | value -> invalid_arg (Printf.sprintf "unknown BroadcastResponse.retry_disposition: %S" value)
+  ;;
+
+  let workspace_persistence_status_to_wire = function
+    | Workspace_persisted -> "persisted"
+    | Workspace_not_persisted -> "not_persisted"
+    | Workspace_persistence_unknown -> "outcome_unknown"
+  ;;
+
+  let workspace_persistence_status_of_wire = function
+    | "persisted" -> Workspace_persisted
+    | "not_persisted" -> Workspace_not_persisted
+    | "outcome_unknown" -> Workspace_persistence_unknown
+    | value ->
+      invalid_arg
+        (Printf.sprintf
+           "unknown BroadcastResponse.workspace_persistence_status: %S"
+           value)
+  ;;
+
+  let nonempty_option value =
+    if String.trim value = "" then None else Some value
+  ;;
 
   let of_bytes bytes =
     let p = decode ~type_name:"BroadcastResponse" P.BroadcastResponse.from_proto bytes in
-    { success = p.success; seq = p.seq }
+    { success = p.success
+    ; seq = p.seq
+    ; request_id = nonempty_option p.request_id
+    ; delivery_status = delivery_status_of_wire p.delivery_status
+    ; delivery_reason = nonempty_option p.delivery_reason
+    ; workspace_persistence_status =
+        workspace_persistence_status_of_wire p.workspace_persistence_status
+    ; retry_disposition = retry_disposition_of_wire p.retry_disposition
+    }
   ;;
 
   let to_bytes (t : t) =
-    encode P.BroadcastResponse.to_proto { success = t.success; seq = t.seq }
+    encode
+      P.BroadcastResponse.to_proto
+      { success = t.success
+      ; seq = t.seq
+      ; request_id = Option.value t.request_id ~default:""
+      ; delivery_status = delivery_status_to_wire t.delivery_status
+      ; delivery_reason = Option.value t.delivery_reason ~default:""
+      ; workspace_persistence_status =
+          workspace_persistence_status_to_wire t.workspace_persistence_status
+      ; retry_disposition = retry_disposition_to_wire t.retry_disposition
+      }
   ;;
 end
 

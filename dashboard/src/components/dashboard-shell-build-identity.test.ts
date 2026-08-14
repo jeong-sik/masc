@@ -38,8 +38,8 @@ describe('BuildIdentityBadge executable identity', () => {
     render(h(BuildIdentityBadge, {}), container)
 
     const button = container.querySelector('button')
-    expect(button).toHaveTextContent('v0.22.0 · binary unknown')
-    expect(button).toHaveAttribute('aria-label', 'Server build v0.22.0 · binary unknown')
+    expect(button?.textContent).toContain('v0.22.0 · binary unknown')
+    expect(button?.getAttribute('aria-label')).toBe('Server build v0.22.0 · binary unknown')
     expect(button?.getAttribute('title')).toContain('binary commit unknown')
     expect(button?.getAttribute('title')).toContain('Checkout 13dd32a37a')
   })
@@ -63,7 +63,7 @@ describe('BuildIdentityBadge executable identity', () => {
     render(h(BuildIdentityBadge, {}), container)
 
     const button = container.querySelector('button')
-    expect(button).toHaveTextContent('v0.22.0 · 0123456789')
+    expect(button?.textContent).toContain('v0.22.0 · 0123456789')
     expect(button?.getAttribute('title')).toContain('v0.22.0 · 0123456789')
     expect(button?.getAttribute('title')).toContain('Checkout fedcba9876')
   })
@@ -74,8 +74,8 @@ describe('BuildIdentityBadge executable identity', () => {
     render(h(BuildIdentityBadge, {}), container)
 
     const button = container.querySelector('button')
-    expect(button).toHaveTextContent('v0.22.0 · binary unknown')
-    expect(button).toHaveAttribute('aria-label', 'Server build v0.22.0 · binary unknown')
+    expect(button?.textContent).toContain('v0.22.0 · binary unknown')
+    expect(button?.getAttribute('aria-label')).toBe('Server build v0.22.0 · binary unknown')
     expect(button?.getAttribute('title')).toContain('binary commit unknown')
   })
 })

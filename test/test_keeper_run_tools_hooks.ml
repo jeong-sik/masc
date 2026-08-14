@@ -648,6 +648,30 @@ let test_failed_tool_observer_releases_next_completion () =
   check bool "a reported observer failure does not poison later receipts" true !observed
 ;;
 
+let test_cancelled_tool_observer_releases_next_completion () =
+  Eio_main.run @@ fun _env ->
+  let serialize =
+    Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+  in
+  let continued_after_cancel = ref false in
+  let cancellation_escaped =
+    try
+      Eio.Cancel.sub (fun cancellation ->
+        serialize (fun () ->
+          Eio.Cancel.cancel cancellation (Failure "cancel tool observer");
+          Eio.Fiber.check ();
+          continued_after_cancel := true));
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  check bool "observer cancellation escapes the serialization boundary" true cancellation_escaped;
+  check bool "cancelled observer does not continue its effects" false !continued_after_cancel;
+  let observed = ref false in
+  serialize (fun () -> observed := true);
+  check bool "cancellation releases the next completion" true !observed
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -741,6 +765,10 @@ let () =
             "releases the next completion after a reported failure"
             `Quick
             test_failed_tool_observer_releases_next_completion
+        ; test_case
+            "propagates cancellation and releases the next completion"
+            `Quick
+            test_cancelled_tool_observer_releases_next_completion
         ] )
     ]
 ;;

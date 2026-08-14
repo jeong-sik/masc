@@ -14,19 +14,12 @@ type tool_observer_serialization = (unit -> unit) -> unit
 
 let create_tool_observer_serialization () : tool_observer_serialization =
   let mutex = Eio.Mutex.create () in
-  fun observe ->
-    Eio.Mutex.lock mutex;
-    (* The enclosing Agent-core hook reports a failed observer and continues.
-       [use_rw] would poison the per-run mutex on that reported exception and
-       reject every later completion. Unlock explicitly while protecting the
-       acquired critical section from cancellation, so one failed observation
-       cannot erase unrelated later receipts. *)
-    Eio.Cancel.protect (fun () ->
-      match observe () with
-      | () -> Eio.Mutex.unlock mutex
-      | exception exn ->
-        Eio.Mutex.unlock mutex;
-        raise exn)
+  (* This mutex orders independent observer effects; it does not protect a
+     recoverable mutable invariant.  [use_ro] therefore gives the required
+     exception-safe unlock without masking cancellation across registry reads,
+     activity persistence, or SSE delivery.  A cancelled/failed observation
+     releases the boundary so later tool completions can still be reported. *)
+  fun observe -> Eio.Mutex.use_ro mutex observe
 ;;
 
 type agent_setup =

@@ -11,16 +11,24 @@ type librarian_drain =
 
 type entry =
   { state_mu : Stdlib.Mutex.t
-    (* Guards [pending] and [librarian_drain]. Critical sections never yield. *)
+    (* Guards [lifecycle], [pending], [librarian_drain], and
+       [last_owner_lane]. Critical sections never yield. *)
+  ; mutable lifecycle : lifecycle
   ; mutable pending : int
   ; mutable librarian_drain : librarian_drain option
+  ; mutable last_owner_lane : Keeper_lane.t option
   }
+
+and lifecycle =
+  | Accepting
+  | Draining
 
 type outcome =
   | Submitted
   | Coalesced
   | Ran_inline
   | Dropped
+  | Rejected_draining
 
 let entries : (string, entry) Hashtbl.t = Hashtbl.create 16
 
@@ -42,15 +50,22 @@ let entry_key ~base_path ~keeper_name =
   Keeper_registry_types.registry_key ~base_path keeper_name ^ "#" ^ lane_label
 ;;
 
+let make_entry lifecycle =
+  { state_mu = Stdlib.Mutex.create ()
+  ; lifecycle
+  ; pending = 0
+  ; librarian_drain = None
+  ; last_owner_lane = None
+  }
+;;
+
 let entry_for ~base_path ~keeper_name =
   let key = entry_key ~base_path ~keeper_name in
   Stdlib.Mutex.protect registry_mu (fun () ->
     match Hashtbl.find_opt entries key with
     | Some e -> e
     | None ->
-      let e =
-        { state_mu = Stdlib.Mutex.create (); pending = 0; librarian_drain = None }
-      in
+      let e = make_entry Accepting in
       Hashtbl.add entries key e;
       e)
 ;;
@@ -121,6 +136,7 @@ type librarian_submission =
   | Start_drain of librarian_drain
   | Queue_latest
   | Replace_latest
+  | Reject_draining
 
 type librarian_drain_step =
   | Drain_stopped
@@ -129,8 +145,9 @@ type librarian_drain_step =
 
 let librarian_reserve entry f =
   Stdlib.Mutex.protect entry.state_mu (fun () ->
-    match entry.librarian_drain with
-    | None ->
+    match entry.lifecycle, entry.librarian_drain with
+    | Draining, _ -> Reject_draining
+    | Accepting, None ->
       let drain =
         { latest = None
         ; in_flight = false
@@ -139,9 +156,10 @@ let librarian_reserve entry f =
         }
       in
       entry.librarian_drain <- Some drain;
+      entry.last_owner_lane <- Some drain.owner_lane;
       entry.pending <- 1;
       Start_drain drain
-    | Some drain ->
+    | Accepting, Some drain ->
       (match drain.latest with
        | None ->
          drain.latest <- Some f;
@@ -150,6 +168,31 @@ let librarian_reserve entry f =
        | Some _ ->
          drain.latest <- Some f;
          Replace_latest))
+;;
+
+type lifecycle_open_error = Librarian_drain_still_active
+
+let lifecycle_open_error_to_string = function
+  | Librarian_drain_still_active ->
+    "a prior Keeper lifecycle still owns active Librarian work"
+;;
+
+let begin_librarian_lifecycle ~base_path ~keeper_name =
+  let entry = entry_for ~base_path ~keeper_name in
+  Stdlib.Mutex.protect entry.state_mu (fun () ->
+    match entry.librarian_drain, entry.last_owner_lane with
+    | Some _, _ -> Error Librarian_drain_still_active
+    | None, Some owner_lane when Option.is_none (Keeper_lane.peek_exit owner_lane) ->
+      Error Librarian_drain_still_active
+    | None, (None | Some _) ->
+      (* A new admitted Keeper lifecycle owns no work from the prior one. Keep
+         terminal receipts until this boundary so shutdown can still observe a
+         failed/cancelled owner, then clear them even if that owner exited while
+         the entry was still [Accepting] (for example, a pre-fork executor
+         drop). *)
+      entry.last_owner_lane <- None;
+      entry.lifecycle <- Accepting;
+      Ok ())
 ;;
 
 let librarian_drain_is_active entry drain =
@@ -287,6 +330,11 @@ let rec run_librarian_drain ~keeper_name entry drain sw current =
 
 let submit_librarian ~keeper_name entry sw f =
   match librarian_reserve entry f with
+  | Reject_draining ->
+    record_counter ~keeper_name MemoryLaneRejectedDraining;
+    Log.Keeper.warn ~keeper_name
+      "memory lane rejected post-turn unit after lifecycle drain began (lane=librarian)";
+    Rejected_draining
   | Queue_latest ->
     inc_pending ~keeper_name ();
     inc_latest_pending ~keeper_name ();
@@ -304,6 +352,13 @@ let submit_librarian ~keeper_name entry sw f =
     arm_librarian_switch_release ~keeper_name entry drain sw;
     if not (librarian_drain_is_active entry drain)
     then (
+      let reason = Failure "Librarian executor switch released before lane start" in
+      (match Keeper_lane.reject_before_start drain.owner_lane ~reason with
+       | Ok () -> ()
+       | Error _ ->
+         (* Rejection only fails after another path has already claimed this
+            exact owner receipt; either way it is no longer [Not_started]. *)
+         ());
       record_counter ~keeper_name MemoryLaneDropped;
       Log.Keeper.warn ~keeper_name
         "memory lane executor switch unavailable (lane=librarian): dropping post-turn \
@@ -350,57 +405,129 @@ let submit ~base_path ~keeper_name f =
   match current_sw () with
   | None ->
     (* Not initialized: run inline. The caller is still inside the per-keeper
-       turn lane, so single-fiber-per-keeper memory access is preserved. A
-       raising unit is contained and counted rather than escaping. *)
-    (try f () with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       record_counter ~keeper_name MemoryLaneUnitFailures;
-       Log.Keeper.warn ~keeper_name
-         "memory lane unit failed (inline): %s"
-         (Printexc.to_string exn));
-    record_counter ~keeper_name MemoryLaneRanInline;
-    Ran_inline
+       turn lane, so single-fiber-per-keeper memory access is preserved. The
+       lifecycle fence still applies before the executor switch exists: a
+       launch rollback or terminal drain must not be bypassed by the inline
+       fallback. A raising admitted unit is contained and counted rather than
+       escaping. *)
+    let entry = entry_for ~base_path ~keeper_name in
+    if
+      Stdlib.Mutex.protect entry.state_mu (fun () -> entry.lifecycle = Draining)
+    then Rejected_draining
+    else (
+      (try f () with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         record_counter ~keeper_name MemoryLaneUnitFailures;
+         Log.Keeper.warn ~keeper_name
+           "memory lane unit failed (inline): %s"
+           (Printexc.to_string exn));
+      record_counter ~keeper_name MemoryLaneRanInline;
+      Ran_inline)
   | Some sw ->
     let entry = entry_for ~base_path ~keeper_name in
     submit_librarian ~keeper_name entry sw f
 ;;
 
-type librarian_join_outcome =
+type librarian_drain_outcome =
   | No_librarian_work
-  | Librarian_joined of Keeper_lane.outcome
-  | Librarian_join_failed of string
+  | Librarian_drained
 
-let cancel_and_join_librarian ~base_path ~keeper_name =
+type librarian_drain_error =
+  | Librarian_interrupted of Keeper_lane.outcome
+  | Librarian_cleanup_failed of string
+
+type librarian_abort_outcome =
+  | Librarian_abort_idle
+  | Librarian_abort_requested
+  | Librarian_abort_already_in_progress
+  | Librarian_abort_already_exited of Keeper_lane.exit
+  | Librarian_abort_committed_with_failure of exn
+
+type librarian_abort_error =
+  | Librarian_abort_wrong_domain
+  | Librarian_abort_not_committed of exn
+
+let librarian_lane_outcome_to_string = function
+  | Keeper_lane.Completed -> "completed"
+  | Keeper_lane.Shutdown_before_start -> "shutdown_before_start"
+  | Keeper_lane.Shutdown_requested -> "shutdown_requested"
+  | Keeper_lane.Shutdown_cancel_failed failure ->
+    "shutdown_cancel_failed: " ^ Printexc.to_string failure.cause
+  | Keeper_lane.Cancelled_by_parent exn ->
+    "cancelled_by_parent: " ^ Printexc.to_string exn
+  | Keeper_lane.Failed exn -> "failed: " ^ Printexc.to_string exn
+;;
+
+let librarian_drain_error_to_string = function
+  | Librarian_interrupted outcome ->
+    "Librarian drain ended without completion: "
+    ^ librarian_lane_outcome_to_string outcome
+  | Librarian_cleanup_failed detail -> "Librarian cleanup failed: " ^ detail
+;;
+
+let librarian_abort_error_to_string = function
+  | Librarian_abort_wrong_domain ->
+    "Librarian cancellation was requested from a non-owner domain"
+  | Librarian_abort_not_committed exn ->
+    "Librarian cancellation was not committed: " ^ Printexc.to_string exn
+;;
+
+let abort_librarian ~base_path ~keeper_name =
+  let entry = entry_for ~base_path ~keeper_name in
+  let owner_lane =
+    Stdlib.Mutex.protect entry.state_mu (fun () ->
+      entry.lifecycle <- Draining;
+      match entry.librarian_drain with
+      | Some drain -> Some drain.owner_lane
+      | None -> entry.last_owner_lane)
+  in
+  match owner_lane with
+  | None -> Ok Librarian_abort_idle
+  | Some owner_lane ->
+    (match Keeper_lane.peek_exit owner_lane with
+     | Some exit -> Ok (Librarian_abort_already_exited exit)
+     | None ->
+       (match Keeper_lane.request_cancel owner_lane with
+        | Keeper_lane.Cancel_requested -> Ok Librarian_abort_requested
+        | Keeper_lane.Cancel_already_requested
+        | Keeper_lane.Cancel_already_exiting ->
+          Ok Librarian_abort_already_in_progress
+        | Keeper_lane.Cancel_committed_with_failure exn ->
+          Ok (Librarian_abort_committed_with_failure exn)
+        | Keeper_lane.Cancel_wrong_domain -> Error Librarian_abort_wrong_domain
+        | Keeper_lane.Cancel_not_committed exn ->
+          Error (Librarian_abort_not_committed exn)))
+;;
+
+let drain_and_join_librarian ~base_path ~keeper_name =
   let entry =
     let key = entry_key ~base_path ~keeper_name in
-    Stdlib.Mutex.protect registry_mu (fun () -> Hashtbl.find_opt entries key)
+    Stdlib.Mutex.protect registry_mu (fun () ->
+      match Hashtbl.find_opt entries key with
+      | Some entry -> entry
+      | None ->
+        let entry = make_entry Draining in
+        Hashtbl.add entries key entry;
+        entry)
   in
-  match entry with
-  | None -> No_librarian_work
-  | Some entry ->
-    let owner_lane =
-      Stdlib.Mutex.protect entry.state_mu (fun () ->
-        Option.map (fun drain -> drain.owner_lane) entry.librarian_drain)
-    in
-    (match owner_lane with
-     | None -> No_librarian_work
-     | Some owner_lane ->
-    (match Keeper_lane.request_cancel owner_lane with
-     | Keeper_lane.Cancel_wrong_domain ->
-       Librarian_join_failed
-         "librarian cancellation requested from a non-owning domain"
-     | Keeper_lane.Cancel_not_committed exn ->
-       Librarian_join_failed
-         ("librarian cancellation was not committed: " ^ Printexc.to_string exn)
-     | Keeper_lane.Cancel_committed_with_failure _
-     | Keeper_lane.Cancel_requested
-     | Keeper_lane.Cancel_already_requested
-     | Keeper_lane.Cancel_already_exiting ->
-       let exit = Keeper_lane.await_exit owner_lane in
-       (match exit.cleanup_error with
-        | Some detail -> Librarian_join_failed detail
-        | None -> Librarian_joined exit.outcome)))
+  let owner_lane =
+    Stdlib.Mutex.protect entry.state_mu (fun () ->
+      entry.lifecycle <- Draining;
+      match entry.librarian_drain with
+      | Some drain -> Some drain.owner_lane
+      | None -> entry.last_owner_lane)
+  in
+  match owner_lane with
+  | None -> Ok No_librarian_work
+  | Some owner_lane ->
+    let exit = Keeper_lane.await_exit owner_lane in
+    (match exit.cleanup_error with
+     | Some detail -> Error (Librarian_cleanup_failed detail)
+     | None ->
+       (match exit.outcome with
+        | Keeper_lane.Completed -> Ok Librarian_drained
+        | outcome -> Error (Librarian_interrupted outcome)))
 ;;
 
 module For_testing = struct

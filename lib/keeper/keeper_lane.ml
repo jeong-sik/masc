@@ -113,6 +113,17 @@ let exited t = t.exited_p
 let peek_exit t = Eio.Promise.peek t.exited_p
 let await_exit t = Eio.Promise.await t.exited_p
 
+let crossed_start_boundary t =
+  match Atomic.get t.state with
+  | Not_started -> false
+  | Starting | Running _ | Cancellation_requested | Finalizing -> true
+  | Exited ->
+    (match Eio.Promise.peek t.exited_p with
+     | Some { outcome = Shutdown_before_start; _ } -> false
+     | Some _ -> true
+     | None -> true)
+;;
+
 let rec claim_start t =
   if Atomic.compare_and_set t.state Not_started Starting
   then Ok ()

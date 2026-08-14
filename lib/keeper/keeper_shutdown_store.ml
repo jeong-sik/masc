@@ -317,6 +317,7 @@ let cleanup_reason_to_json = function
 
 let phase_to_json = function
   | Prepared -> `Assoc [ "kind", `String "prepared" ]
+  | Joining_lanes -> `Assoc [ "kind", `String "joining_lanes" ]
   | Joined_idle -> `Assoc [ "kind", `String "joined_idle" ]
   | Finalizing_tasks settled_task_ids ->
     `Assoc
@@ -609,6 +610,7 @@ let phase_of_json json =
   let* kind = string "kind" json in
   match kind with
   | "prepared" -> Ok Prepared
+  | "joining_lanes" -> Ok Joining_lanes
   | "joined_idle" -> Ok Joined_idle
   | "finalizing_tasks" ->
     let* settled_task_ids = task_ids_field_of_json "settled_task_ids" json in
@@ -1043,7 +1045,8 @@ let persist_blocked_latest ~config ~identity ~failure ~now =
            (match existing.phase with
             | Finalized _ | Blocked _ | Reconciliation_required _ | Superseded _ ->
               Ok (State_preserved existing)
-            | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
+            | Prepared | Joining_lanes | Joined_idle | Finalizing_tasks _
+            | Cleanup_ready _ ->
               let blocked =
                 { existing with
                   revision = existing.revision + 1

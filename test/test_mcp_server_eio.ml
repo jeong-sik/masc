@@ -14,6 +14,7 @@ module Tool_result = Tool_result
 module Keeper_types = Keeper_types
 module Keeper_identity = Masc.Keeper_identity
 module Keeper_registry = Masc.Keeper_registry
+module Keeper_lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Masc_log = Log
 
 let () =
@@ -167,7 +168,11 @@ let json_string_field_exn label json field =
         (Yojson.Safe.to_string json)
 
 let log_detail_string (entry : Masc_log.Ring.entry) field =
-  Yojson.Safe.Util.(entry.details |> member field |> to_string_option)
+  match Yojson.Safe.Util.member field entry.details with
+  | `String value | `Intlit value -> Some value
+  | `Int value -> Some (string_of_int value)
+  | `Null -> None
+  | _ -> None
 
 let find_mcp_tool_log_exn ~phase ~tool_name ~request_id entries =
   match
@@ -870,8 +875,8 @@ let test_handle_request_initialize_managed_profile () =
             in
             Alcotest.(check bool) "mentions managed profile" true
               (String_util.contains_substring instructions "managed-agent profile");
-            Alcotest.(check bool) "mentions canonical task control" true
-              (String_util.contains_substring instructions "masc_transition")
+            Alcotest.(check bool) "distinguishes public inventory" true
+              (String_util.contains_substring instructions "public /mcp surface")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
   cleanup_dir base_path
@@ -1054,7 +1059,7 @@ let test_handle_request_tools_call_missing_params_records_duration () =
      -. before_count);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_managed_translation_error_records_duration () =
+let test_handle_request_tools_call_managed_invalid_arguments_records_duration () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1104,9 +1109,9 @@ let test_handle_request_tools_call_managed_translation_error_records_duration ()
       request
   in
   let response_text = Yojson.Safe.to_string response in
-  Alcotest.(check bool) "translation error is returned" true
-    (String_util.contains_substring response_text "managed agent tool translation failed");
-  Alcotest.(check (float 0.0001)) "translation error records duration count"
+  Alcotest.(check bool) "invalid arguments are rejected at admission" true
+    (String_util.contains_substring response_text "arguments must be an object");
+  Alcotest.(check (float 0.0001)) "admission error records duration count"
     1.0
     (Masc.Otel_metric_store.metric_value_or_zero (metric_name ^ "_count") ~labels ()
      -. before_count);
@@ -2177,7 +2182,39 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
             (persisted |> member "tools" |> index 0 |> member "deferred" |> to_int);
           Keeper_registry.For_testing.unregister ~base_path keeper_name;
           ignore (Keeper_registry.For_testing.register ~base_path keeper_name keeper_meta);
-          Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
+          let registered =
+            Keeper_registry.get ~base_path keeper_name
+            |> Option.get
+          in
+          let launch_token =
+            match
+              Keeper_lifecycle_reservation.acquire
+                ~base_path
+                ~keeper_name
+                ~expected_generation:registered.transition_seq
+                ~purpose:Keepalive_launch
+            with
+            | Ok token -> token
+            | Error _ -> Alcotest.fail "failed to reserve keeper launch lifecycle"
+          in
+          Fun.protect
+            ~finally:(fun () ->
+              ignore (Keeper_lifecycle_reservation.release launch_token))
+            (fun () ->
+              (* The ordinary replay is fenced while launch owns the key. The
+                 launch path must carry its exact mutation authority instead of
+                 silently dropping the persisted counters. *)
+              Masc.Keeper_registry_tool_usage_persistence.restore
+                ~base_path
+                keeper_name;
+              Alcotest.(check (list string))
+                "unqualified restore is fenced"
+                []
+                (Keeper_registry.tool_usage_of ~base_path keeper_name
+                 |> List.map fst);
+              Masc.Keeper_registry_tool_usage_persistence.restore_for_lifecycle
+                launch_token
+                registered);
           let restored =
             List.assoc_opt
               "masc_status"
@@ -3064,8 +3101,8 @@ let eio_tests = [
     test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias;
   "handle tools/call missing params records duration", `Quick,
     test_handle_request_tools_call_missing_params_records_duration;
-  "handle tools/call managed translation error records duration", `Quick,
-    test_handle_request_tools_call_managed_translation_error_records_duration;
+  "handle tools/call managed invalid arguments record duration", `Quick,
+    test_handle_request_tools_call_managed_invalid_arguments_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
   "handle tools/call transition done requires LLM verdict", `Quick,

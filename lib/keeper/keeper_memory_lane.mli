@@ -36,6 +36,22 @@ type outcome =
   | Dropped
       (** The executor switch could not own the unit. Saturation returns
           {!Coalesced}, not [Dropped]. The drop is counted, never silent. *)
+  | Rejected_draining
+      (** The Keeper lifecycle has begun draining this lane. No post-turn unit
+          may cross that terminal boundary; a later Keeper lifecycle must call
+          {!begin_librarian_lifecycle} before it can submit. *)
+
+type lifecycle_open_error = Librarian_drain_still_active
+
+val begin_librarian_lifecycle
+  :  base_path:string
+  -> keeper_name:string
+  -> (unit, lifecycle_open_error) result
+(** Open the Librarian entry for one newly admitted Keeper lifecycle. This is
+    idempotent while the entry is idle and fails when a prior lifecycle still
+    owns active work. *)
+
+val lifecycle_open_error_to_string : lifecycle_open_error -> string
 
 val init : sw:Eio.Switch.t -> unit
 (** Record the long-lived switch that owns detached memory fibers. Call once at
@@ -53,18 +69,53 @@ val submit
     counted rather than escaping. Outcomes and per-keeper state are exported as
     metrics. *)
 
-type librarian_join_outcome =
+type librarian_drain_outcome =
   | No_librarian_work
-  | Librarian_joined of Keeper_lane.outcome
-  | Librarian_join_failed of string
+  | Librarian_drained
 
-val cancel_and_join_librarian
+type librarian_drain_error =
+  | Librarian_interrupted of Keeper_lane.outcome
+  | Librarian_cleanup_failed of string
+
+val librarian_drain_error_to_string : librarian_drain_error -> string
+
+type librarian_abort_outcome =
+  | Librarian_abort_idle
+  | Librarian_abort_requested
+  | Librarian_abort_already_in_progress
+  | Librarian_abort_already_exited of Keeper_lane.exit
+  | Librarian_abort_committed_with_failure of exn
+
+type librarian_abort_error =
+  | Librarian_abort_wrong_domain
+  | Librarian_abort_not_committed of exn
+
+val librarian_abort_error_to_string : librarian_abort_error -> string
+
+val abort_librarian
   :  base_path:string
   -> keeper_name:string
-  -> librarian_join_outcome
-(** Cancel the exact detached Librarian drain owned by [keeper_name] and wait
-    until its provider/tool scope and cleanup have joined. A Keeper lifecycle
-    boundary must call this before publishing its own terminal state. *)
+  -> (librarian_abort_outcome, librarian_abort_error) result
+(** Fence new submissions and request cancellation of the exact Librarian
+    owner without joining it. Unexpected Keeper exits use this fail-fast path
+    so a slow provider cannot delay crash publication or registry cleanup.
+    Cancellation outcomes distinguish a committed signal from a request that
+    was not delivered; callers must not retry a committed cancellation. *)
+
+val drain_and_join_librarian
+  :  base_path:string
+  -> keeper_name:string
+  -> (librarian_drain_outcome, librarian_drain_error) result
+(** Wait for the exact detached Librarian drain owned by [keeper_name] to
+    finish its current unit and any retained latest unit, then join its
+    provider/tool scope and cleanup. The entry becomes closed to new
+    submissions before its owner is inspected, so an accepted unit cannot race
+    behind the join. The exact terminal receipt remains available if the owner
+    exits before this function is called. Only a [Completed] owner lane returns
+    [Librarian_drained]; every other terminal outcome is a typed error. A
+    graceful Keeper lifecycle boundary must call this before publishing its own terminal state.
+    Parent-switch cancellation still interrupts the drain during process
+    shutdown. *)
 
 module For_testing : sig
   val reset : unit -> unit

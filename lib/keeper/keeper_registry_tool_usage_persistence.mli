@@ -16,3 +16,9 @@ val flush_all_dirty : unit -> unit
     Reads JSON from [tool_usage_path]; replays each entry via
     [Keeper_registry.set_tool_usage_entry]. *)
 val restore : base_path:string -> string -> unit
+
+(** Restore persisted usage while [expected]'s launch transaction owns the
+    lifecycle reservation. The replay is exact to that registry lane and uses
+    [token] as its mutation authority. *)
+val restore_for_lifecycle :
+  Keeper_lifecycle_reservation.token -> Keeper_registry.registry_entry -> unit

@@ -571,12 +571,22 @@ let status_result
       request_id
   with
   | Keeper_msg_async.Found entry ->
-    result_from_json
-      ~tool_name
-      ~start_time
-      ~class_:Tool_result.Runtime_failure
-      ~ok:true
-      (Keeper_msg_async.entry_to_json entry)
+    let result =
+      result_from_json
+        ~tool_name
+        ~start_time
+        ~class_:Tool_result.Runtime_failure
+        ~ok:true
+        (Keeper_msg_async.entry_to_json entry)
+    in
+    (match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
+     | Ok result -> result
+     | Error { message; _ } ->
+       Tool_result.make_err
+         ~tool_name
+         ~class_:Tool_result.Runtime_failure
+         ~start_time
+         ("async composition status manifest persistence failed: " ^ message))
   | Keeper_msg_async.Absent ->
     result_from_json
       ~tool_name
@@ -610,6 +620,10 @@ let status_result
           ; "reason", Keeper_msg_async.access_rejection_to_json rejection
           ])
 ;;
+
+module For_testing = struct
+  let status_result = status_result
+end
 
 let cancel_result
       ~(config : Workspace.config)

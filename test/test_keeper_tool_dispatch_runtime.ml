@@ -6143,6 +6143,118 @@ let test_async_composition_uses_durable_request_status_surface () =
            Yojson.Safe.Util.(member "result" payload |> member "composition_tool" |> to_string))
 ;;
 
+let test_async_composition_status_preserves_artifact_manifest () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "composition-async-artifact-status"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore publication_recovery;
+       ignore ctx_work;
+       let artifact_reference =
+         Tool_blob_store.put_durable
+           (Tool_blob_store.create ~base_path:config.base_path)
+           ~bytes:"async artifact payload"
+           ~mime:"text/plain"
+       in
+       let structured_data =
+         `Assoc
+           [ ( "output_artifact"
+             , Tool_output.normalized_artifact_ref_to_json artifact_reference )
+           ]
+       in
+       let background_sw =
+         match Masc.Keeper_msg_async.server_background_switch () with
+         | Ok sw -> sw
+         | Error error ->
+           fail
+             (Masc.Keeper_msg_async.submit_error_to_json error
+              |> Yojson.Safe.to_string)
+       in
+       let request_id =
+         match Masc.Keeper_msg_async.submit
+                 ~background_sw
+                 ~base_path:config.base_path
+                 ~caller:meta.name
+                 ~keeper_name:meta.name
+                 ~f:(fun _request_sw ->
+                   Tool_result.make_ok
+                     ~tool_name:"keeper_compose_artifact-fixture"
+                     ~start_time:(Time_compat.now ())
+                     ~data:structured_data
+                     ())
+                 ()
+         with
+         | Ok outcome -> outcome.request_id
+         | Error error ->
+           fail
+             (Masc.Keeper_msg_async.submit_error_to_json error
+              |> Yojson.Safe.to_string)
+       in
+       let rec await_terminal () =
+         match
+           Masc.Keeper_msg_async.poll
+             ~base_path:config.base_path
+             ~caller:meta.name
+             request_id
+         with
+         | Masc.Keeper_msg_async.Found
+             ({ status = Masc.Keeper_msg_async.Done _; _ } as entry) ->
+           entry
+         | Masc.Keeper_msg_async.Found
+             { status =
+                 ( Masc.Keeper_msg_async.Queued
+                 | Masc.Keeper_msg_async.Running
+                 | Masc.Keeper_msg_async.Cancelling _ )
+             ; _
+             } ->
+           Eio.Fiber.yield ();
+           await_terminal ()
+         | Masc.Keeper_msg_async.Found _ ->
+           fail "async artifact composition did not complete"
+         | Masc.Keeper_msg_async.Absent -> fail "async artifact request disappeared"
+         | Masc.Keeper_msg_async.Unreadable reason -> fail reason
+         | Masc.Keeper_msg_async.Rejected _ ->
+           fail "async artifact request access was rejected"
+       in
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some clock -> clock
+         | None -> fail "async artifact test lost its bound Eio clock"
+       in
+       ignore
+         (Eio.Time.with_timeout_exn clock 5.0 await_terminal
+           : Masc.Keeper_msg_async.entry);
+       let status_result =
+         Masc.Keeper_tool_composition_surface.For_testing.status_result
+           ~config
+           ~meta
+           ~request_id
+       in
+       match Masc.Tool_bridge.to_agent_core_typed_result
+               ~base_path:config.base_path
+               status_result
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload =
+           structured_tool_output_exn
+             ~base_path:config.base_path
+             output.content
+         in
+         check string "artifact status remains terminal" "done"
+           Yojson.Safe.Util.(member "status" payload |> to_string);
+         let artifact =
+           Yojson.Safe.Util.
+             (member "result" payload
+              |> member "output_artifact")
+         in
+         match Tool_output.normalized_artifact_ref_of_json artifact with
+         | Tool_output.Decoded_normalized_artifact_ref _ -> ()
+         | Tool_output.Not_normalized_artifact_ref ->
+           fail "async status dropped its normalized artifact reference"
+         | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail)
+;;
+
 let test_composition_runtime_uses_canonical_descriptor () =
   with_exec_fixture "composition-canonical-descriptor"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -6361,6 +6473,8 @@ let () =
         test_terminal_composition_post_effect_defer_closes_without_resume;
       test_case "async composition exposes durable status" `Quick
         test_async_composition_uses_durable_request_status_surface;
+      test_case "async composition status preserves artifact manifest" `Quick
+        test_async_composition_status_preserves_artifact_manifest;
       test_case "terminal composition requires terminal outer invocation" `Quick
         test_composition_terminal_requires_terminal_outer_invocation;
     ]);

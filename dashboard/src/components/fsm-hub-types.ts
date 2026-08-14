@@ -353,6 +353,7 @@ const TURN_TERMINAL_FAILURE_CODES = new Set<string>([
   'provider_runtime_error',
   'fiber_unresolved',
   'stale_turn_timeout',
+  'provider_attempt_effect_fenced',
 ])
 
 export function isTurnTerminalFailureCode(code: string | null | undefined): boolean {

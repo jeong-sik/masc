@@ -11,6 +11,7 @@ import {
   MAX_OBSERVATIONS,
   MAX_TRANSITION_HISTORY,
   initialHubState,
+  isTurnTerminalFailureCode,
   operatorDispositionReasonLabel,
 } from './fsm-hub-types'
 import type { KeeperCompositeSnapshot } from '../api/keeper'
@@ -191,6 +192,12 @@ describe('operatorDispositionReasonLabel', () => {
     expect(operatorDispositionReasonLabel('provider_attempt_effect_fenced')).toBe(
       'Provider 효과 결과 확인 필요',
     )
+  })
+})
+
+describe('isTurnTerminalFailureCode', () => {
+  it('treats a fenced provider attempt as terminal execution evidence', () => {
+    expect(isTurnTerminalFailureCode('provider_attempt_effect_fenced')).toBe(true)
   })
 })
 

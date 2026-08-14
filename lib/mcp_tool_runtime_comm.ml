@@ -76,6 +76,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
             (Printexc.to_string exn)
       in
       project_auxiliary "session" (fun () ->
+        (* fire-and-forget: recipient list unused; project_auxiliary logs failures. *)
         ignore (Session.push_message registry ~from_agent ~content:message ~mention));
       let notification_fields =
         [ ("type", `String "masc/broadcast")

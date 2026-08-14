@@ -201,7 +201,9 @@ export function AttentionIndicatorV2() {
       params: { section: 'fleet-health' },
     })
   }
-  const tone = (a.approvals ?? 0) > 0 || a.dead > 0 || (a.health.state === 'attention' && a.health.severity === 'bad')
+  const healthIsBad = (a.health.state === 'attention' || a.health.state === 'status')
+    && a.health.severity === 'bad'
+  const tone = (a.approvals ?? 0) > 0 || a.dead > 0 || healthIsBad
     || (a.approvalQueueState?.state !== 'ready' && a.approvalQueueState?.severity === 'bad')
     ? 'bad'
     : 'warn'

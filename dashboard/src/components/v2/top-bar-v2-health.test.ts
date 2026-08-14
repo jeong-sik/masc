@@ -15,9 +15,9 @@ import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 import { AttentionIndicatorV2 } from './top-bar-v2'
 import type { DashboardGateResponse } from '../../types'
 
-function healthResponse(operatorActionRequired: boolean) {
+function healthResponse(operatorActionRequired: boolean, overallStatus = 'degraded') {
   return {
-    overall_status: 'degraded',
+    overall_status: overallStatus,
     operator_action_required: operatorActionRequired,
     operator_action_reasons: operatorActionRequired ? ['keeper_event_queue'] : [],
     full_health_snapshot: {
@@ -93,6 +93,28 @@ describe('AttentionIndicatorV2 backend health', () => {
       const chip = container.querySelector('.v2-statchip.attn')
       expect(chip?.textContent).toContain('Runtime health degraded')
       expect(chip?.textContent).not.toContain('주의 1')
+    })
+  })
+
+  it('keeps the chip bad when a non-action bad health status accompanies counted work', async () => {
+    keepers.value = [{ name: 'sangsu', status: 'running', needs_attention: true }]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(healthResponse(false, 'error')),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+
+    await act(async () => {
+      render(html`<${AttentionIndicatorV2} />`, container)
+    })
+
+    await waitFor(() => {
+      const chip = container.querySelector('.v2-statchip.attn')
+      expect(chip?.classList.contains('bad')).toBe(true)
+      expect(chip?.textContent).toContain('주의 1')
+    })
+    ;(container.querySelector('.v2-statchip.attn') as HTMLButtonElement).click()
+    await waitFor(() => {
+      expect(container.textContent).toContain('Runtime health error')
     })
   })
 })

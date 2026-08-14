@@ -884,6 +884,13 @@
  (modules test_runtime_agent_advanced_outcome)
  (libraries masc_test_deps))
 
+; RFC-0379: monitor transition matrix, lifecycle, creation validation, codecs.
+
+(test
+ (name test_monitor_domain)
+ (modules test_monitor_domain)
+ (libraries masc_test_deps masc_monitor))
+
 ; A keeper must not be offered its own authored tasks as claimable work —
 ; otherwise a routing/report keeper re-triggers on its own output.
 

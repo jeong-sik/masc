@@ -25,6 +25,28 @@ let ( let* ) = Result.bind
     - Sampling params go inside [options] object
     - [num_predict] instead of [max_tokens]
     - No [tool_choice] support *)
+(* The reasoning blocks this codec puts on the wire, and the ones it
+   drops. Separated from [build_request] so a caller that must size a
+   request before building it gets the same answer the wire will give;
+   the diagnostic [observe] stays at the call site, which keeps this a
+   function of its arguments. *)
+let project_history config messages =
+  Reasoning_history_projection.project_for_provider_config
+    ~assistant_has_payload:(fun content -> content <> [])
+    ~reasoning_block_supported:(function
+      | Thinking _ -> true
+      | ReasoningDetails _
+      | RedactedThinking _
+      | Text _
+      | ToolUse _
+      | ToolResult _
+      | Image _
+      | Document _
+      | Audio _ -> false)
+    config
+    messages
+;;
+
 let build_request_artifact
       ?(stream = false)
       ~(config : Provider_config.t)
@@ -61,22 +83,7 @@ let build_request_artifact
       ~caps
   in
   let projected_messages =
-    match
-      Reasoning_history_projection.project_for_provider_config
-        ~assistant_has_payload:(fun content -> content <> [])
-        ~reasoning_block_supported:(function
-          | Thinking _ -> true
-          | ReasoningDetails _
-          | RedactedThinking _
-          | Text _
-          | ToolUse _
-          | ToolResult _
-          | Image _
-          | Document _
-          | Audio _ -> false)
-        config
-        messages
-    with
+    match project_history config messages with
     | Error error ->
       invalid_arg
         ("Backend_ollama.build_request: "

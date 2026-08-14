@@ -18,7 +18,9 @@ open Keeper_agent_prompt_metrics
     After execution completes, {!freeze} produces an immutable snapshot.
     Concurrent tool completions serialize the whole [on_tool_executed]
     observation transaction per run; observers must therefore remain bounded
-    and must not perform open-ended I/O while holding that boundary. *)
+    and must not perform open-ended I/O while holding that boundary. The
+    observer body remains cancellable; only releasing the per-run mutex is an
+    exception-safe, non-suspending finalizer. *)
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list

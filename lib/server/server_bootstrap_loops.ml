@@ -167,6 +167,26 @@ type broadcast_mention_delivery_outcome =
   | Broadcast_persisted_and_woken of string
   | Broadcast_persisted_wake_deferred of string
 
+let resolve_broadcast_mention_target ~config target =
+  match Keeper_meta_store.read_meta config target with
+  | Error detail -> Error detail
+  | Ok (Some _) -> Ok (Some target)
+  | Ok None ->
+    (match Keeper_identity_binding.resolve ~config ~agent_name:target with
+     | Keeper_identity_binding.Unique keeper_name ->
+       (match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some _) -> Ok (Some keeper_name)
+        | Ok None -> Ok None
+        | Error detail -> Error detail)
+     | Keeper_identity_binding.Not_found -> Ok None
+     | Keeper_identity_binding.Ambiguous candidates ->
+       Error
+         (Printf.sprintf
+            "broadcast mention agent identity %S is ambiguous: %s"
+            target
+            (String.concat ", " candidates))
+     | Keeper_identity_binding.Lookup_failed detail -> Error detail)
+
 let deliver_broadcast_mention
       ~config
       ~base_path
@@ -176,18 +196,19 @@ let deliver_broadcast_mention
   =
   match broadcast_mention_wakeup_action delivery.mention with
   | `Suppress_no_target -> Broadcast_without_target
-  | `Wake_keeper target ->
+  | `Wake_keeper requested_target ->
     let delivery_key =
       Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id
       |> Result.map (fun request_id ->
         Keeper_chat_delivery_identity.Workspace_message request_id)
     in
-    (match
-       ( Keeper_meta_store.read_meta config target
-       , Keeper_identity.Keeper_id.of_string target
-       , delivery_key )
-     with
-     | Ok (Some _), Some target_id, Ok delivery_key ->
+    (match resolve_broadcast_mention_target ~config requested_target with
+     | Error message ->
+       Broadcast_target_meta_unavailable (requested_target, message)
+     | Ok None -> Broadcast_target_missing_meta requested_target
+     | Ok (Some target) ->
+       (match Keeper_identity.Keeper_id.of_string target, delivery_key with
+        | Some target_id, Ok delivery_key ->
        let speaker : Keeper_chat_store.speaker =
          { speaker_id = Some delivery.from_agent
          ; speaker_name = Some delivery.from_agent
@@ -213,11 +234,8 @@ let deliver_broadcast_mention
             Broadcast_persisted_and_woken target)
           else Broadcast_persisted_wake_deferred target
         | Error message -> Broadcast_intake_failed (target, message))
-     | Ok None, _, _ -> Broadcast_target_missing_meta target
-     | Error message, _, _ -> Broadcast_target_meta_unavailable (target, message)
-     | Ok (Some _), None, _ -> Broadcast_target_invalid target
-     | Ok (Some _), Some _, Error message ->
-       Broadcast_request_invalid (target, message))
+        | None, _ -> Broadcast_target_invalid target
+        | Some _, Error message -> Broadcast_request_invalid (target, message)))
 
 module Projection_for_testing = struct
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec

@@ -113,6 +113,35 @@ let test_stopped_keeper_persists_without_wake () =
   check int "stopped Keeper not woken" 0 !wakes
 ;;
 
+let test_runtime_agent_alias_resolves_before_delivery () =
+  with_workspace @@ fun config ->
+  let keeper_name = "rondo" in
+  let target = Keeper_identity.keeper_agent_name keeper_name in
+  let request_id = "wmsg-aabbccddeeff0011" in
+  persist_meta config keeper_name;
+  let woken = ref None in
+  let outcome =
+    Broadcast_wakeup.deliver_broadcast_mention
+      ~config
+      ~base_path:config.base_path
+      ~is_running:(String.equal keeper_name)
+      ~wakeup:(fun name -> woken := Some name)
+      (delivery ~target ~request_id ~seq:3 ~content:"agent alias delivery")
+  in
+  (match outcome with
+   | Server_bootstrap_loops.Broadcast_persisted_and_woken actual ->
+     check string "canonical delivery target" keeper_name actual
+   | _ -> fail "runtime agent alias did not resolve to the canonical Keeper");
+  check (option string) "canonical wake target" (Some keeper_name) !woken;
+  check int "delivery stored under canonical Keeper" 1
+    (count_delivery_rows
+       ~base_path:config.base_path
+       ~keeper_name
+       ~request_id);
+  check int "no alias-named chat store" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id)
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -126,5 +155,7 @@ let () =
             test_delivery_appends_once_before_wake
         ; test_case "stopped Keeper persists without wake" `Quick
             test_stopped_keeper_persists_without_wake
+        ; test_case "runtime agent alias resolves before delivery" `Quick
+            test_runtime_agent_alias_resolves_before_delivery
         ] )
     ]

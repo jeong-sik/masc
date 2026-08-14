@@ -37,12 +37,46 @@ describe('projectDashboardCompositeHealth', () => {
       },
     })
 
+    // This fixture is the live 2026-08-14 payload: `Health_status.rank` puts
+    // `degraded` below the operator-action threshold while the backend still
+    // sets `operator_action_required`. The two axes are independent, so the
+    // explicit requirement — not the rank — decides the tone.
     expect(result).toMatchObject({
       state: 'attention',
-      severity: 'warn',
+      severity: 'bad',
       issueCount: 1,
     })
     expect(result.issues[0]?.detail).toContain('keeper_event_queue')
+  })
+
+  it('treats a status outside the backend vocabulary as loud, not as a warning', () => {
+    const result = projectDashboardCompositeHealth({
+      overall_status: 'brand_new_backend_state',
+      operator_action_required: false,
+      full_health_snapshot: {
+        status: 'ready',
+        stale_reason: null,
+        last_good_available: true,
+        component_timed_out: false,
+      },
+    })
+
+    expect(result).toMatchObject({ severity: 'bad' })
+  })
+
+  it('keeps a ranked-but-not-actionable status quiet', () => {
+    const result = projectDashboardCompositeHealth({
+      overall_status: 'degraded',
+      operator_action_required: false,
+      full_health_snapshot: {
+        status: 'ready',
+        stale_reason: null,
+        last_good_available: true,
+        component_timed_out: false,
+      },
+    })
+
+    expect(result).toMatchObject({ severity: 'warn' })
   })
 
   it('never projects a timed-out component as healthy', () => {

@@ -7,7 +7,7 @@ const repositoryRow = {
   id: 'masc',
   name: 'masc',
   url: 'https://github.com/jeong-sik/masc.git',
-  codebase: 'github.com_jeong-sik_masc',
+  codebase: 'github.com_jeong-sik_masc' as string | null,
   local_path: '/workspace/masc',
   default_branch: 'main',
   status: 'active',
@@ -1174,6 +1174,36 @@ describe('IdeShell', () => {
       label: 'str_replace',
       keeper_id: 'sangsu',
     })
+  })
+
+  it('clears cursor overlays when the selected repository has no codebase', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
+    repositoryRow.codebase = null
+    cursorOverlaySignal.value = {
+      cursors: new Map([['sangsu', {
+        keeper_id: 'sangsu',
+        file_path: 'lib/stale.ml',
+        line: 7,
+        column: 1,
+        focus_mode: 'editing',
+        last_update: Date.now(),
+      }]]),
+      heatmap: new Map([[7, 1]]),
+      collisions: [{ line: 7, keeper_ids: ['sangsu', 'albini'] }],
+      active_file: 'lib/stale.ml',
+      stream: { status: 'live', failedCount: 0 },
+    }
+
+    try {
+      render(h(IdeShell, {}), container)
+      await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('closed'))
+      expect(cursorOverlaySignal.value.cursors.size).toBe(0)
+      expect(cursorOverlaySignal.value.heatmap.size).toBe(0)
+      expect(cursorOverlaySignal.value.collisions).toEqual([])
+      expect(cursorOverlaySignal.value.active_file).toBeNull()
+    } finally {
+      repositoryRow.codebase = 'github.com_jeong-sik_masc'
+    }
   })
 
   it('hydrates collapsed IDE rails from the route', () => {

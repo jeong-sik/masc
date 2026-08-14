@@ -961,7 +961,10 @@ export function IdeShell() {
     const codebase = activeCodebase
     if (!repoId || !codebase) {
       cursorOverlaySignal.value = {
-        ...cursorOverlaySignal.value,
+        cursors: new Map(),
+        heatmap: new Map(),
+        collisions: [],
+        active_file: null,
         stream: { status: 'closed', failedCount: 0 },
       }
       return

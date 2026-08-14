@@ -66,6 +66,7 @@ let is_slug_char c =
 
 let path_segment_to_slug seg =
   if seg = "" then None
+  else if String.equal seg "." then None
   else if String.length seg >= 2 && String.sub seg 0 2 = ".."
   then None
   else if String.for_all is_slug_char seg
@@ -137,7 +138,8 @@ module Code_address = struct
      [path_segment_to_slug], so every slug [canonical_url_of_remote] can
      emit is accepted and nothing outside that alphabet is. *)
   let valid_codebase slug =
-    not (String.length slug >= 2 && String.sub slug 0 2 = "..")
+    not (String.equal slug ".")
+    && not (String.length slug >= 2 && String.sub slug 0 2 = "..")
     && String.for_all is_slug_char slug
   ;;
 

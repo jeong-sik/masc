@@ -753,20 +753,33 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
          context-window rejection ("Prompt is too long" / "Input is too long
          for requested model", either status, or a 413 naming the window). A
          frame that carries the verdict is authoritative in both directions,
-         like the codex lane's [codexErrorInfo]. Frames from CLIs that predate
-         the enum carry no [terminal_reason]; only those fall back to the
-         historical exact-prefix 400, unchanged in scope (RFC amendment
-         2026-08-12). *)
+         like the codex lane's [codexErrorInfo]. Frames that omit the enum
+         carry no [terminal_reason]; only those fall back to the compatibility
+         evidence below. The exact statusless sentence is the live Claude Code
+         2.1.232 wire; older verbose frames retain the
+         historical exact-prefix 400 rule (RFC amendment 2026-08-12). *)
       match terminal_reason with
       | Some reason -> String.equal reason "prompt_too_long"
       | None ->
-        Option.equal Int.equal api_error_status (Some 400)
-        && Option.exists
-             (fun detail ->
-                String.starts_with
-                  ~prefix:"Prompt is too long"
-                  (String.trim detail))
-             result
+        let canonical_statusless_rejection =
+          (* Live Claude Code 2.1.232 emitted the canonical provider verdict
+             with neither [terminal_reason] nor [api_error_status]. Admit that
+             exact wire sentence only; do not infer overflow from arbitrary
+             prose that merely contains it. *)
+          Option.is_none api_error_status
+          && Option.exists
+               (fun detail -> String.equal (String.trim detail) "Prompt is too long")
+               result
+        in
+        canonical_statusless_rejection
+        ||
+        (Option.equal Int.equal api_error_status (Some 400)
+         && Option.exists
+              (fun detail ->
+                 String.starts_with
+                   ~prefix:"Prompt is too long"
+                   (String.trim detail))
+              result)
     in
     if structurally_quota_blocked
     then Error (Quota_blocked { api_error_status; rate_limit })

@@ -411,6 +411,175 @@ let keeper_id_param uri =
      | _ -> None)
 ;;
 
+(* Keeper-lane activity is a server projection over the authoritative Keeper
+   stores.  Keeping the join here preserves the lane-token authorization on
+   [/api/v1/ide/events] while avoiding a second turn JSONL written by the IDE
+   observation bus.  Receipts own terminal outcomes (including cancellation),
+   the registry owns the live turn, and the tool-call log owns pathless calls. *)
+let keeper_lane_event_timestamp_ms json =
+  match Safe_ops.json_int_opt "timestamp_ms" json with
+  | Some value -> Int64.of_int value
+  | None -> 0L
+;;
+
+let keeper_lane_compare_events left right =
+  Int64.compare
+    (keeper_lane_event_timestamp_ms right)
+    (keeper_lane_event_timestamp_ms left)
+;;
+
+let keeper_lane_drop count items =
+  let rec loop remaining = function
+    | items when remaining <= 0 -> items
+    | [] -> []
+    | _ :: rest -> loop (remaining - 1) rest
+  in
+  loop count items
+;;
+
+let keeper_lane_take count items =
+  let rec loop remaining acc = function
+    | [] -> List.rev acc
+    | _ when remaining <= 0 -> List.rev acc
+    | item :: rest -> loop (remaining - 1) (item :: acc) rest
+  in
+  loop count [] items
+;;
+
+let keeper_lane_receipt_event ~keeper_id json =
+  let trace_id =
+    Safe_ops.json_string_nonempty_opt "trace_id" json
+    |> Option.value ~default:("turn-" ^ keeper_id)
+  in
+  let outcome = Safe_ops.json_string ~default:"receipt_done" "outcome" json in
+  let phase =
+    match outcome with
+    | "receipt_cancelled" | "cancelled" -> "cancelled"
+    | "receipt_failed" | "error" -> "failed"
+    | _ -> "completed"
+  in
+  let timestamp_ms =
+    (match Safe_ops.json_string_nonempty_opt "recorded_at" json with
+     | Some recorded_at -> Masc_domain.parse_iso8601_opt recorded_at
+     | None -> None)
+    |> Option.value ~default:0.0
+    |> fun seconds -> Int64.of_float (seconds *. 1000.0)
+  in
+  let model_used =
+    Safe_ops.json_assoc "runtime" json
+    |> fun runtime -> Safe_ops.json_string_nonempty_opt "selected_model" (`Assoc runtime)
+  in
+  `Assoc
+    [ "type", `String "turn"
+    ; "turn_id", `String trace_id
+    ; "keeper_id", `String keeper_id
+    ; "phase", `String phase
+    ; "model_used", (match model_used with Some model -> `String model | None -> `Null)
+    ; "tools_used", `List []
+    ; ( "stop_reason"
+      , match Safe_ops.json_string_nonempty_opt "terminal_reason_code" json with
+        | Some reason -> `String reason
+        | None -> `Null )
+    ; "duration_ms", `Null
+    ; "timestamp_ms", `Intlit (Int64.to_string timestamp_ms)
+    ]
+;;
+
+let keeper_lane_tool_event ~keeper_id json =
+  let trace_id =
+    Safe_ops.json_string_nonempty_opt "trace_id" json
+    |> Option.value ~default:("turn-" ^ keeper_id)
+  in
+  let success = Safe_ops.json_bool ~default:false "success" json in
+  let output =
+    match json with
+    | `Assoc fields -> Option.value ~default:`Null (List.assoc_opt "output" fields)
+    | _ -> `Null
+  in
+  let summary =
+    match output with
+    | `String value -> value
+    | value -> Yojson.Safe.to_string value
+  in
+  let summary =
+    String_util.utf8_safe ~max_bytes:200 ~suffix:"..." summary
+    |> String_util.to_string
+  in
+  let timestamp_ms =
+    Safe_ops.json_float ~default:0.0 "ts" json
+    |> fun seconds -> Int64.of_float (seconds *. 1000.0)
+  in
+  `Assoc
+    [ "type", `String "tool"
+    ; "tool_name", `String (Safe_ops.json_string ~default:"unknown" "tool" json)
+    ; "keeper_id", `String keeper_id
+    ; "turn_id", `String trace_id
+    ; "outcome", `String (if success then "ok" else "error")
+    ; "typed_outcome", `String (if success then "ok" else "error")
+    ; "latency_ms", `Int (int_of_float (Safe_ops.json_float ~default:0.0 "duration_ms" json))
+    ; "summary", `String summary
+    ; "file_path", `Null
+    ; "timestamp_ms", `Intlit (Int64.to_string timestamp_ms)
+    ]
+;;
+
+let keeper_lane_live_event ~(config : Workspace.config) ~keeper_id =
+  match Keeper_registry.get ~base_path:config.base_path keeper_id with
+  | Some { current_turn_observation = Some observation; _ } ->
+    Some
+      (`Assoc
+        [ "type", `String "turn"
+        ; "turn_id", `String (Printf.sprintf "turn-%d" observation.turn_id)
+        ; "keeper_id", `String keeper_id
+        ; "phase", `String "started"
+        ; ( "model_used"
+          , match observation.selected_model with
+            | Some model -> `String model
+            | None -> `Null )
+        ; "tools_used", `List []
+        ; "stop_reason", `Null
+        ; "duration_ms", `Null
+        ; ( "timestamp_ms"
+          , `Intlit
+              (Int64.to_string
+                 (Int64.of_float (observation.started_at *. 1000.0))) )
+        ])
+  | Some _ | None -> None
+;;
+
+let list_keeper_lane_events ~(config : Workspace.config) ~keeper_id ?kind ~limit ~offset () =
+  let scan_limit = min 1000 (max limit (limit + offset) * 5) in
+  let turns =
+    match kind with
+    | Some Ide_bridge.Tool -> []
+    | Some Ide_bridge.Turn | None ->
+      let store = Keeper_types_support.keeper_execution_receipt_store config keeper_id in
+      let terminal =
+        Dated_jsonl.read_recent store scan_limit
+        |> List.map (keeper_lane_receipt_event ~keeper_id)
+      in
+      (match keeper_lane_live_event ~config ~keeper_id with
+       | Some live -> live :: terminal
+       | None -> terminal)
+  in
+  let tools =
+    match kind with
+    | Some Ide_bridge.Turn -> []
+    | Some Ide_bridge.Tool | None ->
+      Keeper_tool_call_log.read_recent_rows
+        ~n:(scan_limit * Keeper_tool_call_log.read_over_scan_factor)
+        ()
+      |> Keeper_tool_call_log.filter_rows_for_keeper
+           ~keeper_name:keeper_id
+           ~n:scan_limit
+      |> List.map (keeper_lane_tool_event ~keeper_id)
+  in
+  turns @ tools
+  |> List.sort keeper_lane_compare_events
+  |> keeper_lane_drop offset
+  |> keeper_lane_take limit
+;;
+
 let file_path_param uri =
   match Uri.get_query_param uri "file_path" with
   | Some p when String.trim p <> "" -> Some (String.trim p)
@@ -934,16 +1103,25 @@ let add_routes router =
                     respond_ide_error ~status:`Bad_request ~request err reqd
                   | Ok keeper_id ->
                     with_keeper_lane_read_auth ~state ~request ~reqd ~scope (fun () ->
-                    let partition = partition_of_ide_scope scope in
                     let events =
-                      Ide_bridge.list_events
-                        ~base_path:base
-                        ~partition
-                        ?kind
-                        ?keeper_id
-                        ~limit
-                        ~offset
-                        ()
+                      match scope with
+                      | Scope_keeper_lane { keeper_id } ->
+                        list_keeper_lane_events
+                          ~config:(Mcp_server.workspace_config state)
+                          ~keeper_id
+                          ?kind
+                          ~limit
+                          ~offset
+                          ()
+                      | Scope_canonical_url _ | Scope_repo_id _ ->
+                        Ide_bridge.list_events
+                          ~base_path:base
+                          ~partition:(partition_of_ide_scope scope)
+                          ?kind
+                          ?keeper_id
+                          ~limit
+                          ~offset
+                          ()
                     in
                     let kind_json =
                       match kind with

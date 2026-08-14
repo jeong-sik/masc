@@ -1004,51 +1004,29 @@ let test_memory_response_honors_canonical_url_scope () =
    to the lane keeper, conflicts with repo scopes, and never authorizes
    mutations. *)
 
-(* RFC-0378 B: the bus carries no turn events; lane-read tests seed the
-   stored row directly — standing in for the pre-existing data the read
-   path serves until rung E. *)
-let rec seed_mkdir_p path =
-  if path = "" || path = "/" || Sys.file_exists path
-  then ()
-  else (
-    seed_mkdir_p (Filename.dirname path);
-    try Unix.mkdir path 0o755 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-;;
-
-let seed_lane_turn_event ~base_path ~keeper_id ~turn_id ~timestamp_ms =
-  let dir = Ide_paths.partition_store_dir ~base_dir:base_path Ide_paths.Legacy_default in
-  seed_mkdir_p dir;
-  let row =
-    Ide_event_types.ide_event_to_json
-      (Ide_event_types.Turn_event
-         { turn_id
-         ; keeper_id
-         ; phase = "completed"
-         ; model_used = None
-         ; tools_used = []
-         ; stop_reason = None
-         ; duration_ms = Some 10
-         ; timestamp_ms
-         })
-  in
-  let oc =
-    open_out_gen
-      [ Open_append; Open_creat ]
-      0o644
-      (Filename.concat dir "turn_events.jsonl")
-  in
-  output_string oc (Yojson.Safe.to_string row ^ "\n");
-  close_out oc
+(* RFC-0378 B: Keeper lanes are projections over authoritative Keeper stores,
+   not a second IDE turn log. *)
+let seed_lane_receipt ~config ~keeper_id ~turn_id ~outcome ~recorded_at =
+  let store = Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_id in
+  Dated_jsonl.append
+    store
+    (`Assoc
+      [ "keeper_name", `String keeper_id
+      ; "trace_id", `String turn_id
+      ; "outcome", `String outcome
+      ; "terminal_reason_code", `String outcome
+      ; "recorded_at", `String recorded_at
+      ])
 ;;
 
 let test_events_keeper_lane_returns_only_lane_events () =
-  with_ide_server (fun ~base_path ~state:_ ~router ->
+  with_ide_server (fun ~base_path ~state ~router ->
     let token = create_worker_token base_path "alice" in
-    seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
-      ~timestamp_ms:1700000000000L;
-    seed_lane_turn_event ~base_path ~keeper_id:"bob" ~turn_id:"turn-bob-1"
-      ~timestamp_ms:1700000001000L;
+    let config = Masc.Mcp_server.workspace_config state in
+    seed_lane_receipt ~config ~keeper_id:"alice" ~turn_id:"turn-alice-1"
+      ~outcome:"receipt_done" ~recorded_at:"2023-11-14T22:13:20Z";
+    seed_lane_receipt ~config ~keeper_id:"bob" ~turn_id:"turn-bob-1"
+      ~outcome:"receipt_done" ~recorded_at:"2023-11-14T22:13:21Z";
     let request =
       http_request
         ~meth:`GET
@@ -1065,6 +1043,40 @@ let test_events_keeper_lane_returns_only_lane_events () =
       check string "lane keeper only" "alice"
         (json_string_member "lane event" "keeper_id" event)
     | events -> failf "expected exactly alice's event, got %d" (List.length events))
+;;
+
+let test_events_keeper_lane_projects_cancelled_receipts_and_tool_calls () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    let token = create_worker_token base_path "alice" in
+    let config = Masc.Mcp_server.workspace_config state in
+    seed_lane_receipt ~config ~keeper_id:"alice" ~turn_id:"turn-cancelled"
+      ~outcome:"receipt_cancelled" ~recorded_at:"2023-11-14T22:13:20Z";
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    Masc.Keeper_tool_call_log.log_call
+      ~keeper_name:"alice"
+      ~tool_name:"masc_board_read"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~success:true
+      ~duration_ms:2.0
+      ~trace_id:"turn-cancelled"
+      ();
+    let request =
+      http_request
+        ~meth:`GET
+        ~path:"/api/v1/ide/events?keeper_lane=alice"
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "GET keeper-lane durable projection succeeds" 200 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    let events = json_list_member "lane events" "events" (Json.member "data" json) in
+    check int "receipt and tool call projected" 2 (List.length events);
+    let phases = List.filter_map (Safe_ops.json_string_opt "phase") events in
+    let tools = List.filter_map (Safe_ops.json_string_opt "tool_name") events in
+    check bool "cancelled receipt remains visible" true (List.mem "cancelled" phases);
+    check bool "pathless tool call remains visible" true (List.mem "masc_board_read" tools))
 ;;
 
 let test_events_keeper_lane_conflicts_with_repo_scope () =
@@ -1100,8 +1112,6 @@ let test_events_keeper_lane_rejects_mismatched_keeper_filter () =
 let test_events_keeper_lane_rejects_other_keeper_token () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "bob" in
-    seed_lane_turn_event ~base_path ~keeper_id:"alice" ~turn_id:"turn-alice-1"
-      ~timestamp_ms:1700000000000L;
     let request =
       http_request
         ~meth:`GET
@@ -1259,6 +1269,10 @@ let () =
     ; ( "keeper_lane_scope"
       , [ test_case "GET events keeper_lane returns only lane events" `Quick
             test_events_keeper_lane_returns_only_lane_events
+        ; test_case
+            "GET events keeper_lane projects cancelled receipts and tool calls"
+            `Quick
+            test_events_keeper_lane_projects_cancelled_receipts_and_tool_calls
         ; test_case "keeper_lane conflicts with repo scope" `Quick
             test_events_keeper_lane_conflicts_with_repo_scope
         ; test_case "keeper_lane rejects mismatched keeper filter" `Quick

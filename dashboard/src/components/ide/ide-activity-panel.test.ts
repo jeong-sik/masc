@@ -8,14 +8,6 @@ import { lspDiagnosticSnapshot } from './ide-lsp-client'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { goals, tasks } from '../../store'
 
-const turnRecordsMocks = vi.hoisted(() => ({
-  fetchKeeperTurnRecords: vi.fn(),
-}))
-
-vi.mock('../../api/dashboard-turn-records', () => ({
-  fetchKeeperTurnRecords: turnRecordsMocks.fetchKeeperTurnRecords,
-}))
-
 const renderedContainers = new Set<Parameters<typeof preactRender>[1]>()
 
 const render = (...args: Parameters<typeof preactRender>): ReturnType<typeof preactRender> => {
@@ -34,8 +26,6 @@ function stubEmptyActivityFetch(): void {
 
 beforeEach(() => {
   stubEmptyActivityFetch()
-  turnRecordsMocks.fetchKeeperTurnRecords.mockReset()
-  turnRecordsMocks.fetchKeeperTurnRecords.mockResolvedValue({ entries: [] })
   clearTraces()
 })
 
@@ -759,8 +749,21 @@ describe('IdeActivityPanel', () => {
     expect(container.querySelector('[data-testid="ide-activity-no-scope"]')).not.toBeNull()
   })
 
-  it('degrades the refresh tone when the keeper turn-record fetch fails', async () => {
-    turnRecordsMocks.fetchKeeperTurnRecords.mockRejectedValue(new Error('turn records unavailable'))
+  it('degrades the refresh tone when the keeper lane fetch fails', async () => {
+    const fetchMock = vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({ ok: false, error: 'lane unavailable' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
     render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', keeperLane: 'sangsu' }), container)
@@ -768,27 +771,35 @@ describe('IdeActivityPanel', () => {
     await waitFor(() => {
       expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('offline 1 failed')
     })
-    expect(turnRecordsMocks.fetchKeeperTurnRecords).toHaveBeenCalledWith('sangsu', 50)
+    const laneUrl = fetchMock.mock.calls
+      .map(call => String(call[0]))
+      .find(url => url.includes('/api/v1/ide/events'))
+    expect(laneUrl).toContain('keeper_lane=sangsu')
   })
 
-  it('merges durable keeper turn records into the feed', async () => {
-    turnRecordsMocks.fetchKeeperTurnRecords.mockResolvedValue({
-      entries: [{
-        record: {
-          keeper: 'sangsu',
-          turn_ref: 'trace-lane#7',
-          absolute_turn: 7,
-          turn_kind: 'autonomous',
-          ts: 1_717_400_000,
-          finish_reason: 'end_turn',
-          model: 'test-model',
-          raw_trace_run_ref: {
-            worker_run_id: 'run-lane-1',
+  it('merges keeper lane events into the feed when the lane fetch succeeds', async () => {
+    const fetchMock = vi.fn(async input => {
+      const url = String(input)
+      if (url.includes('/api/v1/ide/events')) {
+        return new Response(JSON.stringify({
+          ok: true,
+          data: {
+            events: [{
+              type: 'turn',
+              keeper_id: 'sangsu',
+              turn_id: 'turn-lane-1',
+              phase: 'completed',
+              timestamp_ms: 1717400000000,
+            }],
           },
-        },
-        diff_vs_prev: null,
-      }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ events: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
     })
+    vi.stubGlobal('fetch', fetchMock)
 
     const container = document.createElement('div')
     render(h(IdeActivityPanel, { activeFile: 'lib/runtime.ml', keeperLane: 'sangsu' }), container)
@@ -798,8 +809,6 @@ describe('IdeActivityPanel', () => {
       expect(container.querySelector('.ide-activity-refresh-status')?.textContent).toBe('loaded')
     })
     expect(container.textContent).toContain('sangsu')
-    expect(container.textContent).toContain('turn:7')
-    expect(turnRecordsMocks.fetchKeeperTurnRecords).toHaveBeenCalledWith('sangsu', 50)
   })
 
   it('renders active run goal progress from activity goal and task links', async () => {

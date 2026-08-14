@@ -966,6 +966,35 @@ let resume_from_checkpoint
            ?checkpoint_sink:config.checkpoint_sink
            ()))
 
+type classified_advanced_outcome =
+  | Advanced_completed of Agent_core.Types.api_response
+  | Advanced_yielded of
+      cooperative_yield_reason
+      * Agent_core.Agent.Advanced.yielded
+      * Agent_core.Types.api_response
+
+let classify_advanced_outcome ~yield_reason ~boundary_response outcome =
+  match outcome with
+  | Agent_core.Agent.Advanced.Completed response ->
+    Ok (Advanced_completed response)
+  | Agent_core.Agent.Advanced.Terminal_tool_completed { receipt; _ } ->
+    (* The run ended because a terminal-contract tool completed its effect;
+       the receipt's provider response is the completion payload — the same
+       classification Agent Core's own lifecycle events apply. *)
+    Ok (Advanced_completed receipt.Agent_core.Terminal_tool_receipt.response)
+  | Agent_core.Agent.Advanced.Yielded yielded ->
+    (match yield_reason, boundary_response with
+     | Some reason, Some response ->
+       Ok (Advanced_yielded (reason, yielded, response))
+     | None, _ ->
+       Error
+         (Agent_core.Error.Internal
+            "cooperative yield returned without a typed decision")
+     | Some _, None ->
+       Error
+         (Agent_core.Error.Internal
+            "cooperative yield returned without its provider response"))
+
 (* ================================================================ *)
 (* Run                                                               *)
 (* ================================================================ *)
@@ -1115,24 +1144,17 @@ let run_blocks
                  prefer_cooperative_probe_error !probe_error advanced_result
                with
                | Error e -> Error e
-               | Ok (Agent_core.Agent.Advanced.Completed response) ->
-                 Ok (`Completed response)
-               | Ok (Agent_core.Agent.Advanced.Terminal_tool_completed _) ->
-                 Error
-                   (Agent_core.Error.Internal
-                      "runtime_agent_terminal_tool_completion_unsupported")
-               | Ok (Agent_core.Agent.Advanced.Yielded yielded) ->
-                 (match !yield_decision, !boundary_response with
-                  | Some decision, Some response ->
-                    Ok (`Yielded (decision, yielded, response))
-                  | None, _ ->
-                    Error
-                      (Agent_core.Error.Internal
-                         "cooperative yield returned without a typed decision")
-                  | Some _, None ->
-                    Error
-                      (Agent_core.Error.Internal
-                         "cooperative yield returned without its provider response"))))
+               | Ok outcome ->
+                 (match
+                    classify_advanced_outcome
+                      ~yield_reason:!yield_decision
+                      ~boundary_response:!boundary_response
+                      outcome
+                  with
+                  | Error e -> Error e
+                  | Ok (Advanced_completed response) -> Ok (`Completed response)
+                  | Ok (Advanced_yielded (reason, yielded, response)) ->
+                    Ok (`Yielded (reason, yielded, response)))))
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =

@@ -67,6 +67,25 @@ type cooperative_yield_probe =
     completed deliverable: [InputRequired] resumes from later host input, while
     yield variants resume through later host-owned activity boundaries. *)
 
+type classified_advanced_outcome =
+  | Advanced_completed of Agent_core.Types.api_response
+  | Advanced_yielded of
+      cooperative_yield_reason
+      * Agent_core.Agent.Advanced.yielded
+      * Agent_core.Types.api_response
+
+val classify_advanced_outcome :
+  yield_reason:cooperative_yield_reason option ->
+  boundary_response:Agent_core.Types.api_response option ->
+  Agent_core.Agent.Advanced.run_outcome ->
+  (classified_advanced_outcome, Agent_core.Error.t) result
+(** Pure projection of one Advanced run outcome. [Terminal_tool_completed]
+    completes with its receipt's provider response: the run ended because a
+    terminal-contract tool finished its effect (for example a connector
+    post), which is a success, not an unsupported state. A cooperative yield
+    must carry both its typed decision and the provider response captured at
+    the boundary; a missing half is a typed internal error. *)
+
 (** {1 Config} *)
 
 type config = Runtime_agent_context.config = {

@@ -19,10 +19,9 @@ let test_blank_is_passive () =
   | `Suppress_no_target -> ()
   | `Wake_keeper target -> failf "unexpected blank-target wake: %s" target
 
-let make_meta ?(mention_targets = []) name =
+let make_meta name =
   match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
-  | Ok meta ->
-    { meta with Keeper_meta_contract.mention_targets = mention_targets }
+  | Ok meta -> meta
   | Error detail -> failf "keeper meta fixture failed: %s" detail
 ;;
 
@@ -52,10 +51,61 @@ let with_workspace f =
     (fun () -> f config)
 ;;
 
-let persist_meta ?mention_targets config name =
-  match Keeper_meta_store.replace_snapshot config (make_meta ?mention_targets name) with
+let persist_meta config name =
+  match Keeper_meta_store.replace_snapshot config (make_meta name) with
   | Ok () -> ()
   | Error detail -> failf "keeper meta persistence failed: %s" detail
+;;
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path)
+  then (
+    let parent = Filename.dirname path in
+    if not (String.equal parent path) then mkdir_p parent;
+    Unix.mkdir path 0o755)
+;;
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let configure_mention_targets config name mention_targets =
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path
+      ~base_path:config.Workspace.base_path
+  in
+  mkdir_p keepers_dir;
+  let keeper_dir = Filename.concat keepers_dir name in
+  mkdir_p keeper_dir;
+  write_file
+    (Filename.concat keeper_dir "AGENT.md")
+    "You are a focused test Keeper.\n";
+  let path = Filename.concat keepers_dir (name ^ ".toml") in
+  let rendered_targets =
+    mention_targets
+    |> List.map (Printf.sprintf "%S")
+    |> String.concat ", "
+  in
+  write_file
+    path
+    (Printf.sprintf
+       "[keeper]\nsandbox_profile = \"local\"\nmention_targets = [%s]\n"
+       rendered_targets)
+;;
+
+let check_effective_mention_targets config name expected =
+  match Keeper_meta_store.read_effective_meta config name with
+  | Error detail -> failf "effective metadata read failed: %s" detail
+  | Ok None -> fail "effective metadata disappeared"
+  | Ok (Some meta) ->
+    check
+      (list string)
+      "effective mention targets"
+      expected
+      meta.Keeper_meta_contract.mention_targets
 ;;
 
 let count_delivery_rows ~base_path ~keeper_name ~request_id =
@@ -154,7 +204,9 @@ let test_configured_mention_alias_resolves_and_stamps_feed_target () =
   let keeper_name = "rondo" in
   let alias = "sangsu" in
   let request_id = "wmsg-1122334455667788" in
-  persist_meta ~mention_targets:[ alias ] config keeper_name;
+  persist_meta config keeper_name;
+  configure_mention_targets config keeper_name [ alias ];
+  check_effective_mention_targets config keeper_name [ alias ];
   let outcome =
     Broadcast_wakeup.deliver_broadcast_mention
       ~config
@@ -182,7 +234,9 @@ let test_canonical_delivery_stamps_configured_feed_target () =
   let keeper_name = "rondo" in
   let alias = "sangsu" in
   let request_id = "wmsg-8877665544332211" in
-  persist_meta ~mention_targets:[ alias ] config keeper_name;
+  persist_meta config keeper_name;
+  configure_mention_targets config keeper_name [ alias ];
+  check_effective_mention_targets config keeper_name [ alias ];
   ignore
     (Broadcast_wakeup.deliver_broadcast_mention
        ~config

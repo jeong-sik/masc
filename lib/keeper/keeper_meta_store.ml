@@ -90,10 +90,20 @@ let persisted_keeper_name_for_agent_name config ~agent_name =
 
 let persisted_keeper_for_mention_target config ~mention_target =
   let target = String.trim mention_target in
+  let read_effective keeper_name =
+    match read_meta_file_path (keeper_meta_path config keeper_name) with
+    | Error _ as error -> error
+    | Ok None -> Ok None
+    | Ok (Some meta) ->
+      Keeper_meta_contract.effective_meta_result
+        ~base_path:config.Workspace.base_path
+        meta
+      |> Result.map Option.some
+  in
   let rec collect matches = function
     | [] -> Ok (List.rev matches)
     | keeper_name :: rest ->
-      (match read_meta_file_path (keeper_meta_path config keeper_name) with
+      (match read_effective keeper_name with
        | Error detail -> Error detail
        | Ok None -> collect matches rest
        | Ok (Some meta) ->

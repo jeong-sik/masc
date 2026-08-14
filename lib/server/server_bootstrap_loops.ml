@@ -168,13 +168,13 @@ type broadcast_mention_delivery_outcome =
   | Broadcast_persisted_wake_deferred of string
 
 let resolve_broadcast_mention_target ~config target =
-  match Keeper_meta_store.read_meta config target with
+  match Keeper_meta_store.read_effective_meta config target with
   | Error detail -> Error detail
   | Ok (Some meta) -> Ok (Some (target, meta))
   | Ok None ->
     (match Keeper_identity_binding.resolve ~config ~agent_name:target with
      | Keeper_identity_binding.Unique keeper_name ->
-       (match Keeper_meta_store.read_meta config keeper_name with
+       (match Keeper_meta_store.read_effective_meta config keeper_name with
         | Ok (Some meta) -> Ok (Some (keeper_name, meta))
         | Ok None -> Ok None
         | Error detail -> Error detail)

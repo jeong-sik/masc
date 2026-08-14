@@ -23,8 +23,10 @@ val tool_io_preview_fields
   -> unit
   -> (string * Yojson.Safe.t) list
 
-(** Exact AGENT_CORE model-tool occurrence fields. Blank or repeated [tool_use_id]
-    values are preserved because [turn] and [planned_index] provide the scope. *)
+(** Exact AGENT_CORE model-tool occurrence and schedule fields. Blank or repeated
+    [tool_use_id] values are preserved because [turn] and [planned_index]
+    provide the scope. The batch fields and execution mode come directly from
+    the invocation rather than elapsed-time inference. *)
 val agent_core_invocation_fields
   :  Agent_core.Tool_contract.Invocation.t option
   -> (string * Yojson.Safe.t) list

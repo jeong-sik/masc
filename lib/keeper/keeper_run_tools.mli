@@ -15,7 +15,10 @@ open Keeper_agent_prompt_metrics
 
     AGENT_CORE hooks (before_turn, on_tool_executed) cannot return values, so
     they write into this single mutable record during Agent.run execution.
-    After execution completes, {!freeze} produces an immutable snapshot. *)
+    After execution completes, {!freeze} produces an immutable snapshot.
+    Concurrent tool completions serialize the whole [on_tool_executed]
+    observation transaction per run; observers must therefore remain bounded
+    and must not perform open-ended I/O while holding that boundary. *)
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list

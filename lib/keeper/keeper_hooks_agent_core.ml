@@ -475,6 +475,7 @@ let make_hooks
            the log_call row and the trajectory entry below share the value
            so downstream views can join the two stores on a single key. *)
         let execution_id = Ids.Execution_id.generate () in
+        let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
         (* RFC-0233 PR-2: register the provider-call ↔ execution pair now,
            strictly before AGENT_CORE publishes ToolCompleted for this call, so the
            event bridge can stamp the same id onto the agent_core:tool_completed
@@ -494,7 +495,10 @@ let make_hooks
              ?prompt_fingerprint:tctx.prompt_fingerprint
              ~execution_id
              ~tool_use_id
-             ~planned_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
+             ~planned_index:schedule.planned_index
+             ~batch_index:schedule.batch_index
+             ~batch_size:schedule.batch_size
+             ~execution_mode:schedule.execution_mode
              ?trace_id:tctx.trace_id ?session_id:tctx.session_id
              ?generation:tctx.generation
              ?turn:invocation_turn ?keeper_turn_id:tctx.keeper_turn_id

@@ -50,6 +50,10 @@ function toolCalls(): ToolCallsResponse {
         duration_ms: 120,
         trace_id: 'trace-1',
         turn: 1,
+        planned_index: 4,
+        batch_index: 0,
+        batch_size: 2,
+        execution_mode: 'concurrent',
       },
     ],
   }
@@ -198,6 +202,9 @@ describe('JourneyPanel', () => {
       expect(screen.getByText('fs_read')).toBeInTheDocument()
       expect(screen.getByText('agent turns 2')).toBeInTheDocument()
       expect(screen.getByText('trajectory + I/O')).toBeInTheDocument()
+      expect(screen.getByText('plan 4')).toBeInTheDocument()
+      expect(screen.getByText('batch 0 · size 2')).toBeInTheDocument()
+      expect(screen.getByText('mode concurrent')).toBeInTheDocument()
     })
 
     expect(fetchKeeperTrajectory).toHaveBeenCalledWith('keeper-a', 200, true, true)

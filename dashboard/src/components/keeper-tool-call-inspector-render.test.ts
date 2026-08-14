@@ -246,6 +246,9 @@ describe('KeeperToolCallInspector render', () => {
           tool_use_id: '',
           turn: 9,
           planned_index: 4,
+          batch_index: 0,
+          batch_size: 2,
+          execution_mode: 'concurrent',
           lane: 'autonomous',
         },
       ],
@@ -270,7 +273,9 @@ describe('KeeperToolCallInspector render', () => {
     expect(text).toContain('Evidence links')
     expect(text).toContain('Code')
     expect(text).toContain('Task')
-    expect(text).toContain('turn 9 · plan 4 · tool_use_id (blank)')
+    expect(text).toContain(
+      'turn 9 · plan 4 · batch 0 · size 2 · mode concurrent · tool_use_id (blank)',
+    )
   })
 
   it('does not render Code links for unsafe absolute tool-call file inputs', async () => {

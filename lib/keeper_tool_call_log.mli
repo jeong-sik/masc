@@ -147,6 +147,9 @@ val log_call :
   ?execution_id:Ids.Execution_id.t ->
   ?tool_use_id:string ->
   ?planned_index:int ->
+  ?batch_index:int ->
+  ?batch_size:int ->
+  ?execution_mode:Agent_core.Tool_contract.execution_mode ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -171,7 +174,9 @@ val log_call :
     same execution (when the dispatch lane has one) — the key that the
     agent_core:tool_called/agent_core:tool_completed event rows also carry. Blank and
     repeated provider ids remain meaningful when scoped by [turn] and
-    [planned_index], so they are persisted unchanged.
+    [planned_index], so they are persisted unchanged. [batch_index],
+    [batch_size], and [execution_mode] preserve Agent Core's actual schedule
+    rather than inferring concurrency from timing.
     [on_committed], when supplied, forces this row through the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the

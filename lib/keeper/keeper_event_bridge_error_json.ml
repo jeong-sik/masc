@@ -219,11 +219,16 @@ let core_agent_error_fields = function
     ]
   | Agent_core.Error.TerminalToolDurabilityFailed
       { invocation; effect_disposition; detail } ->
+    let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
     [ "variant", `String "terminal_tool_durability_failed"
     ; ( "tool_use_id"
       , `String (Agent_core.Tool_contract.Invocation.tool_use_id invocation) )
     ; "turn", `Int (Agent_core.Tool_contract.Invocation.turn invocation)
-    ; "planned_index", `Int (Agent_core.Tool_contract.Invocation.planned_index invocation)
+    ; "planned_index", `Int schedule.planned_index
+    ; "batch_index", `Int schedule.batch_index
+    ; "batch_size", `Int schedule.batch_size
+    ; ( "execution_mode"
+      , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
     ; ( "effect_disposition"
       , `String (Keeper_agent_error.terminal_effect_disposition_to_wire effect_disposition) )
     ; "detail_digest", `String (sha256_hex detail)

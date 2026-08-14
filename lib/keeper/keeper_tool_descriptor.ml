@@ -42,6 +42,20 @@ type input_schema_source =
 
 type readonly_of_input = Yojson.Safe.t -> bool option
 
+type ordinary_execution_mode =
+  | Serial
+  | Concurrent
+
+type execution =
+  | Ordinary of ordinary_execution_mode
+  | Terminal
+
+let execution_to_string = function
+  | Ordinary Serial -> "serial"
+  | Ordinary Concurrent -> "concurrent"
+  | Terminal -> "terminal"
+;;
+
 type identity_validation =
   | Validate_once_before_translation
   | Validate_once_after_translation
@@ -115,6 +129,7 @@ type t =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; model_output_projection : Tool_output.model_projection
+  ; execution : execution
   ; policy : policy
   ; executor : executor
   ; backend : backend
@@ -496,6 +511,7 @@ let descriptor
       ~description
       ~input_schema
       ?(model_output_projection = Tool_output.default_model_projection)
+      ?(ordinary_execution_mode = Serial)
       ~policy
       ~executor
       ~backend
@@ -506,6 +522,46 @@ let descriptor
   =
   let capability_id =
     capability_id_of_identity ~internal_name capability_identity
+  in
+  let execution =
+    match runtime_handler with
+    | Tool_surface_post -> Terminal
+    | ( Tool_execute
+      | Tool_search_files
+      | Tool_read_file
+      | Tool_edit_file
+      | Tool_write_file
+      | Tool_time_now
+      | Tool_tools_list
+      | Tool_context_status
+      | Tool_artifact_read
+      | Tool_memory_search
+      | Tool_memory_write
+      | Tool_library_search
+      | Tool_library_read
+      | Tool_surface_read
+      | Tool_person_note_set
+      | Tool_ide_annotate
+      | Tool_voice_dispatch
+      | Tool_task_dispatch
+      | Tool_board_dispatch
+      | Tool_masc_task_dispatch
+      | Tool_masc_plan_dispatch
+      | Tool_masc_run_dispatch
+      | Tool_masc_agent_dispatch
+      | Tool_masc_workspace_dispatch
+      | Tool_masc_misc_dispatch
+      | Tool_web_search
+      | Tool_web_fetch
+      | Tool_masc_control_dispatch
+      | Tool_masc_agent_timeline_dispatch
+      | Tool_masc_schedule_dispatch
+      | Tool_masc_keeper_dispatch
+      | Tool_masc_fusion_dispatch
+      | Tool_masc_fusion_status
+      | Tool_masc_library_dispatch
+      | Tool_masc_local_runtime_dispatch
+      | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
   in
   let receipt_labels =
     [ "descriptor_id", id
@@ -518,6 +574,7 @@ let descriptor
     ; "backend", backend_to_string backend
     ; "sandbox", sandbox_to_string sandbox
     ; "runtime_handler", runtime_handler_to_string runtime_handler
+    ; "execution", execution_to_string execution
     ; ( "keeper_tool_group"
       , keeper_tool_group_to_string
           (keeper_tool_group_of_runtime_handler runtime_handler) )
@@ -538,6 +595,7 @@ let descriptor
   ; description
   ; input_schema
   ; model_output_projection
+  ; execution
   ; policy
   ; executor
   ; backend
@@ -1010,6 +1068,7 @@ let in_process_descriptor_with_schema_source
       ~capability_identity
       ~keeper_model_projection
       ~input_schema_source ~id ~name ~description ~input_schema ~policy ~handler
+      ?ordinary_execution_mode
       ()
   =
   descriptor
@@ -1021,6 +1080,7 @@ let in_process_descriptor_with_schema_source
     ~internal_name:name
     ~description
     ~input_schema
+    ?ordinary_execution_mode
     ~policy
     ~executor:In_process
     ~backend:Ocaml_runtime
@@ -1031,7 +1091,8 @@ let in_process_descriptor_with_schema_source
 ;;
 
 let in_process_descriptor ~keeper_model_projection ~id ~name ~description
-      ~input_schema ~policy ~handler
+      ~input_schema ~policy ?ordinary_execution_mode ~handler
+      ()
   =
   in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
@@ -1043,6 +1104,7 @@ let in_process_descriptor ~keeper_model_projection ~id ~name ~description
     ~input_schema
     ~policy
     ~handler
+    ?ordinary_execution_mode
     ()
 ;;
 
@@ -1120,6 +1182,30 @@ let masc_board_descriptor board_name =
   let name = Tool_name.Board_name.to_string board_name in
   let operation_policy = Board_tool_registry.operation_policy board_name in
   let readonly = operation_policy.readonly in
+  let ordinary_execution_mode =
+    match board_name with
+    | Tool_name.Board_name.Board_stats -> Concurrent
+    | ( Board_cleanup
+      | Board_comment
+      | Board_comment_vote
+      | Board_curation_read
+      | Board_curation_submit
+      | Board_delete
+      | Board_hearths
+      | Board_list
+      | Board_post
+      | Board_post_get
+      | Board_post_update
+      | Board_profile
+      | Board_reaction
+      | Board_search
+      | Board_sub_board_create
+      | Board_sub_board_delete
+      | Board_sub_board_get
+      | Board_sub_board_list
+      | Board_sub_board_update
+      | Board_vote ) -> Serial
+  in
   let policy = policy ~readonly ~retryable:readonly () in
   let canonical_keeper_input_schema =
     remove_schema_fields
@@ -1141,6 +1227,7 @@ let masc_board_descriptor board_name =
        ~name
        ~description
        ~input_schema
+       ~ordinary_execution_mode
        ~policy
        ~handler:Tool_board_dispatch
        ()
@@ -1406,8 +1493,10 @@ let internal_descriptors : t list =
         "Return the current wall-clock time as ISO 8601 and Unix epoch \
          seconds. No arguments."
       ~input_schema:empty_object_schema
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_time_now
+      ()
   ; (in_process_descriptor
        ~keeper_model_projection:Internal_name
        ~id:"keeper.tools_list"
@@ -1420,6 +1509,7 @@ let internal_descriptors : t list =
        ~input_schema:empty_object_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tools_list
+       ()
      |> with_eval_tags [ "capability_introspection" ])
     (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
   ; in_process_descriptor
@@ -1433,6 +1523,7 @@ let internal_descriptors : t list =
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_context_status
+      ()
   ; (in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -1477,6 +1568,7 @@ let internal_descriptors : t list =
       ~input_schema:library_search_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_search
+      ()
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
       ~id:"keeper.library.read"
@@ -1485,6 +1577,7 @@ let internal_descriptors : t list =
       ~input_schema:library_read_schema
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
+      ()
     (* ── connector surfaces (RFC-0223 P3) ─────────────────────── *)
   ; (in_process_descriptor
        ~keeper_model_projection:Internal_name
@@ -1499,6 +1592,7 @@ let internal_descriptors : t list =
        ~input_schema:surface_read_schema
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_surface_read
+       ()
      |> with_eval_tags [ "surface_context_read" ])
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
@@ -1508,6 +1602,7 @@ let internal_descriptors : t list =
       ~input_schema:surface_post_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_surface_post
+      ()
   ; in_process_descriptor
       ~keeper_model_projection:Internal_name
       ~id:"keeper.person.note_set"
@@ -1520,6 +1615,7 @@ let internal_descriptors : t list =
       ~input_schema:person_note_set_schema
       ~policy:(write_in_process_policy ())
       ~handler:Tool_person_note_set
+      ()
     (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
@@ -1919,6 +2015,7 @@ let route_evidence_json d =
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+     ; "execution", `String (execution_to_string d.execution)
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
      ]
@@ -1953,6 +2050,7 @@ let discovery_fields d =
    ; "backend", `String (backend_to_string d.backend)
    ; "sandbox", `String (sandbox_to_string d.sandbox)
    ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+   ; "execution", `String (execution_to_string d.execution)
    ; "policy", discovery_policy_json d.policy
    ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
    ]

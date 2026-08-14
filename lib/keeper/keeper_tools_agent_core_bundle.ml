@@ -9,18 +9,6 @@
 
 open Keeper_tools_agent_core
 
-type completion_boundary =
-  | Continue_after_success
-  | Terminal_effect
-
-(* A connected-surface post is the reply deliverable for this Keeper turn.
-   Classify it from the closed runtime-handler ADT: no tool-name comparison,
-   payload inspection, retry count, or elapsed-time threshold participates. *)
-let completion_boundary_of_runtime_handler = function
-  | Keeper_tool_descriptor.Tool_surface_post -> Terminal_effect
-  | _ -> Continue_after_success
-;;
-
 let terminal_externalization_failure
       state
       ({ message; _ } : Tool_bridge.externalization_error)
@@ -253,9 +241,23 @@ let make_tool_bundle_for_descriptors
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
+         let agent_core_descriptor =
+           match descriptor.execution with
+           | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial ->
+             Some
+               (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+           | Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent ->
+             Some
+               (Agent_core.Tool.ordinary_descriptor
+                  Agent_core.Tool_contract.Concurrent)
+           | Keeper_tool_descriptor.Terminal ->
+             Some
+               (Agent_core.Tool.terminal_descriptor
+                  Agent_core.Tool_contract.Effect_outcome_unknown)
+         in
          let on_completed, on_failed, on_externalization_error =
-           match completion_boundary_of_runtime_handler descriptor.runtime_handler with
-           | Terminal_effect ->
+           match descriptor.execution with
+           | Keeper_tool_descriptor.Terminal ->
              ( Some
                  (function
                    | Some receipt -> mark_terminal_effect_completed receipt
@@ -268,7 +270,9 @@ let make_tool_bundle_for_descriptors
                        })
              , Some mark_terminal_effect_failed
              , Some mark_completed_terminal_externalization_failed )
-           | Continue_after_success -> None, None, None
+           | Keeper_tool_descriptor.Ordinary
+               (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) ->
+             None, None, None
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
@@ -298,6 +302,7 @@ let make_tool_bundle_for_descriptors
                  ()
              in
              Tool_bridge.agent_core_tool_of_masc_with_execution_env
+               ?descriptor:agent_core_descriptor
                ~base_path:config.base_path
                ~model_projection:descriptor.model_output_projection
                ?on_externalization_error
@@ -367,12 +372,6 @@ let make_tools
 ;;
 
 module For_testing = struct
-  let is_terminal_effect_handler handler =
-    match completion_boundary_of_runtime_handler handler with
-    | Terminal_effect -> true
-    | Continue_after_success -> false
-  ;;
-
   let initial_terminal_effect_state = initial_terminal_effect_state
 
   let terminal_externalization_failure =

@@ -872,6 +872,15 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
+            # The ratchet compares against pull_request.base.sha, which is not
+            # always reachable from the base branch: a PR whose base was
+            # retargeted (its parent in a stack merged) keeps the SHA recorded
+            # at event time, and that commit lives on the old base. Fetching
+            # the branch alone leaves it absent and the ratchet hard-fails with
+            # "base revision is unavailable". Fetch the exact commit too.
+            if ! git cat-file -e "${OCAML_BOUNDARY_BASE_REF}^{commit}" 2>/dev/null; then
+              bash scripts/ci/git-fetch-retry.sh origin "${OCAML_BOUNDARY_BASE_REF}"
+            fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             bash scripts/ci/git-fetch-retry.sh \
               origin \

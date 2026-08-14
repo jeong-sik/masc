@@ -182,6 +182,30 @@ run_gate() {
     done < <(find "$signals_root" -name '*.jsonl' -print0)
   fi
 
+  # Board attention candidate ledgers are schema_version 4 (typed post_created
+  # identity). parse_rows is fail-total per file, so one pre-v4 row silently
+  # stalls that keeper's board attention after restart. There is deliberately
+  # no legacy reader: retire old ledgers instead of starting on top of them.
+  local candidates_root="$runtime_root/board_attention_candidates"
+  if [[ -e "$candidates_root" || -L "$candidates_root" ]]; then
+    [[ -d "$candidates_root" && ! -L "$candidates_root" ]] \
+      || fail "board attention candidate store is not an exact directory: $candidates_root"
+    local candidate_ledger_path
+    local stale_row_report
+    while IFS= read -r -d '' candidate_ledger_path; do
+      if [[ ! -s "$candidate_ledger_path" ]]; then
+        continue
+      fi
+      # -R + fromjson: a torn or non-JSON line is reported instead of skipped —
+      # the runtime reader is fail-total per file, so it would stall on it too.
+      stale_row_report="$(jq -Rr \
+        'select(test("\\S")) | try (fromjson | select(.schema_version != 4) | "schema_version=\(.schema_version)") catch "unparseable row"' \
+        "$candidate_ledger_path" | head -1)"
+      [[ -z "$stale_row_report" ]] \
+        || fail "board attention candidate ledger has a pre-v4 or unreadable row ($stale_row_report): $candidate_ledger_path — retire the store before restart: mv $candidates_root ${runtime_root}/board_attention_candidates-retired-$(date +%Y%m%d)"
+    done < <(find "$candidates_root" -name '*.jsonl' -print0)
+  fi
+
   printf '[runtime-deployment-preflight] OK: base_path=%s schedule_ledgers=%d signal_files=%d signal_rows=%d current_owners=%d in_progress=%d\n' \
     "$BASE_PATH" "$schedule_ledger_count" "$signal_file_count" \
     "$signal_row_count" "$current_owner_count" "$in_progress_count_total"
@@ -288,6 +312,27 @@ if [[ "$SELF_TEST" -eq 1 ]]; then
   write_schedules "$current_root" running
   write_current_queue "$current_root"
   "$0" --base-path "$current_root" >/dev/null
+
+  candidate_v4_root="$fixture_root/candidate-v4"
+  write_schedules "$candidate_v4_root" running
+  mkdir -p "$candidate_v4_root/.masc/board_attention_candidates"
+  printf '{"schema_version": 4, "candidate_id": "fixture"}\n' \
+    >"$candidate_v4_root/.masc/board_attention_candidates/fixture.jsonl"
+  "$0" --base-path "$candidate_v4_root" >/dev/null
+
+  stale_candidate_root="$fixture_root/candidate-pre-v4"
+  write_schedules "$stale_candidate_root" running
+  mkdir -p "$stale_candidate_root/.masc/board_attention_candidates"
+  printf '{"schema_version": 3, "candidate_id": "fixture"}\n' \
+    >"$stale_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
+  expect_failure stale_board_attention_candidate_ledger "$stale_candidate_root"
+
+  torn_candidate_root="$fixture_root/candidate-torn"
+  write_schedules "$torn_candidate_root" running
+  mkdir -p "$torn_candidate_root/.masc/board_attention_candidates"
+  printf '{"schema_version": 4}\n{"schema_ver' \
+    >"$torn_candidate_root/.masc/board_attention_candidates/fixture.jsonl"
+  expect_failure torn_board_attention_candidate_ledger "$torn_candidate_root"
 
   malformed_current_root="$fixture_root/malformed-current"
   write_schedules "$malformed_current_root" running

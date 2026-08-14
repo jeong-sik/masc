@@ -39,9 +39,11 @@ type accumulator
 (** Allocate a fresh empty accumulator. *)
 val create_accumulator : unit -> accumulator
 
-(** Capture one producer-owned typed result. Only a JSON object can carry the
-    reserved multimodal fields; every other JSON variant, including a
-    JSON-looking [`String], is ignored without reparsing. *)
+(** Capture one producer-owned typed result only when the canonical multimodal
+    detector finds both a supported [__multimodal_kind] and a string
+    [__multimodal_id]. Untagged typed objects and every other JSON variant,
+    including a JSON-looking [`String], are ignored without reparsing or being
+    retained until post-turn drain. *)
 val capture_typed_result : accumulator -> Yojson.Safe.t -> unit
 
 (** Drain the accumulator and merge any tagged tool results into

@@ -881,6 +881,7 @@ let run_turn
                       ~yield_on_tool
                       ~context_injector
                       ~context:shared_context
+                      ~terminal_effect_state:s.terminal_effect_state
                       ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
                       ?cooperative_yield_probe
                       ?agent_core_checkpoint:resume_agent_core_checkpoint

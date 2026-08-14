@@ -254,6 +254,60 @@ let test_input_required_bypasses_response_accept () =
     0
     !accept_calls
 
+let test_terminal_tool_completion_bypasses_empty_response_rejection () =
+  let accept_calls = ref 0 in
+  let reject (_ : Agent_core.Types.api_response) =
+    incr accept_calls;
+    false
+  in
+  let completed_state () =
+    Masc.Keeper_tools_agent_core.Terminal_effect_completed
+      (Masc.Keeper_tool_execution.Surface_post_completed
+         Masc.Keeper_surface_post.To_dashboard)
+  in
+  (match
+     Masc.Keeper_turn_driver.For_testing.apply_official_client_accept
+       ~runtime_id:"runtime.official-client"
+       ~accept:reject
+       ~terminal_effect_state:completed_state
+       (run_result ~content:[] ())
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "settled terminal tool completion was rejected: %s"
+       (Agent_core.Error.to_string error));
+  Alcotest.(check int)
+    "terminal completion does not invoke response-content acceptance"
+    0
+    !accept_calls
+
+let test_open_terminal_state_keeps_empty_response_rejection () =
+  match
+    Masc.Keeper_turn_driver.For_testing.apply_official_client_accept
+      ~runtime_id:"runtime.official-client"
+      ~accept:Keeper_tooling.Response.response_has_text_or_tool_progress
+      ~terminal_effect_state:(fun () ->
+        Masc.Keeper_tools_agent_core.Terminal_effect_open)
+      (run_result ~content:[] ())
+  with
+  | Error error ->
+    (match Keeper_internal_error.classify_masc_internal_error error with
+     | Some (Keeper_internal_error.Accept_rejected { reason; _ }) ->
+       Alcotest.(check bool)
+         "ordinary empty response remains typed no-progress"
+         true
+         (contains ~needle:"response rejected by accept" reason)
+     | Some other ->
+       Alcotest.failf
+         "ordinary empty response produced %s"
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf
+         "ordinary empty response produced the wrong rejection: %s"
+         (Agent_core.Error.to_string error))
+  | Ok _ -> Alcotest.fail "ordinary empty response was incorrectly accepted"
+
 let test_replay_projection_failure_preserves_provider_success () =
   let open Agent_core.Types in
   let canonical_prefix =
@@ -1772,6 +1826,14 @@ let () =
             "InputRequired bypasses response acceptance"
             `Quick
             test_input_required_bypasses_response_accept;
+          Alcotest.test_case
+            "terminal tool completion bypasses empty response rejection"
+            `Quick
+            test_terminal_tool_completion_bypasses_empty_response_rejection;
+          Alcotest.test_case
+            "open terminal state keeps empty response rejection"
+            `Quick
+            test_open_terminal_state_keeps_empty_response_rejection;
           Alcotest.test_case
             "replay projection failure preserves provider success"
             `Quick

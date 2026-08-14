@@ -1,5 +1,14 @@
 module String_set = Set_util.StringSet
 
+module Artifact_reference_set = Set.Make (struct
+  type t = Tool_output.artifact_ref
+
+  let compare left right =
+    match String.compare left.Tool_output.sha256 right.Tool_output.sha256 with
+    | 0 -> String.compare left.mime right.mime
+    | order -> order
+end)
+
 type mode =
   | Observe_only
   | Delete_previous_candidates
@@ -26,6 +35,14 @@ type error =
   | Malformed_structured_artifact_reference of
       { path : string
       ; line : int
+      ; detail : string
+      }
+  | Artifact_manifest_read_failed of
+      { sha256 : string
+      ; reason : string
+      }
+  | Artifact_manifest_invalid of
+      { sha256 : string
       ; detail : string
       }
   | Candidate_snapshot_invalid of
@@ -74,6 +91,10 @@ let error_to_string = function
       path
       line
       detail
+  | Artifact_manifest_read_failed { sha256; reason } ->
+    Printf.sprintf "artifact manifest read failed sha256=%s: %s" sha256 reason
+  | Artifact_manifest_invalid { sha256; detail } ->
+    Printf.sprintf "artifact manifest invalid sha256=%s: %s" sha256 detail
   | Candidate_snapshot_invalid { path; detail } ->
     Printf.sprintf "blob maintenance candidate snapshot invalid path=%s: %s" path detail
   | Candidate_snapshot_read_failed { path; detail } ->
@@ -120,7 +141,7 @@ let add_references ~path ~line references text =
       Tool_output.encode_for_agent_core (Tool_output.Stored reference)
     in
     if String.equal text canonical
-    then Ok (String_set.add reference.Tool_output.sha256 references)
+    then Ok (Artifact_reference_set.add reference references)
     else
       Error
         (Malformed_artifact_reference
@@ -136,7 +157,7 @@ let rec references_in_json ~path ~line references = function
   | (`Assoc fields as json) ->
     (match Tool_output.normalized_artifact_ref_of_json json with
      | Tool_output.Decoded_normalized_artifact_ref reference ->
-       Ok (String_set.add reference.Tool_output.sha256 references)
+       Ok (Artifact_reference_set.add reference references)
      | Tool_output.Invalid_normalized_artifact_ref { detail } ->
        Error
          (Malformed_structured_artifact_reference
@@ -181,7 +202,7 @@ let references_in_file ~ownership_root path =
       references_in_json
         ~path
         ~line:1
-        String_set.empty
+        Artifact_reference_set.empty
         (Yojson.Safe.from_string payload)
     with
     | Yojson.Json_error _ ->
@@ -217,7 +238,7 @@ let references_in_file ~ownership_root path =
                         line)
               in
               line_number + 1, next)
-           (1, Ok String_set.empty)
+           (1, Ok Artifact_reference_set.empty)
       |> snd
 ;;
 
@@ -361,7 +382,7 @@ let live_references ~base_path =
       | Unix.S_DIR -> scan_directory path references
       | Unix.S_REG ->
         Result.map
-          (String_set.union references)
+          (Artifact_reference_set.union references)
           (references_in_file ~ownership_root:base_path path)
         | Unix.S_LNK ->
           Error
@@ -401,7 +422,62 @@ let live_references ~base_path =
   |> List.fold_left
        (fun result root ->
           Result.bind result (fun progress -> scan_directory root progress))
-       (Ok String_set.empty)
+       (Ok Artifact_reference_set.empty)
+;;
+
+let expand_artifact_manifests ~store references =
+  let rec expand expanded references = function
+    | [] -> Ok references
+    | reference :: rest
+      when not
+             (String.equal
+                reference.Tool_output.mime
+                Tool_output.artifact_manifest_mime) ->
+      expand expanded references rest
+    | reference :: rest
+      when String_set.mem reference.Tool_output.sha256 expanded ->
+      expand expanded references rest
+    | reference :: rest ->
+      let sha256 = reference.Tool_output.sha256 in
+      let expanded = String_set.add sha256 expanded in
+      (match Tool_blob_store.fetch store ~sha256 with
+       | Error error ->
+         Error
+           (Artifact_manifest_read_failed
+              { sha256; reason = Tool_blob_store.fetch_error_to_string error })
+       | Ok None ->
+         Error
+           (Artifact_manifest_read_failed
+              { sha256; reason = "referenced manifest blob is absent" })
+       | Ok (Some payload) ->
+         let decoded =
+           try
+             Yojson.Safe.from_string payload
+             |> Tool_output.artifact_manifest_of_json
+           with
+           | Yojson.Json_error detail ->
+             Tool_output.Invalid_artifact_manifest { detail }
+         in
+         (match decoded with
+          | Tool_output.Decoded_artifact_manifest { artifact_refs; _ } ->
+            let references, added =
+              List.fold_left
+                (fun (references, added) child ->
+                   if Artifact_reference_set.mem child references
+                   then references, added
+                   else Artifact_reference_set.add child references, child :: added)
+                (references, [])
+                artifact_refs
+            in
+            expand expanded references (List.rev_append added rest)
+          | Tool_output.Not_artifact_manifest ->
+            Error
+              (Artifact_manifest_invalid
+                 { sha256; detail = "manifest MIME requires the canonical schema" })
+          | Tool_output.Invalid_artifact_manifest { detail } ->
+            Error (Artifact_manifest_invalid { sha256; detail })))
+  in
+  expand String_set.empty references (Artifact_reference_set.elements references)
 ;;
 
 let candidate_snapshot_to_json candidates =
@@ -532,7 +608,15 @@ let run ~base_path ~mode =
   let open Result.Syntax in
   let* () = reject_uncoordinated_cluster_roots ~base_path in
   let store = Tool_blob_store.create ~base_path in
-  let* live = live_references ~base_path in
+  let* direct_live = live_references ~base_path in
+  let* live_references = expand_artifact_manifests ~store direct_live in
+  let live =
+    Artifact_reference_set.fold
+      (fun reference hashes ->
+         String_set.add reference.Tool_output.sha256 hashes)
+      live_references
+      String_set.empty
+  in
   let* previous_candidates = load_candidate_snapshot ~base_path in
   let* blob_list =
     match Tool_blob_store.list_all_result store with

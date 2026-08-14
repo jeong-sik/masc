@@ -24,6 +24,7 @@ let make_keeper_tool_handler
       ?gate_context
       ?gate_grant
       ?record_gate_result
+      ?observe_execution_evidence
       ?on_completed
       ?on_deferred
       ?on_external_effect_deferred
@@ -116,6 +117,12 @@ let make_keeper_tool_handler
   fun ?agent_core_invocation raw_input ->
     let invocation_fields = agent_core_invocation_fields agent_core_invocation in
     let handle_validation_error ~input validation_result =
+      Option.iter
+        (fun observe ->
+           observe
+             ~failure_effect_disposition:(Some Tool_result.Proven_pre_effect)
+             ~deferred_kind:None)
+        observe_execution_evidence;
       let output_text = Tool_result.message validation_result in
       let duration_ms = 0 in
       let disposition = Tool_result.string_of_disposition validation_result in
@@ -209,6 +216,13 @@ let make_keeper_tool_handler
                 ~input
                 ()
             in
+            Option.iter
+              (fun observe ->
+                 observe
+                   ~failure_effect_disposition:
+                     execution.failure_effect_disposition
+                   ~deferred_kind:execution.deferred_kind)
+              observe_execution_evidence;
             execution.tool_result
             |> record_result ~input
             |> observe_terminal_execution_result

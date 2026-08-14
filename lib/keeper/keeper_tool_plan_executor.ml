@@ -109,11 +109,40 @@ let outer_completion plan =
 
 type node_result =
   { node_id : Keeper_tool_plan.Node_id.t
+  ; execution_id : Ids.Execution_id.t
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
   ; result : Tool_result.result
+  ; tool_use_id : string
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition option
+  ; deferred_kind : Keeper_tool_execution.deferred_kind option
+  ; result_bytes : int
+  ; truncated_to : int option
   }
+
+type dispatch_result =
+  { result : Tool_result.result
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition option
+  ; deferred_kind : Keeper_tool_execution.deferred_kind option
+  ; result_bytes : int option
+  ; truncated_to : int option
+  }
+
+let dispatch_result
+      ?failure_effect_disposition
+      ?deferred_kind
+      ?result_bytes
+      ?truncated_to
+      result
+  =
+  { result
+  ; failure_effect_disposition
+  ; deferred_kind
+  ; result_bytes
+  ; truncated_to
+  }
+;;
 
 type cause =
   | Plan_execution_failed of
@@ -122,6 +151,10 @@ type cause =
       ; error : Keeper_tool_plan.execution_error
       }
   | Tool_did_not_complete of node_result
+  | Node_observation_failed of
+      { node : node_result
+      ; detail : string
+      }
   | Outer_completion_mismatch of
       { expected : Agent_core.Tool_contract.completion
       ; actual : Agent_core.Tool_contract.completion
@@ -130,14 +163,16 @@ type cause =
 type failure =
   { settled : node_result list
   ; cause : cause
+  ; effect_disposition : Tool_result.failure_effect_disposition
   }
 
 type dispatch =
-  node:Keeper_tool_plan.node
+  tool_use_id:string
+  -> node:Keeper_tool_plan.node
   -> descriptor:Keeper_tool_descriptor.t
   -> schedule:Agent_core.Tool_contract.schedule
   -> input:Yojson.Safe.t
-  -> Tool_result.result
+  -> dispatch_result
 
 type node_settlement =
   { result : node_result option
@@ -145,7 +180,15 @@ type node_settlement =
   ; cause : cause option
   }
 
-let execute_one ~plan ~run_id ~outputs ~dispatch scheduled =
+let execute_one
+      ~plan
+      ~run_id
+      ~outputs
+      ~tool_use_id_for_node
+      ~dispatch
+      ?observe_node_result
+      scheduled
+  =
   let node = scheduled.node in
   let node_id = node.Keeper_tool_plan.id in
   let plan_failure error =
@@ -167,31 +210,69 @@ let execute_one ~plan ~run_id ~outputs ~dispatch scheduled =
   with
   | Error error -> plan_failure error
   | Ok input ->
+    (* The executor owns both occurrence identities. Mint them before entering
+       dispatch so success, Deferred/Failed settlement, and the exception
+       wrapper all project the exact same non-optional join key. *)
+    let execution_id = Ids.Execution_id.generate () in
+    let tool_use_id = tool_use_id_for_node ~execution_id node in
     let start_time = Time_compat.now () in
     let result =
       Cancel_safe.protect
         ~on_exn:(fun exn ->
-          Tool_result.make_err_of_exn
-            ~class_:Tool_result.Runtime_failure
-            ~tool_name:node.tool_name
-            ~start_time
-            exn)
+          dispatch_result
+            ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+            (Tool_result.make_err_of_exn
+               ~class_:Tool_result.Runtime_failure
+               ~tool_name:node.tool_name
+               ~start_time
+               exn))
         (fun () ->
            dispatch
+             ~tool_use_id
              ~node
              ~descriptor:scheduled.descriptor
              ~schedule:scheduled.schedule
              ~input)
     in
+    let result_bytes =
+      Option.value
+        ~default:(String.length (Tool_result.message result.result))
+        result.result_bytes
+    in
     let node_result =
       { node_id
+      ; execution_id
       ; tool_name = node.tool_name
       ; input
       ; schedule = scheduled.schedule
-      ; result
+      ; result = result.result
+      ; tool_use_id
+      ; failure_effect_disposition = result.failure_effect_disposition
+      ; deferred_kind = result.deferred_kind
+      ; result_bytes
+      ; truncated_to = result.truncated_to
       }
     in
-    (match result with
+    let observation_error =
+      match observe_node_result with
+      | None -> None
+      | Some observe ->
+        (try
+           match observe node_result with
+           | Ok () -> None
+           | Error detail -> Some detail
+         with
+         | Eio.Cancel.Cancelled _ as exn -> raise exn
+         | exn -> Some (Printexc.to_string exn))
+    in
+    (match observation_error with
+     | Some detail ->
+       { result = Some node_result
+       ; output = None
+       ; cause = Some (Node_observation_failed { node = node_result; detail })
+       }
+     | None ->
+       (match result.result with
      | Tool_result.Deferred _ | Tool_result.Failed _ ->
        { result = Some node_result
        ; output = None
@@ -207,7 +288,7 @@ let execute_one ~plan ~run_id ~outputs ~dispatch scheduled =
                plan
                ~run_id
                ~node_id
-               (Tool_result.data result)
+               (Tool_result.data result.result)
            with
            | Ok output ->
              { result = Some node_result; output = Some output; cause = None }
@@ -218,14 +299,60 @@ let execute_one ~plan ~run_id ~outputs ~dispatch scheduled =
                  Some
                    (Plan_execution_failed
                       { node_id; schedule = scheduled.schedule; error })
-             })))
+             }))))
 ;;
 
-let execute ~plan ~run_id ~dispatch () =
+let execute_with_tool_use_id
+      ~plan
+      ~run_id
+      ~tool_use_id_for_node
+      ~dispatch
+      ?observe_node_result
+      ()
+  =
+  let node_effect_disposition (result : node_result) =
+    match result.result with
+    | Tool_result.Deferred _ -> Tool_result.Proven_pre_effect
+    | Tool_result.Failed _ ->
+      Option.value
+        ~default:Tool_result.Effect_outcome_unknown
+        result.failure_effect_disposition
+    | Tool_result.Completed _ ->
+      (match Keeper_tool_plan.descriptor plan result.node_id with
+       | Some descriptor
+         when Keeper_tool_descriptor.readonly_for_input descriptor ~input:result.input
+              = Some true ->
+         Tool_result.Proven_pre_effect
+       | Some _ | None -> Tool_result.Proven_post_effect)
+  in
+  let aggregate_effect_disposition settled =
+    List.fold_left
+      (fun aggregate result ->
+         match aggregate, node_effect_disposition result with
+         | Tool_result.Proven_post_effect, _
+         | _, Tool_result.Proven_post_effect ->
+           Tool_result.Proven_post_effect
+         | Tool_result.Effect_outcome_unknown, _
+         | _, Tool_result.Effect_outcome_unknown ->
+           Tool_result.Effect_outcome_unknown
+         | Tool_result.Proven_pre_effect, Tool_result.Proven_pre_effect ->
+           Tool_result.Proven_pre_effect)
+      Tool_result.Proven_pre_effect
+      settled
+  in
   let rec run_batches settled outputs = function
     | [] -> Ok settled
     | batch :: rest ->
-      let execute scheduled = execute_one ~plan ~run_id ~outputs ~dispatch scheduled in
+      let execute scheduled =
+        execute_one
+          ~plan
+          ~run_id
+          ~outputs
+          ~tool_use_id_for_node
+          ~dispatch
+          ?observe_node_result
+          scheduled
+      in
       let settlements =
         match batch with
         | Serial_batch scheduled -> [ execute scheduled ]
@@ -234,7 +361,12 @@ let execute ~plan ~run_id ~dispatch () =
       let batch_results = List.filter_map (fun settlement -> settlement.result) settlements in
       let settled = settled @ batch_results in
       (match List.find_map (fun settlement -> settlement.cause) settlements with
-       | Some cause -> Error { settled; cause }
+       | Some cause ->
+         Error
+           { settled
+           ; cause
+           ; effect_disposition = aggregate_effect_disposition settled
+           }
        | None ->
          let outputs =
            List.fold_left
@@ -251,10 +383,31 @@ let execute ~plan ~run_id ~dispatch () =
   run_batches [] [] (schedule plan)
 ;;
 
-let nested_tool_use_id parent_invocation node_id =
+let execute ~plan ~run_id ~dispatch ?observe_node_result () =
+  let tool_use_id_for_node ~execution_id _node =
+    "composition-node:" ^ Ids.Execution_id.to_string execution_id
+  in
+  execute_with_tool_use_id
+    ~plan
+    ~run_id
+    ~tool_use_id_for_node
+    ~dispatch
+    ?observe_node_result
+    ()
+;;
+
+let nested_tool_use_id ~composition_run_id parent_invocation node_id =
   let parent = Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation in
   let node = Keeper_tool_plan.Node_id.to_string node_id in
-  Printf.sprintf "composition:%d:%s:%d:%s" (String.length parent) parent (String.length node) node
+  let run = Keeper_tool_plan.Composition_run_id.to_string composition_run_id in
+  Printf.sprintf
+    "composition:%d:%s:%d:%s:%d:%s"
+    (String.length run)
+    run
+    (String.length parent)
+    parent
+    (String.length node)
+    node
 ;;
 
 let equal_failure_effect left right =
@@ -285,6 +438,7 @@ let equal_completion left right =
 let execute_keeper
       ~plan
       ~run_id
+      ?composition_run_id
       ~parent_invocation
       ~config
       ~meta
@@ -300,8 +454,14 @@ let execute_keeper
       ?on_deferred
       ?on_external_effect_deferred
       ?on_failed
+      ?observe_node_result
       ()
   =
+  let composition_run_id =
+    Option.value
+      ~default:(Keeper_tool_plan.Composition_run_id.fresh ())
+      composition_run_id
+  in
   let expected_completion = outer_completion plan in
   let actual_completion =
     Agent_core.Tool_contract.Invocation.completion parent_invocation
@@ -313,15 +473,17 @@ let execute_keeper
       ; cause =
           Outer_completion_mismatch
             { expected = expected_completion; actual = actual_completion }
+      ; effect_disposition = Tool_result.Proven_pre_effect
       }
   else
-  let dispatch ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input =
+  let dispatch ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input =
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with
       | Keeper_tool_descriptor.Terminal -> on_completed, on_failed
       | Keeper_tool_descriptor.Ordinary
           (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) -> None, None
     in
+    let execution_evidence = ref None in
     let handler =
       Keeper_tools_agent_core_handler.make_keeper_tool_handler
         ~name:descriptor.internal_name
@@ -338,6 +500,8 @@ let execute_keeper
         ?gate_context
         ?gate_grant
         ?record_gate_result
+        ~observe_execution_evidence:(fun ~failure_effect_disposition ~deferred_kind ->
+          execution_evidence := Some (failure_effect_disposition, deferred_kind))
         ?on_completed:terminal_on_completed
         ?on_deferred
         ?on_external_effect_deferred
@@ -346,12 +510,43 @@ let execute_keeper
     in
     let invocation =
       Agent_core.Tool_contract.Invocation.create
-        ~tool_use_id:(nested_tool_use_id parent_invocation node.id)
+        ~tool_use_id
         ~turn:(Agent_core.Tool_contract.Invocation.turn parent_invocation)
         ~schedule
         ~completion:Agent_core.Tool_contract.Continue_after_success
     in
-    handler ~agent_core_invocation:invocation input
+    let result = handler ~agent_core_invocation:invocation input in
+    let original_bytes, truncated_to =
+      Keeper_tool_call_log.consume_truncation_info ~invocation ()
+    in
+    let result_bytes =
+      if original_bytes > 0
+      then original_bytes
+      else String.length (Tool_result.message result)
+    in
+    match !execution_evidence with
+    | Some (failure_effect_disposition, deferred_kind) ->
+      { result
+      ; failure_effect_disposition
+      ; deferred_kind
+      ; result_bytes = Some result_bytes
+      ; truncated_to
+      }
+    | None ->
+      dispatch_result
+        ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
+        ~result_bytes
+        ?truncated_to
+        result
   in
-  execute ~plan ~run_id ~dispatch ()
+  let tool_use_id_for_node ~execution_id:_ node =
+    nested_tool_use_id ~composition_run_id parent_invocation node.Keeper_tool_plan.id
+  in
+  execute_with_tool_use_id
+    ~plan
+    ~run_id
+    ~tool_use_id_for_node
+    ~dispatch
+    ?observe_node_result
+    ()
 ;;

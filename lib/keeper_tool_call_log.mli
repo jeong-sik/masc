@@ -130,6 +130,11 @@ val configured_masc_root : unit -> string option
     [init], even if the store failed to open. Runtime sidecars use this to
     keep their durable projections in the same cluster namespace. *)
 
+val committed_revision : unit -> int
+(** Monotonic in-process revision advanced exactly after each successful
+    durable tool-call append. Readers use it to invalidate derived caches
+    without making the persistence owner depend on a dashboard module. *)
+
 val log_call :
   keeper_name:string ->
   tool_name:string ->
@@ -150,6 +155,12 @@ val log_call :
   ?batch_index:int ->
   ?batch_size:int ->
   ?execution_mode:Agent_core.Tool_contract.execution_mode ->
+  ?typed_result:Tool_result.result ->
+  ?composition_tool:string ->
+  ?composition_run_id:string ->
+  ?composition_node_id:string ->
+  ?composition_execution:Keeper_tool_composition_catalog.execution_mode ->
+  ?parent_tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -177,6 +188,15 @@ val log_call :
     [planned_index], so they are persisted unchanged. [batch_index],
     [batch_size], and [execution_mode] preserve Agent Core's actual schedule
     rather than inferring concurrency from timing.
+    [typed_result] serializes the producer-owned disposition when it is
+    available. Any canonical normalized artifact references in its typed data
+    are also persisted as actual JSON under [artifact_refs], keeping the
+    content-addressed blobs visible to offline maintenance without parsing a
+    JSON-bearing model-output string. Those GC roots deliberately carry an
+    empty preview; model/UI preview projection remains owned by [output]. The
+    composition fields are an explicit observation envelope supplied by the
+    typed plan executor; readers must not reconstruct them from [tool_use_id]
+    or tool-name strings.
     [on_committed], when supplied, forces this row through the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the

@@ -639,8 +639,70 @@ let with_composable_output composable_output descriptor =
   { descriptor with composable_output }
 ;;
 
+let normalized_artifact_ref_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "_blob"
+            , `Assoc
+                [ "type", `String "object"
+                ; ( "properties"
+                  , `Assoc
+                      [ "sha256", `Assoc [ "type", `String "string" ]
+                      ; "bytes", `Assoc [ "type", `String "integer" ]
+                      ; "mime", `Assoc [ "type", `String "string" ]
+                      ; "preview", `Assoc [ "type", `String "string" ]
+                      ] )
+                ; ( "required"
+                  , `List
+                      (List.map
+                         (fun name -> `String name)
+                         [ "sha256"; "bytes"; "mime"; "preview" ]) )
+                ; "additionalProperties", `Bool false
+                ] )
+          ] )
+    ; "required", `List [ `String "_blob" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let execute_output_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "ok", `Assoc [ "type", `String "boolean" ]
+          ; ( "status"
+            , `Assoc
+                [ "type", `String "object"
+                ; ( "properties"
+                  , `Assoc
+                      [ "kind", `Assoc [ "type", `String "string" ]
+                      ; "code", `Assoc [ "type", `String "integer" ]
+                      ; "signal", `Assoc [ "type", `String "integer" ]
+                      ] )
+                ; "required", `List [ `String "kind" ]
+                ; "additionalProperties", `Bool false
+                ] )
+          ; "output", `Assoc [ "type", `String "string" ]
+          ; "output_artifact", normalized_artifact_ref_schema
+          ; "stdout_artifact", normalized_artifact_ref_schema
+          ; "stderr_artifact", normalized_artifact_ref_schema
+          ; "typed", `Assoc [ "type", `String "boolean" ]
+          ; "execution_time_ms", `Assoc [ "type", `String "integer" ]
+          ] )
+    ; ( "required"
+      , `List
+          (List.map
+             (fun name -> `String name)
+             [ "ok"; "status"; "typed"; "execution_time_ms" ]) )
+    ; "additionalProperties", `Bool true
+    ]
+;;
+
 let public_descriptors =
-  [ descriptor
+  [ (descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name
       ~input_schema_source:Descriptor_owned
@@ -654,7 +716,10 @@ let public_descriptors =
          I/O and typed env for environment variables. MASC validates the input \
          shape, path jail, sandbox target, and external-effect Gate but never \
          interprets program or subcommand meaning. The invoked program owns \
-         its syntax and exit result."
+         its syntax and exit result. A successful result exposes typed status, \
+         output and execution_time_ms fields to later composition nodes. Small \
+         output stays inline; oversized output is represented by canonical \
+         output/stdout/stderr artifact references."
       ~input_schema:execute_schema
       ~policy:
         (policy
@@ -674,6 +739,7 @@ let public_descriptors =
         ]
       ~input_translation:(Identity Validate_once_before_translation)
       ()
+     |> with_composable_output (Json_output { schema = execute_output_schema }))
   ; descriptor
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Preferred_public_name

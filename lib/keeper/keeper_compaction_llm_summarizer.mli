@@ -36,6 +36,7 @@ type summarization_failure =
   | Exact_execution_authority_rejected
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_compaction_outcome.exact_execution_terminal
+  | No_reducible_boundary
   | Invalid_plan
 
 type summarizer =

@@ -1212,6 +1212,33 @@ class MissionRun:
                         runs.setdefault((role, run_id), []).append(row)
             return runs
 
+        def has_nested_settlement_evidence(row: dict[str, Any]) -> bool:
+            execution_id = row.get("execution_id")
+            tool_use_id = row.get("tool_use_id")
+            result_bytes = row.get("result_bytes")
+            truncated_to = row.get("truncated_to")
+            output = row.get("output")
+            return (
+                isinstance(execution_id, str)
+                and bool(execution_id.strip())
+                and isinstance(tool_use_id, str)
+                and bool(tool_use_id.strip())
+                and isinstance(result_bytes, int)
+                and not isinstance(result_bytes, bool)
+                and result_bytes >= 0
+                and truncated_to is None
+                and isinstance(output, str)
+                and result_bytes == len(output.encode("utf-8"))
+            )
+
+        def has_unique_nested_identities(
+            rows: list[dict[str, Any]], expected_count: int
+        ) -> bool:
+            return (
+                len({row.get("execution_id") for row in rows}) == expected_count
+                and len({row.get("tool_use_id") for row in rows}) == expected_count
+            )
+
         inline_runs = composition_runs("keeper_compose_mission-snapshot")
         async_runs = composition_runs("keeper_compose_background-snapshot")
         composition_rows = [row for rows in inline_runs.values() for row in rows]
@@ -1254,12 +1281,52 @@ class MissionRun:
                 or len(parent_ids) != 1
                 or next(iter(parent_ids)) != outer_rows[0].get("tool_use_id")
                 or not all(row.get("disposition") == "completed" for row in run_rows)
+                or not all(has_nested_settlement_evidence(row) for row in run_rows)
+                or not has_unique_nested_identities(run_rows, 4)
             ):
                 inline_turn_errors.append(f"{label}:invalid_rows={len(run_rows)}")
                 continue
             inline_turn_runs[label] = (run_id, run_rows)
             attributed_inline_run_keys.add((role, run_id))
         unattributed_inline_runs = set(inline_runs) - attributed_inline_run_keys
+        inline_run_ids_globally_unique = (
+            len({run_id for run_id, _ in inline_turn_runs.values()})
+            == len(required_inline_turn_labels)
+        )
+        inline_action_rows = [
+            row for _, rows in inline_turn_runs.values() for row in rows
+        ]
+        accepted_inline_row_identities = {
+            (
+                label.removeprefix("parallel-")
+                if label.startswith("parallel-")
+                else "coordinator",
+                run_id,
+                row.get("execution_id"),
+                row.get("tool_use_id"),
+            )
+            for label, (run_id, rows) in inline_turn_runs.items()
+            for row in rows
+        }
+        full_inline_action_rows = [
+            row for rows in inline_runs.values() for row in rows
+        ]
+        full_inline_row_identities = {
+            (role, run_id, row.get("execution_id"), row.get("tool_use_id"))
+            for (role, run_id), rows in inline_runs.items()
+            for row in rows
+        }
+        inline_row_universe_exact = (
+            len(inline_action_rows) == 56
+            and len(full_inline_action_rows) == 56
+            and len(accepted_inline_row_identities) == 56
+            and full_inline_row_identities == accepted_inline_row_identities
+        )
+        inline_action_identities_globally_unique = (
+            len(inline_action_rows) == 56
+            and len({row.get("execution_id") for row in inline_action_rows}) == 56
+            and len({row.get("tool_use_id") for row in inline_action_rows}) == 56
+        )
 
         researcher_turn = self.turns.get("parallel-researcher")
         researcher_rows = (
@@ -1310,6 +1377,21 @@ class MissionRun:
                     and final_output.get("status") == "done"
                     and final_output.get("ok") is True
                 )
+        async_action_rows = [row for rows in async_runs.values() for row in rows]
+        all_nested_action_rows = inline_action_rows + async_action_rows
+        all_composition_run_ids = {
+            run_id for _, run_id in set(inline_runs) | set(async_runs)
+        }
+        composition_run_ids_globally_unique = (
+            len(inline_runs) == 14
+            and len(async_runs) == 1
+            and len(all_composition_run_ids) == 15
+        )
+        all_nested_action_identities_globally_unique = (
+            len(all_nested_action_rows) == 58
+            and len({row.get("execution_id") for row in all_nested_action_rows}) == 58
+            and len({row.get("tool_use_id") for row in all_nested_action_rows}) == 58
+        )
 
         coordinator_runtime_turn_ids: dict[str, int] = {}
         coordinator_turn_evidence_errors: list[str] = []
@@ -1634,7 +1716,10 @@ class MissionRun:
             "composition_inline_observed": (
                 set(inline_turn_runs) == required_inline_turn_labels
                 and not inline_turn_errors
-                and not unattributed_inline_runs,
+                and not unattributed_inline_runs
+                and inline_run_ids_globally_unique
+                and inline_row_universe_exact
+                and inline_action_identities_globally_unique,
                 f"exact completed inline runs={len(inline_turn_runs)}/14 "
                 f"errors={inline_turn_errors} unattributed={sorted(unattributed_inline_runs)}",
             ),
@@ -1657,6 +1742,7 @@ class MissionRun:
                     and all(
                         row.get("composition_execution") == "async"
                         and row.get("disposition") == "completed"
+                        and has_nested_settlement_evidence(row)
                         for row in rows
                     )
                     and all(
@@ -1664,8 +1750,11 @@ class MissionRun:
                         == async_submit_rows[0].get("tool_use_id")
                         for row in rows
                     )
+                    and has_unique_nested_identities(rows, 2)
                     for (role, _), rows in async_runs.items()
-                ),
+                )
+                and composition_run_ids_globally_unique
+                and all_nested_action_identities_globally_unique,
                 f"async runs={len(async_runs)} request_id={async_request_id} "
                 f"submit_rows={len(async_submit_rows)} status_rows={len(async_status_rows)} terminal={async_outer_terminal}",
             ),

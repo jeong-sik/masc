@@ -38,6 +38,15 @@ type error =
       ; character : char
       }
   | Duplicate_composition_name of string
+  | Invalid_execution_mode of
+      { path : string list
+      ; mode : string
+      }
+  | Async_tool_not_statically_read_only of
+      { name : string
+      ; node_id : Plan.Node_id.t
+      ; tool_name : string
+      }
   | Invalid_template_kind of
       { path : string list
       ; kind : string
@@ -59,9 +68,14 @@ type error =
       ; error : Plan.error
       }
 
+type execution_mode =
+  | Inline
+  | Async
+
 type entry =
   { name : string
   ; description : string option
+  ; execution : execution_mode
   ; plan : Plan.t
   }
 
@@ -71,12 +85,27 @@ let tool_name_prefix = "keeper_compose_"
 let maximum_tool_name_bytes = 64
 let maximum_composition_name_bytes = maximum_tool_name_bytes - String.length tool_name_prefix
 let tool_name entry = tool_name_prefix ^ entry.name
+let status_tool_name = "keeper_composition_status"
+let cancel_tool_name = "keeper_composition_cancel"
+
+let execution_mode_to_string = function
+  | Inline -> "inline"
+  | Async -> "async"
+;;
+
 let path ~config_root = Filename.concat config_root "tool-compositions.toml"
 
 let entries catalog = catalog
 
 let find catalog name =
   List.find_opt (fun entry -> String.equal entry.name name) catalog
+;;
+
+let model_tool_names catalog =
+  let entry_names = List.map tool_name catalog in
+  if List.exists (fun entry -> entry.execution = Async) catalog
+  then entry_names @ [ status_tool_name; cancel_tool_name ]
+  else entry_names
 ;;
 
 let first_duplicate fields =
@@ -334,7 +363,12 @@ let parse_composition ~index value =
   match table_fields ~path ~field:"composition" value with
   | Error _ as error -> error
   | Ok fields ->
-    (match validate_fields ~path ~allowed:[ "name"; "description"; "nodes" ] fields with
+    (match
+       validate_fields
+         ~path
+         ~allowed:[ "name"; "description"; "execution"; "nodes" ]
+         fields
+     with
      | Error _ as error -> error
      | Ok () ->
        (match required_nonempty_string ~path "name" fields with
@@ -355,9 +389,19 @@ let parse_composition ~index value =
             | Some character ->
               Error (Invalid_composition_name_character { name; character })
             | None ->
-            (match optional_string ~path "description" fields with
+           (match optional_string ~path "description" fields with
            | Error _ as error -> error
            | Ok description ->
+             (match required_string ~path "execution" fields with
+              | Error _ as error -> error
+              | Ok raw_execution ->
+                (match raw_execution with
+                 | "inline" -> Ok Inline
+                 | "async" -> Ok Async
+                 | mode -> Error (Invalid_execution_mode { path; mode }))
+                |> (function
+                 | Error _ as error -> error
+                 | Ok execution ->
              (match required_field ~path "nodes" fields with
               | Error _ as error -> error
               | Ok raw_nodes ->
@@ -379,8 +423,30 @@ let parse_composition ~index value =
                            ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
                            nodes
                        with
-                       | Ok plan -> Ok { name; description; plan }
-                       | Error error -> Error (Plan_rejected { name; error })))))))))
+                       | Error error -> Error (Plan_rejected { name; error })
+                       | Ok plan ->
+                         (match execution with
+                          | Inline -> Ok { name; description; execution; plan }
+                          | Async ->
+                            (match
+                               Plan.nodes plan
+                               |> List.find_map (fun (node : Plan.node) ->
+                                 match Plan.descriptor plan node.id with
+                                 | Some descriptor
+                                   when Keeper_tool_descriptor.readonly_static_hint
+                                          descriptor
+                                        = Some true ->
+                                   None
+                                 | Some _ | None -> Some node)
+                             with
+                             | None -> Ok { name; description; execution; plan }
+                             | Some node ->
+                               Error
+                                 (Async_tool_not_statically_read_only
+                                    { name
+                                    ; node_id = node.id
+                                    ; tool_name = node.tool_name
+                                    })))))))))))))
 ;;
 
 let parse content =
@@ -485,6 +551,17 @@ let error_to_string = function
   | Invalid_composition_name_character { name; character } ->
     Printf.sprintf "composition name %S contains unsupported character %C" name character
   | Duplicate_composition_name name -> "duplicate composition name: " ^ name
+  | Invalid_execution_mode { path; mode } ->
+    Printf.sprintf
+      "invalid execution mode %S at %s (expected inline or async)"
+      mode
+      (String.concat "." path)
+  | Async_tool_not_statically_read_only { name; node_id; tool_name } ->
+    Printf.sprintf
+      "async composition %S node %S tool %S is not statically read-only"
+      name
+      (node_id_to_string node_id)
+      tool_name
   | Invalid_template_kind { path; kind } ->
     Printf.sprintf "invalid template kind %S at %s" kind (String.concat "." path)
   | Invalid_node_id { path; _ } -> "invalid node id at " ^ String.concat "." path

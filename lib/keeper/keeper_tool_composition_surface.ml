@@ -10,6 +10,30 @@ let empty_input_schema =
     ]
 ;;
 
+let request_id_input_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ ( "request_id"
+            , `Assoc
+                [ "type", `String "string"
+                ; "minLength", `Int 1
+                ] )
+          ] )
+    ; "required", `List [ `String "request_id" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let request_id_of_validated_input = function
+  | `Assoc fields ->
+    (match List.assoc_opt "request_id" fields with
+     | Some (`String request_id) -> Some request_id
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
 let schedule_to_json (schedule : Agent_core.Tool_contract.schedule) =
   `Assoc
     [ "planned_index", `Int schedule.planned_index
@@ -256,6 +280,286 @@ let result_of_execution ~tool_name ~start_time = function
       (Yojson.Safe.to_string data)
 ;;
 
+let async_parent_invocation ~request_id source =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id:("composition-async:" ^ request_id)
+    ~turn:(Agent_core.Tool_contract.Invocation.turn source)
+    ~schedule:(Agent_core.Tool_contract.Invocation.schedule source)
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+;;
+
+let async_worker_result
+      ~(entry : Catalog.entry)
+      ~tool_name
+      ~request_id
+      ~source_invocation
+      ~request_sw
+      ~(config : Workspace.config)
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ?clock
+      ()
+  =
+  Eio_context.with_turn_switch request_sw
+  @@ fun () ->
+  let sandbox_factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Eio.Switch.on_release request_sw (fun () ->
+    Keeper_sandbox_factory.cleanup sandbox_factory);
+  let start_time = Time_compat.now () in
+  Executor.execute_keeper
+    ~plan:entry.plan
+    ~run_id:(Keeper_tool_plan.Run_id.fresh ())
+    ~parent_invocation:
+      (async_parent_invocation ~request_id source_invocation)
+    ~config
+    ~meta
+    ~publication_recovery
+    ~ctx_snapshot
+    ~turn_sandbox_factory:sandbox_factory
+    ?clock
+    ()
+  |> result_of_execution ~tool_name ~start_time
+;;
+
+let result_from_json ~tool_name ~start_time ~class_ ~ok data =
+  if ok
+  then Tool_result.make_ok ~tool_name ~start_time ~data ()
+  else
+    Tool_result.make_err
+      ~tool_name
+      ~class_
+      ~start_time
+      ~data
+      (Yojson.Safe.to_string data)
+;;
+
+let async_submission_result
+      ~entry
+      ~tool_name
+      ~parent_invocation
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~publication_recovery
+      ~ctx_snapshot
+      ?clock
+      ()
+  =
+  let start_time = Time_compat.now () in
+  match Keeper_msg_async.server_background_switch () with
+  | Error error ->
+    let data = Keeper_msg_async.submit_error_to_json error in
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~ok:false
+      data
+  | Ok background_sw ->
+    (match
+       Keeper_msg_async.submit_with_request_id
+         ~background_sw
+         ~base_path:config.base_path
+         ~caller:meta.name
+         ~keeper_name:meta.name
+         ~f:(fun ~request_id request_sw ->
+           async_worker_result
+             ~entry
+             ~tool_name
+             ~request_id
+             ~source_invocation:parent_invocation
+             ~request_sw
+             ~config
+             ~meta
+             ~publication_recovery
+             ~ctx_snapshot
+             ?clock
+             ())
+         ()
+     with
+     | Error error ->
+       let data = Keeper_msg_async.submit_error_to_json error in
+       result_from_json
+         ~tool_name
+         ~start_time
+         ~class_:Tool_result.Runtime_failure
+         ~ok:false
+         data
+     | Ok
+         ({ Keeper_msg_async.acceptance = Keeper_msg_async.Durably_accepted
+          ; request_id
+          } as outcome) ->
+       let data =
+         `Assoc
+           [ "composition_tool", `String tool_name
+           ; "execution", `String "async"
+           ; "request_id", `String request_id
+           ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
+           ]
+       in
+       result_from_json
+         ~tool_name
+         ~start_time
+         ~class_:Tool_result.Runtime_failure
+         ~ok:true
+         data
+     | Ok
+         ({ Keeper_msg_async.acceptance =
+              Keeper_msg_async.Reconciliation_required _
+          ; _
+          } as outcome) ->
+       let data =
+         `Assoc
+           [ "composition_tool", `String tool_name
+           ; "execution", `String "async"
+           ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
+           ]
+       in
+       result_from_json
+         ~tool_name
+         ~start_time
+         ~class_:Tool_result.Runtime_failure
+         ~ok:false
+         data)
+;;
+
+let status_result
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~request_id
+  =
+  let tool_name = Catalog.status_tool_name in
+  let start_time = Time_compat.now () in
+  match
+    Keeper_msg_async.poll
+      ~base_path:config.base_path
+      ~caller:meta.name
+      request_id
+  with
+  | Keeper_msg_async.Found entry ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~ok:true
+      (Keeper_msg_async.entry_to_json entry)
+  | Keeper_msg_async.Absent ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Workflow_rejection
+      ~ok:false
+      (`Assoc
+          [ "error", `String "request_id_not_found"
+          ; "request_id", `String request_id
+          ])
+  | Keeper_msg_async.Unreadable reason ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~ok:false
+      (`Assoc
+          [ "error", `String "request_record_unreadable"
+          ; "request_id", `String request_id
+          ; "reason", `String reason
+          ])
+  | Keeper_msg_async.Rejected rejection ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Policy_rejection
+      ~ok:false
+      (`Assoc
+          [ "error", `String "request_access_rejected"
+          ; "request_id", `String request_id
+          ; "reason", Keeper_msg_async.access_rejection_to_json rejection
+          ])
+;;
+
+let cancel_result
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+      ~request_id
+  =
+  let tool_name = Catalog.cancel_tool_name in
+  let start_time = Time_compat.now () in
+  let result =
+    Keeper_msg_async.cancel
+      ~base_path:config.base_path
+      ~caller:meta.name
+      request_id
+  in
+  let data = Keeper_msg_async.cancel_result_to_json ~request_id result in
+  match result with
+  | Keeper_msg_async.Cancellation_requested _ ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~ok:true
+      data
+  | Keeper_msg_async.Cancel_not_found
+  | Keeper_msg_async.Cancel_already_terminal _ ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Workflow_rejection
+      ~ok:false
+      data
+  | Keeper_msg_async.Cancel_rejected _ ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Policy_rejection
+      ~ok:false
+      data
+  | Keeper_msg_async.Cancel_unreadable _
+  | Keeper_msg_async.Cancel_worker_ownership_unknown _
+  | Keeper_msg_async.Cancel_persistence_failed _
+  | Keeper_msg_async.Cancel_worker_signal_failed _
+  | Keeper_msg_async.Cancel_state_invariant_failed _ ->
+    result_from_json
+      ~tool_name
+      ~start_time
+      ~class_:Tool_result.Runtime_failure
+      ~ok:false
+      data
+;;
+
+let make_request_control_tool
+      ~(config : Workspace.config)
+      ~name
+      ~description
+      ~descriptor
+      ~handle
+  =
+  Tool_bridge.agent_core_tool_of_masc_with_execution_env
+    ~descriptor
+    ~base_path:config.base_path
+    ~name
+    ~description
+    ~input_schema:request_id_input_schema
+    (fun _execution_env input ->
+      let start_time = Time_compat.now () in
+      match
+        Tool_input_validation.validate_args
+          ~schema:request_id_input_schema
+          ~name
+          ~args:input
+          ()
+      with
+      | Error rejection -> rejection
+      | Ok _ ->
+        (match request_id_of_validated_input input with
+         | Some request_id -> handle request_id
+         | None ->
+           Tool_result.runtime_err
+             ~tool_name:name
+             ~start_time
+             "validated composition request input lost request_id"))
+;;
+
 let make_tools
       ~catalog
       ~(config : Workspace.config)
@@ -275,21 +579,27 @@ let make_tools
       ?on_externalization_error
       ()
   =
-  Catalog.entries catalog
-  |> List.map (fun (entry : Catalog.entry) ->
+  let composition_tools =
+    Catalog.entries catalog
+    |> List.map (fun (entry : Catalog.entry) ->
     let tool_name = Catalog.tool_name entry in
     let completion = Executor.outer_completion entry.plan in
     let descriptor =
-      match completion with
-      | Agent_core.Tool_contract.Continue_after_success ->
+      match entry.execution, completion with
+      | Catalog.Async, Agent_core.Tool_contract.Continue_after_success
+      | Catalog.Inline, Agent_core.Tool_contract.Continue_after_success ->
         Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial
-      | Agent_core.Tool_contract.Terminal_after_success disposition ->
+      | Catalog.Inline, Agent_core.Tool_contract.Terminal_after_success disposition ->
         Agent_core.Tool.terminal_descriptor disposition
+      | Catalog.Async, Agent_core.Tool_contract.Terminal_after_success _ ->
+        invalid_arg "validated async composition retained a terminal completion"
     in
     let tool_externalization_error =
-      match completion with
-      | Agent_core.Tool_contract.Continue_after_success -> None
-      | Agent_core.Tool_contract.Terminal_after_success _ ->
+      match entry.execution, completion with
+      | Catalog.Async, _
+      | Catalog.Inline, Agent_core.Tool_contract.Continue_after_success ->
+        None
+      | Catalog.Inline, Agent_core.Tool_contract.Terminal_after_success _ ->
         on_externalization_error
     in
     Tool_bridge.agent_core_tool_of_masc_with_execution_env
@@ -299,7 +609,14 @@ let make_tools
       ~name:tool_name
       ~description:
         (Option.value
-           ~default:("Execute the validated Keeper composition " ^ entry.name ^ ".")
+           ~default:
+             (match entry.execution with
+              | Catalog.Inline ->
+                "Execute the validated Keeper composition " ^ entry.name ^ "."
+              | Catalog.Async ->
+                "Start the validated read-only Keeper composition "
+                ^ entry.name
+                ^ " and return its durable request id.")
            entry.description)
       ~input_schema:empty_input_schema
       (fun execution_env input ->
@@ -320,6 +637,19 @@ let make_tools
                ~start_time
                "composition execution requires Agent-Core invocation identity"
            | Some parent_invocation ->
+             (match entry.execution with
+              | Catalog.Async ->
+                async_submission_result
+                  ~entry
+                  ~tool_name
+                  ~parent_invocation
+                  ~config
+                  ~meta
+                  ~publication_recovery
+                  ~ctx_snapshot
+                  ?clock
+                  ()
+              | Catalog.Inline ->
              let execution =
                Executor.execute_keeper
                  ~plan:entry.plan
@@ -372,5 +702,33 @@ let make_tools
                   ; _
                   } ->
                 ());
-             result_of_execution ~tool_name ~start_time execution)))
+             result_of_execution ~tool_name ~start_time execution))))
+  in
+  let has_async =
+    Catalog.entries catalog
+    |> List.exists (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+  in
+  if not has_async
+  then composition_tools
+  else
+    let status_tool =
+      make_request_control_tool
+        ~config
+        ~name:Catalog.status_tool_name
+        ~description:
+          "Read the exact durable status and structured result of one async Keeper composition request."
+        ~descriptor:
+          (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
+        ~handle:(fun request_id -> status_result ~config ~meta ~request_id)
+    in
+    let cancel_tool =
+      make_request_control_tool
+        ~config
+        ~name:Catalog.cancel_tool_name
+        ~description:
+          "Request cancellation of one async Keeper composition by its exact durable request id."
+        ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+        ~handle:(fun request_id -> cancel_result ~config ~meta ~request_id)
+    in
+    composition_tools @ [ status_tool; cancel_tool ]
 ;;

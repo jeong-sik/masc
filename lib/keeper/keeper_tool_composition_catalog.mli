@@ -42,6 +42,15 @@ type error =
       ; character : char
       }
   | Duplicate_composition_name of string
+  | Invalid_execution_mode of
+      { path : string list
+      ; mode : string
+      }
+  | Async_tool_not_statically_read_only of
+      { name : string
+      ; node_id : Keeper_tool_plan.Node_id.t
+      ; tool_name : string
+      }
   | Invalid_template_kind of
       { path : string list
       ; kind : string
@@ -63,9 +72,14 @@ type error =
       ; error : Keeper_tool_plan.error
       }
 
+type execution_mode =
+  | Inline
+  | Async
+
 type entry = private
   { name : string
   ; description : string option
+  ; execution : execution_mode
   ; plan : Keeper_tool_plan.t
   }
 
@@ -80,6 +94,15 @@ val entries : t -> entry list
 val find : t -> string -> entry option
 val tool_name : entry -> string
 (** Stable model-visible name for this materialized composition. *)
+
+val execution_mode_to_string : execution_mode -> string
+
+val model_tool_names : t -> string list
+(** Exact model-visible composition surface, including the shared status and
+    cancel controls when at least one async composition is declared. *)
+
+val status_tool_name : string
+val cancel_tool_name : string
 
 val error_to_string : error -> string
 

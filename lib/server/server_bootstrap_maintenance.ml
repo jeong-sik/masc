@@ -310,8 +310,39 @@ module Recovery_for_testing = struct
   let consume_owner_projection_batch = consume_owner_projection_batch
 end
 
+let recover_keeper_msg_requests_on_startup ~base_path =
+  let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
+  if
+    report.lost > 0
+    || report.finalized > 0
+    || report.cleaned > 0
+    || report.unreadable > 0
+    || report.failed > 0
+    || report.staging_files_deleted > 0
+    || report.staging_files_preserved > 0
+  then
+    Log.Server.info
+      "keeper_msg_async: startup recovery lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging_inspected=%d staging_deleted=%d staging_preserved=%d"
+      report.lost
+      report.finalized
+      report.cleaned
+      report.unreadable
+      report.failed
+      report.staging_files_inspected
+      report.staging_files_deleted
+      report.staging_files_preserved;
+  report
+;;
+
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
+  (* Exclusive startup ownership: before any new server request can submit a
+     worker, settle disk-only nonterminal rows left by the prior process.  Poll
+     and cancel deliberately cannot infer process death, so this bootstrap
+     boundary is the sole production authority for that transition. *)
+  ignore
+    (recover_keeper_msg_requests_on_startup ~base_path:config.base_path
+      : Keeper_msg_async.recovery_report);
   let recovery_ctx : _ Keeper_types_profile.context =
     { config
     ; agent_name = "keeper-maintenance-recovery"

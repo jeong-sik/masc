@@ -85,12 +85,12 @@ type try_provider_ctx =
             provider admitted, and those bytes are a superset of what these
             atoms describe.
 
-            A turn issues one provider request (7,763 API calls over 7,646
-            turns on a live 2026-08-14 trace), so a later call within one turn
-            belongs to a failover attempt and supersedes the earlier one. Never
-            invoked when the projection refuses — the turn carries a typed
-            budget error instead, and reporting a cut that was never dispatched
-            would fabricate evidence. *)
+            Invoked per provider request, and one keeper turn issues many —
+            62 and 83 on the two turns this module's window comment measures —
+            so the retained value is the last request of the turn, not a
+            summary of it. Never invoked when the projection refuses: the turn
+            carries a typed budget error instead, and reporting a cut that was
+            never dispatched would fabricate evidence. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

@@ -520,6 +520,14 @@ let budgeted_model_input_projection
      the list spine is rebuilt — which is what makes the memo hit at all: it
      confirms every lookup with physical equality. *)
   let measure_message_bytes = memoize_message_measurement measure_message_bytes in
+  (* Scoped to the attempt, written by the one fiber that drives it. The
+     closure below runs per provider request — 62 to 83 of them in one keeper
+     turn on the traces this window's own comment cites — and a keeper whose
+     history carries a malformed tag falls back on every one of them, forever.
+     Narrating that per request is the shape this codebase already had to undo
+     once: [Reasoning_history_projection.observe]'s comment records a WARN
+     firing ~973x/day about routine normalisation before it was demoted. *)
+  let fallback_reported = ref false in
   fun messages ->
     (* Measure the history the wire will carry, not the history the checkpoint
        holds. [Keeper_context_core.message_to_json] is the durable encoder — it
@@ -550,12 +558,16 @@ let budgeted_model_input_projection
            exactly that scope. The cost is the narrower window this refinement
            was added to widen, which is the previous behaviour, not a new
            failure. *)
-        Log.Keeper.warn
-          "%s: model input measured against durable shape; reasoning \
-           projection declined: %s"
-          ctx.keeper_name
-          (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string
-             error);
+        if not !fallback_reported
+        then (
+          fallback_reported := true;
+          Log.Keeper.warn
+            "%s: model input measured against durable shape; reasoning \
+             projection declined: %s"
+            ctx.keeper_name
+            (Agent_core.Llm_provider.Reasoning_history_projection
+             .error_to_string
+               error));
         messages
     in
     let planned_and_windowed =

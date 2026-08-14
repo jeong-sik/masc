@@ -293,7 +293,6 @@ let latest_age_hours_json ~now stat =
 let has_persistent_turn_span_for ~required_span_hours ~now stat =
   Float.is_finite required_span_hours
   && required_span_hours > 0.0
-  && stat.recent_interaction_count >= 2
   &&
   match stat.first_ts, stat.latest_ts with
   | Some first, Some latest ->

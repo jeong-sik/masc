@@ -884,7 +884,7 @@ let make_tools
                   ~tool_name
                   ~class_:Tool_result.Runtime_failure
                   ~start_time
-                  "composition result manifest persistence failed"))))
+                  "composition result manifest persistence failed")))))
   in
   let has_async =
     Catalog.entries catalog

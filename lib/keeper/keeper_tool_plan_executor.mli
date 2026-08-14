@@ -31,7 +31,7 @@ type node_result = private
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
   ; result : Tool_result.result
-  ; tool_use_id : string option
+  ; tool_use_id : string
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
   ; result_bytes : int
@@ -44,8 +44,7 @@ type dispatch_result
     producer evidence must supply it; absent failure evidence is conservatively
     treated as an unknown effect outcome. *)
 val dispatch_result
-  :  ?tool_use_id:string
-  -> ?failure_effect_disposition:Tool_result.failure_effect_disposition
+  :  ?failure_effect_disposition:Tool_result.failure_effect_disposition
   -> ?deferred_kind:Keeper_tool_execution.deferred_kind
   -> ?result_bytes:int
   -> ?truncated_to:int
@@ -75,7 +74,8 @@ type failure = private
   }
 
 type dispatch =
-  node:Keeper_tool_plan.node
+  tool_use_id:string
+  -> node:Keeper_tool_plan.node
   -> descriptor:Keeper_tool_descriptor.t
   -> schedule:Agent_core.Tool_contract.schedule
   -> input:Yojson.Safe.t
@@ -87,7 +87,9 @@ type dispatch =
     no text or payload inference is performed. A deferred node produces no
     composable output, so it cannot satisfy a downstream output reference and
     terminates the plan instead of being resumed as a producer.
-    [observe_node_result], when supplied, is part of settlement: an observation
+    The executor mints one non-empty [tool_use_id] before calling [dispatch];
+    the dispatch, exception settlement, durable row, and live refresh all share
+    that identity. [observe_node_result], when supplied, is part of settlement: an observation
     error becomes [Node_observation_failed] after every sibling in the current
     batch has settled, preserving the aggregate effect disposition. *)
 val execute

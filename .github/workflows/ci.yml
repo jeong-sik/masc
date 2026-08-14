@@ -16,18 +16,22 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # CI verifies the current branch state. A newer push contains every older
-  # main commit, so keeping all superseded 30-50 minute builds only multiplies
-  # cold compiles and delays the result for the state that can actually ship.
+  # Branch/PR runs verify the current branch state: a newer push supersedes
+  # the older run, so the older one cancels. Main is excluded from that rule:
+  # merges land minutes apart while a build takes 30-50, so cancelling
+  # in-progress main runs left main with no completed verdict at all (72% of
+  # main-push runs cancelled; on 2026-08-14 five consecutive heads were killed
+  # inside 40 minutes with zero completions). With cancel-in-progress off,
+  # GitHub still keeps at most one pending run per group — intermediate queued
+  # runs collapse into the newest — so main completes one verdict per build
+  # duration and is never more than one build behind, without a backlog.
   # TLA+ Main Verification remains independently SHA-scoped and preserves the
   # per-commit formal verification contract.
   group: >-
     ${{ github.workflow }}-${{ github.event_name }}-${{
       github.event.pull_request.number || github.ref_name || github.run_id
     }}
-  # Pushes supersede older CI for the same branch. Code-changing PR events
-  # likewise replace an outdated run for that PR.
-  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
+  cancel-in-progress: ${{ (github.event_name == 'push' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
 
 jobs:
   pr-sync-check:

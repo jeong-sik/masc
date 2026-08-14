@@ -46,9 +46,14 @@ let relative_components ~ownership_root path =
         let component = Filename.basename current in
         if
           String.equal parent current
-          || String.equal component Filename.current_dir_name
           || String.equal component Filename.parent_dir_name
         then Error (Owned_path_outside_root { ownership_root; path })
+        else if String.equal component Filename.current_dir_name
+        then
+          (* "." is a path identity: /root/./x and /root/x name the same file,
+             so the segment is dropped. ".." stays rejected above because the
+             OS resolves it upward, which can leave the ownership root. *)
+          ascend components parent
         else ascend (component :: components) parent
     in
     ascend [] path

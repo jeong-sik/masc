@@ -1066,6 +1066,7 @@ jobs:
             @test/runtest-test_event_bus_subscription_contract \
             @test/runtest-test_fs_compat_home_guard \
             @test/runtest-test_guarded_dispatch_telemetry \
+            @test/runtest-test_owned_read_cwd \
             @test/runtest-test_keeper_capability_probe \
             @test/runtest-test_keeper_checkpoint_stale_guard \
             @test/runtest-test_keeper_contract_classifier_pure \

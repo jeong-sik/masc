@@ -630,6 +630,11 @@
  (modules test_repo_store)
  (libraries alcotest repo_manager unix masc.string_util))
 
+(test
+ (name test_owned_read_cwd)
+ (modules test_owned_read_cwd)
+ (libraries alcotest masc_test_deps))
+
 ; Request-authority admission uses Eio fiber-local bindings and therefore owns
 ; an explicit executable stanza instead of borrowing the pure synchronous test
 ; group above.

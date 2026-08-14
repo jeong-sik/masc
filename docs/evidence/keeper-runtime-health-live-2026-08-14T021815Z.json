@@ -2,7 +2,7 @@
   "schema": "masc.keeper_feature_matrix.live_refresh.v1",
   "captured_at": "2026-08-14T02:18:15Z",
   "source_truth": {
-    "upstream_main": "686007ea1d02002b201c881aea4b409a385c3b8b",
+    "upstream_main_at_capture": "686007ea1d02002b201c881aea4b409a385c3b8b",
     "live_runtime_checkout": "13dd32a37a",
     "live_commit_source": "runtime_repo_head",
     "embedded_binary_commit_known": false,
@@ -72,6 +72,7 @@
     "The health commit is runtime_repo_head metadata, not an embedded binary build SHA.",
     "The queue sample is below its stale threshold and is not a duration verdict.",
     "The live checkout predates merged dashboard repair 28694 and repair PR 28701.",
+    "PR 28700 merged 44 seconds after this health capture and is intentionally absent from the source cutoff above.",
     "The Monitor count is recorded as observed; this evidence does not infer its denominator."
   ]
 }

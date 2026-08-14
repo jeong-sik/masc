@@ -19,7 +19,15 @@ let schemas : Masc_domain.tool_schema list =
           [ "type", `String "object"
           ; ( "properties"
             , `Assoc
-                [ ( "content"
+                [ ( "title"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Optional post title shown in board lists. Must not be blank \
+                             when present; omit for short untitled posts." )
+                      ] )
+                ; ( "content"
                   , `Assoc
                       [ "type", `String "string"
                       ; "description", `String "Post body text"

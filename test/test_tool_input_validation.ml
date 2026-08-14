@@ -601,6 +601,62 @@ let test_validate_args_masc_board_post_accepts_sources_array () =
       "expected masc_board_post sources array to pass validation, got %s"
       (Yojson.Safe.to_string (Tool_result.data result))
 
+(* Live keepers titled their posts 44 times on 2026-08-13 and every attempt
+   was rejected as an undeclared field, even though the handler
+   (Board_tool_post.handle_post_create) and the store both carry titles.
+   The schema is the only layer that hid the field. *)
+let test_validate_args_masc_board_post_accepts_title () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_schema
+      ~name:"masc_board_post"
+      ~args:
+        (`Assoc
+          [ "title", `String "Turn continuity findings"
+          ; "content", `String "Keeper board post with a list title"
+          ; "hearth", `String "ops"
+          ])
+      ()
+  with
+  | Ok forwarded ->
+    (match Yojson.Safe.Util.member "title" forwarded with
+     | `String value ->
+       Alcotest.(check string) "title preserved" "Turn continuity findings" value
+     | other ->
+       Alcotest.failf
+         "expected title to be preserved, got %s"
+         (Yojson.Safe.to_string other))
+  | Error result ->
+    Alcotest.failf
+      "expected masc_board_post title to pass validation, got %s"
+      (Yojson.Safe.to_string (Tool_result.data result))
+
+(* Declaring title must not loosen the closed schema: tags stays undeclared
+   and rejected. *)
+let test_validate_args_masc_board_post_still_rejects_tags () =
+  match
+    Tool_input_validation.validate_args
+      ~schema:keeper_model_board_post_schema
+      ~name:"masc_board_post"
+      ~args:
+        (`Assoc
+          [ "title", `String "Turn continuity findings"
+          ; "content", `String "body"
+          ; "tags", `List [ `String "ops" ]
+          ])
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.failf
+      "expected tags to be rejected, but it passed: %s"
+      (Yojson.Safe.to_string forwarded)
+  | Error result ->
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
+    Alcotest.(check bool)
+      "error names tags"
+      true
+      (string_contains msg "unsupported field(s): tags")
+
 let test_registered_hook_masc_board_post_accepts_sources_array () =
   let blocked, forwarded =
     run_registered_hook
@@ -2257,6 +2313,10 @@ let () =
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct masc_board_post accepts sources array" `Quick
         test_validate_args_masc_board_post_accepts_sources_array;
+      Alcotest.test_case "direct masc_board_post accepts title" `Quick
+        test_validate_args_masc_board_post_accepts_title;
+      Alcotest.test_case "direct masc_board_post still rejects tags" `Quick
+        test_validate_args_masc_board_post_still_rejects_tags;
       Alcotest.test_case "masc_transition rejects to/note aliases" `Quick
         test_registered_hook_transition_rejects_to_and_note;
       Alcotest.test_case "masc_transition canonical action value" `Quick

@@ -879,13 +879,6 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
-            # The ratchet compares against the recorded base *SHA*, but the
-            # fetch above names the base *branch*. Those agree when the base is
-            # main; on a stacked PR the branch tip moves as the parent is
-            # restacked, so the recorded SHA can be absent locally and the
-            # ratchet exits with "base revision is unavailable" while its own
-            # suite passes 6/6. Fetch the exact revision the comparison needs.
-            bash scripts/ci/git-fetch-retry.sh origin "${OCAML_BOUNDARY_BASE_REF}"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             bash scripts/ci/git-fetch-retry.sh \
               origin \

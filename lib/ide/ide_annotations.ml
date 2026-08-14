@@ -319,8 +319,11 @@ let create
     Ok annotation
 ;;
 
+(* Reads never create the store: [load_all_for_codebase] answers [] for an
+   absent file, and a GET that mkdirs seeds a directory for whatever slug
+   the query named (live proof 2026-08-14: a bare-token scope probe left an
+   empty store directory beside the canonical one). *)
 let list ~base_dir ~codebase ~filter () =
-  ensure_store ~base_dir ~codebase ();
   let all : annotation list = load_all_for_codebase ~base_dir codebase in
   let by_file =
     match filter.file_path with
@@ -370,7 +373,8 @@ let compact ~base_dir ~codebase () =
 ;;
 
 let delete ~base_dir ~codebase ~id ~keeper_id ?expected_version () =
-  ensure_store ~base_dir ~codebase ();
+  (* No ensure_store: a delete that finds its target appends a tombstone to
+     a file that already exists; a miss must not seed the directory. *)
   let all = load_all_for_codebase ~base_dir codebase in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with
   | None -> Error "annotation not found or keeper mismatch"

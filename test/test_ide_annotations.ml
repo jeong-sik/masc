@@ -296,6 +296,22 @@ let test_create_isolates_codebases () =
     check int "other codebase is empty" 0 (List.length other))
 ;;
 
+(* A read must not seed the store: listing a codebase nobody wrote to
+   answers empty and leaves no directory behind (live 2026-08-14: a GET
+   scope probe created an empty [by-url/github/] beside the canonical
+   store). *)
+let test_list_does_not_create_store () =
+  with_temp_dir (fun base_dir ->
+    let slug = "github.com_owner_absent" in
+    let rows = Store.list ~base_dir ~codebase:slug ~filter:(make_filter ()) () in
+    check int "absent codebase lists empty" 0 (List.length rows);
+    check
+      bool
+      "store directory not created by the read"
+      false
+      (Sys.file_exists (Ide_paths.code_store_dir ~base_dir ~codebase:slug)))
+;;
+
 let test_codebases_hold_their_own_rows () =
   with_temp_dir (fun base_dir ->
     let slug = "github.com_owner_repo" in
@@ -925,6 +941,10 @@ let () =
             "create isolates codebases"
             `Quick
             test_create_isolates_codebases
+        ; test_case
+            "list does not create the store"
+            `Quick
+            test_list_does_not_create_store
         ; test_case
             "codebases hold their own rows"
             `Quick

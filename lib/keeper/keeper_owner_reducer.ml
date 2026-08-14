@@ -86,6 +86,7 @@ type profile_update =
   ; telemetry_feedback_window_hours : int option
   ; always_allow : bool option
   ; agent_core_env : (string * string) list
+  ; autonomous_instructions : string option
   ; updated_at : string
   }
 
@@ -656,6 +657,7 @@ let apply_existing (state : state) meta command =
          ; telemetry_feedback_window_hours = update.telemetry_feedback_window_hours
          ; always_allow = update.always_allow
          ; agent_core_env = update.agent_core_env
+         ; autonomous_instructions = update.autonomous_instructions
          ; updated_at = update.updated_at
          })
   | Handoff_identity handoff ->

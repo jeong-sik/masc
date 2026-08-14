@@ -3927,6 +3927,244 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
         check bool "error message preserved" true
           (String_util.contains_substring execution.raw_output "Self-approval"))
 
+(* ── Exact-once dispatch (RFC-0371 B5b) ─────────────────────────────
+
+   handle_registered_tool_with_outcome previously ran mint_token +
+   guarded_dispatch, collapsed the outcome's distinctions into None, and then
+   re-derived them by running the same effects again in the fallthrough.
+   Every tool the guarded dispatcher declined paid the pre-hook chain, the
+   dispatch observers, and the telemetry emission twice per turn call, and a
+   pre-hook that mutates state saw phantom double calls. These tests pin the
+   exact-once contract: one mint, at most one guarded_dispatch. *)
+
+let exact_once_declined_tool = "test_keeper_exact_once_declined"
+
+let test_declined_tool_fires_hooks_and_observers_exactly_once () =
+  (* A module tag makes mint_token succeed, but no handler is registered so
+     guarded_dispatch declines (returns None). The fallthrough then runs the
+     capability gate + tag dispatch. Pre-hooks and dispatch observers must
+     fire exactly once — the old shape ran guarded_dispatch twice and saw
+     phantom double calls. *)
+  register_probe_schema exact_once_declined_tool;
+  let pre_hook_calls = Atomic.make 0 in
+  let observer_calls = Atomic.make 0 in
+  let span_wrapper_calls = Atomic.make 0 in
+  Tool_dispatch.clear_hooks ();
+  Tool_dispatch.register_pre_hook
+    (fun ~name ~args:_ ->
+      Atomic.incr pre_hook_calls;
+      Tool_dispatch.Pass);
+  Tool_dispatch.register_dispatch_observer
+    (fun _outcome _result -> Atomic.incr observer_calls);
+  Tool_dispatch.set_span_wrapper
+    (fun ?force_new_trace_id:_ ?surface:_ ~tool_name:_ body ->
+      Atomic.incr span_wrapper_calls;
+      body (fun () -> Some ("probe-trace", "probe-trace")));
+  Fun.protect
+    ~finally:(fun () -> Tool_dispatch.clear_hooks ())
+    (fun () ->
+      with_exec_fixture "keeper_tool_dispatch_exact_once_declined"
+        (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
+          match
+            Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
+              ~config
+              ~keeper_name:meta.name
+              ~name:exact_once_declined_tool
+              ~args:(`Assoc [])
+          with
+          | None -> fail "expected declined tool to fall through to tag dispatch"
+          | Some execution ->
+            check int "pre-hook fires exactly once" 1 (Atomic.get pre_hook_calls);
+            check int "dispatch observer fires exactly once" 1
+              (Atomic.get observer_calls);
+            check int "span wrapper fires exactly once" 1
+              (Atomic.get span_wrapper_calls);
+            check string "declined tool falls through to tag dispatch" "failure"
+              (outcome_label execution.disposition)))
+
+let exact_once_mint_rejected_tool = "test_keeper_exact_once_mint_rejected"
+
+let test_mint_rejection_returns_policy_rejection_with_reason () =
+  (* A handler is registered but no module tag: mint_token fails (name not in
+     the tag registry), yet the name is owned by this runtime (is_registered).
+     The entry must surface a Policy_rejection carrying the mint reason — and
+     mint runs exactly once (the old shape re-minted in the fallthrough). *)
+  Tool_dispatch.register
+    ~tool_name:exact_once_mint_rejected_tool
+    ~handler:(fun ~name ~args:_ -> tool_ok ~tool_name:name "unreachable");
+  with_exec_fixture "keeper_tool_dispatch_exact_once_mint_rejected"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
+      match
+        Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
+          ~config
+          ~keeper_name:meta.name
+          ~name:exact_once_mint_rejected_tool
+          ~args:(`Assoc [])
+      with
+      | None -> fail "expected owned mint-rejected tool to return a failure"
+      | Some execution ->
+        (match execution.disposition with
+         | Tool_result.Failed Tool_result.Policy_rejection -> ()
+         | Tool_result.Failed class_ ->
+           fail
+             ("expected policy_rejection, got "
+              ^ Tool_result.tool_failure_class_to_string class_)
+         | Tool_result.Completed () -> fail "expected mint rejection failure"
+         | Tool_result.Deferred () ->
+           fail "expected mint rejection failure, got deferred");
+        let json = Yojson.Safe.from_string execution.raw_output in
+        check string "mint rejection error" "unregistered_masc_tool"
+          Yojson.Safe.Util.(member "error" json |> to_string);
+        check bool "mint rejection reason reaches caller" true
+          (contains_substring execution.raw_output "not in current tool set"))
+
+let test_unowned_name_returns_none () =
+  (* A name in neither the tag registry nor the handler registry is not owned
+     by this runtime: mint fails and owned_by_this_runtime is false, so the
+     entry returns None — no dispatch, no failure. *)
+  with_exec_fixture "keeper_tool_dispatch_exact_once_unowned"
+    (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
+      match
+        Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
+          ~config
+          ~keeper_name:meta.name
+          ~name:"test_keeper_exact_once_unowned_tool"
+          ~args:(`Assoc [])
+      with
+      | None -> ()
+      | Some _ -> fail "expected unowned name to return None")
+
+let exact_once_happy_tool = "test_keeper_exact_once_happy"
+
+let test_happy_dispatch_fires_all_effects_exactly_once () =
+  (* Both a module tag and a handler are registered, so guarded_dispatch
+     succeeds on the first attempt. Pre-hook, dispatch observer, span
+     wrapper, and handler must each fire exactly once — the old shape
+     ran mint+dispatch twice when the handler existed but the guarded
+     dispatcher declined for other reasons, doubling every effect. *)
+  register_probe_schema exact_once_happy_tool;
+  let pre_hook_calls = Atomic.make 0 in
+  let observer_calls = Atomic.make 0 in
+  let span_wrapper_calls = Atomic.make 0 in
+  let handler_calls = Atomic.make 0 in
+  Tool_dispatch.clear_hooks ();
+  Tool_dispatch.register_pre_hook
+    (fun ~name ~args:_ ->
+      Atomic.incr pre_hook_calls;
+      Tool_dispatch.Pass);
+  Tool_dispatch.register_dispatch_observer
+    (fun _outcome _result -> Atomic.incr observer_calls);
+  Tool_dispatch.set_span_wrapper
+    (fun ?force_new_trace_id:_ ?surface:_ ~tool_name:_ body ->
+      Atomic.incr span_wrapper_calls;
+      body (fun () -> Some ("probe-trace", "probe-trace")));
+  Tool_dispatch.register
+    ~tool_name:exact_once_happy_tool
+    ~handler:(fun ~name ~args:_ ->
+      Atomic.incr handler_calls;
+      tool_ok ~tool_name:name
+        (Yojson.Safe.to_string
+           (`Assoc
+              [ ("ok", `Bool true)
+              ; ("tool", `String name)
+              ; ("route", `String "registered")
+              ])));
+  Fun.protect
+    ~finally:(fun () -> Tool_dispatch.clear_hooks ())
+    (fun () ->
+      with_exec_fixture "keeper_tool_dispatch_exact_once_happy"
+        (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
+          match
+            Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
+              ~config
+              ~keeper_name:meta.name
+              ~name:exact_once_happy_tool
+              ~args:(`Assoc [])
+          with
+          | None -> fail "expected happy tool to succeed via guarded_dispatch"
+          | Some execution ->
+            check int "pre-hook fires exactly once" 1 (Atomic.get pre_hook_calls);
+            check int "dispatch observer fires exactly once" 1
+              (Atomic.get observer_calls);
+            check int "span wrapper fires exactly once" 1
+              (Atomic.get span_wrapper_calls);
+            check int "handler fires exactly once" 1
+              (Atomic.get handler_calls);
+            check string "happy tool completes" "success"
+              (outcome_label execution.disposition)))
+
+let exact_once_validation_tool = "test_keeper_exact_once_validation"
+
+let test_validation_pre_hook_rejects_and_fires_exactly_once () =
+  (* A handler is registered with a schema requiring a "payload" field.
+     Tool_input_validation is installed as a pre-hook and rejects the call
+     with missing required fields. The handler must NOT fire, and the
+     validation pre-hook must fire exactly once — the old shape ran
+     guarded_dispatch twice, invoking the pre-hook chain twice. *)
+  let validation_schema =
+    { name = exact_once_validation_tool
+    ; description = "test validation exact-once probe"
+    ; input_schema =
+        `Assoc
+          [ ("type", `String "object")
+          ; ( "properties"
+            , `Assoc [ ("payload", `Assoc [ ("type", `String "string") ]) ])
+          ; ("required", `List [ `String "payload" ])
+          ]
+    }
+  in
+  Tool_dispatch.register_module_tag
+    ~schemas:[validation_schema]
+    ~tag:Tool_dispatch.Mod_misc;
+  let handler_calls = Atomic.make 0 in
+  let pre_hook_calls = Atomic.make 0 in
+  let observer_calls = Atomic.make 0 in
+  Tool_dispatch.clear_hooks ();
+  (* Insert a counting wrapper before the validation hook so we count the
+     full pre-hook chain including validation. *)
+  Tool_dispatch.register_pre_hook
+    (fun ~name:_ ~args:_ ->
+      Atomic.incr pre_hook_calls;
+      Tool_dispatch.Pass);
+  (* Install the production validation pre-hook after the counter. *)
+  Tool_input_validation.register_pre_hook ();
+  Tool_dispatch.register_dispatch_observer
+    (fun _outcome _result -> Atomic.incr observer_calls);
+  Tool_dispatch.register
+    ~tool_name:exact_once_validation_tool
+    ~handler:(fun ~name ~args:_ ->
+      Atomic.incr handler_calls;
+      tool_ok ~tool_name:name "unreachable");
+  Fun.protect
+    ~finally:(fun () -> Tool_dispatch.clear_hooks ())
+    (fun () ->
+      with_exec_fixture "keeper_tool_dispatch_exact_once_validation"
+        (fun ~config ~meta ~publication_recovery:_ ~ctx_work:_ ->
+          (* Call without the required "payload" field — validation must reject. *)
+          match
+            Masc.Keeper_tool_registered_runtime.handle_registered_tool_with_outcome
+              ~config
+              ~keeper_name:meta.name
+              ~name:exact_once_validation_tool
+              ~args:(`Assoc [])
+          with
+          | None -> fail "expected validation rejection to produce a result"
+          | Some execution ->
+            check int "pre-hook chain fires exactly once" 1
+              (Atomic.get pre_hook_calls);
+            check int "handler never fires" 0 (Atomic.get handler_calls);
+            check string "validation rejection is a failure" "failure"
+              (outcome_label execution.disposition);
+            (match execution.disposition with
+             | Tool_result.Failed Tool_result.Policy_rejection -> ()
+             | Tool_result.Failed class_ ->
+               failf "expected Policy_rejection, got %s"
+                 (Tool_result.tool_failure_class_to_string class_)
+             | Tool_result.Completed () -> fail "expected validation rejection"
+             | Tool_result.Deferred () -> fail "expected validation rejection");
+            check bool "raw output mentions missing field" true
+              (contains_substring execution.raw_output "payload")))
+
 (* ── Agent Core descriptor execution mode ───────────────────────────
 
    WebSearch/WebFetch hit external rate-limited APIs. They must not be
@@ -4699,6 +4937,16 @@ let () =
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick
         test_registered_dispatch_preserves_workflow_failure_class;
+      test_case "declined tool fires hooks and observers exactly once" `Quick
+        test_declined_tool_fires_hooks_and_observers_exactly_once;
+      test_case "mint rejection returns policy rejection with reason" `Quick
+        test_mint_rejection_returns_policy_rejection_with_reason;
+      test_case "unowned name returns None" `Quick
+        test_unowned_name_returns_none;
+      test_case "happy dispatch fires all effects exactly once" `Quick
+        test_happy_dispatch_fires_all_effects_exactly_once;
+      test_case "validation pre-hook rejects and fires exactly once" `Quick
+        test_validation_pre_hook_rejects_and_fires_exactly_once;
       test_case "success payload containing error data stays success" `Quick
         test_success_payload_with_error_data_stays_success;
       test_case "malformed JSON-looking success stays success" `Quick

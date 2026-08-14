@@ -76,6 +76,7 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
         | Schema.Agent_name ->
           `String (Masc.Keeper_identity.keeper_agent_name name)
         | Schema.Instructions -> `String ""
+        | Schema.Autonomous_instructions -> `String ""
         | Schema.Trace_id -> `String trace_id
         | Schema.Multimodal_policy ->
           `String

@@ -404,6 +404,10 @@ type keeper_meta =
   ; name : string
   ; agent_name : string
   ; instructions : string
+  ; autonomous_instructions : string option
+    (** Per-keeper autonomous-turn instructions (RFC autonomous_instructions).
+        When non-empty, used instead of [instructions] for scheduled autonomous
+        turns. Direct/dashboard turns always use [instructions]. *)
   ; (* -- Policy -- *)
     sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
@@ -543,6 +547,9 @@ let effective_meta_of_profile_defaults
             };
           instructions =
             apply_profile_default defaults.instructions meta.instructions;
+          autonomous_instructions =
+            apply_profile_default_opt defaults.autonomous_instructions
+              meta.autonomous_instructions;
           autoboot_enabled =
             apply_profile_default defaults.autoboot_enabled
               meta.autoboot_enabled;

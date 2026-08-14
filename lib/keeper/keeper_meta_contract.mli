@@ -266,6 +266,10 @@ type keeper_meta = {
   name : string;
   agent_name : string;
   instructions : string;
+  autonomous_instructions : string option;
+      (** Per-keeper autonomous-turn instructions (RFC autonomous_instructions).
+          When non-empty, used instead of [instructions] for scheduled autonomous
+          turns. Direct/dashboard turns always use [instructions]. *)
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;
   sandbox_image : string option;

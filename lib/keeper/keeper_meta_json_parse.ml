@@ -299,6 +299,7 @@ let decode_current_meta fields =
   let* name = string_field fields "name" in
   let* agent_name = string_field fields "agent_name" in
   let* instructions = string_field fields "instructions" in
+  let* autonomous_instructions = nullable_string_field fields "autonomous_instructions" in
   let* trace_id_raw = string_field fields "trace_id" in
   let* trace_id = parse_trace_id trace_id_raw in
   let* multimodal_policy = parse_multimodal_policy fields in
@@ -430,6 +431,7 @@ let decode_current_meta fields =
       ; name
       ; agent_name
       ; instructions
+      ; autonomous_instructions
       ; sandbox_profile
       ; sandbox_image = None
       ; network_mode = default_network_mode_for_profile sandbox_profile

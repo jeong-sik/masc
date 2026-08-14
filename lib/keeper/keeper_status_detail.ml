@@ -636,6 +636,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
            ("meta", Keeper_meta_json.meta_to_json m);
            ("instructions",
             if String.trim m.instructions = "" then `Null else `String m.instructions);
+           ("autonomous_instructions",
+            (match m.autonomous_instructions with Some v -> `String v | None -> `Null));
            ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
            ("agent", agent_status);

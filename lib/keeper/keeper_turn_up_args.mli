@@ -28,6 +28,7 @@ type parsed_args =
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
   ; instructions_arg : string option
+  ; autonomous_instructions_opt : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option
   }

@@ -252,6 +252,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  (if String.trim old.instructions <> "" then old.instructions
                   else Option.value ~default:"" p.profile_defaults.instructions)
                p.instructions_opt);
+    autonomous_instructions =
+      Dashboard_utils.first_some p.autonomous_instructions_opt
+        (if old.autonomous_instructions <> None then old.autonomous_instructions
+         else p.profile_defaults.autonomous_instructions);
     allowed_paths;
     sandbox_profile;
     network_mode;
@@ -382,6 +386,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                         updated.telemetry_feedback_window_hours
                     ; always_allow = updated.always_allow
                     ; agent_core_env = updated.agent_core_env
+                    ; autonomous_instructions = updated.autonomous_instructions
                     ; updated_at = updated.updated_at
                     })
              with

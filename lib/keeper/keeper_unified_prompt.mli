@@ -72,6 +72,17 @@ val effective_instructions :
 (** Resolve the single instructions value used by every system-prompt
     entrypoint and its dashboard projection. *)
 
+val effective_autonomous_instructions :
+  meta:Keeper_meta_contract.keeper_meta ->
+  ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  ?turn_decision:Keeper_world_observation.keeper_cycle_decision ->
+  unit ->
+  string
+(** Channel-aware instructions resolution: on Scheduled_autonomous turns,
+    returns [autonomous_instructions] (when non-empty, resolved through
+    profile-defaults → meta merge); on all other channels falls back to
+    [effective_instructions]. Exported for unit tests. *)
+
 val owned_executing_goals_without_tasks :
   config:Workspace.config ->
   keeper_name:string ->
@@ -117,6 +128,7 @@ val build_system_prompt :
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   ?active_goal_summaries:(string * string) list ->
+  ?turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   unit ->
   string
 (** Build the model-facing stable Keeper contract shared by direct and

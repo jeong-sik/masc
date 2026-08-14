@@ -722,6 +722,36 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
   | None -> meta.instructions
 ;;
 
+(* Channel-aware instruction resolution (RFC autonomous_instructions).
+   When the turn channel is [Scheduled_autonomous] AND the merged
+   [autonomous_instructions] field is non-empty, use it instead of the
+   normal [instructions].  For all other channels (Reactive, direct, dashboard)
+   fall back to [effective_instructions] unchanged.  An empty or [None]
+   autonomous_instructions always falls back to the normal instructions. *)
+let effective_autonomous_instructions ~(meta : Keeper_meta_contract.keeper_meta)
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option) ()
+  =
+  match turn_decision with
+  | Some { channel = Scheduled_autonomous; _ } ->
+    (* Resolve autonomous_instructions through the same profile-defaults
+       → meta merge path as effective_instructions.  When non-empty it
+       replaces the normal instructions for autonomous turns only. *)
+    let auto =
+      match profile_defaults with
+      | Some d ->
+        (match d.autonomous_instructions with
+         | Some _ as s -> s
+         | None -> meta.autonomous_instructions)
+      | None -> meta.autonomous_instructions
+    in
+    (match auto with
+     | Some s when String.length s > 0 -> s
+     | _ -> effective_instructions ~meta ?profile_defaults ())
+  | Some _ | None ->
+    effective_instructions ~meta ?profile_defaults ()
+;;
+
 (* Titles for the goals the world observation already narrowed to the ones a
    keeper can still progress. [meta.active_goal_ids] records assignment and is
    never cleared when a goal reaches a terminal phase, so this resolves the
@@ -819,9 +849,12 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(active_goal_summaries : (string * string) list option)
+    ?(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ()
   =
-  let instructions = effective_instructions ~meta ?profile_defaults () in
+  let instructions =
+    effective_autonomous_instructions ~meta ?profile_defaults ?turn_decision ()
+  in
   let active_goals =
     Option.value
       ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
@@ -895,6 +928,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       ~config
       ?profile_defaults
       ?active_goal_summaries
+      ?turn_decision
       ()
   in
   (* User message: structured world observation — reactive triggers + resource state only.

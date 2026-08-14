@@ -605,6 +605,54 @@ max_context_override = 128001
       check (option int) "max_context_override" (Some 128_001)
         d.max_context_override
 
+let test_profile_parses_autonomous_instructions () =
+  let input = {|
+[keeper]
+autonomous_instructions = "autonomous turn instructions"
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check (option string) "autonomous_instructions"
+         (Some "autonomous turn instructions")
+         d.autonomous_instructions)
+
+let test_profile_autonomous_instructions_absent_is_none () =
+  let input = "[keeper]\ninstructions = \"normal\"\n" in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+    (match KTP.profile_defaults_of_toml doc with
+     | Error e -> fail e
+     | Ok d ->
+       check (option string) "autonomous_instructions absent" None
+         d.autonomous_instructions)
+
+let test_profile_autonomous_instructions_roundtrip () =
+  (* Write a declarative keeper TOML, then load it back: the value must survive
+     the write -> parse -> profile_defaults roundtrip. *)
+  let path = Filename.temp_file "keeper-auto-roundtrip" ".toml" in
+  Sys.remove path;
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      (match
+         TL.create_keeper_toml_file
+           ~path
+           [ ("autonomous_instructions", TL.Toml_string "roundtrip autonomous text") ]
+       with
+       | Error e -> fail ("create_keeper_toml_file failed: " ^ e)
+       | Ok () ->
+         (match KTP.load_keeper_toml path with
+          | Error e -> fail (KTP.keeper_toml_load_error_to_string e)
+          | Ok (_name, defaults) ->
+            check (option string) "roundtrip autonomous_instructions"
+              (Some "roundtrip autonomous text")
+              defaults.autonomous_instructions)))
+
 let test_profile_rejects_wrong_known_field_shape () =
   let input =
     {|
@@ -1627,6 +1675,10 @@ let () =
             test_profile_parses_multimodal_policy;
           test_case "rejects invalid multimodal_policy" `Quick
             test_profile_rejects_invalid_multimodal_policy;
+          test_case "autonomous_instructions absent is none" `Quick
+            test_profile_autonomous_instructions_absent_is_none;
+          test_case "autonomous_instructions roundtrip" `Quick
+            test_profile_autonomous_instructions_roundtrip;
         ] );
       ( "writer",
         [

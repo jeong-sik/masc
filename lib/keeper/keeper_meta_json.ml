@@ -19,6 +19,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; Name, `String m.name
     ; Agent_name, `String m.agent_name
     ; Instructions, `String m.instructions
+    ; Autonomous_instructions
+    , (match m.autonomous_instructions with
+       | Some s -> `String s
+       | None -> `Null)
     ; Trace_id, `String (Keeper_id.Trace_id.to_string rt.trace_id)
     ; Multimodal_policy, `String (multimodal_policy_to_string m.multimodal_policy)
     ; Trace_history, `List (List.map (fun s -> `String s) rt.trace_history)

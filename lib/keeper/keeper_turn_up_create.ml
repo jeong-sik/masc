@@ -175,6 +175,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
         instructions;
+        autonomous_instructions =
+          Dashboard_utils.first_some p.autonomous_instructions_opt
+            p.profile_defaults.autonomous_instructions;
         sandbox_profile;
         sandbox_image = None;
         network_mode;

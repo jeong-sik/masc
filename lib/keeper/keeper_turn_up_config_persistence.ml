@@ -6,6 +6,9 @@ type outcome =
   ; created : bool
   }
 
+let value_string value =
+  Keeper_toml_loader.Toml_string value
+
 let set_string value =
   Keeper_toml_loader.Set (Keeper_toml_loader.Toml_string value)
 
@@ -40,7 +43,7 @@ let full_fields
     ; "proactive_enabled", Keeper_toml_loader.Toml_bool meta.proactive.enabled
     ; "autoboot_enabled", Keeper_toml_loader.Toml_bool meta.autoboot_enabled
     ; "active_goal_ids", Keeper_toml_loader.Toml_string_array meta.active_goal_ids
-    ]
+    ] |> append_optional "autonomous_instructions" value_string meta.autonomous_instructions
   in
   let fields =
     match meta.max_context_override with
@@ -59,14 +62,14 @@ let full_fields
 let explicit_edits
       (parsed : Keeper_turn_up_args.parsed_args)
   =
-  []
-  |> append_optional "sandbox_profile" set_string parsed.sandbox_profile_opt
+  [] |> append_optional "sandbox_profile" set_string parsed.sandbox_profile_opt
   |> append_optional "network_mode" set_string parsed.network_mode_opt
   |> append_optional "allowed_paths" set_strings parsed.allowed_paths_opt
   |> append_optional "mention_targets" set_strings parsed.mention_targets_opt
   |> append_optional "proactive_enabled" set_bool parsed.proactive_enabled_opt
   |> append_optional "autoboot_enabled" set_bool parsed.autoboot_enabled_opt
   |> append_optional "active_goal_ids" set_strings parsed.active_goal_ids_opt
+  |> append_optional "autonomous_instructions" set_string parsed.autonomous_instructions_opt
   |> fun fields ->
   (if not parsed.max_context_override_present
    then fields

@@ -18,12 +18,11 @@ type parsed_args = {
   active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
   max_context_override_present : bool;
-  autonomous_wake_prompt_opt : string option;
-  autonomous_wake_prompt_present : bool;
   proactive_enabled_opt : bool option;
   sandbox_profile_opt : string option;
   network_mode_opt : string option;
   instructions_arg : string option;
+  autonomous_instructions_opt : string option;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
 }
@@ -96,26 +95,6 @@ let parse_max_context_override args =
            "max_context_override must be an integer or null (received %s)"
            (Json_util.kind_name other))
 
-(* Same shared contract as the fleet env var and the keeper TOML parser
-   (Env_config_keeper.KeeperAutonomous.validate_wake_prompt), so no value can
-   pass one authoring surface and be rejected by another. Null is the only
-   explicit clear: strings have no zero sentinel, and folding "" into a clear
-   would make a typo read as "the setting did not take". *)
-let parse_autonomous_wake_prompt args =
-  match Json_util.assoc_member_opt "autonomous_wake_prompt" args with
-  | None -> Ok (false, None)
-  | Some `Null -> Ok (true, None)
-  | Some (`String raw) ->
-      (match Env_config_keeper.KeeperAutonomous.validate_wake_prompt raw with
-       | Ok value -> Ok (true, Some value)
-       | Error reason ->
-           Error (Printf.sprintf "autonomous_wake_prompt: %s" reason))
-  | Some other ->
-      Error
-        (Printf.sprintf
-           "autonomous_wake_prompt must be a string or null (received %s)"
-           (Json_util.kind_name other))
-
 let parse (ctx : _ context) (args : Yojson.Safe.t) :
     (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
@@ -149,7 +128,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       Ok runtime_id_opt ->
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
     let max_context_override_res = parse_max_context_override args in
-    let autonomous_wake_prompt_res = parse_autonomous_wake_prompt args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
@@ -187,14 +165,13 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    match
-      sandbox_profile_error, max_context_override_res, autonomous_wake_prompt_res
-    with
-    | Some msg, _, _ -> Error (tool_result_error msg)
-    | None, Error msg, _ -> Error (tool_result_error msg)
-    | None, _, Error msg -> Error (tool_result_error msg)
-    | None, Ok (max_context_override_present, max_context_override_opt),
-      Ok (autonomous_wake_prompt_present, autonomous_wake_prompt_opt) ->
+    let autonomous_instructions_opt =
+      Safe_ops.json_string_opt "autonomous_instructions" args
+    in
+    match sandbox_profile_error, max_context_override_res with
+    | Some msg, _ -> Error (tool_result_error msg)
+    | None, Error msg -> Error (tool_result_error msg)
+    | None, Ok (max_context_override_present, max_context_override_opt) ->
     Ok {
       name;
       runtime_id_opt;
@@ -204,12 +181,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       mention_targets_opt;
       max_context_override_opt;
       max_context_override_present;
-      autonomous_wake_prompt_opt;
-      autonomous_wake_prompt_present;
       proactive_enabled_opt;
       sandbox_profile_opt;
       network_mode_opt;
       instructions_arg;
+      autonomous_instructions_opt;
       profile_defaults;
       instructions_opt;
     }

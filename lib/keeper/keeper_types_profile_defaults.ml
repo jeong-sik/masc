@@ -28,6 +28,11 @@ type keeper_profile_defaults = {
      Applied via Unix.putenv right before each turn so AGENT_CORE transport
      build_args picks them up.  Empty list = no overrides. *)
   agent_core_env : (string * string) list;
+  (* Per-keeper autonomous-turn instructions (RFC autonomous_instructions).
+     Injected into autonomous (scheduler-triggered) turns only, not
+     direct/dashboard turns.  Parsed from [[keeper.autonomous_instructions]]
+     in the keeper TOML profile. *)
+  autonomous_instructions : string option;
 }
 
 let empty_keeper_profile_defaults =
@@ -50,5 +55,6 @@ let empty_keeper_profile_defaults =
     telemetry_feedback_window_hours = None;
     always_allow = None;
     agent_core_env = [];
+    autonomous_instructions = None;
   }
 ;;

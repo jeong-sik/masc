@@ -20,6 +20,11 @@ type keeper_profile_defaults = {
   always_allow : bool option;
   (* Keeper runtime assignment lives in runtime.toml [[runtime.assignments]]. *)
   agent_core_env : (string * string) list;
+  (* Per-keeper autonomous-turn instructions (RFC autonomous_instructions).
+     Injected into autonomous (scheduler-triggered) turns only, not
+     direct/dashboard turns.  Parsed from [[keeper.autonomous_instructions]]
+     in the keeper TOML profile. *)
+  autonomous_instructions : string option;
 }
 
 val empty_keeper_profile_defaults : keeper_profile_defaults

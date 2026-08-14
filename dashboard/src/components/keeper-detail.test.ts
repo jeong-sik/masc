@@ -365,8 +365,11 @@ describe('KeeperDetailPage', () => {
 
     // Secondary inspectors live in the standalone-style overflow. Opening the
     // menu and choosing "상세" flips to the reused full tabbed detail body.
-    fireEvent.click(screen.getByRole('button', { name: '대화 도구' }))
-    fireEvent.click(screen.getByRole('menuitemcheckbox', { name: '상세' }))
+    fireEvent.click(screen.getByTestId('kw-chat-command-menu-toggle'))
+    const detailCommand = screen.getByTestId('kw-chat-command-detail')
+    expect(detailCommand.getAttribute('role')).toBe('menuitemcheckbox')
+    expect(detailCommand.textContent).toContain('상세')
+    fireEvent.click(detailCommand)
     const statusTab = await screen.findByRole('tab', { name: '상태' })
     fireEvent.click(statusTab)
     expect(statusTab.getAttribute('aria-selected')).toBe('true')

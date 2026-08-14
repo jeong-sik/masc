@@ -799,6 +799,71 @@ describe('Overview v2 marker classes', () => {
   })
 })
 
+describe('Overview backend composite health', () => {
+  function stubOverviewFetch(operatorActionRequired: boolean) {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: RequestInfo | URL) => {
+      const url = `${input}`
+      if (url.includes('/health?full=1')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          overall_status: 'degraded',
+          operator_action_required: operatorActionRequired,
+          operator_action_reasons: operatorActionRequired ? ['keeper_event_queue'] : [],
+          full_health_snapshot: {
+            status: 'ready',
+            stale_reason: null,
+            last_good_available: true,
+            component_timed_out: false,
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (url.includes('/api/v1/dashboard/telemetry/summary')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          generated_at: '2026-08-14T00:00:00Z',
+          sources: [],
+          total_entries: 0,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (url.includes('/api/v1/dashboard/telemetry?')) {
+        return Promise.resolve(new Response(JSON.stringify({
+          generated_at: '2026-08-14T00:00:00Z',
+          count: 0,
+          entries: [],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      return Promise.reject(new Error(`unexpected url: ${url}`))
+    }))
+  }
+
+  afterEach(() => {
+    cleanup()
+    dashboardFullHealthResource.reset()
+    vi.unstubAllGlobals()
+  })
+
+  it('joins one backend action requirement into the KPI and attention panel', async () => {
+    stubOverviewFetch(true)
+    const { container } = render(h(Overview, null))
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="kpi-att"] .ov-kpi-v')?.textContent).toBe('1')
+      expect(container.querySelector('[data-testid="attention-row-runtime-health"]')?.textContent)
+        .toContain('Runtime health degraded')
+    })
+  })
+
+  it('keeps a non-action degraded verdict visible without counting operator work', async () => {
+    stubOverviewFetch(false)
+    const { container } = render(h(Overview, null))
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="kpi-att"] .ov-kpi-v')?.textContent).toBe('0')
+      expect(container.querySelector('[data-testid="overview-attention"] h3')?.textContent)
+        .toBe('상태 참고')
+      expect(container.querySelector('[data-testid="attention-row-runtime-health"]')).not.toBeNull()
+    })
+  })
+})
+
 describe('Overview StyleSeed surfaces', () => {
   afterEach(() => {
     cleanup()

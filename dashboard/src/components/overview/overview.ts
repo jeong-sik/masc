@@ -46,6 +46,10 @@ import {
   resolveKeeperFleetExecutionCounts,
   type KeeperFleetExecutionCounts,
 } from '../../runtime-counts'
+import {
+  projectDashboardCompositeHealth,
+  type DashboardCompositeHealthVerdict,
+} from '../../lib/dashboard-composite-health'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
 import { gateData } from '../gate-signals'
@@ -1067,18 +1071,40 @@ function OverviewKpi({
 function OverviewKpiStrip({
   stats,
   fleet,
+  health,
   digest,
   approvalQueueState,
 }: {
   stats: OverviewStats
   fleet: KeeperFleetExecutionCounts | null
+  health: DashboardCompositeHealthVerdict
   digest: OverviewDigest
   approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | undefined
 }) {
+  const attentionCount = stats.att + health.issueCount
+  const attentionValue = health.state === 'unavailable'
+    ? stats.att > 0 ? `${stats.att}+?` : '—'
+    : String(attentionCount)
+  const attentionTone = health.state === 'attention' && health.severity === 'warn' && stats.att === 0
+    ? 'warn'
+    : attentionCount > 0 || health.state === 'unavailable'
+      ? 'bad'
+      : undefined
+  const hasKeeperAttention = stats.att > 0
+  const hasHealthRow = health.state !== 'healthy'
+  const openAttention = () => {
+    if (hasKeeperAttention && hasHealthRow) {
+      document.getElementById('overview-attention')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } else if (hasHealthRow) {
+      navigate('monitoring', { section: 'fleet-health' })
+    } else {
+      navigate('monitoring', { section: 'agents' })
+    }
+  }
   return html`
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
       <${OverviewKpi} label="실행 중 keeper" value=${fleetCountText(fleet?.running)} sub=${` / ${stats.total}`} tone=${fleet?.running != null ? 'ok' : undefined} testId="kpi-run" onClick=${() => navigate('monitoring')} />
-      <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
+      <${OverviewKpi} label="주의 필요" value=${attentionValue} tone=${attentionTone} testId="kpi-att" onClick=${openAttention} />
       ${approvalQueueState && approvalQueueState.state !== 'ready'
         ? html`<${OverviewKpi}
             label="열린 Gate"
@@ -1107,7 +1133,13 @@ function attentionToneClass(sev: KeeperAttentionReason['sev']): string {
   return sev === 'bad' ? 'bg-destructive' : 'bg-warning'
 }
 
-function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] }) {
+function OverviewAttentionPanel({
+  keeperList,
+  health,
+}: {
+  keeperList: readonly Keeper[]
+  health: DashboardCompositeHealthVerdict
+}) {
   const attn = useMemo(
     () => pickAttentionKeepers(keeperList).slice().sort((a, b) => {
       const aBad = deriveKeeperAttentionReason(a).sev === 'bad'
@@ -1119,9 +1151,9 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
     [keeperList],
   )
 
-  if (attn.length === 0) {
+  if (attn.length === 0 && health.state === 'healthy') {
     return html`
-      <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
+      <section id="overview-attention" class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
         <div class="ov-card-h">
           <h3>주의 필요 · 지금 손이 필요한 것</h3>
           <span class="ov-count">0</span>
@@ -1131,13 +1163,51 @@ function OverviewAttentionPanel({ keeperList }: { keeperList: readonly Keeper[] 
     `
   }
 
+  const attentionCount = attn.length + health.issueCount
+  const attentionCountLabel = health.state === 'unavailable'
+    ? attn.length > 0 ? `${attn.length}+?` : '—'
+    : String(attentionCount)
+
   return html`
-    <section class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
+    <section id="overview-attention" class="ov-card ov-attn v2-overview-attention" data-testid="overview-attention">
       <div class="ov-card-h">
-        <h3>주의 필요 · 지금 손이 필요한 것</h3>
-        <span class="ov-count">${attn.length}</span>
+        <h3>${attentionCount === 0 && health.state === 'status' ? '상태 참고' : '주의 필요 · 지금 손이 필요한 것'}</h3>
+        <span class="ov-count">${attentionCountLabel}</span>
       </div>
       <div class="ov-attn-list v2-overview-attention-list">
+        ${health.state === 'unavailable'
+          ? html`
+              <div
+                class="ov-attn-row v2-overview-attention-row"
+                data-testid="attention-row-composite-health-unavailable"
+                onClick=${() => navigate('monitoring', { section: 'fleet-health' })}
+              >
+                <span class="inline-block size-2 rounded-full bg-warning"></span>
+                <div class="ov-attn-meta">
+                  <div class="ov-attn-name">Fleet health 미연결</div>
+                  <div class="ov-attn-reason sev-warn">Backend composite health verdict has not loaded.</div>
+                </div>
+                <button type="button" class="ov-attn-act">상태 상세 →</button>
+              </div>
+            `
+          : health.state === 'attention' || health.state === 'status'
+            ? health.issues.map(issue => html`
+                <div
+                  key=${issue.kind}
+                  class="ov-attn-row v2-overview-attention-row"
+                  data-testid=${`attention-row-${issue.kind}`}
+                  title=${issue.detail}
+                  onClick=${() => navigate('monitoring', { section: 'fleet-health' })}
+                >
+                  <span class=${`inline-block size-2 rounded-full ${issue.severity === 'bad' ? 'bg-destructive' : 'bg-warning'}`}></span>
+                  <div class="ov-attn-meta">
+                    <div class="ov-attn-name">${issue.label}</div>
+                    <div class=${`ov-attn-reason sev-${issue.severity}`}>${issue.detail}</div>
+                  </div>
+                  <button type="button" class="ov-attn-act">상태 상세 →</button>
+                </div>
+              `)
+            : null}
         ${attn.map(k => {
           const reason = deriveKeeperAttentionReason(k)
           const displayName = k.koreanName && k.koreanName !== '' ? k.koreanName : k.name
@@ -1575,13 +1645,15 @@ export function Overview() {
       ? gateData.value?.approval_queue?.length ?? null
       : null
   const scheduledAutomationData = scheduledAutomationProjection.value ?? null
-  const scheduleRunnerStatus = dashboardFullHealth.value?.schedule_runner ?? null
-  const keeperQueueHealth = dashboardFullHealth.value?.keeper_event_queue ?? null
+  const fullHealth = dashboardFullHealth.value
+  const scheduleRunnerStatus = fullHealth?.schedule_runner ?? null
+  const keeperQueueHealth = fullHealth?.keeper_event_queue ?? null
   // Keeper execution counts come from the runtime-health fleet projection the
   // shell already holds — the same `keeper_fleet_safety_health_json` payload
   // `/health?full=1` embeds, so reading it here adds no request.
   const fleetSafety = shellRuntimeResolution.value?.fleet_safety ?? null
   const fleet = useMemo(() => resolveKeeperFleetExecutionCounts(fleetSafety), [fleetSafety])
+  const compositeHealth = useMemo(() => projectDashboardCompositeHealth(fullHealth), [fullHealth])
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
     () => computeOverviewDigest(
@@ -1603,11 +1675,12 @@ export function Overview() {
         <${OverviewKpiStrip}
           stats=${stats}
           fleet=${fleet}
+          health=${compositeHealth}
           digest=${digest}
           approvalQueueState=${approvalQueueState}
         />
         <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
-          <${OverviewAttentionPanel} keeperList=${keeperList} />
+          <${OverviewAttentionPanel} keeperList=${keeperList} health=${compositeHealth} />
           <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
         <${OverviewDomainSection}

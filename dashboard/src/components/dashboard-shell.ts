@@ -748,17 +748,25 @@ function formatUptimeSecondsHuman(
     surface the one-glance summary on hover and reserve the click for
     \"deep details\". \n renders verbatim in native tooltips. */
 function composeBuildBadgeTitle(
-  build: { release_version?: string | null; commit?: string | null; uptime_seconds?: number | null } | null | undefined,
+  build: {
+    release_version?: string | null
+    binary_commit?: string | null
+    repo_head_commit?: string | null
+    uptime_seconds?: number | null
+  } | null | undefined,
   fallbackVersion: string | null | undefined,
 ): string {
   if (!build && !fallbackVersion) return 'Build unavailable'
   const lines: string[] = ['Server build']
   const version = build?.release_version ?? fallbackVersion
   if (version != null && version !== '') {
-    const commit = build?.commit != null && build.commit !== ''
-      ? ` · ${shortCommit(build.commit)}`
-      : ' · dev'
-    lines.push(`  · v${version}${commit}`)
+    const binary = build?.binary_commit != null && build.binary_commit !== ''
+      ? shortCommit(build.binary_commit)
+      : 'binary commit unknown'
+    lines.push(`  · v${version} · ${binary}`)
+  }
+  if (build?.repo_head_commit != null && build.repo_head_commit !== '') {
+    lines.push(`  · Checkout ${shortCommit(build.repo_head_commit)}`)
   }
   const uptime = formatUptimeSecondsHuman(build?.uptime_seconds)
   if (uptime !== 'Unknown') {
@@ -772,9 +780,9 @@ export function BuildIdentityBadge() {
   const status = serverStatus.value
   const build = status?.build
   const label = build
-    ? `v${build.release_version} · ${shortCommit(build.commit)}`
+    ? `v${build.release_version} · ${build.binary_commit ? shortCommit(build.binary_commit) : 'binary unknown'}`
     : status?.version
-      ? `v${status.version} · dev`
+      ? `v${status.version} · binary unknown`
       : 'Build unavailable'
   const hoverTitle = composeBuildBadgeTitle(build, status?.version)
 
@@ -797,8 +805,11 @@ export function BuildIdentityBadge() {
               <${BuildInfoRow} label="Release">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>
-              <${BuildInfoRow} label="Commit">
-                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.commit ?? 'git not detected (dev)'}</strong>
+              <${BuildInfoRow} label="Binary commit">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.binary_commit ?? 'Unknown (build identity absent)'}</strong>
+              <//>
+              <${BuildInfoRow} label="Checkout head">
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.repo_head_commit ?? 'Unknown'}</strong>
               <//>
               <${BuildInfoRow} label="Server started">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'Unknown'}</strong>

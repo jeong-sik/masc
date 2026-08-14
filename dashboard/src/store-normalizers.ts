@@ -948,6 +948,11 @@ export function normalizeBuildIdentity(raw: unknown): ServerStatus['build'] | un
   return {
     release_version: releaseVersion,
     commit: asString(raw.commit) ?? null,
+    commit_source: asString(raw.commit_source) ?? null,
+    binary_commit: asString(raw.binary_commit) ?? null,
+    binary_commit_source: asString(raw.binary_commit_source) ?? null,
+    repo_head_commit: asString(raw.repo_head_commit) ?? null,
+    repo_head_commit_source: asString(raw.repo_head_commit_source) ?? null,
     started_at: startedAt,
     uptime_seconds: uptimeSeconds,
   }

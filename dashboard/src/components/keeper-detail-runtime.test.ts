@@ -910,13 +910,18 @@ describe('RuntimeLensSection', () => {
         server_repo_git_commit: '386514c1f9',
         workspace_git_commit: 'd0add960d7',
         server_repo_path: { path: '/repo/.worktrees/stale-server' },
+        build: {
+          binary_commit: 'a1b2c3d4e5f6',
+        },
       },
     })
 
     expect(summary.tone).toBe('warn')
     expect(summary.runtimeWarnings).toEqual(['Runtime build commit differs from server repo HEAD.'])
-    expect(summary.runtimeBuildLabel).toBe('386514c1f9 vs workspace d0add960d7')
-    expect(summary.runtimeRepoLabel).toBe('.worktrees/stale-server')
+    expect(summary.runtimeBuildLabel).toBe('a1b2c3d4e5')
+    expect(summary.runtimeRepoLabel).toBe(
+      '.worktrees/stale-server · head 386514c1f9 · workspace d0add960d7',
+    )
   })
 
   it('renders secret projection status without secret values', () => {

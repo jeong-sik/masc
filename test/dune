@@ -891,6 +891,21 @@
  (modules test_monitor_domain)
  (libraries masc_test_deps masc_monitor))
 
+; RFC-0379: locked monitor store CRUD, cap, ownership, fire accounting, expiry.
+
+(test
+ (name test_monitor_store)
+ (modules test_monitor_store)
+ (libraries masc_test_deps masc_monitor))
+
+; RFC-0379: in-process end-to-end fire — real socket edge, real store, real
+; runner sweep, durable Monitor_fired row in the keeper event-queue file.
+
+(test
+ (name test_monitor_runner_fire)
+ (modules test_monitor_runner_fire)
+ (libraries masc_test_deps masc_monitor eio_main))
+
 ; A keeper must not be offered its own authored tasks as claimable work —
 ; otherwise a routing/report keeper re-triggers on its own output.
 

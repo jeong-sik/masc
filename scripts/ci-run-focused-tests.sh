@@ -273,6 +273,8 @@ normal_targets=(
   @test/runtest-test_runtime_modality_reroute
   @test/runtest-test_runtime_agent_advanced_outcome
   @test/runtest-test_monitor_domain
+  @test/runtest-test_monitor_store
+  @test/runtest-test_monitor_runner_fire
   @test/runtest-test_runtime_model_input_tail_window
   @test/runtest-test_keeper_context_overflow_shrink
   @test/runtest-test_keeper_provider_call_deadline

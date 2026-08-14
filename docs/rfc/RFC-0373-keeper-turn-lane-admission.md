@@ -97,7 +97,7 @@ a policy before knowing what the exclusion protects would be guessing.
 
 ## Measurements
 
-Whole-day log, 2026-08-12, 7 keepers (`~/me/.masc/logs/system_log_2026-08-12.jsonl`):
+Whole-day log, 2026-08-12, 7 keepers (`<base-path>/.masc/logs/system_log_2026-08-12.jsonl`):
 
 | | |
 |---|---|

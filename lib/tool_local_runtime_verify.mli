@@ -10,6 +10,12 @@
     renderer behind {!runtime_verify_json}.  The old single-host legacy
     probe fallback is gone; verification now requires AGENT_CORE discovery. *)
 
+module For_testing : sig
+  val select_endpoint_urls_for_pool :
+    ?runtime_pool:string -> string list -> string list option
+  (** Regression seam for the fail-closed explicit-pool selector. *)
+end
+
 val provider_health_reachable : status:int option -> bool
 (** [provider_health_reachable ~status] is [true] iff
     [status = Some 200].  The health endpoint is a status-code-only
@@ -66,9 +72,10 @@ val runtime_verify_json :
 
     Returns a JSON object with health/slot/ctx/model
     diagnostics + the {!classify_runtime_blocker} verdict.  [?runtime_pool]
-    selects the pool by name; default behaviour is "use the
-    default pool" via {!Local_runtime_pool.default_pool_label}.  When
-    discovery has no resolvable endpoints, the local-runtime diagnostic fails
+    selects the pool by name; default behaviour verifies every discovered
+    endpoint. An explicit pool that matches no endpoint fails closed rather
+    than probing the full pool. When discovery has no resolvable endpoints,
+    the local-runtime diagnostic fails
     closed with [runtime_blocker = "agent_core_discovery_unavailable"]. The
     response also pins [verification_scope =
     "local_openai_compatible_runtime_pool"], [blocks_keeper_turns = false],

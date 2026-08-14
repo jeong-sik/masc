@@ -78,7 +78,7 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
             request_runtime_profile: null,
             request_body_bytes: null,
             runtime_profile: 'agent-core-seoul-1',
-            model: 'runtime',
+            selected_model: 'gpt-5.4',
             finish_reason: 'completed',
             input_tokens: 33000,
             output_tokens: 120,

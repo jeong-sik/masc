@@ -930,13 +930,15 @@ let run_turn
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_core.Types.text_of_content result.response.content in
-                 (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
-                 let model =
+                 let manifest_model_label =
                    Boundary_redaction.to_string
                      Boundary_redaction.runtime_model_label
                  in
                  receipt_turn_count_ref := Some result.turns;
-                 receipt_model_used_ref := Some model;
+                 receipt_model_used_ref :=
+                   Option.bind
+                     result.runtime_observation
+                     (fun observation -> observation.selected_model);
                  receipt_stop_reason_ref := Some result.stop_reason;
                  receipt_runtime_observation_ref := result.runtime_observation;
                  (* Thinking is now persisted per-turn inside the after_turn
@@ -1043,7 +1045,8 @@ let run_turn
                              ~ctx_snapshot:ctx_work
                              ~generation ~profile_defaults
                              ~manifest_keeper_turn_id
-                             ~session ~append_manifest ~model
+                             ~session ~append_manifest
+                             ~model:manifest_model_label
                              ~acc
                              ~actual_keeper_tool_names
                              ~result
@@ -1207,9 +1210,9 @@ let run_turn
           | Error _ -> None
         in
         (* RFC-0233 §2.3 — views derive, no view-side repair: ground the
-           inspector's [model] and [finish_reason] in the same refs the
-           execution receipt already records this turn. [model] is the
-           RFC-0132 boundary-redacted runtime label; [finish_reason] is
+           inspector's [selected_model] and [finish_reason] in the same refs
+           the execution receipt already records this turn. [selected_model]
+           is the successful attempt's observed model; [finish_reason] is
            the keeper stop reason serialized through the receipt SSOT
            ([Keeper_execution_receipt.stop_reason_to_string]). Both are
            [None] on the error path (receipt refs unset), never a
@@ -1284,7 +1287,7 @@ let run_turn
           ~trace_id
           ~absolute_turn:manifest_keeper_turn_id
           ~runtime_profile:settled_runtime_id
-          ~model:!receipt_model_used_ref
+          ~selected_model:!receipt_model_used_ref
           ~finish_reason:
             (Option.map
                Keeper_execution_receipt.stop_reason_to_string

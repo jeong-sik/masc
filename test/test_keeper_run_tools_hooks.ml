@@ -625,6 +625,59 @@ let test_completed_calls_short_list_is_whole () =
   check int "every call is kept" 3 (List.length kept)
 ;;
 
+let test_concurrent_tool_observers_commit_as_transactions () =
+  Eio_main.run @@ fun _env ->
+  let serialize =
+    Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+  in
+  let trace = ref [] in
+  let record event = trace := event :: !trace in
+  let first_entered, resolve_first_entered = Eio.Promise.create () in
+  let release_first, resolve_release_first = Eio.Promise.create () in
+  let second_attempting, resolve_second_attempting = Eio.Promise.create () in
+  Eio.Switch.run (fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      serialize (fun () ->
+        record "receipt:first";
+        Eio.Promise.resolve resolve_first_entered ();
+        Eio.Promise.await release_first;
+        record "activity:first"));
+    Eio.Promise.await first_entered;
+    Eio.Fiber.fork ~sw (fun () ->
+      Eio.Promise.resolve resolve_second_attempting ();
+      serialize (fun () ->
+        record "receipt:second";
+        record "activity:second"));
+    Eio.Promise.await second_attempting;
+    (* Give the second fiber a scheduling turn while the first observer is
+       suspended. Without the production serialization boundary this would put
+       the second receipt/activity pair inside the first pair. *)
+    Eio.Fiber.yield ();
+    Eio.Promise.resolve resolve_release_first ());
+  check
+    (list string)
+    "receipt and activity effects share one completion order"
+    [ "receipt:first"
+    ; "activity:first"
+    ; "receipt:second"
+    ; "activity:second"
+    ]
+    (List.rev !trace)
+;;
+
+let test_failed_tool_observer_releases_next_completion () =
+  Eio_main.run @@ fun _env ->
+  let serialize =
+    Masc.Keeper_run_tools_hooks.create_tool_observer_serialization ()
+  in
+  (match serialize (fun () -> raise Exit) with
+   | () -> fail "failed observer unexpectedly returned"
+   | exception Exit -> ());
+  let observed = ref false in
+  serialize (fun () -> observed := true);
+  check bool "a reported observer failure does not poison later receipts" true !observed
+;;
+
 let () =
   run
     "keeper_run_tools_hooks"
@@ -712,6 +765,16 @@ let () =
             "bare relative outside repos lane is an unregistered path"
             `Quick
             test_partition_bare_relative_outside_repos_is_unregistered_path
+        ] )
+    ; ( "concurrent_tool_observer"
+      , [ test_case
+            "commits receipt and activity as one transaction"
+            `Quick
+            test_concurrent_tool_observers_commit_as_transactions
+        ; test_case
+            "releases the next completion after a reported failure"
+            `Quick
+            test_failed_tool_observer_releases_next_completion
         ] )
     ]
 ;;

@@ -34,7 +34,6 @@ end
 type delivery_key =
   | Operation of Request_id.t
   | Fusion_run of Request_id.t
-  | Continuation of Request_id.t
 
 type transcript_slot =
   | Accepted_user
@@ -91,11 +90,6 @@ let delivery_key_to_yojson = function
       [ "kind", `String "fusion_run"
       ; "request_id", `String (Request_id.to_string request_id)
       ]
-  | Continuation intent_id ->
-    `Assoc
-      [ "kind", `String "continuation"
-      ; "intent_id", `String (Request_id.to_string intent_id)
-      ]
 ;;
 
 let delivery_key_of_yojson = function
@@ -122,16 +116,6 @@ let delivery_key_of_yojson = function
        let* request_id = string_field "request_id" fields in
        let* request_id = Request_id.of_string request_id in
        Ok (Fusion_run request_id)
-     | "continuation" ->
-       let* () =
-         validate_fields
-           ~context:"continuation delivery identity"
-           ~expected:[ "kind"; "intent_id" ]
-           fields
-       in
-       let* intent_id = string_field "intent_id" fields in
-       let* intent_id = Request_id.of_string intent_id in
-       Ok (Continuation intent_id)
      | _ -> Error (Printf.sprintf "unsupported delivery identity kind %S" kind))
   | _ -> Error "delivery identity must be an object"
 ;;
@@ -140,10 +124,7 @@ let delivery_key_equal left right =
   match left, right with
   | Operation left, Operation right -> Request_id.equal left right
   | Fusion_run left, Fusion_run right -> Request_id.equal left right
-  | Continuation left, Continuation right -> Request_id.equal left right
-  | (Operation _ | Fusion_run _ | Continuation _),
-    (Operation _ | Fusion_run _ | Continuation _) ->
-    false
+  | Operation _, Fusion_run _ | Fusion_run _, Operation _ -> false
 ;;
 
 let transcript_slot_to_yojson = function

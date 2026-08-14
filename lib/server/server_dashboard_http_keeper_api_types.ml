@@ -19,6 +19,7 @@ let keeper_suffix_paused_work = "/paused-work"
 let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_memory_journal = "/memory-journal"
+let keeper_suffix_turn_records = "/turn-records"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
@@ -164,7 +165,9 @@ let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
 
 let keeper_get_permission req_path =
-  if
+  if keeper_path_ends_with req_path keeper_suffix_turn_records
+  then Some Masc_domain.CanReadState
+  else if
     is_keeper_checkpoints_get_path req_path
     || is_keeper_paused_work_get_path req_path
     || keeper_path_ends_with req_path keeper_suffix_github_identity
@@ -361,48 +364,6 @@ let claim_scope_summary_absent =
     ; ("trace_id", `Null)
     ; ("keeper_turn_id", `Null)
     ]
-
-let internal_history_json_to_trajectory_line (json : Yojson.Safe.t)
-    : Trajectory.trajectory_line option =
-  let source = Safe_ops.json_string ~default:"" "source" json in
-  (* History rows persist message text as typed [content_blocks], not a flat
-     [content] string (Keeper_context_core_message_json: "Structured
-     content_blocks is the only supported message-content shape"). Reading a
-     flat [content] field decoded to "" for every persisted internal_assistant
-     row, so the whole keeper reasoning history was skipped and invisible in the
-     dashboard trace. Use the SSOT extractor (shared with history routing /
-     memory recall) so content_blocks rows decode to their text. *)
-  let content = Keeper_context_core.text_of_history_jsonl_json json in
-  if source <> "internal_assistant" || String.trim content = "" then None
-  else
-    let ts =
-      match Safe_ops.json_float_opt "ts_unix" json with
-      | Some value when value > 0.0 -> value
-      | _ ->
-          match Safe_ops.json_float_opt "timestamp" json with
-          | Some value when value > 0.0 -> value
-          | _ -> 0.0
-    in
-    if ts <= 0.0 then None
-    else
-      let ts_iso =
-        match Safe_ops.json_string_opt "ts_iso" json with
-        | Some value when Option.is_some (String_util.trim_to_option value) -> value
-        | _ ->
-            match Safe_ops.json_string_opt "ts" json with
-            | Some value when Option.is_some (String_util.trim_to_option value) -> value
-            | _ -> Masc_domain.iso8601_of_unix_seconds ts
-      in
-      Some
-        (Trajectory.Thinking
-           {
-             ts;
-             ts_iso;
-             turn = Safe_ops.json_int ~default:0 "turn" json;
-             content;
-             content_length = String.length content;
-             redacted = Safe_ops.json_bool ~default:false "redacted" json;
-           })
 
 let runtime_manifest_public_json row =
   Keeper_runtime_manifest.public_to_json row

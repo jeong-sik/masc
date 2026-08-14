@@ -79,6 +79,12 @@ val dashboard_scheduled_automation_http_json :
     rather than the projection directly, so the two transports cannot serve
     different data or drift on cache policy. *)
 
+val dashboard_scheduled_automation_query_http_json :
+  config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
+(** Query-aware owner for the scheduled-automation route. With no [schedule_id]
+    it delegates to {!dashboard_scheduled_automation_http_json}; an exact lookup
+    reads the schedule store without populating a client-controlled cache key. *)
+
 val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 

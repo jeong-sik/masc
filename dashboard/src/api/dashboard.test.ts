@@ -418,6 +418,9 @@ describe('keeper tool telemetry fetchers', () => {
             tool_use_id: '',
             turn: 6,
             planned_index: 2,
+            batch_index: 1,
+            batch_size: 3,
+            execution_mode: 'concurrent',
             goal_ids: ['g-1', 'g-2'],
           },
         ],
@@ -432,6 +435,9 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.tool_use_id).toBe('')
     expect(entry?.turn).toBe(6)
     expect(entry?.planned_index).toBe(2)
+    expect(entry?.batch_index).toBe(1)
+    expect(entry?.batch_size).toBe(3)
+    expect(entry?.execution_mode).toBe('concurrent')
   })
 
   it('keeps missing or malformed tool-call duration unmeasured', async () => {
@@ -468,7 +474,7 @@ describe('keeper tool telemetry fetchers', () => {
     expect(result.entries.map(entry => entry.duration_ms)).toEqual([null, null])
   })
 
-  it('grounds turn-record model / finish_reason, leaving absent fields undefined', async () => {
+  it('grounds turn-record selected_model / finish_reason, leaving absent fields undefined', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({
         keeper: 'keeper-alpha',
@@ -511,7 +517,7 @@ describe('keeper tool telemetry fetchers', () => {
               turn_ref: 'trace-grounded#7',
               ts: 10,
               runtime_profile: 'local',
-              model: 'deepseek-v4-flash',
+              selected_model: 'deepseek-v4-flash',
               finish_reason: 'completed',
               blocks: [],
               input_components: [],
@@ -522,7 +528,7 @@ describe('keeper tool telemetry fetchers', () => {
             diff_vs_prev: null,
           },
           {
-            // RFC-0233 §2.3: error turn omits model/finish_reason — must
+            // RFC-0233 §2.3: error turn omits selected_model/finish_reason — must
             // decode to undefined, never a fabricated "stop"/placeholder.
             record: {
               keeper: 'keeper-alpha',
@@ -551,9 +557,9 @@ describe('keeper tool telemetry fetchers', () => {
     const result = await fetchKeeperTurnRecords('keeper-alpha')
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/keepers/keeper-alpha/turn-records')
-    expect(result.entries[0]?.record.model).toBe('deepseek-v4-flash')
+    expect(result.entries[0]?.record.selected_model).toBe('deepseek-v4-flash')
     expect(result.entries[0]?.record.finish_reason).toBe('completed')
-    expect(result.entries[1]?.record.model).toBeUndefined()
+    expect(result.entries[1]?.record.selected_model).toBeUndefined()
     expect(result.entries[1]?.record.finish_reason).toBeUndefined()
   })
 

@@ -356,7 +356,7 @@ describe('streamKeeperMessage', () => {
 
     const events: string[] = []
     await streamKeeperMessage('sangsu', 'ping', {
-      requestId: 'kmsg-stream-direct',
+      operationId: 'kmsg-stream-direct',
       onEvent: event => {
         events.push(event.type)
       },
@@ -387,7 +387,7 @@ describe('streamKeeperMessage', () => {
 
     const events: string[] = []
     await streamKeeperMessage('sangsu', 'ping', {
-      requestId: 'kmsg-stream-copilot',
+      operationId: 'kmsg-stream-copilot',
       onEvent: event => {
         events.push(event.type)
       },
@@ -431,6 +431,7 @@ describe('streamKeeperMessage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await streamKeeperMessage('sangsu', 'describe this', {
+      operationId: 'kmsg-stream-blocks',
       onEvent: () => {},
       attachments: [
         {
@@ -527,6 +528,7 @@ describe('streamKeeperMessage', () => {
 
     const events: string[] = []
     await streamKeeperMessage('sangsu', 'ping', {
+      operationId: 'kmsg-stream-retry-invalid-token',
       onEvent: event => {
         events.push(event.type)
       },
@@ -551,7 +553,10 @@ describe('streamKeeperMessage', () => {
       auth_error_code: 'actor_mismatch',
     })
 
-    await streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} })
+    await streamKeeperMessage('sangsu', 'ping', {
+      operationId: 'kmsg-stream-retry-actor',
+      onEvent: () => {},
+    })
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       '/api/v1/keepers/chat/stream',
@@ -577,7 +582,10 @@ describe('streamKeeperMessage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(
-      streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} }),
+      streamKeeperMessage('sangsu', 'ping', {
+        operationId: 'kmsg-stream-no-retry-origin',
+        onEvent: () => {},
+      }),
     ).rejects.toMatchObject({
       name: 'ApiRequestError',
       authErrorCode: 'same_origin_blocked',
@@ -597,7 +605,10 @@ describe('streamKeeperMessage', () => {
     })
 
     await expect(
-      streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} }),
+      streamKeeperMessage('sangsu', 'ping', {
+        operationId: 'kmsg-stream-no-retry-untyped',
+        onEvent: () => {},
+      }),
     ).rejects.toThrow()
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([

@@ -437,6 +437,28 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.textContent).toContain('페이로드')
   })
 
+  it('renders a controlled exact request that is absent from aggregate rows', () => {
+    const selectedRequest = request({
+      schedule_id: 'sched-outside-page',
+      payload_summary: 'Exact route payload',
+    })
+
+    render(
+      html`<${ScheduledAutomationPanel}
+        automation=${automation([])}
+        variant="v2"
+        selectedScheduleId=${selectedRequest.schedule_id}
+        selectedRequest=${selectedRequest}
+        onSelectSchedule=${vi.fn()}
+      />`,
+      container,
+    )
+
+    expect(container.querySelector(
+      '[data-schedule-detail-panel="sched-outside-page"]',
+    )?.textContent).toContain('Exact route payload')
+  })
+
   it('renders keeper wake dispatch receipts as queue proof in diagnostics and v2', async () => {
     const auto = automation([
       request({

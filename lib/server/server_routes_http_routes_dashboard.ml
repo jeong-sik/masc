@@ -22,6 +22,7 @@ let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 let exact_lane_run_permission = Masc_domain.CanAdmin
+let runtime_probe_read_permission = Masc_domain.CanReadState
 
 (* The panel draws a table; a page an operator can actually scan is ~50 rows.
    The ceiling exists so a caller cannot ask for the whole store back and
@@ -579,6 +580,7 @@ module For_testing = struct
 
   let gate_mode_change_json = gate_mode_change_json
   let exact_lane_run_permission = exact_lane_run_permission
+  let runtime_probe_read_permission = runtime_probe_read_permission
 end
 
 let handle_gate_mode_body state operator_name request reqd body_str =
@@ -987,7 +989,7 @@ let add_routes ~sw ~clock router =
          let json = dashboard_runtime_probe_http_json ~force () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
-       with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+       with_permission_auth ~permission:runtime_probe_read_permission handle request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-defaults" (fun request reqd ->
        (* Structured, already-resolved runtime defaults / model routing for the
           Settings surface. Read-only projection of the runtime.toml SSOT
@@ -1705,16 +1707,15 @@ let add_routes ~sw ~clock router =
            in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  (* Schedule projection, served by its owner. Previously reachable only as a
-     nested field of /api/v1/dashboard/tools, which made a surface that needs
-     schedule state fetch the whole tool inventory. No cache: the owner reads a
-     single ledger file, and a TTL here would be staler than what the tools
-     snapshot used to provide. *)
+  (* Schedule projection, served by its owner. The no-query aggregate keeps its
+     shared live cache; an exact schedule_id lookup reads the same ledger and
+     row encoder without adding a client-controlled cache key. *)
   |> Http.Router.get "/api/v1/dashboard/scheduled-automation" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json =
-           Server_dashboard_http.dashboard_scheduled_automation_http_json
+           Server_dashboard_http.dashboard_scheduled_automation_query_http_json
              ~config:(Mcp_server.workspace_config state)
+             req
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

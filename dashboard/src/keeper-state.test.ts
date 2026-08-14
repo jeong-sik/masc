@@ -7,7 +7,7 @@ import {
   appendAssistantThinkingDelta,
   appendThreadEntry,
   attachKeeperAudioClip,
-  chatHistoryEntriesFromRest,
+  chatHistoryEntriesFromRest as normalizeChatHistoryEntriesFromRest,
   finalizeAssistantEntry,
   insertThreadEntryBefore,
   isDefaultVisibleConversationEntry,
@@ -17,11 +17,52 @@ import {
   markAssistantToolTraceEnded,
   mergeServerHistoryEntries,
   normalizeAudioClip,
-  normalizeStatusDetail,
+  normalizeStatusDetail as normalizeCurrentStatusDetail,
   removeThreadEntries,
   setStatusDetail,
 } from './keeper-state'
 import type { ChatBlock, ChatTraceStep, KeeperConversationEntry } from './types'
+import { operationDeliveryProvenance } from './keeper-delivery-provenance'
+
+type RestHistoryMessages = Parameters<typeof normalizeChatHistoryEntriesFromRest>[1]
+type RestHistoryMessage = RestHistoryMessages[number]
+type RestHistoryFixtureMessage = Omit<RestHistoryMessage, 'id'> & { id?: string }
+
+function withCurrentMessageIds(messages: RestHistoryFixtureMessage[]): RestHistoryMessages {
+  return messages.map((message, index) => ({
+    ...message,
+    id: message.id ?? `msg-fixture-${index}`,
+  }))
+}
+
+function chatHistoryEntriesFromRest(
+  keeperName: string,
+  messages: RestHistoryFixtureMessage[],
+): ReturnType<typeof normalizeChatHistoryEntriesFromRest> {
+  return normalizeChatHistoryEntriesFromRest(keeperName, withCurrentMessageIds(messages))
+}
+
+function normalizeStatusDetail(
+  name: string,
+  text: string,
+  rawStatus: unknown,
+): ReturnType<typeof normalizeCurrentStatusDetail> {
+  if (typeof rawStatus !== 'object' || rawStatus === null || Array.isArray(rawStatus)) {
+    return normalizeCurrentStatusDetail(name, text, rawStatus)
+  }
+  const record = rawStatus as Record<string, unknown>
+  const historyTail = Array.isArray(record.history_tail)
+    ? record.history_tail.map((entry, index) => (
+        typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+          ? { id: `msg-status-fixture-${index}`, ...entry }
+          : entry
+      ))
+    : record.history_tail
+  return normalizeCurrentStatusDetail(name, text, {
+    ...record,
+    history_tail: historyTail,
+  })
+}
 
 describe('normalizeStatusDetail', () => {
   it('infers and hides internal keeper history from direct comms', () => {
@@ -167,10 +208,10 @@ describe('thread history merge & persistence', () => {
   })
 
   it('does not duplicate a local message when server history arrives with a different timestamp', () => {
-    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', requestId: 'kmsg-r1', timestamp: '2026-06-10T00:00:01.000Z' }))
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'), timestamp: '2026-06-10T00:00:01.000Z' }))
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', requestId: 'kmsg-r1', delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
+      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'), delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
     ])
 
     const matches = (keeperThreads.value.echo ?? []).filter(e => e.text === 'gg')
@@ -184,7 +225,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'final answer',
       rawText: 'final answer',
-      requestId: 'kmsg-r1',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'),
       delivery: 'streaming',
       streamState: 'streaming',
     }))
@@ -201,7 +242,7 @@ describe('thread history merge & persistence', () => {
         role: 'assistant',
         text: 'final answer',
         rawText: 'final answer',
-        requestId: 'kmsg-r1',
+        deliveryProvenance: operationDeliveryProvenance('kmsg-r1', 'terminal_assistant'),
         delivery: 'history',
         timestamp: '2026-06-10T00:00:05.000Z',
       }),
@@ -218,14 +259,14 @@ describe('thread history merge & persistence', () => {
 
   it('distributes identical-text assistant turns trace 1:1 across history rows (#21748)', () => {
     // Two local optimistic assistants with the SAME reply text but distinct
-    // thinking traces and distinct requestIds. Each history row must inherit
-    // its OWN turn's trace via the requestId join, never the other's.
+    // thinking traces and distinct provenance. Each history row must inherit
+    // its OWN turn's trace via the exact provenance join, never the other's.
     appendThreadEntry('echo', entry({
       id: 'local-a',
       role: 'assistant',
       text: 'done',
       rawText: 'done',
-      requestId: 'kmsg-ra',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_assistant'),
       delivery: 'delivered',
       streamState: null,
       timestamp: '2026-06-10T00:00:01.000Z',
@@ -235,7 +276,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'done',
       rawText: 'done',
-      requestId: 'kmsg-rb',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_assistant'),
       delivery: 'delivered',
       streamState: null,
       timestamp: '2026-06-10T00:00:02.000Z',
@@ -244,8 +285,8 @@ describe('thread history merge & persistence', () => {
     appendAssistantThinkingDelta('echo', 'local-b', 'second turn reasoning')
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', requestId: 'kmsg-ra', delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
-      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', requestId: 'kmsg-rb', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
+      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-ra', 'terminal_assistant'), delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', deliveryProvenance: operationDeliveryProvenance('kmsg-rb', 'terminal_assistant'), delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
     ])
 
     const thread = keeperThreads.value.echo ?? []
@@ -302,7 +343,7 @@ describe('thread history merge & persistence', () => {
     expect(traceTextOf('hist-b')).toBe('turn-b reasoning')
   })
 
-  it('converges a stream-interrupted placeholder turn to a single assistant row via requestId', () => {
+  it('converges a stream-interrupted placeholder turn through exact provenance', () => {
     // Live stream died right after the tool events: the local assistant
     // placeholder keeps text='' with only the accumulated tool trace and
     // never received REPLY_DETAILS (turnRef stays null). The real reply
@@ -322,7 +363,7 @@ describe('thread history merge & persistence', () => {
       rawText: '질문',
       delivery: 'delivered',
       timestamp: '2026-06-10T00:00:01.000Z',
-      requestId: R,
+      deliveryProvenance: operationDeliveryProvenance(R, 'accepted_user'),
     }))
     appendThreadEntry('echo', entry({
       id: 'tool-call-1',
@@ -351,15 +392,15 @@ describe('thread history merge & persistence', () => {
       rawText: '',
       delivery: 'error',
       timestamp: '2026-06-10T00:00:04.000Z',
-      requestId: R,
+      deliveryProvenance: operationDeliveryProvenance(R, 'terminal_assistant'),
       traceSteps,
     }))
 
     const history = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_key: { kind: 'operation', operation_id: R } },
-      { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', tool_call_name: 'read_file' },
-      { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', tool_call_name: 'write_file' },
-      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_key: { kind: 'operation', operation_id: R } },
+      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_provenance: operationDeliveryProvenance(R, 'accepted_user'), delivery_provenance_status: 'valid' },
+      { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', tool_call_name: 'read_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'call-1', ordinal: 0 } }, delivery_provenance_status: 'valid' },
+      { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', tool_call_name: 'write_file', delivery_provenance: { delivery_key: { kind: 'operation', operation_id: R }, transcript_slot: { kind: 'tool_call', execution_id: 'call-2', ordinal: 1 } }, delivery_provenance_status: 'valid' },
+      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_provenance: operationDeliveryProvenance(R, 'terminal_assistant'), delivery_provenance_status: 'valid' },
     ])
     mergeServerHistoryEntries('echo', history)
 
@@ -369,20 +410,24 @@ describe('thread history merge & persistence', () => {
     expect(assistants).toHaveLength(1)
     expect(assistants[0]?.text).toBe('답변')
     expect(assistants[0]?.delivery).toBe('history')
-    expect(assistants[0]?.requestId).toBe(R)
+    expect(assistants[0]?.deliveryProvenance).toEqual(
+      operationDeliveryProvenance(R, 'terminal_assistant'),
+    )
     // The interrupted placeholder's live tool trace is inherited.
     expect(assistants[0]?.traceSteps).toEqual(traceSteps)
     // The optimistic user row converges to the history row too.
     const users = thread.filter(e => e.role === 'user')
     expect(users).toHaveLength(1)
     expect(users[0]?.delivery).toBe('history')
-    expect(users[0]?.requestId).toBe(R)
+    expect(users[0]?.deliveryProvenance).toEqual(
+      operationDeliveryProvenance(R, 'accepted_user'),
+    )
     // Tool rows stay single (dedup by the tool-<tool_call_id> id shape).
     expect(thread.filter(e => e.role === 'tool')).toHaveLength(2)
   })
 
-  it('never merges a legacy local entry that carries no requestId (role+text fallback hard-cut)', () => {
-    // The legacy role+text heuristic was removed: without a requestId the
+  it('never merges a local entry that carries no provenance', () => {
+    // The role+text heuristic was removed: without provenance the
     // local row and the history row are distinct rows, even with identical
     // text. A text-less placeholder can no longer be reconciled by text.
     appendThreadEntry('echo', entry({
@@ -402,7 +447,7 @@ describe('thread history merge & persistence', () => {
     expect(thread.map(e => e.id)).toEqual(['local-legacy', 'hist-legacy'])
   })
 
-  it('converges rows through exact turnRef only when delivery keys are absent', () => {
+  it('does not use turnRef as row identity when provenance is absent', () => {
     appendThreadEntry('echo', entry({
       id: 'local-turn-ref',
       role: 'assistant',
@@ -425,12 +470,61 @@ describe('thread history merge & persistence', () => {
 
     const assistants = (keeperThreads.value.echo ?? [])
       .filter(candidate => candidate.role === 'assistant')
-    expect(assistants).toHaveLength(1)
-    expect(assistants[0]?.id).toBe('history-turn-ref')
+    expect(assistants.map(entry => entry.id).sort()).toEqual([
+      'history-turn-ref',
+      'local-turn-ref',
+    ])
   })
 
-  it('does not merge same-text rows that carry different requestIds', () => {
-    // Identical reply text across two distinct turns: requestId is the turn
+  it('does not collapse different transcript slots from the same operation', () => {
+    appendThreadEntry('echo', entry({
+      id: 'local-user',
+      role: 'user',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-slot', 'accepted_user'),
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({
+        id: 'history-assistant',
+        role: 'assistant',
+        text: 'hello',
+        rawText: 'hello',
+        delivery: 'history',
+        deliveryProvenance: operationDeliveryProvenance('kmsg-slot', 'terminal_assistant'),
+      }),
+    ])
+
+    expect((keeperThreads.value.echo ?? []).map(candidate => candidate.id).sort()).toEqual([
+      'history-assistant',
+      'local-user',
+    ])
+  })
+
+  it('is idempotent when canonical history is merged repeatedly', () => {
+    appendThreadEntry('echo', entry({
+      id: 'local-assistant',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_assistant'),
+    }))
+    const history = [entry({
+      id: 'history-assistant',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'history',
+      deliveryProvenance: operationDeliveryProvenance('kmsg-repeat', 'terminal_assistant'),
+    })]
+
+    mergeServerHistoryEntries('echo', history)
+    mergeServerHistoryEntries('echo', history)
+
+    expect(keeperThreads.value.echo).toEqual(history)
+  })
+
+  it('does not merge same-text rows that carry different provenance', () => {
+    // Identical reply text across two distinct turns: provenance is the row
     // identity, so the history row of one request must not claim the local
     // row of another even when role+text coincide.
     appendThreadEntry('echo', entry({
@@ -440,12 +534,12 @@ describe('thread history merge & persistence', () => {
       rawText: 'done',
       delivery: 'delivered',
       timestamp: '2026-06-10T00:00:01.000Z',
-      requestId: 'kmsg_1',
+      deliveryProvenance: operationDeliveryProvenance('kmsg_1', 'terminal_assistant'),
       turnRef: 'trace-shared#1',
     }))
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z', requestId: 'kmsg_2', turnRef: 'trace-shared#1' }),
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z', deliveryProvenance: operationDeliveryProvenance('kmsg_2', 'terminal_assistant'), turnRef: 'trace-shared#1' }),
     ])
 
     const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
@@ -1257,40 +1351,18 @@ describe('R3 producer-assigned message id', () => {
     ])
   })
 
-  it('derives a stable content-keyed id when a row predates R3 (no id)', () => {
-    const first = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: 'same text', ts: 1_780_000_000 },
-    ])
-    const second = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: 'same text', ts: 1_780_000_000 },
-    ])
-    // Deterministic across calls — the former id was index/timestamp
-    // derived; the fallback is content derived so it never shifts.
-    expect(first[0]?.id).toBeTruthy()
-    expect(first[0]?.id).toBe(second[0]?.id)
+  it('rejects a row without a current producer-assigned id', () => {
+    const detail = normalizeCurrentStatusDetail('echo', '', {
+      history_tail: [{ role: 'user', content: 'same text', ts_unix: 1_780_000_000 }],
+    })
+    expect(detail.history).toHaveLength(0)
   })
 
-  it('keeps the fallback id stable regardless of page position (the old index bug)', () => {
-    const alone = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: 'stable', ts: 1_780_000_000 },
-    ])
-    const shifted = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: 'earlier', ts: 1_779_000_000 },
-      { role: 'assistant', content: 'reply', ts: 1_779_000_000 },
-      { role: 'user', content: 'stable', ts: 1_780_000_000 },
-    ])
-    const aloneId = alone.find(e => e.rawText === 'stable')?.id
-    const shiftedId = shifted.find(e => e.rawText === 'stable')?.id
-    expect(aloneId).toBeTruthy()
-    expect(shiftedId).toBe(aloneId)
-  })
-
-  it('gives different content different fallback ids', () => {
-    const entries = chatHistoryEntriesFromRest('echo', [
-      { role: 'user', content: 'one', ts: 1_780_000_000 },
-      { role: 'user', content: 'two', ts: 1_780_000_000 },
-    ])
-    expect(entries[0]?.id).not.toBe(entries[1]?.id)
+  it('rejects a row with a blank producer-assigned id', () => {
+    const detail = normalizeCurrentStatusDetail('echo', '', {
+      history_tail: [{ id: ' ', role: 'user', content: 'stable', ts_unix: 1_780_000_000 }],
+    })
+    expect(detail.history).toHaveLength(0)
   })
 })
 

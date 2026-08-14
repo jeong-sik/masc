@@ -3,6 +3,7 @@
 type target_error =
   { message : string
   ; fields : (string * Yojson.Safe.t) list
+  ; class_ : Tool_result.tool_failure_class
   }
 
 type docker_dispatch =
@@ -10,7 +11,11 @@ type docker_dispatch =
   ; runtime : Keeper_turn_sandbox_runtime.t
   }
 
-val target_error : ?fields:(string * Yojson.Safe.t) list -> string -> target_error
+val target_error
+  :  ?fields:(string * Yojson.Safe.t) list
+  -> ?class_:Tool_result.tool_failure_class
+  -> string
+  -> target_error
 
 val docker_image : Keeper_meta_contract.keeper_meta -> string
 
@@ -21,9 +26,3 @@ val docker_target
   -> ?timeout_sec:float
   -> unit
   -> (docker_dispatch, target_error) result
-
-val docker_local_fallback_target
-  :  meta:Keeper_meta_contract.keeper_meta
-  -> ?timeout_sec:float
-  -> unit
-  -> (Masc_exec.Sandbox_target.t * (string * Yojson.Safe.t) list) option

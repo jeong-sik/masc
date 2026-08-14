@@ -189,6 +189,61 @@ let make_checkpoint () =
     ; working_context = None
     }
 
+let make_irreducible_checkpoint ~name ~trace_id () =
+  { (make_checkpoint ()) with
+    session_id = trace_id
+  ; agent_name = name
+  ; messages =
+      [ Agent_core.Types.text_message
+          Agent_core.Types.Assistant
+          "one valid but irreducible source"
+      ]
+  }
+
+let persist_checkpoint_source_exn
+      ~label
+      config
+      (meta : Masc.Keeper_meta_contract.keeper_meta)
+      (checkpoint : Agent_core.Checkpoint.t)
+  =
+  let session =
+    Masc.Keeper_context_core.create_session
+      ~session_id:checkpoint.Agent_core.Checkpoint.session_id
+      ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+  in
+  let context =
+    Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint
+  in
+  match
+    Masc.Keeper_context_core.save_agent_core_checkpoint_classified
+      ~multimodal_policy:meta.multimodal_policy
+      ~keeper_name:meta.name
+      ~session
+      ~agent_name:meta.agent_name
+      ~ctx:context
+      ~generation:1
+  with
+  | Error detail ->
+    failf
+      "%s checkpoint fixture failed: %s"
+      label
+      (Masc.Keeper_context_core.checkpoint_write_error_to_string
+         ~persistence_error_to_string:(fun detail -> detail)
+         detail)
+  | Ok _ ->
+    (match
+       Masc.Keeper_checkpoint_store.load_agent_core_with_ref
+         ~session_dir:session.session_dir
+         ~session_id:checkpoint.session_id
+     with
+     | Ok (_, source) -> source
+     | Error error ->
+       failf
+         "%s checkpoint source fixture failed: %s"
+         label
+         (Post_turn.compaction_recovery_error_to_string
+            (Post_turn.Checkpoint_ref_load_failed error)))
+
 let block_message role content : Agent_core.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
@@ -341,41 +396,18 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        init_runtime_fixture ();
-       let checkpoint = make_checkpoint () in
-       let session =
-         Masc.Keeper_context_core.create_session
-           ~session_id:checkpoint.session_id
-           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+       let checkpoint =
+         make_irreducible_checkpoint
+           ~name:meta.name
+           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+           ()
        in
-       let context = Masc.Keeper_context_core.context_of_agent_core_checkpoint checkpoint in
        let expected_source =
-         match
-          Masc.Keeper_context_core.save_agent_core_checkpoint_classified
-            ~multimodal_policy:meta.multimodal_policy
-            ~keeper_name:meta.name
-            ~session
-            ~agent_name:meta.agent_name
-            ~ctx:context
-            ~generation:1
-        with
-        | Ok _ ->
-          (match
-             Masc.Keeper_checkpoint_store.load_agent_core_with_ref
-               ~session_dir:session.session_dir
-               ~session_id:checkpoint.session_id
-           with
-           | Ok (_, source) -> source
-           | Error error ->
-             failf
-               "missing-lane checkpoint source fixture failed: %s"
-               (Post_turn.compaction_recovery_error_to_string
-                  (Post_turn.Checkpoint_ref_load_failed error)))
-        | Error detail ->
-          failf
-            "missing-lane checkpoint fixture failed: %s"
-            (Masc.Keeper_context_core.checkpoint_write_error_to_string
-               ~persistence_error_to_string:(fun detail -> detail)
-               detail)
+         persist_checkpoint_source_exn
+           ~label:"missing-lane irreducible"
+           config
+           meta
+           checkpoint
        in
        let resolver_snapshot =
          Exact_fixture.resolver_snapshot
@@ -425,6 +457,88 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
            "missing exact lane returned a retryable error: %s"
            (Post_turn.compaction_recovery_error_to_string error)
        | Ok _ -> fail "missing exact lane unexpectedly prepared compaction")
+;;
+
+let test_irreducible_window_is_source_bound_no_compaction () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let name = "post-turn-irreducible-window" in
+       let trace_id = "trace-post-turn-irreducible-window" in
+       let meta = make_meta ~name ~trace_id () in
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       init_runtime_fixture ();
+       let checkpoint = make_irreducible_checkpoint ~name ~trace_id () in
+       let expected_source =
+         persist_checkpoint_source_exn
+           ~label:"irreducible-window"
+           config
+           meta
+           checkpoint
+       in
+       let slot_id = "irreducible-post-turn-slot" in
+       let resolver_snapshot =
+         Exact_fixture.resolver_snapshot
+           ~source:"post-turn irreducible exact lane"
+           [ ({ id = slot_id; base_url = "http://127.0.0.1:9" }
+              : Exact_fixture.target_fixture)
+           ]
+       in
+       ignore
+         (Exact_fixture.publish_registry
+            ~lane_id:"compaction_exact"
+            ~slot_ids:[ slot_id ]
+            resolver_snapshot);
+       ensure_registered_keeper ~base_path:config.base_path meta;
+       match
+         Post_turn.prepare_compaction
+           ~base_path:config.base_path
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+           ~meta
+           ~trigger:Compaction_trigger.Manual
+           ()
+       with
+       | Error
+           (Post_turn.No_compaction
+              ({ source
+               ; reason = Keeper_compaction_outcome.No_reducible_boundary
+               } as no_compaction)) ->
+         check string
+           "terminal evidence retains checkpoint trace"
+           (Keeper_id.Trace_id.to_string expected_source.trace_id)
+           (Keeper_id.Trace_id.to_string source.trace_id);
+         check int
+           "terminal evidence retains checkpoint turn"
+           expected_source.turn_count
+           source.turn_count;
+         check int
+           "terminal evidence retains checkpoint generation"
+           expected_source.generation
+           source.generation;
+         check string
+           "terminal evidence retains checkpoint digest"
+           expected_source.sha256
+           source.sha256;
+         check string
+           "terminal receipt keeps irreducible identity"
+           "no_compaction:no_reducible_boundary"
+           (Post_turn.compaction_recovery_error_to_tag
+              (Post_turn.No_compaction no_compaction))
+       | Error error ->
+         failf
+           "irreducible window returned the wrong product result: %s"
+           (Post_turn.compaction_recovery_error_to_string error)
+       | Ok _ -> fail "irreducible window unexpectedly prepared compaction")
 ;;
 
 let test_malformed_structure_preserves_checkpoint () =
@@ -1050,5 +1164,7 @@ let () =
         `Quick test_reactive_prepare_has_no_retry_gate;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
+      test_case "irreducible window is source-bound no-compaction"
+        `Quick test_irreducible_window_is_source_bound_no_compaction;
     ];
   ]

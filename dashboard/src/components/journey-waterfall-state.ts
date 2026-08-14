@@ -36,6 +36,10 @@ export interface JourneyWaterfallEntry {
   error: string | null
   sessionId: string | null
   traceId: string | null
+  plannedIndex: number | null
+  batchIndex: number | null
+  batchSize: number | null
+  executionMode: 'serial' | 'concurrent' | null
 }
 
 export interface JourneyWaterfallRuntimeEvidence {
@@ -136,6 +140,13 @@ function traceEventStatus(event: UnifiedTraceEvent): WaterfallEntryStatus {
   return 'unknown'
 }
 
+function traceEventExecutionMode(
+  event: UnifiedTraceEvent,
+): JourneyWaterfallEntry['executionMode'] {
+  const value = event.detail.execution_mode
+  return value === 'serial' || value === 'concurrent' ? value : null
+}
+
 function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | null {
   if (event.kind !== 'tool_call' && event.kind !== 'thinking') return null
   const status = traceEventStatus(event)
@@ -159,6 +170,10 @@ function entryFromTraceEvent(event: UnifiedTraceEvent): JourneyWaterfallEntry | 
     error: event.error ?? null,
     sessionId: event.sessionId ?? null,
     traceId: traceEventTraceId(event),
+    plannedIndex: numberValue(event.detail.planned_index),
+    batchIndex: numberValue(event.detail.batch_index),
+    batchSize: numberValue(event.detail.batch_size),
+    executionMode: traceEventExecutionMode(event),
   }
 }
 

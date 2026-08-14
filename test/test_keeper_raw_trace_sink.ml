@@ -125,7 +125,7 @@ let write_turn_record config ~(meta : Keeper_meta_contract.keeper_meta) ~turn
     ~trace_id
     ~absolute_turn:turn
     ~runtime_profile:"test-runtime"
-    ~model:(Some "test-model")
+    ~selected_model:(Some "test-model")
     ~finish_reason:(Some "completed")
     ~context_window:None
     ~price_input_per_million:None

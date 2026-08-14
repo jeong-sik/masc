@@ -158,8 +158,6 @@ let normalize_path_for_keeper_tool_execute_shell_ir_containment path =
 
 (* Backend target helpers for typed Shell IR dispatch. *)
 let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target
-let docker_local_fallback_target =
-  Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
 type dispatch_bundle =
   { sandbox : Masc_exec.Sandbox_target.t
@@ -196,7 +194,6 @@ let handle_tool_execute_typed
       ~(args : Yojson.Safe.t)
       ()
   =
-  let root = Keeper_alerting_path.project_root_of_config config in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
       ~config
@@ -242,10 +239,6 @@ let handle_tool_execute_typed
         let cmd = typed_input_command_text input in
         let timeout_sec = typed_input_timeout_sec input in
         let input = input_with_cwd cwd input in
-        (* This location check only selects the explicit local-fallback route.
-           It is not authorization evidence. The outer Keeper Gate remains the
-           sole authorization boundary for every Execute request. *)
-        let in_playground = Keeper_tool_execute_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _ =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
@@ -322,27 +315,17 @@ let handle_tool_execute_typed
               Error
                 (Keeper_sandbox_shell_ir_target.target_error
                    "typed Shell IR Docker dispatch does not support env yet")
-            else (
-              match docker_local_fallback_target ~meta ?timeout_sec () with
-              | Some (target, fields) when in_playground ->
-                (match target with
-                 | Masc_exec.Sandbox_target.Host ->
-                   local_dispatch_sandbox ~extra_fields:fields ()
-                 | Docker _ ->
-                   Error
-                     (Keeper_sandbox_shell_ir_target.target_error
-                        "Docker preflight fallback returned a Docker target"))
-              | Some _ | None ->
-                docker_sandbox_target
-                  ~turn_sandbox_factory
-                  ~meta
-                  ~cwd
-                  ?timeout_sec
-                  ()
-                |> Result.map
-                     (fun
-                       (dispatch : Keeper_sandbox_shell_ir_target.docker_dispatch)
-                     ->
+            else
+              docker_sandbox_target
+                ~turn_sandbox_factory
+                ~meta
+                ~cwd
+                ?timeout_sec
+                ()
+              |> Result.map
+                   (fun
+                     (dispatch : Keeper_sandbox_shell_ir_target.docker_dispatch)
+                   ->
                   { sandbox = dispatch.target
                   ; fields =
                       [ "requested_sandbox", `String "docker"
@@ -356,11 +339,13 @@ let handle_tool_execute_typed
                            ?timeout_sec
                            dispatch.runtime)
                   ; cleanup = Fun.id
-                  }))
+                  })
         in
         (match dispatch_sandbox with
-         | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
+         | Error ({ message; fields; class_ } : Keeper_sandbox_shell_ir_target.target_error) ->
            Keeper_tool_execution.failure
+             ~class_
+             ~effect_disposition:Tool_result.Proven_pre_effect
              (error_json
                 ~fields:
                   ([ "typed", `Bool true; "cmd", `String cmd ]

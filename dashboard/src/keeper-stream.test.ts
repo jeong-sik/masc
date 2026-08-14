@@ -4,9 +4,10 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  claimLiveSendRequest,
   clearActiveStream,
+  markLiveSendRequestAccepted,
   setActiveStream,
-  setActiveStreamRequestId,
 } from './keeper-state'
 import { keeperThreads } from './keeper-state'
 import {
@@ -17,6 +18,15 @@ import {
   applyKeeperStreamEvent,
 } from './keeper-stream'
 import { parseSSEMessage } from './schemas/sse'
+import {
+  operationDeliveryProvenance,
+  isOperationDeliveryProvenance,
+} from './keeper-delivery-provenance'
+import {
+  _clearTrackedKeeperChatOperationsForTests,
+  trackedKeeperChatOperationsForKeeper,
+  upsertTrackedKeeperChatOperation,
+} from './keeper-chat-operations-local'
 
 function assistantEntry(): void {
   appendThreadEntry('sangsu', {
@@ -38,6 +48,7 @@ describe('Keeper operation stream projection', () => {
     _resetKeeperStreamBuffersForTests()
     _resetLiveSendRequestOwnersForTests()
     _resetActiveKeeperStreamsForTests()
+    _clearTrackedKeeperChatOperationsForTests()
     keeperThreads.value = {}
   })
 
@@ -116,7 +127,9 @@ describe('Keeper operation stream projection', () => {
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('queued')
-    expect(entry?.requestId).toBe('kmsg-operation-1')
+    expect(entry?.deliveryProvenance).toEqual(
+      operationDeliveryProvenance('kmsg-operation-1', 'terminal_assistant'),
+    )
   })
 
   it('routes server-pushed events by exact operation id', () => {
@@ -129,7 +142,10 @@ describe('Keeper operation stream projection', () => {
         text: '',
         rawText: '',
         timestamp: null,
-        requestId: operationId,
+        deliveryProvenance: operationDeliveryProvenance(
+          operationId,
+          'terminal_assistant',
+        ),
         delivery: 'queued',
         streamState: null,
         details: null,
@@ -142,8 +158,16 @@ describe('Keeper operation stream projection', () => {
     })
 
     const entries = keeperThreads.value.sangsu ?? []
-    expect(entries.find(entry => entry.requestId === 'kmsg-operation-1')?.text).toBe('')
-    expect(entries.find(entry => entry.requestId === 'kmsg-operation-2')?.text).toBe('second')
+    expect(entries.find(entry => isOperationDeliveryProvenance(
+      entry.deliveryProvenance,
+      'kmsg-operation-1',
+      'terminal_assistant',
+    ))?.text).toBe('')
+    expect(entries.find(entry => isOperationDeliveryProvenance(
+      entry.deliveryProvenance,
+      'kmsg-operation-2',
+      'terminal_assistant',
+    ))?.text).toBe('second')
   })
 
   // The direct send stamps the accepted operation id onto the bubble it is
@@ -162,13 +186,17 @@ describe('Keeper operation stream projection', () => {
       text: '',
       rawText: '',
       timestamp: null,
-      requestId: 'kmsg-operation-1',
+      deliveryProvenance: operationDeliveryProvenance(
+        'kmsg-operation-1',
+        'terminal_assistant',
+      ),
       delivery: 'streaming',
       streamState: 'streaming',
       details: null,
     })
     // Mirrors keeper-actions: the direct send claims the accepted operation id.
-    setActiveStreamRequestId('sangsu', 'kmsg-operation-1')
+    claimLiveSendRequest('kmsg-operation-1', 'sangsu')
+    markLiveSendRequestAccepted('kmsg-operation-1')
   }
 
   // The server hands the very same AG-UI event to both transports
@@ -198,7 +226,10 @@ describe('Keeper operation stream projection', () => {
       text: '',
       rawText: '',
       timestamp: null,
-      requestId: 'kmsg-opening',
+      deliveryProvenance: operationDeliveryProvenance(
+        'kmsg-opening',
+        'terminal_assistant',
+      ),
       delivery: 'sending',
       streamState: 'opening',
       details: null,
@@ -228,7 +259,10 @@ describe('Keeper operation stream projection', () => {
       text: '',
       rawText: '',
       timestamp: null,
-      requestId: 'kmsg-interrupted',
+      deliveryProvenance: operationDeliveryProvenance(
+        'kmsg-interrupted',
+        'terminal_assistant',
+      ),
       delivery: 'interrupted',
       streamState: null,
       details: null,
@@ -326,7 +360,10 @@ describe('Keeper operation stream projection', () => {
       text: '',
       rawText: '',
       timestamp: null,
-      requestId: 'kmsg-operation-1',
+      deliveryProvenance: operationDeliveryProvenance(
+        'kmsg-operation-1',
+        'terminal_assistant',
+      ),
       delivery: 'streaming',
       streamState: 'streaming',
       details: null,
@@ -346,14 +383,72 @@ describe('Keeper operation stream projection', () => {
     const second = new AbortController()
     setActiveStream('sangsu', 'kmsg-operation-1', 'reply-1', first)
     setActiveStream('sangsu', 'kmsg-operation-2', 'reply-2', second)
-    setActiveStreamRequestId('sangsu', 'kmsg-operation-1')
-    setActiveStreamRequestId('sangsu', 'kmsg-operation-2')
+    markLiveSendRequestAccepted('kmsg-operation-1')
+    markLiveSendRequestAccepted('kmsg-operation-2')
 
     abortKeeperThreadMessage('sangsu')
 
     expect(first.signal.aborted).toBe(true)
     expect(second.signal.aborted).toBe(false)
     expect(activeStreamRequestId('sangsu')).toBe('kmsg-operation-2')
+  })
+
+  it('does not return a later accepted request when aborting the first pre-acceptance stream', () => {
+    const first = new AbortController()
+    const second = new AbortController()
+    setActiveStream('sangsu', 'kmsg-operation-1', 'reply-1', first)
+    setActiveStream('sangsu', 'kmsg-operation-2', 'reply-2', second)
+    markLiveSendRequestAccepted('kmsg-operation-2')
+
+    const aborted = abortKeeperThreadMessage('sangsu')
+
+    expect(aborted?.requestId).toBeNull()
+    expect(first.signal.aborted).toBe(true)
+    expect(second.signal.aborted).toBe(false)
+    expect(activeStreamRequestId('sangsu')).toBe('kmsg-operation-2')
+  })
+
+  it('persists a concurrent assistant draft under its own operation provenance', () => {
+    for (const [operationId, entryId] of [
+      ['kmsg-operation-1', 'reply-1'],
+      ['kmsg-operation-2', 'reply-2'],
+    ] as const) {
+      upsertTrackedKeeperChatOperation({
+        operationId,
+        keeperName: 'sangsu',
+        message: operationId,
+        submittedAt: 1,
+      })
+      appendThreadEntry('sangsu', {
+        id: entryId,
+        role: 'assistant',
+        source: 'direct_assistant',
+        label: 'sangsu',
+        text: '',
+        rawText: '',
+        timestamp: null,
+        deliveryProvenance: operationDeliveryProvenance(
+          operationId,
+          'terminal_assistant',
+        ),
+        delivery: 'streaming',
+        streamState: 'thinking',
+        details: null,
+      })
+    }
+
+    applyKeeperStreamEvent('sangsu', 'reply-2', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'second operation' },
+    })
+    _flushPendingKeeperStreamDeltasForTests()
+
+    const operations = trackedKeeperChatOperationsForKeeper('sangsu')
+    expect(operations.find(item => item.operationId === 'kmsg-operation-1')?.assistantDraft)
+      .toBeUndefined()
+    expect(operations.find(item => item.operationId === 'kmsg-operation-2')?.assistantDraft?.traceSteps)
+      .toEqual([{ kind: 'think', text: 'second operation', ts: expect.any(String) }])
   })
 
   it('accepts the singular operation SSE envelope and rejects the removed event type', () => {

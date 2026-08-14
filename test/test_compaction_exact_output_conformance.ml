@@ -207,11 +207,44 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
       ~keeper_name
       ~registry
       ~lane_id:"compaction_exact"
-      ~units
+      ~units:
+        [ U.Ordinary_message
+            (message T.Assistant "one valid but irreducible source")
+        ]
   with
   | Error C.Exact_lane_unconfigured -> ()
+  | Error C.No_reducible_boundary ->
+    Alcotest.fail "lane resolution must precede irreducible-window classification"
   | Error _ -> Alcotest.fail "missing lane returned the wrong typed failure"
   | Ok _ -> Alcotest.fail "missing lane must not be synthesized"
+;;
+
+let test_irreducible_window_is_a_distinct_terminal_noop () =
+  let slot_id = "irreducible-window-slot" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"irreducible compaction window"
+      [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let keeper_name = "keeper-irreducible-window" in
+  let source_units =
+    [ U.Ordinary_message (message T.Assistant "only eligible source") ]
+  in
+  ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name;
+  match
+    C.prepare_lane
+      ~base_path:exact_flow_base_path
+      ~keeper_name
+      ~registry
+      ~lane_id:conformance_lane_id
+      ~units:source_units
+  with
+  | Error C.No_reducible_boundary -> ()
+  | Error C.Invalid_plan ->
+    Alcotest.fail "a valid irreducible window regressed to invalid_plan"
+  | Error _ -> Alcotest.fail "irreducible window returned the wrong typed failure"
+  | Ok _ -> Alcotest.fail "a one-source window cannot produce a reducing boundary"
 ;;
 
 let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
@@ -983,6 +1016,10 @@ let () =
             "missing lane is explicit"
             `Quick
             test_missing_compaction_lane_is_explicit_degraded_state
+        ; Alcotest.test_case
+            "irreducible window is a terminal no-op"
+            `Quick
+            test_irreducible_window_is_a_distinct_terminal_noop
         ; Alcotest.test_case
             "order and generation freeze before attempt allocation"
             `Quick

@@ -1240,6 +1240,44 @@ let test_keeper_list_row_surfaces_effective_meta_errors () =
              (List.mem_assoc "effective_meta_error" fields)
        | _ -> Alcotest.fail "expected object row")
 
+let test_config_snapshot_does_not_fallback_to_raw_meta () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "bad-config-snapshot" in
+  write_keeper_agent ~keepers_dir ~name "Missing sandbox profile";
+  write_file
+    (Filename.concat keepers_dir (name ^ ".toml"))
+    {|[keeper]
+|};
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  match Dashboard_http_keeper_snapshot.keeper_config_json config name with
+  | `Not_found, _ -> Alcotest.fail "expected a typed unavailable config snapshot"
+  | `OK, json ->
+    Alcotest.(check (option string))
+      "snapshot preserves the raw keeper identity"
+      (Some name)
+      (json_string_field "name" json);
+    Alcotest.(check bool)
+      "effective config is explicitly unavailable"
+      true
+      (json_field "effective_config" json = Some `Null);
+    Alcotest.(check bool)
+      "raw sandbox defaults are not projected as effective"
+      true
+      (json_field "sandbox_profile" json = None);
+    Alcotest.(check bool)
+      "typed config error remains visible"
+      true
+      (match json_field "config_error" json with
+       | Some (`Assoc _) -> true
+       | Some _ | None -> false);
+    Alcotest.(check bool)
+      "raw source provenance remains visible"
+      true
+      (match json_field "sources" json with
+       | Some (`Assoc _) -> true
+       | Some _ | None -> false)
+
 let test_keeper_list_error_row_preserves_keepalive_state () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "badprofile-running" in
@@ -1324,6 +1362,9 @@ let () =
             test_status_surfaces_chat_operation_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"
             `Quick test_keeper_list_row_surfaces_effective_meta_errors;
+          Alcotest.test_case
+            "config snapshot never falls back to raw effective fields"
+            `Quick test_config_snapshot_does_not_fallback_to_raw_meta;
           Alcotest.test_case
             "keeper list error row preserves keepalive state"
             `Quick test_keeper_list_error_row_preserves_keepalive_state;

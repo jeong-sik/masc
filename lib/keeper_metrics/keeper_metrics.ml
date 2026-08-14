@@ -203,9 +203,6 @@ type t =
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
-      (* counter: RFC-0320 W3c continuation delivery outcome; label=outcome_tag
-         (Delivered/Skipped_unrouted/Skipped_already_replied/Skipped_empty/Failed).
-         G5 observability — a dropped/unrouted continuation must never be silent. *)
 [@@deriving enumerate]
 
 (** String conversion

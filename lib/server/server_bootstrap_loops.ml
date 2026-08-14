@@ -170,15 +170,18 @@ type broadcast_mention_delivery_outcome =
 let resolve_broadcast_mention_target ~config target =
   match Keeper_meta_store.read_meta config target with
   | Error detail -> Error detail
-  | Ok (Some _) -> Ok (Some target)
+  | Ok (Some meta) -> Ok (Some (target, meta))
   | Ok None ->
     (match Keeper_identity_binding.resolve ~config ~agent_name:target with
      | Keeper_identity_binding.Unique keeper_name ->
        (match Keeper_meta_store.read_meta config keeper_name with
-        | Ok (Some _) -> Ok (Some keeper_name)
+        | Ok (Some meta) -> Ok (Some (keeper_name, meta))
         | Ok None -> Ok None
         | Error detail -> Error detail)
-     | Keeper_identity_binding.Not_found -> Ok None
+     | Keeper_identity_binding.Not_found ->
+       Keeper_meta_store.persisted_keeper_for_mention_target
+         config
+         ~mention_target:target
      | Keeper_identity_binding.Ambiguous candidates ->
        Error
          (Printf.sprintf
@@ -206,14 +209,19 @@ let deliver_broadcast_mention
      | Error message ->
        Broadcast_target_meta_unavailable (requested_target, message)
      | Ok None -> Broadcast_target_missing_meta requested_target
-     | Ok (Some target) ->
+     | Ok (Some (target, meta)) ->
        (match Keeper_identity.Keeper_id.of_string target, delivery_key with
-        | Some target_id, Ok delivery_key ->
+        | Some _target_id, Ok delivery_key ->
        let speaker : Keeper_chat_store.speaker =
          { speaker_id = Some delivery.from_agent
          ; speaker_name = Some delivery.from_agent
          ; speaker_authority = Keeper_chat_store.External
          }
+       in
+       let mention_ids =
+         target :: meta.Keeper_meta_contract.mention_targets
+         |> List.filter_map Keeper_identity.Keeper_id.of_string
+         |> List.sort_uniq Keeper_identity.Keeper_id.compare
        in
        (match
           Keeper_chat_store.append_user_message_once
@@ -224,7 +232,7 @@ let deliver_broadcast_mention
             ~surface:Surface_ref.Agent
             ~external_message_id:delivery.request_id
             ~speaker
-            ~extra_mentions:[ target_id ]
+            ~extra_mentions:mention_ids
             ()
         with
         | Ok (Keeper_chat_store.Appended _ | Keeper_chat_store.Already_present _) ->

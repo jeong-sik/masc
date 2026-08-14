@@ -88,6 +88,37 @@ let persisted_keeper_name_for_agent_name config ~agent_name =
             (String.concat "," keeper_names)))
 ;;
 
+let persisted_keeper_for_mention_target config ~mention_target =
+  let target = String.trim mention_target in
+  let rec collect matches = function
+    | [] -> Ok (List.rev matches)
+    | keeper_name :: rest ->
+      (match read_meta_file_path (keeper_meta_path config keeper_name) with
+       | Error detail -> Error detail
+       | Ok None -> collect matches rest
+       | Ok (Some meta) ->
+         if List.exists (String.equal target) meta.mention_targets
+         then collect ((keeper_name, meta) :: matches) rest
+         else collect matches rest)
+  in
+  if target = ""
+  then Ok None
+  else
+    match persisted_keeper_names_result config with
+    | Error _ as error -> error
+    | Ok keeper_names ->
+      (match collect [] keeper_names with
+       | Error _ as error -> error
+       | Ok [] -> Ok None
+       | Ok [ match_ ] -> Ok (Some match_)
+       | Ok matches ->
+         Error
+           (Printf.sprintf
+              "multiple persisted Keepers claim mention_target=%s: %s"
+              target
+              (matches |> List.map fst |> String.concat ",")))
+;;
+
 let configured_keeper_names config =
   Keeper_types_profile.discover_keepers_toml
     (Config_dir_resolver.keepers_dir_for_base_path

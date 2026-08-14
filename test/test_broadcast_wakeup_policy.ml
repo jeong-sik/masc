@@ -19,9 +19,10 @@ let test_blank_is_passive () =
   | `Suppress_no_target -> ()
   | `Wake_keeper target -> failf "unexpected blank-target wake: %s" target
 
-let make_meta name =
+let make_meta ?(mention_targets = []) name =
   match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String name ]) with
-  | Ok meta -> meta
+  | Ok meta ->
+    { meta with Keeper_meta_contract.mention_targets = mention_targets }
   | Error detail -> failf "keeper meta fixture failed: %s" detail
 ;;
 
@@ -51,8 +52,8 @@ let with_workspace f =
     (fun () -> f config)
 ;;
 
-let persist_meta config name =
-  match Keeper_meta_store.replace_snapshot config (make_meta name) with
+let persist_meta ?mention_targets config name =
+  match Keeper_meta_store.replace_snapshot config (make_meta ?mention_targets name) with
   | Ok () -> ()
   | Error detail -> failf "keeper meta persistence failed: %s" detail
 ;;
@@ -142,6 +143,63 @@ let test_runtime_agent_alias_resolves_before_delivery () =
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id)
 ;;
 
+let delivery_message ~base_path ~keeper_name ~request_id =
+  Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name
+  |> List.find_opt (fun (message : Keeper_chat_store.chat_message) ->
+    message.external_message_id = Some request_id)
+;;
+
+let test_configured_mention_alias_resolves_and_stamps_feed_target () =
+  with_workspace @@ fun config ->
+  let keeper_name = "rondo" in
+  let alias = "sangsu" in
+  let request_id = "wmsg-1122334455667788" in
+  persist_meta ~mention_targets:[ alias ] config keeper_name;
+  let outcome =
+    Broadcast_wakeup.deliver_broadcast_mention
+      ~config
+      ~base_path:config.base_path
+      ~is_running:(String.equal keeper_name)
+      ~wakeup:(fun _ -> ())
+      (delivery ~target:alias ~request_id ~seq:4 ~content:"alias delivery")
+  in
+  (match outcome with
+   | Server_bootstrap_loops.Broadcast_persisted_and_woken actual ->
+     check string "alias resolves to canonical Keeper" keeper_name actual
+   | _ -> fail "configured mention alias did not resolve");
+  match delivery_message ~base_path:config.base_path ~keeper_name ~request_id with
+  | None -> fail "configured alias delivery was not persisted"
+  | Some message ->
+    let mentions =
+      List.map Keeper_identity.Keeper_id.to_string message.mentions
+    in
+    check bool "persisted row carries configured feed target" true
+      (List.mem alias mentions)
+;;
+
+let test_canonical_delivery_stamps_configured_feed_target () =
+  with_workspace @@ fun config ->
+  let keeper_name = "rondo" in
+  let alias = "sangsu" in
+  let request_id = "wmsg-8877665544332211" in
+  persist_meta ~mention_targets:[ alias ] config keeper_name;
+  ignore
+    (Broadcast_wakeup.deliver_broadcast_mention
+       ~config
+       ~base_path:config.base_path
+       ~is_running:(fun _ -> false)
+       ~wakeup:(fun _ -> ())
+       (delivery ~target:keeper_name ~request_id ~seq:5 ~content:"canonical delivery"));
+  match delivery_message ~base_path:config.base_path ~keeper_name ~request_id with
+  | None -> fail "canonical delivery was not persisted"
+  | Some message ->
+    let mentions =
+      List.map Keeper_identity.Keeper_id.to_string message.mentions
+    in
+    check bool "canonical row carries configured feed target" true
+      (List.mem alias mentions)
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -157,5 +215,9 @@ let () =
             test_stopped_keeper_persists_without_wake
         ; test_case "runtime agent alias resolves before delivery" `Quick
             test_runtime_agent_alias_resolves_before_delivery
+        ; test_case "configured mention alias resolves and stamps feed target" `Quick
+            test_configured_mention_alias_resolves_and_stamps_feed_target
+        ; test_case "canonical delivery stamps configured feed target" `Quick
+            test_canonical_delivery_stamps_configured_feed_target
         ] )
     ]

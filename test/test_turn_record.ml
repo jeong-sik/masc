@@ -83,6 +83,7 @@ let sample_record () : Turn_record.t =
         { runtime_profile = "ollama_cloud.deepseek-v4-flash"
         ; body_bytes = 560_513
         }
+  ; model_input_window = Some { transmitted_atoms = 15; total_atoms = 7_706 }
   ; raw_trace_run_ref =
       Some
         { worker_run_id = "worker-run-41"

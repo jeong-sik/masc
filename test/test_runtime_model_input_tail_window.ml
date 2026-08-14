@@ -390,7 +390,9 @@ let test_projection_reports_how_much_history_it_carried () =
     | Error error ->
       Alcotest.failf "reported cut: %s" (Window.budget_error_to_string error)
   in
-  let observed = Window.observe projected in
+  let observed =
+    Window.observe ~history_atom_count:projected.Window.atom_count projected
+  in
   Alcotest.(check int)
     "total is the history the caller handed in"
     (count_atoms history)
@@ -422,13 +424,56 @@ let test_uncut_history_reports_everything_carried () =
     | Error error ->
       Alcotest.failf "uncut: %s" (Window.budget_error_to_string error)
   in
-  let observed = Window.observe projected in
+  let observed =
+    Window.observe ~history_atom_count:projected.Window.atom_count projected
+  in
   Alcotest.(check int)
     "nothing was dropped" observed.Window.total_atoms observed.Window.transmitted_atoms;
   Alcotest.(check int)
     "and that total is the whole history"
     (count_atoms history)
     observed.Window.total_atoms
+;;
+
+(* The demotion pipeline cuts, materializes, and — when a blob fails to
+   persist — re-cuts the survivors. That last projection only ever saw the
+   survivors, so a denominator read off it would report a keeper that reached
+   back over a fraction of its history as having reached over nearly all of
+   it. *)
+let test_chained_cut_keeps_the_whole_history_as_denominator () =
+  let history = atoms (4 * k) in
+  let cut ~capacity_bytes messages =
+    match
+      Window.project_with_drop
+        ~measure_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes:0
+        messages
+    with
+    | Ok projection -> projection
+    | Error error ->
+      Alcotest.failf "chained cut: %s" (Window.budget_error_to_string error)
+  in
+  let first = cut ~capacity_bytes:(total_bytes history / 4) history in
+  let second =
+    cut
+      ~capacity_bytes:(total_bytes first.Window.messages / 2)
+      first.Window.messages
+  in
+  let observed =
+    Window.observe ~history_atom_count:first.Window.atom_count second
+  in
+  Alcotest.(check int)
+    "denominator is the whole history, not the survivors"
+    (count_atoms history)
+    observed.Window.total_atoms;
+  Alcotest.(check bool)
+    "which the chained projection could not have supplied" true
+    (observed.Window.total_atoms > second.Window.atom_count);
+  Alcotest.(check int)
+    "numerator is what the last cut kept"
+    (count_atoms second.Window.messages)
+    observed.Window.transmitted_atoms
 ;;
 
 let test_tool_results_stay_with_their_call () =
@@ -655,6 +700,8 @@ let () =
             `Quick test_projection_reports_how_much_history_it_carried
         ; Alcotest.test_case "uncut history reports everything carried" `Quick
             test_uncut_history_reports_everything_carried
+        ; Alcotest.test_case "chained cut keeps the whole history as denominator"
+            `Quick test_chained_cut_keeps_the_whole_history_as_denominator
         ; Alcotest.test_case "tool results stay with their call" `Quick
             test_tool_results_stay_with_their_call
         ; Alcotest.test_case "preamble on assistant head" `Quick

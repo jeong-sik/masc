@@ -46,9 +46,9 @@ type window_observation =
   ; total_atoms : int
   }
 
-let observe (projection : projection) =
+let observe ~history_atom_count (projection : projection) =
   { transmitted_atoms = projection.atom_count - projection.dropped_atoms
-  ; total_atoms = projection.atom_count
+  ; total_atoms = history_atom_count
   }
 ;;
 

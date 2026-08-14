@@ -1227,24 +1227,33 @@ function TurnRow({
             ? html`<div class="text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">기록된 블록 없음</div>`
             : record.blocks.map(block => html`<${BlockRow} block=${block} />`)}
         </div>
+        ${(() => {
+          // Rendered outside the composition panel: input_components can be
+          // absent on a turn whose window observation succeeded (they come from
+          // two independent observations), and nesting this inside it hid the
+          // number on exactly those turns.
+          const transmitted = record.transmitted_atoms
+          const total = record.total_atoms
+          if (transmitted == null || total == null || total <= 0) return null
+          // Built as concatenation so the html template holds no nested literal.
+          const label =
+            '이력 '
+            + transmitted.toLocaleString()
+            + ' / '
+            + total.toLocaleString()
+            + ' atom ('
+            + ((transmitted / total) * 100).toFixed(1)
+            + '% 전송)'
+          return html`
+            <div data-testid="turn-transmitted-atoms" class="flex items-center gap-2 text-2xs font-mono v2-monitoring-row">
+              <span class="text-[var(--color-fg-muted)]">${label}</span>
+            </div>
+          `
+        })()}
         ${record.input_components && record.input_components.length > 0
           ? (() => {
               const components = sortedInputComponents(record)
               const totalBytes = components.reduce((sum, c) => sum + c.bytes, 0)
-              // How much conversation those bytes were. Built here rather than
-              // inline so the template holds no nested literal.
-              const transmitted = record.transmitted_atoms
-              const total = record.total_atoms
-              const atomsLabel =
-                transmitted != null && total != null && total > 0
-                  ? '· 이력 '
-                    + transmitted.toLocaleString()
-                    + ' / '
-                    + total.toLocaleString()
-                    + ' atom ('
-                    + ((transmitted / total) * 100).toFixed(1)
-                    + '% 전송)'
-                  : null
               return html`
                 <div data-testid="turn-input-components">
                   <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
@@ -1256,9 +1265,6 @@ function TurnRow({
                     <span class="text-[var(--color-fg-muted)]">합계 ${formatComponentBytes(totalBytes)}</span>
                     ${record.request_body_bytes != null
                       ? html`<span class="text-[var(--color-fg-disabled)]">· wire ${formatComponentBytes(record.request_body_bytes)} (방언 투영 후 실제 요청 본문)</span>`
-                      : null}
-                    ${atomsLabel != null
-                      ? html`<span data-testid="turn-transmitted-atoms" class="text-[var(--color-fg-disabled)]">${atomsLabel}</span>`
                       : null}
                   </div>
                 </div>

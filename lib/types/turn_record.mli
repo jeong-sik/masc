@@ -74,9 +74,11 @@ type model_input_window =
 
     Reported beside {!request_wire_observation}, never in place of it: that one
     counts the bytes the provider admitted, this one counts how much
-    conversation those bytes were. Neither substitutes for the other, and
-    [input_components] answers a third question — which block kinds the bytes
-    went to.
+    conversation the turn reached back over. The two do not decompose into each
+    other — the admitted bytes also carry pinned context, the synthetic
+    preamble, and anything the per-turn assembler appends, none of which is
+    history and none of which is an atom. [input_components] answers a third
+    question: which block kinds the bytes went to.
 
     Both counts are recorded because a share cannot be recovered from the
     transmitted messages alone: dropped atoms leave no trace, so a reader given

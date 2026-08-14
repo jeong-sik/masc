@@ -148,9 +148,18 @@ type window_observation =
 (** How much of a history one projection carried, kept without the messages so
     an observer can hold it for the length of a turn. *)
 
-val observe : projection -> window_observation
-(** Read the counts off a projection. The only arithmetic is [total_atoms -
-    dropped_atoms]; nothing here re-derives a cut. *)
+val observe : history_atom_count:int -> projection -> window_observation
+(** [observe ~history_atom_count projection] pairs what [projection]
+    transmitted with the history it was measured against.
+
+    [history_atom_count] is passed in rather than read off [projection]
+    because a projection only knows the list it was handed. The demotion
+    pipeline cuts, materializes, and on a storage failure re-cuts the
+    surviving sublist — and that last projection's own [atom_count] is the
+    size of the sublist, not of the turn's history. Reading the denominator
+    from it would report a keeper that transmitted 800 of 5,000 atoms as
+    having transmitted 800 of 1,000. Supply the [atom_count] of the first cut,
+    which is the only one taken against the full history. *)
 
 val budget_error_to_string : budget_error -> string
 (** Diagnostic rendering carrying the measured values. Suitable as the

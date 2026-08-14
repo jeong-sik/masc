@@ -544,21 +544,26 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
                 ~demote_before:raw_projection.dropped_atoms
                 messages
           in
+          (* The first cut is the only one taken against the whole history;
+             every later cut sees a list that has already been shortened. Carry
+             its atom count so the reported share keeps that denominator. *)
+          let history_atom_count = raw_projection.atom_count in
           (match planned.Keeper_model_input_demotion.pending with
-           | [] -> Ok (planned, raw_projection)
+           | [] -> Ok (planned, raw_projection, history_atom_count)
            | _ ->
              (match raw_cut planned.Keeper_model_input_demotion.messages with
               | Error error ->
                 Error
                   (Runtime_model_input_tail_window.budget_error_to_string error)
-              | Ok windowed -> Ok (planned, windowed))))
+              | Ok windowed -> Ok (planned, windowed, history_atom_count))))
     in
     let windowed =
       match planned_and_windowed with
       | Error error -> Error error
-      | Ok (planned, windowed) ->
+      | Ok (planned, windowed, history_atom_count) ->
+        let keep projection = Ok (projection, history_atom_count) in
         (match planned.Keeper_model_input_demotion.pending with
-         | [] -> Ok windowed
+         | [] -> keep windowed
          | pending ->
            (* Blob materialization performs filesystem I/O and therefore stays
               on the owning Eio fiber rather than in the CPU domain pool. *)
@@ -572,7 +577,7 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
            then
              (* Materialization rewrites bodies inside the already-chosen cut;
                 it neither adds nor removes atoms, so the counts still hold. *)
-             Ok
+             keep
                { windowed with
                  Runtime_model_input_tail_window.messages =
                    outcome.Keeper_model_input_demotion.messages
@@ -589,16 +594,20 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
                     ~reserved_bytes
                     outcome.Keeper_model_input_demotion.messages)
               with
-              | Ok recut -> Ok recut
+              | Ok recut -> keep recut
               | Error error ->
                 Error
                   (Runtime_model_input_tail_window.budget_error_to_string error)))
     in
     match windowed with
     | Error error -> Error error
-    | Ok windowed ->
+    | Ok (windowed, history_atom_count) ->
       Option.iter
-        (fun observe -> observe (Runtime_model_input_tail_window.observe windowed))
+        (fun observe ->
+           observe
+             (Runtime_model_input_tail_window.observe
+                ~history_atom_count
+                windowed))
         ctx.on_model_input_window_observation;
       let windowed = windowed.Runtime_model_input_tail_window.messages in
       (match ctx.model_input_projection with

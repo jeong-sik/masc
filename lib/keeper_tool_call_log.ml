@@ -393,6 +393,13 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> `String output
 ;;
 
+let normalized_artifact_refs_in_typed_data data =
+  Tool_output.normalized_artifact_refs_in_json data
+  |> List.map (fun reference ->
+    Tool_output.with_preview reference ""
+    |> Tool_output.normalized_artifact_ref_to_json)
+;;
+
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   (* Per-leaf marker-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
@@ -557,10 +564,16 @@ let log_call
             , Agent_core.Tool_contract.execution_mode_to_yojson value ) ]
         | None -> []
       in
-      let typed_disposition_field =
+      let typed_result_fields =
         match typed_result with
         | Some result ->
+          let artifact_refs =
+            normalized_artifact_refs_in_typed_data (Tool_result.data result)
+          in
           [ "disposition", `String (Tool_result.string_of_disposition result) ]
+          @ (if artifact_refs = []
+             then []
+             else [ "artifact_refs", `List artifact_refs ])
         | None -> []
       in
       let composition_fields =
@@ -688,7 +701,7 @@ let log_call
            @ batch_index_field
            @ batch_size_field
            @ execution_mode_field
-           @ typed_disposition_field
+           @ typed_result_fields
            @ composition_fields
            @ composition_execution_field
            @ trace_id_field

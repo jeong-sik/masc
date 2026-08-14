@@ -7,7 +7,7 @@ export const dashboardFullHealthResource = createManagedAsyncResource<DashboardF
 
 export const dashboardFullHealth = computed(() => {
   const state = dashboardFullHealthResource.state.value
-  return state.loading || state.error !== null ? null : state.data
+  return state.data
 })
 
 export function loadDashboardFullHealth(): Promise<void> {

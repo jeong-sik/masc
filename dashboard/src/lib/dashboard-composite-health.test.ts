@@ -61,4 +61,17 @@ describe('projectDashboardCompositeHealth', () => {
       issueCount: 0,
     })
   })
+
+  it('preserves a decoded top-level status when the detailed snapshot is absent', () => {
+    expect(projectDashboardCompositeHealth({
+      overall_status: 'degraded',
+      operator_action_required: false,
+      full_health_snapshot: null,
+    })).toMatchObject({
+      state: 'status',
+      severity: 'warn',
+      issueCount: 0,
+      issues: [{ label: 'Runtime health degraded' }],
+    })
+  })
 })

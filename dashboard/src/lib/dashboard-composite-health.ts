@@ -48,7 +48,7 @@ export function projectDashboardCompositeHealth(
   const requiresAction = health?.operator_action_required
   const snapshotUnhealthy = snapshotStatus !== null
     && (snapshotStatus !== 'ready' || snapshot?.component_timed_out === true)
-  if (requiresAction !== true && snapshotStatus === null) {
+  if (requiresAction !== true && snapshotStatus === null && status === null) {
     return { state: 'unavailable', issueCount: 0, issues: [] }
   }
 

@@ -95,6 +95,7 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  | Reason_provider_attempt_effect_fenced
   | Reason_unmapped_runtime_state
 
 let operator_disposition_reason_to_string = function
@@ -111,6 +112,8 @@ let operator_disposition_reason_to_string = function
   | Reason_cancelled -> "cancelled"
   | Reason_phase_skipped -> "phase_skipped"
   | Reason_transcript_corruption -> "transcript_corruption"
+  | Reason_provider_attempt_effect_fenced ->
+    Keeper_internal_error.provider_attempt_effect_fenced_kind
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 
@@ -156,6 +159,12 @@ let operator_disposition (receipt : t)
   | _ when input_required -> Disp_pass, Reason_input_required
   | Keeper_terminal_reason.Transcript_corruption _ ->
     Disp_operator_reset_required, Reason_transcript_corruption
+  | Keeper_terminal_reason.Provider_attempt_effect_fenced _ ->
+    (* Same-turn replay stays forbidden, and the runtime lifecycle remains
+       responsible for selecting a later turn. Keep the operator alert, but
+       classify the canonical typed failure instead of incrementing the
+       unmapped-state regression metric. *)
+    Disp_unknown, Reason_provider_attempt_effect_fenced
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
@@ -223,6 +232,7 @@ let operator_disposition (receipt : t)
        | Config_or_auth _
        | Provider_runtime_failure _
        | Transcript_corruption _
+       | Provider_attempt_effect_fenced _
        | Internal_error _
        | Unknown _ -> false)
     then Disp_pass, Reason_healthy

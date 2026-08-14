@@ -22,3 +22,11 @@ val make_tools
   -> ?on_externalization_error:(Tool_bridge.externalization_error -> unit)
   -> unit
   -> Agent_core.Tool.t list
+
+module For_testing : sig
+  val status_result :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    request_id:string ->
+    Tool_result.result
+end

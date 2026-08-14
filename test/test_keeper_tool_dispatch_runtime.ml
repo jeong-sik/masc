@@ -179,6 +179,20 @@ let parse_json raw =
   try Yojson.Safe.from_string raw with
   | Yojson.Json_error err -> fail ("invalid json: " ^ err)
 
+let structured_tool_output_exn ~base_path content =
+  match Tool_output.decode_from_agent_core content with
+  | Tool_output.Not_marker -> parse_json content
+  | Tool_output.Invalid_marker { detail } -> fail detail
+  | Tool_output.Decoded reference ->
+    if not (String.equal reference.mime Tool_output.artifact_manifest_mime)
+    then fail "tool output marker is not a typed result manifest";
+    let payload = fetch_artifact_exn ~base_path reference |> parse_json in
+    (match Tool_output.artifact_manifest_of_json payload with
+     | Tool_output.Decoded_artifact_manifest { structured_content; _ } ->
+       structured_content
+     | Tool_output.Not_artifact_manifest -> fail "typed result manifest is absent"
+     | Tool_output.Invalid_artifact_manifest { detail } -> fail detail)
+
 let outcome_label = function
   | Tool_result.Completed () -> "success"
   | Tool_result.Deferred () -> "deferred"
@@ -4773,6 +4787,67 @@ value = {}
 |}
 ;;
 
+let shell_output_composition =
+  {|[[compositions]]
+name = "shell-output"
+description = "Feed one typed Shell IR result into a later Keeper tool."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "emit"
+tool = "Execute"
+[compositions.nodes.input]
+kind = "literal"
+value = { argv = ["printf", "shell-composition-marker"] }
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+after = ["emit"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "emit"
+pointer = "/output"
+|}
+;;
+
+let shell_artifact_composition () =
+  let oversized_output =
+    String.make (Masc.Tool_bridge.default_externalize_threshold_bytes + 1) 'x'
+  in
+  Printf.sprintf
+    {|[[compositions]]
+name = "shell-artifact"
+description = "Feed one typed Shell IR artifact identity into a later Keeper tool."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "emit"
+tool = "Execute"
+[compositions.nodes.input]
+kind = "literal"
+value = { argv = ["printf", "%s"] }
+
+[[compositions.nodes]]
+id = "search"
+tool = "keeper_memory_search"
+after = ["emit"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "emit"
+pointer = "/output_artifact/_blob/sha256"
+|}
+    oversized_output
+;;
+
 let test_composition_catalog_materializes_and_executes_first_class_tool () =
   with_exec_fixture "composition-first-class-tool"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -4843,6 +4918,482 @@ let test_composition_catalog_materializes_and_executes_first_class_tool () =
                  (List.mem_assoc "data" fields)
              | _ -> fail "nested action result lost typed result shape")
           | _ -> fail "composition did not expose its single settled action"))
+;;
+
+let test_composition_feeds_typed_shell_ir_output_to_later_tool () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "composition-shell-ir-output"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let composition_catalog =
+         match Masc.Keeper_tool_composition_catalog.parse shell_output_composition with
+         | Ok catalog -> catalog
+         | Error error ->
+           fail (Masc.Keeper_tool_composition_catalog.error_to_string error)
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_shell-output" with
+         | Some tool -> tool
+         | None -> fail "Shell IR composition was not materialized"
+       in
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload = parse_json output.content in
+         (match Yojson.Safe.Util.member "actions" payload with
+          | `List [ emit; search ] ->
+            check string
+              "Shell IR node"
+              "Execute"
+              Yojson.Safe.Util.(member "tool_name" emit |> to_string);
+            check bool
+              "Shell IR typed result"
+              true
+              Yojson.Safe.Util.
+                (member "result" emit |> member "data" |> member "typed" |> to_bool);
+            check string
+              "Shell IR exact output"
+              "shell-composition-marker"
+              Yojson.Safe.Util.
+                (member "result" emit |> member "data" |> member "output" |> to_string);
+            check string
+              "later node receives typed Shell IR output"
+              "shell-composition-marker"
+              Yojson.Safe.Util.(member "input" search |> member "query" |> to_string)
+          | _ -> fail "Shell IR composition did not settle both nodes in planned order"))
+;;
+
+let test_composition_externalizes_oversized_shell_ir_output () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "composition-shell-ir-artifact"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       Masc.Keeper_tool_call_log.reset_for_testing ();
+       Masc.Keeper_tool_call_log.init ~base_path:config.base_path ();
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let composition_catalog =
+         match
+           Masc.Keeper_tool_composition_catalog.parse
+             (shell_artifact_composition ())
+         with
+         | Ok catalog -> catalog
+         | Error error ->
+           fail (Masc.Keeper_tool_composition_catalog.error_to_string error)
+       in
+       let tools =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ~composition_catalog
+           ~turn_ctx_cell
+           ()
+       in
+       let tool =
+         match find_tool_by_name tools "keeper_compose_shell-artifact" with
+         | Some tool -> tool
+         | None -> fail "Shell IR artifact composition was not materialized"
+       in
+       match
+         Agent_core.Tool.execute
+           ~invocation:
+             (composition_invocation
+                ~completion:Agent_core.Tool_contract.Continue_after_success)
+           tool
+           (`Assoc [])
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload =
+           structured_tool_output_exn
+             ~base_path:config.base_path
+             output.content
+         in
+         (match Yojson.Safe.Util.member "actions" payload with
+          | `List [ emit; search ] ->
+            let data = Yojson.Safe.Util.(member "result" emit |> member "data") in
+            check
+              bool
+              "oversized output is not retained inline"
+              true
+              (Yojson.Safe.Util.member "output" data = `Null);
+            let artifact_ref field =
+              match
+                Yojson.Safe.Util.member field data
+                |> Tool_output.normalized_artifact_ref_of_json
+              with
+              | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+              | Tool_output.Not_normalized_artifact_ref ->
+                failf
+                  "oversized Shell IR output has no normalized %s reference"
+                  field
+              | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
+            in
+            let output_ref = artifact_ref "output_artifact" in
+            let stdout_ref = artifact_ref "stdout_artifact" in
+            let stderr_ref = artifact_ref "stderr_artifact" in
+            check string "combined output equals stdout" output_ref.sha256 stdout_ref.sha256;
+            check int "empty stderr is still explicit" 0 stderr_ref.bytes;
+            let artifact =
+              fetch_artifact_exn ~base_path:config.base_path output_ref
+            in
+            check
+              int
+              "artifact retains every output byte"
+              (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
+              (String.length artifact);
+            let durable_root_present =
+              Masc.Keeper_tool_call_log.read_recent
+                ~keeper_name:meta.name
+                ~n:10
+                ()
+              |> List.exists (fun row ->
+                Safe_ops.json_string_opt "composition_node_id" row = Some "emit"
+                &&
+                match Yojson.Safe.Util.member "artifact_refs" row with
+                | `List roots ->
+                  List.exists
+                    (fun root ->
+                       let blob = Yojson.Safe.Util.member "_blob" root in
+                       Safe_ops.json_string_opt "sha256" blob
+                       = Some output_ref.sha256
+                       && Safe_ops.json_string_opt "preview" blob = Some "")
+                    roots
+                | _ -> false)
+            in
+            check
+              bool
+              "durable action log owns a preview-free artifact root"
+              true
+              durable_root_present;
+            let maintenance mode =
+              match
+                Tool_blob_maintenance.run ~base_path:config.base_path ~mode
+              with
+              | Ok report -> report
+              | Error error ->
+                fail (Tool_blob_maintenance.error_to_string error)
+            in
+            let observed = maintenance Tool_blob_maintenance.Observe_only in
+            check
+              bool
+              "durable action evidence roots the stream artifacts"
+              true
+              (observed.live_references >= 2);
+            ignore
+              (maintenance Tool_blob_maintenance.Delete_previous_candidates);
+            check
+              string
+              "maintenance preserves the referenced output"
+              artifact
+              (fetch_artifact_exn ~base_path:config.base_path output_ref);
+            check
+              string
+              "later node receives the artifact identity"
+              output_ref.sha256
+              Yojson.Safe.Util.(member "input" search |> member "query" |> to_string)
+          | _ ->
+            fail
+              "Shell IR artifact composition did not settle both nodes in planned order"))
+;;
+
+let test_direct_execute_artifact_manifest_survives_maintenance () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "direct-shell-ir-artifact"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let execute =
+         Masc.Keeper_tools_agent_core_bundle.make_tools
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+         |> List.find_opt (fun (tool : Agent_core.Tool.t) ->
+           String.equal tool.schema.name "Execute")
+         |> function
+         | Some tool -> tool
+         | None -> fail "direct Execute tool is absent"
+       in
+       let oversized =
+         String.make (Masc.Tool_bridge.default_externalize_threshold_bytes + 1) 'd'
+       in
+       let output =
+         match
+           Agent_core.Tool.execute
+             ~invocation:
+               (composition_invocation
+                  ~completion:Agent_core.Tool_contract.Continue_after_success)
+             execute
+             (`Assoc [ "argv", `List [ `String "printf"; `String oversized ] ])
+         with
+         | Ok output -> output.Agent_core.Types.content
+         | Error error -> fail error.Agent_core.Types.message
+       in
+       let manifest_ref =
+         match Tool_output.decode_from_agent_core output with
+         | Tool_output.Decoded reference
+           when String.equal reference.mime Tool_output.artifact_manifest_mime ->
+           reference
+         | Tool_output.Decoded _ -> fail "direct Execute returned a non-manifest marker"
+         | Tool_output.Not_marker -> fail "direct Execute artifact result stayed inline"
+         | Tool_output.Invalid_marker { detail } -> fail detail
+       in
+       let durable_checkpoint =
+         Filename.concat
+           (Common.masc_dir_from_base_path ~base_path:config.base_path)
+           "keepers/direct-execute/checkpoint.json"
+       in
+       Fs_compat.mkdir_p (Filename.dirname durable_checkpoint);
+       Fs_compat.save_file
+         durable_checkpoint
+         (Yojson.Safe.to_string (`Assoc [ "tool_result", `String output ]));
+       let structured =
+         structured_tool_output_exn ~base_path:config.base_path output
+       in
+       let output_ref =
+         Yojson.Safe.Util.member "output_artifact" structured
+         |> Tool_output.normalized_artifact_ref_of_json
+         |> function
+         | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+         | Tool_output.Not_normalized_artifact_ref ->
+           fail "direct Execute manifest lost its child output reference"
+         | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
+       in
+       let maintenance mode =
+         match Tool_blob_maintenance.run ~base_path:config.base_path ~mode with
+         | Ok report -> report
+         | Error error -> fail (Tool_blob_maintenance.error_to_string error)
+       in
+       let observed = maintenance Tool_blob_maintenance.Observe_only in
+       check bool
+         "direct checkpoint roots manifest and child streams"
+         true
+         (observed.live_references >= 3);
+       ignore (maintenance Tool_blob_maintenance.Delete_previous_candidates);
+       check string
+         "direct Execute child survives both maintenance passes"
+         oversized
+         (fetch_artifact_exn ~base_path:config.base_path output_ref);
+       check bool
+         "manifest itself survives both maintenance passes"
+         true
+         (match
+            Tool_blob_store.fetch
+              (Tool_blob_store.create ~base_path:config.base_path)
+              ~sha256:manifest_ref.sha256
+          with
+          | Ok (Some _) -> true
+          | Ok None | Error _ -> false))
+;;
+
+let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "direct-shell-ir-post-effect-artifact-failure"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let blob_root =
+              Tool_blob_store.create ~base_path:config.base_path
+              |> Tool_blob_store.root_dir
+            in
+            Fs_compat.mkdir_p (Filename.dirname blob_root);
+            Fs_compat.save_file blob_root "artifact persistence is blocked";
+            let marker = Filename.concat config.base_path "execute-invocations" in
+            let oversized =
+              String.make
+                (Masc.Tool_bridge.default_externalize_threshold_bytes + 1)
+                'p'
+            in
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:1
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let execute =
+              projected
+              |> List.find_opt
+                   (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                      String.equal tool.name "Execute")
+              |> function
+              | Some tool -> tool
+              | None -> fail "direct Execute tool was not projected"
+            in
+            let result =
+              execute.call
+                ~call_id:"direct-execute-post-effect-failure"
+                (`Assoc
+                   [ ( "argv"
+                     , `List
+                         [ `String "/bin/sh"
+                         ; `String "-c"
+                         ; `String "printf x >> \"$1\"; printf %s \"$2\""
+                         ; `String "keeper-execute-test"
+                         ; `String marker
+                         ; `String oversized
+                         ] )
+                   ])
+            in
+            check bool "artifact persistence failure is visible" false result.success;
+            check string
+              "the process effect occurs exactly once before settlement"
+              "x"
+              (read_file marker);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_agent_core.Terminal_effect_failed
+                 { effect_disposition = Tool_result.Proven_post_effect; _ } ->
+               ()
+             | _ -> fail "ordinary Execute post-effect failure left bundle open");
+            match result.abort_turn with
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary
+                  { tool_name = "Execute"
+                  ; outcome =
+                      Masc.Keeper_official_client_host.Terminal_failed
+                        { effect_disposition = Tool_result.Proven_post_effect; _ }
+                  }) ->
+              ()
+            | Some
+                (Masc.Keeper_official_client_host.Terminal_tool_boundary _)
+            | Some (Masc.Keeper_official_client_host.Repeated_tool_call _)
+            | None ->
+              fail "direct Execute post-effect failure remained provider-retryable"))
+;;
+
+let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
+  with_exec_fixture
+    ~process:true
+    ~always_allow:true
+    "direct-pre-effect-correction"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       let bundle =
+         Masc.Keeper_tools_agent_core_bundle.make_tool_bundle
+           ~config
+           ~meta
+           ~publication_recovery
+           ~ctx_snapshot:ctx_work
+           ()
+       in
+       Fun.protect
+         ~finally:bundle.cleanup
+         (fun () ->
+            let terminal_error = ref None in
+            let projected =
+              match
+                Masc.Keeper_official_client_host.dynamic_tools
+                  ~runtime_label:"test-official-client"
+                  ~keeper_name:meta.name
+                  ~turn_count:1
+                  ~tools:bundle.tools
+                  ~hooks:Agent_core.Hooks.empty
+                  ~event_bus:None
+                  ~context_injector:None
+                  ~context:(Some (Agent_core.Context.create_sync ()))
+                  ~terminal_effect_state:bundle.terminal_effect_state
+                  ~terminal_error
+                  ~raw_trace_run:None
+              with
+              | Ok tools -> tools
+              | Error error -> fail (Agent_core.Error.to_string error)
+            in
+            let call name input =
+              let tool =
+                projected
+                |> List.find_opt
+                     (fun (tool : Masc.Keeper_official_client_host.dynamic_tool) ->
+                        String.equal tool.name name)
+                |> function
+                | Some tool -> tool
+                | None -> failf "%s was not projected" name
+              in
+              tool.call ~call_id:("correction-" ^ name) input
+            in
+            let invalid_execute =
+              call "Execute" (`Assoc [ "argv", `List [ `String "" ] ])
+            in
+            check bool "invalid Execute is a failure" false invalid_execute.success;
+            check
+              (option string)
+              "pre-effect Execute failure keeps the turn open"
+              None
+              (Option.map
+                 (fun _ -> "abort")
+                 invalid_execute.abort_turn);
+            let invalid_write =
+              call
+                "Write"
+                (`Assoc
+                   [ "file_path", `String ""
+                   ; "content", `String "must not be written"
+                   ])
+            in
+            check bool "invalid Write is a failure" false invalid_write.success;
+            check
+              (option string)
+              "unaudited ordinary producer keeps its prior correction behavior"
+              None
+              (Option.map (fun _ -> "abort") invalid_write.abort_turn);
+            let missing_artifact =
+              call
+                "keeper_artifact_read"
+                (`Assoc [ "sha256", `String (String.make 64 '0') ])
+            in
+            check bool "missing artifact is a failure" false missing_artifact.success;
+            check
+              (option string)
+              "read-only failure keeps the turn open"
+              None
+              (Option.map
+                 (fun _ -> "abort")
+                 missing_artifact.abort_turn);
+            match bundle.terminal_effect_state () with
+            | Masc.Keeper_tools_agent_core.Terminal_effect_open -> ()
+            | _ -> fail "correction-capable failures poisoned terminal state"))
 ;;
 
 let test_composition_action_commit_advances_revision_before_refresh_event () =
@@ -5592,6 +6143,118 @@ let test_async_composition_uses_durable_request_status_surface () =
            Yojson.Safe.Util.(member "result" payload |> member "composition_tool" |> to_string))
 ;;
 
+let test_async_composition_status_preserves_artifact_manifest () =
+  with_exec_fixture
+    ~bind_eio_context:true
+    "composition-async-artifact-status"
+    (fun ~config ~meta ~publication_recovery ~ctx_work ->
+       ignore publication_recovery;
+       ignore ctx_work;
+       let artifact_reference =
+         Tool_blob_store.put_durable
+           (Tool_blob_store.create ~base_path:config.base_path)
+           ~bytes:"async artifact payload"
+           ~mime:"text/plain"
+       in
+       let structured_data =
+         `Assoc
+           [ ( "output_artifact"
+             , Tool_output.normalized_artifact_ref_to_json artifact_reference )
+           ]
+       in
+       let background_sw =
+         match Masc.Keeper_msg_async.server_background_switch () with
+         | Ok sw -> sw
+         | Error error ->
+           fail
+             (Masc.Keeper_msg_async.submit_error_to_json error
+              |> Yojson.Safe.to_string)
+       in
+       let request_id =
+         match Masc.Keeper_msg_async.submit
+                 ~background_sw
+                 ~base_path:config.base_path
+                 ~caller:meta.name
+                 ~keeper_name:meta.name
+                 ~f:(fun _request_sw ->
+                   Tool_result.make_ok
+                     ~tool_name:"keeper_compose_artifact-fixture"
+                     ~start_time:(Time_compat.now ())
+                     ~data:structured_data
+                     ())
+                 ()
+         with
+         | Ok outcome -> outcome.request_id
+         | Error error ->
+           fail
+             (Masc.Keeper_msg_async.submit_error_to_json error
+              |> Yojson.Safe.to_string)
+       in
+       let rec await_terminal () =
+         match
+           Masc.Keeper_msg_async.poll
+             ~base_path:config.base_path
+             ~caller:meta.name
+             request_id
+         with
+         | Masc.Keeper_msg_async.Found
+             ({ status = Masc.Keeper_msg_async.Done _; _ } as entry) ->
+           entry
+         | Masc.Keeper_msg_async.Found
+             { status =
+                 ( Masc.Keeper_msg_async.Queued
+                 | Masc.Keeper_msg_async.Running
+                 | Masc.Keeper_msg_async.Cancelling _ )
+             ; _
+             } ->
+           Eio.Fiber.yield ();
+           await_terminal ()
+         | Masc.Keeper_msg_async.Found _ ->
+           fail "async artifact composition did not complete"
+         | Masc.Keeper_msg_async.Absent -> fail "async artifact request disappeared"
+         | Masc.Keeper_msg_async.Unreadable reason -> fail reason
+         | Masc.Keeper_msg_async.Rejected _ ->
+           fail "async artifact request access was rejected"
+       in
+       let clock =
+         match Eio_context.get_clock_opt () with
+         | Some clock -> clock
+         | None -> fail "async artifact test lost its bound Eio clock"
+       in
+       ignore
+         (Eio.Time.with_timeout_exn clock 5.0 await_terminal
+           : Masc.Keeper_msg_async.entry);
+       let status_result =
+         Masc.Keeper_tool_composition_surface.For_testing.status_result
+           ~config
+           ~meta
+           ~request_id
+       in
+       match Masc.Tool_bridge.to_agent_core_typed_result
+               ~base_path:config.base_path
+               status_result
+       with
+       | Error error -> fail error.Agent_core.Types.message
+       | Ok output ->
+         let payload =
+           structured_tool_output_exn
+             ~base_path:config.base_path
+             output.content
+         in
+         check string "artifact status remains terminal" "done"
+           Yojson.Safe.Util.(member "status" payload |> to_string);
+         let artifact =
+           Yojson.Safe.Util.
+             (member "result" payload
+              |> member "output_artifact")
+         in
+         match Tool_output.normalized_artifact_ref_of_json artifact with
+         | Tool_output.Decoded_normalized_artifact_ref _ -> ()
+         | Tool_output.Not_normalized_artifact_ref ->
+           fail "async status dropped its normalized artifact reference"
+         | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail)
+;;
+
 let test_composition_runtime_uses_canonical_descriptor () =
   with_exec_fixture "composition-canonical-descriptor"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
@@ -5784,6 +6447,16 @@ let () =
         test_composition_runtime_uses_canonical_descriptor;
       test_case "catalog composition is a first-class executable tool" `Quick
         test_composition_catalog_materializes_and_executes_first_class_tool;
+      test_case "composition feeds typed Shell IR output to later tool" `Quick
+        test_composition_feeds_typed_shell_ir_output_to_later_tool;
+      test_case "composition externalizes oversized Shell IR output" `Quick
+        test_composition_externalizes_oversized_shell_ir_output;
+      test_case "direct Execute artifact manifest survives maintenance" `Quick
+        test_direct_execute_artifact_manifest_survives_maintenance;
+      test_case "direct Execute artifact failure closes official-client loop" `Quick
+        test_direct_execute_post_effect_artifact_failure_closes_official_client_loop;
+      test_case "direct pre-effect and read-only failures remain correction-capable" `Quick
+        test_direct_pre_effect_and_readonly_failures_remain_correction_capable;
       test_case "composition action commit refreshes dashboard evidence" `Quick
         test_composition_action_commit_advances_revision_before_refresh_event;
       test_case "composition telemetry outage preserves execution" `Quick
@@ -5800,6 +6473,8 @@ let () =
         test_terminal_composition_post_effect_defer_closes_without_resume;
       test_case "async composition exposes durable status" `Quick
         test_async_composition_uses_durable_request_status_surface;
+      test_case "async composition status preserves artifact manifest" `Quick
+        test_async_composition_status_preserves_artifact_manifest;
       test_case "terminal composition requires terminal outer invocation" `Quick
         test_composition_terminal_requires_terminal_outer_invocation;
     ]);

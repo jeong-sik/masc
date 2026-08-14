@@ -212,6 +212,10 @@ type operator_disposition_reason =
   | Reason_cancelled
   | Reason_phase_skipped
   | Reason_transcript_corruption
+  | Reason_provider_attempt_effect_fenced
+  (** The provider attempt did not prove whether an effect occurred. Paired
+      with [Disp_unknown] so operator attention remains required, while the
+      receipt is no longer counted as an unmapped classifier regression. *)
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string

@@ -29,6 +29,7 @@ type t =
   | Config_or_auth of string
   | Provider_runtime_failure of string
   | Transcript_corruption of string
+  | Provider_attempt_effect_fenced of string
   | Internal_error of string
   | Pre_dispatch_success of string
   | Unknown of string
@@ -44,8 +45,9 @@ let is_config_or_auth_wire = function
 
 (* Priority-ranked partition. The bucket order replicates the [if/else]
    order of the pre-typing [operator_disposition] string predicates, with the
-   exact canonical [Capacity_backpressure] policy bucket inserted before the
-   opaque internal-error fall-through;
+   exact canonical policy buckets for [Capacity_backpressure] and
+   [Provider_attempt_effect_fenced] inserted before the opaque internal-error
+   fall-through;
    [of_wire] returns the FIRST matching bucket. Capacity backpressure is an
    exact producer-owned wire kind; casing variants remain opaque rather than
    inheriting its non-pageable policy. The original
@@ -68,6 +70,9 @@ let of_wire wire =
   else if
     String.equal wire Keeper_internal_error.incomplete_tool_transcript_kind
   then Transcript_corruption wire
+  else if
+    String.equal wire Keeper_internal_error.provider_attempt_effect_fenced_kind
+  then Provider_attempt_effect_fenced wire
   else if String.equal wire "internal_error"
   then Internal_error wire
   else if String.equal wire "pre_dispatch_success"
@@ -85,6 +90,7 @@ let to_wire = function
   | Config_or_auth wire -> wire
   | Provider_runtime_failure wire -> wire
   | Transcript_corruption wire -> wire
+  | Provider_attempt_effect_fenced wire -> wire
   | Internal_error wire -> wire
   | Pre_dispatch_success wire -> wire
   | Unknown wire -> wire
@@ -113,6 +119,7 @@ let is_transient_provider_runtime_failure = function
   | Capacity_backpressure _
   | Config_or_auth _
   | Transcript_corruption _
+  | Provider_attempt_effect_fenced _
   | Internal_error _
   | Pre_dispatch_success _
   | Unknown _ -> false

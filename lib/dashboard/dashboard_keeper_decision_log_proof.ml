@@ -35,6 +35,20 @@ type turn_span_stat = {
 let seconds_per_hour = Masc_time_constants.hour
 let persistent_turn_window_hours = 24.0
 let recent_turn_max_age_hours = 24.0
+
+type persistence_tier =
+  { id : string
+  ; required_span_hours : float
+  }
+
+let persistence_tiers =
+  [ { id = "1h"; required_span_hours = 1.0 }
+  ; { id = "2h"; required_span_hours = 2.0 }
+  ; { id = "4h"; required_span_hours = 4.0 }
+  ; { id = "24h"; required_span_hours = persistent_turn_window_hours }
+  ]
+;;
+
 let decision_tail_max_bytes = 512 * 1024
 let decision_tail_max_lines = 5000
 
@@ -180,7 +194,7 @@ type segment_head_scan =
   | Complete_without_turn
   | Scan_exhausted
 
-let earliest_turn_ts_in_segment path =
+let earliest_turn_ts_in_segment ~now path =
   let slice = Fs_compat.read_slice ~path ~from:0 ~len:decision_head_max_bytes in
   let turn =
     String.split_on_char '\n' slice
@@ -192,7 +206,10 @@ let earliest_turn_ts_in_segment path =
         | exception Yojson.Json_error _ -> None
         | json ->
           if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json)
-          then decision_ts_unix json
+          then
+            (match decision_ts_unix json with
+             | Some ts when ts <= now -> Some ts
+             | Some _ | None -> None)
           else None)
   in
   match turn with
@@ -202,29 +219,30 @@ let earliest_turn_ts_in_segment path =
      | Some size when size <= String.length slice -> Complete_without_turn
      | Some _ | None -> Scan_exhausted)
 
-let earliest_turn_ts segments =
+let earliest_turn_ts ~now segments =
   let rec scan = function
     | [] -> None, No_turn_row_in_history
     | (rotation, path) :: rest ->
-      (match earliest_turn_ts_in_segment path with
+      (match earliest_turn_ts_in_segment ~now path with
        | Turn_found ts -> Some ts, History_head rotation
        | Complete_without_turn -> scan rest
        | Scan_exhausted -> None, History_scan_exhausted rotation)
   in
   scan segments
 
-let turn_span_stats ~config keeper_name =
+let turn_span_stats ~config ~now keeper_name =
   let tail =
     fold_keeper_decision_log ~config keeper_name ~init:empty_tail_scan
       ~f:(fun scan json ->
         if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json) then
           match decision_ts_unix json with
-          | Some ts -> update_tail_scan scan ts
+          | Some ts when ts <= now -> update_tail_scan scan ts
+          | Some _ -> scan
           | None -> scan
         else scan)
   in
   let segments = decision_log_segments ~config keeper_name in
-  let first_ts, first_ts_origin = earliest_turn_ts segments in
+  let first_ts, first_ts_origin = earliest_turn_ts ~now segments in
   {
     recent_interaction_count = tail.count;
     first_ts;
@@ -272,14 +290,24 @@ let latest_age_hours_json ~now stat =
   | Some latest -> `Float (latest_age_hours ~now latest)
   | None -> `Null
 
-let has_persistent_turn_span ~now stat =
-  stat.recent_interaction_count >= 2
+let has_persistent_turn_span_for ~required_span_hours ~now stat =
+  Float.is_finite required_span_hours
+  && required_span_hours > 0.0
   &&
   match stat.first_ts, stat.latest_ts with
   | Some first, Some latest ->
-    hours_between first latest >= persistent_turn_window_hours
+    first <= latest
+    && latest <= now
+    && hours_between first latest >= required_span_hours
     && latest_age_hours ~now latest <= recent_turn_max_age_hours
   | _ -> false
+
+let has_persistent_turn_span ~now stat =
+  has_persistent_turn_span_for
+    ~required_span_hours:persistent_turn_window_hours
+    ~now
+    stat
+;;
 
 let turn_span_evidence_json ~now keeper_name stat =
   `Assoc [

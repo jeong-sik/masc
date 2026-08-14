@@ -22,6 +22,7 @@ let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let live_cache_ttl_s = Server_dashboard_http_core_cache.live_cache_ttl_s
 let feature_health_cache_ttl_s = Server_dashboard_http_core_cache.feature_health_cache_ttl_s
 let exact_lane_run_permission = Masc_domain.CanAdmin
+let runtime_probe_read_permission = Masc_domain.CanReadState
 
 (* The panel draws a table; a page an operator can actually scan is ~50 rows.
    The ceiling exists so a caller cannot ask for the whole store back and
@@ -579,6 +580,7 @@ module For_testing = struct
 
   let gate_mode_change_json = gate_mode_change_json
   let exact_lane_run_permission = exact_lane_run_permission
+  let runtime_probe_read_permission = runtime_probe_read_permission
 end
 
 let handle_gate_mode_body state operator_name request reqd body_str =
@@ -987,7 +989,7 @@ let add_routes ~sw ~clock router =
          let json = dashboard_runtime_probe_http_json ~force () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
-       with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)
+       with_permission_auth ~permission:runtime_probe_read_permission handle request reqd)
   |> Http.Router.get "/api/v1/dashboard/runtime-defaults" (fun request reqd ->
        (* Structured, already-resolved runtime defaults / model routing for the
           Settings surface. Read-only projection of the runtime.toml SSOT

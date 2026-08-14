@@ -1458,13 +1458,23 @@ let masc_library_descriptors =
 let masc_local_runtime_descriptor
       (definition : Tool_schemas_local_runtime.definition) =
   let schema = definition.schema in
-  cluster_descriptor_with_schema_source
+  let keeper_model_projection =
+    match Tool_schemas_local_runtime.keeper_model_exposure definition.operation with
+    | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
+    | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only
+  in
+  let execution_policy =
+    Tool_schemas_local_runtime.execution_policy definition.operation
+  in
+  let policy =
+    policy
+      ~readonly:execution_policy.read_only
+      ~retryable:execution_policy.retryable
+      ()
+  in
+  in_process_descriptor_with_schema_source
     ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:
-      (Tool_schemas_local_runtime.keeper_model_exposure definition.operation
-       |> function
-       | Tool_schemas_local_runtime.Keeper_callable -> Internal_name
-       | Tool_schemas_local_runtime.Operator_diagnostic -> Operator_only)
+    ~keeper_model_projection
     ~input_schema_source:Canonical_registry
     ~input_schema:schema.input_schema
     ~id:
@@ -1473,7 +1483,7 @@ let masc_local_runtime_descriptor
     ~name:schema.name
     ~description:schema.description
     ~handler:Tool_masc_local_runtime_dispatch
-    ~readonly:true
+    ~policy
     ()
 ;;
 

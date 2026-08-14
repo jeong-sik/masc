@@ -36,6 +36,7 @@
   masc_core
   masc_config
   masc.tool_types
+  masc.tool_schemas_specs
   masc.tool_catalog_surfaces
   time_compat
   yojson

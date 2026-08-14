@@ -29,7 +29,7 @@ let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
     (Yojson.Safe.to_string data)
 ;;
 
-let handle_runtime_verify _ctx args : Core.tool_result =
+let run_runtime_verify args : Core.tool_result =
   let tool_name = "masc_runtime_verify" in
   let start_time = Time_compat.now () in
   let runtime_pool = Json_util.get_string args "runtime_pool" in
@@ -54,6 +54,20 @@ let handle_runtime_verify _ctx args : Core.tool_result =
         Tool_local_runtime_verify.runtime_verify_json
           ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
     ]
+
+(* TEL-OK: this adapter only requests the shared external-effect authorization
+   and delegates the completion. The authorizer owns the Gate decision receipt;
+   the outer MCP tool-call boundary owns duration and result telemetry. *)
+let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
+  let continue () = run_runtime_verify args in
+  match ctx.authorize_external_effect with
+  | None -> continue ()
+  | Some authorize ->
+    authorize
+      ~operation:"masc_runtime_verify"
+      ~input:args
+      ~continue
+;;
 
 let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
   let tool_name = "masc_runtime_ollama_probe" in
@@ -173,6 +187,9 @@ let () =
   List.iter
     (fun (definition : Tool_schemas_local_runtime.definition) ->
       let s = definition.schema in
+      let policy =
+        Tool_schemas_local_runtime.execution_policy definition.operation
+      in
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name
@@ -180,8 +197,8 @@ let () =
            ~module_tag:Tool_dispatch.Mod_local_runtime
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
-           ~is_read_only:true
-           ~is_idempotent:true
+           ~is_read_only:policy.read_only
+           ~is_idempotent:policy.idempotent
            ()))
     Tool_schemas_local_runtime.definitions
 

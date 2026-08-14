@@ -188,6 +188,13 @@ let test_internal_exact_lane_registry_is_admin_only () =
     (Server_routes_http_routes_dashboard.For_testing.exact_lane_run_permission
      = Masc_domain.CanAdmin)
 
+let test_runtime_probe_route_owns_read_permission () =
+  check bool
+    "metadata-only runtime probe remains a read route"
+    true
+    (Server_routes_http_routes_dashboard.For_testing.runtime_probe_read_permission
+     = Masc_domain.CanReadState)
+
 let test_event_queue_operator_routes_are_exact () =
   check (option string) "event operator route is exact" (Some "idealist")
     (Server_dashboard_http_keeper_event_queue_operator.route
@@ -3651,6 +3658,8 @@ let () =
             test_keeper_sensitive_get_permissions_are_exact;
           test_case "internal exact lane registry is Admin-only" `Quick
             test_internal_exact_lane_registry_is_admin_only;
+          test_case "runtime probe route owns read permission" `Quick
+            test_runtime_probe_route_owns_read_permission;
           test_case "event queue operator routes are exact" `Quick
             test_event_queue_operator_routes_are_exact;
           test_case "event operator keeps exact source refs across queue changes" `Quick

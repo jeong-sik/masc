@@ -1137,10 +1137,15 @@ let replay_connector_post_with_outcome
     Keeper_tool_execution.success
       (Keeper_surface_post.ok_json ~surface:connector ?message_id ())
   in
-  let fail connector detail =
+  (* [effect_disposition] decides whether the keeper may correct and retry
+     inside the same provider turn ({!Keeper_runtime_failure_route}: a proven
+     pre-effect rejection must never reach the terminal effect boundary), so
+     each connector supplies what its transport actually proves instead of
+     defaulting every failure to "outcome unknown". *)
+  let fail connector ~effect_disposition detail =
     Keeper_tool_execution.failure
       ~class_:Tool_result.Runtime_failure
-      ~effect_disposition:Tool_result.Effect_outcome_unknown
+      ~effect_disposition
       (Keeper_surface_post.error_json
          (Printf.sprintf "%s send failed: %s" connector detail))
   in
@@ -1166,8 +1171,14 @@ let replay_connector_post_with_outcome
          ~mention_user_ids ()
      with
      | Error send_error ->
+       (* Discord stays "outcome unknown": its refusals arrive as non-2xx and
+          {!Discord_rest_client.Discord_api} carries Discord's own error code
+          rather than the HTTP status, so this layer cannot tell a 4xx refusal
+          from a 5xx that may have committed. Claiming pre-effect here would
+          license a duplicate post. *)
        fail
          Keeper_surface_post.discord_label
+         ~effect_disposition:Tool_result.Effect_outcome_unknown
          (Format.asprintf
             "%a"
             Channel_gate_discord_state.pp_send_error
@@ -1228,6 +1239,7 @@ let replay_connector_post_with_outcome
         | Error send_error ->
           fail
             Keeper_surface_post.slack_label
+            ~effect_disposition:(Keeper_chat_slack.effect_disposition send_error)
             (Format.asprintf "%a" Keeper_chat_slack.pp_error send_error)
         | Ok () ->
           (match

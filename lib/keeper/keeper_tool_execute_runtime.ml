@@ -345,6 +345,7 @@ let handle_tool_execute_typed
          | Error ({ message; fields; class_ } : Keeper_sandbox_shell_ir_target.target_error) ->
            Keeper_tool_execution.failure
              ~class_
+             ~effect_disposition:Tool_result.Proven_pre_effect
              (error_json
                 ~fields:
                   ([ "typed", `Bool true; "cmd", `String cmd ]

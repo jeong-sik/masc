@@ -1079,6 +1079,57 @@ let test_events_keeper_lane_projects_cancelled_receipts_and_tool_calls () =
     check bool "pathless tool call remains visible" true (List.mem "masc_board_read" tools))
 ;;
 
+let test_events_keeper_lane_sorts_intlit_and_excludes_addressed_tools () =
+  with_ide_server (fun ~base_path ~state ~router ->
+    let token = create_worker_token base_path "alice" in
+    let config = Masc.Mcp_server.workspace_config state in
+    let masc_path, _ = seed_annotation_scope_repos base_path in
+    let meta =
+      match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "alice" ]) with
+      | Ok meta -> meta
+      | Error detail -> fail detail
+    in
+    (match Masc.Keeper_meta_store.replace_snapshot config meta with
+     | Ok () -> ()
+     | Error detail -> fail detail);
+    seed_lane_receipt ~config ~keeper_id:"alice" ~turn_id:"turn-old"
+      ~outcome:"receipt_done" ~recorded_at:"2023-11-14T22:13:20Z";
+    Masc.Keeper_tool_call_log.init ~base_path ();
+    Masc.Keeper_tool_call_log.log_call
+      ~keeper_name:"alice"
+      ~tool_name:"masc_board_read"
+      ~input:(`Assoc [])
+      ~output_text:"newest"
+      ~success:true
+      ~duration_ms:2.0
+      ~trace_id:"turn-new"
+      ();
+    Masc.Keeper_tool_call_log.log_call
+      ~keeper_name:"alice"
+      ~tool_name:"write"
+      ~input:(`Assoc [ "file_path", `String (Filename.concat masc_path "lib/a.ml") ])
+      ~output_text:"addressed"
+      ~success:true
+      ~duration_ms:2.0
+      ~trace_id:"turn-addressed"
+      ();
+    let request =
+      http_request
+        ~meth:`GET
+        ~path:"/api/v1/ide/events?keeper_lane=alice&limit=1"
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "GET keeper-lane filtered projection succeeds" 200 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    match json_list_member "lane events" "events" (Json.member "data" json) with
+    | [ event ] ->
+      check string "Intlit timestamps keep newest event first" "masc_board_read"
+        (json_string_member "lane tool event" "tool_name" event)
+    | events -> failf "expected one newest pathless event, got %d" (List.length events))
+;;
+
 let test_events_keeper_lane_conflicts_with_repo_scope () =
   with_ide_server (fun ~base_path:_ ~state:_ ~router ->
     let request =
@@ -1273,6 +1324,10 @@ let () =
             "GET events keeper_lane projects cancelled receipts and tool calls"
             `Quick
             test_events_keeper_lane_projects_cancelled_receipts_and_tool_calls
+        ; test_case
+            "GET events keeper_lane sorts Intlit and excludes addressed tools"
+            `Quick
+            test_events_keeper_lane_sorts_intlit_and_excludes_addressed_tools
         ; test_case "keeper_lane conflicts with repo scope" `Quick
             test_events_keeper_lane_conflicts_with_repo_scope
         ; test_case "keeper_lane rejects mismatched keeper filter" `Quick

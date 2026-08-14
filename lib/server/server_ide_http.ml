@@ -417,9 +417,13 @@ let keeper_id_param uri =
    observation bus.  Receipts own terminal outcomes (including cancellation),
    the registry owns the live turn, and the tool-call log owns pathless calls. *)
 let keeper_lane_event_timestamp_ms json =
-  match Safe_ops.json_int_opt "timestamp_ms" json with
-  | Some value -> Int64.of_int value
-  | None -> 0L
+  match Json_util.assoc_member_opt "timestamp_ms" json with
+  | Some (`Int value) -> Int64.of_int value
+  | Some (`Intlit value) | Some (`String value) ->
+    Option.value ~default:0L (Int64.of_string_opt value)
+  | Some (`Float value) when Float.is_finite value -> Int64.of_float value
+  | Some (`Float _) | Some (`Bool _) | Some (`List _) | Some (`Assoc _)
+  | Some `Null | None -> 0L
 ;;
 
 let keeper_lane_compare_events left right =
@@ -547,6 +551,37 @@ let keeper_lane_live_event ~(config : Workspace.config) ~keeper_id =
   | Some _ | None -> None
 ;;
 
+let keeper_lane_tool_row_is_lane_only
+      ~(config : Workspace.config)
+      ~keeper_id
+      json
+  =
+  let input =
+    match Json_util.assoc_member_opt "input" json with
+    | Some input -> input
+    | None -> `Assoc []
+  in
+  match Tool_input_path.tool_input_file_path input with
+  | None -> true
+  | Some _ ->
+    (match Keeper_meta_store.read_meta config keeper_id with
+     | Ok (Some meta) ->
+       (match
+          Keeper_run_tools_hooks.observation_attribution_for_tool_input
+            ~config
+            ~meta
+            input
+        with
+        | Agent_observation.Pathless
+        | Agent_observation.File (Agent_observation.Unaddressed _) -> true
+        | Agent_observation.File (Agent_observation.Addressed _) -> false)
+     | Ok None | Error _ ->
+       (* Without the same Keeper metadata used by the producer, a path-shaped
+          row cannot be proven lane-only.  Excluding it avoids duplicating an
+          addressed repo event under a second, pathless representation. *)
+       false)
+;;
+
 let list_keeper_lane_events ~(config : Workspace.config) ~keeper_id ?kind ~limit ~offset () =
   let scan_limit = min 1000 (max limit (limit + offset) * 5) in
   let turns =
@@ -572,6 +607,7 @@ let list_keeper_lane_events ~(config : Workspace.config) ~keeper_id ?kind ~limit
       |> Keeper_tool_call_log.filter_rows_for_keeper
            ~keeper_name:keeper_id
            ~n:scan_limit
+      |> List.filter (keeper_lane_tool_row_is_lane_only ~config ~keeper_id)
       |> List.map (keeper_lane_tool_event ~keeper_id)
   in
   turns @ tools

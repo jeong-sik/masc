@@ -34,7 +34,7 @@ let ok label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
-let signal ?(content = "Persisted Board evidence") post_id :
+let signal ?(content = "Persisted Board evidence") ?(updated_at = 42.0) post_id :
   Masc.Board_dispatch.board_signal
   =
   { kind = Masc.Board_dispatch.Board_post_created
@@ -43,7 +43,7 @@ let signal ?(content = "Persisted Board evidence") post_id :
   ; title = "Board update"
   ; content
   ; hearth = Some "hearth-1"
-  ; updated_at = Some 42.0
+  ; updated_at = Some updated_at
   }
 ;;
 
@@ -139,15 +139,7 @@ let candidate ?(context = keeper_context ()) signal :
   A.candidate
   =
   let keeper_name = "sangsu" in
-  let candidate_id =
-    `Assoc
-      [ "keeper_name", `String keeper_name
-      ; "signal", A.signal_to_yojson signal
-      ]
-    |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
+  let candidate_id = A.candidate_id_of_signal ~keeper_name signal in
   { candidate_id
   ; keeper_name
   ; signal
@@ -722,8 +714,25 @@ let test_record_dedupes_exact_identity_and_rejects_conflict () =
    | A.Duplicate duplicate ->
      Alcotest.(check bool) "exact duplicate" true (duplicate = persisted)
    | A.Recorded _ | A.Record_error _ -> Alcotest.fail "exact duplicate was not deduped");
+  (* #28607 regression: the backlog scanner re-synthesizes the same post's
+     [Board_post_created] signal with a moved [updated_at]/[content] every
+     cycle. Under the typed event identity (keeper, kind, post_id) that
+     re-mint must converge to the already-persisted candidate instead of
+     minting a fresh one (68 candidates = 68 model judgments for one post). *)
+  (* Both volatile axes drift on a real re-scan: a comment bumps the post's
+     updated_at, and edits change content. The fixture must move both or a
+     hash that quietly re-admits one of them survives this test. *)
+  let rescanned =
+    candidate
+      (signal ~content:"different evidence" ~updated_at:99.5 "post-record")
+  in
+  (match A.record ~base_path rescanned with
+   | A.Duplicate duplicate ->
+     Alcotest.(check bool) "re-scan converges to original" true (duplicate = persisted)
+   | A.Recorded _ -> Alcotest.fail "re-scanned post minted a second candidate"
+   | A.Record_error _ -> Alcotest.fail "re-scanned post was rejected");
   let conflicting =
-    { original with signal = signal ~content:"different evidence" "post-record" }
+    { original with signal = signal "post-other" }
   in
   (match A.record ~base_path conflicting with
    | A.Record_error _ -> ()

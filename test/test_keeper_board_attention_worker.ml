@@ -110,15 +110,7 @@ let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post
 let candidate ?(id = "candidate-worker") ?(recorded_at = 1.0) () : A.candidate =
   let keeper_name = "sangsu" in
   let signal = signal id in
-  let candidate_id =
-    `Assoc
-      [ "keeper_name", `String keeper_name
-      ; "signal", A.signal_to_yojson signal
-      ]
-    |> Yojson.Safe.to_string
-    |> Digestif.SHA256.digest_string
-    |> Digestif.SHA256.to_hex
-  in
+  let candidate_id = A.candidate_id_of_signal ~keeper_name signal in
   { candidate_id
   ; keeper_name
   ; signal

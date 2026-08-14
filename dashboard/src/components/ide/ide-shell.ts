@@ -942,6 +942,7 @@ export function IdeShell() {
     workspaceStore.workspaceIssues,
     workspaceStore.subscribeWorkspaceIssues,
   )
+  const activeCodebase = codebaseForRepositoryId(activeRepositoryId)
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
   useEffect(() => {
@@ -957,7 +958,7 @@ export function IdeShell() {
 
   useEffect(() => {
     const repoId = activeRepositoryId?.trim()
-    const codebase = codebaseForRepositoryId(repoId)
+    const codebase = activeCodebase
     if (!repoId || !codebase) {
       cursorOverlaySignal.value = {
         ...cursorOverlaySignal.value,
@@ -973,7 +974,7 @@ export function IdeShell() {
         cursorOverlaySignal.value = { ...cursorOverlaySignal.value, stream }
       },
     })
-  }, [activeRepositoryId])
+  }, [activeCodebase, activeRepositoryId])
 
   const routeFileFocus = routeFocusFile(route.value.params)
   const routeLineFocus = routeFocusLine(route.value.params)
@@ -1167,8 +1168,13 @@ export function IdeShell() {
       showToast('주석 삭제에는 repo 선택이 필요합니다', 'error')
       return 'error'
     }
+    const codebase = codebaseForRepositoryId(repoId)
+    if (codebase === null) {
+      showToast('주석 삭제에는 canonical codebase가 있는 repo 선택이 필요합니다', 'error')
+      return 'error'
+    }
     const outcome = await deleteIdeAnnotation(annotation.id, {
-      codebase: codebaseForRepositoryId(repoId),
+      codebase,
     })
     switch (outcome) {
       case 'deleted':
@@ -1445,7 +1451,7 @@ export function IdeShell() {
                   <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
                     <${IdeActivityPanel}
                       activeFile=${activeFilePath}
-                      codebase=${codebaseForRepositoryId(activeRepositoryId)}
+                      codebase=${activeCodebase}
                       annotations=${annotations}
                       diffRows=${diffRows}
                       pollMs=${IDE_ACTIVITY_POLL_MS}
@@ -1461,7 +1467,7 @@ export function IdeShell() {
                         <div class="ide-plane-context-stack" data-testid="ide-right-context-stack">
                           <${IdeKeeperWorkPanel} keeperName=${terminalKeeper} />
                           <${IdePersistencePanel} keeperName=${terminalKeeper} />
-                          <${IdeMemoryPanel} keeperName=${terminalKeeper} codebase=${codebaseForRepositoryId(activeRepositoryId)} />
+                          <${IdeMemoryPanel} keeperName=${terminalKeeper} codebase=${activeCodebase} />
                         </div>
                         <div class="ide-plane-primary-rail" data-testid="ide-primary-conversation-rail">
                           <${IdeConversationRail} />

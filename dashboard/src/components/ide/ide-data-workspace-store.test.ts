@@ -250,6 +250,54 @@ describe('IDE focus workspace provenance', () => {
     }
   })
 
+  it('refreshes workspace and file identity when the selected repo codebase changes', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
+    repositoryApiMocks.fetchRepositoriesList.mockResolvedValueOnce([
+      repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_old_repo-a'),
+    ])
+    workspaceApiMocks.fetchWorkspaceTree.mockResolvedValue(
+      repositoryTree('repo-a', [changedFile('lib/a.ml')]),
+    )
+    workspaceApiMocks.fetchWorkspaceFile.mockResolvedValue(workspaceFile('let a = 1\n'))
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      await vi.waitFor(() => {
+        expect(activeIdeWorkspaceIdentity.value).toEqual({
+          kind: 'repository',
+          repoId: 'repo-a',
+          codebase: 'github.com_old_repo-a',
+        })
+      })
+      focusIdeFile({
+        path: 'lib/a.ml',
+        origin: 'operator',
+        workspace_identity: activeIdeWorkspaceIdentity.value,
+        availability: 'available',
+      })
+
+      repositoryApiMocks.fetchRepositoriesList.mockResolvedValueOnce([
+        repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_new_repo-a'),
+      ])
+      await store.scanRepositories()
+
+      await vi.waitFor(() => {
+        expect(activeIdeWorkspaceIdentity.value).toEqual({
+          kind: 'repository',
+          repoId: 'repo-a',
+          codebase: 'github.com_new_repo-a',
+        })
+        expect(activeIdeFocus.value?.workspace_identity).toEqual({
+          kind: 'repository',
+          repoId: 'repo-a',
+          codebase: 'github.com_new_repo-a',
+        })
+      })
+    } finally {
+      store.dispose()
+    }
+  })
+
   it('clears an unreachable persisted repository instead of retrying it on reload', async () => {
     window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
     repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
@@ -736,6 +784,13 @@ describe('workspace fetch diagnostics', () => {
     workspaceApiMocks.fetchWorkspaceFile.mockImplementationOnce(() => new Promise(resolve => {
       resolveFile = resolve
     }))
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'repo-a')
+    repositoryApiMocks.fetchRepositoriesList.mockResolvedValue([
+      repo('repo-a', '/workspace/repo-a', 'repo-a', 'github.com_test_repo-a'),
+    ])
+    workspaceApiMocks.fetchWorkspaceTree.mockResolvedValue(
+      repositoryTree('repo-a', [changedFile('lib/scheduler/round.ml')]),
+    )
     ideApiMocks.fetchIdeRegions.mockResolvedValueOnce([{
       file_path: 'lib/scheduler/round.ml',
       line_start: 2,
@@ -747,14 +802,6 @@ describe('workspace fetch diagnostics', () => {
       source_note: null,
       timestamp_ms: 1_700_000_000_000,
     }])
-    activeKeeperName.value = 'sangsu'
-    synchronizeIdeWorkspaceIdentity({ kind: 'keeper', keeper: 'sangsu' })
-    focusIdeFile({
-      path: 'lib/scheduler/round.ml',
-      origin: 'operator',
-      workspace_identity: { kind: 'keeper', keeper: 'sangsu' },
-      availability: 'available',
-    })
     selectedTask.value = null
     route.value = { tab: 'code', params: { view: 'source' }, postId: null }
     const store = createIdeDataWorkspaceStore()
@@ -771,8 +818,8 @@ describe('workspace fetch diagnostics', () => {
         expect(ideApiMocks.fetchIdeRegions).toHaveBeenCalledWith(
           'lib/scheduler/round.ml',
           expect.objectContaining({
-            keeper: 'sangsu',
-            codebase: null,
+            keeper: undefined,
+            codebase: 'github.com_test_repo-a',
           }),
         )
       })
@@ -785,6 +832,54 @@ describe('workspace fetch diagnostics', () => {
       expect(store.ownershipStore.ownership().get(3)).toMatchObject({
         keeper_id: 'sangsu',
       })
+    } finally {
+      store.dispose()
+      synchronizeIdeWorkspaceIdentity(previousWorkspaceIdentity)
+      if (previousFocus) focusIdeFile(previousFocus)
+      else clearIdeFileFocus()
+      activeKeeperName.value = previousKeeper
+      selectedTask.value = previousTask
+      route.value = previousRoute
+    }
+  })
+
+  it('skips region reads when the selected workspace has no canonical codebase', async () => {
+    const previousFocus = activeIdeFocus.value
+    const previousWorkspaceIdentity = activeIdeWorkspaceIdentity.value
+    const previousKeeper = activeKeeperName.value
+    const previousTask = selectedTask.value
+    const previousRoute = route.value
+
+    vi.clearAllMocks()
+    seedWorkspaceApiMocks()
+    workspaceApiMocks.fetchWorkspaceFile.mockResolvedValue(
+      workspaceFile('let local_only = true\n'),
+    )
+    activeKeeperName.value = 'sangsu'
+    synchronizeIdeWorkspaceIdentity({ kind: 'keeper', keeper: 'sangsu' })
+    focusIdeFile({
+      path: 'lib/local_only.ml',
+      origin: 'operator',
+      workspace_identity: { kind: 'keeper', keeper: 'sangsu' },
+      availability: 'available',
+    })
+    selectedTask.value = null
+    route.value = { tab: 'code', params: { view: 'source' }, postId: null }
+    const store = createIdeDataWorkspaceStore()
+
+    try {
+      await vi.waitFor(() => {
+        expect(store.documentStore.document()).toMatchObject({
+          file_path: 'lib/local_only.ml',
+          content: 'let local_only = true\n',
+        })
+      })
+      expect(ideApiMocks.fetchIdeRegions).not.toHaveBeenCalled()
+      expect(store.documentStore.regionsState()).toBe('idle')
+      expect(store.workspaceIssues()).not.toContainEqual(expect.objectContaining({
+        kind: 'regions',
+        file_path: 'lib/local_only.ml',
+      }))
     } finally {
       store.dispose()
       synchronizeIdeWorkspaceIdentity(previousWorkspaceIdentity)

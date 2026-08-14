@@ -489,4 +489,13 @@ describe('deep links written by hand', () => {
     expect(route.value.tab).toBe('monitoring')
     expect(route.value.params.section).toBe('internal-agents')
   })
+
+  it('decodes query values exactly once', () => {
+    bootWith(
+      '/dashboard',
+      '?tab=monitoring&section=agents&keeper=a%2Bb%2520c',
+    )
+    expect(route.value.tab).toBe('monitoring')
+    expect(route.value.params.keeper).toBe('a+b%20c')
+  })
 })

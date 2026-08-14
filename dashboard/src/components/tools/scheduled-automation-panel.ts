@@ -1820,12 +1820,14 @@ function SchWakeReceipt({
 function SchedulePrototypeSurface({
   automation,
   selectedScheduleId: controlledSelectedId,
+  selectedRequest: controlledSelectedRequest,
   onSelectSchedule,
 }: {
   automation: DashboardScheduledAutomation
   // Optional controlled selection so a sibling (the operations aside) can drive
   // the same detail overlay. Uncontrolled (internal state) when omitted.
   selectedScheduleId?: string | null
+  selectedRequest?: DashboardScheduledAutomationRequest | null
   onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [tab, setTab] = useState<SchTabKey>('scheduled')
@@ -1844,7 +1846,9 @@ function SchedulePrototypeSurface({
   const durableSignalContract = durableWakeSignalContract(automation)
   const durableSignals = durableSignalContract.visibleSignals
   const selected = selectedScheduleId
-    ? rows.find(request => request.schedule_id === selectedScheduleId) ?? null
+    ? controlledSelectedRequest?.schedule_id === selectedScheduleId
+      ? controlledSelectedRequest
+      : rows.find(request => request.schedule_id === selectedScheduleId) ?? null
     : null
   const payloadSummary = payloadSupportSummary(automation)
 
@@ -2080,12 +2084,14 @@ export function ScheduledAutomationPanel({
   automation,
   variant = 'diagnostics',
   selectedScheduleId: controlledSelectedId,
+  selectedRequest: controlledSelectedRequest,
   onSelectSchedule,
 }: {
   automation?: DashboardScheduledAutomation | null
   variant?: 'diagnostics' | 'v2'
   // Forwarded to the v2 surface so the schedule aside can control the overlay.
   selectedScheduleId?: string | null
+  selectedRequest?: DashboardScheduledAutomationRequest | null
   onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [activeFilter, setActiveFilter] = useState<ScheduleFilterKey>('all')
@@ -2103,6 +2109,7 @@ export function ScheduledAutomationPanel({
     return html`<${SchedulePrototypeSurface}
       automation=${automation}
       selectedScheduleId=${controlledSelectedId}
+      selectedRequest=${controlledSelectedRequest}
       onSelectSchedule=${onSelectSchedule}
     />`
   }

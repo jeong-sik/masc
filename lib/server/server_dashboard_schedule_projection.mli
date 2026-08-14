@@ -22,3 +22,9 @@ val scheduled_automation_dashboard_json : Workspace.config -> Yojson.Safe.t
     [counts] / [request_count] / [fsm.active_count] are [null], and
     [schedule_store_read_error] carries the reason. Consumers must render that
     as unknown rather than as zero schedules. *)
+
+val scheduled_automation_exact_lookup_json :
+  Workspace.config -> now:float -> schedule_id:string -> Yojson.Safe.t
+(** Renders one exact schedule through the same request-row encoder as the
+    aggregate projection. The closed [status] is [found], [not_found],
+    [unavailable], or [invalid_id]. *)

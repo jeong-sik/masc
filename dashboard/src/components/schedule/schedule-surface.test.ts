@@ -6,6 +6,7 @@ import type {
   DashboardKeeperWaitingInventory,
   DashboardScheduledAutomationAvailableData,
   DashboardScheduledAutomationProjection,
+  DashboardScheduledAutomationRequest,
 } from '../../api'
 
 type MockToolsResponse = {
@@ -26,6 +27,15 @@ const mocks = vi.hoisted(() => ({
   scheduledAutomationError: { value: null as string | null },
   subscribeScheduledAutomationRefresh: vi.fn(() => () => {}),
   pruneSchedules: vi.fn(),
+  fetchScheduledAutomationLookup: vi.fn(),
+  replaceRoute: vi.fn(),
+  route: {
+    value: {
+      tab: 'schedule',
+      params: {} as Record<string, string>,
+      postId: null,
+    },
+  },
 }))
 
 vi.mock('../tools/tool-state', () => ({
@@ -44,6 +54,21 @@ vi.mock('./schedule-state', () => ({
 
 vi.mock('../../api/dashboard-schedule', () => ({
   pruneSchedules: mocks.pruneSchedules,
+}))
+
+vi.mock('../../api/dashboard-scheduled-automation', async () => {
+  const actual = await vi.importActual<typeof import('../../api/dashboard-scheduled-automation')>(
+    '../../api/dashboard-scheduled-automation',
+  )
+  return {
+    ...actual,
+    fetchDashboardScheduledAutomationLookup: mocks.fetchScheduledAutomationLookup,
+  }
+})
+
+vi.mock('../../router', () => ({
+  route: mocks.route,
+  replaceRoute: mocks.replaceRoute,
 }))
 
 import { ScheduleSurface } from './schedule-surface'
@@ -198,6 +223,9 @@ describe('ScheduleSurface', () => {
     mocks.scheduledAutomationProjection.value = null
     mocks.scheduledAutomationLoading.value = false
     mocks.scheduledAutomationError.value = null
+    mocks.fetchScheduledAutomationLookup.mockReset()
+    mocks.replaceRoute.mockReset()
+    mocks.route.value = { tab: 'schedule', params: {}, postId: null }
   })
 
   afterEach(() => {
@@ -516,5 +544,53 @@ describe('ScheduleSurface', () => {
     // Only the interval schedule survives the 폴링 cadence filter in the list.
     expect(container.querySelector('[data-schedule-id="sched-interval"]')).not.toBeNull()
     expect(container.querySelector('[data-schedule-id="sched-oneshot"]')).toBeNull()
+  })
+
+  it('opens an exact route that is outside the truncated aggregate page', async () => {
+    const exactRequest: DashboardScheduledAutomationRequest = {
+      ...sampleAutomation().requests[0]!,
+      schedule_id: 'sched-outside-page',
+      payload_summary: 'Exact route payload',
+    }
+    setAutomation(sampleAutomation())
+    mocks.route.value = {
+      tab: 'schedule',
+      params: { schedule_id: exactRequest.schedule_id, view: 'calendar' },
+      postId: null,
+    }
+    mocks.fetchScheduledAutomationLookup.mockResolvedValue({
+      status: 'found',
+      scheduleId: exactRequest.schedule_id,
+      request: exactRequest,
+    })
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    expect(mocks.fetchScheduledAutomationLookup).toHaveBeenCalledWith(
+      exactRequest.schedule_id,
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(container.querySelector(
+      '[data-schedule-detail-panel="sched-outside-page"]',
+    )?.textContent).toContain('Exact route payload')
+
+    container.querySelector<HTMLButtonElement>('.turn-close')?.click()
+    expect(mocks.replaceRoute).toHaveBeenCalledWith('schedule', { view: 'calendar' })
+  })
+
+  it('uses an in-page route row without issuing a redundant exact lookup', async () => {
+    setAutomation(sampleAutomation())
+    mocks.route.value = {
+      tab: 'schedule',
+      params: { schedule_id: 'sched-1' },
+      postId: null,
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    expect(mocks.fetchScheduledAutomationLookup).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-schedule-detail-panel="sched-1"]')).not.toBeNull()
   })
 })

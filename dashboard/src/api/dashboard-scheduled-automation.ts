@@ -10,7 +10,16 @@ import { ensureDevToken } from './dev-token'
 import type {
   DashboardScheduledAutomation,
   DashboardScheduledAutomationFsm,
+  DashboardScheduledAutomationRequest,
 } from './dashboard-tools-prompts'
+
+const SCHEDULE_LOOKUP_SCHEMA = 'masc.dashboard.scheduled_automation.lookup.v1'
+
+export type DashboardScheduledAutomationLookup =
+  | { status: 'found'; scheduleId: string; request: DashboardScheduledAutomationRequest }
+  | { status: 'not_found'; scheduleId: string }
+  | { status: 'unavailable'; scheduleId: string; reason: string }
+  | { status: 'invalid_id'; scheduleId: string; reason: string }
 
 export interface DashboardScheduledAutomationPage {
   /** Rows materialized in this response. */
@@ -66,6 +75,91 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null
+}
+
+function exactFields(
+  record: Record<string, unknown>,
+  required: readonly string[],
+  context: string,
+): void {
+  const expected = new Set(required)
+  const missing = required.filter(field => !(field in record))
+  const unknown = Object.keys(record).filter(field => !expected.has(field))
+  if (missing.length > 0 || unknown.length > 0) {
+    throw new Error(
+      `${context} fields mismatch (missing=[${missing.join(',')}], unknown=[${unknown.join(',')}])`,
+    )
+  }
+}
+
+function parseLookupRequest(
+  value: unknown,
+  expectedScheduleId: string,
+): DashboardScheduledAutomationRequest {
+  const request = asRecord(value)
+  if (!request || request.schedule_id !== expectedScheduleId) {
+    throw new Error('Invalid scheduled-automation lookup response: request identity mismatch')
+  }
+  switch (request.status) {
+    case 'scheduled':
+    case 'due':
+    case 'running':
+    case 'succeeded':
+    case 'failed':
+    case 'cancelled':
+    case 'expired':
+      break
+    default:
+      throw new Error('Invalid scheduled-automation lookup response: invalid request status')
+  }
+  if (typeof request.source !== 'string' || request.source.trim() === '') {
+    throw new Error('Invalid scheduled-automation lookup response: invalid request source')
+  }
+  return request as unknown as DashboardScheduledAutomationRequest
+}
+
+export function decodeScheduledAutomationLookup(
+  raw: unknown,
+  expectedScheduleId: string,
+): DashboardScheduledAutomationLookup {
+  const record = asRecord(raw)
+  if (!record) throw new Error('Invalid scheduled-automation lookup response: envelope must be an object')
+  if (record.schema !== SCHEDULE_LOOKUP_SCHEMA || record.source !== 'schedule_store') {
+    throw new Error('Invalid scheduled-automation lookup response: unsupported schema or source')
+  }
+  if (
+    typeof record.generated_at !== 'string'
+    || record.generated_at.trim() === ''
+    || typeof record.schedule_id !== 'string'
+  ) {
+    throw new Error('Invalid scheduled-automation lookup response: invalid generated_at or schedule_id')
+  }
+  const scheduleId = record.schedule_id
+  if (scheduleId !== expectedScheduleId) {
+    throw new Error('Invalid scheduled-automation lookup response: envelope identity mismatch')
+  }
+  switch (record.status) {
+    case 'found':
+      exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id', 'request'], 'envelope')
+      return { status: 'found', scheduleId, request: parseLookupRequest(record.request, scheduleId) }
+    case 'not_found':
+      exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id'], 'envelope')
+      return { status: 'not_found', scheduleId }
+    case 'unavailable':
+      exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id', 'reason'], 'envelope')
+      if (typeof record.reason !== 'string' || record.reason.trim() === '') {
+        throw new Error('Invalid scheduled-automation lookup response: invalid reason')
+      }
+      return { status: 'unavailable', scheduleId, reason: record.reason }
+    case 'invalid_id':
+      exactFields(record, ['schema', 'source', 'generated_at', 'status', 'schedule_id', 'reason'], 'envelope')
+      if (typeof record.reason !== 'string' || record.reason.trim() === '') {
+        throw new Error('Invalid scheduled-automation lookup response: invalid reason')
+      }
+      return { status: 'invalid_id', scheduleId, reason: record.reason }
+    default:
+      throw new Error(`Invalid scheduled-automation lookup response: unknown status ${JSON.stringify(record.status)}`)
+  }
 }
 
 /** A count the server reported, or null when it reported none.
@@ -210,4 +304,16 @@ export async function fetchDashboardScheduledAutomation(
     signal: opts?.signal,
   })
   return normalizeScheduledAutomation(raw)
+}
+
+export async function fetchDashboardScheduledAutomationLookup(
+  scheduleId: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardScheduledAutomationLookup> {
+  await ensureDevToken()
+  const query = new URLSearchParams({ schedule_id: scheduleId })
+  const raw = await get<unknown>(`/api/v1/dashboard/scheduled-automation?${query}`, {
+    signal: opts?.signal,
+  })
+  return decodeScheduledAutomationLookup(raw, scheduleId)
 }

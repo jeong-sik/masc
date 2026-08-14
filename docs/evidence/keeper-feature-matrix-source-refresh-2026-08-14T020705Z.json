@@ -1,0 +1,37 @@
+{
+  "schema": "masc.keeper_feature_matrix.source_refresh.v1",
+  "captured_at": "2026-08-14T02:07:05Z",
+  "source_truth": {
+    "upstream_main": "686007ea1d02002b201c881aea4b409a385c3b8b",
+    "recent_merges": {
+      "28605": "e98e7fcfc5",
+      "28611": "8ff9cb1329",
+      "28626": "2c2b18ceb5",
+      "28658": "13dd32a37a",
+      "28694": "686007ea1d"
+    },
+    "repair_pr": {
+      "number": 28701,
+      "head": "a3a3ef8c480b475fd0dd7a1c4c22bc33d188ae7d",
+      "state": "open_draft_mergeable_ci_running_adversarial_review",
+      "repair": "replace cancellation shield with cancellable exception-safe observer serialization"
+    },
+    "matrix_pr": {
+      "number": 28698,
+      "state_before_refresh": "open_draft_mergeable_build_running"
+    }
+  },
+  "live_probe": {
+    "url": "http://127.0.0.1:8935/health?full=1",
+    "result": "connection_refused",
+    "server_process_observed": false,
+    "concurrent_ocaml_build_process_observed": true,
+    "interpretation": "temporarily unavailable during build; not classified as deployment or runtime regression"
+  },
+  "last_successful_live_evidence": "keeper-runtime-health-live-2026-08-14T013507Z.json",
+  "limits": [
+    "No server restart or process mutation was performed.",
+    "The latest source state is not deployed or live-verified by this evidence.",
+    "GitHub CI and PR state may move after capture."
+  ]
+}

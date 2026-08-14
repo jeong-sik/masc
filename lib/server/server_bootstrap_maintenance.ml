@@ -338,6 +338,17 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~sw
     ~on_error:(log_server_fiber_crash "ide_ingest_writer")
     (fun () -> Ide_ingest_queue.run_writer ());
+  (* RFC-0379 monitor runner: observes registered keeper monitors and
+     enqueues Monitor_fired wakes on condition transitions. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "monitor_runner")
+    (fun () ->
+       Keeper_monitor_runner.run
+         ~net:env#net
+         ~clock
+         ~base_path:(Mcp_server.workspace_config state).base_path
+         ());
   Shutdown.register ~name:"ide_ingest_drain" ~priority:26 Ide_ingest_queue.drain_pending;
   (* Host FD observation poller. It records sysmon WARN/CRIT signals through
      [Keeper_fd_pressure.engage_external] for health telemetry and never changes

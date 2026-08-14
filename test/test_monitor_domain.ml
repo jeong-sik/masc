@@ -6,7 +6,6 @@ module M = Monitor_domain
 
 let port_up = M.Port_up { host = "127.0.0.1"; port = 8935 }
 let port_down = M.Port_down { host = "127.0.0.1"; port = 8935 }
-let http_ok = M.Http_ok { url = "http://127.0.0.1:8935/health" }
 let file_changed = M.File_changed { path = "/tmp/watched" }
 let snapshot_a = M.File_snapshot { mtime = 100.0; inode = 7 }
 let snapshot_b = M.File_snapshot { mtime = 200.0; inode = 7 }
@@ -24,7 +23,6 @@ let check_fire name expected trigger ~prev ~current =
 let test_baseline_never_fires () =
   check_fire "port_up baseline" false port_up ~prev:None ~current:M.Reachable;
   check_fire "port_down baseline" false port_down ~prev:None ~current:M.Unreachable;
-  check_fire "http_ok baseline" false http_ok ~prev:None ~current:M.Reachable;
   check_fire "file baseline" false file_changed ~prev:None ~current:snapshot_a
 ;;
 
@@ -39,10 +37,8 @@ let test_reachability_edges () =
     ~prev:(Some M.Reachable) ~current:M.Unreachable;
   check_fire "port_down holds on down->up" false port_down
     ~prev:(Some M.Unreachable) ~current:M.Reachable;
-  check_fire "http_ok fires on down->up" true http_ok
-    ~prev:(Some M.Unreachable) ~current:M.Reachable;
-  check_fire "http_ok holds on steady up" false http_ok
-    ~prev:(Some M.Reachable) ~current:M.Reachable
+  check_fire "port_down holds on steady down" false port_down
+    ~prev:(Some M.Unreachable) ~current:M.Unreachable
 ;;
 
 let test_file_edges () =
@@ -138,7 +134,7 @@ let test_trigger_codec_roundtrip () =
     (fun trigger ->
        let decoded = M.trigger_to_yojson trigger |> M.trigger_of_yojson |> expect_ok in
        check bool "trigger roundtrips" true (decoded = trigger))
-    [ port_up; port_down; http_ok; file_changed ];
+    [ port_up; port_down; file_changed ];
   (match M.trigger_of_yojson (`Assoc [ "kind", `String "log_pattern" ]) with
    | Error _ -> ()
    | Ok _ -> fail "unknown trigger kind must be rejected")

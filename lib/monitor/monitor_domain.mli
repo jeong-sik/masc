@@ -16,7 +16,6 @@ type trigger =
       ; port : int
       }
   | File_changed of { path : string }
-  | Http_ok of { url : string }
 
 (** One observation of a trigger's target. Ports and HTTP collapse to
     reachability; files carry the identity pair that detects rewrites even
@@ -56,8 +55,7 @@ type fire_decision =
 val decide : trigger -> prev:observation option -> current:observation -> fire_decision
 (** Exhaustive transition matrix. [prev = None] is always [Hold] (baseline).
     [Port_up] fires only on [Unreachable] -> [Reachable]; [Port_down] on
-    [Reachable] -> [Unreachable]; [Http_ok] on [Unreachable] -> [Reachable];
-    [File_changed] on any change of the snapshot pair, including
+    [Reachable] -> [Unreachable]; [File_changed] on any change of the snapshot pair, including
     absent -> present and present -> absent. Observations that cannot belong
     to the trigger (a file snapshot for a port trigger) are [Hold]: the
     runner produced an incoherent pair and must not wake anyone on it. *)

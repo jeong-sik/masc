@@ -10,7 +10,6 @@ type trigger =
       ; port : int
       }
   | File_changed of { path : string }
-  | Http_ok of { url : string }
 
 type observation =
   | Reachable
@@ -59,11 +58,11 @@ let decide trigger ~prev ~current =
   | Some prev ->
     (match trigger, prev, current with
      (* Reachability triggers: fire on the named direction only. *)
-     | (Port_up _ | Http_ok _), Unreachable, Reachable ->
+     | Port_up _, Unreachable, Reachable ->
        Fire { from_ = Unreachable; to_ = Reachable }
-     | (Port_up _ | Http_ok _), Reachable, Reachable
-     | (Port_up _ | Http_ok _), Unreachable, Unreachable
-     | (Port_up _ | Http_ok _), Reachable, Unreachable -> Hold
+     | Port_up _, Reachable, Reachable
+     | Port_up _, Unreachable, Unreachable
+     | Port_up _, Reachable, Unreachable -> Hold
      | Port_down _, Reachable, Unreachable ->
        Fire { from_ = Reachable; to_ = Unreachable }
      | Port_down _, Reachable, Reachable
@@ -78,8 +77,8 @@ let decide trigger ~prev ~current =
        else Fire { from_ = prev; to_ = current }
      (* Incoherent pairs: the observation cannot belong to this trigger.
         The runner produced a defective observation; never wake on it. *)
-     | (Port_up _ | Port_down _ | Http_ok _), (File_snapshot _ | File_absent), _
-     | (Port_up _ | Port_down _ | Http_ok _), _, (File_snapshot _ | File_absent)
+     | (Port_up _ | Port_down _), (File_snapshot _ | File_absent), _
+     | (Port_up _ | Port_down _), _, (File_snapshot _ | File_absent)
      | File_changed _, (Reachable | Unreachable), _
      | File_changed _, _, (Reachable | Unreachable) -> Hold)
 ;;
@@ -102,7 +101,6 @@ let validate_trigger = function
     then Ok ()
     else Error (Printf.sprintf "monitor port %d is outside 1-65535" port)
   | File_changed { path } -> trim_to_error ~field:"path" path
-  | Http_ok { url } -> trim_to_error ~field:"url" url
 ;;
 
 let validate_create ~keeper ~trigger ~expires_at ~max_fires ~now =
@@ -177,7 +175,6 @@ let trigger_to_yojson = function
     `Assoc [ "kind", `String "port_down"; "host", `String host; "port", `Int port ]
   | File_changed { path } ->
     `Assoc [ "kind", `String "file_changed"; "path", `String path ]
-  | Http_ok { url } -> `Assoc [ "kind", `String "http_ok"; "url", `String url ]
 ;;
 
 let trigger_of_yojson = function
@@ -205,12 +202,6 @@ let trigger_of_yojson = function
        in
        let* path = string_field "path" fields in
        Ok (File_changed { path })
-     | "http_ok" ->
-       let* () =
-         validate_fields ~context:"http_ok trigger" ~expected:[ "kind"; "url" ] fields
-       in
-       let* url = string_field "url" fields in
-       Ok (Http_ok { url })
      | _ -> Error (Printf.sprintf "unsupported monitor trigger kind %S" kind))
   | _ -> Error "monitor trigger must be an object"
 ;;

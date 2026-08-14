@@ -25,7 +25,6 @@ type trigger =
   | Port_up of { host : string; port : int }
   | Port_down of { host : string; port : int }
   | File_changed of { path : string }          (* mtime 또는 inode 변화 *)
-  | Http_ok of { url : string }                (* 2xx 로의 전이 *)
 ```
 
 - **Edge-triggered**: 발화는 관측된 상태 전이에서만 일어난다. 최초 관측은 baseline 설정이며
@@ -73,6 +72,7 @@ catalog/schema/dispatch 결. create 입력: trigger, payload(opaque), expires_at
 | capability token / allowlist / audit | single-user; 게이트는 목표 달성 후 (운영 원칙) |
 | `arm`/`disarm`, `history`, versioned API | v1 수명이 one-shot 중심이라 상태 기계가 없다 |
 | `log_pattern` trigger | tail+regex 는 string 분류기 축 재개방. 로그가 아니라 상태를 관측한다 |
+| `Http_ok` trigger | v1.1 유예: 저장소에 Eio HTTP 클라이언트 실사용 선례가 없고, TCP 도달성으로 2xx 를 흉내내면 트리거 이름이 거짓말이 된다 |
 | process(pidfd) trigger | v1 대상 사례(서버 재기동)는 Port_up/Port_down 으로 충분 |
 | cooldown | max_fires=1 이 대체한다. 반복 monitor 는 v2 에서 전이 시맨틱과 함께 |
 

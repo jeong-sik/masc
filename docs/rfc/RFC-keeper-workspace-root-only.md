@@ -264,7 +264,7 @@ $ git -C .../code-reviewer/repos/masc/review-pr-28304 remote get-url origin
 
 로컬 경로 origin 이라 `canonical_url_of_remote` 가 `None` 을 반환한다. 오늘 이 경로는 역파싱 → 카탈로그 조회로 정상 귀속된다. 순진하게 전환하면 정상 → 고아로 후퇴한다. **origin 이 canonicalize 안 되면 그 로컬 경로를 등록 repo 의 `local_path` prefix 와 매칭하는 폴백이 필요하다.**
 
-그리고 동일 origin N-클론(`sangsu/repos/{masc, masc-wtask-188, -195, -204, -205}`)이 한 버킷으로 붕괴한다. RFC-0128 §4.5 의 조인 의도로는 옳지만 동시 작업 격리가 관측층에서 사라지므로, checkout 판별자를 region 레코드에 넣을지 이 단계에서 결정한다.
+그리고 동일 origin N-클론(`sangsu/repos/{masc, masc-wtask-188, -195, -204, -205}`)이 한 버킷으로 붕괴한다. RFC-0128 §4.5 의 조인 의도로는 옳지만 동시 작업 격리가 관측층에서 사라지므로, checkout 판별자를 record 에 넣을지의 결정은 **RFC-0378 §5.1 이 소유한다** — 판별자는 넣되 join key 가 아니라 projection 메타데이터이며, region 레코드 한정이 아니라 Code fact 전체에 같은 자리로 들어간다. 2b 는 그 계약을 소비만 한다.
 
 ## 6. RFC-0364 를 대체하는 근거
 

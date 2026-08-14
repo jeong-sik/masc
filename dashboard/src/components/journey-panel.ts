@@ -281,6 +281,15 @@ function WaterfallEntryRow({
         ${entry.round != null
           ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">round ${entry.round}</span>`
           : null}
+        ${isTool && entry.plannedIndex != null
+          ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">plan ${entry.plannedIndex}</span>`
+          : null}
+        ${isTool && entry.batchIndex != null && entry.batchSize != null
+          ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">batch ${entry.batchIndex} · size ${entry.batchSize}</span>`
+          : null}
+        ${isTool && entry.executionMode
+          ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">mode ${entry.executionMode}</span>`
+          : null}
       </div>
 
       ${isTool

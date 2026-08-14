@@ -6,23 +6,24 @@
     @since 2.249.0 *)
 
 val set_truncation_info :
-  keeper_name:string ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
   original_bytes:int ->
   ?truncated_to:int ->
   unit ->
   unit
-(** [set_truncation_info ~keeper_name ~original_bytes ?truncated_to ()]
-    records pre-truncation output size for the given keeper. Called by
+(** [set_truncation_info ~invocation ~original_bytes ?truncated_to ()]
+    records pre-truncation output size for the exact invocation. Called by
     the tool handler wrapper before returning the (possibly truncated)
-    result to AGENT_CORE. Per-keeper isolation prevents cross-keeper corruption
-    under concurrent tool execution. *)
+    result to AGENT_CORE. Physical invocation identity preserves isolation even
+    when a provider emits blank or repeated tool-use ids. Weak ownership lets a
+    cancelled invocation release its pending observation. *)
 
 val consume_truncation_info :
-  keeper_name:string ->
+  invocation:Agent_core.Tool_contract.Invocation.t ->
   unit ->
   int * int option
-(** [consume_truncation_info ~keeper_name ()] returns
-    [(original_bytes, truncated_to)] for the given keeper and clears
+(** [consume_truncation_info ~invocation ()] returns
+    [(original_bytes, truncated_to)] for the exact invocation and clears
     the pending state. Returns [(0, None)] when no truncation info
     was set (e.g. AGENT_CORE-internal tool call that bypassed the wrapper). *)
 
@@ -146,6 +147,9 @@ val log_call :
   ?execution_id:Ids.Execution_id.t ->
   ?tool_use_id:string ->
   ?planned_index:int ->
+  ?batch_index:int ->
+  ?batch_size:int ->
+  ?execution_mode:Agent_core.Tool_contract.execution_mode ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -170,7 +174,9 @@ val log_call :
     same execution (when the dispatch lane has one) — the key that the
     agent_core:tool_called/agent_core:tool_completed event rows also carry. Blank and
     repeated provider ids remain meaningful when scoped by [turn] and
-    [planned_index], so they are persisted unchanged.
+    [planned_index], so they are persisted unchanged. [batch_index],
+    [batch_size], and [execution_mode] preserve Agent Core's actual schedule
+    rather than inferring concurrency from timing.
     [on_committed], when supplied, forces this row through the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the
@@ -235,6 +241,9 @@ val read_latest :
 
 val reset_for_testing : unit -> unit
 (** Resets the in-memory store reference. For unit tests only. *)
+
+val pending_truncation_count_for_testing : unit -> int
+(** Number of live invocation-scoped truncation observations. Test only. *)
 
 val queued_count_for_testing : unit -> int
 (** Number of queued asynchronous append records. For unit tests only. *)

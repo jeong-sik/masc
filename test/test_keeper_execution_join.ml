@@ -1,4 +1,4 @@
-(** Tests for RFC-0233 PR-2: the in-flight [tool_use_id ↔ execution_id]
+(** Tests for RFC-0233 PR-2: the in-flight [invocation ↔ execution_id]
     join table ([Keeper_execution_join]) and the event bridge stamping
     that consumes it ([Keeper_event_bridge.native_event_to_json]). *)
 
@@ -23,34 +23,77 @@ let int_of_field = function
   | Some (`Int value) -> Some value
   | _ -> None
 
+let invocation
+      ?(turn = 0)
+      ?(planned_index = 0)
+      ?(batch_index = 0)
+      ?(batch_size = 1)
+      ?(execution_mode = Agent_core.Tool_contract.Serial)
+      tool_use_id
+  =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+    ~schedule:
+      { planned_index
+      ; batch_index
+      ; batch_size
+      ; execution_mode
+      }
+
 (* ── Join table semantics ─────────────────────────────── *)
 
 let test_record_take_roundtrip () =
   Join.For_testing.clear ();
-  Join.record ~tool_use_id:"tu-1" ~execution_id:"exec-1-0001";
+  let invocation = invocation "tu-1" in
+  Join.record ~invocation ~execution_id:"exec-1-0001";
   check (option string) "take returns the pair" (Some "exec-1-0001")
-    (Join.take ~tool_use_id:"tu-1");
+    (Join.take ~invocation);
   check (option string) "take removes the entry" None
-    (Join.take ~tool_use_id:"tu-1");
+    (Join.take ~invocation);
   check int "table empty after take" 0 (Join.For_testing.size ())
 
-let test_empty_tool_use_id_ignored () =
+let test_blank_tool_use_id_joins_by_invocation () =
   Join.For_testing.clear ();
-  Join.record ~tool_use_id:"" ~execution_id:"exec-1-0002";
-  check int "empty id records nothing" 0 (Join.For_testing.size ());
-  check (option string) "empty id lookup is None" None (Join.take ~tool_use_id:"")
+  let invocation = invocation "" in
+  Join.record ~invocation ~execution_id:"exec-1-0002";
+  check (option string)
+    "blank provider id still joins"
+    (Some "exec-1-0002")
+    (Join.take ~invocation)
 
 let test_missing_entry_is_none () =
   Join.For_testing.clear ();
+  let invocation = invocation "tu-unknown" in
   check (option string) "unknown id is None" None
-    (Join.take ~tool_use_id:"tu-unknown")
+    (Join.take ~invocation)
 
-let test_rerecord_overwrites () =
+let test_distinct_occurrences_with_repeated_id_do_not_overwrite () =
   Join.For_testing.clear ();
-  Join.record ~tool_use_id:"tu-2" ~execution_id:"exec-1-000a";
-  Join.record ~tool_use_id:"tu-2" ~execution_id:"exec-1-000b";
-  check (option string) "last record wins" (Some "exec-1-000b")
-    (Join.take ~tool_use_id:"tu-2")
+  let first = invocation ~turn:1 ~planned_index:0 "tu-2" in
+  let second = invocation ~turn:1 ~planned_index:1 "tu-2" in
+  Join.record ~invocation:first ~execution_id:"exec-1-000a";
+  Join.record ~invocation:second ~execution_id:"exec-1-000b";
+  check (option string)
+    "second occurrence"
+    (Some "exec-1-000b")
+    (Join.take ~invocation:second);
+  check (option string)
+    "first occurrence remains"
+    (Some "exec-1-000a")
+    (Join.take ~invocation:first)
+
+let test_abandoned_join_is_released_with_invocation () =
+  Join.For_testing.clear ();
+  let record_abandoned () =
+    let abandoned = invocation ~turn:4 ~planned_index:2 "cancelled" in
+    Join.record ~invocation:abandoned ~execution_id:"exec-abandoned"
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  check int "cancelled publication leaves no join entry" 0 (Join.For_testing.size ())
 
 (* ── Bridge stamping ──────────────────────────────────── *)
 
@@ -67,25 +110,18 @@ let mk_event ?(event_id = "event-1") ?caused_by payload : Agent_core.Event_bus.e
   ; payload
   }
 
-let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
-  Agent_core.Tool_contract.Invocation.create
-    ~tool_use_id
-    ~turn
-    ~completion:Agent_core.Tool_contract.Continue_after_success
-    ~schedule:
-      { planned_index
-      ; batch_index = 0
-      ; batch_size = 1
-      ; execution_mode = Agent_core.Tool_contract.Serial
-      }
-
 let test_tool_called_carries_tool_use_id () =
   Join.For_testing.clear ();
   let json =
     Bridge.native_event_to_json
       (mk_event
          (Agent_core.Event_bus.ToolCalled
-            { invocation = invocation "tu-3"
+            { invocation =
+                invocation
+                  ~batch_index:2
+                  ~batch_size:3
+                  ~execution_mode:Agent_core.Tool_contract.Concurrent
+                  "tu-3"
             ; agent_name = "agent_core-r1"
             ; tool_name = "Read"
             ; input = `Null
@@ -98,6 +134,12 @@ let test_tool_called_carries_tool_use_id () =
     (int_of_field (payload_member "turn" json));
   check (option int) "payload planned_index" (Some 0)
     (int_of_field (payload_member "planned_index" json));
+  check (option int) "payload batch_index" (Some 2)
+    (int_of_field (payload_member "batch_index" json));
+  check (option int) "payload batch_size" (Some 3)
+    (int_of_field (payload_member "batch_size" json));
+  check (option string) "payload execution_mode" (Some "concurrent")
+    (string_of_field (payload_member "execution_mode" json));
   check bool "tool_called has no execution_id (mint happens after publish)"
     true
     (payload_member "execution_id" json = None)
@@ -105,12 +147,13 @@ let test_tool_called_carries_tool_use_id () =
 let test_tool_completed_stamps_execution_id () =
   Join.For_testing.clear ();
   (* The hook records the pair before AGENT_CORE publishes ToolCompleted. *)
-  Join.record ~tool_use_id:"tu-4" ~execution_id:"exec-2-0001";
+  let invocation = invocation ~turn:1 ~planned_index:3 "tu-4" in
+  Join.record ~invocation ~execution_id:"exec-2-0001";
   let json =
     Bridge.native_event_to_json
       (mk_event ~caused_by:"run-called-1"
          (Agent_core.Event_bus.ToolCompleted
-            { invocation = invocation ~turn:1 ~planned_index:3 "tu-4"
+            { invocation
             ; agent_name = "keeper-x-agent"
             ; tool_name = "Read"
             ; output = Ok { content = "ok"; _meta = None }
@@ -616,9 +659,13 @@ let () =
   run "keeper_execution_join"
     [ ( "join_table"
       , [ test_case "record/take roundtrip" `Quick test_record_take_roundtrip
-        ; test_case "empty tool_use_id ignored" `Quick test_empty_tool_use_id_ignored
+        ; test_case "blank tool_use_id joins by invocation" `Quick
+            test_blank_tool_use_id_joins_by_invocation
         ; test_case "missing entry is None" `Quick test_missing_entry_is_none
-        ; test_case "re-record overwrites" `Quick test_rerecord_overwrites
+        ; test_case "repeated ids keep distinct occurrences" `Quick
+            test_distinct_occurrences_with_repeated_id_do_not_overwrite
+        ; test_case "cancelled invocation releases abandoned join" `Quick
+            test_abandoned_join_is_released_with_invocation
         ] )
     ; ( "bridge_stamping"
       , [ test_case "tool_called carries tool_use_id" `Quick

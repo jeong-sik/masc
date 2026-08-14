@@ -186,8 +186,13 @@ let wrap_event
     compile-time update requirement at this boundary. *)
 let invocation_payload_fields invocation =
   let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
+  let schedule = Agent_core.Tool_contract.Invocation.schedule invocation in
   [ "turn", `Int (Agent_core.Tool_contract.Invocation.turn invocation)
-  ; "planned_index", `Int (Agent_core.Tool_contract.Invocation.planned_index invocation)
+  ; "planned_index", `Int schedule.planned_index
+  ; "batch_index", `Int schedule.batch_index
+  ; "batch_size", `Int schedule.batch_size
+  ; ( "execution_mode"
+    , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
   ]
   @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
 ;;
@@ -313,16 +318,11 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
   | Agent_core.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
-    (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
-       tool_use_id ↔ execution_id pair before AGENT_CORE published this event,
-       so the lookup is deterministic. A miss means the execution did not
-       go through a keeper hook (worker/eval lanes), not a failure. *)
-    let tool_use_id = Agent_core.Tool_contract.Invocation.tool_use_id invocation in
+    (* RFC-0233 PR-2: the keeper post_tool_use hook registered this exact
+       immutable invocation before AGENT_CORE published the event. Physical
+       invocation identity keeps blank/repeated provider ids distinct. *)
     let execution_id_fields =
-      match
-        if tool_use_id = "" then None
-        else Keeper_execution_join.take ~tool_use_id
-      with
+      match Keeper_execution_join.take ~invocation with
       | Some execution_id -> [ "execution_id", `String execution_id ]
       | None -> []
     in

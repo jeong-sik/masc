@@ -38,6 +38,15 @@ let execute_with_observers
   =
   let t0 = Time_compat.now () in
   let invocation_fields = agent_core_invocation_fields agent_core_invocation in
+  let set_truncation_info ~original_bytes =
+    Option.iter
+      (fun invocation ->
+         Keeper_tool_call_log.set_truncation_info
+           ~invocation
+           ~original_bytes
+           ())
+      agent_core_invocation
+  in
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->
@@ -145,10 +154,7 @@ let execute_with_observers
             ; "error_preview", `String detail
             ]
              @ invocation_fields));
-      Keeper_tool_call_log.set_truncation_info
-        ~keeper_name:meta.name
-        ~original_bytes:(String.length projected_error)
-        ();
+      set_truncation_info ~original_bytes:(String.length projected_error);
       { tool_result = dispatch_result
       ; failure_effect_disposition = Some result.failure_effect_disposition
       ; deferred_kind = None
@@ -209,10 +215,7 @@ let execute_with_observers
              ; "disposition", `String disposition
              ]
              @ invocation_fields));
-      Keeper_tool_call_log.set_truncation_info
-        ~keeper_name:meta.name
-        ~original_bytes:original_len
-        ();
+      set_truncation_info ~original_bytes:original_len;
       { tool_result = observed_result
       ; failure_effect_disposition = None
       ; deferred_kind = None
@@ -269,10 +272,7 @@ let execute_with_observers
             ; "disposition", `String disposition
             ]
              @ invocation_fields));
-      Keeper_tool_call_log.set_truncation_info
-        ~keeper_name:meta.name
-        ~original_bytes:(String.length projected_result)
-        ();
+      set_truncation_info ~original_bytes:(String.length projected_result);
       { tool_result = observed_result
       ; failure_effect_disposition = None
       ; deferred_kind = result.deferred_kind
@@ -338,10 +338,7 @@ let execute_with_observers
           ; "error", `String error_text
           ]
            @ invocation_fields));
-    Keeper_tool_call_log.set_truncation_info
-      ~keeper_name:meta.name
-      ~original_bytes:(String.length projected_error)
-      ();
+    set_truncation_info ~original_bytes:(String.length projected_error);
     { tool_result = exception_result
     ; failure_effect_disposition = Some Tool_result.Effect_outcome_unknown
     ; deferred_kind = None

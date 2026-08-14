@@ -14,24 +14,46 @@
 
 let max_output_len = 4000
 
-(** Pre-truncation info, keyed by keeper name.
-    Set by the tool handler wrapper (keeper_tools_agent_core), consumed by the
-    AGENT_CORE on_tool_result hook (keeper_hooks_agent_core).  Per-keeper isolation
-    prevents cross-keeper corruption when multiple keepers call tools
-    concurrently. Within a single keeper's Agent.run, tool calls are
-    sequential so set→consume ordering is guaranteed. *)
-let pending_truncation : (string, int * int option) Hashtbl.t = Hashtbl.create 8
+module Invocation_key = struct
+  type t = Agent_core.Tool_contract.Invocation.t
 
-let set_truncation_info ~keeper_name ~original_bytes ?truncated_to () =
-  Hashtbl.replace pending_truncation keeper_name (original_bytes, truncated_to)
+  let equal left right = left == right
+  let hash = Hashtbl.hash
+end
+
+module Invocation_table = Ephemeron.K1.Make (Invocation_key)
+
+(** Pre-truncation info, keyed by the exact Agent Core occurrence. Set by the
+    tool handler wrapper and consumed by the on-tool-result hook. The weak key
+    prevents cancellation before that hook from retaining the invocation. *)
+let pending_truncation : (int * int option) Invocation_table.t =
+  Invocation_table.create 8
 ;;
 
-let consume_truncation_info ~keeper_name () =
-  match Hashtbl.find_opt pending_truncation keeper_name with
-  | Some info ->
-    Hashtbl.remove pending_truncation keeper_name;
-    info
-  | None -> 0, None
+let pending_truncation_mu = Stdlib.Mutex.create ()
+
+let with_pending_truncation_lock f =
+  Stdlib.Mutex.lock pending_truncation_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock pending_truncation_mu)
+    f
+;;
+
+let set_truncation_info ~invocation ~original_bytes ?truncated_to () =
+  with_pending_truncation_lock (fun () ->
+    Invocation_table.replace
+      pending_truncation
+      invocation
+      (original_bytes, truncated_to))
+;;
+
+let consume_truncation_info ~invocation () =
+  with_pending_truncation_lock (fun () ->
+    match Invocation_table.find_opt pending_truncation invocation with
+    | Some info ->
+      Invocation_table.remove pending_truncation invocation;
+      info
+    | None -> 0, None)
 ;;
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
@@ -152,7 +174,13 @@ let reset_for_testing () =
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
-  Hashtbl.reset pending_truncation
+  with_pending_truncation_lock (fun () -> Invocation_table.reset pending_truncation)
+;;
+
+let pending_truncation_count_for_testing () =
+  with_pending_truncation_lock (fun () ->
+    Invocation_table.clean pending_truncation;
+    Invocation_table.length pending_truncation)
 ;;
 
 let store_dir () =
@@ -390,6 +418,9 @@ let log_call
       ?execution_id
       ?tool_use_id
       ?planned_index
+      ?batch_index
+      ?batch_size
+      ?execution_mode
       ?trace_id
       ?session_id
       ?generation
@@ -487,6 +518,23 @@ let log_call
       let planned_index_field =
         match planned_index with
         | Some value -> [ "planned_index", `Int value ]
+        | None -> []
+      in
+      let batch_index_field =
+        match batch_index with
+        | Some value -> [ "batch_index", `Int value ]
+        | None -> []
+      in
+      let batch_size_field =
+        match batch_size with
+        | Some value -> [ "batch_size", `Int value ]
+        | None -> []
+      in
+      let execution_mode_field =
+        match execution_mode with
+        | Some value ->
+          [ ( "execution_mode"
+            , Agent_core.Tool_contract.execution_mode_to_yojson value ) ]
         | None -> []
       in
       let session_id_field =
@@ -593,6 +641,9 @@ let log_call
            @ execution_id_field
            @ tool_use_id_field
            @ planned_index_field
+           @ batch_index_field
+           @ batch_size_field
+           @ execution_mode_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

@@ -21,6 +21,87 @@ let artifact_ref_exn ~sha256 ~bytes ~preview ~mime =
 
 let counter = ref 0
 
+let invocation ~tool_use_id ~turn ~planned_index =
+  Agent_core.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~completion:Agent_core.Tool_contract.Continue_after_success
+    ~schedule:
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 2
+      ; execution_mode = Agent_core.Tool_contract.Concurrent
+      }
+;;
+
+let test_pending_observations_are_occurrence_scoped () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let first = invocation ~tool_use_id:"" ~turn:7 ~planned_index:0 in
+  let sibling_with_same_blank_id =
+    invocation ~tool_use_id:"" ~turn:7 ~planned_index:1
+  in
+  let later_with_repeated_id =
+    invocation ~tool_use_id:"repeated" ~turn:8 ~planned_index:0
+  in
+  let earlier_with_repeated_id =
+    invocation ~tool_use_id:"repeated" ~turn:7 ~planned_index:2
+  in
+  List.iter
+    (fun (invocation, original_bytes) ->
+       Keeper_tool_call_log.set_truncation_info
+         ~invocation
+         ~original_bytes
+         ())
+    [ first, 11
+    ; sibling_with_same_blank_id, 22
+    ; earlier_with_repeated_id, 33
+    ; later_with_repeated_id, 44
+    ];
+  let consume invocation =
+    Keeper_tool_call_log.consume_truncation_info
+      ~invocation
+      ()
+  in
+  Alcotest.(check (pair int (option int)))
+    "blank-id sibling keeps its own observation"
+    (22, None)
+    (consume sibling_with_same_blank_id);
+  Alcotest.(check (pair int (option int)))
+    "first blank-id occurrence remains available"
+    (11, None)
+    (consume first);
+  Alcotest.(check (pair int (option int)))
+    "later repeated-id occurrence keeps its own observation"
+    (44, None)
+    (consume later_with_repeated_id);
+  Alcotest.(check (pair int (option int)))
+    "earlier repeated-id occurrence remains available"
+    (33, None)
+    (consume earlier_with_repeated_id);
+  Alcotest.(check (pair int (option int)))
+    "consumed occurrence is absent"
+    (0, None)
+    (consume first)
+;;
+
+let test_abandoned_observation_is_released_with_invocation () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let record_abandoned () =
+    let abandoned = invocation ~tool_use_id:"cancelled" ~turn:9 ~planned_index:0 in
+    Keeper_tool_call_log.set_truncation_info
+      ~invocation:abandoned
+      ~original_bytes:99
+      ()
+  in
+  record_abandoned ();
+  Gc.full_major ();
+  Gc.full_major ();
+  Alcotest.(check int)
+    "settlement-skip observation is weakly released"
+    0
+    (Keeper_tool_call_log.pending_truncation_count_for_testing ())
+;;
+
 let with_tmp_log f =
   incr counter;
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -187,6 +268,9 @@ let test_exact_agent_core_occurrence_persisted () =
       ~tool_use_id:""
       ~turn:9
       ~planned_index:4
+      ~batch_index:2
+      ~batch_size:3
+      ~execution_mode:Agent_core.Tool_contract.Concurrent
       ();
     match Keeper_tool_call_log.read_recent ~n:1 () with
     | [ entry ] ->
@@ -201,7 +285,19 @@ let test_exact_agent_core_occurrence_persisted () =
       Alcotest.(check int)
         "planned index persisted"
         4
-        (Safe_ops.json_int ~default:(-1) "planned_index" entry)
+        (Safe_ops.json_int ~default:(-1) "planned_index" entry);
+      Alcotest.(check int)
+        "batch index persisted"
+        2
+        (Safe_ops.json_int ~default:(-1) "batch_index" entry);
+      Alcotest.(check int)
+        "batch size persisted"
+        3
+        (Safe_ops.json_int ~default:(-1) "batch_size" entry);
+      Alcotest.(check (option string))
+        "execution mode persisted"
+        (Some "concurrent")
+        (Safe_ops.json_string_opt "execution_mode" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
 
 (* ── Redaction: tool names do not suppress evidence ────────────── *)
@@ -1330,7 +1426,17 @@ let test_commit_callback_fails_closed_without_store () =
 
 let () =
   Alcotest.run "keeper_tool_call_log"
-    [ ( "read_recent",
+    [ ( "invocation observation",
+        [ Alcotest.test_case
+            "blank and repeated ids remain occurrence-scoped"
+            `Quick
+            test_pending_observations_are_occurrence_scoped
+        ; Alcotest.test_case
+            "cancelled invocation releases abandoned observation"
+            `Quick
+            test_abandoned_observation_is_released_with_invocation
+        ] )
+    ; ( "read_recent",
         [ eio_test "n=0 returns []" test_read_recent_n_zero
         ; eio_test "n<0 returns []" test_read_recent_n_negative
         ; eio_test "keeper filter" test_read_recent_keeper_filter

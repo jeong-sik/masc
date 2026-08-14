@@ -426,6 +426,10 @@ function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Reco
   if (entry.lane) detail.lane = entry.lane
   if (entry.model) detail.model = entry.model
   if (entry.execution_id) detail.execution_id = entry.execution_id
+  if (entry.planned_index != null) detail.planned_index = entry.planned_index
+  if (entry.batch_index != null) detail.batch_index = entry.batch_index
+  if (entry.batch_size != null) detail.batch_size = entry.batch_size
+  if (entry.execution_mode) detail.execution_mode = entry.execution_mode
   return detail
 }
 

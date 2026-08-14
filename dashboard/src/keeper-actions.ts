@@ -1,4 +1,9 @@
 import { keeperStreamContract } from './keeper-stream-contract'
+import {
+  newKeeperChatOperationId,
+  operationDeliveryProvenance,
+  sameDeliveryProvenance,
+} from './keeper-delivery-provenance'
 import { callMcpTool } from './api/mcp'
 import { runOperatorAction } from './api/core'
 import {
@@ -46,7 +51,6 @@ import {
   chatHistoryEntriesFromRest,
   clearActiveStream,
   finalizeAssistantEntry,
-  releaseActiveStreamRequestId,
   mergeServerHistoryEntries,
   normalizeKeeperProbeResult,
   normalizeKeeperRecoverResult,
@@ -58,7 +62,6 @@ import {
   setActiveStream,
   setRecordValue,
   setStatusDetail,
-  updateThreadEntry,
 } from './keeper-state'
 import {
   abortKeeperThreadMessage,
@@ -167,7 +170,7 @@ export function cancelKeeperThreadRequest(
     .then(result => {
       if (result.state.kind === 'cancelled') {
         removeTrackedKeeperChatOperation(id)
-        releaseActiveStreamRequestId(id)
+        releaseLiveSendRequest(id)
       }
       setRecordValue(keeperActionErrors, name, null)
       return 'cancelled' as const
@@ -262,6 +265,10 @@ export async function hydrateKeeperStatus(name: string, force = false): Promise<
     } catch {
       parsed = null
     }
+    const { normalizeKeeperStatusPayloadDeliveryProvenance } = await import(
+      './api/schemas/keeper-chat-delivery-provenance'
+    )
+    parsed = normalizeKeeperStatusPayloadDeliveryProvenance(parsed)
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)
     return detail
@@ -372,62 +379,36 @@ const QUEUED_KEEPER_REQUEST_LOST_MESSAGE =
   '서버 재시작으로 대기 중이던 요청을 찾을 수 없습니다. 메시지를 다시 보내주세요.'
 const PENDING_KEEPER_CHAT_RESUME_FAILED_MESSAGE =
   '응답을 확인할 수 없어 메시지 복구를 중단했습니다. 다시 보내주세요.'
-const STREAM_FAILURE_HISTORY_SKEW_MS = 30_000
-
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-function entryTimeMs(entry: KeeperConversationEntry): number | null {
-  if (!entry.timestamp) return null
-  const ms = Date.parse(entry.timestamp)
-  return Number.isFinite(ms) ? ms : null
-}
-
-function hasServerAssistantAfterLocalMessage(
+function hasCanonicalOperationTurn(
   entries: readonly KeeperConversationEntry[],
-  message: string,
-  sentAtMs: number | null,
+  operationId: string,
 ): boolean {
-  const expectedText = message.trim()
-  if (!expectedText) return false
-  let matchedUser = false
-
-  for (const entry of entries) {
-    const tsMs = entryTimeMs(entry)
-    if (
-      sentAtMs !== null
-      && tsMs !== null
-      && tsMs < sentAtMs - STREAM_FAILURE_HISTORY_SKEW_MS
-    ) {
-      continue
-    }
-
-    if (entry.role === 'user' && entry.text.trim() === expectedText) {
-      matchedUser = true
-      continue
-    }
-
-    if (matchedUser && entry.role === 'assistant' && entry.text.trim() !== '') {
-      return true
-    }
-  }
-
-  return false
+  const expectedUser = operationDeliveryProvenance(operationId, 'accepted_user')
+  const expectedAssistant = operationDeliveryProvenance(operationId, 'terminal_assistant')
+  const hasUser = entries.some(entry => (
+    entry.deliveryProvenance != null
+    && sameDeliveryProvenance(entry.deliveryProvenance, expectedUser)
+  ))
+  const hasAssistant = entries.some(entry => (
+    entry.deliveryProvenance != null
+    && sameDeliveryProvenance(entry.deliveryProvenance, expectedAssistant)
+  ))
+  return hasUser && hasAssistant
 }
 
 async function reconcileStreamFailureFromServerHistory(
   keeperName: string,
-  message: string,
+  operationId: string,
   localUserId: string,
   localAssistantId: string,
 ): Promise<boolean> {
-  const localUser = (keeperThreads.value[keeperName] ?? [])
-    .find(entry => entry.id === localUserId) ?? null
-  const sentAtMs = localUser ? entryTimeMs(localUser) : null
   const history = await fetchKeeperChatHistory(keeperName)
   const historyEntries = chatHistoryEntriesFromRest(keeperName, history)
-  if (!hasServerAssistantAfterLocalMessage(historyEntries, message, sentAtMs)) {
+  if (!hasCanonicalOperationTurn(historyEntries, operationId)) {
     return false
   }
 
@@ -436,22 +417,12 @@ async function reconcileStreamFailureFromServerHistory(
   return true
 }
 
-function operationUserEntryId(requestId: string): string {
-  return `pending-user-${requestId}`
+function operationUserEntryId(operationId: string): string {
+  return `pending-user-${operationId}`
 }
 
-function operationAssistantEntryId(requestId: string): string {
-  return `pending-assistant-${requestId}`
-}
-
-// The live-send placeholders are appended before the operation acceptance
-// arrives. Stamp the exact operation id onto both rows for reconnect joins.
-function stampPlaceholderRequestId(keeperName: string, entryIds: string[], requestId: string): void {
-  for (const entryId of entryIds) {
-    updateThreadEntry(keeperName, entryId, entry => (
-      entry.requestId === requestId ? entry : { ...entry, requestId }
-    ))
-  }
+function operationAssistantEntryId(operationId: string): string {
+  return `pending-assistant-${operationId}`
 }
 
 function isUnknownKeeperChatOperationError(err: unknown): boolean {
@@ -479,7 +450,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
       timestamp: new Date(request.submittedAt).toISOString(),
       delivery: 'delivered',
       streamState: null,
-      requestId: request.operationId,
+      deliveryProvenance: operationDeliveryProvenance(request.operationId, 'accepted_user'),
       streamContract: keeperStreamContract('client_operation_store', 'client_placeholder', {
         requestId: request.operationId,
         reason: 'restored accepted operation from browser storage',
@@ -499,7 +470,7 @@ function ensureTrackedOperationThreadEntries(request: TrackedKeeperChatOperation
       timestamp: assistantDraft?.timestamp ?? null,
       delivery: assistantDraft?.delivery ?? 'queued',
       streamState: assistantDraft ? assistantDraft.streamState : 'opening',
-      requestId: request.operationId,
+      deliveryProvenance: operationDeliveryProvenance(request.operationId, 'terminal_assistant'),
       streamContract: keeperStreamContract('client_operation_store', 'client_placeholder', {
         requestId: request.operationId,
         reason: 'awaiting durable operation terminal state',
@@ -716,7 +687,6 @@ async function handoffCancelledStreamToOperationHydration(
 ): Promise<void> {
   removeThreadEntries(request.keeperName, localEntryIds)
   releaseLiveSendRequest(request.operationId)
-  releaseActiveStreamRequestId(request.operationId)
   await hydrateTrackedKeeperChatOperation(request)
 }
 
@@ -822,6 +792,10 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
       )
       parsed = null
     }
+    const { normalizeKeeperStatusPayloadDeliveryProvenance } = await import(
+      './api/schemas/keeper-chat-delivery-provenance'
+    )
+    parsed = normalizeKeeperStatusPayloadDeliveryProvenance(parsed)
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)
   } catch (err) {
@@ -880,10 +854,6 @@ function fallbackMessageForUserBlocks(blocks: KeeperUserInputBlock[]): string {
     : `[첨부 ${media.length}개]`
 }
 
-function newKeeperChatOperationId(): string {
-  return `kmsg-${crypto.randomUUID()}`
-}
-
 export async function sendKeeperThreadMessage(
   name: string,
   prompt: string,
@@ -918,14 +888,7 @@ export async function sendKeeperThreadMessage(
   appendThreadEntry(keeperName, {
     id: localId,
     role: 'user',
-    // The operation id is the same value the backend stamps as the row's
-    // delivery_key request_id, so carrying it from the start lets the history
-    // merge recognise its own placeholder. Waiting for
-    // KEEPER_CHAT_OPERATION_ACCEPTED to stamp it leaves the row identity-less
-    // whenever the stream dies first, and sameConversationEntry reads
-    // "one side has a request id" as "different rows" — which renders the sent
-    // message twice, once local and once from history.
-    requestId: operationId,
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'accepted_user'),
     source: 'direct_user',
     label: 'You',
     text: message,
@@ -943,7 +906,7 @@ export async function sendKeeperThreadMessage(
   appendThreadEntry(keeperName, {
     id: assistantId,
     role: 'assistant',
-    requestId: operationId,
+    deliveryProvenance: operationDeliveryProvenance(operationId, 'terminal_assistant'),
     source: 'direct_assistant',
     label: keeperName,
     text: '',
@@ -961,13 +924,13 @@ export async function sendKeeperThreadMessage(
   setRecordValue(keeperStreamStartedAt, keeperName, Date.now())
   const controller = new AbortController()
   setActiveStream(keeperName, operationId, assistantId, controller)
-  let requestId: string | null = null
+  let operationAccepted = false
   let toolCallEnded = false
   try {
     finalizeAssistantEntry(keeperName, localId, { delivery: 'delivered' })
 
     const outcome = await streamKeeperMessage(keeperName, message, {
-      requestId: operationId,
+      operationId,
       signal: controller.signal,
       attachments,
       userBlocks,
@@ -982,13 +945,8 @@ export async function sendKeeperThreadMessage(
           if (!acceptedOperationId || acceptedOperationId !== operationId) {
             throw new Error('Keeper operation acceptance identity mismatch')
           }
-          requestId = acceptedOperationId
+          operationAccepted = true
           markLiveSendRequestAccepted(acceptedOperationId)
-          stampPlaceholderRequestId(
-            keeperName,
-            [localId, assistantId],
-            acceptedOperationId,
-          )
           upsertTrackedKeeperChatOperation({
             operationId: acceptedOperationId,
             keeperName,
@@ -997,11 +955,20 @@ export async function sendKeeperThreadMessage(
             ...(attachments ? { attachments } : {}),
           })
         }
-        const error = applyKeeperStreamEvent(keeperName, assistantId, event)
+        const error = applyKeeperStreamEvent(
+          keeperName,
+          assistantId,
+          event,
+          { kind: 'operation', operationId },
+        )
         if (error) {
           throw new Error(error)
         }
-        persistTrackedOperationAssistantDraft(keeperName, requestId, assistantId)
+        persistTrackedOperationAssistantDraft(
+          keeperName,
+          operationAccepted ? operationId : null,
+          assistantId,
+        )
         if (event.type === 'TOOL_CALL_END') {
           toolCallEnded = true
         }
@@ -1017,14 +984,13 @@ export async function sendKeeperThreadMessage(
     const finalText = finalEntry?.text.trim() ?? ''
 
     if (!outcome.terminal) {
-      if (requestId) {
+      if (operationAccepted) {
         removeThreadEntries(keeperName, [localId, assistantId])
         // Hand off to resume: release ownership FIRST so our own resume
         // call below is not blocked by the guard we just set.
-        releaseLiveSendRequest(requestId)
-        releaseActiveStreamRequestId(requestId)
+        releaseLiveSendRequest(operationId)
         await hydrateTrackedKeeperChatOperation({
-          operationId: requestId,
+          operationId,
           keeperName,
           message,
           submittedAt: Date.now(),
@@ -1048,7 +1014,6 @@ export async function sendKeeperThreadMessage(
       })
       setRecordValue(keeperActionErrors, keeperName, cutMessage)
       if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-      releaseActiveStreamRequestId(operationId)
       return
     }
 
@@ -1076,9 +1041,8 @@ export async function sendKeeperThreadMessage(
         }),
       })
       setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
-      if (requestId) {
-        removeTrackedKeeperChatOperation(requestId)
-        releaseActiveStreamRequestId(requestId)
+      if (operationAccepted) {
+        removeTrackedKeeperChatOperation(operationId)
       }
       return
     }
@@ -1098,36 +1062,35 @@ export async function sendKeeperThreadMessage(
       }),
     })
     if (toolCallEnded) void hydrateKeeperToolOutputs(keeperName)
-    if (requestId) {
-      removeTrackedKeeperChatOperation(requestId)
-      releaseActiveStreamRequestId(requestId)
+    if (operationAccepted) {
+      removeTrackedKeeperChatOperation(operationId)
     }
   } catch (err) {
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (isAbortError(err)) {
-      const durablePendingRequest = requestId
+      const durablePendingRequest = operationAccepted
         ? trackedKeeperChatOperationsForKeeper(keeperName)
-          .find(candidate => candidate.operationId === requestId) ?? null
+          .find(candidate => candidate.operationId === operationId) ?? null
         : null
       const hasDurablePendingRequest = durablePendingRequest !== null
       const shouldAttemptServerCancel = Boolean(
-        requestId && (liveSendOwnsRequest(requestId) || hasDurablePendingRequest),
+        operationAccepted && (liveSendOwnsRequest(operationId) || hasDurablePendingRequest),
       )
       const serverCancelAlreadyFinalized = Boolean(
-        requestId
-        && !liveSendOwnsRequest(requestId)
+        operationAccepted
+        && !liveSendOwnsRequest(operationId)
         && !hasDurablePendingRequest,
       )
-      if (shouldAttemptServerCancel && requestId) {
+      if (shouldAttemptServerCancel) {
         const pendingRequest = withCurrentTrackedOperationAssistantDraft(durablePendingRequest ?? {
-          operationId: requestId,
+          operationId,
           keeperName,
           message,
           submittedAt: Date.now(),
           ...(attachments ? { attachments } : {}),
         }, assistantId)
         upsertTrackedKeeperChatOperation(pendingRequest)
-        void cancelKeeperThreadRequest(keeperName, requestId).then(outcome => {
+        void cancelKeeperThreadRequest(keeperName, operationId).then(outcome => {
           if (outcome === 'cancelling') {
             return handoffCancelledStreamToOperationHydration(
               pendingRequest,
@@ -1141,7 +1104,7 @@ export async function sendKeeperThreadMessage(
         delivery: 'cancelled',
         error: null,
         streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
-          requestId: requestId ?? undefined,
+          requestId: operationAccepted ? operationId : undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
@@ -1153,7 +1116,7 @@ export async function sendKeeperThreadMessage(
         error: null,
         timestamp: new Date().toISOString(),
         streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
-          requestId: requestId ?? undefined,
+          requestId: operationAccepted ? operationId : undefined,
           reason: KEEPER_MESSAGE_CANCELLED_TEXT,
         }),
       })
@@ -1169,7 +1132,7 @@ export async function sendKeeperThreadMessage(
       error: errorMessage,
       timestamp: new Date().toISOString(),
       streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
-        requestId: requestId ?? undefined,
+        requestId: operationAccepted ? operationId : undefined,
         reason: errorMessage,
       }),
     })
@@ -1181,14 +1144,14 @@ export async function sendKeeperThreadMessage(
       delivery: 'delivered',
       error: null,
       streamContract: keeperStreamContract('client_stream_failure', 'contract_gap', {
-        requestId: requestId ?? undefined,
+        requestId: operationAccepted ? operationId : undefined,
         reason: errorMessage,
       }),
     })
     try {
       const reconciled = await reconcileStreamFailureFromServerHistory(
         keeperName,
-        message,
+        operationId,
         localId,
         assistantId,
       )
@@ -1205,12 +1168,11 @@ export async function sendKeeperThreadMessage(
     setRecordValue(keeperActionErrors, keeperName, errorMessage)
     throw err
   } finally {
-    // Release ownership on every exit (success/abort/error). Idempotent:
-    // the non-terminal handoff above already released, so this is a no-op
-    // there; Map.delete of an absent key is harmless.
-    if (requestId) {
-      releaseLiveSendRequest(requestId)
-      releaseKeeperThreadCancelTracking(requestId)
+    // Release cancellation bookkeeping on every accepted exit. The exact
+    // operation ownership is released once by clearActiveStream below; the
+    // non-terminal handoff released it early so its own resume was not blocked.
+    if (operationAccepted) {
+      releaseKeeperThreadCancelTracking(operationId)
     }
     sendKeys.forEach(key => sendingKeeperThreadMessages.delete(key))
     clearActiveStream(keeperName, operationId)

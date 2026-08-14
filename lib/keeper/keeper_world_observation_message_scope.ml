@@ -230,11 +230,11 @@ let acknowledged_turn_refs messages =
 let answered_delivery_keys messages =
   List.filter_map
     (fun (message : Keeper_chat_store.chat_message) ->
-      match message.role, message.kind, message.delivery_key with
+      match message.role, message.kind, message.delivery_provenance with
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Utterance,
-        Some delivery_key ->
-        Some delivery_key
+        Some provenance ->
+        Some provenance.Keeper_chat_delivery_identity.delivery_key
       | Keeper_chat_store.Role.Assistant,
         Keeper_chat_store.Row_kind.Transport_failure,
         _
@@ -249,9 +249,10 @@ let answered_delivery_keys messages =
 
 let exact_delivery_was_answered answered = function
   | None -> false
-  | Some delivery_key ->
+  | Some provenance ->
     List.exists
-      (Keeper_chat_delivery_identity.delivery_key_equal delivery_key)
+      (Keeper_chat_delivery_identity.delivery_key_equal
+         provenance.Keeper_chat_delivery_identity.delivery_key)
       answered
 ;;
 
@@ -275,9 +276,15 @@ let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) 
     match message.role, message.turn_ref with
     | Keeper_chat_store.Role.User, Some turn_ref ->
       not (StringSet.mem (Ids.Turn_ref.to_string turn_ref) acknowledged)
-      && not (exact_delivery_was_answered answered_deliveries message.delivery_key)
+      && not
+           (exact_delivery_was_answered
+              answered_deliveries
+              message.delivery_provenance)
     | Keeper_chat_store.Role.User, None ->
-      not (exact_delivery_was_answered answered_deliveries message.delivery_key)
+      not
+        (exact_delivery_was_answered
+           answered_deliveries
+           message.delivery_provenance)
     | Keeper_chat_store.Role.Assistant, _ | Keeper_chat_store.Role.Tool, _ -> false)
 ;;
 

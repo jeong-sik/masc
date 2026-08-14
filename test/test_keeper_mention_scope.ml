@@ -66,7 +66,7 @@ let msg ~role ?(id = "test-msg") ?(ts = Some 1.0) ?(surface = None) ?(speaker = 
   ; kind
   ; turn_ref
   ; stream_lifecycle = None
-  ; delivery_key = None
+  ; delivery_provenance = None
   }
 ;;
 
@@ -216,7 +216,7 @@ let tool_line : Store.chat_message =
   ; kind = Store.Row_kind.Utterance
   ; turn_ref = None
   ; stream_lifecycle = None
-  ; delivery_key = None
+  ; delivery_provenance = None
   }
 ;;
 

@@ -248,7 +248,7 @@ export interface KeeperChatOperation {
 }
 
 export interface StreamKeeperMessageOptions {
-  requestId?: string
+  operationId: string
   signal?: AbortSignal
   onEvent: (event: KeeperChatStreamEvent) => void
   attachments?: StreamAttachment[]
@@ -279,7 +279,7 @@ export async function streamKeeperMessage(
   name: string,
   message: string,
   {
-    requestId,
+    operationId,
     signal,
     onEvent,
     attachments,
@@ -298,9 +298,10 @@ export async function streamKeeperMessage(
   // network round-trip for every message while still preventing the common
   // freshly-loaded-dashboard failure.
   if (!jsonHeaders().Authorization) await ensureDevToken()
-  const operationId = requestId?.trim() || `kmsg-${crypto.randomUUID()}`
+  const exactOperationId = operationId.trim()
+  if (!exactOperationId) throw new Error('Keeper chat operation id is required')
   const body: Record<string, unknown> = {
-    request_id: operationId,
+    request_id: exactOperationId,
     name,
     message,
   }

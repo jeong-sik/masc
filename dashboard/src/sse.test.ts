@@ -5,6 +5,7 @@ import {
   recordServerPushEvent,
 } from './sse'
 import { appendThreadEntry, keeperThreads } from './keeper-state'
+import { operationDeliveryProvenance } from './keeper-delivery-provenance'
 
 describe('Keeper operation server push', () => {
   const operationId = 'kmsg-operation-1'
@@ -21,7 +22,10 @@ describe('Keeper operation server push', () => {
       timestamp: null,
       delivery: 'queued',
       streamState: null,
-      requestId: operationId,
+      deliveryProvenance: operationDeliveryProvenance(
+        operationId,
+        'terminal_assistant',
+      ),
       details: null,
     })
   })

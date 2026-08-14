@@ -214,12 +214,12 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
   let stats =
     snapshots
     |> List.map (fun snapshot ->
-      snapshot.keeper_name, Decision.turn_span_stats ~config snapshot.keeper_name)
+      snapshot.keeper_name, Decision.turn_span_stats ~config ~now snapshot.keeper_name)
   in
   let stat_for keeper_name =
     match List.assoc_opt keeper_name stats with
     | Some stat -> stat
-    | None -> Decision.turn_span_stats ~config keeper_name
+    | None -> Decision.turn_span_stats ~config ~now keeper_name
   in
   let observed =
     snapshots

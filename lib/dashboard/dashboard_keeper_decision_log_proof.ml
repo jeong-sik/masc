@@ -194,7 +194,7 @@ type segment_head_scan =
   | Complete_without_turn
   | Scan_exhausted
 
-let earliest_turn_ts_in_segment path =
+let earliest_turn_ts_in_segment ~now path =
   let slice = Fs_compat.read_slice ~path ~from:0 ~len:decision_head_max_bytes in
   let turn =
     String.split_on_char '\n' slice
@@ -206,7 +206,10 @@ let earliest_turn_ts_in_segment path =
         | exception Yojson.Json_error _ -> None
         | json ->
           if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json)
-          then decision_ts_unix json
+          then
+            (match decision_ts_unix json with
+             | Some ts when ts <= now -> Some ts
+             | Some _ | None -> None)
           else None)
   in
   match turn with
@@ -216,29 +219,30 @@ let earliest_turn_ts_in_segment path =
      | Some size when size <= String.length slice -> Complete_without_turn
      | Some _ | None -> Scan_exhausted)
 
-let earliest_turn_ts segments =
+let earliest_turn_ts ~now segments =
   let rec scan = function
     | [] -> None, No_turn_row_in_history
     | (rotation, path) :: rest ->
-      (match earliest_turn_ts_in_segment path with
+      (match earliest_turn_ts_in_segment ~now path with
        | Turn_found ts -> Some ts, History_head rotation
        | Complete_without_turn -> scan rest
        | Scan_exhausted -> None, History_scan_exhausted rotation)
   in
   scan segments
 
-let turn_span_stats ~config keeper_name =
+let turn_span_stats ~config ~now keeper_name =
   let tail =
     fold_keeper_decision_log ~config keeper_name ~init:empty_tail_scan
       ~f:(fun scan json ->
         if is_turn_exchange_channel (Safe_ops.json_string_opt "channel" json) then
           match decision_ts_unix json with
-          | Some ts -> update_tail_scan scan ts
+          | Some ts when ts <= now -> update_tail_scan scan ts
+          | Some _ -> scan
           | None -> scan
         else scan)
   in
   let segments = decision_log_segments ~config keeper_name in
-  let first_ts, first_ts_origin = earliest_turn_ts segments in
+  let first_ts, first_ts_origin = earliest_turn_ts ~now segments in
   {
     recent_interaction_count = tail.count;
     first_ts;

@@ -81,7 +81,7 @@ let oversized_heartbeat_row ts =
 
 let evidence ~now ~base ~keeper =
   let config = Workspace.default_config base in
-  let stat = Proof.turn_span_stats ~config keeper in
+  let stat = Proof.turn_span_stats ~config ~now keeper in
   (stat, Proof.turn_span_evidence_json ~now keeper stat)
 
 let json_field name = function
@@ -216,6 +216,45 @@ let head_budget_exhaustion_is_explicit () =
          | Some (`Int n) -> Some n
          | _ -> None))
 
+let post_snapshot_turn_does_not_poison_valid_span () =
+  let base = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      let now = 1_700_000_000.0 in
+      write_segment base ~keeper:"racing" ~rotation:None
+        [ turn_row (now -. (48.0 *. hour))
+        ; turn_row (now -. 60.0)
+        ; turn_row (now +. 1.0)
+        ];
+      let stat, json = evidence ~now ~base ~keeper:"racing" in
+      check bool "valid snapshot-relative span still passes" true
+        (Proof.has_persistent_turn_span ~now stat);
+      check (option (float 0.0)) "latest excludes the post-snapshot row"
+        (Some (now -. 60.0))
+        (float_field "latest_ts_unix" json);
+      check (option int) "post-snapshot row is not counted"
+        (Some 2)
+        (match json_field "recent_interaction_count" json with
+         | Some (`Int n) -> Some n
+         | _ -> None))
+
+let future_only_turns_do_not_prove_persistence () =
+  let base = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      let now = 1_700_000_000.0 in
+      write_segment base ~keeper:"future" ~rotation:None
+        [ turn_row (now +. 1.0); turn_row (now +. hour) ];
+      let stat, json = evidence ~now ~base ~keeper:"future" in
+      check bool "future-only rows fail closed" false
+        (Proof.has_persistent_turn_span ~now stat);
+      check (option (float 0.0)) "future-only latest remains absent" None
+        (float_field "latest_ts_unix" json);
+      check string "future-only head is not accepted as history" "none"
+        (origin_segment json))
+
 let () =
   run "keeper persistence span history"
     [ ( "turn span"
@@ -225,5 +264,9 @@ let () =
         ; test_case "no turn rows is explicit" `Quick no_turn_rows_is_explicit
         ; test_case "head budget exhaustion is explicit" `Quick
             head_budget_exhaustion_is_explicit
+        ; test_case "post-snapshot row is ignored" `Quick
+            post_snapshot_turn_does_not_poison_valid_span
+        ; test_case "future-only rows fail closed" `Quick
+            future_only_turns_do_not_prove_persistence
         ] )
     ]

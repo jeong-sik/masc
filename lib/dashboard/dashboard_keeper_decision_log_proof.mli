@@ -23,6 +23,7 @@ val scheduled_evidence_json : scheduled_stat -> Yojson.Safe.t
 
 val turn_span_stats :
   config:Workspace.config ->
+  now:float ->
   string ->
   turn_span_stat
 

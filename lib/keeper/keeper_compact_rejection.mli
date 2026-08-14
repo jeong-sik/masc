@@ -11,6 +11,7 @@ type compaction_rejection =
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
   | No_eligible_history
+  | No_reducible_boundary
   | Invalid_structural_evidence of
       Keeper_compaction_evidence.decode_error
       * Keeper_compaction_outcome.exact_execution_terminal

@@ -39,7 +39,6 @@ type t =
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
-  | IdeOrphanWrites
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses

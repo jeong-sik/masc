@@ -28,7 +28,14 @@ export type IdeFileFocusAvailability =
 
 export type IdeWorkspaceIdentity =
   | { readonly kind: 'project' }
-  | { readonly kind: 'repository'; readonly repoId: string }
+  | {
+      readonly kind: 'repository'
+      readonly repoId: string
+      /** RFC-0378 §5.3b: server-minted codebase slug the co-view context
+       *  carries so the keeper can hand it back to `keeper_ide_annotate`
+       *  verbatim. Absent when the repository has no canonical remote. */
+      readonly codebase?: string | null
+    }
   | { readonly kind: 'keeper'; readonly keeper: string }
 
 interface IdeFileFocusBase {
@@ -82,9 +89,12 @@ export function synchronizeIdeWorkspaceIdentity(identity: IdeWorkspaceIdentity):
 export function ideWorkspaceIdentityForSelection(
   repoId: string | null | undefined,
   keeper: string | null | undefined,
+  codebase?: string | null,
 ): IdeWorkspaceIdentity {
   const normalizedRepoId = repoId?.trim()
-  if (normalizedRepoId) return { kind: 'repository', repoId: normalizedRepoId }
+  if (normalizedRepoId) {
+    return { kind: 'repository', repoId: normalizedRepoId, codebase: codebase ?? null }
+  }
   const normalizedKeeper = keeper?.trim()
   if (normalizedKeeper) return { kind: 'keeper', keeper: normalizedKeeper }
   return { kind: 'project' }
@@ -99,7 +109,9 @@ export function sameIdeWorkspaceIdentity(
     case 'project':
       return true
     case 'repository':
-      return right.kind === 'repository' && left.repoId === right.repoId
+      return right.kind === 'repository'
+        && left.repoId === right.repoId
+        && (left.codebase ?? null) === (right.codebase ?? null)
     case 'keeper':
       return right.kind === 'keeper' && left.keeper === right.keeper
   }

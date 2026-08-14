@@ -236,65 +236,97 @@ let with_partition_fixture ?sandbox_profile f =
     f ~config ~meta)
 ;;
 
-let resolve_partition ~config ~meta fields =
-  Masc.Keeper_run_tools_hooks.observation_partition_for_tool_input
+let resolve_attribution ?tool_name ~config ~meta fields =
+  Masc.Keeper_run_tools_hooks.observation_attribution_for_tool_input
+    ?tool_name
     ~config
     ~meta
-    ~kind:"tool_event"
     (`Assoc fields)
 ;;
 
+let addressed_or_fail = function
+  | Agent_observation.File (Agent_observation.Addressed { address; _ }) -> address
+  | Agent_observation.File (Agent_observation.Unaddressed { reason; _ }) ->
+    fail
+      ("expected an addressed fact, got Unaddressed "
+       ^ Agent_observation.Unattributed.reason_to_string reason)
+  | Agent_observation.Pathless -> fail "expected an addressed fact, got Pathless"
+;;
+
 (* The keeper's playground clone of a registered repo resolves to the
-   repo's [By_url] bucket via the structural playground parse — the
-   #23469 regression this case pins: before the sandbox anchor, this
-   input re-anchored at the server base path and only matched because
-   the same repo happened to be registered at [repos/masc] there. *)
-(* A coordination tool names no file, so the observation has a partition but
-   no document. The helper used to answer the project root here, which the
-   consumer then stored as the edited file — a broadcast claiming a document
-   it never touched (masc#28582). *)
+   repo's address via the structural playground parse — the #23469
+   regression this case pins: before the sandbox anchor, this input
+   re-anchored at the server base path and only matched because the
+   same repo happened to be registered at [repos/masc] there. *)
+(* A coordination tool names no file: the observation is a keeper-timeline
+   fact with no document. The helper used to answer the project root here,
+   which the consumer then stored as the edited file — a broadcast claiming
+   a document it never touched (masc#28582). *)
 let test_partition_resolution_leaves_pathless_calls_without_a_document () =
   with_partition_fixture (fun ~config ~meta ->
-    let _partition, rel_path =
-      resolve_partition ~config ~meta [ "message", `String "fixing: CI" ]
-    in
-    check (option string) "pathless call names no document" None rel_path)
+    match resolve_attribution ~config ~meta [ "message", `String "fixing: CI" ] with
+    | Agent_observation.Pathless -> ()
+    | Agent_observation.File _ ->
+      fail "a pathless call must not carry a file attribution")
 ;;
 
 let test_partition_resolution_uses_project_root_for_masc_base_path () =
   with_partition_fixture (fun ~config ~meta ->
-    let partition, rel_path =
-      resolve_partition
-        ~config
-        ~meta
-        [ "cwd", `String "repos/masc"; "path", `String "lib/foo.ml" ]
+    let address =
+      addressed_or_fail
+        (resolve_attribution
+           ~config
+           ~meta
+           [ "cwd", `String "repos/masc"; "path", `String "lib/foo.ml" ])
     in
-    check (option string) "repo-relative path" (Some "lib/foo.ml") rel_path;
-    match partition with
-    | Agent_observation.By_url slug ->
-      check string "slug" "github.com_jeong-sik_masc" slug
-    | Agent_observation.No_canonical_url
-    | Agent_observation.Unmatched
-    | Agent_observation.Base_unresolved
-    | Agent_observation.Legacy_default ->
-      fail "expected By_url partition")
+    check
+      string
+      "slug"
+      "github.com_jeong-sik_masc"
+      (Agent_observation.Code_address.codebase address);
+    check
+      string
+      "repo-relative path"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path address))
 ;;
 
-let test_partition_unregistered_playground_repo_is_unmatched () =
+let test_annotate_uses_input_code_address_without_sandbox_resolution () =
   with_partition_fixture (fun ~config ~meta ->
-    let partition, _ =
-      resolve_partition
-        ~config
-        ~meta
-        [ "path", `String "repos/ghost/lib/foo.ml" ]
+    let address =
+      addressed_or_fail
+        (resolve_attribution
+           ~tool_name:"keeper_ide_annotate"
+           ~config
+           ~meta
+           [ "codebase", `String "github.com_jeong-sik_masc"
+           ; "file_path", `String "lib/annotated.ml"
+           ])
     in
-    match partition with
-    | Agent_observation.Unmatched -> ()
-    | Agent_observation.By_url _
-    | Agent_observation.No_canonical_url
-    | Agent_observation.Base_unresolved
-    | Agent_observation.Legacy_default ->
-      fail "expected Unmatched partition for unregistered playground repo")
+    check string "annotation codebase" "github.com_jeong-sik_masc"
+      (Agent_observation.Code_address.codebase address);
+    check string "annotation repo-relative path" "lib/annotated.ml"
+      (Agent_observation.Code_address.path address))
+;;
+
+let test_partition_unregistered_playground_repo_fails_with_repo_id () =
+  with_partition_fixture (fun ~config ~meta ->
+    match
+      resolve_attribution ~config ~meta [ "path", `String "repos/ghost/lib/foo.ml" ]
+    with
+    | Agent_observation.File
+        (Agent_observation.Unaddressed
+           { reason = Agent_observation.Unattributed.Unregistered_repo_id repo_id
+           ; attempted_path
+           }) ->
+      check string "repo id" "ghost" repo_id;
+      check
+        bool
+        "attempted path preserved for forensics"
+        true
+        (String.length attempted_path > 0)
+    | _ ->
+      fail "expected Unaddressed Unregistered_repo_id for unregistered playground repo")
 ;;
 
 let test_partition_docker_visible_path_maps_to_playground_repo () =
@@ -306,36 +338,34 @@ let test_partition_docker_visible_path_maps_to_playground_repo () =
            (Masc.Keeper_sandbox.container_root meta.name)
            "repos/masc/lib/docker.ml"
        in
-       let partition, rel_path =
-         resolve_partition ~config ~meta [ "path", `String container_repo_path ]
+       let address =
+         addressed_or_fail
+           (resolve_attribution ~config ~meta [ "path", `String container_repo_path ])
        in
-       check (option string) "repo-relative path" (Some "lib/docker.ml") rel_path;
-       match partition with
-       | Agent_observation.By_url slug ->
-         check string "slug" "github.com_jeong-sik_masc" slug
-       | Agent_observation.No_canonical_url
-       | Agent_observation.Unmatched
-       | Agent_observation.Base_unresolved
-       | Agent_observation.Legacy_default ->
-         fail "expected Docker visible absolute path to resolve to By_url")
+       check
+         string
+         "slug"
+         "github.com_jeong-sik_masc"
+         (Agent_observation.Code_address.codebase address);
+       check
+         string
+         "repo-relative path"
+         "lib/docker.ml"
+         (Agent_observation.Code_address.path address))
 ;;
 
 (* A bare relative path outside the [repos/<id>/] lane is a real
-   playground-local file, not a repo file — it must degrade to the typed
-   orphan partition instead of borrowing whichever repository overlaps
+   playground-local file, not a repo file — it must fail attribution with
+   the typed reason instead of borrowing whichever repository overlaps
    the server base path. *)
-let test_partition_bare_relative_outside_repos_is_base_unresolved () =
+let test_partition_bare_relative_outside_repos_is_unregistered_path () =
   with_partition_fixture (fun ~config ~meta ->
-    let partition, _ =
-      resolve_partition ~config ~meta [ "path", `String "notes/todo.md" ]
-    in
-    match partition with
-    | Agent_observation.Base_unresolved -> ()
-    | Agent_observation.By_url _
-    | Agent_observation.No_canonical_url
-    | Agent_observation.Unmatched
-    | Agent_observation.Legacy_default ->
-      fail "expected Base_unresolved partition for playground-local file")
+    match resolve_attribution ~config ~meta [ "path", `String "notes/todo.md" ] with
+    | Agent_observation.File
+        (Agent_observation.Unaddressed
+           { reason = Agent_observation.Unattributed.Unregistered_path; _ }) ->
+      ()
+    | _ -> fail "expected Unaddressed Unregistered_path for playground-local file")
 ;;
 
 (* --- gate history slice ------------------------------------------------- *)
@@ -720,17 +750,21 @@ let () =
             `Quick
             test_partition_resolution_uses_project_root_for_masc_base_path
         ; test_case
-            "unregistered playground repo is Unmatched"
+            "annotate uses its input code address"
             `Quick
-            test_partition_unregistered_playground_repo_is_unmatched
+            test_annotate_uses_input_code_address_without_sandbox_resolution
+        ; test_case
+            "unregistered playground repo fails with its repo id"
+            `Quick
+            test_partition_unregistered_playground_repo_fails_with_repo_id
         ; test_case
             "Docker visible absolute path maps to playground repo"
             `Quick
             test_partition_docker_visible_path_maps_to_playground_repo
         ; test_case
-            "bare relative outside repos lane is Base_unresolved"
+            "bare relative outside repos lane is an unregistered path"
             `Quick
-            test_partition_bare_relative_outside_repos_is_base_unresolved
+            test_partition_bare_relative_outside_repos_is_unregistered_path
         ] )
     ; ( "concurrent_tool_observer"
       , [ test_case

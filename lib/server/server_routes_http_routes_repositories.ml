@@ -92,6 +92,14 @@ let repository_json ~base_path (repo : Repo_manager_types.repository) =
       ("id", `String repo.id);
       ("name", `String repo.name);
       ("url", `String repo.url);
+      (* RFC-0378 §5.3b: the server is the only slug mint — clients carry
+         this value into co-view context and scope queries instead of
+         re-deriving it from the url. [`Null] when the url cannot
+         canonicalize (blank or local-path remote). *)
+      ( "codebase",
+        match Agent_observation.canonical_url_of_remote repo.url with
+        | Some slug -> `String slug
+        | None -> `Null );
       ("local_path", `String repo.local_path);
       ("aliases", `List (List.map (fun s -> `String s) repo.aliases));
       ("default_branch", `String repo.default_branch);

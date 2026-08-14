@@ -1,5 +1,5 @@
 (** IDE annotation storage — CRUD backed by [annotations.jsonl] in the
-    selected {!Ide_paths.partition} directory.
+    selected {!Ide_paths.codebase} directory.
 
     The log is append-only. Explicit compaction writes begin/end snapshot
     markers; readers replay rows appended during the compaction window. *)
@@ -9,16 +9,16 @@ module String_set = Set.Make (String)
 
 let store_path ~base_dir = Ide_paths.store_path ~base_dir
 
-let partition_dir ~base_dir partition =
-  Ide_paths.partition_store_dir ~base_dir partition
+let codebase_dir ~base_dir codebase =
+  Ide_paths.code_store_dir ~base_dir ~codebase
 ;;
 
-let annotations_file_for ~base_dir partition =
-  Filename.concat (partition_dir ~base_dir partition) "annotations.jsonl"
+let annotations_file_for ~base_dir codebase =
+  Filename.concat (codebase_dir ~base_dir codebase) "annotations.jsonl"
 ;;
 
-let store_file ~base_dir ?(partition = Ide_paths.Legacy_default) () =
-  annotations_file_for ~base_dir partition
+let store_file ~base_dir ~codebase () =
+  annotations_file_for ~base_dir codebase
 ;;
 
 
@@ -31,13 +31,13 @@ let compact_annotations_key = "annotations"
 let compact_seq_mu = Stdlib.Mutex.create ()
 let compact_seq = ref 0
 
-(* RFC-0128 §4.2: [_orphan/] and [by-url/<slug>/] live one or two
-   levels deeper than the flat store. Delegate parent creation to the
+(* RFC-0378 §5.2: a codebase store lives at [by-url/<slug>/], two
+   levels below the store root. Delegate parent creation to the
    filesystem SSOT instead of carrying a local recursive mkdir copy. *)
 let ensure_dir = Fs_compat.mkdir_p
 
-let ensure_store ~base_dir ?(partition = Ide_paths.Legacy_default) () =
-  ensure_dir (partition_dir ~base_dir partition)
+let ensure_store ~base_dir ~codebase () =
+  ensure_dir (codebase_dir ~base_dir codebase)
 ;;
 
 let now_ms () =
@@ -212,8 +212,8 @@ let rec apply_log_record ?(capture = true) annotations tombstoned active = funct
   | Ignored -> ()
 ;;
 
-let load_all_partition ?stop_before_compact_begin_id ~base_dir partition =
-  let path = annotations_file_for ~base_dir partition in
+let load_all_for_codebase ?stop_before_compact_begin_id ~base_dir codebase =
+  let path = annotations_file_for ~base_dir codebase in
   if not (Sys.file_exists path)
   then []
   else (
@@ -263,7 +263,7 @@ let load_all_partition ?stop_before_compact_begin_id ~base_dir partition =
 
 let create
       ~base_dir
-      ?(partition = Ide_paths.Legacy_default)
+      ~codebase
       ~keeper_id
       ~file_path
       ~line_start
@@ -275,7 +275,7 @@ let create
       ?(references = [])
       ()
   =
-  ensure_store ~base_dir ~partition ();
+  ensure_store ~base_dir ~codebase ();
   if file_path = ""
   then Error "file_path is required"
   else if line_start < 1 || line_end < line_start
@@ -314,14 +314,14 @@ let create
       }
     in
     Fs_compat.append_jsonl
-      (annotations_file_for ~base_dir partition)
+      (annotations_file_for ~base_dir codebase)
       (annotation_to_json annotation);
     Ok annotation
 ;;
 
-let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =
-  ensure_store ~base_dir ~partition ();
-  let all : annotation list = load_all_partition ~base_dir partition in
+let list ~base_dir ~codebase ~filter () =
+  ensure_store ~base_dir ~codebase ();
+  let all : annotation list = load_all_for_codebase ~base_dir codebase in
   let by_file =
     match filter.file_path with
     | Some fp -> List.filter (fun (a : annotation) -> a.file_path = fp) all
@@ -357,21 +357,21 @@ let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 ;;
 
-let compact ~base_dir ?(partition = Ide_paths.Legacy_default) () =
-  ensure_store ~base_dir ~partition ();
-  let path = annotations_file_for ~base_dir partition in
+let compact ~base_dir ~codebase () =
+  ensure_store ~base_dir ~codebase ();
+  let path = annotations_file_for ~base_dir codebase in
   File_lock_eio.with_lock path (fun () ->
     let id = next_compaction_id () in
     Fs_compat.append_jsonl path (compact_begin_json id);
     let snapshot =
-      load_all_partition ~stop_before_compact_begin_id:id ~base_dir partition
+      load_all_for_codebase ~stop_before_compact_begin_id:id ~base_dir codebase
     in
     Fs_compat.append_jsonl path (compact_end_json id snapshot))
 ;;
 
-let delete ~base_dir ?(partition = Ide_paths.Legacy_default) ~id ~keeper_id ?expected_version () =
-  ensure_store ~base_dir ~partition ();
-  let all = load_all_partition ~base_dir partition in
+let delete ~base_dir ~codebase ~id ~keeper_id ?expected_version () =
+  ensure_store ~base_dir ~codebase ();
+  let all = load_all_for_codebase ~base_dir codebase in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with
   | None -> Error "annotation not found or keeper mismatch"
   | Some found ->
@@ -391,7 +391,7 @@ let delete ~base_dir ?(partition = Ide_paths.Legacy_default) ~id ~keeper_id ?exp
      | _ ->
        let ts = now_ms () in
        Fs_compat.append_jsonl
-         (annotations_file_for ~base_dir partition)
+         (annotations_file_for ~base_dir codebase)
          (tombstone_json id keeper_id ts);
        Ok ())
 ;;

@@ -48,7 +48,6 @@ type t =
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
-  | IdeOrphanWrites
   | PathResolverIdentityMismatch
   | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
@@ -252,7 +251,6 @@ let to_string = function
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"
   | ToolUnderusedAllowed -> "masc_keeper_tool_underused_allowed"
   | PathRejection -> "masc_keeper_path_rejection_total"
-  | IdeOrphanWrites -> "masc_ide_orphan_writes_total"
   | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
   | KeeperMetaOverlayDrift -> "masc_keeper_meta_overlay_drift_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"

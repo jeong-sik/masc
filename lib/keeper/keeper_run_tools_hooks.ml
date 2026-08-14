@@ -143,23 +143,43 @@ let observation_file_path_from_tool_input ~sandbox_root input =
   | Some p -> Some p
 ;;
 
-(* Returns the partition the observation belongs to and the file path as the
-   resolver named it. A tool call that names no file still has a partition —
-   it is a keeper-timeline fact, attributed through the project root the way
-   turn events are — but it has no document, so the path is [None] rather than
-   the project root standing in for one. *)
-let observation_partition_for_tool_input ~config ~meta ~kind input =
+(* Returns where the tool fact belongs (RFC-0378 §5.1). A call that names
+   no file is [Pathless] — a keeper-timeline fact with no document — and
+   never touches the resolver; a call that names one gets the resolver's
+   attribution, minted once here and carried as a parsed value. *)
+let annotation_attribution_from_tool_input input =
+  let codebase =
+    match Yojson.Safe.Util.member "codebase" input with
+    | `String value -> value
+    | _ -> ""
+  in
+  let path =
+    match Yojson.Safe.Util.member "file_path" input with
+    | `String value -> value
+    | _ -> ""
+  in
+  match Agent_observation.Code_address.v ~codebase ~path with
+  | Ok address ->
+    Agent_observation.File
+      (Agent_observation.Addressed { address; checkout = None })
+  | Error reason ->
+    Agent_observation.File
+      (Agent_observation.Unaddressed
+         { reason = Agent_observation.Unattributed.Unmintable reason
+         ; attempted_path = path
+         })
+;;
+
+let observation_attribution_for_tool_input ?(tool_name = "") ~config ~meta input =
+  if String.equal tool_name "keeper_ide_annotate"
+  then annotation_attribution_from_tool_input input
+  else
   let base_dir = Keeper_alerting_path.project_root_of_config config in
   let sandbox_root =
     Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta
   in
-  let resolve file_path =
-    Keeper_tool_filesystem_runtime.resolve_partition_for_write ~base_dir ~kind ~file_path
-  in
   match observation_file_path_from_tool_input ~sandbox_root input with
-  | None ->
-    let partition, _ = resolve base_dir in
-    (partition, None)
+  | None -> Agent_observation.Pathless
   | Some visible ->
     let host_path =
       Keeper_tool_shared_runtime.keeper_observation_host_path_of_visible_path
@@ -167,8 +187,10 @@ let observation_partition_for_tool_input ~config ~meta ~kind input =
         ~meta
         visible
     in
-    let partition, resolved = resolve host_path in
-    (partition, Some resolved)
+    Agent_observation.File
+      (Keeper_tool_filesystem_runtime.resolve_write_attribution
+         ~base_dir
+         ~file_path:host_path)
 ;;
 
 let assemble_hooks
@@ -310,22 +332,21 @@ let assemble_hooks
                  | Some t -> Keeper_id.Task_id.to_string t
                  | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
                in
-               (* task-1733: resolve the partition from the tool's actual edited
-                  file (input.path / input.file_path, with explicit cwd honoured
+               (* task-1733: attribute from the tool's actual edited file
+                  (input.path / input.file_path, with explicit cwd honoured
                   for relative paths), not from the [.masc] runtime root.
                   #23469: relative shapes anchor at this keeper's playground
                   sandbox root, matching the file tools' own resolution. *)
-               let partition, observed_file_path =
-                 observation_partition_for_tool_input
+               let attribution =
+                 observation_attribution_for_tool_input
+                   ~tool_name
                    ~config
                    ~meta:acc.meta
-                   ~kind:"tool_event"
                    input
                in
                Agent_observation.emit_tool_event
                  { base_path = config.base_path
-                 ; partition
-                 ; file_path = observed_file_path
+                 ; attribution
                  ; tool_name
                  ; keeper_id = acc.meta.name
                  ; turn_id

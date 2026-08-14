@@ -119,18 +119,31 @@ let filesystem_tools : Masc_domain.tool_schema list =
     ; description =
         "Attach a keeper-authored annotation to a source file line range. Use this to \
          leave durable IDE context linked to an optional goal, task, or opaque external \
-         reference. file_path, line_start, and content are required. The IDE transport \
-         stores and renders reference relation/value pairs without interpreting the \
-         producer's product vocabulary."
+         reference. codebase, file_path, line_start, and content are required. Hand \
+         codebase and file_path back exactly as the IDE co-view context names them — \
+         never derive them from your sandbox mount layout. The IDE transport stores and \
+         renders reference relation/value pairs without interpreting the producer's \
+         product vocabulary."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
           ; ( "properties"
             , `Assoc
-                [ ( "file_path"
+                [ ( "codebase"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Workspace-relative source file path"
+                      ; ( "description"
+                        , `String
+                            "Canonical codebase slug exactly as the co-view context \
+                             names it (e.g. example.com_owner_repo)" )
+                      ] )
+                ; ( "file_path"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Repo-root-relative source file path exactly as the \
+                             co-view context names it" )
                       ] )
                 ; ( "line_start"
                   , `Assoc
@@ -200,7 +213,13 @@ let filesystem_tools : Masc_domain.tool_schema list =
                         )
                       ] )
                 ] )
-          ; "required", `List [ `String "file_path"; `String "line_start"; `String "content" ]
+          ; ( "required"
+            , `List
+                [ `String "codebase"
+                ; `String "file_path"
+                ; `String "line_start"
+                ; `String "content"
+                ] )
           ; "additionalProperties", `Bool false
           ]
     }

@@ -39,16 +39,19 @@ function documentStoreFixture(filePath: string | null) {
 function composer({
   filePath = 'lib/foo.ml',
   repoId = 'masc',
+  codebase = 'github.com_jeong-sik_masc',
   refresh = () => {},
 }: {
   filePath?: string | null
   repoId?: string | null
+  codebase?: string | null
   refresh?: () => void
 } = {}) {
   return html`
     <${IdeAnnotationComposer}
       documentStore=${documentStoreFixture(filePath)}
       activeRepositoryId=${() => repoId}
+      codebaseForRepo=${() => codebase}
       subscribeActiveRepositoryId=${() => () => {}}
       refresh=${refresh}
     />
@@ -61,6 +64,7 @@ function SharedComposerPair() {
   const props = {
     documentStore: documentStoreFixture('lib/foo.ml'),
     activeRepositoryId: () => 'masc',
+    codebaseForRepo: () => 'github.com_jeong-sik_masc',
     subscribeActiveRepositoryId: () => () => {},
     refresh: () => {},
     draft,
@@ -114,11 +118,21 @@ describe('IdeAnnotationComposer', () => {
     expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()
   })
 
-  it('disables the entry button without a repo scope (keeper_lane is read-only)', () => {
+  it('disables the entry button without a repository-backed codebase', () => {
     const el = mount(composer({ repoId: null }))
     const button = el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-open"]')
     expect(button?.disabled).toBe(true)
     expect(button?.title ?? '').toContain('repo 선택')
+  })
+
+  it('disables the entry button when the selected repository has no canonical codebase', () => {
+    const el = mount(composer({ repoId: 'local-only', codebase: null }))
+    const button = el.querySelector<HTMLButtonElement>('[data-testid="ide-annotation-open"]')
+    expect(button?.disabled).toBe(true)
+    expect(button?.title ?? '').toContain('canonical codebase')
+    button?.click()
+    expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()
+    expect(createIdeAnnotationMock).not.toHaveBeenCalled()
   })
 
   it('opens the form with the editor selection as the default line range', async () => {
@@ -242,7 +256,7 @@ describe('IdeAnnotationComposer', () => {
         kind: 'Comment',
         content: '경계 조건 확인 필요',
       },
-      { repoId: 'masc' },
+      { codebase: 'github.com_jeong-sik_masc' },
     )
     expect(refresh).toHaveBeenCalledTimes(1)
     expect(el.querySelector('[data-testid="ide-annotation-composer-open"]')).toBeNull()

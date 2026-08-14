@@ -6,7 +6,8 @@ import { fireEvent, waitFor } from '@testing-library/preact'
 const repositoryRow = {
   id: 'masc',
   name: 'masc',
-  url: '',
+  url: 'https://github.com/jeong-sik/masc.git',
+  codebase: 'github.com_jeong-sik_masc' as string | null,
   local_path: '/workspace/masc',
   default_branch: 'main',
   status: 'active',
@@ -447,6 +448,7 @@ describe('IdeShell', () => {
         id: 'masc',
         name: 'masc',
         url: '',
+        codebase: null,
         local_path: '/workspace/masc',
         default_branch: 'main',
         status: 'active',
@@ -645,6 +647,10 @@ describe('IdeShell', () => {
   })
 
   it('surfaces malformed annotation responses in the IDE statusbar', async () => {
+    // RFC-0378 §5.4: annotations are code facts; the fetch only fires for an
+    // explicitly selected codebase, so the malformed-row guard is observed
+    // behind a persisted selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     vi.stubGlobal(
       'fetch',
       vi.fn(dashboardFetchMockWithResponse(
@@ -709,6 +715,8 @@ describe('IdeShell', () => {
   })
 
   it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {
+    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -1089,6 +1097,8 @@ describe('IdeShell', () => {
 
 
   it('switches the IDE right rail tabs and renders cursor push focus', async () => {
+    // RFC-0378 §5.4: the cursor stream follows the explicit selection.
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
     route.value = {
       tab: 'code',
       params: { section: 'ide-shell', view: 'source' },
@@ -1164,6 +1174,36 @@ describe('IdeShell', () => {
       label: 'str_replace',
       keeper_id: 'sangsu',
     })
+  })
+
+  it('clears cursor overlays when the selected repository has no codebase', async () => {
+    window.localStorage.setItem('masc.ide.activeRepositoryId', 'masc')
+    repositoryRow.codebase = null
+    cursorOverlaySignal.value = {
+      cursors: new Map([['sangsu', {
+        keeper_id: 'sangsu',
+        file_path: 'lib/stale.ml',
+        line: 7,
+        column: 1,
+        focus_mode: 'editing',
+        last_update: Date.now(),
+      }]]),
+      heatmap: new Map([[7, 1]]),
+      collisions: [{ line: 7, keeper_ids: ['sangsu', 'albini'] }],
+      active_file: 'lib/stale.ml',
+      stream: { status: 'live', failedCount: 0 },
+    }
+
+    try {
+      render(h(IdeShell, {}), container)
+      await waitFor(() => expect(cursorOverlaySignal.value.stream?.status).toBe('closed'))
+      expect(cursorOverlaySignal.value.cursors.size).toBe(0)
+      expect(cursorOverlaySignal.value.heatmap.size).toBe(0)
+      expect(cursorOverlaySignal.value.collisions).toEqual([])
+      expect(cursorOverlaySignal.value.active_file).toBeNull()
+    } finally {
+      repositoryRow.codebase = 'github.com_jeong-sik_masc'
+    }
   })
 
   it('hydrates collapsed IDE rails from the route', () => {

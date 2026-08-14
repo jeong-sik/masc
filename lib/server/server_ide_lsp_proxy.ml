@@ -238,6 +238,15 @@ let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 let overlay_codebase cs = Option.map Server_ide_scope.codebase_of_ide_scope cs.store_scope
 ;;
 
+let workspace_axis_present uri =
+  List.exists
+    (fun key ->
+       match Uri.get_query_param uri key with
+       | Some raw -> not (String.equal (String.trim raw) "")
+       | None -> false)
+    [ "repo_id"; "keeper" ]
+;;
+
 (* What this connection addresses, read from its URL before the socket is
    upgraded. Two independent axes: the overlay store directory comes from
    the IDE scope ([codebase], resolved by the same [Server_ide_scope]
@@ -250,6 +259,12 @@ let overlay_codebase cs = Option.map Server_ide_scope.codebase_of_ide_scope cs.s
 let lsp_connection_addressing ~state ~uri =
   match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
   | Error err -> Error err
+  | Ok (Some _) when not (workspace_axis_present uri) ->
+    Error
+      { Server_ide_scope.code = "missing_workspace_anchor"
+      ; message =
+          "codebase-scoped LSP requires repo_id=<id> or keeper=<name> so document URIs have an exact workspace root"
+      }
   | Ok scope ->
     (* RFC-0378 §5.3b: the scope names the overlay store; the workspace
        tree anchor is the separate workspace axis, resolved from its own
@@ -1362,6 +1377,7 @@ module For_testing = struct
   let workspace_root_for_initialize = workspace_root_for_initialize
   let initialize_result_json = initialize_result_json
   let inbound_dispatch_worker_count = Lsp_proxy_limits.inbound_dispatch_worker_count
+  let workspace_axis_present = workspace_axis_present
 
   type nonrec resolved_lang = resolved_lang =
     | Known_lang of string

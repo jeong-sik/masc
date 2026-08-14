@@ -109,7 +109,9 @@ export function sameIdeWorkspaceIdentity(
     case 'project':
       return true
     case 'repository':
-      return right.kind === 'repository' && left.repoId === right.repoId
+      return right.kind === 'repository'
+        && left.repoId === right.repoId
+        && (left.codebase ?? null) === (right.codebase ?? null)
     case 'keeper':
       return right.kind === 'keeper' && left.keeper === right.keeper
   }

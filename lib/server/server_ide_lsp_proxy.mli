@@ -17,6 +17,10 @@ module For_testing : sig
       init off the socket read path. *)
   val inbound_dispatch_worker_count : int
 
+  (** True only when the LSP URI names a non-empty [repo_id] or [keeper]
+      workspace axis. A codebase store without this anchor is rejected. *)
+  val workspace_axis_present : Uri.t -> bool
+
   type resolved_lang =
     | Known_lang of string
     | Unknown_lang

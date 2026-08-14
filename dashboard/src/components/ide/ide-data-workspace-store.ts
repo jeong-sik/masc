@@ -1,4 +1,4 @@
-import { signal, effect, untracked } from '@preact/signals'
+import { computed, signal, effect, untracked } from '@preact/signals'
 import {
   activeIdeFile,
   activeIdeFocus,
@@ -295,6 +295,14 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const workspaceBasePathSignal = signal<string | null>(null)
   const repositoriesSignal = signal<ReadonlyArray<Repository>>([])
   const activeRepositoryIdSignal = signal<string | null>(null)
+  // Repository list refreshes may mint or correct a codebase without changing
+  // the selected repo id. Depend on the selected slug itself so only that
+  // identity change re-runs observation fetches; unrelated catalog refreshes
+  // remain inert.
+  const selectedCodebaseSignal = computed(() => {
+    const repoId = activeRepositoryIdSignal.value
+    return repositoriesSignal.value.find(repository => repository.id === repoId)?.codebase ?? null
+  })
   const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
   const currentWorkspaceIssues = (): ReadonlyArray<WorkspaceFetchIssue> =>
     workspaceIssuesSignal.peek()
@@ -406,11 +414,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
     const task = selectedTask.value
-    // peek: the codebase is derived from the already-tracked repoId — reading
-    // the repository list reactively here would subscribe this fetch effect to
-    // every repositories refresh and re-fire it without a selection change.
-    const selectedCodebase =
-      repositoriesSignal.peek().find(repository => repository.id === repoId)?.codebase ?? null
+    const selectedCodebase = selectedCodebaseSignal.value
     const workspaceIdentity = ideWorkspaceIdentityForSelection(repoId, keeper, selectedCodebase)
     const workspaceIdentityChanged = !sameIdeWorkspaceIdentity(
       activeIdeWorkspaceIdentity.peek(),
@@ -682,31 +686,35 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
         // the region read only after that load has committed; doing both in
         // parallel let a slower file response mark a valid region response as
         // stale before it could populate the ownership projection.
-        documentStore.loadRegions(filePath, ideOpts).then(() => {
-          if (signal.aborted || documentStore.document().file_path !== filePath) return
-          for (const region of documentStore.regions()) {
-            ownershipStore.ingest({
-              file_path: region.file_path,
-              line_start: region.line_start,
-              line_end: region.line_end,
-              keeper_id: region.keeper_id,
-              timestamp_ms: region.timestamp_ms,
-              // Regions prove that a keeper operated on this code range, but the
-              // wire contract deliberately does not infer a more specific edit
-              // operation such as create/refactor/revert.
-              kind: 'observed',
+        if (codebase) {
+          documentStore.loadRegions(filePath, ideOpts).then(() => {
+            if (signal.aborted || documentStore.document().file_path !== filePath) return
+            for (const region of documentStore.regions()) {
+              ownershipStore.ingest({
+                file_path: region.file_path,
+                line_start: region.line_start,
+                line_end: region.line_end,
+                keeper_id: region.keeper_id,
+                timestamp_ms: region.timestamp_ms,
+                // Regions prove that a keeper operated on this code range, but the
+                // wire contract deliberately does not infer a more specific edit
+                // operation such as create/refactor/revert.
+                kind: 'observed',
+              })
+            }
+            clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
+          }).catch(error => {
+            if (signal.aborted) return
+            recordIssue('regions', error, {
+              filePath,
+              keeper: keeperParam ?? null,
+              repoId,
+              fallbackMessage: 'IDE regions fetch failed',
             })
-          }
-          clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
-        }).catch(error => {
-          if (signal.aborted) return
-          recordIssue('regions', error, {
-            filePath,
-            keeper: keeperParam ?? null,
-            repoId,
-            fallbackMessage: 'IDE regions fetch failed',
           })
-        })
+        } else {
+          clearIssue('regions', { filePath, keeper: keeperParam ?? null, repoId })
+        }
       } else {
         documentStore.invalidate()
         const currentFocus = activeIdeFocus.peek()

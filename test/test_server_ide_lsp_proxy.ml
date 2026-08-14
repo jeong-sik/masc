@@ -56,6 +56,24 @@ let test_workspace_root_initialize_stays_in_base () =
     (Lsp.workspace_root_for_initialize ~base_path "file:///tmp/outside")
 ;;
 
+let test_codebase_scope_requires_workspace_axis () =
+  check bool "bare codebase has no tree anchor" false
+    (Lsp.workspace_axis_present
+       (Uri.of_string "/api/v1/ide/lsp?codebase=github.com_owner_repo"));
+  check bool "repository anchors codebase" true
+    (Lsp.workspace_axis_present
+       (Uri.of_string
+          "/api/v1/ide/lsp?codebase=github.com_owner_repo&repo_id=masc"));
+  check bool "keeper anchors codebase" true
+    (Lsp.workspace_axis_present
+       (Uri.of_string
+          "/api/v1/ide/lsp?codebase=github.com_owner_repo&keeper=sangsu"));
+  check bool "blank repository is not an anchor" false
+    (Lsp.workspace_axis_present
+       (Uri.of_string
+          "/api/v1/ide/lsp?codebase=github.com_owner_repo&repo_id=%20"))
+;;
+
 let test_file_uri_resolution_is_workspace_scoped () =
   let base = "/workspace/masc" in
   check
@@ -444,6 +462,8 @@ let () =
             test_initialize_handshake_is_read_only
         ; test_case "initialize root stays inside workspace" `Quick
             test_workspace_root_initialize_stays_in_base
+        ; test_case "codebase scope requires a workspace axis" `Quick
+            test_codebase_scope_requires_workspace_axis
         ; test_case "file uri resolution is workspace scoped" `Quick
             test_file_uri_resolution_is_workspace_scoped
         ; test_case "file uri resolution rejects symlink escape" `Quick

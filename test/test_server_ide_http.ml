@@ -835,6 +835,20 @@ let test_get_events_rejects_invalid_canonical_scope () =
       (error_code_of_response response))
 ;;
 
+let test_get_events_rejects_dot_codebase_scope () =
+  with_ide_server (fun ~base_path:_ ~state:_ ~router ->
+    let request =
+      http_request ~meth:`GET ~path:"/api/v1/ide/events?codebase=." ()
+    in
+    let response = dispatch router request in
+    check_status "GET events with dot codebase returns 400" 400 response;
+    check
+      string
+      "dot codebase code"
+      "invalid_codebase"
+      (error_code_of_response response))
+;;
+
 let test_post_annotations_rejects_missing_scope () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
@@ -1026,6 +1040,10 @@ let () =
             "GET events rejects an invalid codebase scope"
             `Quick
             test_get_events_rejects_invalid_canonical_scope
+        ; test_case
+            "GET events rejects dot codebase scope"
+            `Quick
+            test_get_events_rejects_dot_codebase_scope
         ; test_case
             "POST annotation rejects missing scope"
             `Quick

@@ -7,9 +7,9 @@
 # (the LSP overlay cache keys revisions by file byte length under an
 # append-only assumption a directory swap breaks — review P0-2).
 #
-# The store root is <project-root>/.masc-ide, the sibling of the .masc
-# base path. Pass it explicitly, or let the script derive it from
-# MASC_BASE_PATH.
+# The store root is <project-root>/.masc-ide. MASC_BASE_PATH is that project
+# root, so pass the store explicitly or let the script append .masc-ide to the
+# runtime's exact base path.
 set -euo pipefail
 
 usage() {
@@ -49,7 +49,7 @@ if [ -z "${STORE}" ]; then
     usage
     exit 2
   fi
-  STORE="$(dirname "${MASC_BASE_PATH}")/.masc-ide"
+  STORE="${MASC_BASE_PATH%/}/.masc-ide"
 fi
 
 STORE="${STORE%/}"

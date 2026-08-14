@@ -111,6 +111,10 @@ let () =
             "slash in codebase"
             `Quick
             (check_rejected ~codebase:"github.com/x" ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "dot codebase"
+            `Quick
+            (check_rejected ~codebase:"." ~path:"lib/x.ml" A.Malformed_codebase)
         ] )
     ]
 ;;

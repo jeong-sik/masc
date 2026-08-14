@@ -57,24 +57,29 @@ type trajectory = {
   task_id : string option;
 }
 
-(** {1 Thinking entries}
+(** {1 Withheld reasoning entries} *)
 
-    Thinking blocks from LLM responses, persisted alongside tool call entries
-    in the same JSONL file with [type = "thinking"]. *)
+type withheld_reasoning_kind =
+  | Thinking_block
+  | Reasoning_details
+  | Redacted_thinking
 
-type thinking_entry = {
+type withheld_thinking_entry = {
   ts : float;
   ts_iso : string;
   turn : int;
-  content : string;
-  content_length : int;
-  redacted : bool;
+  block_index : int;
+  reasoning_kind : withheld_reasoning_kind;
+  char_count : int;
 }
+(** Metadata for one newly observed reasoning block. The type cannot carry
+    hidden content or provider replay signatures. *)
 
-(** Tagged union for reading mixed JSONL (tool calls + thinking). *)
+(** Tagged union for reading tool calls and metadata-only reasoning evidence.
+    Content-bearing historical thinking rows are rejected by the decoder. *)
 type trajectory_line =
   | Tool_call of tool_call_entry
-  | Thinking of thinking_entry
+  | Withheld_thinking of withheld_thinking_entry
 
 (** {1 Cost estimation} *)
 
@@ -86,7 +91,6 @@ val gate_decision_to_json : gate_decision -> Yojson.Safe.t
 val outcome_to_json : trajectory_outcome -> Yojson.Safe.t
 val outcome_to_string : trajectory_outcome -> string
 val default_result_truncation : int
-val default_thinking_truncation : int
 val entry_to_json :
   ?result_max_len:int ->
   ?runtime_contract:Yojson.Safe.t ->
@@ -101,8 +105,8 @@ val tool_call_entry_of_json :
     JSON. The [bool] is true when the gate field parsed from a
     persisted value rather than the legacy default. Exposed for
     RFC-0233 consumers that join rows on [execution_id]. *)
-val thinking_entry_to_json : ?content_max_len:int -> thinking_entry -> Yojson.Safe.t
-val trajectory_line_to_json : ?result_max_len:int -> ?content_max_len:int -> trajectory_line -> Yojson.Safe.t
+val withheld_thinking_entry_to_json : withheld_thinking_entry -> Yojson.Safe.t
+val trajectory_line_to_json : ?result_max_len:int -> trajectory_line -> Yojson.Safe.t
 val trajectory_to_json : trajectory -> Yojson.Safe.t
 
 (** {1 Persistence} *)
@@ -120,9 +124,11 @@ val append_summary :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   trajectory -> unit
 
-val append_thinking :
+val append_withheld_thinking :
   masc_root:string -> keeper_name:string -> trace_id:string ->
-  thinking_entry -> unit
+  withheld_thinking_entry -> unit
+(** Persist one metadata-only reasoning observation. [content] is always JSON
+    null at this writer boundary. *)
 
 val read_entries :
   masc_root:string -> keeper_name:string -> trace_id:string ->

@@ -228,8 +228,12 @@ describe('scheduleSessionTraceReload', () => {
         ts: 1712400000,
         ts_iso: '2024-04-06T10:40:00Z',
         turn: 12,
-        content: 'new keeper thought',
-        content_length: 18,
+        content: null,
+        content_withheld: true,
+        observation: 'withheld',
+        reasoning_kind: 'thinking',
+        char_count: 18,
+        identity: { source: 'trajectory_block', block_index: 0 },
         redacted: false,
       }],
     })
@@ -247,7 +251,7 @@ describe('scheduleSessionTraceReload', () => {
 
     expect(dashboardApiMocks.fetchAgentTimeline).toHaveBeenCalledTimes(1)
     expect(dashboardApiMocks.fetchKeeperTrajectory).toHaveBeenCalledTimes(1)
-    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('new keeper thought')
+    expect(getTraceEvents('keeper-a')[0]?.summary).toBe('[비공개 사고]')
   })
 
   it('ignores reload requests for closed trace slots', async () => {

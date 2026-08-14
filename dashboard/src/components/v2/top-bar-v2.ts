@@ -132,6 +132,16 @@ export function AttentionIndicatorV2() {
 
   const a = computeAttention()
   const approvalQueueUnknown = a.approvalQueueState?.state !== 'ready' || a.approvals === null
+  if (!a.total && a.approvalQueueState && a.approvalQueueState.state !== 'ready') {
+    const state = a.approvalQueueState
+    return html`
+      <button
+        class=${`v2-statchip attn ${state.severity}`}
+        onClick=${() => navigate('approvals')}
+        title=${state.operator_detail}
+      >${state.icon} ${state.title}</button>
+    `
+  }
   if (!a.total && a.health.state === 'healthy' && !approvalQueueUnknown) {
     return html`<span class="v2-statchip live" title="처리할 항목 없음">${'✓'} 정상</span>`
   }

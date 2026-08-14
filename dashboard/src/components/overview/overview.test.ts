@@ -32,6 +32,7 @@ import type {
 } from '../../api/dashboard'
 import { keepers, boardPosts, boardTotal, lastBoardRefreshAt, shellRuntimeResolution } from '../../store'
 import type { Goal } from '../../types/core'
+import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 
 const overviewMocks = vi.hoisted(() => ({
   scheduledAutomationProjection: { value: null as null | DashboardScheduledAutomationProjection },
@@ -41,6 +42,10 @@ vi.mock('../schedule/schedule-state', () => ({
   scheduledAutomationProjection: overviewMocks.scheduledAutomationProjection,
   subscribeScheduledAutomationRefresh: () => () => {},
 }))
+
+afterEach(() => {
+  dashboardFullHealthResource.reset()
+})
 
 // bar-seg ratio helper (mirrors FunnelCard inline logic)
 function segPct(counts: FunnelCounts, key: 'created' | 'inProgress' | 'awaiting' | 'completed'): number {
@@ -1288,6 +1293,8 @@ describe('Overview prototype surface', () => {
         const card = container.querySelector('[data-testid="domain-schedule"]')
         expect(card?.textContent).toContain('runner: ok')
       })
+      expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/health?full=1')))
+        .toHaveLength(1)
     } finally {
       overviewMocks.scheduledAutomationProjection.value = previousScheduledAutomation
       if (previousFetch) {

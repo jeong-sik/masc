@@ -117,4 +117,35 @@ describe('AttentionIndicatorV2 backend health', () => {
       expect(container.textContent).toContain('Runtime health error')
     })
   })
+
+  it('keeps a non-ready Gate title visible on the collapsed chip', async () => {
+    gateResource.reset({
+      ...readyGate,
+      approval_queue: null,
+      approval_queue_state: {
+        state: 'observation_error',
+        code: 'observation_failed',
+        title: 'Gate observation unavailable',
+        operator_detail: 'Gate refresh failed',
+        severity: 'bad',
+        icon: '!',
+      },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(healthResponse(false)),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+
+    await act(async () => {
+      render(html`<${AttentionIndicatorV2} />`, container)
+    })
+
+    await waitFor(() => {
+      const chip = container.querySelector('.v2-statchip.attn')
+      expect(chip?.textContent).toContain('! Gate observation unavailable')
+      expect(chip?.textContent).not.toContain('주의 ?')
+      expect(chip?.classList.contains('bad')).toBe(true)
+      expect(chip?.getAttribute('title')).toBe('Gate refresh failed')
+    })
+  })
 })

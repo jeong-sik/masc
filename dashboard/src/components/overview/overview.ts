@@ -57,13 +57,15 @@ import {
 import {
   fetchTelemetry,
   fetchTelemetrySummary,
-  fetchDashboardFullHealth,
   type TelemetryEntry,
   type TelemetrySourceSummary,
-  type DashboardFullHealthResponse,
   type DashboardKeeperEventQueueHealth,
   type DashboardScheduleRunnerStatus,
 } from '../../api/dashboard'
+import {
+  dashboardFullHealth,
+  subscribeDashboardFullHealthRefresh,
+} from '../dashboard-full-health-state'
 import {
   OVERVIEW_TELEMETRY_EVENTS_PER_BUCKET,
 } from '../../config/constants'
@@ -995,14 +997,6 @@ function loadOverviewTelemetry(nowMs = Date.now()): Promise<void> {
   })
 }
 
-const overviewFullHealthResource: AsyncResource<DashboardFullHealthResponse> = createAsyncResource()
-
-function loadOverviewFullHealth(): Promise<void> {
-  return overviewFullHealthResource.load(async () => {
-    return fetchDashboardFullHealth()
-  })
-}
-
 // ─── Keeper-v2 overview surfaces ─────────────────────────────────────────────
 
 function nowHMKst(): string {
@@ -1554,17 +1548,20 @@ export function Overview() {
   useNowSecondsTicker()
   useEffect(() => {
     void loadOverviewTelemetry()
-    void loadOverviewFullHealth()
     const interval = window.setInterval(() => {
       void loadOverviewTelemetry()
-      void loadOverviewFullHealth()
     }, 60_000)
+    // Overview and the shell consume one shared full-health resource. The
+    // subscriber owns ref-counted refresh lifetime, so mounting both surfaces
+    // never creates a second backend poller.
+    const stopFullHealthRefresh = subscribeDashboardFullHealthRefresh()
     // Schedule state is its own projection with its own poller. Root used to
     // reach it through the tool inventory, which meant entering the home
     // surface fetched the whole tool registry.
     const stopScheduleRefresh = subscribeScheduledAutomationRefresh()
     return () => {
       window.clearInterval(interval)
+      stopFullHealthRefresh()
       stopScheduleRefresh()
     }
   }, [])
@@ -1578,14 +1575,8 @@ export function Overview() {
       ? gateData.value?.approval_queue?.length ?? null
       : null
   const scheduledAutomationData = scheduledAutomationProjection.value ?? null
-  const scheduleRunnerStatus =
-    overviewFullHealthResource.state.value.status === 'loaded'
-      ? overviewFullHealthResource.state.value.data.schedule_runner ?? null
-      : null
-  const keeperQueueHealth =
-    overviewFullHealthResource.state.value.status === 'loaded'
-      ? overviewFullHealthResource.state.value.data.keeper_event_queue ?? null
-      : null
+  const scheduleRunnerStatus = dashboardFullHealth.value?.schedule_runner ?? null
+  const keeperQueueHealth = dashboardFullHealth.value?.keeper_event_queue ?? null
   // Keeper execution counts come from the runtime-health fleet projection the
   // shell already holds — the same `keeper_fleet_safety_health_json` payload
   // `/health?full=1` embeds, so reading it here adds no request.

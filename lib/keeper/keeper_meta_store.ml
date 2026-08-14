@@ -89,7 +89,7 @@ let persisted_keeper_name_for_agent_name config ~agent_name =
 ;;
 
 let persisted_keeper_for_mention_target config ~mention_target =
-  let target = String.trim mention_target in
+  let target = Keeper_identity.Keeper_id.of_string mention_target in
   let read_effective keeper_name =
     match read_meta_file_path (keeper_meta_path config keeper_name) with
     | Error _ as error -> error
@@ -107,11 +107,18 @@ let persisted_keeper_for_mention_target config ~mention_target =
        | Error detail -> Error detail
        | Ok None -> collect matches rest
        | Ok (Some meta) ->
-         if List.exists (String.equal target) meta.mention_targets
+         if
+           List.exists
+             (fun alias ->
+                match Keeper_identity.Keeper_id.of_string alias, target with
+                | Some alias_id, Some target_id ->
+                  Keeper_identity.Keeper_id.equal alias_id target_id
+                | None, _ | _, None -> false)
+             meta.mention_targets
          then collect ((keeper_name, meta) :: matches) rest
          else collect matches rest)
   in
-  if target = ""
+  if Option.is_none target
   then Ok None
   else
     match persisted_keeper_names_result config with
@@ -125,7 +132,7 @@ let persisted_keeper_for_mention_target config ~mention_target =
          Error
            (Printf.sprintf
               "multiple persisted Keepers claim mention_target=%s: %s"
-              target
+              (String.trim mention_target)
               (matches |> List.map fst |> String.concat ",")))
 ;;
 

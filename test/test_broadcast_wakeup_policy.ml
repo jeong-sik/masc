@@ -202,18 +202,23 @@ let delivery_message ~base_path ~keeper_name ~request_id =
 let test_configured_mention_alias_resolves_and_stamps_feed_target () =
   with_workspace @@ fun config ->
   let keeper_name = "rondo" in
-  let alias = "sangsu" in
+  let configured_alias = "Sangsu" in
+  let delivery_target = "sangsu" in
   let request_id = "wmsg-1122334455667788" in
   persist_meta config keeper_name;
-  configure_mention_targets config keeper_name [ alias ];
-  check_effective_mention_targets config keeper_name [ alias ];
+  configure_mention_targets config keeper_name [ configured_alias ];
+  check_effective_mention_targets config keeper_name [ configured_alias ];
   let outcome =
     Broadcast_wakeup.deliver_broadcast_mention
       ~config
       ~base_path:config.base_path
       ~is_running:(String.equal keeper_name)
       ~wakeup:(fun _ -> ())
-      (delivery ~target:alias ~request_id ~seq:4 ~content:"alias delivery")
+      (delivery
+         ~target:delivery_target
+         ~request_id
+         ~seq:4
+         ~content:"alias delivery")
   in
   (match outcome with
    | Server_bootstrap_loops.Broadcast_persisted_and_woken actual ->
@@ -226,7 +231,7 @@ let test_configured_mention_alias_resolves_and_stamps_feed_target () =
       List.map Keeper_identity.Keeper_id.to_string message.mentions
     in
     check bool "persisted row carries configured feed target" true
-      (List.mem alias mentions)
+      (List.mem delivery_target mentions)
 ;;
 
 let test_canonical_delivery_stamps_configured_feed_target () =

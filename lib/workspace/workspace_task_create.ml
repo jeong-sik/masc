@@ -358,7 +358,14 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                     (List.length added_tasks)
                     summary
                 in
-                let _ = broadcast config ~from_agent:actor ~content:msg in
+                (match broadcast config ~from_agent:actor ~content:msg with
+                 | Ok _ -> ()
+                 | Error error ->
+                   Log.Workspace.error
+                     "batch task creation committed but broadcast was not persisted actor=%s task_ids=%s detail=%s"
+                     actor
+                     summary
+                     (broadcast_error_to_string error));
                 let count = List.length added_tasks in
                 let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
                 let summary = Printf.sprintf "Added %d tasks: %s" count summary in

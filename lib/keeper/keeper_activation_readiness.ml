@@ -238,8 +238,31 @@ let classify_owner_execution =
   classify_owner_execution_with ~require_proactive:true
 ;;
 
-let classify_durable_demand_execution =
-  classify_owner_execution_with ~require_proactive:false
+let classify_durable_demand_execution
+      ~shutdown_operation_id
+      ~runtime
+      meta_result
+  =
+  match
+    classify_owner_execution_with
+      ~require_proactive:false
+      ~shutdown_operation_id
+      ~runtime
+      meta_result,
+    runtime,
+    meta_result
+  with
+  | Retained_disabled Retained_autoboot_disabled,
+    Owner_registered
+      { phase = Keeper_state_machine.Running; live_fiber = true; _ },
+    Ok meta
+      when (not meta.autoboot_enabled)
+           && (Keeper_lifecycle_gate_env.global ()).autonomous ->
+    (* [autoboot_enabled] controls whether an absent owner may be started. It
+       must not suppress an explicit durable wake for an owner that is already
+       running. Lifecycle and shutdown fences were resolved before this arm. *)
+    Executable
+  | truth, _, _ -> truth
 ;;
 
 let of_meta meta =

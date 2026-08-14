@@ -30,11 +30,13 @@ type run_status =
       { outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      ; selected_slot : string option
       }
   | Completion_persistence_failed of
       { intended_outcome : outcome
       ; elapsed_s : float
       ; output : Yojson.Safe.t
+      ; selected_slot : string option
       ; failure : persistence_failure
       }
 
@@ -54,6 +56,7 @@ type t
 
 type completion_error =
   | Unknown_run
+  | Invalid_selected_slot
   | Persistence_failed of persistence_failure
 
 val completion_error_to_string : completion_error -> string
@@ -87,13 +90,16 @@ val mark_completed
   -> run_id:string
   -> outcome:outcome
   -> elapsed_s:float
+  -> selected_slot:string option
   -> output:Yojson.Safe.t
   -> (unit, completion_error) result
 (** Record an observation-plane completion without taking ownership of the
     caller's primary lifecycle. Persistence failures are returned rather than
     raised. The durable core entry remains [Running], while [get]/[list_runs]
     expose [Completion_persistence_failed] with an explicit durability state;
-    callers never silently present a terminal run as still executing. *)
+    callers never silently present a terminal run as still executing. The
+    labelled [selected_slot] argument forces every producer to state whether it
+    owns an accepted exact-flow receipt. Blank slot identities are rejected. *)
 
 val list_runs : t -> run list
 

@@ -135,6 +135,7 @@ type t =
   | MemoryLaneSubmitted
   | MemoryLaneRanInline
   | MemoryLaneDropped
+  | MemoryLaneRejectedDraining
   | MemoryLaneCoalesced
   | MemoryLanePending
   | MemoryLaneInFlight
@@ -345,6 +346,8 @@ let to_string = function
   | MemoryLaneSubmitted -> "masc_keeper_memory_lane_submitted_total"
   | MemoryLaneRanInline -> "masc_keeper_memory_lane_ran_inline_total"
   | MemoryLaneDropped -> "masc_keeper_memory_lane_dropped_total"
+  | MemoryLaneRejectedDraining ->
+    "masc_keeper_memory_lane_rejected_draining_total"
   | MemoryLaneCoalesced -> "masc_keeper_memory_lane_coalesced_total"
   | MemoryLanePending -> "masc_keeper_memory_lane_pending"
   | MemoryLaneInFlight -> "masc_keeper_memory_lane_in_flight"

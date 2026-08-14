@@ -59,13 +59,15 @@ let home_error_to_core_error error =
     (Runtime_antigravity_home.error_to_string error)
 ;;
 
+let history_role_label = function
+  | Agent_core.Types.System -> "SYSTEM:\n"
+  | Agent_core.Types.User -> "USER:\n"
+  | Agent_core.Types.Assistant -> "ASSISTANT:\n"
+  | Agent_core.Types.Tool -> "TOOL:\n"
+;;
+
 let render_message (message : Agent_core.Types.message) =
-  let text = Host.encode_history_message message in
-  match message.role with
-  | Agent_core.Types.System -> Ok ("SYSTEM:\n" ^ text)
-  | Agent_core.Types.User -> Ok ("USER:\n" ^ text)
-  | Agent_core.Types.Assistant -> Ok ("ASSISTANT:\n" ^ text)
-  | Agent_core.Types.Tool -> Ok ("TOOL:\n" ^ text)
+  Ok (history_role_label message.role ^ Host.encode_history_message message)
 ;;
 
 let render_messages messages =
@@ -86,6 +88,101 @@ let extra_system_context_messages messages =
     messages
 ;;
 
+let system_instructions_label = "SYSTEM INSTRUCTIONS:\n"
+let current_goal_label = "CURRENT GOAL:\n"
+let prompt_section_separator = "\n\n"
+
+let measure_model_input_message_bytes (message : Agent_core.Types.message) =
+  String.length (history_role_label message.role)
+  + String.length (Host.encode_history_message message)
+  + String.length prompt_section_separator
+;;
+
+(* The declared per-model [max-prompt-bytes] is the only authority that can
+   bound this provider's turn prompt. The reactive shrink contract the other
+   official clients rely on has no stimulus here: agy 1.1.12 does not refuse
+   an oversized prompt with a typed overflow — it silently truncates the
+   stdin payload (11,386,764 bytes sent, 185,751-byte USER_INPUT recorded by
+   the client, 2026-08-14) so the goal at the tail never reaches the model,
+   and while stalled on the oversized payload its print-mode response
+   subscriber is killed ("Publish killing slow subscriber ... stalled for
+   5s"), after which the result event reports SUCCESS with an empty
+   response. Six of six spawns failed exactly that way on 2026-08-14, each
+   parking the session and re-sending the full history to a fresh
+   conversation. Windowing the provider-bound history up front to the
+   declared capacity is therefore this runtime's admission contract, not a
+   second authority over a provider-owned window.
+
+   [prompt_section_framing_reserved_bytes] is derived from the actual label
+   literals [prompt_for_turn] concatenates, so a label change cannot silently
+   outgrow the reserve. Each history message is charged its actual role label
+   plus one separator; charging a separator for the last message too is a
+   deliberate conservative byte that keeps the rendered prompt within the
+   declared cap without depending on deployment margin. *)
+let prompt_section_framing_reserved_bytes =
+  String.length system_instructions_label
+  + String.length current_goal_label
+  + (2 * String.length prompt_section_separator)
+;;
+
+(* The source projection runs first: the one production source appends a
+   bounded typed Gate replay reference (keeper_agent_run.ml), and on this
+   lane the window is the only authority over the transmitted bytes — there
+   is no provider refusal to catch an append that lands after the cut, so
+   the window must see everything that ships. The appended reference is the
+   newest material and survives the tail window. *)
+let bounded_history_projection ~capacity_bytes ~reserved_bytes source_projection
+  : Agent_core.Agent.model_input_projection
+  =
+  fun messages ->
+  let* messages =
+    match source_projection with
+    | None -> Ok messages
+    | Some project -> project messages
+  in
+  Domain_pool_ref.submit_cpu_or_inline (fun () ->
+    match
+      Runtime_model_input_tail_window.project
+        ~allow_empty_history:true
+        ~measure_message_bytes:measure_model_input_message_bytes
+        ~capacity_bytes
+        ~reserved_bytes
+        messages
+    with
+    | Ok projected -> Ok projected
+    | Error error ->
+      Error (Runtime_model_input_tail_window.budget_error_to_string error))
+;;
+
+let capacity_bounded_model_input_projection ~declared_max_prompt_bytes
+    ~system_prompt ~goal source_projection
+  =
+  match declared_max_prompt_bytes with
+  | None -> Ok source_projection
+  | Some capacity_bytes ->
+    let reserved_bytes =
+      String.length system_prompt
+      + String.length goal
+      + prompt_section_framing_reserved_bytes
+    in
+    if reserved_bytes >= capacity_bytes
+    then
+      Error
+        (config_error
+           ~field:"max_prompt_bytes"
+           (Printf.sprintf
+              "Antigravity fixed prompt sections (system prompt and goal) measure %d bytes, at or above the declared max-prompt-bytes %d; no history window can fit"
+              reserved_bytes
+              capacity_bytes))
+    else
+      Ok
+        (Some
+           (bounded_history_projection
+              ~capacity_bytes
+              ~reserved_bytes
+              source_projection))
+;;
+
 let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
   if is_resume
   then (
@@ -99,17 +196,17 @@ let prompt_for_turn ~is_resume ~goal (prepared : Host.prepared_turn) =
     in
     match String_util.trim_to_option context with
     | None -> Ok goal
-    | Some context -> Ok (context ^ "\n\n" ^ goal))
+    | Some context -> Ok (context ^ prompt_section_separator ^ goal))
   else
     let* history = render_messages prepared.messages in
     Ok
       ([ String_util.trim_to_option prepared.system_prompt
-         |> Option.map (fun value -> "SYSTEM INSTRUCTIONS:\n" ^ value)
+         |> Option.map (fun value -> system_instructions_label ^ value)
       ; String_util.trim_to_option history
-      ; Some ("CURRENT GOAL:\n" ^ goal)
+      ; Some (current_goal_label ^ goal)
       ]
       |> List.filter_map Fun.id
-      |> String.concat "\n\n")
+      |> String.concat prompt_section_separator)
 ;;
 
 let tool_spec (tool : Host.dynamic_tool) =
@@ -264,6 +361,21 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     in
     let is_resume = Option.is_some claim_plan.previous_settlement in
     let turn_count = claim_plan.turn_count in
+    let* goal =
+      match goal_blocks with
+      | None -> Ok goal
+      | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
+    in
+    let declared_max_prompt_bytes =
+      Runtime_inference.resolve_max_prompt_bytes ~runtime_id
+    in
+    let* model_input_projection =
+      capacity_bounded_model_input_projection
+        ~declared_max_prompt_bytes
+        ~system_prompt
+        ~goal
+        model_input_projection
+    in
     let* prepared =
       Host.prepare_turn
         ~configured_reasoning_effort:
@@ -291,12 +403,22 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ~field:"reasoning_effort"
              "Antigravity effort must be declared by its runtime provider")
     in
-    let* goal =
-      match goal_blocks with
-      | None -> Ok goal
-      | Some blocks -> Host.text_of_blocks ~runtime_label ~field:"goal_blocks" blocks
-    in
     let* prompt = prompt_for_turn ~is_resume ~goal prepared in
+    (* Recording the half this process controls, mirroring the Codex and
+       Claude Code composition lines: an oversized prompt was invisible until
+       the client's own log showed promptLength=11,386,764 (2026-08-14). *)
+    Log.Keeper.info
+      ~keeper_name
+      "%s turn composition: mode=%s prompt_bytes=%d system_prompt_bytes=%d \
+       goal_bytes=%d declared_max_prompt_bytes=%s"
+      runtime_label
+      (if is_resume then "resume" else "start")
+      (String.length prompt)
+      (String.length prepared.system_prompt)
+      (String.length goal)
+      (match declared_max_prompt_bytes with
+       | None -> "undeclared"
+       | Some bytes -> string_of_int bytes);
     let terminal_error = ref None in
     let* dynamic_tools =
       Host.dynamic_tools
@@ -801,3 +923,26 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
   in
   { result; effect_disposition = Atomic.get effect_disposition }
 ;;
+
+module For_testing = struct
+  let capacity_bounded_model_input_projection =
+    capacity_bounded_model_input_projection
+  ;;
+
+  let start_prompt_bytes ~system_prompt ~goal messages =
+    let prepared : Host.prepared_turn =
+      { messages; system_prompt; tools = []; reasoning_effort = None }
+    in
+    Result.map String.length (prompt_for_turn ~is_resume:false ~goal prepared)
+  ;;
+
+  (* One byte more than this is the smallest admissible declared capacity.
+     This is not the rendered empty-history prompt: the reserve charges both
+     separators (the with-history worst case), while an empty-history render
+     joins its two sections with one. *)
+  let reserved_prompt_bytes ~system_prompt ~goal =
+    String.length system_prompt
+    + String.length goal
+    + prompt_section_framing_reserved_bytes
+  ;;
+end

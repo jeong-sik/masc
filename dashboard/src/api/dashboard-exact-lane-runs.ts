@@ -38,6 +38,9 @@ export interface ExactLaneRunSummary {
   intendedDetail?: string
   persistenceError?: string
   persistenceState?: ExactLanePersistenceState
+  // Opaque configured exact-lane slot. This is not separately authoritative
+  // provider/model attribution. Running rows have no terminal value yet.
+  selectedSlot?: string | null
 }
 
 // One opened run, payloads included.
@@ -122,7 +125,9 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
   const base = ['run_id', 'lane', 'subject_id', 'actor', 'started_at', 'status']
     .concat(withPayloads ? ['input'] : [])
   // `output` rides with the payloads; a summary never carries it.
-  const completion = withPayloads ? ['elapsed_s', 'output'] : ['elapsed_s']
+  const completion = withPayloads
+    ? ['elapsed_s', 'output', 'selected_slot']
+    : ['elapsed_s', 'selected_slot']
   const persistenceFailure = status === 'completion_persistence_failed'
     || status === 'completion_durability_unknown'
   const intendedStatus = persistenceFailure
@@ -158,6 +163,11 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
   if (persistenceState !== expectedPersistenceState) {
     fail(`${context}.persistence_state must be ${JSON.stringify(expectedPersistenceState)}`)
   }
+  const selectedSlot = status === 'running'
+    ? undefined
+    : raw.selected_slot === null
+      ? null
+      : string(raw.selected_slot, `${context}.selected_slot`)
   return {
     runId: string(raw.run_id, `${context}.run_id`),
     lane: lane as ExactLane,
@@ -181,6 +191,7 @@ function parseRun(raw: unknown, index: number, withPayloads: boolean): ExactLane
       ? string(raw.persistence_error, `${context}.persistence_error`)
       : undefined,
     persistenceState: persistenceState as ExactLanePersistenceState | undefined,
+    selectedSlot,
   }
 }
 

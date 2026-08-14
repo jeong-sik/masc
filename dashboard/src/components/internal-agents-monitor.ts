@@ -336,6 +336,9 @@ function ExactRunDetail({ runId }: { runId: string }) {
           <${EvidenceBadge} kind="typed" />
           <strong>Exact-output registry metadata</strong>
           <span class="text-[var(--color-fg-muted)]">Admin-only 실제 typed 값 · Librarian exact에는 research RAW 입력 없음</span>
+          ${run.selectedSlot === undefined
+            ? null
+            : html`<span class="text-[var(--color-fg-muted)]">선택 slot <code>${run.selectedSlot ?? '미기록'}</code></span>`}
           <a class="ml-auto text-[var(--color-accent)] hover:underline" href=${keeperHref(run.actor)}>Keeper 전체 evidence 열기 →</a>
         </div>
         <div class="grid gap-3 lg:grid-cols-2">
@@ -623,6 +626,9 @@ export function InternalAgentsMonitor() {
                     <span class="min-w-0">
                       <strong class="block text-xs text-[var(--color-fg-primary)]">${laneLabel(row)}</strong>
                       <code class="block truncate text-3xs text-[var(--color-fg-muted)]" title=${subject(row)}>${subject(row)}</code>
+                      ${row.source === 'exact' && row.run.lane === 'librarian_exact'
+                        ? html`<code translate="no" class="block truncate text-3xs text-[var(--color-fg-muted)]" title=${row.run.runId}>run_id · ${row.run.runId}</code>`
+                        : null}
                     </span>
                     <span class="text-right text-3xs text-[var(--color-fg-muted)]">
                       <span class="block">${actor(row)}</span>

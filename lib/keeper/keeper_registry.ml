@@ -298,18 +298,8 @@ let record_crash ~base_path name ts msg =
   Error_tracking.record_crash ~base_path name ts msg ~update_entry:update_entry_unit
 ;;
 
-let set_failure_reason_exact entry reason =
-  update_entry_exact entry (fun current -> { current with last_failure_reason = reason })
-;;
-
 let set_last_error_exact entry err =
   update_entry_exact entry (fun current -> { current with last_error = Some err })
-;;
-
-let record_crash_exact entry ts msg =
-  Log.Keeper.error "registry: recording exact-lane crash name=%s msg=%s" entry.name msg;
-  update_entry_exact entry (fun current ->
-    Error_tracking.record_crash_entry current ts msg)
 ;;
 
 let exact_update_succeeded entry ~site = function
@@ -607,14 +597,17 @@ let cleanup_tracking ~base_path name =
   | None -> ()
 ;;
 
-let cleanup_tracking_exact (entry : registry_entry) =
-  update_entry_exact entry (fun current ->
-    { current with
-      board_wakeups = StringMap.empty
-    ; tool_usage = StringMap.empty
-    ; board_cursor_ts = 0.0
-    ; board_cursor_post_id = None
-    })
+let cleanup_tracking_entry current =
+  { current with
+    board_wakeups = StringMap.empty
+  ; tool_usage = StringMap.empty
+  ; board_cursor_ts = 0.0
+  ; board_cursor_post_id = None
+  }
+;;
+
+let cleanup_tracking_exact_for_lifecycle token (entry : registry_entry) =
+  update_entry_exact_for_lifecycle token entry cleanup_tracking_entry
 ;;
 
 let clear () =

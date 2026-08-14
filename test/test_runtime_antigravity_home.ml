@@ -61,6 +61,14 @@ let test_prepares_private_home_with_oauth_seed () =
     (Yojson.Safe.equal
        (Runtime_antigravity_home.For_testing.settings_json ())
        (Yojson.Safe.from_file paths.settings_path));
+  (match Runtime_antigravity_home.For_testing.settings_json () with
+   | `Assoc fields ->
+     check
+       bool
+       "no dead toolPermission key"
+       false
+       (List.mem_assoc "toolPermission" fields)
+   | _ -> fail "settings must be a JSON object");
   check bool "oauth target is a regular file" true
     ((Unix.lstat paths.oauth_path).Unix.st_kind = Unix.S_REG);
   check int "managed oauth mode" 0o600 (permission paths.oauth_path);

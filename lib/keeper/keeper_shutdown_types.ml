@@ -149,6 +149,7 @@ type supersession =
 
 type phase =
   | Prepared
+  | Joining_lanes
   | Joined_idle
   | Finalizing_tasks of Keeper_id.Task_id.t list
   | Cleanup_ready of cleanup_evidence
@@ -202,6 +203,7 @@ let requires_admission_fence operation =
       { completion = (Completion_not_requested | Completion_delivered _); _ }
   | Superseded _ -> false
   | Prepared
+  | Joining_lanes
   | Joined_idle
   | Finalizing_tasks _
   | Cleanup_ready _
@@ -369,6 +371,7 @@ let validate operation =
          | Dashboard_keeper_purge _ ) as cleanup_reason ->
          Error (Superseded_cleanup_reason_mismatch cleanup_reason))
     | Prepared
+    | Joining_lanes
     | Joined_idle
     | Finalizing_tasks _
     | Cleanup_ready _

@@ -92,6 +92,7 @@ normal_targets=(
   @test/runtest-test_file_kind_vocabulary
   @test/runtest-test_http_auth_strict_flag
   @test/runtest-test_keeper_chat_broadcast
+  @test/runtest-test_keeper_memory_lane
   @test/runtest-test_server_dashboard_http_keeper_chat_page
   @test/runtest-test_keeper_codex_effort_clamp
   @test/runtest-test_keeper_codex_error_carriage
@@ -210,6 +211,7 @@ normal_targets=(
   @test/runtest-test_tool_call_quality_benchmark
   @test/runtest-test_client_identity
   @test/runtest-test_mcp_session_task_lifecycle
+  @test/runtest-test_mcp_server_eio
   @test/runtest-test_keeper_sandbox_docker_cwd_response
   @test/runtest-test_goal_store
   @test/runtest-test_keeper_goal_phase_projection

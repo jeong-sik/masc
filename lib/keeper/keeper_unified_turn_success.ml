@@ -631,6 +631,7 @@ let handle
       ~outcome:
         (decision_outcome_to_label
            (decision_outcome_of_terminal_outcome terminal_outcome))
+      ~channel
       ~degraded_retry_applied
       ?degraded_retry_runtime
       ?fallback_reason:

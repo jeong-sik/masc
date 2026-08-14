@@ -5,9 +5,14 @@ let internal_error = Keeper_official_client_host.internal_error
 
 module Host = Keeper_official_client_host
 
+type successful_tool_completion =
+  | No_successful_tool_completion
+  | Successful_tool_completion
+
 type attempt_outcome =
   { result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; effect_disposition : Keeper_provider_attempt_effect.t
+  ; successful_tool_completion : successful_tool_completion
   }
 
 let runtime_label = "Codex"
@@ -195,7 +200,8 @@ let model_input_projection_for_capacity
   Ok projected
 ;;
 
-let codex_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) :
+let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_completion
+    (tool : Host.dynamic_tool) :
     Runtime_codex_app_server.dynamic_tool =
   { tool with
     call =
@@ -205,7 +211,12 @@ let codex_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) :
            observing only its returned value would reopen a duplicate-effect
            window. *)
         observe_effect_attempted ();
-        tool.call ~call_id input)
+        let result = tool.call ~call_id input in
+        (* This is evidence that the handler returned a successful tool result,
+           which is sufficient to accept a tool-only provider terminal. It is
+           not durable-effect truth and grants no retry authority. *)
+        if result.success then observe_successful_tool_completion ();
+        result)
   }
 ;;
 
@@ -378,7 +389,7 @@ let recovery_failure_of_client_error = function
 let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~event_bus ~raw_trace ~on_event
-    ~observe_effect_attempted
+    ~observe_effect_attempted ~observe_successful_tool_completion
     ~(config : Runtime_execution.codex_app_server) =
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -537,7 +548,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~raw_trace_run:None
     in
     let dynamic_tools =
-      List.map (codex_dynamic_tool ~observe_effect_attempted) host_dynamic_tools
+      List.map
+        (codex_dynamic_tool
+           ~observe_effect_attempted
+           ~observe_successful_tool_completion)
+        host_dynamic_tools
     in
     (* The only size this tree reports for a turn is
        [keeper_unified_turn.ml]'s [system_and_user_bytes], which sums
@@ -606,7 +621,11 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~raw_trace_run
     in
     let dynamic_tools =
-      List.map (codex_dynamic_tool ~observe_effect_attempted) host_dynamic_tools
+      List.map
+        (codex_dynamic_tool
+           ~observe_effect_attempted
+           ~observe_successful_tool_completion)
+        host_dynamic_tools
     in
     let* claimed_session =
       match
@@ -940,6 +959,10 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
   let observe_effect_attempted () =
     Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
   in
+  let successful_tool_completion = Atomic.make No_successful_tool_completion in
+  let observe_successful_tool_completion () =
+    Atomic.set successful_tool_completion Successful_tool_completion
+  in
   let observed_next_shrink_capacity_bytes = ref None in
   let starting_capacity_bytes =
     Keeper_context_overflow_shrink_state.starting_capacity_bytes
@@ -997,10 +1020,14 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           ~raw_trace
           ~on_event
           ~observe_effect_attempted
+          ~observe_successful_tool_completion
           ~config)
       ())
   in
-  { result; effect_disposition = Atomic.get effect_disposition }
+  { result
+  ; effect_disposition = Atomic.get effect_disposition
+  ; successful_tool_completion = Atomic.get successful_tool_completion
+  }
 ;;
 
 module For_testing = struct

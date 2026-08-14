@@ -338,7 +338,9 @@ describe('KeeperTurnInspector v2 drawer', () => {
   // keeper_agent_run logs as "turn input composition unavailable".
   it('shows how much history a turn transmitted even without input components', async () => {
     const records = turnRecordsWithMemoryOs()
-    const latest = records.entries[records.entries.length - 1].record
+    const latestRow = records.entries.at(-1)
+    if (!latestRow) throw new Error('fixture must carry a latest turn')
+    const latest = latestRow.record
     latest.input_components = null
     latest.transmitted_atoms = 800
     latest.total_atoms = 5000

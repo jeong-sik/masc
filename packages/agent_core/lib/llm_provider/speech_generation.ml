@@ -305,7 +305,8 @@ let generate
 
 let test_caps task = { Capabilities.default_capabilities with task }
 
-let test_config ?(kind = Provider_config.OpenAI_compat) task =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] test_config ?(kind = Provider_config.OpenAI_compat) task =
   Provider_config.make
     ~kind
     ~provider_id:"test-speech"

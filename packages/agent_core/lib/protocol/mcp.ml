@@ -107,25 +107,6 @@ let list_tools t =
   | Ok tools -> Ok (List.map mcp_tool_of_agent_core_tool tools)
 ;;
 
-let decode_items field decode result_json =
-  let open Yojson.Safe.Util in
-  match result_json |> member field with
-  | `List items ->
-    let rec loop acc = function
-      | [] -> Ok (List.rev acc)
-      | item :: rest ->
-        (match decode item with
-         | Ok value -> loop (value :: acc) rest
-         | Error detail ->
-           Error
-             (Error.Serialization
-                (JsonParseError
-                   { detail = Printf.sprintf "MCP %s decode failed: %s" field detail })))
-    in
-    loop [] items
-  | _ -> Ok []
-;;
-
 let list_resources t =
   match Sdk_client.list_resources_all t.client with
   | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
@@ -444,7 +425,8 @@ let connect_all_best_effort ~sw ~mgr specs =
 [@@@coverage off]
 (* === Inline tests === *)
 
-let test_tool_result ?is_error ?structured_content content =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] test_tool_result ?is_error ?structured_content content =
   let fields = [ "content", Sdk_types.tool_content_list_to_yojson content ] in
   let fields =
     match is_error with
@@ -558,38 +540,6 @@ let%test "merge_env overrides existing keys" =
   | _ -> false
 ;;
 
-let%test "decode_items empty list returns Ok []" =
-  let json = `Assoc [ "items", `List [] ] in
-  decode_items "items" (fun _ -> Ok "x") json = Ok []
-;;
-
-let%test "decode_items missing field returns Ok []" =
-  let json = `Assoc [] in
-  decode_items "items" (fun _ -> Ok "x") json = Ok []
-;;
-
-let%test "decode_items decodes successfully" =
-  let json = `Assoc [ "items", `List [ `String "a"; `String "b" ] ] in
-  match
-    decode_items
-      "items"
-      (fun j ->
-         match j with
-         | `String s -> Ok s
-         | _ -> Error "bad")
-      json
-  with
-  | Ok [ "a"; "b" ] -> true
-  | _ -> false
-;;
-
-let%test "decode_items propagates decode error" =
-  let json = `Assoc [ "items", `List [ `Int 42 ] ] in
-  match decode_items "items" (fun _ -> Error "decode failed") json with
-  | Error _ -> true
-  | Ok _ -> false
-;;
-
 let%test "text_of_tool_result skips non-text content" =
   let r : Sdk_types.tool_result =
     test_tool_result
@@ -606,26 +556,6 @@ let%test "mcp_tool_of_json description not a string defaults to empty" =
   match mcp_tool_of_json json with
   | Some tool -> tool.description = ""
   | None -> false
-;;
-
-let%test "decode_items with single successful item" =
-  let json = `Assoc [ "items", `List [ `String "only" ] ] in
-  match
-    decode_items
-      "items"
-      (fun j ->
-         match j with
-         | `String s -> Ok s
-         | _ -> Error "bad")
-      json
-  with
-  | Ok [ "only" ] -> true
-  | _ -> false
-;;
-
-let%test "decode_items field is not a list returns Ok []" =
-  let json = `Assoc [ "items", `String "not a list" ] in
-  decode_items "items" (fun _ -> Ok "x") json = Ok []
 ;;
 
 let%test "merge_env multiple overrides" =

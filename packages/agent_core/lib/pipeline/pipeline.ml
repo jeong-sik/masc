@@ -36,7 +36,6 @@ let stage_input = Pipeline_stage_prepare.stage_input
 
 (* ── Stage 2: Parse ──────────────────────────────────────── *)
 
-let last_tool_results_from = Pipeline_stage_prepare.last_tool_results_from
 
 (** Prepare the turn using current [agent.state.messages] and the given
     [turn_params].  Centralises the [Agent_turn.prepare_turn] parameter
@@ -703,7 +702,7 @@ let run_turn
 [@@@coverage off]
 (* === Inline tests === *)
 
-let%test "last_tool_results_from empty messages" = last_tool_results_from [] = []
+let%test "last_tool_results_from empty messages" = Agent_turn.last_tool_results_from [] = []
 
 let%test "last_tool_results_from no tool results" =
   let msgs =
@@ -715,7 +714,7 @@ let%test "last_tool_results_from no tool results" =
       }
     ]
   in
-  last_tool_results_from msgs = []
+  Agent_turn.last_tool_results_from msgs = []
 ;;
 
 let%test "last_tool_results_from finds tool results in last tool message" =
@@ -750,7 +749,7 @@ let%test "last_tool_results_from finds tool results in last tool message" =
       }
     ]
   in
-  match last_tool_results_from msgs with
+  match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "result1"; _meta = _ }
     ; Error { message = "error msg"; recoverable = false; error_class = None }
     ] -> true
@@ -787,7 +786,7 @@ let%test "last_tool_results_from ignores tool results outside tool role" =
       }
     ]
   in
-  last_tool_results_from msgs = []
+  Agent_turn.last_tool_results_from msgs = []
 ;;
 
 let%test "tag_error passes through Ok" =
@@ -820,7 +819,7 @@ let%test "last_tool_results_from assistant-only messages" =
       }
     ]
   in
-  last_tool_results_from msgs = []
+  Agent_turn.last_tool_results_from msgs = []
 ;;
 
 let%test "last_tool_results_from picks last tool-result message" =
@@ -861,7 +860,7 @@ let%test "last_tool_results_from picks last tool-result message" =
       }
     ]
   in
-  match last_tool_results_from msgs with
+  match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "second"; _meta = _ } ] -> true
   | _ -> false
 ;;
@@ -886,7 +885,7 @@ let%test "last_tool_results_from ignores mixed content outside tool role" =
       }
     ]
   in
-  last_tool_results_from msgs = []
+  Agent_turn.last_tool_results_from msgs = []
 ;;
 
 let%test "last_tool_results_from error tool result" =
@@ -908,7 +907,7 @@ let%test "last_tool_results_from error tool result" =
       }
     ]
   in
-  match last_tool_results_from msgs with
+  match Agent_turn.last_tool_results_from msgs with
   | [ Error { message = "fail msg"; recoverable = false; error_class = None } ] -> true
   | _ -> false
 ;;
@@ -931,7 +930,7 @@ let%test "last_tool_results_from only non-result roles" =
       }
     ]
   in
-  last_tool_results_from msgs = []
+  Agent_turn.last_tool_results_from msgs = []
 ;;
 
 let%test "last_tool_results_from multiple tool results in one message" =
@@ -967,7 +966,7 @@ let%test "last_tool_results_from multiple tool results in one message" =
       }
     ]
   in
-  List.length (last_tool_results_from msgs) = 3
+  List.length (Agent_turn.last_tool_results_from msgs) = 3
 ;;
 
 let%test "last_tool_results_from user msg with only non-tool content" =
@@ -981,5 +980,5 @@ let%test "last_tool_results_from user msg with only non-tool content" =
       }
     ]
   in
-  last_tool_results_from msgs = []
+  Agent_turn.last_tool_results_from msgs = []
 ;;

@@ -443,10 +443,6 @@ let finalize state =
 
 [@@@coverage off]
 
-let finish state stop_reason =
-  transition state (Types.MessageDelta { stop_reason = Some stop_reason; usage = None })
-;;
-
 let%test "transition is deterministic for the same snapshot and event" =
   let event =
     Types.MessageStart { id = "message"; model = "model"; usage = None }
@@ -494,7 +490,12 @@ let%test "snapshot delta replaces an earlier complete tool input" =
       state
       (Types.ContentBlockDelta
          { index = 0; delta = Types.InputJsonSnapshot {|{"limit":10}|} })
-    |> fun state -> finish state Types.StopToolUse
+    |> fun state ->
+    (* Settling is a MessageDelta carrying the stop reason; naming the event
+       keeps the test honest about what "finishing" is. *)
+    transition
+      state
+      (Types.MessageDelta { stop_reason = Some Types.StopToolUse; usage = None })
   in
   match finalize state with
   | Completed { content = [ Types.ToolUse { input; _ } ]; _ } ->

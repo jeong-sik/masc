@@ -211,7 +211,8 @@ let%test "provider error diagnostic uses the active wire format" =
   | _ -> false
 ;;
 
-let maps_to_sse_wire_failure ~expected_kind stream_error =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] maps_to_sse_wire_failure ~expected_kind stream_error =
   match http_error_of_stream_error stream_error with
   | Http_client.ProviderFailure
       { kind = Http_client.Provider_wire_error { format = Http_client.Sse; kind }; _ } ->

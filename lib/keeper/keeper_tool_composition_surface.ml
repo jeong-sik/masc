@@ -730,17 +730,15 @@ let make_tools
         invalid_arg "validated async composition retained a terminal completion"
     in
     let tool_externalization_error =
-      match entry.execution, completion with
-      | Catalog.Async, _
-      | Catalog.Inline, Agent_core.Tool_contract.Continue_after_success ->
-        None
-      | Catalog.Inline, Agent_core.Tool_contract.Terminal_after_success _ ->
-        on_externalization_error
+      match entry.execution with
+      | Catalog.Async -> None
+      | Catalog.Inline -> on_externalization_error
     in
     Tool_bridge.agent_core_tool_of_masc_with_execution_env
       ~descriptor
       ~base_path:config.base_path
       ?on_externalization_error:tool_externalization_error
+      ~externalization_error_recoverable:false
       ~name:tool_name
       ~description:
         (Option.value
@@ -860,7 +858,33 @@ let make_tools
                   ; _
                   } ->
                 ());
-             result_of_execution ~tool_name ~start_time execution))))
+             let result =
+               result_of_execution ~tool_name ~start_time execution
+             in
+             (match
+                Tool_bridge.attach_artifact_manifest
+                  ~base_path:config.base_path
+                  result
+              with
+              | Ok result -> result
+              | Error { message; _ } ->
+                let diagnostic =
+                  "composition result manifest persistence failed: " ^ message
+                in
+                Option.iter
+                  (fun mark_failed ->
+                     mark_failed
+                       { Keeper_tools_agent_core.failure_class =
+                           Tool_result.Runtime_failure
+                       ; effect_disposition = Tool_result.Effect_outcome_unknown
+                       ; diagnostic
+                       })
+                  on_failed;
+                Tool_result.make_err
+                  ~tool_name
+                  ~class_:Tool_result.Runtime_failure
+                  ~start_time
+                  "composition result manifest persistence failed"))))
   in
   let has_async =
     Catalog.entries catalog

@@ -189,9 +189,14 @@ val log_call :
     [batch_size], and [execution_mode] preserve Agent Core's actual schedule
     rather than inferring concurrency from timing.
     [typed_result] serializes the producer-owned disposition when it is
-    available. The composition fields are an explicit observation envelope
-    supplied by the typed plan executor; readers must not reconstruct them
-    from [tool_use_id] or tool-name strings.
+    available. Any canonical normalized artifact references in its typed data
+    are also persisted as actual JSON under [artifact_refs], keeping the
+    content-addressed blobs visible to offline maintenance without parsing a
+    JSON-bearing model-output string. Those GC roots deliberately carry an
+    empty preview; model/UI preview projection remains owned by [output]. The
+    composition fields are an explicit observation envelope supplied by the
+    typed plan executor; readers must not reconstruct them from [tool_use_id]
+    or tool-name strings.
     [on_committed], when supplied, forces this row through the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the

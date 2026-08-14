@@ -97,14 +97,23 @@
     "verdict": {
       "dashboard_repair_28694": "typed band chips (정상 7 · 일시정지 19 · 중지 2 · 주의 1) rendered; legacy 런타임 가능 N wording absent",
       "deployment": "build label v0.22.0 · ff6a8fa6af equals upstream main",
-      "new_defect_observed": "Client WS disconnected + Auth error badge + Stored Bearer token is not verified banner + two 401 console errors after daemon restart",
-      "taskmaster": "주의 필요 band, context pressure 82% (105.4K/128.0K)"
+      "taskmaster": "주의 필요 band, context pressure 82% (105.4K/128.0K)",
+      "observed_auth_failure": "Client WS disconnected + Auth error badge + Stored Bearer token banner + two 401 console errors — reproduced only when the page URL carried the pre-restart admin token from MASC_DASHBOARD_URL (zshenv), which the 05:59:52Z restart rotated out",
+      "attribution": "stale environment token, not a clean-path product defect; fail-closed behavior worked as designed"
+    },
+    "clean_context_probe": {
+      "captured_at": "2026-08-14T07:11Z",
+      "url": "http://127.0.0.1:8935/dashboard",
+      "websocket": "ws://127.0.0.1:8935/ws opened and stayed connected",
+      "console_401_count": 0,
+      "auth_banner": false,
+      "localStorage_token": false
     }
   },
   "limits": [
     "The health commit is runtime_repo_head metadata, not an embedded binary build SHA.",
     "Queue and fleet numbers are point-in-time snapshots, not duration verdicts.",
     "The three 주의 counts (top chip 41, Overview card 19, Monitor band 1) have different unexplained denominators; recorded as observation only.",
-    "The WS auth failure cause is not yet root-caused; 401 resources were not attributed to a specific route in this capture."
+    "The 06:57Z WS/auth failure is attributed to a stale MASC_DASHBOARD_URL token in the user environment; the 07:11Z clean-context probe opened the WebSocket without errors."
   ]
 }

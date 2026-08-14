@@ -122,7 +122,7 @@ let write_turn_record config ~absolute_turn ~generation ~turn_kind ~raw_trace_ru
     ~trace_id
     ~absolute_turn
     ~runtime_profile:"test-runtime"
-    ~model:(Some "public-model")
+    ~selected_model:(Some "public-model")
     ~finish_reason:(Some "completed")
     ~context_window:None
     ~price_input_per_million:None

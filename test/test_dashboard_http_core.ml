@@ -173,6 +173,11 @@ let test_keeper_sensitive_get_permissions_are_exact () =
     [ "raw-traces"; "raw-trace"; "memory-journal" ];
   check bool "checkpoint permission" true
     (permission "/api/v1/keepers/idealist/checkpoints" = Some Masc_domain.CanAdmin);
+  check bool "turn records require authenticated state read" true
+    (permission "/api/v1/keepers/idealist/turn-records"
+     = Some Masc_domain.CanReadState);
+  check bool "turn records route rejects trailing segment" true
+    (permission "/api/v1/keepers/idealist/turn-records/extra" = None);
   check bool "ordinary keeper read stays public" true
     (permission "/api/v1/keepers/idealist/trajectory" = None)
 

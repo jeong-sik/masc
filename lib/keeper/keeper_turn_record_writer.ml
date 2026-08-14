@@ -7,7 +7,7 @@ let write
       ~trace_id
       ~absolute_turn
       ~runtime_profile
-      ~model
+      ~selected_model
       ~finish_reason
       ~context_window
       ~price_input_per_million
@@ -35,7 +35,7 @@ let write
     ; blocks
     ; input_components
     ; runtime_profile
-    ; model
+    ; selected_model
     ; finish_reason
     ; context_window
     ; price_input_per_million

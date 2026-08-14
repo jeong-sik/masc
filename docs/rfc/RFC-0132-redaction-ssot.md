@@ -55,7 +55,7 @@ Plan SSOT cross-reference:
 - Bundle research artifact PR #16480 §RFC B candidate
 
 Memory cross-reference:
-- `memory/feedback_runtime_lens_boundary_carve_out.md` (2026-05-13~14, PRs #15040 / #15070 / #15089) — establishes the *external surface redact `"runtime"` / internal observability real provider* boundary as a runtime invariant.
+- `memory/feedback_runtime_lens_boundary_carve_out.md` (2026-05-13~14, PRs #15040 / #15070 / #15089) — establishes the *aggregate telemetry redact `"runtime"` / exact execution evidence keeps the observed provider and model* boundary as a runtime invariant.
 
 Workaround Rejection Bar cross-reference (`instructions/software-development.md` §AI 코드 생성 안티패턴):
 - Pattern **1. 하드코딩 산포 (Scattered Hardcoded Defaults)** — exact match.
@@ -71,7 +71,7 @@ Related RFCs:
 
 ## 1. Problem statement
 
-The literal string `"runtime"` is used today as a **boundary redaction label** for external surfaces (dashboard SSE, OAS bridge, keeper telemetry) where the *real* provider/model identity is intentionally suppressed. The label is **scattered as inline literals or local module-level constants** across `lib/runtime/` and `lib/keeper/` with no compiler-enforced SSOT.
+The literal string `"runtime"` is used today as a **boundary redaction label** for aggregate surfaces (dashboard SSE, OAS bridge, keeper telemetry) where the *real* provider/model identity is intentionally suppressed. Exact per-turn evidence such as execution receipts and turn records is outside this label policy. The label is **scattered as inline literals or local module-level constants** across `lib/runtime/` and `lib/keeper/` with no compiler-enforced SSOT.
 
 Direct measurement on `origin/main` (commit `aceefd562a`, 2026-05-19):
 
@@ -123,6 +123,12 @@ Decomposed by shape:
 
 Sites in `keeper_unified_metrics.mli` (lines 113, 141) are doc-comment mentions of the redacted lane, not emit sites — they remain as documentation referencing `Boundary_redaction.runtime_provider_label`.
 
+The table above records the measured 2026-05 source. The current contract
+classifies turn records and execution receipts as operator-owned per-turn
+evidence: their model field carries the selected attempt's observed model and
+is not part of this aggregate-label redaction policy. Dashboard telemetry
+aggregates and AGENT_CORE bridge labels remain redacted through this module.
+
 ### Why this is a problem
 
 1. **No compiler enforcement.** A new Runtime or Keeper module can introduce `"runtime"` as an inline literal without any lint or type signal. The `feedback_runtime_lens_boundary_carve_out` regression (#15040 / #15070 / #15089) is the empirical case — three separate PRs reintroduced inline literals because the boundary discipline lived only in commit history and runbooks.
@@ -154,16 +160,17 @@ Introduce a private-type SSOT module that owns the redaction label vocabulary an
 `lib/types_boundary/boundary_redaction.mli`:
 
 ```ocaml
-(** Boundary redaction labels — SSOT for external surface label vocabulary.
+(** Boundary redaction labels — SSOT for aggregate surface label vocabulary.
 
-    External surfaces (dashboard SSE, OAS bridge, keeper telemetry exposed to
+    Aggregate surfaces (dashboard SSE, OAS bridge, keeper telemetry exposed to
     the operator UI) intentionally redact the real provider/model identity
     behind a fixed label. This module is the only place that holds the label
-    string. All emit sites must route through {!to_string}.
+    string. Emit sites governed by that aggregate contract must route through
+    {!to_string}.
 
-    Internal observability (logs, real provider records, FSM event payloads
-    that stay inside the OCaml runtime) MUST continue to use the actual
-    provider/model identity — do not route those through this module.
+    Internal observability and operator-owned exact execution evidence MUST
+    continue to use the actual provider/model identity — do not route those
+    through this module.
 
     Reference: RFC-0132. *)
 

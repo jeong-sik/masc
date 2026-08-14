@@ -82,10 +82,10 @@ export type TurnRecordEntry = {
   request_runtime_profile: string | null
   request_body_bytes: number | null
   runtime_profile: string
-  // RFC-0233 §2.3 — grounded from the backend turn record (boundary-redacted
-  // model label + keeper stop reason). Absent (undefined) on error turns and
-  // pre-grounding rows; the inspector renders absence, never a fabricated value.
-  model?: string
+  // RFC-0233 §2.3 — exact selected model from the successful runtime attempt.
+  // Absent (undefined) when the producer observed no selected model; the
+  // inspector renders absence, never a fabricated value.
+  selected_model?: string
   finish_reason?: string
   temperature?: number
   top_p?: number
@@ -326,7 +326,7 @@ function hasNoUnknownKeys(raw: Record<string, unknown>, allowed: readonly string
 }
 
 function decodeExactNonEmptyString(raw: unknown): string | null {
-  return typeof raw === 'string' && raw.length > 0 ? raw : null
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw : null
 }
 
 function decodeNullableString(raw: unknown): string | null | undefined {
@@ -502,7 +502,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'request_runtime_profile',
     'request_body_bytes',
     'runtime_profile',
-    'model',
+    'selected_model',
     'finish_reason',
     'context_window',
     'price_input_per_million',
@@ -551,7 +551,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
       : request_runtime_profile === null && request_body_bytes === null
         ? { request_runtime_profile: null, request_body_bytes: null }
         : null
-  const model = decodeOptionalField(raw, 'model', decodeExactNonEmptyString)
+  const selected_model = decodeOptionalField(raw, 'selected_model', decodeExactNonEmptyString)
   const finish_reason = decodeOptionalField(raw, 'finish_reason', decodeExactNonEmptyString)
   const context_window = decodeOptionalField(raw, 'context_window', decodeNonNegativeSafeInteger)
   const price_input_per_million =
@@ -598,7 +598,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     || requestWireObservation === null
     || !Array.isArray(raw.execution_ids)
     || !raw.execution_ids.every((id): id is string => typeof id === 'string' && id.length > 0)
-    || model === null
+    || selected_model === null
     || finish_reason === null
     || context_window === null
     || price_input_per_million === null
@@ -632,7 +632,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     input_components,
     ...requestWireObservation,
     runtime_profile,
-    model,
+    selected_model,
     finish_reason,
     temperature,
     top_p,

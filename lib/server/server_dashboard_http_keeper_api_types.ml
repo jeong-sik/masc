@@ -19,6 +19,7 @@ let keeper_suffix_paused_work = "/paused-work"
 let keeper_suffix_raw_traces = "/raw-traces"
 let keeper_suffix_raw_trace = "/raw-trace"
 let keeper_suffix_memory_journal = "/memory-journal"
+let keeper_suffix_turn_records = "/turn-records"
 let keeper_suffix_catchup_judge = "/catchup-judge"
 let keeper_suffix_fusion = "/fusion"
 let keeper_suffix_operator_note = "/operator-note"
@@ -164,7 +165,9 @@ let is_keeper_paused_work_get_path req_path =
   keeper_path_ends_with req_path keeper_suffix_paused_work
 
 let keeper_get_permission req_path =
-  if
+  if keeper_path_ends_with req_path keeper_suffix_turn_records
+  then Some Masc_domain.CanReadState
+  else if
     is_keeper_checkpoints_get_path req_path
     || is_keeper_paused_work_get_path req_path
     || keeper_path_ends_with req_path keeper_suffix_github_identity

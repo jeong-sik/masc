@@ -76,6 +76,21 @@ val annotate
     a second implementation of it would let the two stages disagree about
     where an atom begins. *)
 
+val first_atom_at_or_after
+  :  Agent_core.Types.message list
+  -> message_index:int
+  -> int
+(** Atom index of the first atom whose message sits at or after
+    [message_index]; the atom count when none does.
+
+    Converts a position in the message list into the atom vocabulary the cut
+    and the demotion boundary both speak. A caller that knows a boundary as a
+    message count — how many messages a turn was seeded with, say — cannot use
+    that number directly: pinned messages are not atoms, and a [Tool] message
+    belongs to the atom its [Assistant] opened, so the two indices drift apart.
+    Kept here so the conversion uses the same labelling as the cut rather than
+    a second reading of where an atom begins. *)
+
 val next_shrink_capacity_bytes
   :  ?allow_empty_history:bool
   -> measure_message_bytes:(Agent_core.Types.message -> int)

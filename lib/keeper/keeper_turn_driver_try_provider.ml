@@ -586,13 +586,29 @@ let budgeted_model_input_projection
         | Error error ->
           Error (Runtime_model_input_tail_window.budget_error_to_string error)
         | Ok raw_projection ->
+          (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
+             reasoning over right now is what this turn produced, and
+             [ctx.initial_messages] is exactly the history the turn was seeded
+             with — so everything past it is this turn's own work and stays
+             verbatim, and everything before it was already reported through a
+             receipt or a board post and becomes a readable address.
+
+             This is a boundary rather than a count of recent results. It also
+             keeps the property the previous boundary was chosen for: appending
+             a message cannot rewrite the retained prefix, because it moves
+             once per turn rather than once per message. *)
+          let demote_before =
+            Runtime_model_input_tail_window.first_atom_at_or_after
+              messages
+              ~message_index:(List.length ctx.initial_messages)
+          in
           let planned =
-            if String.equal ctx.base_path "" || raw_projection.dropped_atoms = 0
+            if String.equal ctx.base_path "" || demote_before = 0
             then { Keeper_model_input_demotion.messages; pending = [] }
             else
               Keeper_model_input_demotion.plan
                 ~measure_message_bytes
-                ~demote_before:raw_projection.dropped_atoms
+                ~demote_before
                 messages
           in
           (* The first cut is the only one taken against the whole history;

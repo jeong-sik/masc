@@ -26,6 +26,7 @@ val outer_completion : Keeper_tool_plan.t -> Agent_core.Tool_contract.completion
 
 type node_result = private
   { node_id : Keeper_tool_plan.Node_id.t
+  ; execution_id : Ids.Execution_id.t
   ; tool_name : string
   ; input : Yojson.Safe.t
   ; schedule : Agent_core.Tool_contract.schedule
@@ -33,6 +34,8 @@ type node_result = private
   ; tool_use_id : string option
   ; failure_effect_disposition : Tool_result.failure_effect_disposition option
   ; deferred_kind : Keeper_tool_execution.deferred_kind option
+  ; result_bytes : int
+  ; truncated_to : int option
   }
 
 type dispatch_result
@@ -44,6 +47,8 @@ val dispatch_result
   :  ?tool_use_id:string
   -> ?failure_effect_disposition:Tool_result.failure_effect_disposition
   -> ?deferred_kind:Keeper_tool_execution.deferred_kind
+  -> ?result_bytes:int
+  -> ?truncated_to:int
   -> Tool_result.result
   -> dispatch_result
 

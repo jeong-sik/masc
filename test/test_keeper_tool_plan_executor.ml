@@ -105,6 +105,7 @@ let test_schedule_and_parallel_dataflow () =
    | _ -> fail "descriptor-aware schedule shape changed");
   let sibling_count = Atomic.make 0 in
   let observed = ref [] in
+  let execution_ids = ref [] in
   let both_started, release = Eio.Promise.create () in
   let dispatch ~node ~descriptor:_ ~schedule:_ ~input =
     let name = node_name node in
@@ -118,6 +119,7 @@ let test_schedule_and_parallel_dataflow () =
       (completed ~tool_name:node.Plan.tool_name ~data:(valid_data_for_node node))
   in
   let observe_node_result result =
+    execution_ids := Ids.Execution_id.to_string result.Executor.execution_id :: !execution_ids;
     observed
       := ( Plan.Node_id.to_string result.Executor.node_id
          , result.Executor.tool_use_id
@@ -141,6 +143,11 @@ let test_schedule_and_parallel_dataflow () =
       [ "producer"; "left"; "right"; "final" ]
       (List.map (fun result -> Plan.Node_id.to_string result.Executor.node_id) results);
     check int "both siblings entered before either returned" 2 (Atomic.get sibling_count);
+    check int "one execution id per settled node" 4 (List.length !execution_ids);
+    check int
+      "execution ids are unique"
+      4
+      (List.sort_uniq String.compare !execution_ids |> List.length);
     check
       (list (triple string (option string) int))
       "observer receives exact nested occurrence after settlement"

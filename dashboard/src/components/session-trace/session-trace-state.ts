@@ -426,6 +426,9 @@ function toolCallMetadataDetail(entry: ToolCallEntry, traceOrigin: string): Reco
   if (entry.lane) detail.lane = entry.lane
   if (entry.model) detail.model = entry.model
   if (entry.execution_id) detail.execution_id = entry.execution_id
+  if (entry.disposition) detail.disposition = entry.disposition
+  if (entry.result_bytes != null) detail.result_bytes = entry.result_bytes
+  if (entry.truncated_to != null) detail.truncated_to = entry.truncated_to
   if (entry.planned_index != null) detail.planned_index = entry.planned_index
   if (entry.batch_index != null) detail.batch_index = entry.batch_index
   if (entry.batch_size != null) detail.batch_size = entry.batch_size
@@ -449,6 +452,10 @@ function toolEventTurn(event: UnifiedTraceEvent): number | undefined {
 
 function toolEventSuccess(event: UnifiedTraceEvent): boolean {
   return event.gate?.status !== 'reject' && event.error == null
+}
+
+function toolCallEntryIsFailure(entry: ToolCallEntry): boolean {
+  return entry.disposition ? entry.disposition === 'failed' : !entry.success
 }
 
 function toolCallEntryMatchesTraceEvent(
@@ -489,7 +496,7 @@ function toolCallEntryMatchesTraceEvent(
     && entry.duration_ms != null
     && Math.abs(event.duration_ms - entry.duration_ms) > 1
   ) return false
-  if (toolEventSuccess(event) !== entry.success) return false
+  if (toolEventSuccess(event) === toolCallEntryIsFailure(entry)) return false
 
   return Math.abs(event.ts - (entry.ts * 1000)) <= TOOL_CALL_MATCH_WINDOW_MS
 }
@@ -528,7 +535,8 @@ function enrichToolCallTrace(
   entry: ToolCallEntry,
 ): UnifiedTraceEvent {
   const outputText = formatToolCallOutput(entry)
-  const error = entry.success ? null : outputText || event.error || 'tool call failed'
+  const isFailure = toolCallEntryIsFailure(entry)
+  const error = isFailure ? outputText || event.error || 'tool call failed' : null
   return {
     ...event,
     agentName: entry.keeper,
@@ -537,7 +545,7 @@ function enrichToolCallTrace(
     detail: { ...event.detail, ...toolCallMetadataDetail(entry, 'trajectory+tool_call_log') },
     toolName: entry.tool,
     toolArgs: normalizeToolCallInput(entry.input) ?? event.toolArgs,
-    toolResult: entry.success ? outputText : null,
+    toolResult: isFailure ? null : outputText,
     duration_ms: entry.duration_ms ?? event.duration_ms,
     // Trajectory turn is trace-relative and pairs with `round`; the log's
     // session-absolute turn stays readable as detail.turn. Mixing the two
@@ -551,6 +559,7 @@ function enrichToolCallTrace(
 function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): UnifiedTraceEvent {
   const ts = entry.ts * 1000
   const outputText = formatToolCallOutput(entry)
+  const isFailure = toolCallEntryIsFailure(entry)
   return {
     // execution_id is unique per physical execution — a stable row id that
     // survives refetch; the composite form remains for pre-PR-1 rows.
@@ -567,11 +576,11 @@ function toolCallEntryToSyntheticTrace(entry: ToolCallEntry, index: number): Uni
     sessionId: entry.session_id ?? null,
     toolName: entry.tool,
     toolArgs: normalizeToolCallInput(entry.input),
-    toolResult: entry.success ? outputText : null,
+    toolResult: isFailure ? null : outputText,
     duration_ms: entry.duration_ms ?? undefined,
     turn: entry.turn ?? entry.keeper_turn_id,
     executionId: entry.execution_id,
-    error: entry.success ? null : outputText || 'tool call failed',
+    error: isFailure ? outputText || 'tool call failed' : null,
   }
 }
 

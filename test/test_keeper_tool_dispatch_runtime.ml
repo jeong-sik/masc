@@ -4911,8 +4911,20 @@ let test_composition_action_commit_advances_revision_before_refresh_event () =
                  (option string)
                  "committed nested row preserves the runtime model bucket"
                  (Some
-                    (Masc.Keeper_hooks_agent_core_types.current_keeper_model meta))
+                    (Keeper_hooks_agent_core_types.current_keeper_model meta))
                  (Safe_ops.json_string_opt "model" row);
+               check bool
+                 "committed nested row has canonical execution identity"
+                 true
+                 (match Safe_ops.json_string_opt "execution_id" row with
+                  | Some value -> String.trim value <> ""
+                  | None -> false);
+               check bool
+                 "committed nested row has producer byte count"
+                 true
+                 (match row with
+                  | `Assoc fields -> List.mem_assoc "result_bytes" fields
+                  | _ -> false);
                row
               | _ -> fail "expected one synchronously committed nested action row"
             in

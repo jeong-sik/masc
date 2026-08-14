@@ -58,6 +58,7 @@ let deferred_kind_to_json = function
 let node_result_to_json (result : Executor.node_result) =
   `Assoc
     [ "node_id", `String (Keeper_tool_plan.Node_id.to_string result.node_id)
+    ; "execution_id", Ids.Execution_id.to_yojson result.execution_id
     ; "tool_name", `String result.tool_name
     ; "input", result.input
     ; "schedule", schedule_to_json result.schedule
@@ -66,6 +67,8 @@ let node_result_to_json (result : Executor.node_result) =
     ; ( "failure_effect_disposition"
       , failure_effect_disposition_to_json result.failure_effect_disposition )
     ; "deferred_kind", deferred_kind_to_json result.deferred_kind
+    ; "result_bytes", `Int result.result_bytes
+    ; "truncated_to", Json_util.int_opt_to_json result.truncated_to
     ]
 ;;
 
@@ -96,12 +99,15 @@ let observe_node_result
       ?thinking_enabled:context.thinking_enabled
       ?thinking_budget:context.thinking_budget
       ?prompt_fingerprint:context.prompt_fingerprint
+      ~execution_id:result.execution_id
       ?tool_use_id:result.tool_use_id
       ~planned_index:schedule.planned_index
       ~batch_index:schedule.batch_index
       ~batch_size:schedule.batch_size
       ~execution_mode:schedule.execution_mode
       ~typed_result:result.result
+      ~result_bytes:result.result_bytes
+      ?truncated_to:result.truncated_to
       ~composition_tool
       ~composition_run_id:
         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
@@ -143,6 +149,9 @@ let observe_node_result
         , `String
             (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation) )
       ; "turn", `Int (Agent_core.Tool_contract.Invocation.turn parent_invocation)
+      ; "execution_id", Ids.Execution_id.to_yojson result.execution_id
+      ; "result_bytes", `Int result.result_bytes
+      ; "truncated_to", Json_util.int_opt_to_json result.truncated_to
       ; "planned_index", `Int schedule.planned_index
       ; "batch_index", `Int schedule.batch_index
       ; "batch_size", `Int schedule.batch_size

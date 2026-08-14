@@ -63,6 +63,8 @@ durable 이벤트는 사이클 입구에서만 턴에 투입되고, 사이클 �
 
 hang(사이클은 등록됐는데 `last_progress_at`이 침묵)은 이 설계에서 **경보가 유지**된다. 정상 장기 루프는 progress가 계속 갱신되므로(#27349 주석: "a long-running turn that keeps progressing stays near zero; a stalled provider call grows unbounded") 경보에서 빠진다.
 
+Known limitation: 반복적이지만 무의미한 progress(예: 동일 실패 도구 호출을 계속 재시도하며 매번 phase가 넘어가는 루프)는 이 설계로 감지되지 않는다. `stamp_turn_progress` 호출부는 전부 "FSM이 다음 단계로 넘어갔다"는 신호이지 "그 결과가 유의미했다"는 신호가 아니다 — `last_progress_at`은 죽음/삶을 구분하고, 생산/공회전 구분은 완전히 다른 메커니즘이 필요한 별도 RFC 영역이다.
+
 ## 4. 소비자
 
 `rg -l work_liveness` 전수(2026-08-14): 발행 2곳(§3), 소비 `dashboard/src/api/dashboard-tools-prompts.ts`, `dashboard/src/components/overview/overview.ts`(현재 `workState: string` + `?? 'unknown'` 폴백 — v2 전환 시 고정 union으로), 테스트 `dashboard/src/api/dashboard.test.ts`, `test/test_keeper_terminal_reason_typed.ml`. 전부 §7 사다리 안에서 전환하고 v1 잔재를 남기지 않는다.
@@ -79,7 +81,7 @@ hang(사이클은 등록됐는데 `last_progress_at`이 침묵)은 이 설계에
 - **임계값 상향**: 신호를 죽이는 워크어라운드. 축이 틀렸는데 눈금을 늘리는 것 — 기각.
 - **사이클 시간 cap/timeout**: rondo의 진짜 작업을 죽인다. 원칙 7/11 위반 — 기각.
 - **사이클 중간 admission**: 턴 경계 계약(`keeper_unified_turn.ml`)의 대형 변경이고, 이번 실측은 그걸 요구하지 않는다 — 보류.
-- **(초안의 Design B) transient 실패의 큐 위치 보존**: 적대 리뷰(2026-08-14)가 코드로 반증했다. 선택은 도착 순서의 첫 ready 항목이고(`keeper_event_queue_state.ml:250-262`), 현행 `defer_pending`(:356-374)은 실패 항목을 "같은 urgency의 꼬리, 다른 urgency 앞"에 재삽입하는 **의도된 라운드로빈**이다("preserves arrival order among same-urgency entries" 주석). `Exhausted_visible_alive`는 재시도 횟수가 아니라 에러 타입 분류라(`keeper_runtime_failure_route.mli:97-110`) 반복 transient 이벤트는 영원히 quarantine되지 않는데, 도착 순서를 보존하면 그 이벤트가 head를 점유해 뒤 이벤트 전부를 굶긴다. 실측의 "나이 배증" 문제는 스케줄링 결함이 아니라 projection 결함이고, §3의 축 정정으로 해소된다 — 기각.
+- **(초안의 Design B) transient 실패의 큐 위치 보존**: 적대 리뷰(2026-08-14)가 코드로 반증했다. 선택은 도착 순서의 첫 ready 항목이고(`keeper_event_queue_state.ml:250-262`), 현행 `defer_pending`(:356-374)은 실패 항목을 "같은 urgency의 꼬리, 다른 urgency 앞"에 재삽입하는 **의도된 라운드로빈**이다("preserves arrival order among same-urgency entries" 주석). `Exhausted_visible_alive`는 재시도 횟수가 아니라 에러 타입 분류라(`keeper_runtime_failure_route.mli:97-110`) 반복 transient 이벤트는 영원히 quarantine되지 않는데, 도착 순서를 보존하면 그 이벤트가 head를 점유해 뒤 이벤트 전부를 굶긴다. 실측의 "나이 배증"에서 지연 자체는 v2에서도 그대로다(`defer_pending`은 `arrived_at`을 건드리지 않는다) — 바뀌는 것은 그 지연이 case (a)의 진짜 대기로서 **참 신호로 경보된다**는 점이다. case (a)는 애초에 false positive가 아니었으므로 스케줄링을 바꿀 근거가 없다 — 기각.
 
 ## 7. 구현 사다리 (각 ≤20k output tokens, 인접 단계 적대 리뷰 병렬)
 

@@ -263,9 +263,19 @@ supports-structured-output = false
 #
 # The keeper pays for the difference in memory. The window sizes history
 # against this ceiling, so on that same trace the keeper transmitted 14 of
-# 15,413 messages, roughly 7 turns of 7,650. 524288 B is about 146,000 tokens,
-# still under the declared window, and is the value #26145 established as
-# operative before it was reverted.
+# 15,413 messages, roughly 7 turns of 7,650.
+#
+# Both candidate values have a recorded failure, and neither is safe by
+# arithmetic. 262144 latched analyst on 2026-07-29: its history serialized to
+# 355,286 B, every request was refused, and the turn could not compact its way
+# out. 524288 failed the next day when five keepers landed at 524,335 B — 47
+# bytes over — because the window fills toward whatever ceiling it is given and
+# the envelope is not part of what it measures. What made that catastrophic
+# rather than a retry was the recovery chain, fixed since in #27813.
+#
+# So this is not "524288 is the right size". It is: one value fails on
+# ordinary history, the other fails only on an envelope overshoot the retry
+# path now absorbs.
 max-request-body-bytes = 524288
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit

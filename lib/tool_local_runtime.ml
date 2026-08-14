@@ -55,6 +55,9 @@ let run_runtime_verify args : Core.tool_result =
           ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
     ]
 
+(* TEL-OK: this adapter only requests the shared external-effect authorization
+   and delegates the completion. The authorizer owns the Gate decision receipt;
+   the outer MCP tool-call boundary owns duration and result telemetry. *)
 let handle_runtime_verify (ctx : Core.context) args : Core.tool_result =
   let continue () = run_runtime_verify args in
   match ctx.authorize_external_effect with

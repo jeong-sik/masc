@@ -130,9 +130,9 @@ let observe_task_transition_fn
       (fun _config ~agent_name:_ ~task_id:_ ~transition:_
            ~details:_ -> ())
 
-(** Invalidate dashboard execution cache on task mutation (add, transition).
-    Wired by server bootstrap to avoid circular dependency between
-    Workspace sub-modules and server dashboard surfaces. *)
+(** Invalidate dashboard execution cache after an authoritative task backlog or
+    goal-link commit. Wired by server bootstrap to avoid a dependency from
+    Workspace sub-modules back to server dashboard surfaces. *)
 let on_task_mutation_fn
   : (unit -> unit) Atomic.t
   = Atomic.make (fun () -> ())

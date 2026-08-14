@@ -29,6 +29,8 @@ const invalidateDashboardCache = vi.fn<() => void>(() => {})
 const hydrateBoardSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const hydrateShellSnapshot = vi.fn<(payload: unknown, opts?: unknown) => void>(() => {})
 const hydrateExecutionSnapshot = vi.fn<(payload: unknown) => void>(() => {})
+const invalidateExecutionSnapshotGeneration = vi.fn<(epoch: string, generation: number) => boolean>(() => true)
+const resetExecutionSnapshotGeneration = vi.fn<() => void>(() => {})
 const hydratePlanningSnapshot = vi.fn<(payload: unknown) => void>(() => {})
 const removeBoardPost = vi.fn<(postId?: string) => void>(() => {})
 const refreshForRoute = vi.fn<(nextRoute: CurrentRoute) => void>()
@@ -59,6 +61,8 @@ async function loadSseStore() {
     hydrateBoardSnapshot,
     hydrateShellSnapshot,
     hydrateExecutionSnapshot,
+    invalidateExecutionSnapshotGeneration,
+    resetExecutionSnapshotGeneration,
     hydratePlanningSnapshot,
     refreshDashboard,
     refreshExecution,
@@ -126,6 +130,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
     hydrateBoardSnapshot.mockClear()
     hydrateShellSnapshot.mockClear()
     hydrateExecutionSnapshot.mockClear()
+    invalidateExecutionSnapshotGeneration.mockClear()
+    resetExecutionSnapshotGeneration.mockClear()
     hydratePlanningSnapshot.mockClear()
     removeBoardPost.mockClear()
     refreshForRoute.mockClear()
@@ -179,6 +185,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
     expect(showToast).toHaveBeenCalled()
     expect(replayAgentCoreRuntimeTelemetry).toHaveBeenCalledTimes(1)
     expect(requestNamespaceTruthNow).toHaveBeenCalledTimes(1)
+    expect(resetExecutionSnapshotGeneration).toHaveBeenCalledTimes(1)
+    expect(refreshExecution).toHaveBeenCalledWith({ force: true })
     expect(refreshDashboard).toHaveBeenCalledWith({ force: true })
 
     vi.clearAllTimers()

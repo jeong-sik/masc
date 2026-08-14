@@ -77,6 +77,12 @@ let append_goal_link_rollback_failures msg rollback_failures =
       (String.concat "; " failures)
 ;;
 
+let protect_task_create_settlement f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+  | Eio_guard.Non_eio -> f ()
+;;
+
 let rollback_goal_links config task_goal_ids =
   List.filter_map
     (fun (task_id, goal_id_opt) ->
@@ -115,6 +121,7 @@ let add_task_with_result
   let goal_id = Workspace_task_classify.trim_opt goal_id in
   let predecessor_task_id = Workspace_task_classify.trim_opt predecessor_task_id in
   try
+    protect_task_create_settlement (fun () ->
     with_file_lock config lock_path (fun () ->
       match read_backlog_r config with
       | Error msg -> Error (Backlog_read_failed msg)
@@ -215,7 +222,6 @@ let add_task_with_result
                                  | Some contract -> contract.strict
                                  | None -> false) )
                           ]);
-                  (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
                   let _ =
                     broadcast
                       config
@@ -223,7 +229,7 @@ let add_task_with_result
                       ~content:(Printf.sprintf "New quest: %s" title)
                   in
                   let summary = Printf.sprintf "Added %s: %s" task_id title in
-                  Ok { task_id; summary; title; priority; description; goal_id }))))
+                  Ok { task_id; summary; title; priority; description; goal_id })))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
@@ -250,6 +256,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
   ensure_initialized config;
   let lock_path = backlog_lock_path config in
   let actor = Option.value ~default:"system" created_by in
+  protect_task_create_settlement (fun () ->
   with_file_lock config lock_path (fun () ->
     match read_backlog_r config with
     | Error msg -> Error (Batch_backlog_read_failed msg)
@@ -351,7 +358,6 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                     ", "
                     (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
                 in
-                (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
                 let msg =
                   Printf.sprintf
                     "New batch of %d quests added: %s"
@@ -365,7 +371,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                 Ok { task_ids; summary; count }))
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Error (Batch_unexpected_error (Printexc.to_string e))))
+       | e -> Error (Batch_unexpected_error (Printexc.to_string e)))))
 ;;
 
 let batch_add_tasks_internal ?created_by config tasks =

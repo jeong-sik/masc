@@ -176,17 +176,98 @@ let execution_cache : cached_surface =
 
 let execution_default_light_cache_key = "execution:default:light"
 let execution_default_light_http_body : string option Atomic.t = Atomic.make None
+let execution_publication_mu = Stdlib.Mutex.create ()
+let execution_publication_generation = ref 0
+let execution_publication_epoch =
+  (* NDT-OK: process-incarnation identity entropy only. *)
+  Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string
+;;
+
+let execution_publication_epoch_field = "execution_publication_epoch"
+let execution_publication_generation_field = "execution_publication_generation"
+let execution_invalidated_field = "execution_invalidated"
+
+let with_execution_publication_lock f =
+  Stdlib.Mutex.protect execution_publication_mu f
+;;
 
 let clear_execution_default_light_http_body () =
   Atomic.set execution_default_light_http_body None
 ;;
 
-let execution_surface_has_fresh_success () =
+let execution_surface_has_fresh_success_unlocked () =
   let execution_snapshot = Server_dashboard_http_cache.snapshot execution_cache in
   match execution_snapshot.last_success_unix, execution_snapshot.last_error_unix with
   | Some success_ts, Some error_ts when error_ts > success_ts -> false
   | Some _, _ -> true
   | None, _ -> false
+;;
+
+let begin_execution_publication_attempt () =
+  with_execution_publication_lock (fun () ->
+    let generation = !execution_publication_generation in
+    clear_execution_default_light_http_body ();
+    Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
+    generation)
+;;
+
+let current_execution_publication_generation () =
+  with_execution_publication_lock (fun () -> !execution_publication_generation)
+;;
+
+let with_execution_publication_generation ~generation = function
+  | `Assoc fields ->
+    let fields =
+      fields
+      |> List.remove_assoc execution_publication_epoch_field
+      |> List.remove_assoc execution_publication_generation_field
+      |> List.remove_assoc execution_invalidated_field
+    in
+    `Assoc
+      ((execution_publication_epoch_field, `String execution_publication_epoch)
+       :: (execution_publication_generation_field, `Int generation)
+       :: (execution_invalidated_field, `Bool false)
+       :: fields)
+  | json ->
+    `Assoc
+      [ execution_publication_epoch_field, `String execution_publication_epoch
+      ; execution_publication_generation_field, `Int generation
+      ; execution_invalidated_field, `Bool false
+      ; "snapshot", json
+      ]
+;;
+
+let publish_execution_success_if_current ~generation json =
+  with_execution_publication_lock (fun () ->
+    if generation <> !execution_publication_generation
+    then false
+    else (
+      Server_dashboard_http_cache.mark_cached_surface_success
+        execution_cache
+        (with_execution_publication_generation ~generation json);
+      true))
+;;
+
+let publish_execution_error_if_current ~generation exn =
+  with_execution_publication_lock (fun () ->
+    if generation <> !execution_publication_generation
+    then false
+    else (
+      clear_execution_default_light_http_body ();
+      Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+      true))
+;;
+
+let publish_execution_error_message_if_current ~generation message =
+  with_execution_publication_lock (fun () ->
+    if generation <> !execution_publication_generation
+    then false
+    else (
+      clear_execution_default_light_http_body ();
+      Server_dashboard_http_cache.mark_cached_surface_error_message
+        execution_cache
+        message;
+      true))
 ;;
 
 let execution_trust_cache_key = "execution-trust:default"
@@ -217,9 +298,8 @@ let with_execution_trust_cache f =
 
 (** Invalidate the execution surface cache so the next
     [/api/v1/dashboard/execution] request recomputes fresh data.
-    Called via [Workspace_hooks.on_task_mutation_fn] after task add,
-    batch_add, and all transitions (claim, start, done, cancel,
-    release) routed through [observe_task_transition].
+    Called via [Workspace_hooks.on_task_mutation_fn] from the authoritative
+    backlog and goal-link commit boundaries.
     Best-effort: never raises — cache staleness must not break
     the mutation path. *)
 let record_invalidation_failure ~callback ~message exn =
@@ -236,14 +316,12 @@ let invalidate_execution_cache_with_hooks_for_testing
       ()
   =
   (try invalidate_execution_surface () with
-   | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      record_invalidation_failure
        ~callback:"execution_surface_cache_invalidate"
        ~message:"Failed to invalidate execution surface cache"
        exn);
   try invalidate_light_cache () with
-  | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     record_invalidation_failure
       ~callback:"dashboard_execution_light_cache_invalidate"
@@ -252,22 +330,61 @@ let invalidate_execution_cache_with_hooks_for_testing
 ;;
 
 let invalidate_execution_cache () =
+  let invalidate () =
+  let invalidated_generation = ref None in
   invalidate_execution_cache_with_hooks_for_testing
     ~invalidate_execution_surface:(fun () ->
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.invalidate_cached_surface execution_cache)
+      with_execution_publication_lock (fun () ->
+        incr execution_publication_generation;
+        invalidated_generation := Some !execution_publication_generation;
+        clear_execution_default_light_http_body ();
+        Server_dashboard_http_cache.invalidate_cached_surface execution_cache))
     ~invalidate_light_cache:(fun () ->
-      Dashboard_cache.invalidate execution_default_light_cache_key)
-    ()
+      Dashboard_cache.invalidate_prefix "execution:")
+    ();
+  Option.iter
+    (fun generation ->
+       try
+         broadcast_cached_surface
+           ~event_type:"execution_snapshot"
+           (`Assoc
+               [ execution_publication_epoch_field, `String execution_publication_epoch
+               ; execution_publication_generation_field, `Int generation
+               ; execution_invalidated_field, `Bool true
+               ])
+       with
+       | exn ->
+         record_invalidation_failure
+           ~callback:"execution_snapshot_invalidation_broadcast"
+           ~message:"Failed to broadcast execution cache invalidation"
+           exn)
+    !invalidated_generation
+  in
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect invalidate
+  | Eio_guard.Non_eio -> invalidate ()
 ;;
+
+let install_task_mutation_cache_invalidation () =
+  Atomic.set Workspace_hooks.on_task_mutation_fn invalidate_execution_cache
+;;
+
+module For_testing = struct
+  let execution_publication_generation () =
+    with_execution_publication_lock (fun () -> !execution_publication_generation)
+  ;;
+
+  let publish_execution_success_if_current = publish_execution_success_if_current
+end
 
 (** Bypass the proactive warm-up guard so tests that call
     [dashboard_namespace_truth_http_json] get the full response instead of
     the "initializing" short-circuit. *)
 let seed_execution_cache_for_test () =
-  Server_dashboard_http_cache.mark_cached_surface_success
-    execution_cache
-    (`Assoc [ "status", `String "seeded_for_test" ])
+  with_execution_publication_lock (fun () ->
+    Server_dashboard_http_cache.mark_cached_surface_success
+      execution_cache
+      (`Assoc [ "status", `String "seeded_for_test" ]))
 ;;
 
 let transport_health_cache =
@@ -447,8 +564,8 @@ let execution_default_light_response_json ~config =
        ~query:default_light_execution_query
 ;;
 
-let cache_execution_default_light_http_body response_json =
-  if execution_surface_has_fresh_success ()
+let cache_execution_default_light_http_body_unlocked response_json =
+  if execution_surface_has_fresh_success_unlocked ()
   then
     Atomic.set
       execution_default_light_http_body
@@ -457,16 +574,60 @@ let cache_execution_default_light_http_body response_json =
 ;;
 
 let refresh_execution_default_light_http_body ~config =
-  let response_json = execution_default_light_response_json ~config in
-  cache_execution_default_light_http_body response_json;
-  response_json
+  with_execution_publication_lock (fun () ->
+    let response_json = execution_default_light_response_json ~config in
+    cache_execution_default_light_http_body_unlocked response_json;
+    response_json)
+;;
+
+let cached_execution_or_first_success_json ~clock ~timeout_sec compute =
+  let cached_success () =
+    with_execution_publication_lock (fun () ->
+      if execution_surface_has_fresh_success_unlocked ()
+      then Some (Server_dashboard_http_cache.cached_surface_json execution_cache)
+      else None)
+  in
+  match cached_success () with
+  | Some json -> json
+  | None ->
+    let compute_and_track () =
+      let generation = begin_execution_publication_attempt () in
+      try
+        let json = compute () in
+        let (_ : bool) = publish_execution_success_if_current ~generation json in
+        json
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        let (_ : bool) = publish_execution_error_if_current ~generation exn in
+        raise exn
+    in
+    let json =
+      Dashboard_cache.get_or_compute_with_timeout
+        execution_default_light_cache_key
+        ~ttl:deep_surface_cache_ttl_s
+        ~clock
+        ~timeout_sec
+        compute_and_track
+    in
+    (match cached_success () with
+     | Some current -> current
+     | None ->
+       (* DET-OK: invalidation won the publication race, so this request may
+          receive only its own completed pre-invalidation value.  It is left
+          unstamped and cannot republish either cache; clients with a mutation
+          watermark reject identity-less late responses. *)
+       json)
 ;;
 
 let with_transport_health_metadata json =
   extend_projection_diagnostics json [ "source", `String "cached_surface" ]
 ;;
 
-let dashboard_execution_snapshot_json () = Server_dashboard_http_cache.cached_surface_json execution_cache
+let dashboard_execution_snapshot_json () =
+  with_execution_publication_lock (fun () ->
+    Server_dashboard_http_cache.cached_surface_json execution_cache)
+;;
 
 (* Cache patchers project a typed lifecycle transition onto dashboard row fields
    (keepalive_running / phase / pipeline_stage / paused). Phase-derived events
@@ -789,29 +950,34 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 ;;
 
 let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
-  clear_execution_default_light_http_body ();
-  match (Server_dashboard_http_cache.snapshot execution_cache).json with
-  | `Assoc fields ->
-    (match List.assoc_opt "keepers" fields with
-     | Some (`List rows) ->
-       let keeper_rows =
-         patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
-       in
-       if keeper_rows <> rows
-       then
-         execution_cache.Server_dashboard_http_cache.current
-         <- { (Server_dashboard_http_cache.snapshot execution_cache) with
-              json =
-                `Assoc
-                  (replace_keeper_rows_and_rebuild_briefs
-                     ~now_ts:(Time_compat.now ())
-                     ~keeper_rows
-                     ~keepers_json:(`List keeper_rows)
-                     fields)
-            }
-     | Some _ -> ()
-     | None -> ())
-  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
+  with_execution_publication_lock (fun () ->
+    incr execution_publication_generation;
+    let generation = !execution_publication_generation in
+    clear_execution_default_light_http_body ();
+    match (Server_dashboard_http_cache.snapshot execution_cache).json with
+    | `Assoc fields ->
+      let json =
+        match List.assoc_opt "keepers" fields with
+        | Some (`List rows) ->
+          let keeper_rows =
+            patch_keeper_rows ~keeper_name ~event ~keepalive_running rows
+          in
+          if keeper_rows = rows
+          then `Assoc fields
+          else
+            `Assoc
+              (replace_keeper_rows_and_rebuild_briefs
+                 ~now_ts:(Time_compat.now ())
+                 ~keeper_rows
+                 ~keepers_json:(`List keeper_rows)
+                 fields)
+        | Some _ | None -> `Assoc fields
+      in
+      execution_cache.Server_dashboard_http_cache.current
+      <- { (Server_dashboard_http_cache.snapshot execution_cache) with
+           json = with_execution_publication_generation ~generation json
+         }
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ())
 ;;
 
 let patch_keeper_dependent_caches ~keeper_name ~event =
@@ -843,33 +1009,36 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ~min_v:30.0
       ~max_v:300.0
   in
+  let attempt_generation = Atomic.make 0 in
   let compute () =
-    clear_execution_default_light_http_body ();
-    Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
+    let generation = begin_execution_publication_attempt () in
+    Atomic.set attempt_generation generation;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ~sw
-        ~clock
-        ~net
-        ~mono_clock
-        ~config:workspace_config
-        (fun ~config ~sw ->
-           Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
-           |> patch_surface_json_for_running_keepers config
-           |> with_projection_diagnostics
-                ~surface:"execution"
-                ~started_at
-                ~extra:
-                  [ ( "readonly_pool"
-                    , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
-                  ])
+      let json =
+        run_dashboard_compute
+          ~mode:Offloaded_readonly
+          ~sw
+          ~clock
+          ~net
+          ~mono_clock
+          ~config:workspace_config
+          (fun ~config ~sw ->
+             Dashboard_execution.json ~light:true ~config ~sw ~clock ~proc_mgr ()
+             |> patch_surface_json_for_running_keepers config
+             |> with_projection_diagnostics
+                  ~surface:"execution"
+                  ~started_at
+                  ~extra:
+                    [ ( "readonly_pool"
+                      , Workspace_utils.domain_local_pg_backend_diagnostics_json () )
+                    ])
+      in
+      generation, json
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+      let (_ : bool) = publish_execution_error_if_current ~generation exn in
       raise exn
   in
   Proactive_refresh.start
@@ -881,19 +1050,20 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ; on_failure =
           Some
             (fun failure ->
-              clear_execution_default_light_http_body ();
-              Server_dashboard_http_cache.mark_cached_surface_error_message
-                execution_cache
-                (Proactive_refresh.failure_message failure))
+              ignore
+                (publish_execution_error_message_if_current
+                   ~generation:(Atomic.get attempt_generation)
+                   (Proactive_refresh.failure_message failure)))
       ; warm_delay_s = 0.0
       }
     ~compute
-    ~on_result:(fun json ->
-      Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
-      broadcast_cached_surface
-        ~event_type:"execution_snapshot"
-        (refresh_execution_default_light_http_body ~config:workspace_config);
-      !broadcast_namespace_truth_ref state)
+    ~on_result:(fun (generation, json) ->
+      if publish_execution_success_if_current ~generation json
+      then (
+        broadcast_cached_surface
+          ~event_type:"execution_snapshot"
+          (refresh_execution_default_light_http_body ~config:workspace_config);
+        !broadcast_namespace_truth_ref state))
 ;;
 
 let dashboard_execution_cached_http_body ~state request =
@@ -902,9 +1072,12 @@ let dashboard_execution_cached_http_body ~state request =
   let actor = execution_actor_for_request ~base_path:config.base_path request in
   let full_mode = bool_query_param request "full" ~default:false in
   let force = bool_query_param request "force" ~default:false in
-  match fixture, actor, full_mode, force, Atomic.get execution_default_light_http_body with
-  | None, None, false, false, Some body when execution_surface_has_fresh_success () ->
-    Some body
+  match fixture, actor, full_mode, force with
+  | None, None, false, false ->
+    with_execution_publication_lock (fun () ->
+      match Atomic.get execution_default_light_http_body with
+      | Some body when execution_surface_has_fresh_success_unlocked () -> Some body
+      | Some _ | None -> None)
   | _ -> None
 ;;
 
@@ -1050,21 +1223,23 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   match fixture, actor, full_mode with
   | None, None, false when force ->
     let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
+    let attempt_generation = Atomic.make 0 in
     let compute_and_track () =
-      clear_execution_default_light_http_body ();
-      Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
+      let generation = begin_execution_publication_attempt () in
+      Atomic.set attempt_generation generation;
       try
         let json = compute ~light:true () in
-        Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
-        let (_ : Yojson.Safe.t) =
-          refresh_execution_default_light_http_body ~config
-        in
-        Server_dashboard_http_cache.cached_surface_json execution_cache
+        if publish_execution_success_if_current ~generation json
+        then (
+          let (_ : Yojson.Safe.t) =
+            refresh_execution_default_light_http_body ~config
+          in
+          dashboard_execution_snapshot_json ())
+        else json
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        clear_execution_default_light_http_body ();
-        Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+        let (_ : bool) = publish_execution_error_if_current ~generation exn in
         raise exn
     in
     (match
@@ -1075,8 +1250,10 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
        let exn =
          Dashboard_cache.Compute_timeout (execution_default_light_cache_key, false)
        in
-       clear_execution_default_light_http_body ();
-       Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
+       ignore
+         (publish_execution_error_if_current
+            ~generation:(Atomic.get attempt_generation)
+            exn);
        Log.Dashboard.warn
          "dashboard execution force refresh timed out: %s (%.0fs)"
          execution_default_light_cache_key
@@ -1103,10 +1280,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
     let json =
-      Server_dashboard_http_cache.cached_surface_or_first_success_json
-        execution_cache
-        ~cache_key:execution_default_light_cache_key
-        ~ttl:deep_surface_cache_ttl_s
+      cached_execution_or_first_success_json
         ~clock
         ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
         (compute ~light:true)
@@ -1118,7 +1292,7 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         ~query
         json
     in
-    cache_execution_default_light_http_body response_json;
+    let (_ : Yojson.Safe.t) = refresh_execution_default_light_http_body ~config in
     response_json
   | _ ->
     (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
@@ -1130,12 +1304,17 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
         (Option.value ~default:"" fixture)
         (if full_mode then "full" else "light")
     in
+    let compute_with_generation () =
+      let generation = current_execution_publication_generation () in
+      compute ?actor ?fixture ~light ()
+      |> with_execution_publication_generation ~generation
+    in
     Dashboard_cache.get_or_compute_with_timeout
       cache_key
       ~ttl:deep_surface_cache_ttl_s
       ~clock
       ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-      (compute ?actor ?fixture ~light)
+      compute_with_generation
     |> with_execution_metadata ~config ~cache_key ~query
 ;;
 

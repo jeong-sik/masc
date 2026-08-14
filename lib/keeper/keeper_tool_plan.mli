@@ -84,6 +84,17 @@ module Run_id : sig
   val equal : t -> t -> bool
 end
 
+(** Globally unique durable observation identity for one composition
+    invocation. Unlike {!Run_id}, this UUID crosses process and fleet storage
+    boundaries and is never used to control plan execution. *)
+module Composition_run_id : sig
+  type t
+
+  val fresh : unit -> t
+  val to_string : t -> string
+  val equal : t -> t -> bool
+end
+
 type json_type =
   | Null_type
   | Boolean_type

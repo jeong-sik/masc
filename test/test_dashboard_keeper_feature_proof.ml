@@ -104,6 +104,22 @@ let keeper_names feature key =
   |> List.sort compare
 ;;
 
+let duration_tier feature id =
+  feature
+  |> U.member "duration_tiers"
+  |> U.to_list
+  |> List.find_opt (fun tier -> U.member "id" tier |> U.to_string = id)
+  |> function
+  | Some tier -> tier
+  | None -> failf "duration tier %s absent from persistence proof" id
+;;
+
+let append_turn_exchange config keeper_name ts =
+  Masc.Keeper_types_support.append_jsonl_line
+    (Masc.Keeper_types_support.keeper_decision_log_path config keeper_name)
+    (`Assoc [ "channel", `String "turn"; "ts_unix", `Float ts ])
+;;
+
 let test_stale_keeper_fails_runtime_liveness () =
   with_workspace
   @@ fun config ->
@@ -236,6 +252,57 @@ let test_stopped_keeper_fails_board_reactive_autonomy () =
     (U.member "status" feature |> U.to_string)
 ;;
 
+let test_persistence_duration_tiers_use_durable_turn_history () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"four-hours" ~last_turn_ts:(now -. hour_seconds) ();
+  seed_keeper config ~name:"twenty-four-hours" ~last_turn_ts:(now -. hour_seconds) ();
+  append_turn_exchange config "four-hours" (now -. (5.0 *. hour_seconds));
+  append_turn_exchange config "four-hours" (now -. (0.5 *. hour_seconds));
+  append_turn_exchange config "twenty-four-hours" (now -. (24.0 *. hour_seconds));
+  append_turn_exchange config "twenty-four-hours" now;
+  let feature =
+    Feature_proof.json ~config ~now ()
+    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
+  in
+  List.iter
+    (fun id ->
+      let tier = duration_tier feature id in
+      check
+        string
+        (id ^ " tier names its evidence semantics")
+        "durable_turn_span"
+        U.(member "evidence_kind" tier |> to_string);
+      check string (id ^ " tier passes for both keepers") "pass" U.(member "status" tier |> to_string);
+      check int (id ^ " tier observes both keepers") 2 U.(member "observed_count" tier |> to_int))
+    [ "1h"; "2h"; "4h" ];
+  let tier_24h = duration_tier feature "24h" in
+  check string "24h tier stays partial" "warn" U.(member "status" tier_24h |> to_string);
+  check
+    (list string)
+    "24h tier names only the keeper with sufficient durable history"
+    [ "twenty-four-hours" ]
+    (tier_24h |> U.member "observed_keepers" |> U.to_list |> List.map U.to_string)
+;;
+
+let test_persistence_duration_tiers_reject_future_turns () =
+  with_workspace
+  @@ fun config ->
+  seed_keeper config ~name:"future" ~last_turn_ts:(now -. hour_seconds) ();
+  append_turn_exchange config "future" (now -. (25.0 *. hour_seconds));
+  append_turn_exchange config "future" (now +. hour_seconds);
+  let feature =
+    Feature_proof.json ~config ~now ()
+    |> fun payload -> feature_by_id payload "persistent_24h_turn_exchange"
+  in
+  List.iter
+    (fun id ->
+      let tier = duration_tier feature id in
+      check string (id ^ " tier rejects a future latest turn") "fail" U.(member "status" tier |> to_string);
+      check int (id ^ " tier observes no keeper with future evidence") 0 U.(member "observed_count" tier |> to_int))
+    [ "1h"; "2h"; "4h"; "24h" ]
+;;
+
 let () =
   run
     "dashboard_keeper_feature_proof"
@@ -256,6 +323,16 @@ let () =
             "stopped keeper fails board_reactive_autonomy"
             `Quick
             test_stopped_keeper_fails_board_reactive_autonomy
+        ] )
+    ; ( "persistence_duration_tiers"
+      , [ test_case
+            "durable history proves 1h 2h 4h and 24h tiers"
+            `Quick
+            test_persistence_duration_tiers_use_durable_turn_history
+        ; test_case
+            "future timestamps cannot prove a duration tier"
+            `Quick
+            test_persistence_duration_tiers_reject_future_turns
         ] )
     ]
 ;;

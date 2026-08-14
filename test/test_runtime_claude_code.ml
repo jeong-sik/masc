@@ -404,6 +404,18 @@ let prompt_too_long_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
 ;;
 
+let prompt_too_long_statusless_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
+;;
+
+let statusless_overflow_prose_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-generic-1","result":"gateway diagnostic mentioned Prompt is too long for an unrelated rejection"}|}
+;;
+
+let explicit_non_overflow_status_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-explicit-status-1","result":"Prompt is too long","api_error_status":500}|}
+;;
+
 let generic_400_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-generic","result":"request rejected; diagnostic mentioned Prompt is too long without the provider prefix","api_error_status":400}|}
 ;;
@@ -439,6 +451,52 @@ let test_terminal_prompt_too_long_is_typed () =
         (Astring.String.is_infix ~affix:"api_status=400" message)
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "an is_error terminal was reported as completion")
+;;
+
+let test_statusless_canonical_prompt_too_long_is_typed () =
+  with_fixture [ Emit prompt_too_long_statusless_result ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Context_window_exceeded
+          { message; tool_effect_attempted = false; response_emitted = false }) ->
+      check
+        bool
+        "canonical provider verdict survives into the typed failure"
+        true
+        (Astring.String.is_infix ~affix:"Prompt is too long" message);
+      check
+        bool
+        "missing status remains explicit"
+        true
+        (Astring.String.is_infix ~affix:"api_status=unknown" message)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a canonical statusless overflow was reported as completion")
+;;
+
+let test_statusless_overflow_prose_remains_turn_failed () =
+  with_fixture [ Emit statusless_overflow_prose_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed detail) ->
+      check
+        bool
+        "unrelated statusless rejection keeps its diagnostic"
+        true
+        (Astring.String.is_infix ~affix:"unrelated rejection" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "unrelated statusless prose was reported as completion")
+;;
+
+let test_exact_overflow_sentence_with_non_overflow_status_remains_turn_failed () =
+  with_fixture [ Emit explicit_non_overflow_status_result ] (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Turn_failed detail) ->
+      check
+        bool
+        "explicit non-overflow status remains authoritative"
+        true
+        (Astring.String.is_infix ~affix:"api_status=500" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an explicit non-overflow status was reported as completion")
 ;;
 
 let test_unrelated_400_remains_turn_failed () =
@@ -1246,6 +1304,18 @@ let () =
             "terminal_reason prompt_too_long is typed"
             `Quick
             test_terminal_reason_prompt_too_long_is_typed
+        ; test_case
+            "statusless canonical prompt too long is typed"
+            `Quick
+            test_statusless_canonical_prompt_too_long_is_typed
+        ; test_case
+            "statusless overflow prose remains turn failed"
+            `Quick
+            test_statusless_overflow_prose_remains_turn_failed
+        ; test_case
+            "exact overflow sentence with non-overflow status remains turn failed"
+            `Quick
+            test_exact_overflow_sentence_with_non_overflow_status_remains_turn_failed
         ; test_case
             "non-overflow terminal_reason beats prefix prose"
             `Quick

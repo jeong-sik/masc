@@ -50,6 +50,7 @@ let make_tool_bundle_for_descriptors
       ?gate_context
       ?hitl_resolution
       ?composition_catalog
+      ?turn_ctx_cell
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
   : tool_bundle
@@ -273,7 +274,49 @@ let make_tool_bundle_for_descriptors
              , Some mark_completed_terminal_externalization_failed )
            | Keeper_tool_descriptor.Ordinary
                (Keeper_tool_descriptor.Serial | Keeper_tool_descriptor.Concurrent) ->
-             None, None, None
+             let on_failed =
+               match descriptor.runtime_handler with
+               | Keeper_tool_descriptor.Tool_execute ->
+                 Some mark_terminal_effect_failed
+               | ( Keeper_tool_descriptor.Tool_search_files
+                 | Keeper_tool_descriptor.Tool_read_file
+                 | Keeper_tool_descriptor.Tool_edit_file
+                 | Keeper_tool_descriptor.Tool_write_file
+                 | Keeper_tool_descriptor.Tool_time_now
+                 | Keeper_tool_descriptor.Tool_tools_list
+                 | Keeper_tool_descriptor.Tool_context_status
+                 | Keeper_tool_descriptor.Tool_artifact_read
+                 | Keeper_tool_descriptor.Tool_memory_search
+                 | Keeper_tool_descriptor.Tool_memory_write
+                 | Keeper_tool_descriptor.Tool_library_search
+                 | Keeper_tool_descriptor.Tool_library_read
+                 | Keeper_tool_descriptor.Tool_surface_read
+                 | Keeper_tool_descriptor.Tool_surface_post
+                 | Keeper_tool_descriptor.Tool_person_note_set
+                 | Keeper_tool_descriptor.Tool_ide_annotate
+                 | Keeper_tool_descriptor.Tool_voice_dispatch
+                 | Keeper_tool_descriptor.Tool_task_dispatch
+                 | Keeper_tool_descriptor.Tool_board_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_task_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_run_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+                 | Keeper_tool_descriptor.Tool_web_search
+                 | Keeper_tool_descriptor.Tool_web_fetch
+                 | Keeper_tool_descriptor.Tool_masc_control_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_fusion_status
+                 | Keeper_tool_descriptor.Tool_masc_library_dispatch
+                 | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
+                 | Keeper_tool_descriptor.Tool_analyze_image ) ->
+                 None
+             in
+             None, on_failed, None
          in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
@@ -329,6 +372,7 @@ let make_tool_bundle_for_descriptors
         ~publication_recovery
         ~ctx_snapshot
         ?turn_sandbox_factory
+        ?turn_ctx_cell
         ?clock
         ?continuation_channel
         ?gate_context:gate_context_provider
@@ -369,6 +413,7 @@ let make_tool_bundle
       ?gate_context
       ?hitl_resolution
       ?composition_catalog
+      ?turn_ctx_cell
       ()
   =
   make_tool_bundle_for_descriptors
@@ -381,6 +426,7 @@ let make_tool_bundle
     ?gate_context
     ?hitl_resolution
     ?composition_catalog
+    ?turn_ctx_cell
     ~descriptors:(Keeper_tool_descriptor.model_visible_descriptors ())
     ()
 ;;
@@ -393,6 +439,7 @@ let make_tools
       ~(ctx_snapshot : Keeper_types.working_context)
       ?clock
       ?composition_catalog
+      ?turn_ctx_cell
       ()
   : Agent_core.Tool.t list
   =
@@ -403,6 +450,7 @@ let make_tools
      ~ctx_snapshot
      ?clock
      ?composition_catalog
+     ?turn_ctx_cell
      ())
     .tools
 ;;

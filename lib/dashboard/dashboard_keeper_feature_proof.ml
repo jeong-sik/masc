@@ -214,12 +214,12 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
   let stats =
     snapshots
     |> List.map (fun snapshot ->
-      snapshot.keeper_name, Decision.turn_span_stats ~config snapshot.keeper_name)
+      snapshot.keeper_name, Decision.turn_span_stats ~config ~now snapshot.keeper_name)
   in
   let stat_for keeper_name =
     match List.assoc_opt keeper_name stats with
     | Some stat -> stat
-    | None -> Decision.turn_span_stats ~config keeper_name
+    | None -> Decision.turn_span_stats ~config ~now keeper_name
   in
   let observed =
     snapshots
@@ -249,6 +249,46 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
       Decision.turn_span_evidence_json ~now snapshot.keeper_name
         (stat_for snapshot.keeper_name))
   in
+  let duration_tiers =
+    Decision.persistence_tiers
+    |> List.map (fun (tier : Decision.persistence_tier) ->
+      let observed_keepers, missing_keepers =
+        snapshots
+        |> List.partition (fun snapshot ->
+          Decision.has_persistent_turn_span_for
+            ~required_span_hours:tier.required_span_hours
+            ~now
+            (stat_for snapshot.keeper_name))
+      in
+      let observed_keepers =
+        observed_keepers
+        |> List.map (fun snapshot -> snapshot.keeper_name)
+        |> uniq_sorted
+      in
+      let missing_keepers =
+        missing_keepers
+        |> List.map (fun snapshot -> snapshot.keeper_name)
+        |> uniq_sorted
+      in
+      let tier_status =
+        if total = 0 || observed_keepers = []
+        then Fail
+        else if List.length observed_keepers = total
+        then Pass
+        else Warn
+      in
+      `Assoc
+        [ "id", `String tier.id
+        ; "evidence_kind", `String "durable_turn_span"
+        ; "required_span_hours", `Float tier.required_span_hours
+        ; "status", `String (status_to_string tier_status)
+        ; "keeper_count", `Int total
+        ; "observed_count", `Int (List.length observed_keepers)
+        ; "missing_count", `Int (List.length missing_keepers)
+        ; "observed_keepers", Json_util.json_string_list observed_keepers
+        ; "missing_keepers", Json_util.json_string_list missing_keepers
+        ])
+  in
   `Assoc [
     ("id", `String "persistent_24h_turn_exchange");
     ("label", `String "24h persistent turn exchange");
@@ -273,6 +313,7 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
        ("read_errors", `List (keeper_read_errors snapshots));
        ("per_keeper", `List per_keeper);
      ]);
+    ("duration_tiers", `List duration_tiers);
     ( "evidence_refs",
       `List [
         evidence_ref ~kind:"store" ~id:"keeper_decision_log"

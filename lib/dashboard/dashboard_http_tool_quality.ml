@@ -77,6 +77,9 @@ let tool_success_of_record record =
   | Some value -> value
   | None -> false
 
+let tool_record_is_deferred record =
+  Safe_ops.json_string_opt "disposition" record = Some "deferred"
+
 let hour_key_of_record record =
   let hour_of_unix ts =
     let tm = Unix.gmtime ts in
@@ -133,7 +136,7 @@ let source_metadata_fields () =
   Dashboard_tool_source_freshness.keeper_tool_call_io_fields
     ~dashboard_surface ()
 
-let empty_summary ~window_hours ~n ~sampling_mode =
+let empty_summary ~window_hours ~n ~sampling_mode ~deferred =
   `Assoc
     (source_metadata_fields ()
     @ [ ("generated_at", `String (Masc_domain.now_iso ()))
@@ -149,6 +152,7 @@ let empty_summary ~window_hours ~n ~sampling_mode =
     ; ("total", `Int 0)
     ; ("success", `Int 0)
     ; ("failure", `Int 0)
+    ; ("deferred", `Int deferred)
     ; ("success_rate", `Float 0.0)
     ; ("by_tool", `List [])
     ; ("by_keeper", `List [])
@@ -171,8 +175,10 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     | _ ->
       (Keeper_tool_call_log.read_recent ~n (), "recent_n", None)
   in
+  let deferred_records, records = List.partition tool_record_is_deferred records in
+  let deferred = List.length deferred_records in
   if records = [] then
-    empty_summary ~window_hours ~n ~sampling_mode
+    empty_summary ~window_hours ~n ~sampling_mode ~deferred
   else
   let total = ref 0 in
   let success = ref 0 in
@@ -400,6 +406,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("total", `Int total_n);
     ("success", `Int success_n);
     ("failure", `Int (total_n - success_n));
+    ("deferred", `Int deferred);
     ("success_rate", `Float (Float.round (rate *. 100.0) /. 100.0));
     ("by_tool", `List by_tool);
     ("by_keeper", `List by_keeper);

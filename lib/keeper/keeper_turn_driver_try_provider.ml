@@ -131,7 +131,10 @@ type try_provider_ctx =
        unit)
         option
   ; on_model_input_window_observation :
-      (Runtime_model_input_tail_window.window_observation -> unit) option
+      (measurement:Turn_record.model_input_measurement
+       -> Runtime_model_input_tail_window.window_observation
+       -> unit)
+        option
   ; (* Event bus *)
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -540,13 +543,13 @@ let budgeted_model_input_projection
        The projection is the same one the serializer runs, through the same
        per-codec function, and it is idempotent — the backend applying it again
        to this output finds nothing left to drop. *)
-    let messages =
+    let messages, measurement =
       match
         Agent_core.Llm_provider.Complete_common.transmitted_history
           ~config:provider_config
           messages
       with
-      | Ok transmitted -> transmitted
+      | Ok transmitted -> transmitted, Turn_record.Wire_shape
       | Error error ->
         (* A refusal here must not become the turn's refusal. The projection
            validates reasoning provenance across the whole list it is given,
@@ -568,7 +571,7 @@ let budgeted_model_input_projection
             (Agent_core.Llm_provider.Reasoning_history_projection
              .error_to_string
                error));
-        messages
+        messages, Turn_record.Durable_shape
     in
     let planned_and_windowed =
       offload_model_input_cpu (fun () ->
@@ -672,6 +675,7 @@ let budgeted_model_input_projection
       Option.iter
         (fun observe ->
            observe
+             ~measurement
              (Runtime_model_input_tail_window.observe
                 ~history_atom_count
                 windowed))

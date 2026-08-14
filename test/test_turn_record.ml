@@ -83,7 +83,7 @@ let sample_record () : Turn_record.t =
         { runtime_profile = "ollama_cloud.deepseek-v4-flash"
         ; body_bytes = 560_513
         }
-  ; model_input_window = Some { transmitted_atoms = 15; total_atoms = 7_706 }
+  ; model_input_window = Some { transmitted_atoms = 15; total_atoms = 7_706; measurement = Wire_shape }
   ; raw_trace_run_ref =
       Some
         { worker_run_id = "worker-run-41"
@@ -383,7 +383,11 @@ let test_record_carries_transmitted_history_share () =
   let record =
     { (sample_record ()) with
       Turn_record.model_input_window =
-        Some { Turn_record.transmitted_atoms = 7; total_atoms = 7_700 }
+        Some
+          { Turn_record.transmitted_atoms = 7
+          ; total_atoms = 7_700
+          ; measurement = Wire_shape
+          }
     }
   in
   match Turn_record.of_json (Turn_record.to_json record) with

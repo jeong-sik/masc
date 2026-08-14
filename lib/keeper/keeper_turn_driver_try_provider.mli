@@ -70,7 +70,10 @@ type try_provider_ctx =
        unit)
         option
   ; on_model_input_window_observation :
-      (Runtime_model_input_tail_window.window_observation -> unit) option
+      (measurement:Turn_record.model_input_measurement
+       -> Runtime_model_input_tail_window.window_observation
+       -> unit)
+        option
         (** Called with the cut the model-input projection selected over the
             keeper's conversation history.
 

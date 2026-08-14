@@ -119,6 +119,56 @@ let a_turn_that_produced_nothing_demotes_everything_before_it () =
     (List.length planned.Demotion.pending)
 ;;
 
+(* SCRATCH — adversarial premise check (deleted after use). [earlier] ends
+   with an Assistant that issued a call whose Tool answer has not been
+   recorded yet — the checkpoint captured a dangling tool cycle at the turn
+   boundary, exactly the shape [Keeper_compaction_unit]'s [protected_suffix]
+   exists to handle elsewhere. On request 1 (before the answer exists)
+   [first_atom_at_or_after] returns one value; once the answer lands on
+   request 2, it returns a different one. Confirm the drift is real, then
+   confirm it is inert: the disputed atom has no [ToolResult] content on the
+   request where the value differs, so [plan] demotes the same set either
+   way, and the completed atom is never split once it exists. *)
+let a_split_atom_at_the_boundary_never_gets_demoted_half () =
+  let earlier =
+    history_with_tool_bodies [ String.make 4_000 'e' ] @ [ assistant "dangling call" ]
+  in
+  let dangling_result = tool_message ~id:"dangling" (String.make 4_000 'd') in
+  let boundary = List.length earlier in
+  let messages_request_1 = earlier in
+  let messages_request_2 = earlier @ [ dangling_result ] in
+  let demote_before_1 =
+    Window.first_atom_at_or_after messages_request_1 ~message_index:boundary
+  in
+  let demote_before_2 =
+    Window.first_atom_at_or_after messages_request_2 ~message_index:boundary
+  in
+  Alcotest.(check bool)
+    "the boundary value does drift across the dangling call"
+    true
+    (demote_before_1 <> demote_before_2);
+  let planned_1 =
+    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_1 messages_request_1
+  in
+  let planned_2 =
+    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_2 messages_request_2
+  in
+  Alcotest.(check int)
+    "request 1 has nothing demotable at the disputed atom yet"
+    1
+    (List.length planned_1.Demotion.pending);
+  Alcotest.(check int)
+    "request 2 demotes the same count once the answer exists"
+    1
+    (List.length planned_2.Demotion.pending);
+  Alcotest.(check bool)
+    "the completed dangling call survives verbatim, not split"
+    true
+    (List.exists
+       (String.equal (String.make 4_000 'd'))
+       (markers planned_2.Demotion.messages))
+;;
+
 (* --- 1. Bound soundness (RFC-0363 §6 test 2) -------------------------- *)
 
 (* The placeholder must bound the real marker for every byte range, because
@@ -405,6 +455,10 @@ let () =
             "a turn that produced nothing demotes everything before it"
             `Quick
             a_turn_that_produced_nothing_demotes_everything_before_it
+        ; Alcotest.test_case
+            "SCRATCH a split atom at the boundary never gets demoted half"
+            `Quick
+            a_split_atom_at_the_boundary_never_gets_demoted_half
         ] )
     ; ( "exclusions"
       , [ Alcotest.test_case

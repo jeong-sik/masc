@@ -11,6 +11,7 @@
   tool_schemas_workspace_extra
   tool_schemas_run
   tool_schemas_schedule
+  tool_schemas_monitor
   tool_schemas_library
   tool_schemas_local_runtime
   tools

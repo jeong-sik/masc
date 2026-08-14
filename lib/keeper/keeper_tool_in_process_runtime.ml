@@ -1629,6 +1629,16 @@ let handle_masc_schedule_with_outcome
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
+let handle_masc_monitor_with_outcome
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~name
+      ~args
+  =
+  Tool_monitor.dispatch { Tool_monitor.config; agent_name = meta.name } ~name ~args
+  |> dispatch_option_to_execution ~name
+;;
+
 (* RFC-0252 — masc_fusion out-of-band panel+judge deliberation.  The
    gate -> fiber fork -> orchestrator logic lives in [Fusion_tool.handle];
    this handler only gathers the keeper context and loads the [fusion] policy

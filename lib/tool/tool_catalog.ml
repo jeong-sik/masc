@@ -350,6 +350,9 @@ let explicit_metadata : (string * metadata) list =
     ("masc_schedule_list", read_state_tool);
     ("masc_schedule_get", read_state_tool);
     ("masc_schedule_cancel", broadcast_tool);
+    ("masc_monitor_create", broadcast_tool);
+    ("masc_monitor_list", read_state_tool);
+    ("masc_monitor_cancel", broadcast_tool);
     ("masc_fusion", broadcast_tool);
     ("masc_fusion_status", read_state_tool);
     ("masc_library_list", read_state_tool);

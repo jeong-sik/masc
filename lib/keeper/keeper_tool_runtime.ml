@@ -90,6 +90,7 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_masc_monitor_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -149,6 +150,7 @@ let handle_shell_ir ctx descriptor args =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_masc_monitor_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -345,6 +347,13 @@ let handle_in_process ctx descriptor args =
          ~name
          ~args
          ())
+  | Tool_masc_monitor_dispatch ->
+    Some
+      (Keeper_tool_in_process_runtime.handle_masc_monitor_with_outcome
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
   | Tool_masc_keeper_dispatch ->
     Some
       (Keeper_tool_in_process_runtime.handle_masc_keeper_with_outcome

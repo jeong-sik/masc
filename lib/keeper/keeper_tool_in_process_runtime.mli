@@ -260,6 +260,15 @@ val handle_masc_schedule_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
+(** RFC-0379 — [handle_masc_monitor_with_outcome] is the descriptor-projection
+    cluster handler for [masc_monitor_*] tools. *)
+val handle_masc_monitor_with_outcome
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> Keeper_tool_execution.t
+
 (** RFC-0252 — [handle_masc_fusion_with_outcome] is the in-process handler for the
     [masc_fusion] out-of-band panel+judge deliberation tool.  It loads the
     [fusion] policy from runtime.toml and delegates durable async submission to

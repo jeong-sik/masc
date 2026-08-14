@@ -103,6 +103,7 @@ type runtime_handler =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_masc_monitor_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -221,6 +222,7 @@ let runtime_handler_to_string = function
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
+  | Tool_masc_monitor_dispatch -> "tool_masc_monitor_dispatch"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
@@ -243,6 +245,7 @@ let keeper_tool_group_of_runtime_handler = function
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
+  | Tool_masc_monitor_dispatch
   | Tool_masc_keeper_dispatch
   | Tool_masc_fusion_dispatch
   | Tool_masc_fusion_status
@@ -556,6 +559,7 @@ let descriptor
       | Tool_masc_control_dispatch
       | Tool_masc_agent_timeline_dispatch
       | Tool_masc_schedule_dispatch
+  | Tool_masc_monitor_dispatch
       | Tool_masc_keeper_dispatch
       | Tool_masc_fusion_dispatch
       | Tool_masc_fusion_status
@@ -1379,6 +1383,21 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ()
 ;;
 
+let masc_monitor_descriptor (definition : Tool_schemas_monitor.definition) =
+  let schema : Masc_domain.tool_schema = definition.schema in
+  cluster_descriptor_with_schema_source
+    ~capability_identity:Internal_name_identity
+    ~keeper_model_projection:Internal_name
+    ~input_schema_source:Canonical_registry
+    ~input_schema:schema.input_schema
+    ~id:("masc.monitor." ^ definition.id)
+    ~name:schema.name
+    ~description:schema.description
+    ~handler:Tool_masc_monitor_dispatch
+    ~readonly:definition.read_only
+    ()
+;;
+
 let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
   let schema : Masc_domain.tool_schema = definition.schema in
   cluster_descriptor_with_schema_source
@@ -1849,6 +1868,8 @@ let internal_descriptors : t list =
   (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
+  (* ── RFC-0379 — keeper condition monitors (3 entries) ────────── *)
+  @ List.map masc_monitor_descriptor Tool_schemas_monitor.definitions
   @ [
   (* ── RFC-0182 §3.1 — masc_keeper cluster ──── *)
     masc_keeper_descriptor ~keeper_model_projection:Operator_only "list" "masc_keeper_list"

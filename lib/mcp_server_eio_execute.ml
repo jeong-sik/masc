@@ -378,6 +378,11 @@ let execute_tool_eio
                      }
                      ~name
                      ~args:coerced_args
+                 | Mod_monitor ->
+                   Tool_monitor.dispatch
+                     { Tool_monitor.config; agent_name }
+                     ~name
+                     ~args:coerced_args
                  | Mod_misc ->
                    Tool_misc.dispatch
                      { Tool_misc.config

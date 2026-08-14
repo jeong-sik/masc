@@ -25,6 +25,7 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_control -> "control"
   | Mod_agent_timeline -> "agent_timeline"
   | Mod_schedule -> "schedule"
+  | Mod_monitor -> "monitor"
   | Mod_misc -> "misc"
   | Mod_inline -> "inline"
   | Mod_operator -> "operator"
@@ -118,6 +119,8 @@ let dispatch
         }
         ~name
         ~args
+    | Mod_monitor ->
+      Tool_monitor.dispatch { Tool_monitor.config; agent_name } ~name ~args
     | Mod_misc ->
       Tool_misc.dispatch
         { Tool_misc.config

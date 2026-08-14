@@ -321,8 +321,8 @@ let create
 
 (* Reads never create the store: [load_all_for_codebase] answers [] for an
    absent file, and a GET that mkdirs seeds a directory for whatever slug
-   the query named (live proof 2026-08-14: a scope probe left an empty
-   [by-url/github/] beside the canonical store). *)
+   the query named (live proof 2026-08-14: a bare-token scope probe left an
+   empty store directory beside the canonical one). *)
 let list ~base_dir ~codebase ~filter () =
   let all : annotation list = load_all_for_codebase ~base_dir codebase in
   let by_file =

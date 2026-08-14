@@ -138,8 +138,8 @@ module Code_address = struct
      [path_segment_to_slug], so every slug [canonical_url_of_remote] can
      emit is accepted and nothing outside that alphabet is. Structure is
      part of the acceptance too: every canonical slug joins a host and at
-     least one path segment with ['_'], so a bare token ("github") is not
-     an address. Live proof 2026-08-14: minutes after the RFC-0378 cut a
+     least one path segment with ['_'], so a bare host token is not an
+     address. Live proof 2026-08-14: minutes after the RFC-0378 cut a
      bare-token scope probe passed this check and seeded a second store
      directory beside the canonical one. *)
   let valid_codebase slug =

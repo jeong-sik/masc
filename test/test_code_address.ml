@@ -115,6 +115,26 @@ let () =
             "dot codebase"
             `Quick
             (check_rejected ~codebase:"." ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "host-only codebase"
+            `Quick
+            (check_rejected ~codebase:"github.com" ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "separator without host and path"
+            `Quick
+            (check_rejected ~codebase:"_" ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "orphan partition is not a codebase"
+            `Quick
+            (check_rejected ~codebase:"_orphan" ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "separator without repository path"
+            `Quick
+            (check_rejected ~codebase:"github.com_" ~path:"lib/x.ml" A.Malformed_codebase)
+        ; Alcotest.test_case
+            "single joined repository segment cannot start with dotdot"
+            `Quick
+            (check_rejected ~codebase:"a_..repo" ~path:"lib/x.ml" A.Malformed_codebase)
         ] )
     ]
 ;;

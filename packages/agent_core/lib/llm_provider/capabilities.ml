@@ -1291,38 +1291,6 @@ let token_of_declared_format format =
   Option.bind format Capability_vocab.token_of_thinking_control_format
 ;;
 
-let thinking_control_token_for_model_id_catalog model_id =
-  match Model_catalog.global () with
-  | Some catalog ->
-    (match Model_catalog.lookup catalog model_id with
-     | Some entry -> token_of_declared_format entry.thinking_control_format
-     | None -> None)
-  | None -> None
-;;
-
-let thinking_control_token_for_model_id_with_manifest manifest model_id =
-  match Capability_manifest.lookup manifest model_id with
-  | Some entry -> token_of_declared_format entry.thinking_control_format
-  | None -> thinking_control_token_for_model_id_catalog model_id
-;;
-
-let[@warning "-32"] thinking_control_token_for_model_id model_id =
-  match Model_catalog.global () with
-  | Some catalog ->
-    (match Model_catalog.lookup catalog model_id with
-     | Some entry -> token_of_declared_format entry.thinking_control_format
-     | None ->
-       (match Capability_manifest.global () with
-        | Some manifest ->
-          thinking_control_token_for_model_id_with_manifest manifest model_id
-        | None -> thinking_control_token_for_model_id_catalog model_id))
-  | None ->
-    (match Capability_manifest.global () with
-     | Some manifest ->
-       thinking_control_token_for_model_id_with_manifest manifest model_id
-     | None -> thinking_control_token_for_model_id_catalog model_id)
-;;
-
 let thinking_control_token_for_provider_model_id
       ~(provider_label : string)
       ~(model_id : string)
@@ -1813,39 +1781,6 @@ let%test "Anthropic thinking policy falls back to manifest when catalog has no r
     (fun () ->
        anthropic_thinking_control_for_model_id "manifest-anthropic-model"
        = Some Anthropic_adaptive_only)
-;;
-
-let%test "thinking_control_token accessor reads the token from the catalog constructor" =
-  (* The token is the single source of truth carried by [Chat_template_token]; a
-     non-token format resolves to [None]. *)
-  Model_catalog.set_global
-    (Model_catalog.of_model_entries
-       [ { (test_catalog_entry "programmatic-catalog-token") with
-           thinking_control_format = Some (Chat_template_token "<|think|>")
-         }
-       ; { (test_catalog_entry "programmatic-catalog-no-token") with
-           thinking_control_format = Some Chat_template_kwargs
-         }
-       ]);
-  Fun.protect ~finally:Model_catalog.clear_global (fun () ->
-    thinking_control_token_for_model_id "programmatic-catalog-token" = Some "<|think|>"
-    && Option.is_none
-         (thinking_control_token_for_model_id "programmatic-catalog-no-token"))
-;;
-
-let%test "thinking_control_token accessor reads the token from the manifest constructor" =
-  Capability_manifest.set_global
-    [ { (test_manifest_entry "programmatic-manifest-token") with
-        thinking_control_format = Some (Chat_template_token "<|think|>")
-      }
-    ; { (test_manifest_entry "programmatic-manifest-no-token") with
-        thinking_control_format = Some Chat_template_kwargs
-      }
-    ];
-  Fun.protect ~finally:Capability_manifest.clear_global (fun () ->
-    thinking_control_token_for_model_id "programmatic-manifest-token" = Some "<|think|>"
-    && Option.is_none
-         (thinking_control_token_for_model_id "programmatic-manifest-no-token"))
 ;;
 
 (* --- emits_usage_tokens / capabilities_for_provider_label --- *)

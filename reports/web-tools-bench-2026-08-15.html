@@ -238,10 +238,25 @@ hit@1 <strong>5/6</strong>, 옛 유일 경로(SearXNG)는 부분 회복 상태�
 </ol>
 </div>
 
+<h2>개선 라운드 2 — 하네스·아웃라인·코퍼스 (2026-08-16 병합분)</h2>
+
+<table>
+<tr><th>개선</th><th>내용</th><th>PR</th></tr>
+<tr><td>품질 회귀 하네스</td><td>고정 8쿼리 결정론 채점(hit@1/hit@5, 한글 비율). Brave grounded는 키 투입 즉시 같은 쿼리셋으로 A/B 활성</td><td>#28779</td></tr>
+<tr><td>내용 인식 절단</td><td>절단 마커 뒤 <code>[OUTLINE ...]</code> — 헤딩별 <strong>바이트 오프셋 지도</strong>(최대 32행, 펜스 제외). 각 행이 곧 <code>keeper_artifact_read(sha256, offset, max_bytes)</code> 인자라 keeper가 64KB 창을 맹목으로 넘기는 대신 섹션을 골라 읽는다. compile-only였던 web_fetch 스위트도 CI 배선</td><td>#28781</td></tr>
+<tr><td>코퍼스 인덱스</td><td>RFC-0383: 오프로드마다 <code>index.jsonl</code>에 사실 한 줄(sha256·source_url·title·bytes·fetched_at). 인덱스는 projection(삭제해도 무영향 — 테스트로 핀), 소비는 기존 Grep→artifact_read 2단으로 <strong>새 도구 0·게이트 0</strong>. keeper가 같은 주제를 웹 왕복 없이 재질의할 수 있는 기반</td><td>#28783 (RFC), #28794 (구현), PR-2 (소비 문서)</td></tr>
+</table>
+
+<p class="note">구현 중 determinism 게이트가 인덱스 행 생성부의 <code>Unix.gettimeofday</code>를
+정확히 FAIL로 잡았고, 마커 주석 대신 <strong>시각 주입</strong>(handle의 start_time을 체인으로 전달)으로
+수리했다 — 비결정 시계 읽기는 dispatch 경계에 남고 그 아래는 입력에 결정론적이다.</p>
+
 <h2>다음 반복</h2>
 <ul>
 <li><strong>Iteration 6</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로 —
 <code>bench-web-quality.py</code>가 같은 쿼리셋으로 자동 A/B.</li>
+<li><strong>코퍼스 재질의 실측</strong>: RFC-0383 acceptance 3 — keeper가 Grep→artifact_read
+2단으로 과거 본문에 도달하는 턴 실측 (Iteration 5와 같은 방법).</li>
 <li>품질은 <code>python3 scripts/bench-web-quality.py -o docs/evidence/web-quality-&lt;date&gt;-rN.json</code>,
 가용성·토큰은 <code>bench-web-tools.py</code> — 실행 후 이 문서에 섹션 추가.</li>
 </ul>

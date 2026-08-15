@@ -22,7 +22,7 @@ val generate : seed:string -> count:int -> fact list
 (** [generate ~seed ~count] returns up to [count] facts drawn from
     {!category_names} in order. [count] is capped at
     [List.length category_names]. Every value is derived solely from
-    [seed] (via a SHA-256-seeded PRNG) — calling this twice with the same
+    [seed] (via SHA-256 digests keyed per value, no PRNG) — calling this twice with the same
     [seed] and [count] always returns an identical list. *)
 
 val recall_prompt : string

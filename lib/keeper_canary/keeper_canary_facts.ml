@@ -37,43 +37,68 @@ let reviewer_timezones =
    ; "Australia/Sydney"; "America/Los_Angeles"
   |]
 
-(* [seed] is hashed through SHA-256 rather than fed to [Random.State.make]
-   as raw bytes of the string: a short or low-entropy run id (e.g. "10T")
-   would otherwise seed the generator with very few effective bits. Folding
-   32 digest bytes into 8 int32-sized words gives Random.State a full-width
-   seed regardless of how the caller spells the run id. *)
-let state_of_seed seed =
-  let digest = Digestif.SHA256.(to_raw_string (digest_string seed)) in
-  let word i =
-    let byte j = Char.code digest.[(i * 4) + j] in
-    (byte 0 lsl 24) lor (byte 1 lsl 16) lor (byte 2 lsl 8) lor byte 3
-  in
-  Random.State.make (Array.init 8 word)
+(* No PRNG anywhere in this module: every value is read directly off a
+   SHA-256 digest of [seed] and a [label] naming which draw it is
+   (e.g. "deadline:month" vs "deadline:day" — a category needing more than
+   one independent-looking value uses one label per value, not one seeded
+   generator advanced twice). A PRNG's whole point is a stream of values
+   from one seed; a hash keyed per-draw gives the same "looks independent,
+   fully reproducible" property without a stream to seed, advance, or
+   thread through call sites. *)
+let digest_bytes ~seed ~label =
+  Digestif.SHA256.(to_raw_string (digest_string (seed ^ "\x00" ^ label)))
+
+let byte_at bytes i = Char.code bytes.[i]
+
+(* First 4 digest bytes as a non-negative int, masked to fit a 32-bit
+   OCaml int (top bit of the first byte cleared) so this behaves the same
+   on 32- and 64-bit builds. *)
+let uint31_of_bytes bytes =
+  ((byte_at bytes 0 land 0x7f) lsl 24)
+  lor (byte_at bytes 1 lsl 16)
+  lor (byte_at bytes 2 lsl 8)
+  lor byte_at bytes 3
+
+let int_in_range ~seed ~label ~modulus =
+  uint31_of_bytes (digest_bytes ~seed ~label) mod modulus
 
 let hex_digits = "0123456789abcdef"
 
-(* 6 bytes (12 hex chars) of seeded pseudo-randomness — same length as the
-   Crypto_rng-backed nonce this replaces, but reproducible from [state]. *)
-let nonce_suffix state =
-  String.init 12 (fun _ -> hex_digits.[Random.State.int state 16])
+(* 6 bytes (12 hex chars) of digest output — same length as the
+   Crypto_rng-backed nonce this module used to mint, but reproducible from
+   [seed] and [label] alone. *)
+let hex_suffix ~seed ~label =
+  let bytes = digest_bytes ~seed ~label in
+  String.init 12 (fun i ->
+    let b = byte_at bytes (i / 2) in
+    let nibble = if i mod 2 = 0 then b lsr 4 else b land 0xf in
+    hex_digits.[nibble])
 
-let value_of_category state = function
-  | "project_codename" -> "Codename-" ^ nonce_suffix state
-  | "lead_reviewer" -> "Reviewer-" ^ nonce_suffix state
+let value_of_category ~seed = function
+  | "project_codename" -> "Codename-" ^ hex_suffix ~seed ~label:"project_codename"
+  | "lead_reviewer" -> "Reviewer-" ^ hex_suffix ~seed ~label:"lead_reviewer"
   | "deadline" ->
-    (* A seeded near-future date, not tied to wall-clock "today" so the
-       same run id reproduces the same date regardless of when it runs. *)
-    Printf.sprintf
-      "2026-%02d-%02d"
-      (1 + Random.State.int state 12)
-      (1 + Random.State.int state 28)
-  | "blocked_dependency" -> "dep-" ^ nonce_suffix state
-  | "fallback_runtime" -> "runtime-" ^ nonce_suffix state
-  | "incident_number" -> string_of_int (1000 + Random.State.int state 9000)
+    (* A digest-derived near-future date, not tied to wall-clock "today"
+       so the same run id reproduces the same date regardless of when it
+       runs. Month and day are independent labels, not two draws from one
+       stream, so neither depends on the other's derivation order. *)
+    let month = 1 + int_in_range ~seed ~label:"deadline:month" ~modulus:12 in
+    let day = 1 + int_in_range ~seed ~label:"deadline:day" ~modulus:28 in
+    Printf.sprintf "2026-%02d-%02d" month day
+  | "blocked_dependency" -> "dep-" ^ hex_suffix ~seed ~label:"blocked_dependency"
+  | "fallback_runtime" -> "runtime-" ^ hex_suffix ~seed ~label:"fallback_runtime"
+  | "incident_number" ->
+    string_of_int (1000 + int_in_range ~seed ~label:"incident_number" ~modulus:9000)
   | "reviewer_timezone" ->
-    reviewer_timezones.(Random.State.int state (Array.length reviewer_timezones))
-  | "artifact_name" -> "artifact-" ^ nonce_suffix state ^ ".json"
-  | "rollback_switch" -> "rollback-" ^ nonce_suffix state
+    let index =
+      int_in_range
+        ~seed
+        ~label:"reviewer_timezone"
+        ~modulus:(Array.length reviewer_timezones)
+    in
+    reviewer_timezones.(index)
+  | "artifact_name" -> "artifact-" ^ hex_suffix ~seed ~label:"artifact_name" ^ ".json"
+  | "rollback_switch" -> "rollback-" ^ hex_suffix ~seed ~label:"rollback_switch"
   | other ->
     invalid_arg ("Keeper_canary_facts: unknown fact category " ^ other)
 
@@ -101,11 +126,10 @@ let statement_of ~category ~value =
    only (see the module doc comment); calling this twice with the same
    [seed] and [count] always returns the same list. *)
 let generate ~seed ~count =
-  let state = state_of_seed seed in
   category_names
   |> List.filteri (fun i _ -> i < count)
   |> List.map (fun category ->
-    let value = value_of_category state category in
+    let value = value_of_category ~seed category in
     { category; statement = statement_of ~category ~value; value })
 
 let recall_prompt =

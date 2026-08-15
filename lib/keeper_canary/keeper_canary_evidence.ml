@@ -105,7 +105,12 @@ let turn_to_yojson (t : turn_evidence) =
   `Assoc
     [ ("index", `Int t.index)
     ; ("category", match t.category with Some c -> `String c | None -> `Null)
-    ; ("delivery_key", Option.value t.delivery_key ~default:`Null)
+    ; ( "delivery_key"
+        (* [None] is a recorded finding, not a decode failure being
+           papered over: it means correlate_turn found no durable row for
+           this turn's request id (see bin/keeper_canary_run.ml and the
+           [notes] this produces) — `Null renders that absence as-is. *)
+      , match t.delivery_key with Some json -> json | None -> `Null )
     ; ("turn_ref", match t.turn_ref with Some s -> `String s | None -> `Null)
     ; ("sent_at", `String t.sent_at)
     ; ("round_trip_s", `Float t.round_trip_s)

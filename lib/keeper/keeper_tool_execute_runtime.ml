@@ -130,6 +130,19 @@ let composable_output_fields ~base_path ~stdout ~stderr ~output =
     | exn -> Error (Printexc.to_string exn)
 
 module For_testing = struct
+  (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
+     through this override instead of the real shell dispatch. The override
+     returns a controlled [Execute_shell_ir.dispatch_error] so tests can
+     drive each rejected-dispatch branch through the real production wiring
+     (stream start -> dispatch -> stream end) without spawning a process. *)
+  let dispatch_override
+      : (unit ->
+        ( Masc_exec.Exec_dispatch.dispatch_result
+        , Keeper_tooling.Execute_shell_ir.dispatch_error )
+        result)
+        option ref
+    = ref None
+
   let elapsed_duration_ms = elapsed_duration_ms
   let model_execute_location_fields = model_execute_location_fields
   let redact_execute_output_with_additional_secret_files
@@ -561,13 +574,16 @@ let handle_tool_execute_typed
             record_stream_chunk stream data
           in
           let dispatch () =
-            Keeper_tooling.Execute_shell_ir.dispatch
-              ~workdir:cwd
-              ~sandbox:dispatch_sandbox
-              ?timeout_sec
-              ?base_host_env
-              ~on_output_chunk
-              ir
+            match !For_testing.dispatch_override with
+            | Some override -> override ()
+            | None ->
+              Keeper_tooling.Execute_shell_ir.dispatch
+                ~workdir:cwd
+                ~sandbox:dispatch_sandbox
+                ?timeout_sec
+                ?base_host_env
+                ~on_output_chunk
+                ir
           in
           let dispatch_result =
             match dispatch_sandbox with
@@ -585,10 +601,46 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               (message_for_log diagnostic);
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:(`Assoc [ "rejected", `String "gate_reject" ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
             authorized (typed_error_json diagnostic)
           | Error Keeper_tooling.Execute_shell_ir.Cannot_parse ->
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:(`Assoc [ "rejected", `String "cannot_parse" ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
             authorized (typed_error_json "Cannot parse command")
           | Error Keeper_tooling.Execute_shell_ir.Too_complex ->
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:(`Assoc [ "rejected", `String "too_complex" ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
             authorized (typed_error_json "Command too complex")
           | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
             (* RFC-0208 P1: path-policy denial audit line. *)
@@ -597,6 +649,18 @@ let handle_tool_execute_typed
               meta.name
               cmd_for_log
               (message_for_log e);
+            (try
+               Keeper_keepalive_signal.record_execute_stream_end
+                 ~keeper_name:meta.name
+                 ~task_id
+                 ~status:(`Assoc [ "rejected", `String "path_reject" ])
+             with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Dashboard.warn
+                  "execute stream end callback failed keeper=%s: %s"
+                  meta.name
+                  (Printexc.to_string exn));
             authorized
               (typed_error_json
                  ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]

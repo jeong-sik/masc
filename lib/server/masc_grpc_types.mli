@@ -180,27 +180,3 @@ module StatusResponse : sig
   val to_bytes : t -> string
 end
 
-(** {1 LSP Proxy} *)
-
-module LspRequest : sig
-  type t =
-    { language_id : string
-    ; jsonrpc_request_json : string
-    ; workspace_root : string option
-    }
-
-  val of_bytes_result : string -> (t, string) result
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end
-
-module LspResponse : sig
-  type t =
-    { jsonrpc_response_json : string
-    ; error_message : string
-    }
-
-  val of_bytes_result : string -> (t, string) result
-  val of_bytes : string -> t
-  val to_bytes : t -> string
-end

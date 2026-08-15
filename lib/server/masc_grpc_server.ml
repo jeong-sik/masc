@@ -17,29 +17,6 @@ let configured_port () = Env_config.Transport.grpc_port
 (** Check whether gRPC is enabled (default: enabled, opt-out via env). *)
 let is_enabled () = Env_config.Transport.grpc_enabled ()
 
-let parse_lsp_jsonrpc_request jsonrpc_request_json =
-  try
-    match Yojson.Safe.from_string jsonrpc_request_json with
-    | `Assoc fields ->
-      (match List.assoc_opt "method" fields with
-       | Some (`String method_) ->
-         let params =
-           match List.assoc_opt "params" fields with
-           | Some value -> value
-           | None -> `Null
-         in
-         Ok (method_, params)
-       | Some _ -> Error "JSON-RPC request method field must be a string"
-       | None -> Error "JSON-RPC request missing method field")
-    | _ -> Error "JSON-RPC request must be a JSON object"
-  with
-  | Yojson.Json_error msg -> Error (Printf.sprintf "JSON-RPC parse error: %s" msg)
-;;
-
-module For_testing = struct
-  let parse_lsp_jsonrpc_request = parse_lsp_jsonrpc_request
-end
-
 module Reflection_bridge = struct
   let reflection_v1_service_name = "grpc.reflection.v1.ServerReflection"
   let reflection_v1alpha_service_name = "grpc.reflection.v1alpha.ServerReflection"
@@ -105,17 +82,13 @@ module Reflection_bridge = struct
       ; "aXRpZXMSKgoRbGFzdF9oZWFydGJlYXRfbXMYBCABKANSD2xhc3RIZWFydGJlYXRNcxItChNzZXNzaW9uX2JvdW5kX2F0X21zGAUg"
       ; "ASgDUhBzZXNzaW9uQm91bmRBdE1zEiYKD2N1cnJlbnRfdGFza19pZBgGIAEoCVINY3VycmVudFRhc2tJZCKFAQoIVGFza0luZm8S"
       ; "DgoCaWQYASABKAlSAmlkEhQKBXRpdGxlGAIgASgJUgV0aXRsZRIWCgZzdGF0dXMYAyABKAlSBnN0YXR1cxIfCgthc3NpZ25lZF90"
-      ; "bxgEIAEoCVIKYXNzaWduZWRUbxIaCghwcmlvcml0eRgFIAEoBVIIcHJpb3JpdHkihgEKCkxzcFJlcXVlc3QSHwoLbGFuZ3VhZ2Vf"
-      ; "aWQYASABKAlSCmxhbmd1YWdlSWQSMAoUanNvbnJwY19yZXF1ZXN0X2pzb24YAiABKAlSEmpzb25ycGNSZXF1ZXN0SnNvbhIlCg53"
-      ; "b3Jrc3BhY2Vfcm9vdBgDIAEoCVINd29ya3NwYWNlUm9vdCJmCgtMc3BSZXNwb25zZRIyChVqc29ucnBjX3Jlc3BvbnNlX2pzb24Y"
-      ; "ASABKAlSE2pzb25ycGNSZXNwb25zZUpzb24SIwoNZXJyb3JfbWVzc2FnZRgCIAEoCVIMZXJyb3JNZXNzYWdlMvoDCg1NYXNjV29y"
-      ; "a3NwYWNlElIKCUhlYXJ0YmVhdBIgLm1hc2Mud29ya3NwYWNlLnYxLkhlYXJ0YmVhdFBpbmcaHy5tYXNjLndvcmtzcGFjZS52MS5I"
-      ; "ZWFydGJlYXRBY2soATABEkwKCVN1YnNjcmliZRIjLm1hc2Mud29ya3NwYWNlLnYxLlN1YnNjcmliZVJlcXVlc3QaGC5tYXNjLndv"
-      ; "cmtzcGFjZS52MS5FdmVudDABElMKCFRvb2xDYWxsEiIubWFzYy53b3Jrc3BhY2UudjEuVG9vbENhbGxSZXF1ZXN0GiMubWFzYy53"
-      ; "b3Jrc3BhY2UudjEuVG9vbENhbGxSZXNwb25zZRJWCglCcm9hZGNhc3QSIy5tYXNjLndvcmtzcGFjZS52MS5Ccm9hZGNhc3RSZXF1"
-      ; "ZXN0GiQubWFzYy53b3Jrc3BhY2UudjEuQnJvYWRjYXN0UmVzcG9uc2USUAoJR2V0U3RhdHVzEiAubWFzYy53b3Jrc3BhY2UudjEu"
-      ; "U3RhdHVzUmVxdWVzdBohLm1hc2Mud29ya3NwYWNlLnYxLlN0YXR1c1Jlc3BvbnNlEkgKB0xzcENhbGwSHS5tYXNjLndvcmtzcGFj"
-      ; "ZS52MS5Mc3BSZXF1ZXN0Gh4ubWFzYy53b3Jrc3BhY2UudjEuTHNwUmVzcG9uc2ViBnByb3RvMw=="
+      ; "bxgEIAEoCVIKYXNzaWduZWRUbxIaCghwcmlvcml0eRgFIAEoBVIIcHJpb3JpdHkysAMKDU1hc2NXb3Jrc3BhY2USUgoJSGVhcnRi"
+      ; "ZWF0EiAubWFzYy53b3Jrc3BhY2UudjEuSGVhcnRiZWF0UGluZxofLm1hc2Mud29ya3NwYWNlLnYxLkhlYXJ0YmVhdEFjaygBMAES"
+      ; "TAoJU3Vic2NyaWJlEiMubWFzYy53b3Jrc3BhY2UudjEuU3Vic2NyaWJlUmVxdWVzdBoYLm1hc2Mud29ya3NwYWNlLnYxLkV2ZW50"
+      ; "MAESUwoIVG9vbENhbGwSIi5tYXNjLndvcmtzcGFjZS52MS5Ub29sQ2FsbFJlcXVlc3QaIy5tYXNjLndvcmtzcGFjZS52MS5Ub29s"
+      ; "Q2FsbFJlc3BvbnNlElYKCUJyb2FkY2FzdBIjLm1hc2Mud29ya3NwYWNlLnYxLkJyb2FkY2FzdFJlcXVlc3QaJC5tYXNjLndvcmtz"
+      ; "cGFjZS52MS5Ccm9hZGNhc3RSZXNwb25zZRJQCglHZXRTdGF0dXMSIC5tYXNjLndvcmtzcGFjZS52MS5TdGF0dXNSZXF1ZXN0GiEu"
+      ; "bWFzYy53b3Jrc3BhY2UudjEuU3RhdHVzUmVzcG9uc2ViBnByb3RvMw=="
       ]
   ;;
 
@@ -425,15 +398,10 @@ let create_server
          string ->
          string ->
          (string, Server_grpc_tool_dispatch.error) result)
-      ~(lsp_dispatcher :
-          language_id:string
-          -> jsonrpc_request_json:string
-          -> workspace_root:string option
-          -> (string, string) result)
   : Grpc_eio.Server.t
   =
   let service =
-    Masc_grpc_service.create_service ~workspace_config ~tool_dispatcher ~lsp_dispatcher
+    Masc_grpc_service.create_service ~workspace_config ~tool_dispatcher
   in
   let health = Grpc_eio.Health.create ~default_status:Grpc_eio.Health.Serving () in
   Grpc_eio.Health.register_service health ~service:Masc_grpc_service.service_name;
@@ -500,115 +468,10 @@ let start
     Log.Server.info "gRPC transport disabled (set MASC_GRPC_ENABLED=0 to disable)")
   else (
     let port = configured_port () in
-    (* Extract Eio capabilities for LSP proxy wiring. *)
-    let proc_mgr = Eio.Stdenv.process_mgr env in
-    let clock = Eio.Stdenv.clock env in
-    let base_path = workspace_config.Workspace_utils_backend_setup.base_path in
-    (* Build the LSP dispatcher closure. Uses a dedicated switch scoped to
-       the gRPC server lifetime so LSP child processes are cleaned up when
-       the server shuts down. The process cache and router are server-scoped
-       (shared across all gRPC calls) since gRPC calls are stateless unary RPCs,
-       unlike the WebSocket endpoint which uses per-connection state. *)
-    let lsp_sw = sw in
-    let lsp_processes : (string, Lsp_process_manager.lsp_process) Hashtbl.t =
-      Hashtbl.create 8
-    in
-    let lsp_router = Lsp_message_router.create () in
-    let lsp_spawn_mutex = Eio.Mutex.create () in
-    let lsp_dispatcher
-          ~language_id
-          ~jsonrpc_request_json
-          ~workspace_root
-      : (string, string) result
-      =
-      let lang_id = language_id in
-      let ws_root = Option.value workspace_root ~default:base_path in
-      (* Ensure the LSP process for this language is running. *)
-      let ensure_proc () =
-        Eio.Mutex.use_rw ~protect:true lsp_spawn_mutex (fun () ->
-          match Hashtbl.find_opt lsp_processes lang_id with
-          | Some proc -> Ok proc
-          | None ->
-            (match Lsp_process_manager.spawn ~sw:lsp_sw ~lang_id ~workspace_root:ws_root proc_mgr with
-             | Error spawn_err ->
-               Error (Format.asprintf "LSP spawn failed for %s: %a" lang_id Lsp_process_manager.pp_spawn_error spawn_err)
-             | Ok proc ->
-               let _reader =
-                 Lsp_message_router.start_response_reader
-                   ~sw:lsp_sw lsp_router proc
-                   ~on_exit:None
-                   ~on_notification:(fun ~client_id:_ ~method_:_ _params -> ())
-               in
-               (* Send initialize request with timeout. *)
-               let init_params =
-                 `Assoc
-                   [ "processId", `Int (Unix.getpid ())
-                   ; "rootUri", `String ("file://" ^ ws_root)
-                   ; "capabilities", `Assoc []
-                   ]
-               in
-               (try
-                  let init_result =
-                    Eio.Time.with_timeout_exn clock 10.0 (fun () ->
-                      let promise =
-                        Lsp_message_router.send_request
-                          lsp_router proc
-                          ~method_:"initialize"
-                          ~params:init_params
-                          ~client_id:0
-                      in
-                      Eio.Promise.await promise)
-                  in
-                  (match init_result with
-                   | Ok _ ->
-                     Lsp_message_router.send_notification
-                       lsp_router proc
-                       ~method_:"initialized"
-                       ~params:(`Assoc []);
-                     Hashtbl.replace lsp_processes lang_id proc;
-                     Ok proc
-                   | Error msg ->
-                     (* Init failed: the proc + its 3 pipe FDs + reader fibers
-                        are bound to [lsp_sw] (server lifetime) and were NOT
-                        cached, so without teardown they leak until shutdown and
-                        the next LspCall re-spawns (RFC-0261 / #21546). *)
-                     Lsp_process_manager.shutdown proc;
-                     Error (Printf.sprintf "LSP initialize failed for %s: %s" lang_id msg))
-                with
-                | Eio.Time.Timeout ->
-                  Lsp_process_manager.shutdown proc;
-                  Error (Printf.sprintf "LSP initialize timeout for %s (10s)" lang_id)
-                | exn ->
-                  Lsp_process_manager.shutdown proc;
-                  Error (Printf.sprintf "LSP initialize error for %s: %s" lang_id (Printexc.to_string exn)))))
-      in
-      match ensure_proc () with
-      | Error _ as e -> e
-      | Ok proc ->
-        (match parse_lsp_jsonrpc_request jsonrpc_request_json with
-         | Error _ as error -> error
-         | Ok (method_, params) ->
-           try
-             let promise =
-               Lsp_message_router.send_request
-                 lsp_router proc
-                 ~method_
-                 ~params
-                 ~client_id:0
-             in
-             (match Eio.Promise.await promise with
-              | Ok result ->
-                Ok (Yojson.Safe.to_string result)
-              | Error msg ->
-                Error (Printf.sprintf "LSP request failed: %s" msg))
-           with
-           | exn ->
-             Error (Printf.sprintf "LSP dispatch error: %s" (Printexc.to_string exn)))
-    in
     Eio.Fiber.fork ~sw (fun () ->
       try
         let server =
-          create_server ~port ~workspace_config ~tool_dispatcher ~lsp_dispatcher
+          create_server ~port ~workspace_config ~tool_dispatcher
         in
         Log.Server.info
           "gRPC workspace server starting on port %d (health + reflection enabled)"
@@ -616,7 +479,7 @@ let start
         Log.Server.info "  service: %s" Masc_grpc_service.service_name;
         Log.Server.info "  health: %s/Check" health_service_name;
         Log.Server.info
-          "  methods: Broadcast, GetStatus, ToolCall, LspCall, Subscribe, Heartbeat";
+          "  methods: Broadcast, GetStatus, ToolCall, Subscribe, Heartbeat";
         Transport_metrics.set_grpc_runtime_listening true;
         Transport_metrics.set_grpc_listen_status "listening";
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)

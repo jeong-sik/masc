@@ -375,8 +375,6 @@ let test_grpc_server_registers_health_service () =
              ~port:Masc_grpc_server.default_port
              ~workspace_config
              ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-             ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-               Error "test stub")
          in
          let services = Grpc_eio.Server.list_services server in
          Alcotest.(check bool)
@@ -397,31 +395,6 @@ let test_grpc_server_registers_health_service () =
          (List.mem "grpc.health.v1.Health" services))
 ;;
 
-let test_lsp_jsonrpc_request_parse_missing_method () =
-  match
-    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
-      {|{"jsonrpc":"2.0","params":null}|}
-  with
-  | Ok _ -> Alcotest.fail "missing method should be rejected"
-  | Error msg ->
-    Alcotest.(check string)
-      "explicit missing method error"
-      "JSON-RPC request missing method field"
-      msg
-;;
-
-let test_lsp_jsonrpc_request_parse_method_not_string () =
-  match
-    Masc_grpc_server.For_testing.parse_lsp_jsonrpc_request
-      {|{"jsonrpc":"2.0","method":17,"params":null}|}
-  with
-  | Ok _ -> Alcotest.fail "non-string method should be rejected"
-  | Error msg ->
-    Alcotest.(check string)
-      "explicit method type error"
-      "JSON-RPC request method field must be a string"
-      msg
-;;
 
 let test_get_status_projects_backlog_tasks () =
   Eio_main.run
@@ -453,8 +426,6 @@ let test_get_status_projects_backlog_tasks () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "GetStatus" with
     | Some { handler = `Unary handler; _ } ->
@@ -576,8 +547,6 @@ let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "ToolCall" with
     | Some { handler = `Unary handler; _ } ->
@@ -600,8 +569,6 @@ let test_subscribe_handler_invalid_bytes_raise_grpc_status () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Subscribe" with
     | Some { handler = `ServerStreaming handler; _ } ->
@@ -627,8 +594,6 @@ let test_heartbeat_handler_invalid_bytes_warns_and_continues () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with
     | Some { handler = `Bidi handler; _ } ->
@@ -692,8 +657,6 @@ let test_heartbeat_projects_workspace_view () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with
     | Some { handler = `Bidi handler; _ } ->
@@ -748,8 +711,6 @@ let test_heartbeat_projects_keeper_pause_not_workspace_pause () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with
     | Some { handler = `Bidi handler; _ } ->
@@ -806,8 +767,6 @@ let test_heartbeat_does_not_materialize_uninitialized_workspace () =
       Masc_grpc_service.create_service
         ~workspace_config
         ~tool_dispatcher:(fun _tool _payload -> Ok "{}")
-        ~lsp_dispatcher:(fun ~language_id:_ ~jsonrpc_request_json:_ ~workspace_root:_ ->
-          Error "test stub")
     in
     match Grpc_eio.Service.get_method service "Heartbeat" with
     | Some { handler = `Bidi handler; _ } ->
@@ -935,14 +894,6 @@ let () =
             "registers_health_service"
             `Quick
             test_grpc_server_registers_health_service
-        ; Alcotest.test_case
-            "lsp_jsonrpc_missing_method"
-            `Quick
-            test_lsp_jsonrpc_request_parse_missing_method
-        ; Alcotest.test_case
-            "lsp_jsonrpc_method_not_string"
-            `Quick
-            test_lsp_jsonrpc_request_parse_method_not_string
         ] )
     ]
 ;;

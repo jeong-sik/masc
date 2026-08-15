@@ -157,6 +157,15 @@ Precedence:
 | `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
 | `OLLAMA_API_KEY` | `(none)` | Env-only credential; presence admits the `ollama` provider. |
 
+Web artifact corpus (RFC-0383): every truncation offload stores the full
+extraction at `<base>/.masc/artifacts/web-fetch/<sha256>.md` and appends one
+`masc.web_artifact.v1` fact row (`sha256`, `source_url`, optional `title`,
+`bytes`, `fetched_at`) to `index.jsonl` in the same directory. The index is a
+projection — deleting it changes no behavior — and keepers consume it with the
+existing pair: `Grep` the index for a topic, then
+`keeper_artifact_read(sha256, offset, max_bytes)` for the body. MASC never
+deletes artifacts or index rows; retention is operator-managed (#28759).
+
 Equivalent `runtime.toml` keys:
 
 ```toml

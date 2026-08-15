@@ -1,4 +1,5 @@
 import type { Message } from '../types'
+import { MENTION_DELIVERY_STATUSES, type MentionDeliveryStatus } from '../types/core'
 import { isRecord } from '../lib/type-guards'
 import { get, type AbortableRequestOptions } from './core'
 
@@ -34,10 +35,13 @@ function decodeDashboardWorkspaceMessage(raw: unknown, index: number): Message {
 function requiredMentionDelivery(
   record: Record<string, unknown>,
   index: number,
-): NonNullable<Message['mentionDelivery']> {
+): MentionDeliveryStatus {
   const value = record.mention_delivery
-  if (value === 'passive' || value === 'pending' || value === 'accepted' || value === 'rejected') {
-    return value
+  if (
+    typeof value === 'string'
+    && (MENTION_DELIVERY_STATUSES as readonly string[]).includes(value)
+  ) {
+    return value as MentionDeliveryStatus
   }
   throw new Error(`Workspace message ${index}.mention_delivery is invalid`)
 }

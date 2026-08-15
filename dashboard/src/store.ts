@@ -667,6 +667,7 @@ let inflightDashboardRefresh: Promise<void> | null = null
 let inflightShellRefresh: Promise<boolean> | null = null
 let inflightShellRefreshLight = false
 let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
+let inflightWorkspaceMessagesRefreshProject: string | null = null
 let workspaceMessagesRefreshController: AbortController | null = null
 let workspaceMessagesRefreshGeneration = 0
 let workspaceMessagesRefreshInvalidated = false
@@ -682,8 +683,14 @@ export function refreshDashboardWorkspaceMessages(
   expectedProject = serverStatus.value?.project ?? null,
 ): Promise<void> {
   if (inflightWorkspaceMessagesRefresh) {
-    workspaceMessagesRefreshInvalidated = true
-    return inflightWorkspaceMessagesRefresh
+    if (inflightWorkspaceMessagesRefreshProject === expectedProject) {
+      workspaceMessagesRefreshInvalidated = true
+      return inflightWorkspaceMessagesRefresh
+    }
+    // The inflight refresh targets a different project. Joining it would let
+    // its result satisfy this call's expectedProject guard by coincidence;
+    // abort it and start a fresh request scoped to this project instead.
+    workspaceMessagesRefreshController?.abort()
   }
 
   workspaceMessagesLoading.value = true
@@ -692,6 +699,7 @@ export function refreshDashboardWorkspaceMessages(
   const generation = ++workspaceMessagesRefreshGeneration
   const controller = new AbortController()
   workspaceMessagesRefreshController = controller
+  inflightWorkspaceMessagesRefreshProject = expectedProject
   inflightWorkspaceMessagesRefresh = (async () => {
     try {
       const { fetchDashboardWorkspaceMessages } = await import('./api/dashboard-workspace')
@@ -718,6 +726,16 @@ export function refreshDashboardWorkspaceMessages(
       }
     } catch (error) {
       if (generation === workspaceMessagesRefreshGeneration && !isAbortError(error)) {
+        // The durable endpoint failed after previously committing a snapshot
+        // for this project: release authority so the execution-snapshot
+        // fallback (see the comment above workspaceMessagesDurableAuthority's
+        // declaration) can resume covering messages instead of freezing on
+        // the last durable snapshot. Scoped to expectedProject so a stale
+        // failure can't clear an authority a newer, still-inflight refresh
+        // already set for a different project.
+        if (workspaceMessagesDurableAuthority?.project === expectedProject) {
+          workspaceMessagesDurableAuthority = null
+        }
         workspaceMessagesError.value = errorMessageOr(
           error,
           'Workspace messages failed to load',
@@ -729,6 +747,7 @@ export function refreshDashboardWorkspaceMessages(
         workspaceMessagesLoading.value = false
         workspaceMessagesRefreshController = null
         inflightWorkspaceMessagesRefresh = null
+        inflightWorkspaceMessagesRefreshProject = null
       }
     }
   })()
@@ -741,7 +760,12 @@ export function cancelDashboardWorkspaceMessagesRefresh(): void {
   workspaceMessagesRefreshController?.abort()
   workspaceMessagesRefreshController = null
   inflightWorkspaceMessagesRefresh = null
+  inflightWorkspaceMessagesRefreshProject = null
   workspaceMessagesLoading.value = false
+  // The durable refresh loop is no longer running, so its snapshot can no
+  // longer be trusted to stay current — release authority so the
+  // execution-snapshot fallback resumes covering messages.
+  workspaceMessagesDurableAuthority = null
 }
 
 export function invalidateDashboardCache(): void {
@@ -989,8 +1013,9 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
   if (workspaceChanged) {
+    // cancelDashboardWorkspaceMessagesRefresh() releases
+    // workspaceMessagesDurableAuthority itself.
     cancelDashboardWorkspaceMessagesRefresh()
-    workspaceMessagesDurableAuthority = null
   }
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)

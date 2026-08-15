@@ -270,6 +270,27 @@ let offload_full_text text =
        | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
        | Sys_error message -> Error message)
 
+let is_utf8_continuation_byte byte = Char.code byte land 0xC0 = 0x80
+
+(* When no newline is near the budget, the raw byte offset can land
+   inside a multi-byte codepoint and ship silent mojibake. Snap the cut
+   to a codepoint start: left for the head (excluded byte must start a
+   codepoint), right for the tail (included byte must start one). Both
+   walks are bounded and deterministic; invalid input degrades to an
+   empty window, never a loop. *)
+let snap_codepoint_left text index =
+  let rec loop i =
+    if i > 0 && is_utf8_continuation_byte text.[i] then loop (i - 1) else i
+  in
+  loop index
+
+let snap_codepoint_right text index =
+  let total = String.length text in
+  let rec loop i =
+    if i < total && is_utf8_continuation_byte text.[i] then loop (i + 1) else i
+  in
+  loop index
+
 let truncate_text ~max_chars text =
   let total = String.length text in
   if total <= max_chars then text, false, None
@@ -281,13 +302,13 @@ let truncate_text ~max_chars text =
       else
         match String.rindex_from_opt text (head_budget - 1) '\n' with
         | Some idx when idx > 0 -> idx
-        | Some _ | None -> head_budget
+        | Some _ | None -> snap_codepoint_left text head_budget
     in
     let tail_start =
       let minimum = total - tail_budget in
       match String.index_from_opt text minimum '\n' with
       | Some idx when idx + 1 < total -> idx + 1
-      | Some _ | None -> minimum
+      | Some _ | None -> snap_codepoint_right text minimum
     in
     let head = String.sub text 0 head_cut in
     let tail = String.sub text tail_start (total - tail_start) in

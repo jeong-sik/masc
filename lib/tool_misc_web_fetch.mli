@@ -40,7 +40,10 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 	      extracted text under [<base>/.masc/artifacts/web-fetch/] (content
 	      addressed by sha256, so identical pages reuse one file); absent when
 	      no truncation happened or the offload failed — the marker then says
-	      [full_text_unavailable=<reason>] instead of hiding it
+	      [full_text_unavailable=<reason>] instead of hiding it. MASC never
+	      deletes these files; retention is operator-managed. Cut points that
+	      fall away from a newline snap to UTF-8 codepoint starts, so a
+	      window never splits a multi-byte sequence
 	    - [content_type]: optional upstream content type
 	    - [downloaded_bytes]: optional curl-reported download size
 	    - [title]: optional, extracted from [<title>] tag

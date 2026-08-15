@@ -255,7 +255,28 @@ supports-response-format-json = true
 supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
-max-request-body-bytes = 262144
+# 262144 was inherited from [glm-coding.glm-4-7-coding], where it is justified
+# by that model's smaller serving window. This model declares max-context =
+# 203000 above, and the ceiling has to be read against that: measured on a live
+# 2026-08-14 request, 195,485 B carried 54,615 tokens, so 262144 B is about
+# 73,000 tokens — a third of what the model accepts.
+#
+# The keeper pays for the difference in memory. The window sizes history
+# against this ceiling, so on that same trace the keeper transmitted 14 of
+# 15,413 messages, roughly 7 turns of 7,650.
+#
+# Both candidate values have a recorded failure, and neither is safe by
+# arithmetic. 262144 latched analyst on 2026-07-29: its history serialized to
+# 355,286 B, every request was refused, and the turn could not compact its way
+# out. 524288 failed the next day when five keepers landed at 524,335 B — 47
+# bytes over — because the window fills toward whatever ceiling it is given and
+# the envelope is not part of what it measures. What made that catastrophic
+# rather than a retry was the recovery chain, fixed since in #27813.
+#
+# So this is not "524288 is the right size". It is: one value fails on
+# ordinary history, the other fails only on an envelope overshoot the retry
+# path now absorbs.
+max-request-body-bytes = 524288
 
 # MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
 # operator use. Do not route provider-native structured-output lanes here unless

@@ -99,10 +99,55 @@ Iteration 2부터는 (a) CI feature test가 직렬화 길이를 핀으로 고정
 <td><code>lib/tool_misc_web_search.ml:229</code></td></tr>
 </table>
 
+<h2>Iteration 2 — 재기동 직전 베이스라인 (2026-08-16 01:33 KST, r5)</h2>
+
+<p class="note">원본 증거: <code>docs/evidence/web-tools-bench-2026-08-16-r5.json</code>.
+측정 시점의 main에는 PR-1(본문 1회 적재 + TTL 900s)~PR-4(Brave LLM Context)가 병합돼 있었으나
+서버(:8935)는 <strong>재기동 전 옛 바이너리</strong>(0.22.0)다. 즉 이 측정은 코드 반영 전 런타임의
+마지막 관측이며, 재기동 후 Iteration 3의 대조군이다.</p>
+
+<div class="verdict">
+<p><strong>판정 3줄.</strong></p>
+<ol>
+<li>SearXNG는 <span class="dead">0건 / 0건 / 0건</span> (HTTP 200, 2196/538/1865ms) —
+Iteration 1에서 관측한 붕괴가 <strong>하루를 넘겨 지속</strong>된다. 회복 없음.
+"컨테이너 생존 + 상류 소진 = 빈 성공" 상태가 일시 장애가 아니라 기본 상태임을 시계열이 확정.</li>
+<li>무자격 폴백도 동결 상태 그대로: DuckDuckGo HTML은 봇 차단 지속(HTTP 202, 결과 앵커 0),
+Bing RSS 계측기는 10건 — 상류 웹은 살아있고 SearXNG 층만 죽어 있음을 분리 확인.</li>
+<li>MCP 외부 surface는 도구 40개, web 도구 0개로 불변(재기동 전이므로 예상과 일치).
+이중 적재 제거의 payload 수치는 외부에서 잴 수 없고, CI에 배선된
+<code>runtest-test_tool_misc_coverage</code>가 <code>page_content = `Null</code> 핀과
+grounded envelope 계약으로 고정한다 — 이 스택의 CI green이 그 실행 증거다.</li>
+</ol>
+</div>
+
+<h2>Iteration 3 — 스택 전체 반영 후 (2026-08-16 02:37 KST, r6)</h2>
+
+<p class="note">원본 증거: <code>docs/evidence/web-tools-bench-2026-08-16-r6.json</code>.
+RFC-0381 스택 8개 PR(#28747, #28760, #28753~#28758)이 main에 전부 병합됐고,
+서버(:8935)는 재빌드된 바이너리(main HEAD <code>4f3cf7ae7d</code> = PR-7)로 재기동된 상태의 측정이다.</p>
+
+<div class="verdict">
+<p><strong>판정 3줄.</strong></p>
+<ol>
+<li>새 바이너리 정상 서빙 — initialize·tools/list 성공, 외부 MCP surface는 coordination 40개 그대로
+(web 도구 비노출은 설계 유지). 스택이 외부 표면을 바꾸지 않았다는 무회귀 확인.</li>
+<li>SearXNG 상류는 여전히 <span class="dead">0건 × 3</span> (HTTP 200) — 다만 새 코드에서 이 상태는
+더 이상 "빈 성공"으로 조용히 흡수되지 않는다. 자격 없는 provider는 체인에서 배제되고 빈 체인은
+<code>Config</code> 실패로 드러난다는 계약은 CI feature test(<code>Tool_misc.dispatch</code> 실경로,
+<code>runtest-test_tool_misc_coverage</code>)가 고정하며, 이 스택의 CI green이 실행 증거다.</li>
+<li>DuckDuckGo 202 차단·Bing RSS 7건 — 무자격 폴백 2종은 코드에서 척살됐으므로(PR-2) 이 수치는
+이제 도구 경로가 아니라 상류 시계열 계측기로만 남는다.</li>
+</ol>
+</div>
+
+<p class="note">자격 투입 시(BRAVE_SEARCH_API_KEY / OLLAMA_API_KEY 발급 대기) grounded·Ollama 경로의
+지연·품질과 keeper 턴 경유 토큰 실측이 다음 반복이다.</p>
+
 <h2>다음 반복</h2>
 <ul>
-<li><strong>Iteration 2</strong> (PR-1·PR-2 머지 후): 이중 적재 제거 전/후 payload 길이를 CI feature test 수치로 비교. SearXNG 회복 여부 재실측.</li>
-<li><strong>Iteration 3</strong> (PR-4·PR-5 후): Brave LLM Context / Ollama provider 경로 지연·결과 품질, keeper 턴 경유 실측.</li>
+<li><strong>Iteration 4</strong> (자격 투입 후): Brave LLM Context / Ollama 라이브 경로 — 지연,
+결과 품질, <code>maximum_number_of_tokens</code> 예산 준수, keeper 턴 경유 토큰 소비.</li>
 <li>매 반복은 <code>python3 scripts/bench-web-tools.py -o docs/evidence/web-tools-bench-&lt;date&gt;-rN.json</code> 실행 후 이 문서에 섹션 추가.</li>
 </ul>
 

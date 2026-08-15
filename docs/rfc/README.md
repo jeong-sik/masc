@@ -242,6 +242,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0377 | 같은 대화의 밀린 메시지는 한 턴이 함께 본다 (Conversation-Batched Stimulus Intake) | Draft | - |
 | 0378 | Code fact 는 태어날 때 주소를 받는다 — typed address, code-fact 전용 store, anchor 계약 통일 | Draft | - |
 | 0380 | 대기 나이는 홀더의 사이클을 알아야 한다 — work liveness 판정 축 정정 | Draft | - |
+| 0381 | 웹 검색은 폴백이 있는 척한다 — provider 계약 정정과 토큰 예산 도입 | Draft | - |
 | RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |

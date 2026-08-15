@@ -424,10 +424,17 @@ let project_workspace_message_to_fleet
       in
       same keeper_name || same agent_name
     in
+    (* Fanout width is not otherwise observable: the registry keeps an entry
+       until it is unregistered, so the recipient count drifts upward within a
+       server lifetime and each recipient costs one transcript transaction. *)
+    let recipients = ref 0 in
+    let appended = ref 0 in
+    let failed = ref 0 in
     registered_keepers ()
     |> List.iter (fun (keeper_name, agent_name) ->
       if not (authored_by_recipient ~keeper_name ~agent_name)
       then (
+        incr recipients;
         match
           Keeper_chat_store.append_user_message_once
             ~base_dir:base_path
@@ -440,6 +447,7 @@ let project_workspace_message_to_fleet
             ()
         with
         | Ok (Keeper_chat_store.Appended _) ->
+          incr appended;
           Keeper_chat_broadcast.chat_appended
             ~keeper_name
             ~source:workspace_message_chat_source
@@ -447,9 +455,13 @@ let project_workspace_message_to_fleet
             ()
         | Ok (Keeper_chat_store.Already_present _) -> ()
         | Error detail ->
+          incr failed;
           Log.Keeper.error
             "fleet projection failed keeper=%s request_id=%s: %s"
-            keeper_name delivery.request_id detail))
+            keeper_name delivery.request_id detail));
+    Log.Keeper.info
+      "fleet projection request_id=%s from=%s recipients=%d appended=%d failed=%d"
+      delivery.request_id delivery.from_agent !recipients !appended !failed
 ;;
 
 module Projection_for_testing = struct

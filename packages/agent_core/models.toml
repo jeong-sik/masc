@@ -515,8 +515,16 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# 2026-08-15: this row declared Ollama's native /api/chat think toggle
+# (ollama_think) even though it is served through ollama_cloud's OpenAI-compat
+# /v1/chat/completions, which cannot encode it — same defect as qwen3.5:397b
+# (PR #28748), already confirmed and corrected for this exact model in the live
+# overlay (~/me/.masc/config/oas-models-overlay.toml, oas#2716 2026-07-20 audit,
+# 2026-08-04 live probe: message keys ['role','content','reasoning']). This row
+# just carried the buggy default forward in the embedded catalog. Closes #28749.
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -530,8 +538,11 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# Same correction as deepseek-v4-flash above; see that row's comment. Confirmed
+# by the live overlay's deepseek-v4-pro row (2026-08-04 live probe).
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
@@ -794,8 +805,12 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# Same ollama_think/Enable_not_encodable defect as deepseek-v4-flash above
+# (2026-08-15, closes #28749); confirmed by the live overlay's kimi-k2.6 row
+# (2026-08-04 live probe: message keys ['role','content','reasoning']).
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
 # Kimi K2 docs: reasoning content must be replayed (hard-required on tool turns,
 # recommended on all turns). Without this, the base replay policy is no_replay.
 reasoning_replay = "preserve_always"
@@ -816,8 +831,11 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# Same correction as kimi-k2.6 above; confirmed by the live overlay's
+# kimi-k2.7-code row (2026-08-04 live probe, same field shape).
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning"
 # Kimi K2.7-code docs: Preserved Thinking is always-on (keep reasoning_content of
 # every historical assistant message) and thinking cannot be disabled.
 reasoning_replay = "preserve_always"
@@ -882,8 +900,12 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# Same ollama_think/Enable_not_encodable defect as deepseek-v4-flash above
+# (2026-08-15, closes #28749); confirmed by the live overlay's minimax-m3 row.
+# reasoning_streaming_format was already correct here — only the control-wire
+# axis and the coupled budget flag were wrong.
+supports_reasoning_budget = false
+thinking_control_format = "none"
 reasoning_streaming_format = "delta:reasoning"
 supports_multimodal_inputs = true
 supports_image_input = true

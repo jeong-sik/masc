@@ -269,93 +269,6 @@ let () = test "validate_web_search_preserves_opaque_query" (fun () ->
   | Error message -> failwith message
 )
 
-let () = test "parse_bing_rss_items" (fun () ->
-  let payload =
-    {|<?xml version="1.0" encoding="utf-8" ?>
-<rss version="2.0">
-  <channel>
-    <item>
-      <title>OpenAI &amp; ChatGPT</title>
-      <link>https://openai.com/</link>
-      <description>OpenAI&#39;s <b>latest</b> updates.</description>
-    </item>
-    <item>
-      <title><![CDATA[Example Result]]></title>
-      <link>https://example.com/hello?a=1&amp;b=2</link>
-      <description><![CDATA[Snippet with <b>markup</b> &amp; detail]]></description>
-    </item>
-    <search:item xmlns:search="urn:search">
-      <search:title>Namespaced Result</search:title>
-      <search:link>https://example.com/namespaced</search:link>
-      <search:description>Namespace-safe item</search:description>
-    </search:item>
-  </channel>
-</rss>|}
-  in
-  let items = Tool_misc.parse_bing_rss_items payload in
-  assert (List.length items = 3);
-  match items with
-  | (title1, url1, snippet1) :: (title2, url2, snippet2)
-    :: (title3, url3, snippet3) :: _ ->
-      assert (title1 = "OpenAI & ChatGPT");
-      assert (url1 = "https://openai.com/");
-      assert (snippet1 = "OpenAI's latest updates.");
-      assert (title2 = "Example Result");
-      assert (url2 = "https://example.com/hello?a=1&b=2");
-      assert (snippet2 = "Snippet with markup & detail");
-      assert (title3 = "Namespaced Result");
-      assert (url3 = "https://example.com/namespaced");
-      assert (snippet3 = "Namespace-safe item")
-  | _ -> failwith "expected three parsed items"
-)
-
-let () = test "looks_like_rss_payload" (fun () ->
-  assert (Tool_misc_web_search.looks_like_rss_payload "<rss><channel></channel></rss>");
-  assert (
-    Tool_misc_web_search.looks_like_rss_payload
-      "<?xml version=\"1.0\"?><rss version=\"2.0\"></rss>");
-  assert (
-    not (Tool_misc_web_search.looks_like_rss_payload "<html><body>captcha</body></html>"))
-)
-
-let () = test "parse_bing_rss_items_drops_non_http_links" (fun () ->
-  let payload =
-    {|<rss><channel>
-    <item><title>safe</title><link>https://example.com/</link><description>ok</description></item>
-    <item><title>bad</title><link>javascript:alert(1)</link><description>bad</description></item>
-    </channel></rss>|}
-  in
-  let items = Tool_misc.parse_bing_rss_items payload in
-  assert (List.length items = 1);
-  match items with
-  | [ (title, url, _snippet) ] ->
-      assert (title = "safe");
-      assert (url = "https://example.com/")
-  | _ -> failwith "expected one safe parsed item"
-)
-
-let () = test "parse_ddg_html" (fun () ->
-  let payload =
-    {|<html><body>
-      <a rel="nofollow" class="result__a&#x9;extra" href="/l/?uddg=https%3A%2F%2Fexample.com%2Falpha">Alpha <b>Result</b></a>
-      <a class="extra&#xC;result__snippet">Alpha <b>snippet</b></a>
-      <a rel="nofollow" class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fbeta">Beta</a>
-      <a class="result__snippet">Beta summary</a>
-    </body></html>|}
-  in
-  let items = Tool_misc.parse_ddg_html payload in
-  assert (List.length items = 2);
-  match items with
-  | (title1, url1, snippet1) :: (title2, url2, snippet2) :: _ ->
-      assert (title1 = "Alpha Result");
-      assert (url1 = "https://example.com/alpha");
-      assert (snippet1 = "Alpha snippet");
-      assert (title2 = "Beta");
-      assert (url2 = "https://example.com/beta");
-      assert (snippet2 = "Beta summary")
-  | _ -> failwith "expected two parsed items"
-)
-
 let () = test "parse_searxng_json_basic" (fun () ->
   let payload =
     {|{"results": [
@@ -395,7 +308,7 @@ let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun (
                   with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
                     assert
                       (Tool_misc.web_search_provider_plan ()
-                       = [ "searxng"; "duckduckgo"; "bing_rss" ]))))))))))
+                       = [ "searxng" ]))))))))))
 )
 
 let () = test "web_search_provider_plan_reads_toml_boot_override" (fun () ->
@@ -411,10 +324,13 @@ let () = test "web_search_provider_plan_reads_toml_boot_override" (fun () ->
                     with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
                       assert
                         (Tool_misc.web_search_provider_plan ()
-                         = [ "searxng"; "duckduckgo"; "bing_rss" ])))))))))))
+                         = [ "searxng" ])))))))))))
 )
 
-let () = test "web_search_provider_plan_defaults_to_scraping_fallbacks" (fun () ->
+(* Feature contract: with zero credentials the plan is empty and the
+   search boundary reports the configuration failure with its remedy —
+   never an empty success. *)
+let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
   with_env "MASC_SEARXNG_URL" None (fun () ->
     with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
       with_env "TAVILY_API_KEY" None (fun () ->
@@ -424,9 +340,19 @@ let () = test "web_search_provider_plan_defaults_to_scraping_fallbacks" (fun () 
               with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
                 with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
                   with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                    assert (Tool_misc.web_search_provider_plan () = []);
+                    let result =
+                      Tool_misc.web_search_simulate_for_test
+                        ~query:"ocaml eio" ~limit:3 []
+                    in
+                    assert (not (Tool_result.is_success result));
                     assert
-                      (Tool_misc.web_search_provider_plan ()
-                       = [ "duckduckgo"; "bing_rss" ]))))))))))
+                      (Tool_result.failure_class result
+                       = Some Tool_result.Runtime_failure);
+                    assert
+                      (str_contains
+                         (Tool_result.message result)
+                         "no web search provider is configured")))))))))))
 )
 
 let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->
@@ -437,11 +363,11 @@ let () = test "web_search_provider_plan_prefers_configured_official_provider" (f
           with_env "BING_SEARCH_API_KEY" None (fun () ->
             with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
               with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave") (fun () ->
-                with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "ddg,bing_rss") (fun () ->
+                with_env "MASC_WEB_SEARCH_FALLBACKS" (Some "tavily,exa") (fun () ->
                   with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
                     assert
                       (Tool_misc.web_search_provider_plan ()
-                       = [ "brave"; "duckduckgo"; "bing_rss" ]))))))))))
+                       = [ "brave"; "tavily"; "exa" ]))))))))))
 )
 
 let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
@@ -449,25 +375,25 @@ let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
       [
         ("brave", `Error "provider failed");
-        ("duckduckgo", `Hits [ ("Eio", "https://example.com/eio", "Fiber runtime") ]);
+        ("searxng", `Hits [ ("Eio", "https://example.com/eio", "Fiber runtime") ]);
       ]
   in
   assert (Tool_result.is_success result);
   let json = parse_json ((Tool_result.message result)) in
   let result_json = Yojson.Safe.Util.member "result" json in
-  assert (Yojson.Safe.Util.member "engine" result_json = `String "duckduckgo");
+  assert (Yojson.Safe.Util.member "engine" result_json = `String "searxng");
   assert (Yojson.Safe.Util.member "result_count" result_json = `Int 1)
 )
 
 let () = test "web_search_simulate_for_test_reports_all_failures" (fun () ->
   let result =
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3
-      [ ("brave", `Empty); ("bing_rss", `Error "rss unavailable") ]
+      [ ("brave", `Empty); ("exa", `Error "provider unavailable") ]
   in
   assert (not (Tool_result.is_success result));
   assert (Tool_result.failure_class result = Some Tool_result.Runtime_failure);
   assert
-    (str_contains (Tool_result.message result) "bing_rss: rss unavailable")
+    (str_contains (Tool_result.message result) "exa: provider unavailable")
 )
 
 let () = test "web_search_provider_error_to_string_renders_typed_variants" (fun () ->
@@ -518,7 +444,7 @@ let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
 </html>|}
   in
   Tool_misc.with_web_search_simulation_for_test
-    ~outcomes:[ ("duckduckgo", `Hits [ ("Result", url, "Snippet") ]) ]
+    ~outcomes:[ ("searxng", `Hits [ ("Result", url, "Snippet") ]) ]
     (fun () ->
       Tool_misc.with_web_fetch_http_get_for_test
         (fun ~timeout_sec ~headers:_ ~max_response_bytes url_arg ->
@@ -574,7 +500,7 @@ let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" 
   let query = "include content fetch failure regression" in
   let url = "https://example.com/masc-web-search-fetch-failure" in
   Tool_misc.with_web_search_simulation_for_test
-    ~outcomes:[ ("duckduckgo", `Hits [ ("Result", url, "Snippet") ]) ]
+    ~outcomes:[ ("searxng", `Hits [ ("Result", url, "Snippet") ]) ]
     (fun () ->
       Tool_misc.with_web_fetch_http_get_for_test
         (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url_arg ->

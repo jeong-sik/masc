@@ -2,6 +2,7 @@
 
 type action_result_status =
   | ActionOk
+  | ActionDeferred
   | ActionError
 
 val action_result_status_to_string : action_result_status -> string

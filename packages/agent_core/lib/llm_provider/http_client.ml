@@ -1288,7 +1288,8 @@ let capture_response_header_evidence headers =
   Response_header_evidence fingerprint, retry_after_header
 ;;
 
-let header_evidence_fingerprint_for_test headers =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] header_evidence_fingerprint_for_test headers =
   headers
   |> Http.Header.of_list
   |> capture_response_header_evidence
@@ -3187,7 +3188,8 @@ let%test "classify_network_exn: unknown backend printer text does not classify" 
   | None -> false
 ;;
 
-let multiple_io_exn errs =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] multiple_io_exn errs =
   let combine acc err =
     let exn = eio_exn err in
     let bt = Printexc.get_callstack 0 in

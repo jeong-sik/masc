@@ -569,8 +569,26 @@ export interface DashboardKeeperEventQueueHealth {
   work_liveness: DashboardKeeperQueueWorkLiveness | null
 }
 
+export type DashboardFullHealthSnapshotStatus =
+  | 'ready'
+  | 'warming'
+  | 'stale'
+  | 'timeout'
+  | 'error'
+
+export interface DashboardFullHealthSnapshot {
+  status: DashboardFullHealthSnapshotStatus
+  stale_reason: string | null
+  last_good_available: boolean
+  component_timed_out: boolean
+}
+
 export interface DashboardFullHealthResponse {
   health_detail?: string
+  overall_status?: string | null
+  operator_action_required?: boolean | null
+  operator_action_reasons?: string[]
+  full_health_snapshot?: DashboardFullHealthSnapshot | null
   schedule_runner?: DashboardScheduleRunnerStatus | null
   keeper_event_queue?: DashboardKeeperEventQueueHealth | null
 }
@@ -802,10 +820,49 @@ export function normalizeFullHealthResponse(
 ): DashboardFullHealthResponse {
   const scheduleRunner = normalizeScheduleRunnerStatus(raw.schedule_runner)
   const keeperEventQueue = normalizeKeeperEventQueueHealth(raw.keeper_event_queue)
+  const fullHealthSnapshot = normalizeFullHealthSnapshot(raw.full_health_snapshot)
   return {
     ...raw,
+    overall_status: typeof raw.overall_status === 'string' ? raw.overall_status : null,
+    operator_action_required:
+      typeof raw.operator_action_required === 'boolean' ? raw.operator_action_required : null,
+    operator_action_reasons: Array.isArray(raw.operator_action_reasons)
+      ? raw.operator_action_reasons.filter((value): value is string => typeof value === 'string')
+      : [],
+    full_health_snapshot: fullHealthSnapshot,
     ...(scheduleRunner ? { schedule_runner: scheduleRunner } : {}),
     ...(keeperEventQueue ? { keeper_event_queue: keeperEventQueue } : {}),
+  }
+}
+
+const FULL_HEALTH_SNAPSHOT_STATUSES: ReadonlySet<DashboardFullHealthSnapshotStatus> = new Set([
+  'ready',
+  'warming',
+  'stale',
+  'timeout',
+  'error',
+])
+
+function normalizeFullHealthSnapshot(raw: unknown): DashboardFullHealthSnapshot | null {
+  const record = asRecord(raw)
+  if (!record) return null
+  const status = typeof record.status === 'string' ? record.status : null
+  if (!status || !FULL_HEALTH_SNAPSHOT_STATUSES.has(status as DashboardFullHealthSnapshotStatus)) {
+    return null
+  }
+  const staleReason = record.stale_reason
+  if (
+    !(staleReason === null || typeof staleReason === 'string')
+    || typeof record.last_good_available !== 'boolean'
+    || typeof record.component_timed_out !== 'boolean'
+  ) {
+    return null
+  }
+  return {
+    status: status as DashboardFullHealthSnapshotStatus,
+    stale_reason: staleReason,
+    last_good_available: record.last_good_available,
+    component_timed_out: record.component_timed_out,
   }
 }
 

@@ -1957,14 +1957,12 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                        provenance)))
        messages)
 
-(* RFC-0233 §7: a turn's transcript derived by an exact join on the
-   persisted [turn_ref] ("<trace_id>#<absolute_turn>"). The inspector
-   needs the operator request that opened the turn and the keeper reply
-   it produced; both are stamped with the same turn_ref by
-   {!append_turn} on the dashboard reply path
-   (server_routes_http_keeper_stream.ml). Tool rows are excluded — they
-   carry only the call args, while the full tool I/O (input + output) is
-   surfaced by the tool-call store keyed on [execution_id]. *)
+(* RFC-0233 §7: a turn's terminal assistant row is selected by exact persisted
+   [turn_ref] ("<trace_id>#<absolute_turn>"). Direct/queued accepted-user rows
+   are persisted before the turn exists, so they carry no [turn_ref]; they join
+   through the same typed delivery key and the [Accepted_user] transcript slot.
+   Tool rows are excluded — they carry only the call args, while the full tool
+   I/O is surfaced by the tool-call store keyed on [execution_id]. *)
 type turn_transcript = {
   user : chat_message list;
   assistant : chat_message list;
@@ -1972,22 +1970,48 @@ type turn_transcript = {
 
 let transcript_of_messages (messages : chat_message list) ~turn_ref :
     turn_transcript =
-  let matches (m : chat_message) =
+  let matches_turn_ref (m : chat_message) =
     match m.turn_ref with
     | Some tr -> Ids.Turn_ref.equal tr turn_ref
     | None -> false
   in
+  let assistant_delivery_keys =
+    List.filter_map
+      (fun (m : chat_message) ->
+         match m.role, m.delivery_provenance with
+         | ( Role.Assistant
+           , Some
+               { Keeper_chat_delivery_identity.delivery_key
+               ; transcript_slot = Keeper_chat_delivery_identity.Terminal_assistant
+               } )
+           when matches_turn_ref m ->
+           Some delivery_key
+         | (Role.Assistant | Role.User | Role.Tool), _ -> None)
+      messages
+  in
+  let matches_accepted_user_delivery (m : chat_message) =
+    match m.role, m.delivery_provenance with
+    | ( Role.User
+      , Some
+          { Keeper_chat_delivery_identity.delivery_key
+          ; transcript_slot = Keeper_chat_delivery_identity.Accepted_user
+          } ) ->
+      List.exists
+        (Keeper_chat_delivery_identity.delivery_key_equal delivery_key)
+        assistant_delivery_keys
+    | (Role.Assistant | Role.User | Role.Tool), _ -> false
+  in
   let user, assistant =
     List.fold_left
       (fun (user, assistant) (m : chat_message) ->
-        if not (matches m) then (user, assistant)
-        else
-          match m.role with
-          | Role.User -> (m :: user, assistant)
-          | Role.Assistant -> (user, m :: assistant)
-          (* Tool rows join via execution_id in the tool-call store, not
-             via the transcript. *)
-          | Role.Tool -> (user, assistant))
+         match m.role with
+         | Role.User when matches_turn_ref m || matches_accepted_user_delivery m ->
+           m :: user, assistant
+         | Role.Assistant when matches_turn_ref m -> user, m :: assistant
+         | Role.User | Role.Assistant | Role.Tool ->
+           (* Tool rows join via execution_id in the tool-call store, not
+              via the transcript. *)
+           user, assistant)
       ([], []) messages
   in
   { user = List.rev user; assistant = List.rev assistant }

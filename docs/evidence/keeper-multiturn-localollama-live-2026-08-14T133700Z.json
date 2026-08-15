@@ -1,0 +1,117 @@
+{
+  "schema": "masc.keeper_feature_matrix.multiturn_evidence.v1",
+  "captured_at": "2026-08-14T13:37:00Z",
+  "purpose": "First 10-turn in-session continuity result for the Local Ollama provider family. The runtime under test is one of the two models that were dispatch-blocked until a positive max-request-body-bytes was set in runtime.toml earlier the same day, so this run also shows that the configuration change produces a working conversation rather than only an admissible catalog row.",
+
+  "daemon": {
+    "endpoint": "http://127.0.0.1:8935",
+    "build_commit": "ff6a8fa6af",
+    "build_commit_source": "runtime_repo_head",
+    "started_at": "2026-08-14T05:59:52Z",
+    "uptime_at_capture": "8h 0m",
+    "binary_identity_limitation": "commit_source is runtime_repo_head, not an embedded binary SHA. The checkout has since advanced to 15c3e58072, so this records the repo head the process was started from and is not proof of what the running binary contains."
+  },
+
+  "canary": {
+    "name": "canary-multiturn-localollama-20260814-0839",
+    "created_by": "a parallel session at 08:39Z, which drove turn 1 and stopped",
+    "resumed_by": "this session at 13:31Z, turns 2 through 10",
+    "config_path": "<base-path>/config/keepers/canary-multiturn-localollama-20260814-0839.toml",
+    "proactive_enabled": false,
+    "note_on_the_five_hour_gap": "The keeper was silent between 08:41Z and 13:31Z. That is not a stall: proactive_enabled is false, so it takes turns only on external stimulus and nobody sent one. No new keeper or runtime assignment was created for this run."
+  },
+
+  "runtime": {
+    "runtime_id": "ollama.gemma-4-E2B-it-qat-GGUF",
+    "provider": "Local Ollama",
+    "family_size": 3,
+    "assignment_source": "explicit",
+    "assignment_line": "\"canary-multiturn-localollama-20260814-0839\" = \"ollama.gemma-4-E2B-it-qat-GGUF\" (in [runtime.assignments], <base-path>/config/runtime.toml:967)"
+  },
+
+  "transport": {
+    "endpoint": "POST /api/v1/keepers/chat/stream",
+    "auth": "bearer, <base-path>/auth/dashboard.token",
+    "request_id_required": true,
+    "request_id_absent_response": "HTTP 400 {\"error\":{\"message\":\"request_id is required\"}}",
+    "request_ids_used": "canary-lo-t2 .. canary-lo-t10"
+  },
+
+  "transcript": {
+    "path": "<base-path>/keeper_chat/canary-multiturn-localollama-20260814-0839.jsonl",
+    "sha256": "3df1e99477f657c4a0d35b83082ff35f0f1f95530cd543f64362bc8365564d20",
+    "bytes": 9462,
+    "rows": 20,
+    "roles": { "user": 10, "assistant": 10 }
+  },
+
+  "facts_established_in_turns_1_to_9": [
+    { "turn": 1, "fact": "project codename is Aster Ledger" },
+    { "turn": 2, "fact": "lead reviewer is Harbor-3" },
+    { "turn": 3, "fact": "deadline is 2026-11-14" },
+    { "turn": 4, "fact": "blocked dependency is glasswing" },
+    { "turn": 5, "fact": "fallback runtime is deepseek-v4-flash" },
+    { "turn": 6, "fact": "incident number is 4471" },
+    { "turn": 7, "fact": "reviewer timezone is Asia/Seoul" },
+    { "turn": 8, "fact": "artifact name is ledger-manifest.json" },
+    { "turn": 9, "fact": "rollback switch is called safe-harbor" }
+  ],
+
+  "unprompted_recall_at_turn_5": {
+    "observed": true,
+    "reply": "Context acknowledged. The project codename is Aster Ledger; the lead reviewer is Harbor-3; the deadline is 2026-11-14; the blocked dependency is glasswing; and the fallback runtime is deepseek-v4-flash.",
+    "why_it_matters": "Turn 5 asked only for a brief acknowledgement of the fifth fact. The keeper restated all five without being asked, so continuity was present in context rather than only retrievable when demanded."
+  },
+
+  "turn_10": {
+    "prompt": "Turn 10. Without using any tool, list all nine facts I told you in this conversation, in the order I gave them. Number them 1 to 9.",
+    "reply_facts_in_order": [
+      "The project codename is Aster Ledger.",
+      "The lead reviewer is Harbor-3.",
+      "The deadline is 2026-11-14.",
+      "The blocked dependency is glasswing.",
+      "The fallback runtime is deepseek-v4-flash.",
+      "The incident number is 4471.",
+      "The reviewer timezone is Asia/Seoul.",
+      "The artifact name is ledger-manifest.json.",
+      "The rollback switch is called safe-harbor."
+    ],
+    "score": { "facts_recalled": 9, "facts_established": 9, "order_matches": true, "tools_used": 0 }
+  },
+
+  "measurements": {
+    "turn_2_wall_clock_seconds": 31.56,
+    "turn_2_usage": {
+      "input_tokens": 18554,
+      "output_tokens": 12,
+      "total_tokens": 18566,
+      "cache_read_input_tokens": 0
+    },
+    "turn_2_turn_ref": "trace-1786696748903-0000b#3",
+    "turn_2_outcome": "visible_reply"
+  },
+
+  "verdict": "PASS",
+
+  "proves": [
+    "In-session 10-turn continuity on ollama.gemma-4-E2B-it-qat-GGUF: nine facts established one per turn were all restated at turn 10, in the order given, with no tool call.",
+    "The max-request-body-bytes value set for this model earlier the same day yields a working multi-turn conversation, not only a dispatchable catalog row.",
+    "A keeper created and abandoned by one session can be resumed by another through POST /api/v1/keepers/chat/stream without recreating the keeper or editing the live runtime assignment.",
+    "The chat-stream endpoint requires request_id and rejects its absence with a typed 400 rather than generating one."
+  ],
+
+  "does_not_prove": [
+    "That the other two Local Ollama runtimes behave the same. The family is 3; this is 1.",
+    "That continuity survives a restart, a compaction, or a graceful shutdown. Every turn here ran inside one process lifetime with no interruption.",
+    "That continuity holds under memory pressure. Turn 2 sent 18,554 input tokens against a 262,144-byte request ceiling, so the window never had to drop anything; nine short facts is not a truncation test.",
+    "Anything about autonomous turns. proactive_enabled is false and every turn was externally driven, so this says nothing about the keeper choosing to act.",
+    "Any duration claim. Turns 2 through 10 took roughly five minutes of wall clock; 1h, 2h, 4h and 24h remain unmeasured for this runtime.",
+    "That the running binary contains any particular commit. build_commit is the repo head the process started from, not an embedded identity."
+  ],
+
+  "required_follow_up": [
+    "Repeat on the remaining two Local Ollama runtimes before calling the provider family verified.",
+    "Extend the same nine-fact contract across a graceful shutdown and restart, which is where the Codex family previously failed.",
+    "Run a contract whose history exceeds the request ceiling, so the window has to choose what to drop and recall is tested against a real cut."
+  ]
+}

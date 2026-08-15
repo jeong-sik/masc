@@ -1,0 +1,213 @@
+{
+  "schema": "masc.keeper_feature_matrix.drain_restart_recall.v1",
+  "captured_at": "2026-08-14T07:52:00Z",
+  "purpose": "Live proof for PR #28625 (graceful Keeper shutdown drains/joins Librarian memory work instead of cancelling it). Direct follow-up to docs/evidence/keeper-librarian-graceful-shutdown-live-2026-08-13T160506Z.json, which caught the pre-fix bug: a 106.1s Librarian pass covering the final chat turn was cancelled by graceful shutdown and never committed.",
+  "daemon": {
+    "endpoint": "http://localhost:8935",
+    "health_checked_at": "2026-08-14T07:11:57Z",
+    "version": "0.22.0",
+    "running_commit": "ff6a8fa6af",
+    "started_at": "2026-08-14T05:59:52Z",
+    "effective_base_path": "/Users/dancer/me",
+    "pr_28625_is_ancestor_of_running_commit": true,
+    "verification_command": "git merge-base --is-ancestor 23d0ebb3cd ff6a8fa6af"
+  },
+  "canary": {
+    "name": "canary-drainrecall-20260814-0717",
+    "runtime_id": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+    "config_toml_path": "/Users/dancer/me/.masc/config/keepers/canary-drainrecall-20260814-0717.toml",
+    "config_toml_sha256": "75369c0dccf37fa18089c505cbaa08239e5fd208a781cdadaf5e3873a40b048d",
+    "agent_md_path": "/Users/dancer/me/.masc/config/keepers/canary-drainrecall-20260814-0717/AGENT.md",
+    "trace_id": "trace-1786691993431-00002",
+    "generation": 1,
+    "sandbox_profile": "local",
+    "network_mode": "inherit",
+    "proactive_enabled_final": false
+  },
+  "setup_anomaly": {
+    "kind": "stray_autonomous_turns_before_proactive_disabled",
+    "detail": "The dashboard /boot endpoint creates a keeper with proactive_enabled defaulting to true when the client body carries only {name}. Before this run's explicit config PATCH set proactive_enabled=false, the fresh keeper ran 3 unattended autonomous keepalive turns (server turn=0,1,2 at 07:20:04-07:20:59Z) against the live 62-item unclaimed task backlog on runtime glm-coding.glm-5-turbo (the fleet default, not the requested ollama_cloud runtime). All 3 turns returned \"Nothing to continue\" / no task claim (current_task_id stayed null throughout; verified via /api/v1/dashboard/keeper-decisions-log receipts and keeper meta autonomous_turn_count=3). No task was claimed and no other keeper's work was touched. proactive_enabled=false was applied at approximately 07:20:6x and held for the remainder of the run. This is a canary-setup mistake in this session, not a #28625 behavior; recorded per the workspace's issue-discovery-on-sight rule rather than silently omitted.",
+    "impact_on_test_validity": "None. The 3 stray turns produced no facts and are absent from every memory-os revision (revision 1 = facts:0). All 11+3 test facts below come exclusively from the 14 deliberately-authored chat turns."
+  },
+  "runtime_config_registration": {
+    "table": "[runtime.assignments] in /Users/dancer/me/.masc/config/runtime.toml",
+    "line": "\"canary-drainrecall-20260814-0717\" = \"ollama_cloud.ollama-cloud-deepseek-v4-flash-0731\"",
+    "note": "First config PATCH attempt returned HTTP 503 code=keeper_runtime_sync_failed (config_applied:true but live-fiber resync failed while a turn was in flight: error keeper_turn_in_flight). A retried PATCH with identical body returned HTTP 200 and the assignment is present in runtime.toml. All 14 deliberate chat turns after this point used ollama_cloud.ollama-cloud-deepseek-v4-flash-0731 (confirmed via per-turn server log lines: no further glm-coding entries after the 3 stray turns)."
+  },
+  "transcript": {
+    "path": "/Users/dancer/me/.masc/keeper_chat/canary-drainrecall-20260814-0717.jsonl",
+    "sha256": "f751fdaa7acbdf229a06f52ac4ef45d94e1f9321b2bef5e13053f9a3b569b72d",
+    "bytes": 16380,
+    "records": 28,
+    "user_records": 14,
+    "assistant_records": 14
+  },
+  "facts_established_turns_1_to_9": [
+    "The recovery project codename is Quartz Meridian.",
+    "The staging depot is called Ember Hollow.",
+    "Violet crates must be inspected before indigo crates.",
+    "If beacon Node-9 drops offline, hold the convoy but keep the manifest active.",
+    "Operator Renn Adair authorizes the override.",
+    "The override is verified by two matching cipher chimes.",
+    "Once verified, the held convoy reroutes to Salt Causeway.",
+    "The final override alert is broadcast on channel Wayfarer-6.",
+    "Indigo crates marked driftmark are held for audit rather than routed, while violet stays first."
+  ],
+  "facts_established_turn_10": [
+    "The audit hold for driftmark crates expires after 14 cycles.",
+    "Node-9 beacon resets are logged under tag copperlatch."
+  ],
+  "turn_10": {
+    "operation_id": "op-turn-10",
+    "run_finished_at_unix": 1786692441.961244,
+    "elapsed_seconds": 7.82396,
+    "in_turn_recall": "All 11 facts (1-9 plus the 2 new) correctly synthesized in a single ordered list by the model in its own live-context response, immediately before shutdown."
+  },
+  "shutdown_probe_1": {
+    "purpose": "Reproduce the original bug's trigger: call graceful shutdown immediately after a turn that just submitted new post-turn Librarian work.",
+    "shutdown_called_at": "2026-08-14T07:27:29.3Z",
+    "gap_after_turn10_seconds": 7.34,
+    "http_status": 200,
+    "elapsed_seconds": 0.027,
+    "server_log_duration_ms": 5,
+    "server_log_lines": [
+      "keeper lifecycle shutdown name=canary-drainrecall-20260814-0717 actor=dashboard started",
+      "Keeper shutdown operation accepted: operation=shutdown-b7fbbe26-54e2-4cc0-b4de-a7b8b90c9572",
+      "keeper lifecycle shutdown name=canary-drainrecall-20260814-0717 actor=dashboard outcome=ok duration_ms=5",
+      "registry: lifecycle phase=draining event=draining",
+      "registry: lifecycle phase=stopped event=stopped detail=drain_complete",
+      "Keeper shutdown operation finalized: operation=shutdown-b7fbbe26-54e2-4cc0-b4de-a7b8b90c9572"
+    ],
+    "cancellation_log_lines_found": 0,
+    "memory_journal_state_at_shutdown": {
+      "committed_entries": 4,
+      "last_revision": 4,
+      "last_revision_facts": 7,
+      "last_revision_covers_turns": "5-7 (Renn Adair, cipher chimes, Salt Causeway)",
+      "missing_at_shutdown": "turns 8, 9, 10 (Wayfarer-6, driftmark, 14-cycles, copperlatch) -- 4 facts absent from durable Memory OS at the instant of shutdown"
+    },
+    "coalesce_event_observed": {
+      "log_line": "WARN memory lane coalesced latest snapshot (lane=librarian pending=2): replacing superseded post-turn memory unit",
+      "at": "2026-08-14T07:26:52Z",
+      "interpretation": "Before turn 10 even ran, the lane already had 2 pending post-turn units (from turns 8 and 9) while the turns-5-7 pass was still current/in-flight; the fix's bounded current+retained-latest queue coalesced the older pending unit into the newer one rather than queueing unboundedly. This is the RFC-28625 'current plus retained-latest' design, not a defect signature by itself."
+    },
+    "post_shutdown_poll": {
+      "duration_seconds": 120,
+      "interval_seconds": 10,
+      "result": "memory-current.json revision stayed at 4 (7 facts) for the full 2-minute poll after shutdown returned. No commit and no cancellation log line ever appeared for the turns-8/9/10 batch during this window."
+    },
+    "finding": "The shutdown HTTP call and its internal registry transition both completed in single-digit milliseconds, with no cancellation log emitted (the pre-fix bug's signature 'memory os librarian cancelled lane=librarian_exact before commit' never appears anywhere in this run's logs). This is consistent with either (a) the pending unit not yet having been dispatched to the LLM at the moment of shutdown given the fast ollama_cloud runtime (dispatch lag was often 15-60s in this run's cadence, longer than the 7.3s reaction gap available), making 'drain' trivial/instant because there was nothing running yet to wait on, or (b) a genuinely fast synchronous drain. The millisecond timing does not by itself distinguish these two cases, and is the main gap this evidence record does not close -- see does_not_prove."
+  },
+  "restart_1": {
+    "resume_directive_note": "The dashboard /boot endpoint returns 409 Boot_operator_paused on a keeper stopped via /shutdown; the owner-level pause must first be cleared via POST /api/v1/keepers/:name/directive {action:resume, owner_nonce, operator_operation_id} (HTTP 202, committed:true, projection:committed_followup_failed -- the lane-resume follow-up itself fails because the fiber is fully stopped, but the owner pause flag is cleared). Only then does /boot succeed (HTTP 200) and actually restart the fiber.",
+    "boot_after_resume_status": 200,
+    "trace_id_preserved": true,
+    "generation_preserved": 1,
+    "note": "Same trace_id/generation across shutdown->resume->boot confirms this is a continuation restart, not a fresh reset."
+  },
+  "restart_1_recall_turn": {
+    "operation_id": "op-turn-11-recall",
+    "prompt": "List every distinct fact you have been told so far in this conversation, one per line, in the order they were established. Do not omit any.",
+    "run_finished_at_unix": 1786692847.167583,
+    "elapsed_seconds": 10.895,
+    "scoring": [
+      { "fact": "Quartz Meridian (project codename)", "result": "PASS" },
+      { "fact": "Ember Hollow (staging depot)", "result": "PASS" },
+      { "fact": "violet before indigo inspection order", "result": "PASS" },
+      { "fact": "Node-9 offline -> hold convoy, keep manifest active", "result": "PASS" },
+      { "fact": "Renn Adair authorizes override", "result": "PASS" },
+      { "fact": "two matching cipher chimes verify override", "result": "PASS" },
+      { "fact": "convoy reroutes to Salt Causeway", "result": "PASS" },
+      { "fact": "final alert on channel Wayfarer-6", "result": "PASS" },
+      { "fact": "driftmark indigo crates held for audit, violet stays first", "result": "PASS" },
+      { "fact": "driftmark audit hold expires after 14 cycles", "result": "PASS" },
+      { "fact": "Node-9 beacon resets logged under tag copperlatch", "result": "PASS" }
+    ],
+    "score": "11/11 PASS",
+    "mechanism": "Live in-context recall via preserved trace_id/transcript continuity across restart. This is independent of the durable Memory OS (memory-current.json) store, which was still stuck at revision 4 (7 facts) at the moment this recall turn ran."
+  },
+  "durable_memory_os_catchup_after_restart_1": {
+    "trigger_turn": "op-turn-11-recall (the recall turn itself, which restated all 11 facts in its own assistant output)",
+    "committed_at": "2026-08-14T07:36:08Z",
+    "revision": 5,
+    "facts_total": 11,
+    "facts_added_this_revision": [
+      "The final override alert is broadcast on channel Wayfarer-6.",
+      "Indigo crates marked driftmark are held for audit rather than routed, while violet stays first.",
+      "The audit hold for driftmark crates expires after 14 cycles.",
+      "Node-9 beacon resets are logged under tag copperlatch."
+    ],
+    "caveat": "This recovery cannot yet be attributed to restart alone: the triggering turn's own assistant response re-stated the previously-uncommitted facts in fresh transcript content, which the Librarian could extract on its next pass regardless of what happened to the original (possibly cancelled) turns-8-10 unit. shutdown_probe_2 below isolates this by using a neutral, non-restating post-restart turn."
+  },
+  "shutdown_probe_2": {
+    "purpose": "Isolate whether durable recovery requires transcript restatement, by using a neutral post-restart turn that does not repeat any fact.",
+    "setup_turn": {
+      "operation_id": "op-turn-13",
+      "new_facts_stated": ["The relay station is called Windrun Vale.", "The backup frequency is 447.2."],
+      "run_finished_at_unix": 1786693595.66208
+    },
+    "shutdown_called_at": "2026-08-14T07:46:40.3Z",
+    "gap_after_turn13_seconds": 4.7,
+    "http_status": 200,
+    "elapsed_seconds": 0.0165,
+    "server_log_duration_ms": 2,
+    "cancellation_log_lines_found": 0,
+    "memory_state_at_shutdown": {
+      "last_revision": 5,
+      "last_revision_facts": 11,
+      "missing_at_shutdown": "op-turn-12 fact (Ashgrove-12) and op-turn-13 facts (Windrun Vale, 447.2) -- 3 facts absent from durable Memory OS at the instant of this second shutdown"
+    }
+  },
+  "restart_2": {
+    "resume_and_boot": "Same resume-directive then boot sequence as restart_1; HTTP 202 then HTTP 200; trace_id and generation preserved (trace-1786691993431-00002 / generation 1)."
+  },
+  "restart_2_neutral_turn": {
+    "operation_id": "op-turn-14-neutral",
+    "prompt": "What is 9 plus 6? Answer with just the number.",
+    "response": "15",
+    "run_finished_at_unix": 1786693624.098897,
+    "note": "Deliberately does not restate or reference any previously established fact."
+  },
+  "durable_memory_os_catchup_after_restart_2": {
+    "committed_at": "2026-08-14T07:48:02Z",
+    "revision": 6,
+    "facts_total": 14,
+    "facts_added_this_revision": [
+      "The post-restart verification tag is Ashgrove-12.",
+      "The relay station is called Windrun Vale.",
+      "The backup frequency is 447.2."
+    ],
+    "lag_after_neutral_turn_seconds": 58,
+    "finding": "All 3 facts that were pending/uncommitted before the second shutdown -- including the 2 facts (Windrun Vale, 447.2) stated only 4.7s before that shutdown call -- were durably committed after restart via the Librarian's ordinary backlog-based cadence pass, triggered by a turn whose own content never restated them. This demonstrates the recovery mechanism is backlog/transcript replay from the preserved trace, not restatement-dependent, and closes the specific gap flagged as unproven in the pre-fix evidence record (docs/evidence/keeper-librarian-graceful-shutdown-live-2026-08-13T160506Z.json: 'A later turn replays the exact cancelled Librarian input' / 'can lose facts that a later assistant message does not repeat')."
+  },
+  "final_state": {
+    "keeper_left_stopped": true,
+    "keeper_left_paused": true,
+    "latched_reason": { "kind": "operator_paused", "actor": "keeper_down" },
+    "keeper_deleted": false,
+    "final_memory_current_path": "/Users/dancer/me/.masc/config/keepers/canary-drainrecall-20260814-0717.memory-current.json",
+    "final_memory_current_sha256": "fdef4edb9de774bdd8b8f801f29aa97d09aa220431daf82490ba1b3ffd67a5e8",
+    "final_memory_journal_path": "/Users/dancer/me/.masc/config/keepers/canary-drainrecall-20260814-0717.memory-journal.jsonl",
+    "final_memory_journal_sha256": "81ac31f1666ec7b0ad2fdb3fd22fd95a1bb86c5c9bbd5a09d7479317ee219637",
+    "final_meta_path": "/Users/dancer/me/.masc/keepers/canary-drainrecall-20260814-0717.json",
+    "final_meta_sha256": "66e24b16cb022f82fbd73a4c0149eb5b9d909f5d90538f1e9b12541b9f1f0abd"
+  },
+  "verdict": "PASS_WITH_CAVEAT",
+  "proves": [
+    "Across two independent graceful-shutdown-immediately-after-a-new-fact probes on the #28625-containing build (ff6a8fa6af), zero cancellation log lines were emitted, in contrast to the pre-fix evidence which logged 'memory os librarian cancelled lane=librarian_exact before commit' after a 106.1s cancelled pass.",
+    "Live in-context recall of all 11 facts survived a full graceful-shutdown-then-restart cycle (11/11 PASS), including facts established in the same turn that immediately preceded shutdown.",
+    "Durable Memory OS structured fact storage (memory-current.json) also recovered every fact that was pending/uncommitted at both shutdown instants (4 facts after probe 1, 3 facts after probe 2) -- no fact was permanently lost in either run.",
+    "This recovery was proven independent of transcript restatement: probe 2's post-restart turn was a neutral arithmetic question that never repeated any fact, and the pending facts were still committed 58 seconds later via ordinary Librarian cadence.",
+    "trace_id and generation are preserved across shutdown/resume/boot, so restart is a continuation, not a reset -- this continuity is what allows the Librarian's later cadence pass to see the full backlog."
+  ],
+  "does_not_prove": [
+    "That the graceful-shutdown code path actually blocked on and joined an in-flight (LLM-call-already-dispatched) Librarian pass. Both probes' shutdown calls returned in single-digit milliseconds; on this fast ollama_cloud runtime, the gap between a turn finishing and calling shutdown (7.3s and 4.7s) may have been shorter than the Librarian's dispatch lag (observed at 15-60s elsewhere in this run's cadence), so the pending unit may simply not have started running yet, making cancellation-or-drain equally instant and indistinguishable from this evidence alone.",
+    "That a keeper crash (as opposed to a clean HTTP-triggered graceful shutdown) preserves the same backlog-catchup behavior.",
+    "That this holds on a slower runtime where a Librarian pass is genuinely in the middle of an LLM call at the moment of shutdown (the original bug report's reproduction used codex_subscription.gpt-5.4 with a 106.1s in-flight pass; this run's ollama_cloud runtime never demonstrably caught a pass mid-flight).",
+    "That the durable Memory OS store's eventual-consistency window (up to ~60-120s of lag observed here) is bounded under load or across many concurrent keepers on the shared live daemon."
+  ],
+  "required_follow_up": [
+    "Repeat shutdown_probe_1/2 methodology on a slower runtime (e.g. codex_subscription or a runtime with observed >30s per-turn latency) to force the shutdown call to land while an LLM call for the Librarian pass is demonstrably in flight (a process log line marking pass dispatch/start, not just commit, would make this directly verifiable rather than inferred from timing).",
+    "Add a server-side log line at Librarian pass dispatch start (mirroring the existing 'memory os librarian committed' line) so future canaries do not need to infer in-flight status from commit-timing arithmetic."
+  ]
+}

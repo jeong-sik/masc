@@ -1,0 +1,117 @@
+{
+  "schema": "masc.keeper_feature_matrix.live_snapshot.v1",
+  "captured_at": "2026-08-14T00:17:41Z",
+  "source_routes": [
+    "/health?full=1",
+    "/api/v1/runtime/resolved",
+    "/api/v1/dashboard/keeper-feature-proof"
+  ],
+  "health": {
+    "status": "ok",
+    "overall_status": "degraded",
+    "version": "0.21.2",
+    "build": {
+      "release_version": "0.21.2",
+      "binary_version": "0.21.2",
+      "repo_version": "0.21.2",
+      "commit": "427b00defa",
+      "commit_source": "runtime_repo_head",
+      "started_at": "2026-08-13T17:27:51Z",
+      "uptime_seconds": 24590,
+      "embedded_binary_commit_known": false
+    },
+    "paths": {
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc",
+      "roots_diverge": false
+    },
+    "fleet": {
+      "status": "degraded",
+      "blocker": "reaction_capacity_below_target",
+      "bootable": 8,
+      "running": 7,
+      "failing": 1,
+      "recovering": 1,
+      "executable": 7,
+      "target": 8
+    },
+    "event_queue": {
+      "status": "warning",
+      "pending": 2,
+      "runnable": 2,
+      "oldest_age_seconds": 121.52173209190369,
+      "read_errors": 0
+    },
+    "schedule_runner": {
+      "status": "ok",
+      "ticks": 1630,
+      "success": 1630,
+      "failure": 0,
+      "crash": 0,
+      "last_duration_sec": 0.3423581123352051
+    },
+    "operator_action_required": true,
+    "operator_action_reasons": [
+      "keeper_fleet_safety:reaction_capacity_below_target",
+      "keeper_reaction_ledger:reaction_ledger_pending_stimulus"
+    ]
+  },
+  "runtime_catalog": {
+    "generated_at": "2026-08-14T00:17:41Z",
+    "config_path": "/Users/dancer/me/.masc/config/runtime.toml",
+    "runtime_count": 47,
+    "dispatchable_count": 45,
+    "blocked_count": 2,
+    "provider_family_count": 8,
+    "provider_families": [
+      "Antigravity Google Subscription",
+      "Claude Code Max Subscription",
+      "Codex ChatGPT Subscription",
+      "Kimi For Coding Subscription",
+      "Local Llama Server (Qwen3.6 35B Uncensored)",
+      "Local Ollama",
+      "Ollama Cloud",
+      "Z.AI Coding"
+    ],
+    "lane_count": 10,
+    "assignment_count": 26
+  },
+  "feature_proof": {
+    "generated_at": "2026-08-14T00:16:47Z",
+    "status": "warn",
+    "keeper_count": 26,
+    "keeper_meta_count": 26,
+    "features": [
+      {
+        "id": "runtime_liveness",
+        "status": "warn",
+        "summary": "25/26 keepers have persisted runtime turns with a latest turn <= 24.0h old"
+      },
+      {
+        "id": "persistent_24h_turn_exchange",
+        "status": "warn",
+        "summary": "7/26 keepers have decision-log turn spans >= 24.0h and latest turn <= 24.0h old"
+      },
+      {
+        "id": "autonomous_tool_use",
+        "status": "warn",
+        "summary": "9/26 keepers have autonomous action and tool-turn counters"
+      },
+      {
+        "id": "board_reactive_autonomy",
+        "status": "warn",
+        "summary": "8/26 keepers have board-reactive turn counters"
+      },
+      {
+        "id": "scheduled_proactive_autonomy",
+        "status": "warn",
+        "summary": "24/26 proactive-enabled keepers have scheduled proactive evidence"
+      }
+    ]
+  },
+  "limits": [
+    "The health commit is sourced from runtime_repo_head, not embedded binary metadata.",
+    "The event queue values are a point-in-time snapshot and changed during adjacent reads.",
+    "A 24h decision-log span proves durable exchange, not semantic continuity, useful progress, or long-run performance."
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "schema": "masc.keeper_feature_matrix.live_refresh.v1",
+  "captured_at": "2026-08-14T00:48:00Z",
+  "source_refreshed_at": "2026-08-14T01:18:00Z",
+  "source": "GET http://127.0.0.1:8935/health?full=1 plus exact GitHub refs",
+  "source_truth": {
+    "upstream_main": "8f06c57c6162338e6e1f704ad946bc6221c4565e",
+    "merged": {
+      "28625": "23d0ebb3cd1c369a7f8afbc7dc2563ed5db8ed40",
+      "28633": "7de373d3a0ad78a3593e58e4102ba9a450e9095c",
+      "28604": "9ef703ae23",
+      "28622": "9bd8e2e53d",
+      "28631": "8f06c57c61"
+    },
+    "open_exact_heads": {
+      "28658": {
+        "head": "d3e76deb7aa8c724d06c6d1d7c4bb43ce97af0b3",
+        "base": "7de373d3a0ad78a3593e58e4102ba9a450e9095c",
+        "status": "source-approved-exact-ci-pass-base-7de373d3a0"
+      },
+      "28673": {
+        "head": "7ebaf2525b1226584c2efdbe74e7eb95bcd149c9",
+        "base": "23d0ebb3cd1c369a7f8afbc7dc2563ed5db8ed40",
+        "status": "source-approved-ci-superseded-by-new-main"
+      },
+      "28605": {
+        "head": "d134545534dbf72b213c2f110ca6666b6628cd4d",
+        "base": "8f06c57c6162338e6e1f704ad946bc6221c4565e",
+        "status": "stable-patch-exact-ci-running"
+      },
+      "28687": {
+        "head": "848030ff4a7f9e9e8a941b69e072032a51d132a0",
+        "base": "8f06c57c6162338e6e1f704ad946bc6221c4565e",
+        "status": "stable-patch-exact-ci-and-overlap-review-running"
+      },
+      "28606": {
+        "head": "b3b744f7afec48a68bd26505facae76ad9a1cf0d",
+        "base": "d134545534dbf72b213c2f110ca6666b6628cd4d",
+        "status": "restacked-fast-checks-only"
+      }
+    }
+  },
+  "live_truth": {
+    "status": "ok",
+    "overall_status": "degraded",
+    "version": "0.21.2",
+    "commit": "427b00defa",
+    "commit_source": "runtime_repo_head",
+    "embedded_binary_sha": null,
+    "started_at": "2026-08-13T17:27:51Z",
+    "uptime_seconds": 26455,
+    "fleet": {
+      "bootable": 8,
+      "running": 8,
+      "failing": 0,
+      "recovering": 0,
+      "executable": 7,
+      "target_reaction_capacity": 8,
+      "blocker": "reaction_capacity_below_target",
+      "blocked_keeper": "rtprobe",
+      "blocked_execution_truth": "retained_disabled"
+    },
+    "queue": {
+      "status": "ok",
+      "backlog_clean": true,
+      "pending_count": 0,
+      "runnable_backlog_count": 0,
+      "read_error_count": 0
+    }
+  },
+  "matrix_browser_proof": {
+    "captured_at": "2026-08-14T01:19:00Z",
+    "screenshot_path": "/Users/dancer/me/reports/masc-keeper-feature-state-matrix-20260814-1019.png",
+    "screenshot_sha256": "a2dbca0af654c380d12050fc967f01024579e4b29506265e27cd6a3f4a196539",
+    "dimensions": {
+      "width": 1440,
+      "height": 11975
+    },
+    "feature_rows": 44,
+    "status_counts": {
+      "partial": 27,
+      "blocked": 8,
+      "missing": 2,
+      "source": 6,
+      "verified": 1
+    },
+    "interactions": {
+      "browser_automation_search_visible_rows": 1,
+      "blocked_filter_visible_rows": 8,
+      "operations_domain_visible_rows": 4,
+      "details_closed_to_open": true,
+      "linked_evidence_schema_visible": true
+    },
+    "horizontal_overflow": false,
+    "console_errors": [],
+    "page_errors": [],
+    "failed_requests": []
+  },
+  "limits": [
+    "The reported commit is the runtime checkout HEAD, not an embedded binary build SHA.",
+    "The health refresh does not prove that merged #28625 or #28633 is deployed.",
+    "Queue idle at one point is not a drain or restart continuity proof.",
+    "The scheduler count remains sourced from the earlier full snapshot, not this compact refresh."
+  ]
+}

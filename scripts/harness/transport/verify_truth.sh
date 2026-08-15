@@ -120,6 +120,7 @@ import sys
 
 host = sys.argv[1]
 port = int(sys.argv[2])
+path = sys.argv[3] if len(sys.argv) > 3 else "/ws"
 try:
     with socket.create_connection((host, port), timeout=2):
         pass
@@ -131,7 +132,8 @@ PY
 probe_ws_handshake() {
   local host="$1"
   local port="$2"
-  python3 - "$host" "$port" <<'PY'
+  local path="${3:-/ws}"
+  python3 - "$host" "$port" "$path" <<'PY'
 import base64
 import os
 import socket
@@ -143,8 +145,9 @@ try:
     sock = socket.create_connection((host, port), timeout=3)
     key = base64.b64encode(os.urandom(16)).decode("ascii")
     request = (
-        f"GET / HTTP/1.1\r\n"
+        f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}:{port}\r\n"
+        f"Origin: http://{host}:{port}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
         f"Sec-WebSocket-Key: {key}\r\n"
@@ -338,9 +341,15 @@ tool_grpc="$(json_bool "$transport_status_json" '.grpc.listening')"
 compare_truth "grpc" "$dashboard_grpc" "$tool_grpc" "$actual_grpc" \
   "tcp=127.0.0.1:${grpc_port}"
 
+# WebSocket is a same-origin upgrade on the HTTP listener, so the probe
+# targets the discovered ws_url rather than a dedicated port.
 ws_discovery="$(curl -fsS --max-time 5 "${MASC_HTTP_BASE_URL}/ws" 2>/dev/null || printf '{}')"
-ws_port="$(jq -r '.ws_port // empty' <<<"$ws_discovery" 2>/dev/null || true)"
-if [[ "$ws_port" =~ ^[0-9]+$ ]] && probe_ws_handshake "127.0.0.1" "$ws_port"; then
+ws_url="$(jq -r '.ws_url // empty' <<<"$ws_discovery" 2>/dev/null || true)"
+ws_probe_host="$(sed -E 's#^wss?://##; s#[:/].*$##' <<<"$ws_url")"
+ws_probe_port="$(sed -E 's#^wss?://[^:/]+:?##; s#/.*$##' <<<"$ws_url")"
+ws_probe_path="/$(sed -E 's#^wss?://[^/]*/?##' <<<"$ws_url")"
+if [[ -n "$ws_url" ]] \
+  && probe_ws_handshake "${ws_probe_host:-127.0.0.1}" "${ws_probe_port:-8935}" "$ws_probe_path"; then
   actual_ws="true"
 else
   actual_ws="false"
@@ -351,7 +360,7 @@ fi
 dashboard_ws="$(json_bool "$transport_health_json" '.websocket.listening')"
 tool_ws="$(json_bool "$transport_status_json" '.websocket.listening')"
 compare_truth "websocket" "$dashboard_ws" "$tool_ws" "$actual_ws" \
-  "port=${ws_port:-missing}"
+  "url=${ws_url:-missing}"
 
 dashboard_h2="$(json_bool "$transport_health_json" '.http2.multiplex_ready')"
 tool_h2="$(

@@ -446,10 +446,21 @@ let test_lookup_kimi_k2_native_cloud_suffix () =
          "provider-qualified Ollama Cloud Kimi context"
          (Some 262_144)
          cloud.max_context_tokens;
+       (* 2026-08-15 (closes #28749): this row is served through ollama_cloud's
+          OpenAI-compat /v1/chat/completions, which cannot encode Ollama's
+          native think toggle — same defect class as qwen3.5:397b (#28748).
+          Live overlay probe (oas-models-overlay.toml, 2026-08-04): reasoning
+          is inherent, no request-side control wire. *)
        check_thinking_control
-         "provider-qualified Ollama Cloud Kimi uses native think"
-         Capabilities.Ollama_think
+         "provider-qualified Ollama Cloud Kimi has no request control"
+         Capabilities.No_thinking_control
          cloud.thinking_control_format;
+       let cloud_dialect = Reasoning_dialect.of_capabilities cloud in
+       (match cloud_dialect.streaming with
+        | Reasoning_dialect.Delta_field "reasoning" -> ()
+        | Reasoning_dialect.Delta_field field ->
+          fail ("provider-qualified Ollama Cloud Kimi reasoning delta field drifted: " ^ field)
+        | _ -> fail "provider-qualified Ollama Cloud Kimi should stream reasoning on a delta field");
        check_visual_first "provider-qualified Ollama Cloud Kimi" cloud
      | None -> fail "should match provider-qualified Ollama Cloud Kimi route")
   | None -> fail "should match kimi-k2 cloud route"
@@ -889,16 +900,14 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
      reasoning may stream on a side channel. The catalog must not regress any
      one of these axes to a generic text-only profile. JSON response-format
      support is an exact per-model contract rather than a provider-wide rule.
-     "qwen3.5:397b" is deliberately absent: unlike the rows below it does not
-     use Ollama's native think toggle on this transport (see
-     test_ollama_cloud_qwen3_5_397b_has_no_control_wire). *)
+     "qwen3.5:397b", "kimi-k2.6", "kimi-k2.7-code", "minimax-m3",
+     "deepseek-v4-flash", and "deepseek-v4-pro" are deliberately absent: unlike
+     the rows below, none of them use Ollama's native think toggle on this
+     transport (closes #28749; see test_ollama_cloud_qwen3_5_397b_has_no_control_wire
+     and test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire). *)
   let cases =
     [ "gemma4:31b", true
-    ; "kimi-k2.7-code", false
-    ; "minimax-m3", true
     ; "nemotron-3-ultra", false
-    ; "deepseek-v4-flash", false
-    ; "deepseek-v4-pro", false
     ; "glm-5.2", false
     ; "gpt-oss:20b", false
     ; "gpt-oss:120b", false
@@ -967,6 +976,48 @@ let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
       "qwen3.5:397b inherent thinking has no request control"
       Capabilities.No_thinking_control
       c.thinking_control_format
+;;
+
+let test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire () =
+  (* 2026-08-15 (closes #28749): these four ollama_cloud-scoped rows carried
+     the same Ollama_think/Enable_not_encodable defect as qwen3.5:397b
+     (#28748) — declaring Ollama's native /api/chat think toggle on a model
+     served through the OpenAI-compat /v1/chat/completions path, which cannot
+     encode it. Each is independently confirmed by a live probe recorded in
+     the OAS overlay (~/me/.masc/config/oas-models-overlay.toml, oas#2716
+     2026-07-20 audit + 2026-08-04 per-model probes): reasoning is inherent
+     and unconditional, and the response streams it back on a plain "reasoning"
+     field (not Ollama's native "thinking" field). kimi-k2.6 is covered
+     separately by test_lookup_kimi_k2_native_cloud_suffix, which already
+     exercises its provider-qualified ollama_cloud lookup. *)
+  List.iter
+    (fun model_id ->
+       match
+         Capabilities.for_provider_model_id
+           ~allow_bare_fallback:false
+           ~provider_label:"ollama_cloud"
+           ~model_id
+       with
+       | None -> failf "ollama_cloud/%s should resolve" model_id
+       | Some c ->
+         check bool (model_id ^ " reasoning") true c.supports_reasoning;
+         check bool (model_id ^ " extended thinking") true c.supports_extended_thinking;
+         check
+           bool
+           (model_id ^ " no reasoning budget control")
+           false
+           c.supports_reasoning_budget;
+         check_thinking_control
+           (model_id ^ " inherent thinking has no request control")
+           Capabilities.No_thinking_control
+           c.thinking_control_format;
+         let dialect = Reasoning_dialect.of_capabilities c in
+         (match dialect.streaming with
+          | Reasoning_dialect.Delta_field "reasoning" -> ()
+          | Reasoning_dialect.Delta_field field ->
+            failf "%s reasoning delta field drifted: %s" model_id field
+          | _ -> failf "%s should stream reasoning on a delta field" model_id))
+    [ "kimi-k2.7-code"; "minimax-m3"; "deepseek-v4-flash"; "deepseek-v4-pro" ]
 ;;
 
 let test_ollama_cloud_grouped_rows_follow_exact_output_contract () =
@@ -1134,9 +1185,12 @@ let test_ollama_cloud_provider_qualified_preserves_shared_bare_family () =
     "bare latest Kimi always preserves reasoning"
     true
     (bare_kimi.preserve_thinking_control_format = Always_preserved_thinking);
+  (* 2026-08-15 (closes #28749): ollama_cloud serves this through the
+     OpenAI-compat /v1 path, which cannot encode Ollama's native think toggle
+     — same defect class as qwen3.5:397b (#28748). *)
   check_thinking_control
-    "cloud Kimi uses Ollama native think"
-    Ollama_think
+    "cloud Kimi has no request control on this transport"
+    No_thinking_control
     cloud_kimi.thinking_control_format;
   check
     (option int)
@@ -1484,7 +1538,9 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Extended_thinking
       , No_structured_output
       , Replay_every_turn
-      , Delta_stream "thinking" )
+      (* 2026-08-15 (closes #28749): no control wire on /v1, same as the
+         qwen3.5:397b and MiniMax M3 rows above. *)
+      , Delta_stream "reasoning" )
     ; ( "Ollama Cloud MiniMax M3"
       , Provider_qualified "ollama_cloud"
       , "minimax-m3"
@@ -1505,14 +1561,16 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Extended_thinking
       , No_structured_output
       , Replay_not_required
-      , Delta_stream "thinking" )
+      (* 2026-08-15 (closes #28749): no control wire on /v1. *)
+      , Delta_stream "reasoning" )
     ; ( "Ollama Cloud DeepSeek V4 Flash"
       , Provider_qualified "ollama_cloud"
       , "deepseek-v4-flash"
       , Extended_thinking
       , No_structured_output
       , Replay_not_required
-      , Delta_stream "thinking" )
+      (* 2026-08-15 (closes #28749): no control wire on /v1. *)
+      , Delta_stream "reasoning" )
     ; ( "Ollama Cloud GLM 5.2"
       , Provider_qualified "ollama_cloud"
       , "glm-5.2"
@@ -2881,6 +2939,10 @@ let () =
             "ollama cloud qwen3.5:397b has no control wire"
             `Quick
             test_ollama_cloud_qwen3_5_397b_has_no_control_wire
+        ; test_case
+            "ollama cloud kimi/deepseek/minimax have no control wire"
+            `Quick
+            test_ollama_cloud_kimi_deepseek_minimax_have_no_control_wire
         ; test_case
             "ollama cloud grouped rows follow exact-output contract"
             `Quick

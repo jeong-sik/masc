@@ -2139,10 +2139,17 @@ let test_capability_provider_label_ollama_cloud_requires_explicit_id () =
         "endpoint alone keeps the provider-independent MiniMax contract"
         true
         (native.thinking_control_format = Capabilities.Thinking_object_adaptive);
+      (* 2026-08-15 (closes #28749): minimax-m3 via ollama_cloud is served
+         through the OpenAI-compat /v1/chat/completions path, which cannot
+         encode Ollama's native think toggle — same defect class as
+         qwen3.5:397b (#28748), corrected in #28750 with a live-probe-backed
+         "none" declaration (oas#2716). This assertion is what checks that
+         the explicit ollama_cloud provider id actually picks up the
+         provider-scoped row's *own* contract rather than the bare/native one. *)
       check_bool
         "explicit Ollama Cloud/model tuple selects its exact contract"
         true
-        (cloud.thinking_control_format = Capabilities.Ollama_think)
+        (cloud.thinking_control_format = Capabilities.No_thinking_control)
     | _ -> Alcotest.fail "both bare and explicit Ollama Cloud rows must resolve")
 ;;
 

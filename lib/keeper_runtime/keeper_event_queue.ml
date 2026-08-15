@@ -77,6 +77,11 @@ type stimulus_payload =
      Goal_reconciliation_ready targets the Goal owner — a Task with no Goal
      link reaches no one. This carries the cancellation to the Task's author. *)
   | Task_cancelled of task_cancellation
+  (* A committed workspace message named this Keeper. The transcript row is the
+     content SSOT; this payload carries the workspace request identity so the
+     message is an entry in the linear drain rather than only a row a scan may
+     or may not reach. *)
+  | Keeper_message of keeper_message
 
 and board_attention = {
   candidate_id : string;
@@ -165,6 +170,14 @@ and task_cancellation = {
   tc_reason : string option;
 }
 
+and keeper_message = {
+  kmsg_request_id : string;
+  kmsg_from : string;
+}
+
+let keeper_message_post_id (message : keeper_message) =
+  "workspace-message:" ^ message.kmsg_request_id
+
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let hitl_resolution_post_id (r : hitl_resolution) = "hitl-approval:" ^ r.approval_id
@@ -233,7 +246,7 @@ let identity_payload = function
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested | Goal_reconciliation_ready _
-    | Completion_authority_rejected _
+    | Completion_authority_rejected _ | Keeper_message _
     ) as payload ->
     payload
 
@@ -352,6 +365,7 @@ let payload_kind_label = function
   | Goal_reconciliation_ready _ -> "goal_reconciliation_ready"
   | Completion_authority_rejected _ -> "completion_authority_rejected"
   | Task_cancelled _ -> "task_cancelled"
+  | Keeper_message _ -> "keeper_message"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
@@ -359,7 +373,7 @@ let is_board_signal = function
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Manual_compaction_requested | Goal_assigned _
   | Goal_reconciliation_ready _ | Completion_authority_rejected _
-  | Task_cancelled _ ->
+  | Task_cancelled _ | Keeper_message _ ->
     false
 
 (* RFC-0377: the batch-intake predicate needs the routed channel without
@@ -371,7 +385,7 @@ let connector_attention_channel = function
   | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
   | Schedule_due _ | Hitl_resolved _ | Manual_compaction_requested
   | Goal_assigned _ | Goal_reconciliation_ready _
-  | Completion_authority_rejected _ | Task_cancelled _ ->
+  | Completion_authority_rejected _ | Task_cancelled _ | Keeper_message _ ->
     None
 
 let drain_board_all (queue : t) : stimulus list * t =
@@ -606,6 +620,12 @@ let payload_to_yojson = function
         , match cancellation.tc_reason with
           | None -> `Null
           | Some reason -> `String reason )
+      ]
+  | Keeper_message message ->
+    `Assoc
+      [ "kind", `String "keeper_message"
+      ; "request_id", `String message.kmsg_request_id
+      ; "from", `String message.kmsg_from
       ]
 
 let continuation_channel_field fields =
@@ -882,6 +902,13 @@ let payload_of_yojson json =
     Ok
       (Task_cancelled
          { tc_task_id = task_id; tc_cancelled_by = cancelled_by; tc_reason = reason })
+  | "keeper_message" ->
+    let* () =
+      exact_fields ~context ~expected:[ "kind"; "request_id"; "from" ] fields
+    in
+    let* request_id = string_field ~context "request_id" fields in
+    let* from = string_field ~context "from" fields in
+    Ok (Keeper_message { kmsg_request_id = request_id; kmsg_from = from })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =
@@ -952,5 +979,6 @@ let continuation_channel_of_payload = function
   | Goal_assigned _
   | Goal_reconciliation_ready _
   | Completion_authority_rejected _
-  | Task_cancelled _ -> None
+  | Task_cancelled _
+  | Keeper_message _ -> None
 ;;

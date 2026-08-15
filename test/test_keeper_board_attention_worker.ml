@@ -241,7 +241,8 @@ let relevant_delivery_count ~base_path ~candidate_id =
           | Event_queue.Goal_assigned _
           | Event_queue.Goal_reconciliation_ready _
           | Event_queue.Completion_authority_rejected _
-          | Event_queue.Task_cancelled _ -> count)
+          | Event_queue.Task_cancelled _
+          | Event_queue.Keeper_message _ -> count)
        0
 ;;
 

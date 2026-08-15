@@ -153,6 +153,12 @@ let board_sse_event_params event =
       ]
 ;;
 
+(* Origin label carried on the [keeper_chat_appended] SSE event, alongside
+   "slack" / "discord" / "dashboard" / "fusion". A workspace message reaches
+   the transcript from the shared message bus, whether another Keeper's
+   [masc_broadcast] or the operator's dashboard broadcast wrote it. *)
+let workspace_message_chat_source = "workspace"
+
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
@@ -230,7 +236,57 @@ let deliver_broadcast_mention
             |> List.filter_map Keeper_identity.Keeper_id.of_string
             |> List.sort_uniq Keeper_identity.Keeper_id.compare
           in
+          (* The transcript row is committed but the dashboard is not told, so
+             the conversation window shows the message only after a reload —
+             every other intake (Slack, Discord, fusion, dashboard) announces
+             its row. *)
+          let announce_chat_row () =
+            Keeper_chat_broadcast.chat_appended
+              ~keeper_name:target
+              ~source:workspace_message_chat_source
+              ~content:delivery.content
+              ()
+          in
+          (* The message becomes an entry in the target's linear drain, so it
+             is ordered against every other stimulus, deduplicated by the
+             workspace request identity, and readable in the operator queue
+             view. The durable commit precedes the wake hint, so a keeper woken
+             by the hint always finds the entry. *)
+          let commit_queue_entry () =
+            let message =
+              { Keeper_event_queue.kmsg_request_id = delivery.request_id
+              ; kmsg_from = delivery.from_agent
+              }
+            in
+            let stimulus =
+              { Keeper_event_queue.post_id =
+                  Keeper_event_queue.keeper_message_post_id message
+              ; urgency = Keeper_event_queue.Immediate
+              ; arrived_at = Unix.gettimeofday ()
+                (* NDT-OK: stimulus receipt time, used only for ordering/age *)
+              ; payload = Keeper_event_queue.Keeper_message message
+              }
+            in
+            match
+              Keeper_registry_event_queue.enqueue_stimulus_durable_result
+                ~base_path
+                target
+                stimulus
+            with
+            | Keeper_registry_event_queue.Stimulus_enqueued
+            | Keeper_registry_event_queue.Stimulus_already_present -> ()
+            | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string KeepaliveSignalFailures)
+                ~labels:
+                  [ "keeper", target; "phase", "keeper_message_delivery" ]
+                ();
+              Log.Keeper.error
+                "keeper message durable delivery failed keeper=%s request_id=%s: %s"
+                target delivery.request_id detail
+          in
           let request_wake () =
+            commit_queue_entry ();
             if is_running target
             then (
               wakeup target;
@@ -255,6 +311,7 @@ let deliver_broadcast_mention
                ()
            with
            | Ok (Keeper_chat_store.Appended _) ->
+             announce_chat_row ();
              request_wake ();
              Workspace_broadcast.Accepted
            | Ok (Keeper_chat_store.Already_present { row_id }) ->

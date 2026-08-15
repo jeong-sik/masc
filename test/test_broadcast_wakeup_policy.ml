@@ -257,6 +257,84 @@ let test_canonical_delivery_stamps_configured_feed_target () =
       (List.mem alias mentions)
 ;;
 
+let queued_keeper_messages ~base_path ~keeper_name =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Error detail -> failf "event queue load failed: %s" detail
+  | Ok queue ->
+    Keeper_event_queue.to_list queue
+    |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Keeper_message message ->
+        Some (stimulus.post_id, stimulus.urgency, message)
+      | Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Bootstrap
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Schedule_due _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Manual_compaction_requested
+      | Keeper_event_queue.Goal_assigned _
+      | Keeper_event_queue.Goal_reconciliation_ready _
+      | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_cancelled _ -> None)
+;;
+
+(* A workspace message that names a Keeper has to reach the same linear drain
+   every other stimulus arrives on. Before this, the delivery boundary wrote a
+   transcript row and flipped a wake flag, so the message existed for the
+   transcript scan and for nothing else: it had no queue identity, no ordering
+   against other stimuli, and nothing for the operator queue view to show. *)
+let test_delivery_enqueues_linear_queue_entry () =
+  with_workspace @@ fun config ->
+  let target = "rondo" in
+  let request_id = "wmsg-1234567890abcdef" in
+  persist_meta config target;
+  let deliver () =
+    Broadcast_wakeup.deliver_broadcast_mention
+      ~config
+      ~base_path:config.base_path
+      ~is_running:(fun _ -> true)
+      ~wakeup:(fun _ -> ())
+      (delivery ~target ~request_id ~seq:6 ~content:"drain me")
+  in
+  ignore (deliver ());
+  (match queued_keeper_messages ~base_path:config.base_path ~keeper_name:target with
+   | [ (post_id, urgency, message) ] ->
+     check string "queue entry keys on the workspace request"
+       ("workspace-message:" ^ request_id) post_id;
+     check bool "an addressed message is immediate" true
+       (urgency = Keeper_event_queue.Immediate);
+     check string "queue entry names its sender" "external-agent"
+       message.Keeper_event_queue.kmsg_from
+   | entries ->
+     failf "expected one queued keeper message, got %d" (List.length entries));
+  (* Redelivery of the same committed message is the same durable event. *)
+  ignore (deliver ());
+  check int "redelivery does not duplicate the queue entry" 1
+    (List.length
+       (queued_keeper_messages ~base_path:config.base_path ~keeper_name:target))
+;;
+
+(* The wake is a hint; the delivery is durable. A Keeper that is not running
+   when the message commits still finds it in its queue on the next cycle. *)
+let test_stopped_keeper_keeps_queue_entry () =
+  with_workspace @@ fun config ->
+  let target = "stopped-drain-keeper" in
+  let request_id = "wmsg-fedcba0987654321" in
+  persist_meta config target;
+  ignore
+    (Broadcast_wakeup.deliver_broadcast_mention
+       ~config
+       ~base_path:config.base_path
+       ~is_running:(fun _ -> false)
+       ~wakeup:(fun _ -> fail "a stopped Keeper must not be woken")
+       (delivery ~target ~request_id ~seq:7 ~content:"queued while stopped"));
+  check int "stopped Keeper still holds the queue entry" 1
+    (List.length
+       (queued_keeper_messages ~base_path:config.base_path ~keeper_name:target))
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -276,5 +354,9 @@ let () =
             test_configured_mention_alias_resolves_and_stamps_feed_target
         ; test_case "canonical delivery stamps configured feed target" `Quick
             test_canonical_delivery_stamps_configured_feed_target
+        ; test_case "delivery enqueues a linear queue entry" `Quick
+            test_delivery_enqueues_linear_queue_entry
+        ; test_case "stopped Keeper keeps the queue entry" `Quick
+            test_stopped_keeper_keeps_queue_entry
         ] )
     ]

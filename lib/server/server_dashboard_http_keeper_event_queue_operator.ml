@@ -110,6 +110,12 @@ let pending_page ~after ~limit pending =
                @ (match cancellation.tc_reason with
                   | None -> []
                   | Some reason -> [ "cancelled_reason", `String reason ])
+             | Keeper_event_queue.Keeper_message message ->
+               (* Who queued the message and under which workspace request, so
+                  an operator reading the queue can find the transcript row. *)
+               [ "message_request_id", `String message.kmsg_request_id
+               ; "message_from", `String message.kmsg_from
+               ]
              | Keeper_event_queue.Board_signal _
              | Keeper_event_queue.Board_attention _
              | Keeper_event_queue.Bootstrap

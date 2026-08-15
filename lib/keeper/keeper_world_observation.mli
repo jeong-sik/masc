@@ -200,6 +200,7 @@ type event_queue_trigger =
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
   | Manual_compaction_stimulus
+  | Keeper_message_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -213,6 +214,7 @@ type turn_reason =
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
   | Manual_compaction_pending
+  | Keeper_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of { unclaimed : int; failed : int }

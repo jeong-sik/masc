@@ -352,7 +352,27 @@ let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
                     assert
                       (str_contains
                          (Tool_result.message result)
-                         "no web search provider is configured"))))))))))
+                         "no web search provider is configured");
+                    (* The real dispatch path must hit search_impl's own
+                       empty-chain branch — the simulator above is a twin
+                       loop, not the production one. With an empty plan
+                       the loop terminates before any HTTP call and
+                       failures are never cached. *)
+                    let ctx = make_test_ctx () in
+                    (match
+                       Tool_misc.dispatch ctx ~name:"masc_web_search"
+                         ~args:(`Assoc [ ("query", `String "empty chain probe") ])
+                     with
+                     | Some dispatched ->
+                         assert (not (Tool_result.is_success dispatched));
+                         assert
+                           (Tool_result.failure_class dispatched
+                            = Some Tool_result.Runtime_failure);
+                         assert
+                           (str_contains
+                              (Tool_result.message dispatched)
+                              "no web search provider is configured")
+                     | None -> failwith "masc_web_search was not dispatched"))))))))))
 )
 
 let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->

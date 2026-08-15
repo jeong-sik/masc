@@ -1078,8 +1078,37 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# 2026-08-15: "qwen3.5:397b" is the tag ollama.com actually serves; "qwen3.5:cloud"
+# above is an alias to the same backend (RFC-0370). This row previously declared
+# supports_reasoning_budget=true + thinking_control_format="ollama_think" —
+# Ollama's *native* /api/chat think:true/false toggle, which does not exist on
+# this OpenAI-compatible /v1/chat/completions request path (confirmed:
+# docs.ollama.com/api/openai-compatibility documents reasoning control only via
+# reasoning_effort/reasoning.effort; the native think field is /api/chat-only).
+# A live probe of the ":cloud" alias on this same backend returned reasoning
+# unconditionally (message keys ['content','reasoning','role'], 882 chars) even
+# without any request-side toggle, matching the confirmed sibling family (kimi-k2.6,
+# kimi-k2.7-code, minimax-m3, deepseek-v4-pro/flash; oas#2716 2026-07-20 audit) of
+# "inherent reasoning, no control wire on /v1". Sending enable_thinking=true against
+# ollama_think here fails fail-closed with Enable_not_encodable (masc keeper canary
+# canary-runtime-failover-20260814-0730, 2026-08-14 07:08); reasoning_effort was
+# tried too (PR #28680) and also failed, because nothing wires an effort value onto
+# this runtime — the reasoning_effort dialect needs both the format declaration and
+# a concrete effort level. supports_reasoning_budget follows the same correction
+# (no budget wire on /v1) already applied to the four confirmed siblings above.
+supports_reasoning_budget = false
+thinking_control_format = "none"
+# reasoning_streaming_format mirrors config/runtime.toml's ollama-cloud-qwen3-5-397b
+# fix (#28680, 2026-08-14), and matches the ollama_cloud fixture in
+# test_streaming.ml ("reasoning_content" delta on a qwen3.5:397b chunk).
+# Flagging one open discrepancy rather than silently resolving it: the
+# ":cloud" alias row above was live-probed and returned field name
+# "reasoning", not "reasoning_content" (oas-models-overlay.toml comment,
+# 2026-08-05). RFC-0370 says ":cloud" and ":397b" hit the same served backend,
+# so the two field names should match; they currently don't. Either value here
+# is strictly better than the prior No_streaming_reasoning default, but the
+# mismatch itself is unresolved — needs a live probe against ":397b" specifically.
+reasoning_streaming_format = "delta:reasoning_content"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"
@@ -1456,8 +1485,13 @@ supports_tools = true
 supports_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "ollama_think"
+# Same correction as the provider-scoped row above (2026-08-15): this is the
+# bare-fallback twin of that entry and was carrying the identical
+# ollama_think/Enable_not_encodable defect. See that row's comment for the
+# full root-cause citation.
+supports_reasoning_budget = false
+thinking_control_format = "none"
+reasoning_streaming_format = "delta:reasoning_content"
 supports_multimodal_inputs = true
 supports_image_input = true
 modality_priority = "visual_first"

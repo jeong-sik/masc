@@ -888,10 +888,12 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
      production workflow: tool call -> tool_result replay -> final answer while
      reasoning may stream on a side channel. The catalog must not regress any
      one of these axes to a generic text-only profile. JSON response-format
-     support is an exact per-model contract rather than a provider-wide rule. *)
+     support is an exact per-model contract rather than a provider-wide rule.
+     "qwen3.5:397b" is deliberately absent: unlike the rows below it does not
+     use Ollama's native think toggle on this transport (see
+     test_ollama_cloud_qwen3_5_397b_has_no_control_wire). *)
   let cases =
-    [ "qwen3.5:397b", false
-    ; "gemma4:31b", true
+    [ "gemma4:31b", true
     ; "kimi-k2.7-code", false
     ; "minimax-m3", true
     ; "nemotron-3-ultra", false
@@ -926,6 +928,45 @@ let test_ollama_cloud_grouped_rows_have_required_axes () =
            Capabilities.Ollama_think
            c.thinking_control_format)
     cases
+;;
+
+let test_ollama_cloud_qwen3_5_397b_has_no_control_wire () =
+  (* "qwen3.5:397b" is the tag ollama.com actually serves; "qwen3.5:cloud"
+     above is an alias to the same backend (RFC-0370). A live probe of the
+     ":cloud" alias against ollama.com's OpenAI-compatible /v1/chat/completions
+     endpoint returned reasoning unconditionally (message keys
+     ['content','reasoning','role'], 882 chars) with no request-side toggle
+     accepted — matching the confirmed sibling family (kimi-k2.6,
+     kimi-k2.7-code, minimax-m3, deepseek-v4-pro/flash; oas#2716 2026-07-20
+     audit) of "inherent reasoning, no control wire on /v1". This row
+     previously declared Ollama's native think toggle (thinking_control_format
+     = "ollama_think"), which only exists on Ollama's native /api/chat, not
+     this OpenAI-compatible path; every enable_thinking=true keeper turn
+     failed closed with Enable_not_encodable (canary
+     canary-runtime-failover-20260814-0730, 2026-08-14 07:08). A later attempt
+     at thinking_control_format = "reasoning-effort" (#28680, since reverted)
+     failed the same way because nothing wires a concrete effort value onto
+     this runtime — the reasoning_effort dialect needs both the format
+     declaration and an effort level to encode anything. *)
+  match
+    Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"ollama_cloud"
+      ~model_id:"qwen3.5:397b"
+  with
+  | None -> fail "ollama_cloud/qwen3.5:397b should resolve"
+  | Some c ->
+    check bool "qwen3.5:397b reasoning" true c.supports_reasoning;
+    check bool "qwen3.5:397b extended thinking" true c.supports_extended_thinking;
+    check
+      bool
+      "qwen3.5:397b no reasoning budget control"
+      false
+      c.supports_reasoning_budget;
+    check_thinking_control
+      "qwen3.5:397b inherent thinking has no request control"
+      Capabilities.No_thinking_control
+      c.thinking_control_format
 ;;
 
 let test_ollama_cloud_grouped_rows_follow_exact_output_contract () =
@@ -1426,7 +1467,10 @@ let test_frontier_grouped_tool_thinking_provider_contracts () =
       , Extended_thinking
       , No_structured_output
       , Replay_not_required
-      , Delta_stream "thinking" )
+      (* 2026-08-15: no control wire on /v1 (see the catalog row's comment),
+         so the reasoning delta streams on the plain reasoning_content field
+         instead of Ollama's native "thinking" field. *)
+      , Delta_stream "reasoning_content" )
     ; ( "Ollama Cloud Gemma4"
       , Provider_qualified "ollama_cloud"
       , "gemma4:31b"
@@ -2833,6 +2877,10 @@ let () =
             "ollama cloud grouped rows keep required axes"
             `Quick
             test_ollama_cloud_grouped_rows_have_required_axes
+        ; test_case
+            "ollama cloud qwen3.5:397b has no control wire"
+            `Quick
+            test_ollama_cloud_qwen3_5_397b_has_no_control_wire
         ; test_case
             "ollama cloud grouped rows follow exact-output contract"
             `Quick

@@ -78,6 +78,36 @@ let test_active_toml_rows_prove_a_consumer () =
     check bool (row.env_name ^ " has consumer proof") true (row.consumers <> []))
 ;;
 
+(* Feature contract: every credential that admits a web-search provider
+   is named by the registry, environment-only (credentials never gain a
+   TOML key in a committed file), and points at its consumer. *)
+let test_web_search_credentials_are_registered_env_only () =
+  [ "BRAVE_SEARCH_API_KEY"
+  ; "TAVILY_API_KEY"
+  ; "EXA_API_KEY"
+  ; "BING_SEARCH_API_KEY"
+  ; "AZURE_BING_SEARCH_API_KEY"
+  ]
+  |> List.iter (fun env_name ->
+    match
+      List.find_opt
+        (fun (row : Keeper_runtime_setting_registry.setting) ->
+          String.equal row.env_name env_name)
+        Keeper_runtime_setting_registry.all
+    with
+    | None -> failf "%s is not registered" env_name
+    | Some row ->
+      (match row.exposure with
+       | Keeper_runtime_setting_registry.Env_only -> ()
+       | Keeper_runtime_setting_registry.Toml_and_env key ->
+         failf "%s leaked a TOML key: %s" env_name key);
+      check string (env_name ^ " category") "web_search" row.category;
+      check bool
+        (env_name ^ " names its consumer")
+        true
+        (List.mem "Tool_misc_web_search" row.consumers))
+;;
+
 let () =
   run
     "Keeper_runtime_config"
@@ -94,6 +124,8 @@ let () =
             test_retired_keys_have_no_active_mapping
         ; test_case "active TOML rows have consumer proof" `Quick
             test_active_toml_rows_prove_a_consumer
+        ; test_case "web-search credentials are registered env-only" `Quick
+            test_web_search_credentials_are_registered_env_only
         ] )
     ]
 ;;

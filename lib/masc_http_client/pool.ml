@@ -329,6 +329,53 @@ let path_and_query uri =
   | [] -> p
   | _ -> p ^ "?" ^ Uri.encoded_of_query (Uri.query uri)
 
+(* HTTP boundary comparison. Header field names are untyped,
+   case-insensitive wire strings (RFC 7230 §3.2) — "host" is not a closed
+   domain enum this repo controls the shape of, so there is no variant to
+   parse it into. *)
+let has_host_header headers =
+  List.exists
+    (fun (name, _) ->
+       String.lowercase_ascii name = "host" (* STR-OK: see doc comment above *))
+    headers
+
+(* Piaf 0.2.0's own default HTTP/1.1 Host header (piaf/lib/headers.ml's
+   [canonicalize_headers], sourced from [Connection.Info.host]) carries the
+   bare hostname only — it never includes the port, even when the target
+   URI names one that differs from the scheme's default. Confirmed by
+   server-side capture (masc, 2026-08-16): a POST to a non-default local
+   port arrived at the server with [Host: 127.0.0.1] and no port; because
+   the server resolves a portless Host to the scheme's default port
+   (server_request_authority.ml's [effective_port_value]), it no longer
+   matches the port actually bound, and [admit_http1_authority] rejects the
+   request as [Untrusted] — this is what surfaced as
+   [request_authority_untrusted] on every non-default-port POST through
+   this client, including the keeper canary harness's live smoke test.
+
+   We supply an explicit, correct Host header ourselves so Piaf's
+   [add_unless_exists] keeps ours instead of its own truncated one. A
+   caller that already set a "host" header (any case) is left alone —
+   this only fills a gap Piaf leaves, it does not override a deliberate
+   caller choice. *)
+(* [None] here is [?headers] genuinely omitted by the caller ("no
+   headers"), not unparsed/malformed external data — [[]] is the only
+   value that means "no headers" for a [(string * string) list], so no
+   information is lost. *)
+let ensure_host_header ~uri headers =
+  let headers = Option.value headers ~default:[] (* DET-OK: sound default, see doc comment above *) in
+  if has_host_header headers
+  then Some headers
+  else (
+    match Uri.host uri with
+    | None -> if headers = [] then None else Some headers
+    | Some host ->
+      let value =
+        match Uri.port uri with
+        | Some port -> Printf.sprintf "%s:%d" host port
+        | None -> host
+      in
+      Some (("host", value) :: headers))
+
 (* Wrap a single request: acquire-or-create client, send, release.
    Errors return [Error string]; the connection is dropped (close)
    on error, parked on success. *)
@@ -371,7 +418,8 @@ let do_request t ?headers ?body ~method_ uri : (response, string) result =
             ~finally:(fun () -> t.counters.inflight <- t.counters.inflight - 1)
             (fun () ->
                try
-                 Piaf.Client.request client ?headers ?body:body_piaf
+                 Piaf.Client.request client
+                   ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
                    ~meth:(method_to_piaf method_) path
                with
                | Eio.Cancel.Cancelled _ as e -> raise e
@@ -535,7 +583,8 @@ let do_request_with_idle_timeout t
                t.counters.inflight <- t.counters.inflight - 1)
              (fun () ->
                 try
-                  Piaf.Client.request client ?headers ?body:body_piaf
+                  Piaf.Client.request client
+                    ?headers:(ensure_host_header ~uri headers) ?body:body_piaf
                     ~meth:(method_to_piaf method_) path
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
@@ -620,4 +669,5 @@ module For_testing = struct
   module Host_key = Host_key
   let close_unreleased_client = close_unreleased_client
   let read_body_with_idle = read_body_with_idle
+  let ensure_host_header = ensure_host_header
 end

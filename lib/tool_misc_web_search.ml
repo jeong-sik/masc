@@ -130,6 +130,9 @@ let parse_tavily_json payload =
 
 let parse_ollama_search_json payload =
   parse_json_search_results
+    (* DET-OK: absent "results" resolves to `Null, which the shared
+       parser reads as zero hits — the chain then reports "no results"
+       instead of inventing content. Same shape as the sibling parsers. *)
     ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"content" payload
 
@@ -177,6 +180,8 @@ let parse_brave_llm_context_json payload =
              in
              match string_field "url", snippets with
              | Some url, _ :: _ when valid_search_result_url url ->
+                 (* DET-OK: a missing title deterministically falls back to
+                    the url — documented in the .mli, visible in output. *)
                  Some (url, Option.value (string_field "title") ~default:url, snippets)
              | _ -> None)
 

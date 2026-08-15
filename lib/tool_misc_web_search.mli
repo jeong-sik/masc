@@ -163,7 +163,8 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     serving provider is [brave_llm_context] the envelope carries
     [grounded=true], [context_text] (the pre-extracted chunks) and
     [sources] (url/title/snippet_count metadata) instead of [results]
-    rows.
+    rows; [includeContent=true] is then a structural no-op — there are
+    no result rows to enrich and the content already rides inline.
 
     Failure classes (RFC-0189):
     - [Workflow_rejection]: empty query input.

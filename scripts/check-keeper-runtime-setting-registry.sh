@@ -37,8 +37,12 @@ done <<<"$declared_keeper_envs"
 
 [ "$missing" -eq 0 ] || fail "$missing Keeper env declaration(s) lack registry rows"
 
+# Duplicate detection covers every registered row, not just MASC_-prefixed
+# ones — provider credentials (BRAVE_SEARCH_API_KEY etc.) are registered
+# without the prefix and must not escape this check. The coverage check
+# above stays MASC_KEEPER_-scoped by design.
 duplicate_envs="$({
-  sed -n 's/.*~env_name:"\(MASC_[A-Z0-9_]*\)".*/\1/p' "$REGISTRY"
+  sed -n 's/.*~env_name:"\([A-Z][A-Z0-9_]*\)".*/\1/p' "$REGISTRY"
 } | sort | uniq -d)"
 [ -z "$duplicate_envs" ] || fail "duplicate env identities: $duplicate_envs"
 

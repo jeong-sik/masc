@@ -258,6 +258,55 @@ let test_native_decode_rate_uses_current_field_only () =
   check_absent_field payload "provider_tokens_per_second"
 ;;
 
+(* RFC-0382: llama-server/Ollama wire timings carry [cache_n] (KV-cache
+   reused prompt tokens) and [prompt_n] (freshly prefilled prompt tokens).
+   Both must land on the cost-ledger payload so the per-turn KV reuse ratio
+   is reconstructible from the ledger alone. *)
+let test_timings_cache_fields_land_on_payload () =
+  let timings : Agent_core.Types.inference_timings =
+    { prompt_n = Some 26
+    ; prompt_ms = Some 709.5
+    ; prompt_per_second = Some 36.6
+    ; predicted_n = Some 512
+    ; predicted_ms = Some 54893.4
+    ; predicted_per_second = Some 9.3
+    ; cache_n = Some 1741
+    }
+  in
+  let telemetry : Agent_core.Types.inference_telemetry =
+    { system_fingerprint = None
+    ; timings = Some timings
+    ; reasoning_tokens = None
+    ; request_latency_ms = None
+    ; peak_memory_gb = None
+    ; provider_kind = None
+    ; reasoning_effort = None
+    ; canonical_model_id = None
+    ; reasoning_source = None
+    ; effective_context_window = None
+    ; provider_internal_action_count = None
+    ; ttfrc_ms = None
+    ; prefill_ms = None
+    }
+  in
+  let payload =
+    H.cost_event_payload
+      ~agent_name:"test_agent"
+      ~task_id:None
+      ~trace_id:"test-trace"
+      ~keeper_turn_id:1
+      ~agent_core_turn_ordinal:0
+      ~model:"qwen3.8-27b"
+      ~input_tokens:26
+      ~output_tokens:512
+      ~cost_usd:0.0
+      ~telemetry
+      ()
+  in
+  check int "cache_n" 1741 (int_field payload "cache_n");
+  check int "prompt_n" 26 (int_field payload "prompt_n")
+;;
+
 let () =
   run "cost_token_decouple"
     [
@@ -287,5 +336,7 @@ let () =
             test_missing_usage_is_explicit_null;
           test_case "native decode rate uses current field only" `Quick
             test_native_decode_rate_uses_current_field_only;
+          test_case "timings cache_n/prompt_n land on payload" `Quick
+            test_timings_cache_fields_land_on_payload;
         ] );
     ]

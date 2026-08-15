@@ -69,7 +69,7 @@
 
 핵심 기전 두 가지. (1) 생성된 thinking 토큰의 KV는 슬롯에 남아 있으므로, 다음 턴 히스토리에 같은 reasoning_content를 그대로 되돌려주면 재토큰화 비용 없이 프리픽스가 이어진다(preserve 턴2: 이전 턴 생성 419tok가 그대로 cache_n에 편입, 새 user 29tok만 처리). (2) 프리픽스 앞쪽 1바이트 변형은 그 뒤 전체를 무효화하며, hybrid(SSM) 모델은 임의 위치 롤백이 안 되므로 체크포인트(`--ctx-checkpoints`, b10180 기본 32/slot)가 있는 위치까지만 되감는다 — volatile-head 턴4에서 cache_n이 68로 무너진 것이 체크포인트 고갈의 실측이다. 원 수치는 `docs/evidence/kv-cache-harness-2026-08-16.jsonl`.
 
-### 3.2 라이브 fleet 캐시 히트 (8/15, `~/.masc/costs/2026-08/15.jsonl`, 760턴)
+### 3.2 라이브 fleet 캐시 히트 (8/15, `<MASC_BASE_PATH>/costs/2026-08/15.jsonl`, 760턴)
 
 | 모델 | 턴 | cache_read | input | 히트율 |
 |---|---|---|---|---|
@@ -92,7 +92,7 @@
 | PR-1 (이 문서) | RFC + 리포트 + 하네스 + 증거 | — |
 | PR-2 | agent_core: OpenAI-compat SSE 최종 청크의 `timings` 파싱 → telemetry (Ollama 경로와 동형) | G1 |
 | PR-3 | keeper/dashboard: cache_n·prompt_n 원값 노출 (bool 축약 제거는 하지 않고 병기) | G5 |
-| PR-4 | llama-server 레인 복원 runbook + 캐파 행(preserve_thinking_control_format 선언) + `~/.masc` 설정 반영 (ops) | G2, G3 |
+| PR-4 | llama-server 레인 복원 runbook + 캐파 행(preserve_thinking_control_format 선언) + `<MASC_BASE_PATH>` 설정 반영 (ops) | G2, G3 |
 | PR-5 | backend_anthropic: top-level 자동 cache_control 옵트인 | G4 |
 | 후속 | usage 의미론 감사 (input_tokens에 cached 포함 여부 provider별 계약 명문화) | G6 |
 

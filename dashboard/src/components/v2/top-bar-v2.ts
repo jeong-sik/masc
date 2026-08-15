@@ -16,6 +16,10 @@ import { StatusDot } from './primitives-v2'
 import { surfaceLabel } from './nav-rail-v2'
 import { configuredCountSourceLabel, keeperRowLooksRunning, resolveRuntimeCounts, runtimeCountSourceLabel } from '../../runtime-counts'
 import type { RuntimeCounts } from '../../runtime-counts'
+import {
+  projectDashboardCompositeHealth,
+  type DashboardCompositeHealthVerdict,
+} from '../../lib/dashboard-composite-health'
 // Operational/safety chrome the v2 prototype omits but operators rely on
 // (connection state, transport telemetry, emergency stop, error inbox, auth,
 // build identity). Re-mounted into the v2 top bar so the reskin does not drop
@@ -25,6 +29,10 @@ import { ConnectionStatus, ErrorCounterBadge, BuildIdentityBadge } from '../dash
 import { AuthStatus } from '../auth-status'
 import { EmergencyStopControl } from '../emergency-stop-control'
 import { TransportBeacon } from '../transport-beacon'
+import {
+  dashboardFullHealth,
+  subscribeDashboardFullHealthRefresh,
+} from '../dashboard-full-health-state'
 
 const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead'])
 
@@ -76,6 +84,7 @@ interface AttentionAgg {
   keepers: number
   dead: number
   stale: number
+  health: DashboardCompositeHealthVerdict
   total: number
 }
 
@@ -89,18 +98,31 @@ function computeAttention(): AttentionAgg {
   const attKeepers = ks.filter((k) => k.needs_attention === true).length
   const dead = ks.filter((k) => !!k.lifecycle_phase && DEAD_PHASES.has(k.lifecycle_phase)).length
   const stale = staleKeepers.value.size
+  const health = projectDashboardCompositeHealth(dashboardFullHealth.value)
   return {
     approvals,
     approvalQueueState,
     keepers: attKeepers,
     dead,
     stale,
-    total: (approvals ?? 0) + attKeepers + dead + stale,
+    health,
+    total: (approvals ?? 0) + attKeepers + dead + stale + health.issueCount,
   }
 }
 
-function AttentionIndicatorV2() {
+interface AttentionRow {
+  k: string
+  n: number | string
+  lbl: string
+  detail?: string
+  sev: 'bad' | 'warn'
+  nav: 'approvals' | 'monitoring' | 'connectors'
+  params?: Record<string, string>
+}
+
+export function AttentionIndicatorV2() {
   const [open, setOpen] = useState(false)
+  useEffect(() => subscribeDashboardFullHealthRefresh(), [])
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
@@ -109,7 +131,8 @@ function AttentionIndicatorV2() {
   }, [open])
 
   const a = computeAttention()
-  if (a.approvalQueueState && a.approvalQueueState.state !== 'ready') {
+  const approvalQueueUnknown = a.approvalQueueState?.state !== 'ready' || a.approvals === null
+  if (!a.total && a.approvalQueueState && a.approvalQueueState.state !== 'ready') {
     const state = a.approvalQueueState
     return html`
       <button
@@ -119,29 +142,88 @@ function AttentionIndicatorV2() {
       >${state.icon} ${state.title}</button>
     `
   }
-  if (a.approvalQueueState?.state !== 'ready' || a.approvals === null) {
-    return html`
-      <button
-        class="v2-statchip attn warn"
-        onClick=${() => navigate('approvals')}
-        title="Gate queue state has not loaded"
-      >? 승인 큐 확인 필요</button>
-    `
-  }
-  if (!a.total) {
+  if (!a.total && a.health.state === 'healthy' && !approvalQueueUnknown) {
     return html`<span class="v2-statchip live" title="처리할 항목 없음">${'✓'} 정상</span>`
   }
-  const rows = [
-    { k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' as const },
-    { k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' as const },
-    { k: 'dead', n: a.dead, lbl: '죽음·넘침', sev: 'bad', nav: 'monitoring' as const },
-    { k: 'stale', n: a.stale, lbl: 'stale 게이트', sev: 'warn', nav: 'connectors' as const },
-  ].filter((r) => r.n !== null && r.n > 0)
-  const tone = a.approvals > 0 || a.dead > 0 ? 'bad' : 'warn'
+  if (!a.total && a.health.state === 'status' && !approvalQueueUnknown) {
+    const issue = a.health.issues[0]
+    return html`
+      <button
+        class=${`v2-statchip attn ${issue.severity}`}
+        onClick=${() => navigate('monitoring', { section: 'fleet-health' })}
+        title=${issue.detail}
+      >${'◌'} ${issue.label}</button>
+    `
+  }
+  const rows: AttentionRow[] = []
+  if (a.approvalQueueState && a.approvalQueueState.state !== 'ready') {
+    const state = a.approvalQueueState
+    rows.push({
+      k: 'approval-queue-state',
+      n: '—',
+      lbl: `${state.icon} ${state.title}`,
+      detail: state.operator_detail,
+      sev: state.severity,
+      nav: 'approvals',
+    })
+  } else if (a.approvals === null) {
+    rows.push({
+      k: 'approval-queue-unavailable',
+      n: '—',
+      lbl: '승인 큐 미연결',
+      detail: 'Gate queue state has not loaded.',
+      sev: 'warn',
+      nav: 'approvals',
+    })
+  }
+  if (a.approvals !== null && a.approvals > 0) rows.push({ k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' })
+  if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' })
+  if (a.dead > 0) rows.push({ k: 'dead', n: a.dead, lbl: '죽음·넘침', sev: 'bad', nav: 'monitoring' })
+  if (a.stale > 0) rows.push({ k: 'stale', n: a.stale, lbl: 'stale 게이트', sev: 'warn', nav: 'connectors' })
+  if (a.health.state === 'attention') {
+    rows.push(...a.health.issues.map(issue => ({
+      k: issue.kind,
+      n: 1,
+      lbl: issue.label,
+      detail: issue.detail,
+      sev: issue.severity,
+      nav: 'monitoring' as const,
+      params: { section: 'fleet-health' },
+    })))
+  } else if (a.health.state === 'status') {
+    rows.push(...a.health.issues.map(issue => ({
+      k: `${issue.kind}-status`,
+      n: '정보',
+      lbl: issue.label,
+      detail: issue.detail,
+      sev: issue.severity,
+      nav: 'monitoring' as const,
+      params: { section: 'fleet-health' },
+    })))
+  } else if (a.health.state === 'unavailable') {
+    rows.push({
+      k: 'composite-health-unavailable',
+      n: '—',
+      lbl: 'Fleet health 미연결',
+      detail: 'Backend composite fleet health verdict has not loaded.',
+      sev: 'warn',
+      nav: 'monitoring',
+      params: { section: 'fleet-health' },
+    })
+  }
+  const healthIsBad = (a.health.state === 'attention' || a.health.state === 'status')
+    && a.health.severity === 'bad'
+  const tone = (a.approvals ?? 0) > 0 || a.dead > 0 || healthIsBad
+    || (a.approvalQueueState?.state !== 'ready' && a.approvalQueueState?.severity === 'bad')
+    ? 'bad'
+    : 'warn'
+  const totalLabel = a.health.state === 'unavailable' || approvalQueueUnknown
+    ? a.total > 0 ? `${a.total}+?` : '?'
+    : String(a.total)
   return html`
     <div class="attn-wrap" onClick=${(e: Event) => e.stopPropagation()}>
       <button class=${`v2-statchip attn ${tone}`} onClick=${() => setOpen((o) => !o)} title="지금 나를 필요로 하는 것">
-        ${'⚑'} 주의 <b>${a.total}</b>
+        ${'⚑'} 주의 <b>${totalLabel}</b>
       </button>
       ${open
         ? html`
@@ -149,7 +231,12 @@ function AttentionIndicatorV2() {
               <div class="attn-menu-h">지금 나를 필요로 하는 것</div>
               ${rows.map(
                 (r) => html`
-                  <button key=${r.k} class="attn-row" onClick=${() => { setOpen(false); navigate(r.nav) }}>
+                  <button
+                    key=${r.k}
+                    class="attn-row"
+                    title=${r.detail}
+                    onClick=${() => { setOpen(false); navigate(r.nav, r.params) }}
+                  >
                     <span class=${`dot2 ${r.sev}`}></span>
                     <span class="attn-row-lbl">${r.lbl}</span>
                     <span class="attn-row-n mono">${r.n}</span>

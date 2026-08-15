@@ -206,7 +206,8 @@ let create_simple ~name ~description runner =
 [@@@coverage off]
 (* === Inline tests === *)
 
-let mock_runner text _prompt =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] mock_runner text _prompt =
   Ok
     { id = "m"
     ; model = "m"
@@ -217,7 +218,8 @@ let mock_runner text _prompt =
     }
 ;;
 
-let failing_runner _prompt = Error (Error.Internal "agent failed")
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] failing_runner _prompt = Error (Error.Internal "agent failed")
 
 let%test "create_simple produces valid tool" =
   let tool = create_simple ~name:"helper" ~description:"A helper" (mock_runner "hello") in

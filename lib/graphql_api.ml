@@ -326,6 +326,15 @@ let message_typ =
         ~typ:(Schema.non_null Schema.int)
         ~args:Arg.[]
         ~resolve:(fun _ (message : Masc_domain.message) -> message.seq);
+      Schema.field "requestId"
+        ~typ:(Schema.non_null Schema.string)
+        ~args:Arg.[]
+        ~resolve:(fun _ (message : Masc_domain.message) -> message.request_id);
+      Schema.field "mentionDelivery"
+        ~typ:(Schema.non_null Schema.string)
+        ~args:Arg.[]
+        ~resolve:(fun _ (message : Masc_domain.message) ->
+          Masc_domain.message_mention_delivery_to_string message.mention_delivery);
       Schema.field "from"
         ~typ:(Schema.non_null Schema.string)
         ~args:Arg.[]

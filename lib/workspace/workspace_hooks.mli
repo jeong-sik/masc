@@ -69,6 +69,16 @@ val observe_task_transition_fn : (Workspace_utils_backend_setup.config ->
            Atomic.t
 val on_task_mutation_fn : (unit -> unit) Atomic.t
 
+(** A workspace message's authoritative row was committed or its delivery
+    state changed. Runtime wiring invalidates projections and emits the
+    corresponding refresh signal. *)
+val on_workspace_message_mutation_fn :
+  (Workspace_utils_backend_setup.config ->
+   request_id:string ->
+   mention_delivery:Masc_domain.message_mention_delivery ->
+   unit)
+    Atomic.t
+
 val operator_pending_confirm_trace_id_fn : (string -> string) Atomic.t
 
 val operator_pending_confirm_upsert_fn :

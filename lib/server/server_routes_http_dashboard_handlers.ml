@@ -25,13 +25,18 @@ let handle_broadcast state agent_name reqd body_str =
     in
     Http.Response.json_value (`Assoc fields) reqd
   in
+  let reply_delivery delivery =
+    Http.Response.json_value
+      (Workspace_broadcast.broadcast_delivery_to_yojson delivery)
+      reqd
+  in
   try
     let json = Yojson.Safe.from_string body_str in
     match Json_util.assoc_member_opt "message" json with
     | Some (`String message) ->
         let config = (Mcp_server.workspace_config state) in
         (match Workspace.broadcast config ~from_agent:agent_name ~content:message with
-         | Ok _ -> reply true None
+         | Ok delivery -> reply_delivery delivery
          | Error error ->
            reply false (Some (Workspace.broadcast_error_to_string error)))
     | Some `Null -> reply false (Some "missing required field: message")

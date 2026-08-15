@@ -677,7 +677,10 @@ async function refreshDashboardFallback(opts?: RefreshOptions): Promise<void> {
   await Promise.all([refreshShell(opts), refreshExecution(opts)])
 }
 
-function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
+function hydrateDashboardBootstrap(
+  data: DashboardBootstrapResponse,
+  executionRequestGeneration: number,
+): void {
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
   }
@@ -686,7 +689,7 @@ function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
   }
 
   hydrateShellSnapshot(data.shell, { light: true })
-  hydrateExecutionSnapshot(data.execution)
+  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
 
   if (data.planning && !bootstrapSliceError(data.planning)) {
     hydratePlanningSnapshot(data.planning)
@@ -714,11 +717,15 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   if (inflightDashboardRefresh) return inflightDashboardRefresh
   dashboardLoading.value = true
   inflightDashboardRefresh = (async () => {
+    const executionRequestGeneration = executionSnapshotRequestGeneration()
     try {
       executionLoading.value = true
       executionError.value = null
       try {
-        hydrateDashboardBootstrap(await fetchDashboardBootstrap())
+        hydrateDashboardBootstrap(
+          await fetchDashboardBootstrap(),
+          executionRequestGeneration,
+        )
       } catch (bootstrapErr) {
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
         await refreshDashboardFallback(opts)
@@ -897,9 +904,138 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   return inflightShellRefresh
 }
 
+let executionPublicationEpoch: string | null = null
+let executionReconnectPreviousEpoch: string | null = null
+let executionReconnectAwaitingHttp = false
+const executionReconnectInvalidationFloors = new Map<string, number>()
+let executionPublicationGenerationWatermark = -1
+let executionHydrationRequestGeneration = 0
+const retiredExecutionPublicationEpochs = new Set<string>()
+
+function retireExecutionPublicationEpoch(epoch: string): void {
+  retiredExecutionPublicationEpochs.add(epoch)
+}
+
+function executionSnapshotRequestGeneration(): number {
+  return executionHydrationRequestGeneration
+}
+
+function executionPublicationIdentityOf(
+  data: DashboardExecutionResponse,
+): { epoch: string; generation: number } | null {
+  const epoch = data.execution_publication_epoch
+  const generation = data.execution_publication_generation
+  return typeof epoch === 'string'
+    && epoch.trim() !== ''
+    && typeof generation === 'number'
+    && Number.isSafeInteger(generation)
+    && generation >= 0
+    ? { epoch, generation }
+    : null
+}
+
+export function invalidateExecutionSnapshotGeneration(
+  epoch: string,
+  generation: number,
+): boolean {
+  if (
+    epoch.trim() === ''
+    || !Number.isSafeInteger(generation)
+    || generation < 0
+    || retiredExecutionPublicationEpochs.has(epoch)
+  ) return false
+  if (executionReconnectAwaitingHttp) {
+    executionReconnectInvalidationFloors.set(
+      epoch,
+      Math.max(executionReconnectInvalidationFloors.get(epoch) ?? -1, generation),
+    )
+    return true
+  }
+  if (executionPublicationEpoch !== epoch) {
+    const previousEpoch = executionPublicationEpoch ?? executionReconnectPreviousEpoch
+    if (previousEpoch !== null && previousEpoch !== epoch) {
+      retireExecutionPublicationEpoch(previousEpoch)
+    }
+    executionPublicationEpoch = epoch
+    executionReconnectPreviousEpoch = null
+    executionPublicationGenerationWatermark = generation
+    return true
+  }
+  executionPublicationGenerationWatermark = Math.max(
+    executionPublicationGenerationWatermark,
+    generation,
+  )
+  return true
+}
+
+export function resetExecutionSnapshotGeneration(): void {
+  executionReconnectPreviousEpoch = executionPublicationEpoch
+  executionPublicationEpoch = null
+  executionPublicationGenerationWatermark = -1
+  executionReconnectAwaitingHttp = true
+  executionReconnectInvalidationFloors.clear()
+  executionHydrationRequestGeneration += 1
+}
+
 /** Hydrate all execution-related signals from a raw data payload.
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
-export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void {
+export function hydrateExecutionSnapshot(
+  data: DashboardExecutionResponse,
+  opts?: { requestGeneration?: number },
+): boolean {
+  if (
+    opts?.requestGeneration !== undefined
+    && opts.requestGeneration !== executionHydrationRequestGeneration
+  ) {
+    return false
+  }
+  const identity = executionPublicationIdentityOf(data)
+  if (executionReconnectAwaitingHttp && opts?.requestGeneration === undefined) {
+    return false
+  }
+  if (identity !== null && retiredExecutionPublicationEpochs.has(identity.epoch)) {
+    return false
+  }
+  if (
+    executionReconnectAwaitingHttp
+    && (
+      identity === null
+      || (
+        identity.generation
+        < (executionReconnectInvalidationFloors.get(identity.epoch) ?? -1)
+      )
+    )
+  ) {
+    return false
+  }
+  if (
+    executionPublicationEpoch !== null
+    && (
+      identity === null
+      || identity.epoch !== executionPublicationEpoch
+      || identity.generation < executionPublicationGenerationWatermark
+    )
+  ) {
+    return false
+  }
+  if (identity !== null) {
+    if (executionPublicationEpoch === null) {
+      if (
+        executionReconnectPreviousEpoch !== null
+        && executionReconnectPreviousEpoch !== identity.epoch
+      ) {
+        retireExecutionPublicationEpoch(executionReconnectPreviousEpoch)
+      }
+      executionPublicationEpoch = identity.epoch
+      executionReconnectPreviousEpoch = null
+      executionReconnectAwaitingHttp = false
+      executionReconnectInvalidationFloors.clear()
+    }
+    executionPublicationGenerationWatermark = Math.max(
+      executionPublicationGenerationWatermark,
+      identity.generation,
+    )
+  }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
@@ -934,6 +1070,7 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
   setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name, stableValueEqual)
   executionLoaded.value = true
+  return true
 }
 
 let nextExecutionForce = false
@@ -941,12 +1078,13 @@ let nextExecutionForce = false
 async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
+  const requestGeneration = executionSnapshotRequestGeneration()
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
-    hydrateExecutionSnapshot(data)
+    hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
     executionError.value = errorMessageOr(err, 'Execution projection load failed')

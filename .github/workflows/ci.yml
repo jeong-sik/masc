@@ -4,7 +4,14 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
+    # No base filter. The filter matches the *base* branch, so a stacked PR --
+    # one opened against another PR's branch rather than main -- did not start
+    # this workflow at all. Those PRs collected only the handful of checks other
+    # workflows contribute and reached review with no compile or test evidence;
+    # on 2026-08-14 five of them sat that way at once. A stack is how work over
+    # 20k tokens is supposed to arrive here, so the shape that needs evidence
+    # most was the one getting none.
+    #
     # Drafts stay cheap through pr-live-gate. ready_for_review starts the exact
     # source and real-world product gates once the author asks for a verdict.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -872,6 +879,17 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
+            # This job checks out shallow (no fetch-depth), so fetching the
+            # base branch brings its tip and nothing behind it. The ratchet
+            # wants pull_request.base.sha, which is an ancestor of that tip on
+            # a PR whose base branch has moved on, so it stays absent and the
+            # ratchet hard-fails with "base revision is unavailable". Fetch the
+            # exact commit; depth 1 is enough because the ratchet only reads
+            # two files at that revision, never its history.
+            if ! git cat-file -e "${OCAML_BOUNDARY_BASE_REF}^{commit}" 2>/dev/null; then
+              bash scripts/ci/git-fetch-retry.sh \
+                origin "${OCAML_BOUNDARY_BASE_REF}" --depth=1
+            fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             bash scripts/ci/git-fetch-retry.sh \
               origin \

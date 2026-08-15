@@ -1,0 +1,199 @@
+{
+  "schema": "masc.keeper_feature_matrix.runtime_health_evidence.v1",
+  "captured_at": "2026-08-13T15:32:54Z",
+  "upstream_main": {
+    "commit": "372edb534d4def1996fa57a1fce9344784e5be45",
+    "source": "GitHub refs/heads/main"
+  },
+  "live_server": {
+    "health_route": "/health?full=1",
+    "status": "ok",
+    "overall_status": "degraded",
+    "version": "0.21.2",
+    "started_at": "2026-08-13T14:35:32Z",
+    "uptime_seconds": 3441,
+    "reported_commit": "a157997abf",
+    "reported_commit_source": "runtime_repo_head",
+    "binary_commit": null,
+    "binary_identity_proven": false,
+    "executable_path": "/Users/dancer/me/workspace/yousleepwhen/masc/_build/default/bin/main_eio.exe",
+    "effective_base_path": "/Users/dancer/me",
+    "effective_masc_root": "/Users/dancer/me/.masc",
+    "resolution_source": "explicit_cli",
+    "keeper_fibers": {
+      "running": 10,
+      "executable": 7,
+      "target_reaction_capacity": 10,
+      "shortfall": 3,
+      "failing": 0,
+      "recovering": 0
+    },
+    "queue": {
+      "status": "ok",
+      "backlog_clean": true,
+      "pending_count": 0,
+      "runnable_backlog_count": 0,
+      "transition_outbox_count": 0,
+      "counts_complete": true
+    },
+    "schedule_runner": {
+      "status": "ok",
+      "tick_count": 227,
+      "success_count": 227,
+      "failure_count": 0,
+      "crash_count": 0,
+      "last_tick_age_sec": 6.226407051086426
+    },
+    "logs": {
+      "status": "active",
+      "capacity": 50000,
+      "total_entries": 53042,
+      "retained_entries": 50000,
+      "recent_errors": 0,
+      "recent_warnings": 1
+    },
+    "otel": {
+      "enabled": true,
+      "status": "inactive",
+      "exporter_active": false
+    },
+    "dashboard_surface": {
+      "status": "stale",
+      "build_stamp_at": "2026-08-13T12:08:16Z",
+      "binary_built_at": "2026-08-13T14:42:37Z"
+    }
+  },
+  "runtime_catalog": {
+    "route": "/api/v1/runtime/resolved",
+    "generated_at_iso": "2026-08-13T15:32:49Z",
+    "source": "/api/v1/runtime/resolved",
+    "config_path": "/Users/dancer/me/.masc/config/runtime.toml",
+    "runtime_count": 47,
+    "dispatchable_count": 45,
+    "blocked_count": 2,
+    "lane_count": 10,
+    "assignment_count": 14,
+    "default_runtime": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+    "providers": [
+      {
+        "provider": "Antigravity Google Subscription",
+        "count": 11,
+        "dispatchable": 11,
+        "runtime_ids": [
+          "antigravity_subscription.gemini-3-6-flash-high",
+          "antigravity_subscription.gemini-3-6-flash-medium",
+          "antigravity_subscription.gemini-3-6-flash-low",
+          "antigravity_subscription.gemini-3-5-flash-high",
+          "antigravity_subscription.gemini-3-5-flash-medium",
+          "antigravity_subscription.gemini-3-5-flash-low",
+          "antigravity_subscription.gemini-3-1-pro-high",
+          "antigravity_subscription.gemini-3-1-pro-low",
+          "antigravity_subscription.claude-sonnet-4-6-agy",
+          "antigravity_subscription.claude-opus-4-6-thinking-agy",
+          "antigravity_subscription.gpt-oss-120b-medium"
+        ]
+      },
+      {
+        "provider": "Claude Code Max Subscription",
+        "count": 7,
+        "dispatchable": 7,
+        "runtime_ids": [
+          "claude_code.claude-sonnet-5",
+          "claude_code.claude-opus-5",
+          "claude_code.claude-fable-5",
+          "claude_code.claude-haiku-4-5",
+          "claude_code.claude-opus-5-low",
+          "claude_code.claude-opus-5-high",
+          "claude_code.claude-opus-5-max"
+        ]
+      },
+      {
+        "provider": "Codex ChatGPT Subscription",
+        "count": 10,
+        "dispatchable": 10,
+        "runtime_ids": [
+          "codex_subscription.gpt-5.3-codex-spark",
+          "codex_subscription.gpt-5.6-sol",
+          "codex_subscription.gpt-5.6-terra",
+          "codex_subscription.gpt-5.6-luna",
+          "codex_subscription.gpt-5.5",
+          "codex_subscription.gpt-5.4",
+          "codex_subscription.gpt-5.4-mini",
+          "codex_subscription.gpt-5-6-sol-low",
+          "codex_subscription.gpt-5-6-sol-high",
+          "codex_subscription.gpt-5-6-sol-xhigh"
+        ]
+      },
+      {
+        "provider": "Kimi For Coding Subscription",
+        "count": 3,
+        "dispatchable": 3,
+        "runtime_ids": [
+          "kimi_coding.kimi-for-coding",
+          "kimi_coding.kimi-for-coding-highspeed",
+          "kimi_coding.kimi-k3"
+        ]
+      },
+      {
+        "provider": "Local Llama Server (Qwen3.6 35B Uncensored)",
+        "count": 1,
+        "dispatchable": 1,
+        "runtime_ids": [
+          "local_llama_server.qwen3-6-35b-uncensored"
+        ]
+      },
+      {
+        "provider": "Local Ollama",
+        "count": 3,
+        "dispatchable": 1,
+        "runtime_ids": [
+          "ollama.gemma4-26b-a4b-qat",
+          "ollama.agentworld-35b-a3b",
+          "ollama.gemma-4-E2B-it-qat-GGUF"
+        ]
+      },
+      {
+        "provider": "Ollama Cloud",
+        "count": 11,
+        "dispatchable": 11,
+        "runtime_ids": [
+          "ollama_cloud.deepseek-v4-flash",
+          "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+          "ollama_cloud.qwen3-5-cloud",
+          "ollama_cloud.gemma4-31b-cloud",
+          "ollama_cloud.kimi-k2-6",
+          "ollama_cloud.kimi-k2-7-code",
+          "ollama_cloud.ollama-cloud-kimi-k3",
+          "ollama_cloud.glm-5.2",
+          "ollama_cloud.nemotron-3-ultra",
+          "ollama_cloud.minimax-m3",
+          "ollama_cloud.deepseek-v4-pro"
+        ]
+      },
+      {
+        "provider": "Z.AI Coding",
+        "count": 1,
+        "dispatchable": 1,
+        "runtime_ids": [
+          "glm-coding.glm-5-turbo"
+        ]
+      }
+    ],
+    "blocked": [
+      {
+        "id": "ollama.gemma4-26b-a4b-qat",
+        "reason": "no positive max-request-body-bytes; declare [ollama.\"gemma4-26b-a4b-qat\"].max-request-body-bytes"
+      },
+      {
+        "id": "ollama.gemma-4-E2B-it-qat-GGUF",
+        "reason": "no positive max-request-body-bytes; declare [ollama.\"gemma-4-E2B-it-qat-GGUF\"].max-request-body-bytes"
+      }
+    ],
+    "evidence_limits": [
+      "Catalog membership and dispatch admission do not prove that a runtime completed a Keeper turn.",
+      "Only one catalog runtime currently has a frozen ten-turn semantic-continuity canary.",
+      "No provider family has frozen 1h, 2h, 4h, and 24h campaign evidence.",
+      "The health commit is a runtime checkout probe, not an embedded binary identity."
+    ]
+  }
+}

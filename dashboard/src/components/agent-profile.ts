@@ -30,6 +30,7 @@ import {
   fetchWorkspaceMessages,
   fetchTaskHistory,
   sendBroadcast,
+  broadcastReceiptMessage,
   fetchAgentTimeline,
   fetchAgentRelations,
   currentDashboardActor,
@@ -161,9 +162,12 @@ async function submitMention(target: string): Promise<void> {
   if (!target || !text) return
   sendingMention.value = true
   try {
-    await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
+    const receipt = await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
     mentionText.value = ''
-    showToast(`${target}에게 전송`, 'success')
+    showToast(
+      receipt.ok ? `${target}에게 전송` : broadcastReceiptMessage(receipt),
+      receipt.ok ? 'success' : 'warning',
+    )
     void loadProfile(target)
   } catch (err) {
     showToast(err instanceof Error ? err.message : '실패', 'error')

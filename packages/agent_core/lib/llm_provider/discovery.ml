@@ -469,9 +469,11 @@ let%test "default_endpoint is localhost:8085" =
 
 (* --- parse_llm_endpoints_env (SSOT helper, #1002) --- *)
 
-let no_env _ = None
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] no_env _ = None
 
-let getenv_with_llm_endpoints value name =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] getenv_with_llm_endpoints value name =
   if name = llm_endpoints_env_var then Some value else None
 ;;
 

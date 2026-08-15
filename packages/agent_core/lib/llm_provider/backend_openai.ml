@@ -28,7 +28,8 @@ let parse_openai_response_result = Backend_openai_parse.parse_openai_response_re
 (* ── Re-exports from request building ─────────────────── *)
 
 let warn_capability_drop = Backend_openai_request.warn_capability_drop
-let effective_tool_choice = Backend_openai_request.effective_tool_choice
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] effective_tool_choice = Backend_openai_request.effective_tool_choice
 let response_format_to_openai_json = Backend_openai_request.response_format_to_openai_json
 
 type request_artifact =
@@ -78,7 +79,8 @@ let deepseek_v4_capabilities =
   }
 ;;
 
-let declared_deepseek_config ?enable_thinking ?reasoning_effort model_id =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] declared_deepseek_config ?enable_thinking ?reasoning_effort model_id =
   Provider_config.make
     ~kind:OpenAI_compat
     ~model_id
@@ -973,7 +975,8 @@ let%test "build_request includes tool_choice for model with supports_tool_choice
   json |> member "tool_choice" |> to_string = "required"
 ;;
 
-let json_object_missing_key key json =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] json_object_missing_key key json =
   match Yojson.Safe.Util.to_assoc json with
   | fields -> not (List.exists (fun (k, _) -> k = key) fields)
   | exception Yojson.Safe.Util.Type_error _ -> false

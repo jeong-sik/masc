@@ -94,6 +94,54 @@ let test_evaluator_failure_is_unavailable_not_reject () =
        Alcotest.(check bool) "no fabricated reject" true (Option.is_none result.verdict))
 ;;
 
+(* The retry policy this exists for: a review whose single seed message
+   already exceeds the target's whole budget cannot be fixed by trying again
+   with the same request, so [Agent_core.Error.is_retryable] already reports
+   [false] for it (it is an [Agent (HookExecutionFailed _)]). [review] must
+   carry that through as [retryable = false] rather than default to the
+   always-retry [true] every other gate uses. *)
+let test_structural_budget_failure_is_not_retryable () =
+  with_reviewer
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+       Error
+         (Agent_core.Error.Agent
+            (Agent_core.Error.HookExecutionFailed
+               { hook_name = "model_input_projection"
+               ; stage = "turn:parse"
+               ; tool_name = None
+               ; tool_use_id = None
+               ; detail =
+                   "newest conversation atom does not fit the model input budget: \
+                    available_bytes=233931 newest_atom_bytes=294670"
+               })))
+    (fun () ->
+       let result = review () in
+       Alcotest.(check string)
+         "gate"
+         "evaluator_unavailable"
+         (AR.gate_to_string result.gate);
+       Alcotest.(check bool) "not retryable" false result.retryable)
+;;
+
+(* Contrast case: a rate limit is exactly the kind of failure retrying is
+   supposed to absorb ([Agent_core.Error.is_retryable] reports [true] for
+   [Api (RateLimited _)]), so the always-retry default must survive here. *)
+let test_rate_limit_failure_stays_retryable () =
+  with_reviewer
+    (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
+       Error
+         (Agent_core.Error.Api
+            (Agent_core.Error.Retry.RateLimited
+               { retry_after = None; message = "rate limited" })))
+    (fun () ->
+       let result = review () in
+       Alcotest.(check string)
+         "gate"
+         "evaluator_unavailable"
+         (AR.gate_to_string result.gate);
+       Alcotest.(check bool) "retryable" true result.retryable)
+;;
+
 let test_reject_without_reason_is_malformed () =
   let malformed =
     [ `Assoc [ "verdict", `String "REJECT" ]
@@ -154,6 +202,14 @@ let () =
             "provider failure unavailable"
             `Quick
             test_evaluator_failure_is_unavailable_not_reject
+        ; Alcotest.test_case
+            "structural budget failure is not retryable"
+            `Quick
+            test_structural_budget_failure_is_not_retryable
+        ; Alcotest.test_case
+            "rate limit failure stays retryable"
+            `Quick
+            test_rate_limit_failure_stays_retryable
         ; Alcotest.test_case
             "reject without reason is malformed"
             `Quick

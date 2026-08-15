@@ -79,6 +79,7 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
+  ; retryable : bool
   }
 
 (* ================================================================ *)
@@ -377,6 +378,7 @@ let review
       ; generator_runtime
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
+      ; retryable = true
       }
   | Ok evaluator_runtime ->
     (match
@@ -402,6 +404,7 @@ let review
          ; generator_runtime
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
+         ; retryable = true
          }
      | Ok prompt ->
        (match generator_runtime with
@@ -448,6 +451,7 @@ let review
             ; generator_runtime
             ; gate = Structured_tool
             ; fallback_reason = None
+            ; retryable = true
             }
         | Ok None ->
           let detail =
@@ -463,15 +467,18 @@ let review
             ; generator_runtime
             ; gate = Invalid_verdict
             ; fallback_reason = Some detail
+            ; retryable = true
             }
         | Error error ->
           let detail = Agent_core.Error.to_string error in
+          let retryable = Agent_core.Error.is_retryable error in
           (Atomic.get outcome_observer_fn)
             ~outcome:"unavailable"
             ~runtime:evaluator_runtime;
           task_warn
-            "[task-completion-review] evaluator unavailable runtime=%s; task remains nonterminal: %s"
+            "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; task remains nonterminal: %s"
             evaluator_runtime
+            retryable
             detail;
           emit
             { verdict = None
@@ -479,5 +486,6 @@ let review
             ; generator_runtime
             ; gate = Evaluator_unavailable
             ; fallback_reason = Some detail
+            ; retryable
             }))
 ;;

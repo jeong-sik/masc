@@ -293,16 +293,30 @@ let prepare_review
 
 type process_outcome =
   | Committed
-  | Deferred
+  | Deferred of { retryable : bool }
 
-let defer ~task_id ~verification_id ~authority ~reason =
+(** [retryable] defaults [true]: every existing call site keeps scheduling
+    the maintenance-pulse retry unless it has positive evidence retrying
+    cannot succeed (currently only the review gate, via
+    {!Task.Anti_rationalization.review_result.retryable}). A [false] here
+    does not stop the task from ever being reviewed again — the next
+    unrelated verification submission still rescans the whole backlog — it
+    only stops this failure from keeping the maintenance-pulse timer
+    self-perpetuating on its own. *)
+let defer ?(retryable = true) ~task_id ~verification_id ~authority ~reason () =
   Log.Misc.warn
-    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
+    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s retryable=%b reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
+    retryable
     reason;
-  Deferred
+  Deferred { retryable }
+;;
+
+let should_schedule_retry = function
+  | Committed -> false
+  | Deferred { retryable } -> retryable
 ;;
 
 let observe_rejection_wakeup
@@ -434,7 +448,7 @@ let commit_verdict
     Committed, on_commit
   | Error error ->
     let detail = Masc_domain.masc_error_to_string error in
-    ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
+    ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
     , Verification_run_registry.Commit_failed { detail } )
 ;;
 
@@ -480,7 +494,7 @@ let process_task_once
   in
   let defer_unavailable ~stage ~detail =
     complete
-      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
+      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
       , Verification_run_registry.Infrastructure_unavailable { stage; detail } )
   in
   try
@@ -539,8 +553,15 @@ let process_task_once
          in
          complete
            ~evaluator_runtime
-           ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
-           , Verification_run_registry.Not_reviewed { gate; detail } )
+           ( defer
+               ~retryable:result.retryable
+               ~task_id:task.id
+               ~verification_id
+               ~authority
+               ~reason:detail
+               ()
+           , Verification_run_registry.Not_reviewed
+               { gate; detail; retryable = result.retryable } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
          let notes =
@@ -575,7 +596,7 @@ let process_task_once
   | exn ->
     let detail = Printexc.to_string exn in
     complete
-      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail
+      ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
       , Verification_run_registry.Raised { detail } )
 ;;
 
@@ -602,9 +623,7 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
         ~finally:(fun () -> release_review runtime key)
         (fun () -> process_task_once runtime task ~assignee ~verification_id)
     in
-    match outcome with
-    | Committed -> ()
-    | Deferred -> schedule_retry runtime)
+    if should_schedule_retry outcome then schedule_retry runtime)
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -720,4 +739,10 @@ module For_testing = struct
   let evidence_refs_of_output = evidence_refs_of_output
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes
+
+  type nonrec process_outcome = process_outcome =
+    | Committed
+    | Deferred of { retryable : bool }
+
+  let should_schedule_retry = should_schedule_retry
 end

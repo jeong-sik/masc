@@ -12,6 +12,7 @@ type outcome =
   | Not_reviewed of
       { gate : string
       ; detail : string
+      ; retryable : bool
       }
   | Commit_failed of { detail : string }
   | Raised of { detail : string }
@@ -122,8 +123,8 @@ module Payload = struct
       [ "stage", `String (infrastructure_stage_to_string stage)
       ; "detail", `String detail
       ]
-    | Not_reviewed { gate; detail } ->
-      [ "gate", `String gate; "detail", `String detail ]
+    | Not_reviewed { gate; detail; retryable } ->
+      [ "gate", `String gate; "detail", `String detail; "retryable", `Bool retryable ]
   ;;
 
   let completion_to_yojson completion =
@@ -162,7 +163,7 @@ module Payload = struct
       | "rejected" -> Ok [ "reason" ]
       | "infrastructure_unavailable" -> Ok [ "stage"; "detail" ]
       | "commit_failed" | "raised" -> Ok [ "detail" ]
-      | "not_reviewed" -> Ok [ "gate"; "detail" ]
+      | "not_reviewed" -> Ok [ "gate"; "detail"; "retryable" ]
       | other -> Error (Printf.sprintf "unknown verification outcome %S" other)
     in
     let* required_detail_fields = required_detail_fields in
@@ -249,7 +250,13 @@ module Payload = struct
       | "not_reviewed" ->
         let* gate = Run_registry_core.Json.string_field "gate" fields in
         let* detail = Run_registry_core.Json.string_field "detail" fields in
-        Ok (Not_reviewed { gate; detail })
+        let* retryable =
+          match List.assoc_opt "retryable" fields with
+          | Some (`Bool value) -> Ok value
+          | Some _ -> Error "field retryable must be a boolean"
+          | None -> Error "missing field retryable"
+        in
+        Ok (Not_reviewed { gate; detail; retryable })
       | "commit_failed" ->
         let* detail = Run_registry_core.Json.string_field "detail" fields in
         Ok (Commit_failed { detail })
@@ -371,8 +378,8 @@ let outcome_detail_fields = function
     [ "stage", `String (Payload.infrastructure_stage_to_string stage)
     ; "detail", `String detail
     ]
-  | Not_reviewed { gate; detail } ->
-    [ "gate", `String gate; "detail", `String detail ]
+  | Not_reviewed { gate; detail; retryable } ->
+    [ "gate", `String gate; "detail", `String detail; "retryable", `Bool retryable ]
 ;;
 
 let run_to_yojson run =

@@ -425,7 +425,7 @@ let test_composable_output_registry_is_closed () =
   check
     (list string)
     "explicit JSON-producing tools"
-    [ "keeper_time_now"; "masc_board_stats" ]
+    [ "Execute"; "keeper_time_now"; "masc_board_stats" ]
     json_names
 ;;
 

@@ -129,6 +129,8 @@ type dispatch_result =
   ; truncated_to : int option
   }
 
+(* TEL-OK: pure smart constructor for the [dispatch_result] record above; it
+   performs no action and emits no effect, so there is nothing to instrument. *)
 let dispatch_result
       ?failure_effect_disposition
       ?deferred_kind
@@ -383,6 +385,8 @@ let execute_with_tool_use_id
   run_batches [] [] (schedule plan)
 ;;
 
+(* TEL-OK: forwards to [execute_with_tool_use_id] below; no new effect
+   originates here, so there is nothing local to instrument. *)
 let execute ~plan ~run_id ~dispatch ?observe_node_result () =
   let tool_use_id_for_node ~execution_id _node =
     "composition-node:" ^ Ids.Execution_id.to_string execution_id
@@ -476,6 +480,8 @@ let execute_keeper
       ; effect_disposition = Tool_result.Proven_pre_effect
       }
   else
+  (* TEL-OK: [handler] below is Keeper_tools_agent_core_handler, which
+     already records telemetry (Otel_metric_store.inc_counter). *)
   let dispatch ~tool_use_id ~(node : Keeper_tool_plan.node) ~descriptor ~schedule ~input =
     let terminal_on_completed, terminal_on_failed =
       match descriptor.Keeper_tool_descriptor.execution with

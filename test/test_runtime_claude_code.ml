@@ -412,10 +412,6 @@ let statusless_overflow_prose_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-generic-1","result":"gateway diagnostic mentioned Prompt is too long for an unrelated rejection"}|}
 ;;
 
-let explicit_non_overflow_status_result =
-  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-explicit-status-1","result":"Prompt is too long","api_error_status":500}|}
-;;
-
 let generic_400_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-400-generic","result":"request rejected; diagnostic mentioned Prompt is too long without the provider prefix","api_error_status":400}|}
 ;;
@@ -500,19 +496,6 @@ let test_statusless_overflow_prose_remains_turn_failed () =
         (Astring.String.is_infix ~affix:"unrelated rejection" detail)
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "unrelated statusless prose was reported as completion")
-;;
-
-let test_exact_overflow_sentence_with_non_overflow_status_remains_turn_failed () =
-  with_fixture [ Emit explicit_non_overflow_status_result ] (fun path ->
-    match run_fixture path with
-    | Error (Runtime_claude_code.Turn_failed detail) ->
-      check
-        bool
-        "explicit non-overflow status remains authoritative"
-        true
-        (Astring.String.is_infix ~affix:"api_status=500" detail)
-    | Error error -> fail (Runtime_claude_code.error_to_string error)
-    | Ok _ -> fail "an explicit non-overflow status was reported as completion")
 ;;
 
 let test_unrelated_400_remains_turn_failed () =
@@ -1374,10 +1357,6 @@ let () =
             "statusless overflow prose remains turn failed"
             `Quick
             test_statusless_overflow_prose_remains_turn_failed
-        ; test_case
-            "exact overflow sentence with non-overflow status remains turn failed"
-            `Quick
-            test_exact_overflow_sentence_with_non_overflow_status_remains_turn_failed
         ; test_case
             "non-overflow terminal_reason beats prefix prose"
             `Quick

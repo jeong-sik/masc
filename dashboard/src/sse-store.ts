@@ -25,7 +25,9 @@ import type * as TransportHealth from './components/transport-health'
 import {
   keeperHeartbeats,
   invalidateDashboardCache,
+  invalidateExecutionSnapshotGeneration,
   hydrateExecutionSnapshot,
+  resetExecutionSnapshotGeneration,
   refreshDashboard,
   refreshExecution,
   refreshBoard,
@@ -369,6 +371,23 @@ function handleNamespaceTruthSnapshot(payload: unknown): void {
 /** Hydrate execution signals directly from a push payload — zero HTTP fetch. */
 function handleExecutionSnapshot(payload: unknown): void {
   try {
+    if (!isRecord(payload)) throw new Error('execution snapshot payload is invalid')
+    if (payload.execution_invalidated === true) {
+      const epoch = payload.execution_publication_epoch
+      const generation = payload.execution_publication_generation
+      if (
+        typeof epoch !== 'string'
+        || epoch.trim() === ''
+        || typeof generation !== 'number'
+        || !Number.isSafeInteger(generation)
+        || generation < 0
+        || !invalidateExecutionSnapshotGeneration(epoch, generation)
+      ) {
+        throw new Error('execution invalidation generation is invalid')
+      }
+      void refreshExecution({ force: true })
+      return
+    }
     hydrateExecutionSnapshot(payload as DashboardExecutionResponse)
   } catch (err) {
     console.warn('[server-push] execution snapshot hydration failed, will fallback to HTTP', err instanceof Error ? err.message : '')
@@ -493,6 +512,8 @@ function handleReconnect(): void {
   // If the server is still warming up after restart, the first fetch may fail.
   // Schedule a single retry after 3s to cover the warm-up window.
   invalidateDashboardCache()
+  resetExecutionSnapshotGeneration()
+  void refreshExecution({ force: true })
   pauseQueuedAgentCoreRuntimeIngress()
   void hydrateAfterReconnect()
     .finally(() => {

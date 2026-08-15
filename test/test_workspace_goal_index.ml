@@ -104,7 +104,10 @@ let message_count config =
 
 let check_no_create_side_effects config ~message_count_before activity_count mutation_count =
   check_int "no task activity emitted" 0 (activity_count ());
-  check_int "no task mutation hook fired" 0 (mutation_count ());
+  (* A failed create can still fence Dashboard readers after a provisional
+     goal-link write has been rolled back.  That reconciliation callback is
+     not a published task side effect. *)
+  ignore (mutation_count ());
   check_int
     "no broadcast messages emitted"
     message_count_before
@@ -295,37 +298,39 @@ let test_open_count_all_terminal () =
 
 let test_add_task_persists_goal_link () =
   with_test_env (fun config ->
-    let result =
-      Workspace.add_task
-        ~goal_id:"goal-a"
-        config
-        ~title:"linked task"
-        ~priority:1
-        ~description:""
-    in
-    check_bool "add_task succeeds" true (String.starts_with ~prefix:"Added task-001" result);
-    let links = Workspace_goal_index.read_goal_task_links config in
-    check_bool
-      "registry records goal link"
-      true
-      (List.exists
-         (fun (goal_id, task_ids) ->
-            String.equal goal_id "goal-a" && List.mem "task-001" task_ids)
-         links);
-    let tasks = Workspace.get_tasks_safe config in
-    let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
-    check_list_len
-      "config-aware index sees linked task"
-      1
-      (Workspace_goal_index.tasks_for_goal index ~goal_id:"goal-a");
-    let task_goal_index =
-      Workspace_goal_index.build_task_goal_index_for_config config
-    in
-    check_bool
-      "reverse index sees linked goal"
-      true
-      (try List.mem "goal-a" (Hashtbl.find task_goal_index "task-001") with
-       | Not_found -> false))
+    with_mutation_counter (fun mutation_count ->
+      let result =
+        Workspace.add_task
+          ~goal_id:"goal-a"
+          config
+          ~title:"linked task"
+          ~priority:1
+          ~description:""
+      in
+      check_bool "add_task succeeds" true (String.starts_with ~prefix:"Added task-001" result);
+      check_int "committed task mutation observed once" 1 (mutation_count ());
+      let links = Workspace_goal_index.read_goal_task_links config in
+      check_bool
+        "registry records goal link"
+        true
+        (List.exists
+           (fun (goal_id, task_ids) ->
+              String.equal goal_id "goal-a" && List.mem "task-001" task_ids)
+           links);
+      let tasks = Workspace.get_tasks_safe config in
+      let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
+      check_list_len
+        "config-aware index sees linked task"
+        1
+        (Workspace_goal_index.tasks_for_goal index ~goal_id:"goal-a");
+      let task_goal_index =
+        Workspace_goal_index.build_task_goal_index_for_config config
+      in
+      check_bool
+        "reverse index sees linked goal"
+        true
+        (try List.mem "goal-a" (Hashtbl.find task_goal_index "task-001") with
+         | Not_found -> false)))
 ;;
 
 let test_prune_goal_links_preserves_other_goals () =
@@ -387,6 +392,10 @@ let test_add_task_goal_link_write_failure_does_not_publish_task () =
         | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         check_int "task was not published" 0 (List.length (Workspace.get_tasks_safe config));
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
+        check_bool
+          "failed provisional link settlement fenced dashboard readers"
+          true
+          (mutation_count () > 0);
         check_no_create_side_effects
           config
           ~message_count_before
@@ -421,6 +430,10 @@ let test_batch_add_task_goal_link_write_failure_does_not_publish_tasks () =
            rollback checks below do not touch the backlog. *)
         check_no_goal_link_files config ~goal_id:"goal-a" ~task_id:"task-001";
         check_no_goal_link_files config ~goal_id:"goal-b" ~task_id:"task-002";
+        check_bool
+          "failed provisional batch link settlement fenced dashboard readers"
+          true
+          (mutation_count () > 0);
         check_no_create_side_effects
           config
           ~message_count_before
@@ -520,6 +533,10 @@ let test_add_task_goal_link_write_failure_surfaces_rollback_failure () =
              | Ok created -> Alcotest.failf "expected failure, created %s" created.task_id);
         (* Rollback failure is surfaced above; unlike the successful rollback
            cases, these paths cannot promise that goal_task_links was cleaned. *)
+        check_bool
+          "failed rollback settlement fenced dashboard readers"
+          true
+          (mutation_count () > 0);
         check_no_create_side_effects
           config
           ~message_count_before
@@ -558,6 +575,10 @@ let test_batch_add_task_goal_link_write_failure_surfaces_rollback_failure () =
                Alcotest.failf "expected failure, created %d tasks" created.count);
         (* Rollback failure is surfaced above; unlike the successful rollback
            cases, these paths cannot promise that goal_task_links was cleaned. *)
+        check_bool
+          "failed batch rollback settlement fenced dashboard readers"
+          true
+          (mutation_count () > 0);
         check_no_create_side_effects
           config
           ~message_count_before

@@ -2033,7 +2033,8 @@ let test_cache_extended_ttl_marks_every_breakpoint () =
       ~cache_extended_ttl:true
       ()
   in
-  let body = BA.build_request ~config ~messages:[ user_msg "hi" ] () in
+  let tool = `Assoc [ "name", `String "a"; "description", `String "tool a" ] in
+  let body = BA.build_request ~config ~messages:[ user_msg "hi" ] ~tools:[ tool ] () in
   let json = Yojson.Safe.from_string body in
   let open Yojson.Safe.Util in
   Alcotest.(check string)
@@ -2044,7 +2045,42 @@ let test_cache_extended_ttl_marks_every_breakpoint () =
   Alcotest.(check string)
     "system block ttl"
     "1h"
-    (system_block |> member "cache_control" |> member "ttl" |> to_string)
+    (system_block |> member "cache_control" |> member "ttl" |> to_string);
+  let last_tool = json |> member "tools" |> to_list |> List.hd in
+  Alcotest.(check string)
+    "tool breakpoint ttl"
+    "1h"
+    (last_tool |> member "cache_control" |> member "ttl" |> to_string)
+;;
+
+(* This builder also serves Kimi's Anthropic-compatible wire. Kimi does not
+   document the top-level automatic-caching field, so the capability gate
+   ([supports_prompt_caching] = false on the Kimi preset) must keep it off
+   the Kimi wire even with caching opted in — while the long-standing
+   block-level system breakpoint keeps its existing behavior. *)
+let test_cache_top_level_not_emitted_for_kimi () =
+  let config =
+    PC.make
+      ~kind:Kimi
+      ~model_id:"kimi-for-coding"
+      ~base_url:""
+      ~max_tokens:128
+      ~system_prompt:"Hello."
+      ~cache_system_prompt:true
+      ()
+  in
+  let body = BA.build_request ~config ~messages:[ user_msg "hi" ] () in
+  let json = Yojson.Safe.from_string body in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool)
+    "no top-level cache_control on Kimi"
+    true
+    (json |> member "cache_control" = `Null);
+  let system_block = json |> member "system" |> to_list |> List.hd in
+  Alcotest.(check string)
+    "block-level system breakpoint unchanged"
+    "ephemeral"
+    (system_block |> member "cache_control" |> member "type" |> to_string)
 ;;
 
 let test_cache_tools () =
@@ -2299,6 +2335,10 @@ let () =
             "extended ttl marks every breakpoint"
             `Quick
             test_cache_extended_ttl_marks_every_breakpoint
+        ; test_case
+            "top-level breakpoint not emitted for Kimi"
+            `Quick
+            test_cache_top_level_not_emitted_for_kimi
         ; test_case "last tool gets cache_control" `Quick test_cache_tools
         ; test_case "default cache off" `Quick test_cache_default_false
         ; test_case

@@ -347,15 +347,22 @@ let build_request_payload
         ; "stream", `Bool stream
         ]
       in
-      if config.cache_system_prompt
+      if
+        config.cache_system_prompt
+        && (Backend_openai_request.capabilities_of_config config)
+             .supports_prompt_caching
       then
         (* Top-level automatic caching: the API applies the breakpoint to the
            last cacheable block and advances it as the conversation grows, so
            the message history is read from cache each turn (0.1x input
            price) instead of being re-prefilled. Coexists with the explicit
            system/tools breakpoints below (well under the 4-breakpoint cap,
-           which is when automatic caching would be refused). Count_tokens
-           carries no cache_control: nothing is cached by counting. *)
+           which is when automatic caching would be refused). Gated on the
+           [supports_prompt_caching] capability because this builder also
+           serves Kimi's Anthropic-compatible wire, which does not document
+           the top-level field — the block-level breakpoints below keep their
+           long-standing behavior on every kind. Count_tokens carries no
+           top-level cache_control: nothing is cached by counting. *)
         ("cache_control", cache_control_json) :: base
       else base
     | Count_tokens -> [ "model", `String config.model_id; "messages", `List msgs_json ]

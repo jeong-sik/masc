@@ -110,12 +110,39 @@ describe('parseVerificationRunsResponse', () => {
       generated_at: '2026-08-05T00:00:00Z',
       count: 1,
       runs: [
-        row({ status: 'not_reviewed', gate: 'evaluator_unavailable', detail: 'no runtime' }),
+        row({
+          status: 'not_reviewed',
+          gate: 'evaluator_unavailable',
+          detail: 'no runtime',
+          retryable: true,
+        }),
       ],
     })
     expect(onlyRun(parsed).status).toBe('not_reviewed')
     expect(onlyRun(parsed).cause).toBe('no runtime')
     expect(onlyRun(parsed).gate).toBe('evaluator_unavailable')
+    expect(onlyRun(parsed).retryable).toBe(true)
+  })
+
+  // The completion authority stops scheduling its own retry when the same
+  // review is known to keep failing the same way (a single-atom review whose
+  // seed message alone exceeds the target's whole budget, for example) —
+  // `retryable: false` is how an operator tells that apart from an ordinary
+  // in-flight `not_reviewed` row that will resolve itself on the next pulse.
+  it('surfaces a non-retryable not_reviewed row distinctly from a retryable one', () => {
+    const parsed = parseVerificationRunsResponse({
+      generated_at: '2026-08-05T00:00:00Z',
+      count: 1,
+      runs: [
+        row({
+          status: 'not_reviewed',
+          gate: 'evaluator_unavailable',
+          detail: 'newest conversation atom does not fit the model input budget',
+          retryable: false,
+        }),
+      ],
+    })
+    expect(onlyRun(parsed).retryable).toBe(false)
   })
 
   it('keeps the typed infrastructure stage without inventing a verdict', () => {

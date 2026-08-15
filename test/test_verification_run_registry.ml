@@ -62,7 +62,8 @@ let all_outcomes : (string * E.outcome) list =
   ; ( "infrastructure_unavailable"
     , E.Infrastructure_unavailable
         { stage = E.Review_preparation; detail = "request store unavailable" } )
-  ; "not_reviewed", E.Not_reviewed { gate = "evaluator_unavailable"; detail = "no runtime" }
+  ; ( "not_reviewed"
+    , E.Not_reviewed { gate = "evaluator_unavailable"; detail = "no runtime"; retryable = true } )
   ; "commit_failed", E.Commit_failed { detail = "verification id mismatch" }
   ; "raised", E.Raised { detail = "Failure(\"boom\")" }
   ]
@@ -155,6 +156,57 @@ let test_outcomes_survive_replay () =
     all_outcomes
 ;;
 
+(* [Not_reviewed.retryable] is what tells an operator whether the completion
+   authority will keep polling this outcome or has already given up — it must
+   round-trip through the wire projection and through replay exactly like
+   [gate]/[detail] do, in both directions. *)
+let test_not_reviewed_retryable_survives_wire_and_replay () =
+  List.iter
+    (fun retryable ->
+       let label = if retryable then "retryable" else "non-retryable" in
+       let path = fresh_path (".not-reviewed-" ^ label ^ ".jsonl") in
+       let t = R.create ~path () in
+       let verification_id = "vrf-" ^ label in
+       register t ~verification_id ~started_at:5.0;
+       R.mark_completed
+         t
+         ~verification_id
+         ~outcome:
+           (E.Not_reviewed
+              { gate = "evaluator_unavailable"
+              ; detail = "newest conversation atom does not fit the model input budget"
+              ; retryable
+              })
+         ~tools:[]
+         ~elapsed_s:1.0
+         ();
+       (match R.get t ~verification_id with
+        | None -> fail (label ^ ": completed review should stay tracked")
+        | Some run ->
+          let json = R.run_to_yojson run in
+          check
+            (option bool)
+            (label ^ ": wire field")
+            (Some retryable)
+            (match field json "retryable" with
+             | Some (`Bool value) -> Some value
+             | _ -> None));
+       let replayed = R.replay path in
+       (match R.get replayed ~verification_id with
+        | None -> fail (label ^ ": lost on replay")
+        | Some run ->
+          let json = R.run_to_yojson run in
+          check
+            (option bool)
+            (label ^ ": replayed wire field")
+            (Some retryable)
+            (match field json "retryable" with
+             | Some (`Bool value) -> Some value
+             | _ -> None));
+       remove_if_exists path)
+    [ true; false ]
+;;
+
 let test_replay_drops_running_reviews () =
   let path = fresh_path ".running.jsonl" in
   let t = R.create ~path () in
@@ -184,7 +236,7 @@ let test_retry_replaces_the_prior_attempt () =
   R.mark_completed
     t
     ~verification_id:"vrf-retry"
-    ~outcome:(E.Not_reviewed { gate = "invalid_verdict"; detail = "no tool call" })
+    ~outcome:(E.Not_reviewed { gate = "invalid_verdict"; detail = "no tool call"; retryable = true })
     ~tools:[]
     ~elapsed_s:1.0
     ();
@@ -358,6 +410,10 @@ let () =
             `Quick
             test_outcome_detail_reaches_the_surface
         ; test_case "every outcome survives replay" `Quick test_outcomes_survive_replay
+        ; test_case
+            "not_reviewed retryable survives the wire and replay, both values"
+            `Quick
+            test_not_reviewed_retryable_survives_wire_and_replay
         ; test_case
             "replay drops running reviews"
             `Quick

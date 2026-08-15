@@ -14,6 +14,12 @@ type outcome =
   | Not_reviewed of
       { gate : string
       ; detail : string
+      ; retryable : bool
+            (** [false] means the completion authority will not schedule
+                another automatic attempt for this outcome — the same review
+                is expected to fail the same way. Operator intervention
+                (resubmission, evidence trim, config change) is what moves
+                this forward, not time. *)
       }
   | Commit_failed of { detail : string }
   | Raised of { detail : string }

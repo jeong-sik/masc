@@ -540,6 +540,15 @@ let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" 
           | None -> failwith "dispatch returned None"))
 )
 
+(* Pins the named default (was inline 30.0): a keeper research loop must
+   be able to repeat a query inside one 15-minute window without paying
+   the provider again. *)
+let () = test "web_search_cache_ttl_default_is_fifteen_minutes" (fun () ->
+  with_boot_override "MASC_WEB_SEARCH_CACHE_TTL_SEC" None (fun () ->
+    with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" None (fun () ->
+      assert (Env_config.Tools.web_search_cache_ttl_sec () = 900.0)))
+)
+
 let () = test "parse_official_provider_json_payloads" (fun () ->
   let brave =
     Tool_misc.parse_brave_json

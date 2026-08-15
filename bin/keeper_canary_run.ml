@@ -136,12 +136,24 @@ let iso8601_now () =
     tm.Unix.tm_min
     tm.Unix.tm_sec
 
+(* With_process.with_process_args_in gives exact argv control (no shell
+   string parsing, unlike Unix.open_process_in) and guarantees the
+   subprocess is reaped on every exit path. The exit status is consumed:
+   a captured line is only trusted when git actually reported success —
+   e.g. a detached-HEAD-less checkout can print nothing on stdout while
+   still exiting 0, and a failing invocation must not be read as "no
+   commit" the same way a genuinely commit-less checkout would be. *)
 let git_commit_opt () =
   try
-    let ic = Unix.open_process_in "git rev-parse HEAD 2>/dev/null" in
-    let line = try Some (input_line ic) with End_of_file -> None in
-    ignore (Unix.close_process_in ic);
-    Option.map String.trim line
+    let lines, status =
+      With_process.with_process_args_in
+        "git"
+        [| "git"; "rev-parse"; "HEAD" |]
+        With_process.drain_lines
+    in
+    match status, lines with
+    | Unix.WEXITED 0, line :: _ -> Some (String.trim line)
+    | _ -> None
   with _ -> None
 
 let sha256_hex text = Digestif.SHA256.(to_hex (digest_string text))

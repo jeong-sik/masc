@@ -65,6 +65,7 @@ const BACKEND_EMITTED: Record<string, string> = {
   project_snapshot: '../lib/server/server_dashboard_http_namespace_truth.ml',
   transport_health_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
   fusion_run_status: '../lib/fusion/fusion_sink.ml',
+  workspace_message_delivery_changed: '../lib/server/server_bootstrap_loops.ml',
 }
 
 // event-type -> why it has no masc backend literal to bind to. Keep short and

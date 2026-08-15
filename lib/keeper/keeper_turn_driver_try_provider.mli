@@ -70,9 +70,13 @@ type try_provider_ctx =
        unit)
         option
   ; on_model_input_window_observation :
-      (Runtime_model_input_tail_window.window_observation -> unit) option
+      (measurement:Turn_record.model_input_measurement
+       -> Runtime_model_input_tail_window.window_observation
+       -> unit)
+        option
         (** Called with the cut the window stage selected over the keeper's
-            conversation history, as that stage saw it.
+            conversation history, as that stage saw it, and which shape it was
+            measured against.
 
             Two kinds of material in the same request are outside these counts,
             for two different reasons. Pinned extra-system context and the
@@ -89,12 +93,12 @@ type try_provider_ctx =
             that one measures the bytes the provider admitted, and those bytes
             cover material these atoms do not.
 
-            A turn issues one provider request (7,763 API calls over 7,646
-            turns on a live 2026-08-14 trace), so a later call within one turn
-            belongs to a failover attempt and supersedes the earlier one. Never
-            invoked when the projection refuses — the turn carries a typed
-            budget error instead, and reporting a cut that was never dispatched
-            would fabricate evidence. *)
+            Invoked per provider request, and one keeper turn issues many —
+            62 and 83 on the two turns this module's window comment measures —
+            so the retained value is the last request of the turn, not a
+            summary of it. Never invoked when the projection refuses: the turn
+            carries a typed budget error instead, and reporting a cut that was
+            never dispatched would fabricate evidence. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

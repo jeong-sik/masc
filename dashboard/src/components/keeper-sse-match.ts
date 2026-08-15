@@ -25,3 +25,7 @@ export function isKeeperToolActivityEvent(event: SSEEvent): boolean {
   const type = normalizeSSEDispatchType(event.type)
   return type === 'keeper_tool_call' || type === 'keeper_tool_skipped'
 }
+
+export function isKeeperToolEvidenceCommittedEvent(event: SSEEvent): boolean {
+  return event.type === 'keeper_tool_call_evidence_committed'
+}

@@ -59,6 +59,14 @@ vi.mock('./verification-requests-panel', () => ({
   VerificationRequestsPanel: () => html`<div data-testid="verification-panel">Verification</div>`,
 }))
 
+vi.mock('./verification-runs-panel', () => ({
+  VerificationRunsPanel: () => html`<div data-testid="verification-runs-panel">Verification runs</div>`,
+}))
+
+vi.mock('./keeper-persistence-proof-panel', () => ({
+  KeeperPersistenceProofPanel: () => html`<div data-testid="keeper-persistence-proof-panel">Persistence proof</div>`,
+}))
+
 vi.mock('./repository-management', () => ({
   RepositoryManagement: () => html`<div data-testid="repository-panel">Repositories</div>`,
 }))
@@ -220,6 +228,8 @@ describe('Work', () => {
     render(html`<${Work} />`)
 
     expect(screen.getByTestId('verification-panel')).toBeTruthy()
+    expect(screen.getByTestId('verification-runs-panel')).toBeTruthy()
+    expect(screen.getByTestId('keeper-persistence-proof-panel')).toBeTruthy()
     expect(screen.queryByTestId('work-kpis')).toBeNull()
   })
 

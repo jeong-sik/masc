@@ -115,6 +115,11 @@ export type TurnRecordEntry = {
   // history, so the inspector renders absence rather than 0.
   transmitted_atoms?: number
   total_atoms?: number
+  // Which shape the budget was measured against. 'durable_shape' means the
+  // reasoning projection declined and the window was sized against the
+  // checkpoint, so this turn saw less history than it needed to — and nothing
+  // about the decline ages out, so a keeper can stay there.
+  model_input_measurement?: 'wire_shape' | 'durable_shape'
   price_input_per_million?: number
   price_output_per_million?: number
   // RFC-0233 §9 — wall-clock duration of the provider call (ms), sourced from
@@ -511,6 +516,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     'request_body_bytes',
     'transmitted_atoms',
     'total_atoms',
+    'model_input_measurement',
     'runtime_profile',
     'selected_model',
     'finish_reason',
@@ -567,6 +573,11 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
   const transmitted_atoms =
     decodeOptionalField(raw, 'transmitted_atoms', decodeNonNegativeSafeInteger)
   const total_atoms = decodeOptionalField(raw, 'total_atoms', decodeNonNegativeSafeInteger)
+  const model_input_measurement = decodeOptionalField(
+    raw,
+    'model_input_measurement',
+    value => (value === 'wire_shape' || value === 'durable_shape' ? value : null),
+  )
   const price_input_per_million =
     decodeOptionalField(raw, 'price_input_per_million', decodeFiniteNumber)
   const price_output_per_million =
@@ -663,6 +674,7 @@ function decodeTurnRecordEntry(raw: unknown): TurnRecordEntry | null {
     // reaches the inspector as absence rather than a fabricated 0.
     transmitted_atoms: transmitted_atoms ?? undefined,
     total_atoms: total_atoms ?? undefined,
+    model_input_measurement: model_input_measurement ?? undefined,
     price_input_per_million,
     price_output_per_million,
     request_latency_ms,

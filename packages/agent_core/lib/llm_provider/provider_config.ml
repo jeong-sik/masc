@@ -54,6 +54,7 @@ type t =
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
+  ; cache_extended_ttl : bool
   ; supports_tool_choice_override : bool option
   ; supports_structured_output_override : bool option
   ; model_capabilities_override : Capabilities.capabilities option
@@ -92,6 +93,7 @@ let make
       ?(disable_parallel_tool_use = false)
       ?(response_format = Types.Off)
       ?(cache_system_prompt = false)
+      ?(cache_extended_ttl = false)
       ?supports_tool_choice_override
       ?supports_structured_output_override
       ?model_capabilities_override
@@ -148,6 +150,7 @@ let make
   ; disable_parallel_tool_use
   ; response_format
   ; cache_system_prompt
+  ; cache_extended_ttl
   ; supports_tool_choice_override
   ; supports_structured_output_override
   ; model_capabilities_override

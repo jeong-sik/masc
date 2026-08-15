@@ -170,6 +170,63 @@ let test_truncation_offloads_full_text () =
           check int "offloaded file is complete" 400
             (List.length (String.split_on_char '\n' stored))))
 
+(* Feature contract: web content chooses the next fetch, so loopback,
+   private, link-local, unspecified, and localhost destinations are
+   rejected at the entry and at every redirect hop — as caller-input
+   violations, before any network round trip. *)
+let test_destination_boundary () =
+  let blocked_urls =
+    [ "http://127.0.0.1:8935/health"
+    ; "https://localhost:8888/search"
+    ; "http://sub.localhost/x"
+    ; "http://[::1]/"
+    ; "http://169.254.169.254/latest/meta-data/"
+    ; "http://10.1.2.3/internal"
+    ; "http://172.16.0.9/"
+    ; "http://192.168.0.10/router"
+    ; "http://0.0.0.0/"
+    ; "http://[fe80::1]/"
+    ; "http://[fd00::2]/"
+    ; "http://[::ffff:127.0.0.1]/"
+    ]
+  in
+  List.iter
+    (fun url ->
+      let result = handle url in
+      check bool (url ^ " rejected") false (Tool_result.is_success result);
+      check (option string) (url ^ " class") (Some "workflow_rejection")
+        (Tool_result.failure_class result
+        |> Option.map Tool_result.tool_failure_class_to_string);
+      check bool (url ^ " reason") true
+        (String_util.contains_substring (Tool_result.message result)
+           "url rejected:");
+      match Masc.Tool_misc_web_fetch.validate_redirect_target url with
+      | Ok () -> fail (url ^ " must be rejected as a redirect hop too")
+      | Error reason ->
+          check bool (url ^ " hop reason") true
+            (String_util.contains_substring reason "redirect target rejected:"))
+    blocked_urls;
+  (* A public destination still flows through to the fetch boundary. *)
+  Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+    (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+      check string "public url reaches fetch" "https://example.com/public" url;
+      Ok
+        { Masc.Tool_misc_web_fetch.http_status = Some 200
+        ; final_url = "https://example.com/public"
+        ; redirect_count = 0
+        ; content_type = Some "text/plain"
+        ; downloaded_bytes = Some 2
+        ; body = "ok"
+        })
+    (fun () ->
+      let json = success_json (handle "https://example.com/public") in
+      check string "public body extracted" "ok"
+        Yojson.Safe.Util.(json |> member "text" |> to_string));
+  check bool "public hop allowed" true
+    (Masc.Tool_misc_web_fetch.validate_redirect_target
+       "https://example.com/next"
+     = Ok ())
+
 let () =
   run "tool_misc_web_fetch"
     [
@@ -183,5 +240,6 @@ let () =
             test_invalid_redirect_is_workflow_rejection;
           test_case "truncation offloads full text" `Quick
             test_truncation_offloads_full_text;
+          test_case "destination boundary" `Quick test_destination_boundary;
         ] );
     ]

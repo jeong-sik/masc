@@ -86,6 +86,53 @@ let valid_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
+(* Boundary: web content decides what gets fetched next, so a request
+   must not reach the loopback surface (MASC's own API included), the
+   private network, or link-local metadata addresses. The check is
+   literal — IP ranges via Ipaddr plus the RFC 6761 localhost names.
+   It does not resolve DNS, so a public hostname that resolves to a
+   private address is outside this boundary; that limitation is part
+   of the contract, not hidden. Applied to the initial URL and to
+   every redirect hop. *)
+let rec blocked_ip_reason : Ipaddr.t -> string option = function
+  | Ipaddr.V4 v4 ->
+      if Ipaddr.V4.Prefix.(mem v4 loopback) then Some "loopback address"
+      else if Ipaddr.V4.Prefix.(mem v4 link) then Some "link-local address"
+      else if
+        List.exists
+          (fun block -> Ipaddr.V4.Prefix.mem v4 block)
+          Ipaddr.V4.Prefix.private_blocks
+      then Some "private-network address"
+      else if Ipaddr.V4.compare v4 Ipaddr.V4.any = 0 then
+        Some "unspecified address"
+      else None
+  | Ipaddr.V6 v6 -> (
+      match Ipaddr.v4_of_v6 v6 with
+      | Some v4 -> blocked_ip_reason (Ipaddr.V4 v4)
+      | None ->
+          if Ipaddr.V6.compare v6 Ipaddr.V6.localhost = 0 then
+            Some "loopback address"
+          else if Ipaddr.V6.Prefix.(mem v6 link) then Some "link-local address"
+          else if Ipaddr.V6.Prefix.(mem v6 unique_local) then
+            Some "private-network address"
+          else if Ipaddr.V6.compare v6 Ipaddr.V6.unspecified = 0 then
+            Some "unspecified address"
+          else None)
+
+let blocked_destination_reason url =
+  match Uri.host (Uri.of_string (String.trim url)) with
+  | None -> Some "URL has no host"
+  | Some host ->
+      let lowered = String.lowercase_ascii host in
+      if
+        String.equal lowered "localhost"
+        || String.ends_with ~suffix:".localhost" lowered
+      then Some "localhost is not fetchable"
+      else (
+        match Ipaddr.of_string lowered with
+        | Error _ -> None (* hostname; resolution is out of scope here *)
+        | Ok ip -> blocked_ip_reason ip)
+
 let ends_with ~suffix value =
   let value_length = String.length value in
   let suffix_length = String.length suffix in
@@ -406,7 +453,10 @@ let fetch_response_of_http_response ~request_url ~redirect_count
 let validate_redirect_target target =
   if not (valid_url target) then
     Error "redirect target must be a valid http or https URL"
-  else Ok ()
+  else (
+    match blocked_destination_reason target with
+    | Some reason -> Error ("redirect target rejected: " ^ reason)
+    | None -> Ok ())
 
 let default_http_fetch ~timeout_sec ~headers ~max_response_bytes url =
   let rec loop ~redirect_count request_url =
@@ -557,6 +607,9 @@ let handle ~tool_name ~start_time args : Tool_result.result =
   if not (valid_url url) then
     make_workflow_err "url must be a valid http or https URL"
   else
+    match blocked_destination_reason url with
+    | Some reason -> make_workflow_err ("url rejected: " ^ reason)
+    | None ->
     match extract_mode_of_string extract_mode_raw with
     | None -> make_workflow_err "extractMode must be one of: markdown, text"
     | Some extract_mode ->

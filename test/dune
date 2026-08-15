@@ -2552,6 +2552,9 @@
 
 (include stanzas/test_completion_authority_retry_policy.inc)
 
+(include stanzas/test_keeper_canary_facts.inc)
+(include stanzas/test_keeper_canary_evidence.inc)
+
 (include stanzas/test_run_registry_concurrent_mutation.inc)
 (include stanzas/test_exact_lane_run_registry.inc)
 

@@ -329,13 +329,14 @@ let path_and_query uri =
   | [] -> p
   | _ -> p ^ "?" ^ Uri.encoded_of_query (Uri.query uri)
 
-(* STR-OK: HTTP boundary comparison. Header field names are untyped,
+(* HTTP boundary comparison. Header field names are untyped,
    case-insensitive wire strings (RFC 7230 §3.2) — "host" is not a closed
    domain enum this repo controls the shape of, so there is no variant to
    parse it into. *)
 let has_host_header headers =
   List.exists
-    (fun (name, _) -> String.lowercase_ascii name = "host")
+    (fun (name, _) ->
+       String.lowercase_ascii name = "host" (* STR-OK: see doc comment above *))
     headers
 
 (* Piaf 0.2.0's own default HTTP/1.1 Host header (piaf/lib/headers.ml's
@@ -356,13 +357,12 @@ let has_host_header headers =
    caller that already set a "host" header (any case) is left alone —
    this only fills a gap Piaf leaves, it does not override a deliberate
    caller choice. *)
+(* [None] here is [?headers] genuinely omitted by the caller ("no
+   headers"), not unparsed/malformed external data — [[]] is the only
+   value that means "no headers" for a [(string * string) list], so no
+   information is lost. *)
 let ensure_host_header ~uri headers =
-  (* DET-OK: sound, not a permissive default on unknown input. [None] here
-     is [?headers] genuinely omitted by the caller ("no headers"), not
-     unparsed/malformed external data — [[]] is the only value that means
-     "no headers" for a [(string * string) list], so no information is
-     lost. *)
-  let headers = Option.value headers ~default:[] in
+  let headers = Option.value headers ~default:[] (* DET-OK: sound default, see doc comment above *) in
   if has_host_header headers
   then Some headers
   else (

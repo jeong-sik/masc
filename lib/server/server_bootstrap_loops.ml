@@ -362,6 +362,18 @@ let deliver_broadcast_mention
    target's row is written there with its mention ids, and
    [append_user_message_once] keeps that first write, so the stamp survives
    and this pass reports the target as already present. *)
+(* [Accepted] and [Already_accepted] mean the mention row is committed and
+   stamped; [Passive] means no mention row will ever be written. Every other
+   outcome leaves the mention path still owing that transcript a stamped row,
+   and the projection must not claim the key first. *)
+let mention_transcript_settled = function
+  | Workspace_broadcast.Passive
+  | Workspace_broadcast.Accepted
+  | Workspace_broadcast.Already_accepted -> true
+  | Workspace_broadcast.Pending
+  | Workspace_broadcast.Deferred _
+  | Workspace_broadcast.Rejected _ -> false
+
 let project_workspace_message_to_fleet
       ~base_path
       ~registered_keepers
@@ -446,6 +458,7 @@ module Projection_for_testing = struct
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
   let deliver_broadcast_mention = deliver_broadcast_mention
   let project_workspace_message_to_fleet = project_workspace_message_to_fleet
+  let mention_transcript_settled = mention_transcript_settled
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
@@ -1512,11 +1525,27 @@ let start_keeper_loops_owned
         ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
         delivery
     in
-    (* The fanout must not be able to change what the mention delivery
-       reported. The dispatcher turns an escaping exception into
-       [Deferred Handler_failed], which would relabel an accepted mention as
-       an undelivered one. *)
-    (try
+    (* The projection writes under the same delivery key the mention path uses,
+       and the chat store is first-write-wins on that key. If the mention
+       delivery returned without writing its row — the target's metadata was
+       unavailable, or its identity was ambiguous — an unstamped projection row
+       would claim the key, and the retry that follows could never stamp it:
+       the reloaded row carries only content-derived mentions, so a keeper
+       whose feed targets do not match the text reads as already answered, the
+       wake is skipped, and the message is recorded as delivered. Project only
+       once the mention path is done with that transcript. *)
+    (if not (mention_transcript_settled mention_outcome)
+     then
+       Log.Keeper.warn
+         "fleet projection deferred with the mention delivery request_id=%s outcome=%s"
+         delivery.request_id
+         (Workspace_broadcast.mention_delivery_kind mention_outcome)
+     else
+       (* The fanout must not be able to change what the mention delivery
+          reported. The dispatcher turns an escaping exception into
+          [Deferred Handler_failed], which would relabel an accepted mention
+          as an undelivered one. *)
+       (try
        project_workspace_message_to_fleet
          ~base_path
          ~registered_keepers:(fun () ->
@@ -1527,10 +1556,10 @@ let start_keeper_loops_owned
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "fleet projection failed request_id=%s: %s"
-         delivery.request_id
-         (Printexc.to_string exn));
+          Log.Keeper.warn
+            "fleet projection failed request_id=%s: %s"
+            delivery.request_id
+            (Printexc.to_string exn)));
     mention_outcome
   in
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;

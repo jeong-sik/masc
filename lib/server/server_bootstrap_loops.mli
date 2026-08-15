@@ -160,6 +160,8 @@ module For_testing : sig
     Workspace_broadcast.broadcast_delivery ->
     unit
 
+  val mention_transcript_settled : Workspace_broadcast.mention_delivery -> bool
+
   val reset_keeper_persistence_lifecycle : unit -> unit
 
   val prepared_base_paths : prepared_keeper_persistence -> string * string

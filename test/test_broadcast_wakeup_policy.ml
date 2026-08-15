@@ -396,7 +396,7 @@ let test_fleet_projection_adds_no_queue_entry () =
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:"sangsu" ~request_id);
   check int "no queue entry for a fleet broadcast" 0
     (List.length
-       (queued_keeper_messages ~base_path:config.base_path ~keeper_name:"sangsu"))
+       (queued_workspace_messages ~base_path:config.base_path ~keeper_name:"sangsu"))
 ;;
 
 (* The named target's row is written by the mention path with its mention ids.
@@ -503,6 +503,28 @@ let test_hyphenated_names_do_not_collide_on_the_author () =
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:author ~request_id)
 ;;
 
+(* The projection writes under the delivery key the mention path uses, and the
+   chat store is first-write-wins on it. An outcome that left the mention path
+   still owing a stamped row must hold the projection back, or the unstamped
+   copy claims the key and the retry can never stamp it. Exhaustive on the
+   closed sum so a new outcome has to state its answer. *)
+let test_projection_waits_for_the_mention_transcript () =
+  let settled = Broadcast_wakeup.mention_transcript_settled in
+  check bool "no mention: no row is owed" true
+    (settled Workspace_broadcast.Passive);
+  check bool "accepted: the stamped row is committed" true
+    (settled Workspace_broadcast.Accepted);
+  check bool "already accepted: the stamped row is committed" true
+    (settled Workspace_broadcast.Already_accepted);
+  check bool "pending: a stamped row is still owed" false
+    (settled Workspace_broadcast.Pending);
+  check bool "deferred: the retry still owes a stamped row" false
+    (settled
+       (Workspace_broadcast.Deferred Workspace_broadcast.Target_state_unavailable));
+  check bool "rejected: the transcript is not the projection's to claim" false
+    (settled (Workspace_broadcast.Rejected Workspace_broadcast.Invalid_target))
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -541,5 +563,7 @@ let () =
             test_undeclared_broadcast_is_a_system_record
         ; test_case "hyphenated names do not collide on the author" `Quick
             test_hyphenated_names_do_not_collide_on_the_author
+        ; test_case "projection waits for the mention transcript" `Quick
+            test_projection_waits_for_the_mention_transcript
         ] )
     ]

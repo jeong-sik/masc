@@ -186,6 +186,7 @@ let () =
 let parse_searxng_json = Tool_misc_web_search.parse_searxng_json
 let parse_brave_json = Tool_misc_web_search.parse_brave_json
 let parse_brave_llm_context_json = Tool_misc_web_search.parse_brave_llm_context_json
+let parse_ollama_search_json = Tool_misc_web_search.parse_ollama_search_json
 let parse_tavily_json = Tool_misc_web_search.parse_tavily_json
 let parse_exa_json = Tool_misc_web_search.parse_exa_json
 let parse_bing_search_json = Tool_misc_web_search.parse_bing_search_json

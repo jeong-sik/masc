@@ -155,6 +155,7 @@ Precedence:
 | `EXA_API_KEY` | `(none)` | Env-only credential; presence admits the `exa` provider. |
 | `BING_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `bing_api` provider. |
 | `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
+| `OLLAMA_API_KEY` | `(none)` | Env-only credential; presence admits the `ollama` provider. |
 
 Equivalent `runtime.toml` keys:
 

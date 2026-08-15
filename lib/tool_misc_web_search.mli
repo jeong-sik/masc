@@ -3,7 +3,8 @@
     credentialed multi-provider chain.
 
     Tries providers in priority order ([Searxng] / [Brave] /
-    [Tavily] / [Exa] / [Bing_api]) with response caching. Only
+    [Tavily] / [Exa] / [Bing_api] / [Ollama]) with response
+    caching. Only
     providers whose credentials are present enter the chain; an
     empty chain is an explicit configuration failure, never an
     empty success. [Brave_llm_context] joins only through explicit
@@ -13,7 +14,7 @@
     provider request, not re-truncated locally.
 
     Internal: ~50+ helpers + internal types stay private —
-    [normalized_hit] / [provider] (6-variant) /
+    [normalized_hit] / [provider] (7-variant) /
     [grounded_source] / [grounded_context] / [search_payload] /
     [provider_response] / [cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
@@ -57,8 +58,8 @@ type simulated_provider_outcome =
 val provider_plan : unit -> string list
 (** [provider_plan ()] returns the resolved provider order as
     canonical lowercase labels ([searxng] / [brave] / [tavily] /
-    [exa] / [bing_api], plus [brave_llm_context] when explicitly
-    configured).  Reads
+    [exa] / [bing_api] / [ollama], plus [brave_llm_context] when
+    explicitly configured).  Reads
     {!Env_config.Tools.web_search_provider_opt} and
     [web_search_fallbacks_opt] at call time, dedupes preserving
     order, then appends the default provider order to fill any
@@ -123,6 +124,10 @@ val parse_exa_json : string -> (string * string * string) list
 val parse_bing_search_json : string -> (string * string * string) list
 (** Parse Bing Search API JSON response from
     [{ "webPages": { "value": \[{name, url, snippet}, ...\] } }]. *)
+
+val parse_ollama_search_json : string -> (string * string * string) list
+(** Parse an Ollama web-search response from
+    [{ "results": \[{title, url, content}, ...\] }]. *)
 
 val parse_brave_llm_context_json : string -> (string * string * string list) list
 (** Parse a Brave LLM Context response from

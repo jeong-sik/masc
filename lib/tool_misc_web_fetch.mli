@@ -11,6 +11,13 @@
 val default_timeout_sec : int
 (** Default timeout for HTTP fetch operations (seconds). *)
 
+val validate_redirect_target : string -> (unit, string) result
+(** [validate_redirect_target target] accepts a redirect hop only when
+    it is a valid http(s) URL whose destination passes the literal
+    boundary above (no loopback / private / link-local / unspecified
+    address, no RFC 6761 localhost name).  Exposed so the per-hop
+    boundary can be exercised without a network round trip. *)
+
 val default_max_chars : int
 (** Default maximum output length for extracted content. *)
 
@@ -50,8 +57,18 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 	    - [description]: optional, extracted from [<meta name="description">]
       or [og:description]
 
+    Destination boundary: the initial URL and every redirect hop are
+    rejected when they target the loopback surface, private networks
+    (RFC 1918 / fc00::/7), link-local ranges, the unspecified address,
+    or an RFC 6761 localhost name.  The check is literal (no DNS
+    resolution), so a public hostname resolving to a private address is
+    outside this boundary by contract; NAT64-embedded IPv4 literals
+    (64:ff9b::/96) are likewise not unwrapped — only the standard
+    IPv4-mapped form (::ffff:0:0/96) is.
+
     Failure classes (RFC-0189):
-    - [Workflow_rejection]: invalid URL — caller-input violation.
+    - [Workflow_rejection]: invalid or rejected URL — caller-input
+      violation (blocked destinations included).
     - [Transient_error]:    rate-limit hit + transport-layer failure;
                             both retry-friendly.
     - [Runtime_failure]:    upstream HTTP non-2xx or missing status. *)

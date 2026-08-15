@@ -353,6 +353,7 @@ let invalidate_execution_cache () =
                ; execution_invalidated_field, `Bool true
                ])
        with
+       | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          record_invalidation_failure
            ~callback:"execution_snapshot_invalidation_broadcast"

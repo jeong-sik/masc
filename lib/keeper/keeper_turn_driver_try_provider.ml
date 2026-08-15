@@ -538,7 +538,7 @@ let budgeted_model_input_projection
        deletes every such block before serialization. Budgeting against the
        durable shape charges the window for bytes the provider never receives,
        and the room they take comes out of transmitted conversation: 23.6% of
-       it on a live 2026-08-14 GLM trace.
+       it on a live 2026-08-14 trace from a reasoning-heavy lane.
 
        The projection is the same one the serializer runs, through the same
        per-codec function, and it is idempotent — the backend applying it again

@@ -1469,8 +1469,8 @@ let test_toml_catalog_resolves_web_search_keys () =
       "[web_search]\n\
        searxng_url = \"http://localhost:8888\"\n\
        provider = \"auto\"\n\
-       provider_order = \"searxng,brave,duckduckgo\"\n\
-       fallbacks = \"duckduckgo,bing_rss\"\n\
+       provider_order = \"searxng,brave,tavily\"\n\
+       fallbacks = \"tavily,exa\"\n\
        timeout_sec = 12\n\
        cache_ttl_sec = 45.5\n"
   in
@@ -1482,9 +1482,9 @@ let test_toml_catalog_resolves_web_search_keys () =
     (List.assoc_opt "MASC_SEARXNG_URL" overrides);
   check (option string) "provider" (Some "auto")
     (List.assoc_opt "MASC_WEB_SEARCH_PROVIDER" overrides);
-  check (option string) "provider order" (Some "searxng,brave,duckduckgo")
+  check (option string) "provider order" (Some "searxng,brave,tavily")
     (List.assoc_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" overrides);
-  check (option string) "fallbacks" (Some "duckduckgo,bing_rss")
+  check (option string) "fallbacks" (Some "tavily,exa")
     (List.assoc_opt "MASC_WEB_SEARCH_FALLBACKS" overrides);
   check (option string) "timeout" (Some "12")
     (List.assoc_opt "MASC_WEB_SEARCH_TIMEOUT_SEC" overrides);

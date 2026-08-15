@@ -17,9 +17,7 @@ type context = {
 
 val schemas : Masc_domain.tool_schema list
 
-val parse_bing_rss_items : string -> (string * string * string) list
 val parse_searxng_json : string -> (string * string * string) list
-val parse_ddg_html : string -> (string * string * string) list
 val parse_brave_json : string -> (string * string * string) list
 val parse_tavily_json : string -> (string * string * string) list
 val parse_exa_json : string -> (string * string * string) list

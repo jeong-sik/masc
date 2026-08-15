@@ -221,8 +221,8 @@ masc_claim_next()
 ```bash
 # Web search provider control
 MASC_WEB_SEARCH_PROVIDER=brave
-MASC_WEB_SEARCH_FALLBACKS=ddg,bing_rss
-BRAVE_SEARCH_API_KEY=...  # optional; without provider credentials the tool falls back to scraping
+MASC_WEB_SEARCH_FALLBACKS=tavily,exa
+BRAVE_SEARCH_API_KEY=...  # credentialed providers only; with no credentials the tool fails with the remedy
 
 # Local SearXNG provider for MASC-owned WebSearch / WebFetch
 scripts/searxng-local.sh start
@@ -260,8 +260,8 @@ Keeper WebSearch/WebFetch backend 메모:
 - `[web_search].searxng_url` 또는 `MASC_SEARXNG_URL` 설정 시 self-hosted SearXNG가 최우선 provider로 작동한다.
 - 로컬 검색 품질이 필요하면 `scripts/searxng-local.sh start`로 Docker SearXNG를 올리고 active `runtime.toml`의 `[web_search].searxng_url = "http://localhost:8888"`만 설정한다. 별도 WebSearch MCP wrapper는 필요 없다.
 - `scripts/searxng-local.sh status|smoke|logs|stop`으로 로컬 provider를 점검한다. 기본 config는 `${MASC_BASE_PATH:-$HOME/me}/.local/share/masc-searxng/settings.yml`에 생성되며 MASC가 쓰는 JSON search format을 켠다.
-- 기본 auto 모드는 공식 provider key가 있으면 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 먼저 시도한다.
-- 공식 provider가 없거나 실패하면 `duckduckgo`, `bing_rss` 순으로 fallback 한다.
+- 기본 auto 모드는 자격이 설정된 provider만 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 시도한다.
+- 자격이 하나도 없으면 검색은 빈 결과가 아니라 설정 방법을 담은 실패로 끝난다.
 - env:
   - `MASC_SEARXNG_URL` (self-hosted SearXNG instance URL)
   - `MASC_WEB_SEARCH_PROVIDER`

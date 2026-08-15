@@ -1,13 +1,15 @@
 
-(** Tool_misc_web_search — Web search MCP tool with multi-provider
-    fallback chain.
+(** Tool_misc_web_search — Web search MCP tool with a
+    credentialed multi-provider chain.
 
     Tries providers in priority order ([Searxng] / [Brave] /
-    [Tavily] / [Exa] / [Bing_api] / [Ddg] / [Bing_rss]) with
-    response caching.
+    [Tavily] / [Exa] / [Bing_api]) with response caching. Only
+    providers whose credentials are present enter the chain; an
+    empty chain is an explicit configuration failure, never an
+    empty success.
 
     Internal: ~50+ helpers + 5 internal types stay private —
-    [normalized_hit] / [provider] (7-variant) /
+    [normalized_hit] / [provider] (5-variant) /
     [provider_response] / [cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
     state),
@@ -20,7 +22,7 @@
     [provider_of_string] / [parse_provider_csv] /
     [default_provider_order] / [provider_order],
     [take_results], [normalize_hits], [provider_error],
-    [result_data], all 7 \[fetch_*\] HTTP fetchers,
+    [result_data], the per-provider \[fetch_*\] HTTP fetchers,
     [fetch_provider], the cache state cells
     (\[initial_cache_capacity = 32\], [cache_entries] hashtable,
     [cache_mutex]),
@@ -45,7 +47,7 @@ type simulated_provider_outcome =
 val provider_plan : unit -> string list
 (** [provider_plan ()] returns the resolved provider order as
     canonical lowercase labels ([searxng] / [brave] / [tavily] /
-    [exa] / [bing_api] / [duckduckgo] / [bing_rss]).  Reads
+    [exa] / [bing_api]).  Reads
     {!Env_config.Tools.web_search_provider_opt} and
     [web_search_fallbacks_opt] at call time, dedupes preserving
     order, then appends the default provider order to fill any
@@ -90,20 +92,6 @@ val provider_error_to_string : provider_error -> string
     internally by {!handle}'s fetch pipeline; exposed for unit
     tests so per-provider payload parsing can be exercised
     without an HTTP roundtrip. *)
-
-val looks_like_rss_payload : string -> bool
-(** [looks_like_rss_payload payload] parses XML and is [true] iff the document
-    contains an [rss] or [channel] element.  Used by the Bing
-    fetcher to dispatch between {!parse_bing_rss_items} and
-    {!parse_bing_search_json}. *)
-
-val parse_bing_rss_items : string -> (string * string * string) list
-(** Parse Bing RSS feed items.  Reads [<item>], [<title>],
-    [<link>], and [<description>] elements through the shared XML parser. *)
-
-val parse_ddg_html : string -> (string * string * string) list
-(** Parse DuckDuckGo HTML lite results.  Decodes URL-encoded
-    href values via [Uri.pct_decode]. *)
 
 val parse_searxng_json : string -> (string * string * string) list
 (** Parse SearxNG JSON response from

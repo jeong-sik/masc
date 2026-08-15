@@ -158,7 +158,7 @@ Equivalent `runtime.toml` keys:
 searxng_url = "http://localhost:8888"
 provider = "auto"
 provider_order = "searxng,brave,tavily,exa,bing_api"
-fallbacks = "duckduckgo,bing_rss"
+fallbacks = "tavily,exa"
 timeout_sec = 15
 cache_ttl_sec = 900.0
 ```

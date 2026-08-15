@@ -2329,7 +2329,7 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
         ~outcomes:
           [
             ("brave", `Error "offline");
-            ( "duckduckgo",
+            ( "searxng",
               `Hits
                 [
                   ( "OCaml Eio runtime",
@@ -2361,9 +2361,9 @@ let test_model_visible_web_search_dispatches_to_misc_runtime () =
             Yojson.Safe.Util.(member "status" json |> to_string);
           check string "query preserved" "ocaml eio runtime test"
             Yojson.Safe.Util.(member "query" result_json |> to_string);
-          check string "fallback provider selected" "duckduckgo"
+          check string "fallback provider selected" "searxng"
             Yojson.Safe.Util.(member "engine" result_json |> to_string);
-          check string "simulated provider url" "test://duckduckgo"
+          check string "simulated provider url" "test://searxng"
             Yojson.Safe.Util.(member "search_url" result_json |> to_string);
           check int "result count" 1
             Yojson.Safe.Util.(member "result_count" result_json |> to_int);
@@ -2487,7 +2487,7 @@ let test_manual_gate_defers_web_tools_before_network () =
       let fetch_calls = ref 0 in
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
-          [ ( "duckduckgo"
+          [ ( "searxng"
             , `Hits [ "unexpected", "https://example.com", "unexpected" ] )
           ]
         (fun () ->
@@ -2590,7 +2590,7 @@ let test_approved_web_search_grant_executes_exact_request () =
       in
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
-          [ ( "duckduckgo"
+          [ ( "searxng"
             , `Hits
                 [ ( "Scheduled result"
                   , "https://example.com/scheduled"
@@ -2693,7 +2693,7 @@ let test_approved_web_search_replays_without_model_resubmission () =
       in
       Masc.Tool_misc.with_web_search_simulation_for_test
         ~outcomes:
-          [ ( "duckduckgo"
+          [ ( "searxng"
             , `Hits
                 [ ( "Replayed result"
                   , "https://example.com/replayed"
@@ -3143,7 +3143,7 @@ let test_blob_failure_repairs_journal_without_second_effect () =
        let first =
          Masc.Tool_misc.with_web_search_simulation_for_test
            ~outcomes:
-             [ ( "duckduckgo"
+             [ ( "searxng"
                , `Hits
                    [ ( "Exactly once"
                      , "https://example.com/once"
@@ -3250,7 +3250,7 @@ let test_journal_failure_retries_only_persistence () =
        let first =
          Masc.Tool_misc.with_web_search_simulation_for_test
            ~outcomes:
-             [ ( "duckduckgo"
+             [ ( "searxng"
                , `Hits
                    [ ( "Journal once"
                      , "https://example.com/journal-once"
@@ -3340,7 +3340,7 @@ let test_unknown_effect_is_durable_and_not_replayed () =
        in
        let first =
          Masc.Tool_misc.with_web_search_simulation_for_test
-           ~outcomes:[ "duckduckgo", `Error "forced exact failure" ]
+           ~outcomes:[ "searxng", `Error "forced exact failure" ]
          @@ fun () ->
          Masc.Keeper_gate_replay.replay_approved_effect
            ~config

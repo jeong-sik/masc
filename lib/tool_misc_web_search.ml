@@ -15,8 +15,6 @@ type provider =
   | Tavily
   | Exa
   | Bing_api
-  | Ddg
-  | Bing_rss
 
 type provider_response = {
   engine : string;
@@ -69,65 +67,6 @@ let valid_search_result_url url =
     | Some "http" | Some "https" -> true
     | _ -> false
 
-let child_text name = function
-  | Markup_document.Text _ -> None
-  | Markup_document.Element { children; _ } ->
-    Markup_document.first_element_named name children
-    |> Option.map (fun node ->
-           Markup_document.text_content node |> normalize_spaces)
-
-let parse_bing_rss_items payload =
-  Markup_document.parse_xml payload
-  |> Markup_document.elements_named "item"
-  |> List.filter_map (fun item ->
-         let description =
-           child_text "description" item |> Option.map clean_search_text
-         in
-         match
-           child_text "title" item,
-           child_text "link" item,
-           description
-         with
-         | Some title, Some url, Some snippet
-           when not (String.equal title "") && valid_search_result_url url ->
-             Some (title, url, snippet)
-         | Some title, Some url, None
-           when not (String.equal title "") && valid_search_result_url url ->
-             Some (title, url, "")
-         | _ -> None)
-
-let parse_ddg_html payload =
-  let nodes = Markup_document.parse_html payload in
-  let anchors = Markup_document.elements_named "a" nodes in
-  let has_class class_name node =
-    Markup_document.attribute "class" node
-    |> Option.exists (fun classes ->
-           classes |> Markup_document.html_space_tokens
-           |> List.exists (String.equal class_name))
-  in
-  let results = List.filter (has_class "result__a") anchors in
-  let snippets = List.filter (has_class "result__snippet") anchors in
-  List.mapi
-    (fun index node ->
-      let url =
-        Option.bind
-          (Markup_document.attribute "href" node)
-          (fun href ->
-             Uri.of_string href |> fun uri -> Uri.get_query_param uri "uddg")
-      in
-      let title = Markup_document.text_content node |> normalize_spaces in
-      let snippet =
-        match List.nth_opt snippets index with
-        | Some snippet ->
-          Markup_document.text_content snippet |> normalize_spaces
-        | None -> ""
-      in
-      Option.map (fun url -> title, url, snippet) url)
-    results
-  |> List.filter_map Fun.id
-  |> List.filter (fun (title, url, _snippet) ->
-         not (String.equal title "") && valid_search_result_url url)
-
 let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
   let str_of item key =
     Safe_ops.protect ~default:None (fun () ->
@@ -178,19 +117,12 @@ let parse_bing_search_json payload =
       Json_util.assoc_member_opt "value" web |> Option.value ~default:`Null)
     ~title_field:"name" ~snippet_field:"snippet" payload
 
-let looks_like_rss_payload payload =
-  let nodes = Markup_document.parse_xml payload in
-  Option.is_some (Markup_document.first_element_named "rss" nodes)
-  || Option.is_some (Markup_document.first_element_named "channel" nodes)
-
 let provider_to_string = function
   | Searxng -> "searxng"
   | Brave -> "brave"
   | Tavily -> "tavily"
   | Exa -> "exa"
   | Bing_api -> "bing_api"
-  | Ddg -> "duckduckgo"
-  | Bing_rss -> "bing_rss"
 
 let provider_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
@@ -199,8 +131,6 @@ let provider_of_string raw =
   | "tavily" -> Some Tavily
   | "exa" -> Some Exa
   | "bing" | "bing_api" -> Some Bing_api
-  | "ddg" | "duckduckgo" -> Some Ddg
-  | "bing_rss" | "bing-rss" -> Some Bing_rss
   | "auto" | "" -> None
   | _ -> None
 
@@ -224,12 +154,13 @@ let provider_has_credentials = function
   | Exa -> env_present "EXA_API_KEY"
   | Bing_api ->
       env_present "BING_SEARCH_API_KEY" || env_present "AZURE_BING_SEARCH_API_KEY"
-  | Ddg | Bing_rss -> true
 
+(* Only credentialed providers search. An empty order is a
+   configuration fact and surfaces as an explicit failure in
+   [search_impl], never as an empty success. *)
 let default_provider_order () =
   [ Searxng; Brave; Tavily; Exa; Bing_api ]
   |> List.filter provider_has_credentials
-  |> fun official -> official @ [ Ddg; Bing_rss ]
 
 let provider_order () =
   match Env_config.Tools.web_search_provider_order_opt () with
@@ -374,34 +305,6 @@ let fetch_searxng ~timeout_sec ~query =
       | Ok (Some status, _) ->
           Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
-
-let fetch_ddg_html ~timeout_sec ~query =
-  let search_url =
-    "https://html.duckduckgo.com/html/?q=" ^ Uri.pct_encode query
-  in
-  match
-    Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
-  with
-  | Error detail ->
-      Error (Transport (endpoint_error ~fallback:"search endpoint unavailable" detail))
-  | Ok (Some 200, payload) -> Ok (search_url, payload)
-  | Ok (Some status, _) ->
-      Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
-  | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
-
-let fetch_bing_rss ~timeout_sec ~query =
-  let search_url =
-    "https://www.bing.com/search?format=rss&q=" ^ Uri.pct_encode query
-  in
-  match
-    Tool_local_runtime_http.http_get_text_with_status ~timeout_sec search_url
-  with
-  | Error detail ->
-      Error (Transport (endpoint_error ~fallback:"search endpoint unavailable" detail))
-  | Ok (Some 200, payload) -> Ok (search_url, payload)
-  | Ok (Some status, _) ->
-      Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
-  | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
 
 let fetch_brave ~timeout_sec ~query ~limit =
   match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
@@ -567,27 +470,6 @@ let fetch_provider ~query ~limit provider =
   | Tavily -> fetch_tavily ~timeout_sec ~query ~limit
   | Exa -> fetch_exa ~timeout_sec ~query ~limit
   | Bing_api -> fetch_bing_api ~timeout_sec ~query ~limit
-  | Ddg -> (
-      match fetch_ddg_html ~timeout_sec ~query with
-      | Error err -> Error err
-      | Ok (search_url, payload) ->
-          let hits =
-            parse_ddg_html payload
-            |> take_results limit
-            |> normalize_hits ~source:(provider_to_string Ddg)
-          in
-          Ok { engine = provider_to_string Ddg; search_url; hits })
-  | Bing_rss -> (
-      match fetch_bing_rss ~timeout_sec ~query with
-      | Error err -> Error err
-      | Ok (search_url, payload) when looks_like_rss_payload payload ->
-          let hits =
-            parse_bing_rss_items payload
-            |> take_results limit
-            |> normalize_hits ~source:(provider_to_string Bing_rss)
-          in
-          Ok { engine = provider_to_string Bing_rss; search_url; hits }
-      | Ok _ -> Error (Parse "provider returned invalid RSS"))
 
 let cache_key ~query ~limit =
   String.concat "|"
@@ -621,11 +503,19 @@ let cache_store key response now =
     Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
         Hashtbl.replace cache_entries key { response; expires_at = now +. ttl })
 
+(* Rendered when the provider chain is empty — the operator-facing
+   remedy travels with the failure instead of a bare symptom. Shared
+   with the test simulator so both boundaries report the same fact. *)
+let no_provider_configured_message =
+  "no web search provider is configured: set web_search.searxng_url \
+   (MASC_SEARXNG_URL) or a provider API key (BRAVE_SEARCH_API_KEY / \
+   TAVILY_API_KEY / EXA_API_KEY / BING_SEARCH_API_KEY)"
+
 let search_impl ~query ~limit =
   let rec loop errors = function
     | [] ->
         Error
-          (if Stdlib.List.length errors = 0 then "no web search providers configured"
+          (if Stdlib.List.length errors = 0 then no_provider_configured_message
            else
              "all web search providers failed: "
              ^ String.concat "; " (List.rev errors))
@@ -667,7 +557,7 @@ let simulated_search_impl ~outcomes ~query ~limit =
   let rec loop errors = function
     | [] ->
         Error
-          (if Stdlib.List.length errors = 0 then "all web search providers failed"
+          (if Stdlib.List.length errors = 0 then no_provider_configured_message
            else String.concat "; " (List.rev errors))
     | (provider_name, outcome) :: rest -> (
         match outcome with
@@ -693,10 +583,11 @@ let with_simulated_search_for_test ~outcomes f =
    substring matching):
 
    - [Workflow_rejection]: empty query input.
-   - [Runtime_failure]:    [search_impl] aggregate ("all web
-     search providers failed: ..."). The 7-provider fallback
-     chain exhausted; per-provider transport vs server
-     distinction is preserved as typed [provider_error] variants
+   - [Runtime_failure]:    [search_impl] aggregate — either
+     [no_provider_configured_message] (empty credentialed
+     chain) or "all web search providers failed: ..." (chain
+     exhausted). Per-provider transport vs server distinction
+     is preserved as typed [provider_error] variants
      ([Transport] / [Server] / [Config] / [Parse]) and rendered
      into the aggregate string via [provider_error_to_string].
      The aggregate boundary remains [Runtime_failure] for now

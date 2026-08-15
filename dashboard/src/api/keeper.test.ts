@@ -1373,3 +1373,45 @@ describe('parseKeeperEventQueuePendingSnapshot cancellation fields', () => {
     expect(row?.cancelledReason).toBeUndefined()
   })
 })
+
+describe('parseKeeperEventQueuePendingSnapshot workspace message fields', () => {
+  const snapshot = (extra: Record<string, unknown>) => ({
+    schema: 'keeper_event_queue.pending.v2',
+    ok: true,
+    keeper_name: 'sangsu',
+    revision: '9',
+    total_pending: 1,
+    next_after: null,
+    pending: [{
+      queue_index: 0,
+      post_id: 'workspace-message:wmsg-1234567890abcdef',
+      source_ref: 'b'.repeat(64),
+      source_incarnation: '9',
+      urgency: 'immediate',
+      arrived_at_unix: 1786822060,
+      payload_kind: 'workspace_message',
+      ...extra,
+    }],
+  })
+
+  // Without these the operator row reads "wake reason workspace_message" and
+  // nothing else: no sender, and no way back to the transcript line.
+  it('carries the sender and the request id through', () => {
+    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({
+      message_request_id: 'wmsg-1234567890abcdef',
+      message_from: 'keeper-rondo-agent',
+    }))
+    const row = parsed.pending[0]
+    expect(row).toBeDefined()
+    expect(row?.messageRequestId).toBe('wmsg-1234567890abcdef')
+    expect(row?.messageFrom).toBe('keeper-rondo-agent')
+  })
+
+  it('leaves both absent on a backend that predates the fields', () => {
+    const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({}))
+    const row = parsed.pending[0]
+    expect(row).toBeDefined()
+    expect(row?.messageRequestId).toBeUndefined()
+    expect(row?.messageFrom).toBeUndefined()
+  })
+})

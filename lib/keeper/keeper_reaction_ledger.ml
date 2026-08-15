@@ -12,7 +12,7 @@ type stimulus_kind =
   | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
-  | Keeper_message
+  | Workspace_message
 
 type reaction_kind =
   | Turn_started
@@ -40,7 +40,7 @@ let stimulus_kind_to_string = function
   | Goal_reconciliation_ready -> "goal_reconciliation_ready"
   | Completion_authority_rejected -> "completion_authority_rejected"
   | Task_cancelled -> "task_cancelled"
-  | Keeper_message -> "keeper_message"
+  | Workspace_message -> "workspace_message"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -59,7 +59,7 @@ let stimulus_kind_of_string = function
   | "goal_reconciliation_ready" -> Some Goal_reconciliation_ready
   | "completion_authority_rejected" -> Some Completion_authority_rejected
   | "task_cancelled" -> Some Task_cancelled
-  | "keeper_message" -> Some Keeper_message
+  | "workspace_message" -> Some Workspace_message
   | _ -> None
 ;;
 
@@ -97,7 +97,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Completion_authority_rejected _ ->
     Completion_authority_rejected
   | Keeper_event_queue.Task_cancelled _ -> Task_cancelled
-  | Keeper_event_queue.Keeper_message _ -> Keeper_message
+  | Keeper_event_queue.Workspace_message _ -> Workspace_message
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -209,11 +209,11 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "task_cancelled task_id=%s cancelled_by=%s"
       cancellation.tc_task_id
       cancellation.tc_cancelled_by
-  | Keeper_event_queue.Keeper_message message ->
+  | Keeper_event_queue.Workspace_message message ->
     Printf.sprintf
-      "keeper_message request_id=%s from=%s"
-      message.kmsg_request_id
-      message.kmsg_from
+      "workspace_message request_id=%s from=%s"
+      message.wmsg_request_id
+      message.wmsg_from
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -234,7 +234,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Goal_reconciliation_ready _ -> None
     | Keeper_event_queue.Completion_authority_rejected _ -> None
     | Keeper_event_queue.Task_cancelled _ -> None
-    | Keeper_event_queue.Keeper_message _ -> None
+    | Keeper_event_queue.Workspace_message _ -> None
   in
   `Assoc
     (base_fields
@@ -848,7 +848,7 @@ let decode_current_row ~keeper_name row =
         | Goal_reconciliation_ready
         | Completion_authority_rejected
         | Task_cancelled
-        | Keeper_message ),
+        | Workspace_message ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1319,7 +1319,7 @@ let board_stimulus_token metadata stimulus_kind =
   | Goal_reconciliation_ready
   | Completion_authority_rejected
   | Task_cancelled
-  | Keeper_message -> None
+  | Workspace_message -> None
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =

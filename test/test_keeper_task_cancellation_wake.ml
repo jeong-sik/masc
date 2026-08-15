@@ -109,7 +109,7 @@ let queued_cancellations ~base_path ~keeper_name =
     | Event_queue.Goal_assigned _
     | Event_queue.Goal_reconciliation_ready _
     | Event_queue.Completion_authority_rejected _
-    | Event_queue.Keeper_message _ -> None)
+    | Event_queue.Workspace_message _ -> None)
 ;;
 
 let test_cross_keeper_cancellation_is_delivered () =

@@ -179,9 +179,6 @@ module Transport = struct
   let grpc_target_opt () =
     Sys.getenv_opt "MASC_GRPC_TARGET" |> trim_opt
 
-  (** WebSocket server port. Default: 8937. *)
-  let ws_port = get_port ~default:8937 "MASC_WS_PORT"
-
   (** Whether WebSocket transport is enabled. Default: true.
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"

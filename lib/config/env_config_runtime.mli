@@ -88,7 +88,6 @@ module Transport : sig
   val grpc_port : int
   val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
-  val ws_port : int
   val ws_enabled : unit -> bool
   val webrtc_enabled : unit -> bool
   val http_auth_strict_env_enabled : unit -> bool

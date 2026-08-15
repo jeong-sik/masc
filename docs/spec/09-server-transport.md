@@ -59,7 +59,7 @@ graph TB
     subgraph TransportLayer["Transport Layer"]
         MCP_HTTP[server_mcp_transport_http<br/>POST /mcp + GET /mcp SSE]
         H2_GW[server_h2_gateway<br/>HTTP/2 h2c]
-        WS_T[server_ws_standalone<br/>GET /ws discovery + ws://:8937/]
+        WS_T[server_mcp_transport_ws<br/>GET /ws same-origin upgrade]
         GRPC_S[masc_grpc_server<br/>:8936 h2c]
         WEBRTC[server_webrtc_transport<br/>/webrtc/*]
     end
@@ -103,7 +103,7 @@ graph TB
 |-----------|---------------|--------|------|------------|--------|
 | HTTP/1.1 | httpun-eio | `server_mcp_transport_http` | 8935 | 기본값 | Canonical |
 | HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
-| WebSocket | httpun-ws-eio | `server_ws_standalone` + `server_mcp_transport_ws` | 8937 standalone, discovery via 8935 `/ws` | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
+| WebSocket | ws-direct (`ws-direct-eio` / `ws-direct-gluten`) | `server_mcp_transport_ws` | HTTP 리스너의 `/ws` same-origin 업그레이드 | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
 | gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본값, `MASC_GRPC_ENABLED=0`으로 비활성화 | Available |
 | WebRTC | ocaml-webrtc | `server_webrtc_transport` | 8935 `/webrtc/*` | 기본값, `MASC_WEBRTC_ENABLED=0`으로 비활성화 | **Experimental** (local interop only; live env-gated) |
 | stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-stdio` 실행 | Available |
@@ -359,7 +359,7 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 | GET | `/mcp/operator` | `handle_get_operator_mcp` | Operator SSE |
 | DELETE | `/mcp/operator` | `handle_delete_mcp ~profile:Operator_remote` | Operator 세션 종료 |
 | GET | `/sse` | `sse_simple_handler` | 단순 SSE (Observer) |
-| GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_port`, `ws_url`) |
+| GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_url`) |
 | POST | `/webrtc/offer` | `handle_offer_request` | WebRTC offer signaling |
 | POST | `/webrtc/answer` | `handle_answer_request` | WebRTC answer signaling |
 | OPTIONS | `*` | `options_handler` | CORS preflight |
@@ -522,8 +522,8 @@ Cloudflare tunnel origin은 cleartext h2(h2c)를 지원하지 않는다. 따라�
 
 ### 9.2 동작 방식
 
-1. `GET /ws`로 `enabled`, `ws_port`, `ws_url`, `session_count`를 discovery
-2. 실제 연결은 standalone WS 포트(`ws://127.0.0.1:${MASC_WS_PORT:-8937}/`)로 HTTP 101 upgrade
+1. `GET /ws`로 `enabled`, `ws_url`, `session_count`를 discovery
+2. 실제 연결은 같은 HTTP 리스너의 `GET /ws`로 same-origin HTTP 101 upgrade
 2. WebSocket 연결 성공 후 `Sse.subscribe_external`로 broadcast 이벤트 수신 등록
 3. 인바운드 메시지: JSON-RPC 요청으로 디스패치 (현재 `on_message` callback, 기본값은 log & ignore)
 4. Ping/Pong 자동 처리

@@ -46,8 +46,7 @@ const currentWire = {
   websocket: {
     configured: false,
     listening: false,
-    mode: 'standalone',
-    port: 8937,
+    mode: 'same_origin',
     sessions: 0,
     relay_source: 'sse_external_subscriber',
     delivery: {
@@ -116,7 +115,7 @@ describe('decodeTransportHealthData', () => {
     expect(result.summary.primary_path).toBe('streamable_http')
     expect(result.sse.hot_sessions).toEqual([])
     expect(result.grpc.port).toBe(8936)
-    expect(result.websocket.mode).toBe('standalone')
+    expect(result.websocket.mode).toBe('same_origin')
     expect(result.webrtc.signaling_mode).toBe('shared_http')
     expect(result.http2.listener_mode).toBe('auto')
     expect(result.projection_diagnostics.source).toBe('cached_surface')

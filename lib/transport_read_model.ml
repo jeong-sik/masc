@@ -34,13 +34,6 @@ let ipaddr_is_unspecified = function
   | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
 ;;
 
-let ipaddr_is_loopback = function
-  | Ipaddr.V4 addr ->
-    let octets = Ipaddr.V4.to_octets addr in
-    String.length octets = 4 && Char.code octets.[0] = 127
-  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-;;
-
 let is_unspecified_host host =
   match Ipaddr.of_string (String.trim host) with
   | Ok ip -> ipaddr_is_unspecified ip
@@ -56,16 +49,6 @@ let is_canonical_loopback_alias host =
       | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
       | Ok (Ipaddr.V4 _) -> false
       | Error _ -> false)
-;;
-
-let is_loopback_host host =
-  let normalized = String.trim host |> String.lowercase_ascii in
-  if String.equal normalized "localhost"
-  then true
-  else
-    match Ipaddr.of_string normalized with
-    | Ok ip -> ipaddr_is_loopback ip
-    | Error _ -> false
 ;;
 
 let normalize_advertised_host host =
@@ -171,47 +154,25 @@ let get_ws_session_count () =
       M.session_count ()
   | None -> 0
 
+(* WebSocket is served only as a same-origin upgrade on the HTTP
+   listener, so readiness is exactly [ws_enabled ()]:
+   [set_ws_same_origin_runtime_ready true] runs unconditionally in
+   [Server_runtime_bootstrap] before any transport starts. There is no
+   separate host/port for a client to discover — the socket is the one
+   it already reached us on. *)
 let websocket_discovery_json (ctx : http_context) =
   let enabled = Transport_metrics.ws_enabled () in
-  let port = Env_config.Transport.ws_port in
-  let standalone_listening = Transport_metrics.ws_listening () in
-  let standalone_bind_host = Masc_network_defaults.masc_http_default_host in
-  let request_host_can_reach_standalone = is_loopback_host ctx.host in
-  let standalone_reachable =
-    request_host_can_reach_standalone
-    && (standalone_listening || tcp_port_reachable port)
-  in
-  let standalone_ws_url = Printf.sprintf "ws://%s:%d/" standalone_bind_host port in
-  let same_origin_upgrade_enabled = Transport_metrics.ws_same_origin_ready () in
+  let ready = Transport_metrics.ws_same_origin_ready () in
   let same_origin_ws_url = websocket_url_from_base_url ctx.base_url in
-  let listening = standalone_listening || same_origin_upgrade_enabled in
-  let reachable = standalone_reachable || same_origin_upgrade_enabled in
-  let discovered_ws_url =
-    if same_origin_upgrade_enabled then `String same_origin_ws_url
-    else if request_host_can_reach_standalone then `String standalone_ws_url
-    else `Null
-  in
-  let primary_mode =
-    if same_origin_upgrade_enabled then "same_origin" else "standalone"
-  in
-  let primary_upgrade_path =
-    if same_origin_upgrade_enabled then "/ws" else "/"
-  in
   let base_fields =
     [ "enabled", `Bool enabled ]
     @ maybe_configured_fields ~include_configured:ctx.include_configured enabled
-    @ [ "listening", `Bool listening
-      ; "reachable", `Bool reachable
-      ; "listen_status", `String (Atomic.get Transport_metrics.ws_listen_status)
-      ; "mode", `String primary_mode
+    @ [ "listening", `Bool ready
+      ; "reachable", `Bool ready
+      ; "mode", `String "same_origin"
       ; "discovery_path", `String "/ws"
-      ; "upgrade_path", `String primary_upgrade_path
-      ; "standalone_listening", `Bool standalone_listening
-      ; "standalone_bind_host", `String standalone_bind_host
+      ; "upgrade_path", `String "/ws"
       ; "request_host", `String ctx.host
-      ; "request_host_can_reach_standalone", `Bool request_host_can_reach_standalone
-      ; "same_origin_listening", `Bool same_origin_upgrade_enabled
-      ; "same_origin_reachable", `Bool same_origin_upgrade_enabled
       ; "session_count", `Int (get_ws_session_count ())
       ]
   in
@@ -219,20 +180,11 @@ let websocket_discovery_json (ctx : http_context) =
     if enabled
     then
       base_fields
-      @ [ "ws_port", `Int port
-        ; "ws_url", discovered_ws_url
-        ; "standalone_ws_port", `Int port
-        ; "standalone_ws_url", `String standalone_ws_url
-        ; "same_origin_upgrade_enabled", `Bool same_origin_upgrade_enabled
+      @ [ "ws_url", `String same_origin_ws_url
+        ; "same_origin_upgrade_enabled", `Bool ready
         ; "same_origin_upgrade_path", `String "/ws"
         ; "same_origin_ws_url", `String same_origin_ws_url
         ]
-      @
-      (if discovered_ws_url <> `Null
-       then []
-       else if request_host_can_reach_standalone
-       then []
-       else [ "unavailable_reason", `String "standalone_ws_loopback_only" ])
     else base_fields
   in
   `Assoc fields

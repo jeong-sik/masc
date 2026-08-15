@@ -379,7 +379,6 @@ let http_listener_json ?now () =
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false
-let ws_runtime_listening : bool Atomic.t = Atomic.make false
 let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
 
 (** Explanatory status for why a transport is or is not listening.
@@ -387,14 +386,11 @@ let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
     ["bind_failed"], ["stopped"]. *)
 let grpc_listen_status : string Atomic.t = Atomic.make "not_started"
 
-let ws_listen_status : string Atomic.t = Atomic.make "not_started"
 let set_grpc_runtime_listening listening = Atomic.set grpc_runtime_listening listening
-let set_ws_runtime_listening listening = Atomic.set ws_runtime_listening listening
 let set_ws_same_origin_runtime_ready ready =
   Atomic.set ws_same_origin_runtime_ready ready
 
 let set_grpc_listen_status status = Atomic.set grpc_listen_status status
-let set_ws_listen_status status = Atomic.set ws_listen_status status
 let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 let grpc_port () = Env_config.Transport.grpc_port
 let grpc_listening () = grpc_enabled () && Atomic.get grpc_runtime_listening
@@ -439,8 +435,6 @@ let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_retry_total ~relay_d
 ;;
 
 let ws_enabled () = Env_config.Transport.ws_enabled ()
-let ws_port () = Env_config.Transport.ws_port
-let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let ws_same_origin_ready () =
   ws_enabled () && Atomic.get ws_same_origin_runtime_ready
 
@@ -604,8 +598,9 @@ let transport_health_json () =
       , `Assoc
           [ "configured", `Bool ws_configured
           ; "listening", `Bool ws_live
-          ; "mode", `String "standalone"
-          ; "port", `Int (ws_port ())
+          ; (* Sessions ride the HTTP listener's same-origin /ws upgrade,
+               so there is no WebSocket-specific port to report. *)
+            "mode", `String "same_origin"
           ; "sessions", `Int ws_sessions
           ; "relay_source", `String "sse_external_subscriber"
           ; ( "delivery"

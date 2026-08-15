@@ -234,16 +234,12 @@ val inc_ws_delta_payload_serialization : unit -> unit
     Drift would break dashboard tooltips. *)
 val grpc_listen_status : string Atomic.t
 
-(** WebSocket variant of {!grpc_listen_status}. *)
-val ws_listen_status : string Atomic.t
 
 (** [set_grpc_runtime_listening listening] flips the gRPC
     listen-state Atomic.  Combined with
     {!Env_config.Transport.grpc_enabled} via {!grpc_listening}. *)
 val set_grpc_runtime_listening : bool -> unit
 
-(** WebSocket variant of {!set_grpc_runtime_listening}. *)
-val set_ws_runtime_listening : bool -> unit
 
 (** [set_ws_same_origin_runtime_ready ready] flips the same-origin [/ws]
     upgrade readiness Atomic.  This is separate from the HTTP listener being
@@ -257,8 +253,6 @@ val set_ws_same_origin_runtime_ready : bool -> unit
     break dashboard parsing. *)
 val set_grpc_listen_status : string -> unit
 
-(** WebSocket variant of {!set_grpc_listen_status}. *)
-val set_ws_listen_status : string -> unit
 
 (** [grpc_listening ()] is
     [grpc_enabled () && Atomic.get grpc_runtime_listening] —
@@ -270,10 +264,6 @@ val grpc_listening : unit -> bool
     Read every call — env mutation between calls takes effect. *)
 val ws_enabled : unit -> bool
 
-(** [ws_listening ()] is
-    [ws_enabled () && Atomic.get ws_runtime_listening] —
-    AND of env-config and runtime state. *)
-val ws_listening : unit -> bool
 
 (** [ws_same_origin_ready ()] is [ws_enabled ()] AND the runtime readiness bit
     set after the inbound WebSocket dispatcher is installed. *)

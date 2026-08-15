@@ -1589,10 +1589,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       in
       Server_mcp_transport_ws.set_inbound_message_handler
         dispatch_ws_inbound_message;
+      (* WebSocket rides the HTTP listener's same-origin /ws upgrade
+         (enabled by default, opt-out via MASC_WS_ENABLED=0). *)
       Transport_metrics.set_ws_same_origin_runtime_ready true;
-      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
-      Server_ws_standalone.start ~sw ~env
-        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message;
       (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
       if Server_webrtc_transport.is_enabled () then (
         Log.Server.info "WebRTC DataChannel transport enabled";
@@ -1633,7 +1632,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Transport_bridge.register_provider (module struct
         let name = "ws"
         let protocol = Transport.Ws
-        let is_enabled () = Server_ws_standalone.is_enabled ()
+        let is_enabled () = Transport_metrics.ws_enabled ()
         let session_count () = Server_mcp_transport_ws.session_count ()
       end);
       Transport_bridge.register_provider (module struct

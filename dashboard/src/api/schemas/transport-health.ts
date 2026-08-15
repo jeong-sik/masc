@@ -70,8 +70,7 @@ const WebsocketDeliverySchema = Schema.Struct({
 const WebsocketSchema = Schema.Struct({
   configured: Schema.Boolean,
   listening: Schema.Boolean,
-  mode: Schema.Literal('standalone'),
-  port: PortSchema,
+  mode: Schema.Literal('same_origin'),
   sessions: NonNegativeIntegerSchema,
   relay_source: Schema.Literal('sse_external_subscriber'),
   delivery: WebsocketDeliverySchema,

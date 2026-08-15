@@ -104,7 +104,7 @@ const PRACTICAL_CASES: PracticalCase[] = [
     transport: 'WebSocket',
     endpoint: () => '/ws',
     description: '양방향 소켓. operator UI 제어용.',
-    live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · port ${data.websocket.port}`,
+    live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · same-origin`,
   },
   {
     id: 'p2p-fastlane',
@@ -326,6 +326,12 @@ export function transportEyebrow(configured: boolean, listening: boolean, port: 
   return listening ? `:${port} 활성` : `:${port} 중단`
 }
 
+/** WebSocket rides the HTTP listener, so there is no separate port to show. */
+export function sameOriginEyebrow(configured: boolean, listening: boolean): string {
+  if (!configured) return '비활성'
+  return listening ? '/ws 활성' : '/ws 중단'
+}
+
 export function webrtcEyebrow(data: TransportHealthData): string {
   if (!data.webrtc.configured) return '비활성'
   return data.webrtc.signaling_available
@@ -503,7 +509,7 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
               </div>
             <//>
 
-            <${SectionCard} label="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
+            <${SectionCard} label="WebSocket" status=${wsStatus} eyebrow=${sameOriginEyebrow(data.websocket.configured, data.websocket.listening)}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
                 <${MetricRow} label="세션" value=${data.websocket.sessions} />

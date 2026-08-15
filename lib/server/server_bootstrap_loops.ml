@@ -153,11 +153,11 @@ let board_sse_event_params event =
       ]
 ;;
 
-(* Origin label carried on the [keeper_chat_appended] SSE event, alongside
-   "slack" / "discord" / "dashboard" / "fusion". A workspace message reaches
-   the transcript from the shared message bus, whether another Keeper's
-   [masc_broadcast] or the operator's dashboard broadcast wrote it. *)
-let workspace_message_chat_source = "workspace"
+(* Origin label carried on the [keeper_chat_appended] SSE event. Derived from
+   the surface the row is written with rather than spelled out here:
+   [Surface_ref.lane_label] is the single derivation site for these labels, so
+   a writer that invents its own string drifts from the row it announces. *)
+let workspace_message_chat_source = Surface_ref.lane_label Surface_ref.Agent
 
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target

@@ -51,6 +51,15 @@ val dialect_history_projection
   -> Types.message list
   -> (history_projection, Reasoning_history_projection.error) result
 
+val project_history
+  :  Provider_config.t
+  -> Types.message list
+  -> (Reasoning_history_projection.t, Reasoning_history_projection.error) result
+(** The history the OpenAI-compatible codecs will actually serialize.
+    [Openai_chat] and [Glm_chat] share it, which is why it is here rather than
+    in either backend. Pure — the diagnostic [observe] belongs to the
+    dispatcher. *)
+
 val dialect_messages_of_history
   :  ?assistant_tool_content_format:Capability_vocab.assistant_tool_content_format
   -> replay_capability:Reasoning_dialect.replay_capability

@@ -67,6 +67,108 @@ let content_of (m : Types.message) =
 
 let markers messages = List.concat_map content_of messages
 
+(* --- Turn boundary: the keeper keeps what it is working on --------------- *)
+
+(* The assembly demotes results from earlier turns and leaves this turn's
+   alone. Stated against the seeded history rather than a count of recent
+   results: a keeper that read a file this turn has to still see what it read,
+   and a keeper that read one three turns ago has an address for it. *)
+let this_turns_results_survive_the_boundary () =
+  let body i = String.make 4_000 (Char.chr (Char.code 'a' + i)) in
+  let earlier = history_with_tool_bodies [ body 0; body 1 ] in
+  let this_turn = history_with_tool_bodies [ body 2 ] in
+  let messages = earlier @ this_turn in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before messages
+  in
+  let transmitted = markers planned.Demotion.messages in
+  Alcotest.(check int)
+    "every result is still present"
+    3
+    (List.length transmitted);
+  Alcotest.(check bool)
+    "this turn's result is verbatim"
+    true
+    (List.exists (fun body -> String.equal body (String.make 4_000 'c')) transmitted);
+  Alcotest.(check int)
+    "and both earlier ones became addresses"
+    2
+    (List.length planned.Demotion.pending)
+;;
+
+(* A turn that has produced nothing yet must not demote its own seed out from
+   under itself before it has read anything. *)
+let a_turn_that_produced_nothing_demotes_everything_before_it () =
+  let messages = history_with_tool_bodies [ String.make 4_000 'a' ] in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length messages)
+  in
+  let planned =
+    Demotion.plan ~measure_message_bytes ~demote_before messages
+  in
+  Alcotest.(check int)
+    "the seeded history is all earlier work"
+    1
+    (List.length planned.Demotion.pending)
+;;
+
+(* [earlier] ends
+   with an Assistant that issued a call whose Tool answer has not been
+   recorded yet — the checkpoint captured a dangling tool cycle at the turn
+   boundary, exactly the shape [Keeper_compaction_unit]'s [protected_suffix]
+   exists to handle elsewhere. On request 1 (before the answer exists)
+   [first_atom_at_or_after] returns one value; once the answer lands on
+   request 2, it returns a different one. Confirm the drift is real, then
+   confirm it is inert: the disputed atom has no [ToolResult] content on the
+   request where the value differs, so [plan] demotes the same set either
+   way, and the completed atom is never split once it exists. *)
+let a_split_atom_at_the_boundary_never_gets_demoted_half () =
+  let earlier =
+    history_with_tool_bodies [ String.make 4_000 'e' ] @ [ assistant "dangling call" ]
+  in
+  let dangling_result = tool_message ~id:"dangling" (String.make 4_000 'd') in
+  let boundary = List.length earlier in
+  let messages_request_1 = earlier in
+  let messages_request_2 = earlier @ [ dangling_result ] in
+  let demote_before_1 =
+    Window.first_atom_at_or_after messages_request_1 ~message_index:boundary
+  in
+  let demote_before_2 =
+    Window.first_atom_at_or_after messages_request_2 ~message_index:boundary
+  in
+  Alcotest.(check bool)
+    "the boundary value does drift across the dangling call"
+    true
+    (demote_before_1 <> demote_before_2);
+  let planned_1 =
+    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_1 messages_request_1
+  in
+  let planned_2 =
+    Demotion.plan ~measure_message_bytes ~demote_before:demote_before_2 messages_request_2
+  in
+  Alcotest.(check int)
+    "request 1 has nothing demotable at the disputed atom yet"
+    1
+    (List.length planned_1.Demotion.pending);
+  Alcotest.(check int)
+    "request 2 demotes the same count once the answer exists"
+    1
+    (List.length planned_2.Demotion.pending);
+  Alcotest.(check bool)
+    "the completed dangling call survives verbatim, not split"
+    true
+    (List.exists
+       (String.equal (String.make 4_000 'd'))
+       (markers planned_2.Demotion.messages))
+;;
+
 (* --- 1. Bound soundness (RFC-0363 §6 test 2) -------------------------- *)
 
 (* The placeholder must bound the real marker for every byte range, because
@@ -234,9 +336,9 @@ let raw_cut_retained_atoms_are_verbatim () =
        (markers planned.Demotion.messages))
 ;;
 
-(* --- 6. The demotion boundary moves only with the raw cut -------------- *)
+(* --- 6. [plan] honours whatever boundary it is handed ------------------- *)
 
-let boundary_moves_only_with_the_raw_cut () =
+let plan_honours_a_monotonic_boundary () =
   let body = String.make 4000 'a' in
   let build atoms =
     List.concat
@@ -345,6 +447,18 @@ let () =
             `Quick
             demotion_actually_happens
         ; Alcotest.test_case "placeholder bounds the real marker" `Quick bound_is_sound
+        ; Alcotest.test_case
+            "this turn's results survive the boundary"
+            `Quick
+            this_turns_results_survive_the_boundary
+        ; Alcotest.test_case
+            "a turn that produced nothing demotes everything before it"
+            `Quick
+            a_turn_that_produced_nothing_demotes_everything_before_it
+        ; Alcotest.test_case
+            "a split atom at the boundary never gets demoted half"
+            `Quick
+            a_split_atom_at_the_boundary_never_gets_demoted_half
         ] )
     ; ( "exclusions"
       , [ Alcotest.test_case
@@ -366,9 +480,9 @@ let () =
         ] )
     ; ( "stability"
       , [ Alcotest.test_case
-            "demotion boundary moves only with the raw cut"
+            "plan honours a monotonic boundary"
             `Quick
-            boundary_moves_only_with_the_raw_cut
+            plan_honours_a_monotonic_boundary
         ; Alcotest.test_case
             "projection reuses candidate measurements"
             `Quick

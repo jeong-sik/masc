@@ -61,11 +61,14 @@ val plan
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would
       make a corrupt payload content-addressed and permanent.
-    - its atom index is below [demote_before], which must be [dropped_atoms]
-      from {!Runtime_model_input_tail_window.project_with_drop} on the same
-      unmodified message list. The demotion boundary therefore moves only when
-      the authoritative raw cut moves; appending one turn cannot rewrite the
-      previous request's retained prefix.
+    - its atom index is below [demote_before], an atom index into this same
+      unmodified message list. The caller owns where that boundary sits and
+      owns the consequence: a boundary that moves on every message rewrites the
+      transmitted prefix on every request and costs the provider's prompt
+      cache, so callers pick one that moves at the rate the conversation
+      itself does. The keeper's assembly uses the turn — results the current
+      turn produced are what it is reasoning over, results from earlier turns
+      were already reported elsewhere — which moves once per turn.
     - the placeholder measures strictly smaller than the message does now.
       This replaces a size threshold: the encoded marker runs from about 125
       bytes to 1,154 depending on the preview's bytes, because

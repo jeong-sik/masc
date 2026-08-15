@@ -43,9 +43,27 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type model_input_measurement =
+  | Wire_shape
+  | Durable_shape
+
+let model_input_measurement_to_string = function
+  | Wire_shape -> "wire_shape"
+  | Durable_shape -> "durable_shape"
+;;
+
+let model_input_measurement_of_string = function
+  | "wire_shape" -> Ok Wire_shape
+  | "durable_shape" -> Ok Durable_shape
+  | other ->
+    Error
+      (Printf.sprintf "turn_record: unknown model_input_measurement %S" other)
+;;
+
 type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
+  ; measurement : model_input_measurement
   }
 
 type turn_kind =
@@ -147,11 +165,13 @@ let to_json (r : t) : Yojson.Safe.t =
       `String observation.runtime_profile, `Int observation.body_bytes
     | None -> `Null, `Null
   in
-  let transmitted_atoms, total_atoms =
+  let transmitted_atoms, total_atoms, model_input_measurement =
     match r.model_input_window with
     | Some window ->
-      `Int window.transmitted_atoms, `Int window.total_atoms
-    | None -> `Null, `Null
+      ( `Int window.transmitted_atoms
+      , `Int window.total_atoms
+      , `String (model_input_measurement_to_string window.measurement) )
+    | None -> `Null, `Null, `Null
   in
   `Assoc
     ([ ( "execution_ids"
@@ -174,6 +194,7 @@ let to_json (r : t) : Yojson.Safe.t =
      ; "request_body_bytes", request_body_bytes
      ; "transmitted_atoms", transmitted_atoms
      ; "total_atoms", total_atoms
+     ; "model_input_measurement", model_input_measurement
      ; ( "raw_trace_run_ref"
        , match r.raw_trace_run_ref with
          | Some run_ref -> raw_trace_run_ref_to_json run_ref
@@ -441,6 +462,7 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
             ; "request_body_bytes"
             ; "transmitted_atoms"
             ; "total_atoms"
+            ; "model_input_measurement"
             ; "raw_trace_run_ref"
             ; "selected_model"
             ; "finish_reason"
@@ -539,19 +561,22 @@ let of_json (json : Yojson.Safe.t) : (t, string) result =
         nullable "transmitted_atoms" fields as_nonnegative_int
       in
       let* total_atoms = nullable "total_atoms" fields as_nonnegative_int in
+      let* measurement =
+        nullable "model_input_measurement" fields (fun name json ->
+          let* raw = as_nonempty_string name json in
+          model_input_measurement_of_string raw)
+      in
       let* model_input_window =
-        match transmitted_atoms, total_atoms with
-        | Some transmitted_atoms, Some total_atoms ->
+        match transmitted_atoms, total_atoms, measurement with
+        | Some transmitted_atoms, Some total_atoms, Some measurement ->
           if transmitted_atoms > total_atoms
-          then
-            Error
-              "turn_record: transmitted_atoms cannot exceed total_atoms"
-          else Ok (Some { transmitted_atoms; total_atoms })
-        | None, None -> Ok None
-        | Some _, None | None, Some _ ->
+          then Error "turn_record: transmitted_atoms cannot exceed total_atoms"
+          else Ok (Some { transmitted_atoms; total_atoms; measurement })
+        | None, None, None -> Ok None
+        | _ ->
           Error
-            "turn_record: transmitted_atoms and total_atoms must both be \
-             present or both be null"
+            "turn_record: transmitted_atoms, total_atoms and \
+             model_input_measurement must all be present or all be null"
       in
       let* raw_trace_run_ref_json = require "raw_trace_run_ref" fields in
       let* raw_trace_run_ref =

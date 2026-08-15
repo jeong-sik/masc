@@ -345,6 +345,28 @@ let capabilities_of_config = Backend_openai_request.capabilities_of_config
    [max_output_tokens]. *)
 let add_sampling_field = Backend_openai_request.add_sampling_field
 
+(* The reasoning blocks this codec puts on the wire, and the ones it
+   drops. Separated from [build_request] so a caller that must size a
+   request before building it gets the same answer the wire will give;
+   the diagnostic [observe] stays at the call site, which keeps this a
+   function of its arguments. *)
+let project_history config messages =
+  Reasoning_history_projection.project_for_provider_config
+    ~assistant_has_payload:(fun content -> content <> [])
+    ~reasoning_block_supported:(function
+      | RedactedThinking _ -> true
+      | Thinking _
+      | ReasoningDetails _
+      | Text _
+      | ToolUse _
+      | ToolResult _
+      | Image _
+      | Document _
+      | Audio _ -> false)
+    config
+    messages
+;;
+
 let build_request_artifact
       ?(stream = false)
       ~(config : Provider_config.t)
@@ -354,30 +376,13 @@ let build_request_artifact
   =
   let tools = Backend_openai_request.effective_tools config tools in
   let projected_messages =
-    match
-      Reasoning_history_projection.project_for_provider_config
-        ~assistant_has_payload:(fun content -> content <> [])
-        ~reasoning_block_supported:(function
-          | RedactedThinking _ -> true
-          | Thinking _
-          | ReasoningDetails _
-          | Text _
-          | ToolUse _
-          | ToolResult _
-          | Image _
-          | Document _
-          | Audio _ -> false)
-        config
-        messages
-    with
+    match project_history config messages with
     | Error error ->
       invalid_arg
         ("Backend_openai_responses.build_request: "
          ^ Reasoning_history_projection.error_to_string error)
     | Ok projection ->
-      Reasoning_history_projection.observe
-        ~component:"backend_openai_responses"
-        projection;
+      Reasoning_history_projection.observe ~component:"backend_openai_responses" projection;
       validate_projected_opaque_reasoning projection.messages;
       projection.messages
   in

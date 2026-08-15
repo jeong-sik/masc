@@ -131,7 +131,10 @@ type try_provider_ctx =
        unit)
         option
   ; on_model_input_window_observation :
-      (Runtime_model_input_tail_window.window_observation -> unit) option
+      (measurement:Turn_record.model_input_measurement
+       -> Runtime_model_input_tail_window.window_observation
+       -> unit)
+        option
   ; (* Event bus *)
     event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
@@ -490,7 +493,9 @@ let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
    window stays ahead of [ctx.model_input_projection] so that projection's
    projected-prefix precondition keeps holding against the list it
    receives. *)
-let budgeted_model_input_projection (ctx : try_provider_ctx)
+let budgeted_model_input_projection
+      (ctx : try_provider_ctx)
+      ~(provider_config : Llm_provider.Provider_config.t)
   : Agent_core.Agent.model_input_projection
   =
   let reserved_bytes =
@@ -518,7 +523,56 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
      the list spine is rebuilt — which is what makes the memo hit at all: it
      confirms every lookup with physical equality. *)
   let measure_message_bytes = memoize_message_measurement measure_message_bytes in
+  (* Scoped to the attempt, written by the one fiber that drives it. The
+     closure below runs per provider request — 62 to 83 of them in one keeper
+     turn on the traces this window's own comment cites — and a keeper whose
+     history carries a malformed tag falls back on every one of them, forever.
+     Narrating that per request is the shape this codebase already had to undo
+     once: [Reasoning_history_projection.observe]'s comment records a WARN
+     firing ~973x/day about routine normalisation before it was demoted. *)
+  let fallback_reported = ref false in
   fun messages ->
+    (* Measure the history the wire will carry, not the history the checkpoint
+       holds. [Keeper_context_core.message_to_json] is the durable encoder — it
+       must keep reasoning verbatim — but a dialect that replays none of it
+       deletes every such block before serialization. Budgeting against the
+       durable shape charges the window for bytes the provider never receives,
+       and the room they take comes out of transmitted conversation: 23.6% of
+       it on a live 2026-08-14 trace from a reasoning-heavy lane.
+
+       The projection is the same one the serializer runs, through the same
+       per-codec function, and it is idempotent — the backend applying it again
+       to this output finds nothing left to drop. *)
+    let messages, measurement =
+      match
+        Agent_core.Llm_provider.Complete_common.transmitted_history
+          ~config:provider_config
+          messages
+      with
+      | Ok transmitted -> transmitted, Turn_record.Wire_shape
+      | Error error ->
+        (* A refusal here must not become the turn's refusal. The projection
+           validates reasoning provenance across the whole list it is given,
+           and it is given the whole checkpoint — so one malformed tag anywhere
+           in a keeper's lifetime would otherwise abort every later turn, with
+           no typed overflow for the shrink retry to catch. Before this budget
+           existed the same check ran only over the windowed tail, inside the
+           backend, and still does: falling back to the durable shape restores
+           exactly that scope. The cost is the narrower window this refinement
+           was added to widen, which is the previous behaviour, not a new
+           failure. *)
+        if not !fallback_reported
+        then (
+          fallback_reported := true;
+          Log.Keeper.warn
+            "%s: model input measured against durable shape; reasoning \
+             projection declined: %s"
+            ctx.keeper_name
+            (Agent_core.Llm_provider.Reasoning_history_projection
+             .error_to_string
+               error));
+        messages, Turn_record.Durable_shape
+    in
     let planned_and_windowed =
       offload_model_input_cpu (fun () ->
         let raw_cut candidate =
@@ -535,13 +589,29 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
         | Error error ->
           Error (Runtime_model_input_tail_window.budget_error_to_string error)
         | Ok raw_projection ->
+          (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
+             reasoning over right now is what this turn produced, and
+             [ctx.initial_messages] is exactly the history the turn was seeded
+             with — so everything past it is this turn's own work and stays
+             verbatim, and everything before it was already reported through a
+             receipt or a board post and becomes a readable address.
+
+             This is a boundary rather than a count of recent results. It also
+             keeps the property the previous boundary was chosen for: appending
+             a message cannot rewrite the retained prefix, because it moves
+             once per turn rather than once per message. *)
+          let demote_before =
+            Runtime_model_input_tail_window.first_atom_at_or_after
+              messages
+              ~message_index:(List.length ctx.initial_messages)
+          in
           let planned =
-            if String.equal ctx.base_path "" || raw_projection.dropped_atoms = 0
+            if String.equal ctx.base_path "" || demote_before = 0
             then { Keeper_model_input_demotion.messages; pending = [] }
             else
               Keeper_model_input_demotion.plan
                 ~measure_message_bytes
-                ~demote_before:raw_projection.dropped_atoms
+                ~demote_before
                 messages
           in
           (* The first cut is the only one taken against the whole history;
@@ -605,6 +675,7 @@ let budgeted_model_input_projection (ctx : try_provider_ctx)
       Option.iter
         (fun observe ->
            observe
+             ~measurement
              (Runtime_model_input_tail_window.observe
                 ~history_atom_count
                 windowed))
@@ -677,7 +748,6 @@ let run_try_provider
           ; preserve_thinking = ctx.preserve_thinking
           ; event_bus = ctx.event_bus
           ; initial_messages = ctx.initial_messages
-          ; model_input_projection = Some (budgeted_model_input_projection ctx)
             (* The serialized request body is the quantity the provider admits
                against [max_request_body_bytes]. AGENT_CORE's provider-specific
                serialization boundary reports every admitted request; a typed
@@ -712,6 +782,19 @@ let run_try_provider
   match config_result with
   | Error err -> Error err, None, None
   | Ok config ->
+    (* Installed here rather than on the record above because the projection
+       needs the provider config that record is still producing: it measures
+       the history that config's serializer will carry, and asking a config
+       that does not exist yet would mean measuring something else. *)
+    let config =
+      { config with
+        Runtime_agent.model_input_projection =
+          Some
+            (budgeted_model_input_projection
+               ctx
+               ~provider_config:config.Runtime_agent.provider_cfg)
+      }
+    in
     (* Explicit stream stall detection is handled by AGENT_CORE's
        [stream_idle_timeout_s]; [None] deliberately leaves it disabled.
        No separate liveness FSM for the common case — provider stall is

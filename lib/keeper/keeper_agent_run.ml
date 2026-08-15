@@ -895,8 +895,9 @@ let run_turn
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
                       ~on_model_input_window_observation:
-                        (fun observation ->
-                           model_input_window_ref := Some observation)
+                        (fun ~measurement observation ->
+                           model_input_window_ref :=
+                             Some (measurement, observation))
                       ~on_request_wire_observation:
                         (fun
                           ~runtime_id
@@ -1312,14 +1313,16 @@ let run_turn
           ~model_input_window:
             (Option.map
                (fun
-                 (observation :
-                   Runtime_model_input_tail_window.window_observation)
+                 ( (measurement : Turn_record.model_input_measurement)
+                 , (observation :
+                     Runtime_model_input_tail_window.window_observation) )
                ->
                   { Turn_record.transmitted_atoms =
                       observation
                         .Runtime_model_input_tail_window.transmitted_atoms
                   ; total_atoms =
                       observation.Runtime_model_input_tail_window.total_atoms
+                  ; measurement
                   })
                !model_input_window_ref)
           ~raw_trace_run_ref

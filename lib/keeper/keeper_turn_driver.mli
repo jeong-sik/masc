@@ -133,7 +133,9 @@ val run_named :
      body_bytes:int ->
      unit) ->
   ?on_model_input_window_observation:
-    (Runtime_model_input_tail_window.window_observation -> unit) ->
+    (measurement:Turn_record.model_input_measurement
+     -> Runtime_model_input_tail_window.window_observation
+     -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->

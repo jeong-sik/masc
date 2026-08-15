@@ -47,6 +47,7 @@ let model_execute_cwd_resolution_error ~config ~meta ~args ~cwd error =
   in
   Keeper_tool_execution.failure
     ~class_:Tool_result.Policy_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
     (error_json ~fields message)
 
 let sandbox_target_label = function
@@ -108,6 +109,25 @@ let redact_execute_output redaction ~stdout ~stderr =
     if String.equal stderr "" then stdout else stdout ^ stderr
   in
   stdout, stderr, output
+
+let composable_output_fields ~base_path ~stdout ~stderr ~output =
+  if String.length output <= Tool_bridge.default_externalize_threshold_bytes
+  then Ok [ "output", `String output ]
+  else
+    try
+      let store = Tool_blob_store.create ~base_path in
+      let store_stream bytes =
+        Tool_blob_store.put_durable store ~bytes ~mime:"text/plain"
+        |> Tool_output.normalized_artifact_ref_to_json
+      in
+      Ok
+        [ "output_artifact", store_stream output
+        ; "stdout_artifact", store_stream stdout
+        ; "stderr_artifact", store_stream stderr
+        ]
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
@@ -222,6 +242,7 @@ let handle_tool_execute_typed
       | Error e ->
         Keeper_tool_execution.failure
           ~class_:Tool_result.Policy_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
           (error_json
              ~fields:
                ([ "typed", `Bool true ] @ model_location_fields)
@@ -234,6 +255,7 @@ let handle_tool_execute_typed
            in
            Keeper_tool_execution.failure
              ~class_:Tool_result.Policy_rejection
+             ~effect_disposition:Tool_result.Proven_pre_effect
              (error_json ~fields (typed_validation_error_text e))
          | Ok () ->
         let cmd = typed_input_command_text input in
@@ -380,6 +402,7 @@ let handle_tool_execute_typed
           in
           Keeper_tool_execution.failure
             ~class_:Tool_result.Policy_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
             (error_json ~fields (typed_validation_error_text e))
         | Ok ir ->
         let cmd_for_log =
@@ -405,6 +428,7 @@ let handle_tool_execute_typed
           =
           Keeper_tool_execution.failure
             ~class_
+            ~effect_disposition:Tool_result.Proven_pre_effect
             (error_json
                ~fields:(typed_context_fields @ extra_fields)
                msg)
@@ -642,23 +666,74 @@ let handle_tool_execute_typed
               | Unix.WEXITED 0, _ | _, "" -> []
               | _, stderr -> [ "error", `String stderr; "stderr", `String stderr ]
             in
-            let payload =
-              Yojson.Safe.to_string
-                (`Assoc
+            let output_fields =
+              if succeeded
+              then
+                composable_output_fields
+                  ~base_path:config.base_path
+                  ~stdout
+                  ~stderr
+                  ~output
+              else Ok [ "output", `String output ]
+            in
+            (match output_fields with
+             | Error detail ->
+               Log.Keeper.warn
+                 ~keeper_name:meta.name
+                 "execute output artifact persistence failed after process completion: %s"
+                 detail;
+               authorized
+                 (Keeper_tool_execution.failure
+                    ~effect_disposition:Tool_result.Proven_post_effect
+                    (error_json
+                       ~fields:
+                         ([ "typed", `Bool true
+                          ; "code", `String "execute_output_externalization_failed"
+                          ; "status", status_json
+                          ; "execution_time_ms", `Int elapsed_ms
+                          ]
+                          @ dispatched_model_location_fields)
+                       "Execute completed, but its oversized output artifact could not be persisted."))
+             | Ok output_fields ->
+               let payload =
+                 `Assoc
                    ([ "ok", `Bool succeeded
                     ; "status", status_json
-                    ; "output", `String output
-                    ; "typed", `Bool true
-                    ; "execution_time_ms", `Int elapsed_ms
                     ]
+                    @ output_fields
+                    @ [ "typed", `Bool true
+                      ; "execution_time_ms", `Int elapsed_ms
+                      ]
                     @ failure_error_fields
                     @ sandbox_extra_fields
-                    @ dispatched_model_location_fields))
-            in
-            authorized
-              (if succeeded
-               then Keeper_tool_execution.success payload
-               else Keeper_tool_execution.failure payload)
+                    @ dispatched_model_location_fields)
+               in
+               authorized
+                 (if succeeded
+                  then
+                    (match
+                       Tool_bridge.attach_artifact_manifest
+                         ~base_path:config.base_path
+                         (Tool_result.make_ok
+                            ~tool_name:"tool_execute"
+                            ~start_time:t0
+                            ~data:payload
+                            ())
+                     with
+                     | Ok result -> Keeper_tool_execution.of_tool_result result
+                     | Error _ ->
+                       Keeper_tool_execution.failure
+                         ~effect_disposition:Tool_result.Proven_post_effect
+                         (error_json
+                            ~fields:
+                              ([ "typed", `Bool true
+                               ; "code", `String "execute_result_manifest_failed"
+                               ; "status", status_json
+                               ; "execution_time_ms", `Int elapsed_ms
+                               ]
+                               @ dispatched_model_location_fields)
+                            "Execute completed, but its result manifest could not be persisted."))
+                  else Keeper_tool_execution.failure (Yojson.Safe.to_string payload)))
         )))))
 
 let handle_tool_execute_with_outcome
@@ -685,6 +760,7 @@ let handle_tool_execute_with_outcome
   else
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
+      ~effect_disposition:Tool_result.Proven_pre_effect
       (error_json
          ~fields:[ "typed", `Bool true ]
          "Typed Shell IR input is required. Provide non-empty argv or pipeline.")

@@ -527,6 +527,60 @@ describe('parseSSEMessage', () => {
     warnSpy.mockRestore()
   })
 
+  it('keeps committed composition evidence at the websocket parse boundary', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'keeper_tool_call_evidence_committed',
+      name: 'analyst',
+      tool_name: 'keeper_time_now',
+      composition_tool: 'keeper_compose_mission-snapshot',
+      composition_run_id: '019d1234-5678-7abc-8def-0123456789ab',
+      composition_node_id: 'clock',
+      composition_execution: 'inline',
+      parent_tool_use_id: '',
+      tool_use_id: 'nested-call',
+      turn: 7,
+      planned_index: 0,
+      batch_index: 0,
+      batch_size: 3,
+      execution_mode: 'concurrent',
+      ts_unix: 1_786_588_800,
+    })
+
+    expect(msg).toMatchObject({
+      type: 'keeper_tool_call_evidence_committed',
+      name: 'analyst',
+      composition_node_id: 'clock',
+      parent_tool_use_id: '',
+      tool_use_id: 'nested-call',
+    })
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('rejects committed composition evidence without exact join identity', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseSSEMessage({
+      type: 'keeper_tool_call_evidence_committed',
+      name: 'analyst',
+      tool_name: 'keeper_time_now',
+      composition_tool: 'keeper_compose_mission-snapshot',
+      composition_run_id: '',
+      composition_node_id: 'clock',
+      composition_execution: 'inline',
+      parent_tool_use_id: 'outer-call',
+      tool_use_id: 'nested-call',
+      turn: 7,
+      planned_index: 0,
+      batch_index: 0,
+      batch_size: 3,
+      execution_mode: 'concurrent',
+      ts_unix: 1_786_588_800,
+    })).toBeNull()
+    expect(warnSpy).toHaveBeenCalledOnce()
+    warnSpy.mockRestore()
+  })
+
   it('keeps gate_mode_changed events instead of dropping them as schema drift', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const msg = parseSSEMessage({

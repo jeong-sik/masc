@@ -26,7 +26,11 @@ import {
   routeLinksForContext,
   type IdeContextRouteLink,
 } from './ide/ide-context-lens'
-import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from './keeper-sse-match'
+import {
+  isKeeperToolActivityEvent,
+  isKeeperToolEvidenceCommittedEvent,
+  sseEventMatchesKeeper,
+} from './keeper-sse-match'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -210,6 +214,14 @@ function entryScopeLabel(entry: ToolCallEntry): string {
       ? `batch ${entry.batch_index} · size ${entry.batch_size}`
       : null,
     entry.execution_mode ? `mode ${entry.execution_mode}` : null,
+    entry.disposition ? `result ${entry.disposition}` : null,
+    entry.composition_tool ? `composition ${entry.composition_tool}` : null,
+    entry.composition_run_id ? `run ${entry.composition_run_id}` : null,
+    entry.composition_node_id ? `node ${entry.composition_node_id}` : null,
+    entry.composition_execution ? `execution ${entry.composition_execution}` : null,
+    entry.parent_tool_use_id !== undefined
+      ? `parent_tool_use_id ${entry.parent_tool_use_id === '' ? '(blank)' : entry.parent_tool_use_id}`
+      : null,
     entry.tool_use_id !== undefined
       ? `tool_use_id ${entry.tool_use_id === '' ? '(blank)' : entry.tool_use_id}`
       : null,
@@ -225,11 +237,19 @@ function entryScopeLabel(entry: ToolCallEntry): string {
 }
 
 function toolCallSucceeded(entry: ToolCallEntry): boolean {
-  return entry.success
+  return entry.disposition === 'completed' || (entry.disposition === undefined && entry.success)
+}
+
+function toolCallDeferred(entry: ToolCallEntry): boolean {
+  return entry.disposition === 'deferred'
+}
+
+function toolCallFailed(entry: ToolCallEntry): boolean {
+  return entry.disposition === 'failed' || (entry.disposition === undefined && !entry.success)
 }
 
 function toolCallStatusLabel(entry: ToolCallEntry): string {
-  return toolCallSucceeded(entry) ? 'ok' : 'failed'
+  return entry.disposition ?? (toolCallSucceeded(entry) ? 'completed' : 'failed')
 }
 
 export function deriveKeeperToolCallDossier(
@@ -238,7 +258,8 @@ export function deriveKeeperToolCallDossier(
 ): KeeperToolCallDossier {
   const latest = newestToolCall(entries)
   const slowest = slowestToolCall(entries)
-  const failed = entries.filter(entry => !toolCallSucceeded(entry))
+  const failed = entries.filter(toolCallFailed)
+  const deferred = entries.filter(toolCallDeferred)
   const toolCounts = countByTool(entries)
   const hotTool = toolCounts[0] ?? null
   const evidenceLinks = countEvidenceLinks(entries)
@@ -247,14 +268,17 @@ export function deriveKeeperToolCallDossier(
   const rows = typeof response?.entry_count === 'number' ? response.entry_count : entries.length
   const totalCalls = entries.length
   const failedCount = failed.length
+  const deferredCount = deferred.length
   let latestTone: StatusChipTone = 'neutral'
   if (latest !== null) {
-    latestTone = toolCallSucceeded(latest) ? 'ok' : 'bad'
+    latestTone = toolCallSucceeded(latest) ? 'ok' : toolCallDeferred(latest) ? 'warn' : 'bad'
   }
 
   let headline = 'no calls'
   if (totalCalls > 0 && failedCount > 0) {
     headline = `${failedCount} failed / ${totalCalls}`
+  } else if (totalCalls > 0 && deferredCount > 0) {
+    headline = `${deferredCount} deferred / ${totalCalls}`
   } else if (totalCalls > 0) {
     headline = `${totalCalls} calls clean`
   }
@@ -262,6 +286,8 @@ export function deriveKeeperToolCallDossier(
   let tone: StatusChipTone = 'neutral'
   if (failedCount > 0) {
     tone = 'bad'
+  } else if (deferredCount > 0) {
+    tone = 'warn'
   } else if (totalCalls > 0) {
     tone = 'ok'
   }
@@ -482,6 +508,10 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
 
   return html`
     <div
+      data-composition-node=${entry.composition_node_id}
+      data-composition-run=${entry.composition_run_id}
+      data-composition-execution=${entry.composition_execution}
+      data-tool-call-disposition=${entry.disposition}
       class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors v2-monitoring-row"
     >
       <button
@@ -493,14 +523,24 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         <span class="font-mono ${cat.color} w-4 text-center flex-shrink-0">${cat.icon}</span>
         <span class="font-mono text-[var(--color-fg-secondary)] flex-shrink-0 w-16">${formatTimestamp(entry.ts)}</span>
         <span class="font-mono font-medium text-[var(--color-fg-secondary)] truncate flex-1" title=${entry.tool}>${entry.tool}</span>
+        ${entry.composition_node_id ? html`
+          <span
+            class="max-w-40 truncate rounded-[var(--r-1)] border border-[var(--color-accent-border)] bg-[var(--color-accent-muted)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]"
+            title=${`${entry.composition_tool ?? 'composition'} / ${entry.composition_node_id} / ${entry.composition_execution ?? 'unknown'}`}
+          >↳ ${entry.composition_node_id} · ${entry.composition_execution ?? 'unknown'}</span>
+        ` : null}
         <span class=${`font-mono flex-shrink-0 w-16 text-right ${entry.duration_ms != null ? durationColor(entry.duration_ms) : 'text-[var(--color-fg-disabled)]'}`}>
           ${entry.duration_ms != null ? formatMsCompact(entry.duration_ms) : NO_DURATION_LABEL}
         </span>
         <span
-          class=${`flex-shrink-0 w-5 text-center ${toolCallSucceeded(entry) ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}`}
-          title=${entry.success ? 'ok' : 'failed'}
+          class=${`flex-shrink-0 w-5 text-center ${toolCallSucceeded(entry)
+            ? 'text-[var(--color-status-ok)]'
+            : toolCallDeferred(entry)
+              ? 'text-[var(--color-status-warn)]'
+              : 'text-[var(--color-status-err)]'}`}
+          title=${toolCallStatusLabel(entry)}
         >
-          ${toolCallSucceeded(entry) ? 'O' : 'X'}
+          ${toolCallSucceeded(entry) ? 'O' : toolCallDeferred(entry) ? 'D' : 'X'}
         </span>
         <span class="flex-shrink-0 w-4 text-[var(--color-fg-muted)] text-center">
           ${expanded.value ? '-' : '+'}
@@ -627,7 +667,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   useEffect(() => {
     const unsubscribe = lastEvent.subscribe((event) => {
       if (!event) return
-      if (!isKeeperToolActivityEvent(event)) return
+      if (!isKeeperToolActivityEvent(event) && !isKeeperToolEvidenceCommittedEvent(event)) return
       if (!sseEventMatchesKeeper(event, keeperName)) return
       void resource.load(loadToolCalls)
     })

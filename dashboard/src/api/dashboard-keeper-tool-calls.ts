@@ -17,6 +17,9 @@ export type ToolCallOutputBlob = {
   }
 }
 
+export type ToolCallDisposition = 'completed' | 'deferred' | 'failed'
+export type ToolCallCompositionExecution = 'inline' | 'async'
+
 export type ToolCallEntry = {
   ts: number
   keeper: string
@@ -34,6 +37,8 @@ export type ToolCallEntry = {
   lane?: string
   // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
   execution_id?: string
+  result_bytes?: number
+  truncated_to?: number
   // RFC-0233 PR-2: provider call id (agent-core-event join key). Equals the chat tool
   // row's tool_call_id for the same execution, so the chat ToolCallBubble can
   // join this entry's output onto the transcript. Absent when the call carried
@@ -46,6 +51,14 @@ export type ToolCallEntry = {
   batch_index?: number
   batch_size?: number
   execution_mode?: 'serial' | 'concurrent'
+  // Typed nested-composition identity. These fields are emitted directly by
+  // the executor observer; the dashboard never reconstructs them from names.
+  disposition?: ToolCallDisposition
+  composition_tool?: string
+  composition_run_id?: string
+  composition_node_id?: string
+  composition_execution?: ToolCallCompositionExecution
+  parent_tool_use_id?: string
   // Goal id(s) this call was attributed to (conditional on the row carrying
   // them), for goal-scoped drill-down alongside task_id/turn.
   goal_ids?: string[]
@@ -100,6 +113,8 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
     execution_id: asString(raw.execution_id),
+    result_bytes: asNumber(raw.result_bytes),
+    truncated_to: asNumber(raw.truncated_to),
     tool_use_id: typeof raw.tool_use_id === 'string' ? raw.tool_use_id : undefined,
     planned_index: asNumber(raw.planned_index),
     batch_index: asNumber(raw.batch_index),
@@ -108,6 +123,21 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
       raw.execution_mode === 'serial' || raw.execution_mode === 'concurrent'
         ? raw.execution_mode
         : undefined,
+    disposition:
+      raw.disposition === 'completed' ||
+      raw.disposition === 'deferred' ||
+      raw.disposition === 'failed'
+        ? raw.disposition
+        : undefined,
+    composition_tool: asString(raw.composition_tool),
+    composition_run_id: asString(raw.composition_run_id),
+    composition_node_id: asString(raw.composition_node_id),
+    composition_execution:
+      raw.composition_execution === 'inline' || raw.composition_execution === 'async'
+        ? raw.composition_execution
+        : undefined,
+    parent_tool_use_id:
+      typeof raw.parent_tool_use_id === 'string' ? raw.parent_tool_use_id : undefined,
     goal_ids: asStringArray(raw.goal_ids),
   }
 }

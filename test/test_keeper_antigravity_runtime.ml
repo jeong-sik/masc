@@ -706,6 +706,7 @@ let test_spawn_failure_is_pre_dispatch () =
                       ~raw_trace:None
                       ~on_event:None
                       ~config
+                      ()
                   in
                   (match attempt.result with
                    | Error

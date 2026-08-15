@@ -89,6 +89,7 @@ let roundtrip_corpus =
     "runtime_exhausted"
   ; Keeper_internal_error.capacity_backpressure_kind
   ; Keeper_internal_error.incomplete_tool_transcript_kind
+  ; Keeper_internal_error.provider_attempt_effect_fenced_kind
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -178,6 +179,11 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
   then R.Disp_operator_reset_required, R.Reason_transcript_corruption
+  else if
+    String.equal
+      terminal_reason
+      Keeper_internal_error.provider_attempt_effect_fenced_kind
+  then R.Disp_unknown, R.Reason_provider_attempt_effect_fenced
   else if preflight_config_failure
   then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
   else if
@@ -308,7 +314,72 @@ let () =
      = (R.Disp_operator_reset_required, R.Reason_transcript_corruption));
   check
     "transcript corruption emits operator broadcast"
-    (R.needs_operator_broadcast (fst transcript_corruption))
+    (R.needs_operator_broadcast (fst transcript_corruption));
+  let fenced_error =
+    Keeper_internal_error.Provider_attempt_effect_fenced
+      { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
+      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+      ; diagnostic = "provider response did not prove whether the tool effect settled"
+      }
+  in
+  let fenced_json = Keeper_internal_error.masc_internal_error_to_json fenced_error in
+  check
+    "provider-attempt fence codec emits the canonical kind"
+    (Json_util.get_string fenced_json "kind"
+     = Some Keeper_internal_error.provider_attempt_effect_fenced_kind);
+  check
+    "provider-attempt fence codec round-trips the typed evidence"
+    (Keeper_internal_error.parse_masc_internal_error_json fenced_json
+     = Some fenced_error);
+  let fenced_wire = Keeper_internal_error.provider_attempt_effect_fenced_kind in
+  let producer_wire =
+    fenced_error
+    |> Keeper_internal_error.core_error_of_masc_internal_error
+    |> Masc.Keeper_agent_error.terminal_reason_code_of_core_error
+  in
+  check
+    "provider-attempt fence producer projects the canonical terminal wire"
+    (String.equal producer_wire fenced_wire);
+  check
+    "provider-attempt fence wire decodes to the closed terminal variant"
+    (match Tr.of_wire fenced_wire with
+     | Tr.Provider_attempt_effect_fenced wire -> String.equal wire fenced_wire
+     | _ -> false);
+  check
+    "provider-attempt fence terminal wire round-trips byte-identically"
+    (String.equal (Tr.to_wire (Tr.of_wire fenced_wire)) fenced_wire);
+  let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
+  let unmapped_before = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
+  let fenced_disposition =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code = fenced_wire
+      ; error_kind = Some (R.error_kind_of_string "internal")
+      ; outcome = `Error
+      ; runtime_outcome = R.Runtime_failed
+      }
+  in
+  let unmapped_after = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
+  check
+    "provider-attempt fence keeps operator attention with a typed reason"
+    (fenced_disposition
+     = (R.Disp_unknown, R.Reason_provider_attempt_effect_fenced));
+  check
+    "provider-attempt fence reason has the canonical dashboard wire"
+    (String.equal
+       (R.operator_disposition_reason_to_string (snd fenced_disposition))
+       fenced_wire);
+  check
+    "attempted provider effect still forbids same-turn retry"
+    (not
+       (Keeper_provider_attempt_effect_core.allows_same_turn_retry
+          Keeper_provider_attempt_effect_core.Effect_attempted));
+  check
+    "provider-attempt fence still emits an operator broadcast"
+    (R.needs_operator_broadcast (fst fenced_disposition));
+  check
+    "provider-attempt fence does not increment the unmapped regression metric"
+    (Float.equal unmapped_before unmapped_after)
 ;;
 
 let () =

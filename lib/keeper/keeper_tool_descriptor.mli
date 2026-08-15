@@ -68,6 +68,15 @@ type execution =
     imply concurrency safety, and terminal concurrent execution is not
     representable. *)
 
+(** Descriptor-owned output contract for typed composition. [Opaque_output]
+    cannot be referenced by another plan node. [Json_output] carries a schema
+    in the closed composable-output subset checked by [Keeper_tool_plan.create]:
+    exact JSON types, object properties/required/boolean additionalProperties,
+    and homogeneous array items. Unsupported JSON Schema keywords fail closed. *)
+type composable_output =
+  | Opaque_output
+  | Json_output of { schema : Yojson.Safe.t }
+
 type identity_validation =
   | Validate_once_before_translation
   | Validate_once_after_translation
@@ -146,6 +155,7 @@ type t =
   ; description : string
   ; input_schema : Yojson.Safe.t
   ; model_output_projection : Tool_output.model_projection
+  ; composable_output : composable_output
   ; execution : execution
   ; policy : policy
   ; executor : executor
@@ -179,6 +189,12 @@ val public_descriptors : t list
     resolve [internal_name] for any descriptor-backed tool, regardless of
     LLM-native vs workspace origin. *)
 val all_descriptors : unit -> t list
+
+(** Resolve the process-owned canonical descriptor for [id]. Callers that
+    accept descriptor records from another layer must resolve through this
+    function before treating execution, schema, or policy fields as runtime
+    authority. *)
+val find_id : string -> t option
 
 (** Objective schema-shape errors that prevent model projection. Empty means
     the descriptor has a resolved object schema whose structural fields are

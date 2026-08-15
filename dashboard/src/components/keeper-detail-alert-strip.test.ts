@@ -68,6 +68,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     ['runtime_exhausted', '런타임 후보 소진'],
     ['unmapped_runtime_state', '매핑되지 않은 runtime 상태'],
     ['transient_runtime_retry', '일시적 런타임 재시도'],
+    ['provider_attempt_effect_fenced', 'Provider 효과 결과 확인 필요'],
   ])('labels receipt-derived attention reason %s distinctly', (reason, label) => {
     const { container } = render(h(KeeperRuntimeAlertStrip, {
       keeper: keeper({
@@ -79,6 +80,22 @@ describe('KeeperRuntimeAlertStrip', () => {
     const text = container.textContent ?? ''
     expect(text).toContain(label)
     expect(text).not.toContain(reason)
+  })
+
+  it('humanizes the fenced provider effect in the operator disposition line', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        needs_attention: true,
+        trust: {
+          operator_disposition_reason: 'provider_attempt_effect_fenced',
+        },
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('운영자 판단')
+    expect(text).toContain('Provider 효과 결과 확인 필요')
+    expect(text).not.toContain('provider_attempt_effect_fenced')
   })
 
   // First-class status_bridge reasons keep their OWN labels — they are no

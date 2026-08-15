@@ -1755,7 +1755,7 @@ let test_runtime_toml_parses_optional_max_request_body_bytes () =
          binding.Runtime_schema.max_request_body_bytes
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
-(* RFC-0382 PR-6: return-progress is a binding-level opt-in (like keep-alive /
+(* RFC-0382 §7: return-progress is a binding-level opt-in (like keep-alive /
    num-ctx) that asks an OpenAI-compat server to stream prompt_progress chunks
    during prefill. Omitted must stay None — only an explicit declaration may
    put the field on the wire. *)

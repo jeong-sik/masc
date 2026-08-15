@@ -285,10 +285,13 @@ let enrich_web_search_payload ~tool_name ~start_time ~content_max_chars
                     ~content_timeout
                     hits
                 in
+                (* Fetched bodies ride only in [content_text]. Mirroring
+                   them into [results.[].page_content] doubled every byte
+                   through [Tool_result.message]'s whole-payload
+                   serialization with no reader on the structured copy. *)
                 let result_fields =
                   append_assoc_fields result_fields
-                    [ "results", `List enriched_hits
-                    ; "content_enriched", `Bool true
+                    [ "content_enriched", `Bool true
                     ; "content_fetch_mode", `String "best_effort"
                     ; "content_max_chars", `Int content_max_chars
                     ; "content_timeout", `Int content_timeout

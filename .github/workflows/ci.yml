@@ -1047,7 +1047,8 @@ jobs:
             @test/runtest-test_tool_shard_coverage \
             @test/runtest-test_tool_board_coverage \
             @test/runtest-test_tool_task_coverage \
-            @test/runtest-test_tool_workspace_coverage
+            @test/runtest-test_tool_workspace_coverage \
+            @test/runtest-test_tool_misc_coverage
 
       - name: Run completion-authority lookup surface suite
         # The judge's lookup tools reach the filesystem and Git inside a

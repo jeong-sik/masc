@@ -476,6 +476,114 @@ let test_chained_cut_keeps_the_whole_history_as_denominator () =
     observed.Window.transmitted_atoms
 ;;
 
+(* The point of the window is how many turns a keeper can still see. Reasoning
+   blocks a dialect never replays are deleted before serialization, so charging
+   the budget for them buys nothing and costs conversation. This is the feature
+   in one assertion: the same budget, the same history, more of it transmitted
+   once the unsent bytes stop being counted. *)
+module Provider_config = Agent_core.Llm_provider.Provider_config
+module Capabilities = Agent_core.Llm_provider.Capabilities
+
+let non_replaying_config =
+  Provider_config.make
+    ~kind:Provider_config.OpenAI_compat
+    ~model_id:"model-a"
+    ~base_url:"https://provider.example"
+    ~model_capabilities_override:
+      { Capabilities.default_capabilities with
+        supports_reasoning = true
+      ; reasoning_replay_override = Capabilities.Force_no_replay
+      }
+    ()
+;;
+
+(* Each assistant atom carries a reasoning block roughly the size of its text,
+   so the unsent share is large enough to move the cut rather than round away. *)
+let deliberating_history n =
+  List.concat
+    (List.init n (fun i ->
+       [ user i
+       ; message
+           ~role:Types.Assistant
+           ~metadata:[]
+           (Printf.sprintf "assistant-%d|" i)
+       ]))
+;;
+
+(* The suite's shared encoder counts transmitted text only, which is what makes
+   its budgets readable as character counts. That model cannot express this
+   case: MASC budgets with [Keeper_context_core.message_to_json], which counts
+   every block including the reasoning the wire will delete — that gap is the
+   whole defect. So this case measures every block. *)
+let measure_all_blocks (m : Types.message) =
+  List.fold_left
+    (fun acc (block : Types.content_block) ->
+       match block with
+       | Types.Text text -> acc + String.length text
+       | Types.Thinking { content; _ } -> acc + String.length content
+       | Types.ReasoningDetails _
+       | Types.RedactedThinking _
+       | Types.ToolUse _
+       | Types.ToolResult _
+       | Types.Image _
+       | Types.Document _
+       | Types.Audio _ -> acc)
+    0
+    m.content
+;;
+
+let total_all_blocks messages =
+  List.fold_left (fun acc m -> acc + measure_all_blocks m) 0 messages
+;;
+
+let project_all ~capacity_bytes history =
+  Window.project
+    ~allow_empty_history:false
+    ~measure_message_bytes:measure_all_blocks
+    ~capacity_bytes
+    ~reserved_bytes:0
+    history
+;;
+
+let test_dropping_unsent_reasoning_widens_the_window () =
+  let config = non_replaying_config in
+  let history =
+    List.map
+      (fun (m : Types.message) ->
+         match m.role with
+         | Types.Assistant ->
+           { m with
+             Types.content =
+               Types.Thinking
+                 { content = String.make atom_bytes 'r'; signature = None }
+               :: m.content
+           }
+         | Types.User | Types.Tool | Types.System -> m)
+      (deliberating_history (2 * k))
+  in
+  let capacity_bytes = total_all_blocks history / 4 in
+  let raw = ok_exn ~what:"raw cut" (project_all ~capacity_bytes history) in
+  let transmitted =
+    match
+      Agent_core.Llm_provider.Complete_common.transmitted_history ~config history
+    with
+    | Ok messages -> messages
+    | Error error ->
+      Alcotest.failf
+        "transmitted history: %s"
+        (Agent_core.Llm_provider.Reasoning_history_projection.error_to_string error)
+  in
+  Alcotest.(check bool)
+    "the wire drops reasoning this dialect never replays" true
+    (total_all_blocks transmitted < total_all_blocks history);
+  let projected =
+    ok_exn ~what:"projected cut" (project_all ~capacity_bytes transmitted)
+  in
+  Alcotest.(check bool)
+    "so the same budget carries more of the conversation" true
+    (count_atoms projected > count_atoms raw)
+;;
+
 let test_tool_results_stay_with_their_call () =
   let history = atoms (4 * k) in
   let projected =
@@ -702,6 +810,8 @@ let () =
             test_uncut_history_reports_everything_carried
         ; Alcotest.test_case "chained cut keeps the whole history as denominator"
             `Quick test_chained_cut_keeps_the_whole_history_as_denominator
+        ; Alcotest.test_case "dropping unsent reasoning widens the window"
+            `Quick test_dropping_unsent_reasoning_widens_the_window
         ; Alcotest.test_case "tool results stay with their call" `Quick
             test_tool_results_stay_with_their_call
         ; Alcotest.test_case "preamble on assistant head" `Quick

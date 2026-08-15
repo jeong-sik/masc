@@ -257,7 +257,6 @@ let install () =
   Atomic.set Workspace_hooks.observe_agent_lifecycle_fn (fun config ~agent_id ~event ~details ->
     observe_agent_lifecycle config ~agent_id ~event ~details);
   Atomic.set Workspace_hooks.observe_task_transition_fn (fun config ~agent_name ~task_id ~transition ~details ->
-    (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
     observe_task_transition_event config ~agent_name ~task_id ~transition ~details);
 
   Atomic.set Workspace_hooks.activity_emit_fn (fun config ~actor ?subject ~kind ~payload ~tags () ->

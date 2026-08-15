@@ -7,6 +7,9 @@ type deferred_kind =
   | Generic_deferred
   | External_effect_deferred
 
+val deferred_kind_to_string : deferred_kind -> string
+(** Stable producer-owned wire label for deferred settlement evidence. *)
+
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
 (** Producer-owned proof of the concrete terminal effect that completed. *)

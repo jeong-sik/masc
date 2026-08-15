@@ -697,6 +697,45 @@ describe('buildTraceEvents', () => {
     expect(events[0]!.executionId).toBe('exec-1712397700000-00ff')
   })
 
+  it('preserves deferred composition rows without classifying them as failures', () => {
+    const events = buildTraceEvents(
+      {
+        agent: 'test',
+        period: { from: '', to: '' },
+        events: [],
+        summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 0 },
+      },
+      null,
+      {
+        keeper: 'test',
+        count: 1,
+        entries: [{
+          ts: 1712397700,
+          keeper: 'test',
+          tool: 'keeper_memory_write',
+          input: { title: 'wait' },
+          output: 'approval required',
+          success: false,
+          disposition: 'deferred',
+          duration_ms: 12,
+          execution_id: 'exec-deferred-composition',
+          result_bytes: 17,
+          truncated_to: 12,
+          composition_tool: 'keeper_compose_write',
+          composition_run_id: 'composition-run-1',
+          composition_node_id: 'write',
+          composition_execution: 'inline',
+        }],
+      },
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]!.error).toBeNull()
+    expect(events[0]!.toolResult).toBe('approval required')
+    expect(events[0]!.detail.disposition).toBe('deferred')
+    expect(events[0]!.detail.result_bytes).toBe(17)
+    expect(events[0]!.detail.truncated_to).toBe(12)
+  })
+
 })
 
 describe('getTraceSummary', () => {

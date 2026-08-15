@@ -6,6 +6,11 @@ val wake_enqueue_counts_of_dispatches :
   Schedule_runner.dispatch_result list -> Schedule_runner_status.wake_enqueue_counts
 (** Derive keeper-wake delivery counts from typed production consumer receipts. *)
 
+val recover_keeper_msg_requests_on_startup :
+  base_path:string -> Keeper_msg_async.recovery_report
+(** Settle durable async request rows that cannot have a live owner after a
+    process restart. Called synchronously before background server work starts. *)
+
 val start_background_maintenance :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->

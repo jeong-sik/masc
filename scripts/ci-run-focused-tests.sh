@@ -236,6 +236,9 @@ normal_targets=(
   @test/runtest-test_keeper_lifecycle_global_gate
   @test/runtest-test_tool_blob_store
   @test/runtest-test_keeper_tool_call_log
+  @test/runtest-test_keeper_tool_plan
+  @test/runtest-test_keeper_tool_composition_catalog
+  @test/runtest-test_keeper_tool_plan_executor
   @test/runtest-test_keeper_external_resource_lease
   @test/runtest-test_keeper_wire_capture
   @test/runtest-test_runtime_provider_auth_headers

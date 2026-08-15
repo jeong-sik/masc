@@ -367,6 +367,7 @@ describe('summarizeToolMonitorQuality', () => {
 
     expect(summary.total).toBe(30)
     expect(summary.failure).toBe(3)
+    expect(summary.deferred).toBe(0)
     expect(summary.rows.map(row => row.name)).toEqual([
       'masc_board_post',
       'keeper_task_claim',

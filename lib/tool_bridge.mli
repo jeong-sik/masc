@@ -37,6 +37,15 @@ type externalization_error =
   ; message : string
   }
 
+val attach_artifact_manifest :
+  base_path:string ->
+  Tool_result.result ->
+  (Tool_result.result, externalization_error) result
+(** Persist and attach the canonical manifest for typed result data containing
+    normalized artifact references. Producers call this inside their effect
+    boundary, before returning the authoritative result. Results without
+    artifact references pass through unchanged. Cancellation propagates. *)
+
 val maybe_externalize :
   ?base_path:string ->
   ?mime:string ->
@@ -63,7 +72,14 @@ val to_agent_core_typed_result :
     to AGENT_CORE [recoverable]/[error_class]. [on_externalization_error] lets an
     owning runtime keep its terminal state consistent when storage fails.
     [externalization_error_recoverable] projects the owning tool's existing
-    retry policy; the provider receives only a bounded generic error. *)
+    retry policy; the provider receives only a bounded generic error.
+
+    When typed result data contains normalized artifact references, the
+    producer must first call {!attach_artifact_manifest}; the provider-facing
+    content then becomes that durable manifest's marker. Projection performs
+    no manifest I/O after the producer's effect boundary. This keeps the
+    transcript itself as the authoritative root while preserving the original
+    content and structured data inside the manifest. *)
 
 (** {1 Schema Conversion} *)
 

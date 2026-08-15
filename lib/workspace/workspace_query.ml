@@ -58,8 +58,7 @@ let update_priority config ~task_id ~priority =
                     ; ("old", `Int old_priority)
                     ; ("new", `Int priority)
                     ; ("ts", `String (now_iso ()))
-                    ]);
-                (Atomic.get Workspace_hooks.on_task_mutation_fn) ()
+                    ])
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
               | exn ->

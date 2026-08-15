@@ -537,6 +537,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
         ~category:Log.Boundary
         "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
   Keeper_task_owner_backend.install_hooks ();
+  Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation ();
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
       ~mono_clock ~net

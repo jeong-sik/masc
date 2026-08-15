@@ -24,6 +24,7 @@ let runtime_id_to_string (s : string) = s
    this value so recoverability cannot drift through duplicated literals. *)
 let capacity_backpressure_kind = "capacity_backpressure"
 let incomplete_tool_transcript_kind = "incomplete_tool_transcript"
+let provider_attempt_effect_fenced_kind = "provider_attempt_effect_fenced"
 
 type provider_rejection = {
   provider_label : string;
@@ -516,7 +517,7 @@ let masc_internal_error_to_json = function
   | Provider_attempt_effect_fenced
       { runtime_id; effect_disposition; diagnostic } ->
     `Assoc
-      [ "kind", `String "provider_attempt_effect_fenced"
+      [ "kind", `String provider_attempt_effect_fenced_kind
       ; "runtime_id", `String runtime_id
       ; ( "effect_disposition"
         , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
@@ -669,7 +670,7 @@ let kind_of_masc_internal_error = function
   | Internal_contract_rejected _ -> "internal_contract_rejected"
   | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
   | Terminal_effect_failed _ -> "terminal_effect_failed"
-  | Provider_attempt_effect_fenced _ -> "provider_attempt_effect_fenced"
+  | Provider_attempt_effect_fenced _ -> provider_attempt_effect_fenced_kind
   | Receipt_persistence_failed _ -> "receipt_persistence_failed"
   | Gate_replay_repair_required _ -> "gate_replay_repair_required"
 
@@ -931,10 +932,11 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     { failure_class; effect_disposition; diagnostic })
              | _ -> None)
           | _ -> None)
-      | Some (`String "provider_attempt_effect_fenced")
-        when exact_fields
-               [ "kind"; "runtime_id"; "effect_disposition"; "diagnostic" ]
-               fields ->
+      | Some (`String kind)
+        when String.equal kind provider_attempt_effect_fenced_kind
+             && exact_fields
+                  [ "kind"; "runtime_id"; "effect_disposition"; "diagnostic" ]
+                  fields ->
         (match
            string_opt_of_assoc "runtime_id" json,
            string_opt_of_assoc "effect_disposition" json,

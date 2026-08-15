@@ -6,10 +6,24 @@ let config_error ~field detail =
 
 let internal_error detail = Agent_core.Error.Internal detail
 
+type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | External_effect_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; diagnostic : string
+      }
+
 type host_stop = Runtime_official_client_tool.host_stop =
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
       }
 
 let text_of_blocks ~runtime_label ~field blocks =
@@ -97,6 +111,38 @@ let invoke_turn_hook ~keeper_name ~turn_count ~hook_name hook event =
     event
 ;;
 
+let invoke_turn_completion_hooks ~runtime_label ~keeper_name ~turn_count ~hooks
+    (response : Agent_core.Types.api_response) =
+  let* () =
+    match
+      invoke_turn_hook
+        ~keeper_name
+        ~turn_count
+        ~hook_name:"after_turn"
+        hooks.Agent_core.Hooks.after_turn
+        (Agent_core.Hooks.AfterTurn { turn = turn_count; response })
+    with
+    | Continue -> Ok ()
+    | HookFailed { stage; detail } ->
+      Error (hook_error ~runtime_label ~hook_name:"after_turn" ~stage detail)
+    | decision ->
+      Error (illegal_hook_decision ~runtime_label ~hook_name:"after_turn" decision)
+  in
+  match
+    invoke_turn_hook
+      ~keeper_name
+      ~turn_count
+      ~hook_name:"on_stop"
+      hooks.on_stop
+      (Agent_core.Hooks.OnStop { reason = response.stop_reason; response })
+  with
+  | Continue -> Ok ()
+  | HookFailed { stage; detail } ->
+    Error (hook_error ~runtime_label ~hook_name:"on_stop" ~stage detail)
+  | decision ->
+    Error (illegal_hook_decision ~runtime_label ~hook_name:"on_stop" decision)
+;;
+
 let lifecycle_outcome = function
   | Error error -> Agent_core.Agent_lifecycle_events.Failed error
   | Ok ({ response; stop_reason; _ } : Runtime_agent.run_result) ->
@@ -122,8 +168,24 @@ let with_run_lifecycle_events ~event_bus ~keeper_name run =
     run
 ;;
 
-let repeated_tool_call_result ~model ~session_id ~turn_id ~turns_used = function
-  | Repeated_tool_call { tool_name; repeated_count } ->
+let host_stop_result ~model ~session_id ~turn_id ~turns_used stop =
+  match stop with
+  | Terminal_tool_boundary
+      { outcome = Terminal_failed { failure_class; effect_disposition; diagnostic }
+      ; _
+      } ->
+    Error
+      (Keeper_internal_error.core_error_of_masc_internal_error
+         (Keeper_internal_error.Terminal_effect_failed
+            { failure_class; effect_disposition; diagnostic }))
+  | ( Repeated_tool_call _
+    | Terminal_tool_boundary
+        { outcome =
+            ( Terminal_completed
+            | Durable_stimulus_deferred
+            | External_effect_deferred )
+        ; _
+        } ) ->
     let response : Agent_core.Types.api_response =
       { id = turn_id
       ; model
@@ -137,17 +199,29 @@ let repeated_tool_call_result ~model ~session_id ~turn_id ~turns_used = function
             }
       }
     in
-    { Runtime_agent.response
-    ; checkpoint = None
-    ; session_id
-    ; turns = turns_used
-    ; trace_ref = None
-    ; run_validation = None
-    ; runtime_observation = None
-    ; stop_reason =
+    let stop_reason =
+      match stop with
+      | Repeated_tool_call { tool_name; repeated_count } ->
         Runtime_agent.Yielded_after_repeated_tool_call
           { turns_used; tool_name; repeated_count }
-    }
+      | Terminal_tool_boundary { outcome = Terminal_completed; _ } ->
+        Runtime_agent.Completed
+      | Terminal_tool_boundary { outcome = Durable_stimulus_deferred; _ } ->
+        Runtime_agent.Yielded_to_durable_stimulus { turns_used }
+      | Terminal_tool_boundary { outcome = External_effect_deferred; _ } ->
+        Runtime_agent.Awaiting_external_effect { turns_used }
+      | Terminal_tool_boundary { outcome = Terminal_failed _; _ } -> assert false
+    in
+    Ok
+      { Runtime_agent.response
+      ; checkpoint = None
+      ; session_id
+      ; turns = turns_used
+      ; trace_ref = None
+      ; run_validation = None
+      ; runtime_observation = None
+      ; stop_reason
+      }
 ;;
 
 type prepared_turn =
@@ -528,8 +602,9 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
 ;;
 
 let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context ~tools
-    ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector ~terminal_error
-    ~raw_trace_run ~next_dynamic_invocation_index ~repeated_call_state
+    ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
+    ~terminal_effect_state ~terminal_error ~raw_trace_run
+    ~next_dynamic_invocation_index ~repeated_call_state
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -654,6 +729,75 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
         match execute () with
         | result ->
           let result = settle result in
+          let terminal_boundary =
+            match terminal_effect_state () with
+            | Keeper_tools_agent_core.Terminal_effect_failed
+                ({ effect_disposition =
+                     ( Tool_result.Proven_post_effect
+                     | Tool_result.Effect_outcome_unknown )
+                 ; _
+                 } as failure) ->
+              (* A composition may be statically ordinary yet fail after a
+                 nested effect.  Producer-owned aggregate evidence outranks
+                 the outer success-completion declaration: allowing the
+                 provider to retry would repeat an already-applied or
+                 indeterminate effect. *)
+              Some
+                (Terminal_tool_boundary
+                   { tool_name = tool.schema.name
+                   ; outcome =
+                       Terminal_failed
+                         { failure_class = failure.failure_class
+                         ; effect_disposition = failure.effect_disposition
+                         ; diagnostic = failure.diagnostic
+                         }
+                   })
+            | ( Keeper_tools_agent_core.Terminal_effect_open
+              | Keeper_tools_agent_core.Deferred_tool_result
+              | Keeper_tools_agent_core.External_effect_deferred
+              | Keeper_tools_agent_core.Terminal_effect_completed _
+              | Keeper_tools_agent_core.Terminal_effect_failed
+                  { effect_disposition = Tool_result.Proven_pre_effect; _ } ) as state ->
+              (match Agent_core.Tool.completion tool with
+               | Agent_core.Tool_contract.Continue_after_success -> None
+               | Agent_core.Tool_contract.Terminal_after_success _ ->
+                 (match state with
+               | Keeper_tools_agent_core.Terminal_effect_completed _
+                 ->
+                 Some
+                   (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Terminal_completed
+                      })
+               | Keeper_tools_agent_core.External_effect_deferred ->
+                 Some
+                   (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = External_effect_deferred
+                      })
+               | Keeper_tools_agent_core.Deferred_tool_result ->
+                 Some
+                   (Terminal_tool_boundary
+                      { tool_name = tool.schema.name
+                      ; outcome = Durable_stimulus_deferred
+                      })
+               | Keeper_tools_agent_core.Terminal_effect_failed
+                   { effect_disposition = Tool_result.Proven_pre_effect; _ }
+               | Keeper_tools_agent_core.Terminal_effect_open ->
+                 None
+               | Keeper_tools_agent_core.Terminal_effect_failed
+                   { effect_disposition =
+                       ( Tool_result.Proven_post_effect
+                       | Tool_result.Effect_outcome_unknown )
+                   ; _
+                   } ->
+                 assert false))
+          in
+          let result =
+            match terminal_boundary with
+            | Some abort_turn -> { result with abort_turn = Some abort_turn }
+            | None -> result
+          in
           let fingerprint =
             dynamic_tool_fingerprint ~tool_name:tool.schema.name ~input result
           in
@@ -686,7 +830,7 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
 ;;
 
 let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_bus
-    ~context_injector ~context ~terminal_error ~raw_trace_run =
+    ~context_injector ~context ~terminal_effect_state ~terminal_error ~raw_trace_run =
   match tools, context with
   | [], _ -> Ok []
   | _ :: _, None ->
@@ -708,6 +852,7 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
             ~hooks
             ~event_bus
             ~context_injector
+            ~terminal_effect_state
             ~terminal_error
             ~raw_trace_run
             ~next_dynamic_invocation_index

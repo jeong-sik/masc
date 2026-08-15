@@ -537,7 +537,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # Exact current count. The audit's documented categories explain why every
 # reported entry is not mechanically removable; the ratchet still forbids
 # adding another dead public export.
-DEAD_EXPORT_BASELINE = 548
+#
+# Lowered from 548 to 545 on 2026-08-14 (#28656): three
+# keeper_official_client_host hook helpers (hook_error,
+# illegal_hook_decision, invoke_turn_hook) lost their last external callers
+# when the three runtime modules were consolidated onto
+# invoke_turn_completion_hooks, and keeper_tool_descriptor.composable_output_to_json
+# / keeper_tool_plan.output_value never had one. All three .mli exports
+# were dropped (implementations kept where still used internally,
+# output_value's implementation removed as unused).
+DEAD_EXPORT_BASELINE = 545
 
 
 def run_ratchet(count: int) -> int:

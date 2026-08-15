@@ -28,7 +28,6 @@ These files are those specifications, moved to sit beside the code they govern.
 | `EVENT-CATALOG.md`, `RUNTIME-OUTPUT-SCHEMA-INDEX.md` | event and output schema indexes |
 | `schemas/`, `schema-surfaces/` | machine-readable schema surfaces |
 
-
 ## Status fields are not filtered
 
 An RFC here may be Withdrawn or Superseded. Those are kept because they record

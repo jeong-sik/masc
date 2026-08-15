@@ -112,4 +112,68 @@ describe('auto-refresh', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
     dispose()
   })
+
+  it('refreshes when the push feed fires', async () => {
+    const refresh = vi.fn()
+    let emitPush = (): void => {}
+    const dispose = setupVisibleAutoRefresh(refresh, 30_000, {
+      subscribeToPush: (onPush) => {
+        emitPush = onPush
+        return () => {}
+      },
+    })
+
+    emitPush()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(refresh).toHaveBeenCalledTimes(1)
+    dispose()
+  })
+
+  it('skips the interval tick when a push already refreshed within the interval', async () => {
+    const refresh = vi.fn()
+    let emitPush = (): void => {}
+    const dispose = setupVisibleAutoRefresh(refresh, 1_000, {
+      subscribeToPush: (onPush) => {
+        emitPush = onPush
+        return () => {}
+      },
+    })
+
+    // Push at t=600 covers the tick at t=1000.
+    await vi.advanceTimersByTimeAsync(600)
+    emitPush()
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(400)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    // Push stopped, so the timer takes over again on the next tick.
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(refresh).toHaveBeenCalledTimes(2)
+    dispose()
+  })
+
+  it('leaves timer behaviour untouched when no push feed is supplied', async () => {
+    const refresh = vi.fn()
+    const dispose = setupVisibleAutoRefresh(refresh, 200)
+
+    await vi.advanceTimersByTimeAsync(200)
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(refresh).toHaveBeenCalledTimes(2)
+    dispose()
+  })
+
+  it('unsubscribes from the push feed on cleanup', () => {
+    const refresh = vi.fn()
+    const unsubscribe = vi.fn()
+    const dispose = setupVisibleAutoRefresh(refresh, 30_000, {
+      subscribeToPush: () => unsubscribe,
+    })
+
+    expect(unsubscribe).not.toHaveBeenCalled()
+    dispose()
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+  })
 })

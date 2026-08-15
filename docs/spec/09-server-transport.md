@@ -103,7 +103,7 @@ graph TB
 |-----------|---------------|--------|------|------------|--------|
 | HTTP/1.1 | httpun-eio | `server_mcp_transport_http` | 8935 | 기본값 | Canonical |
 | HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
-| WebSocket | httpun-ws-eio | `server_ws_standalone` + `server_mcp_transport_ws` | 8937 standalone, discovery via 8935 `/ws` | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
+| WebSocket | ws-direct (`ws-direct-eio` / `ws-direct-gluten`) | `server_ws_standalone` + `server_mcp_transport_ws` | 8937 standalone, 8935 `/ws` same-origin 업그레이드 | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
 | gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본값, `MASC_GRPC_ENABLED=0`으로 비활성화 | Available |
 | WebRTC | ocaml-webrtc | `server_webrtc_transport` | 8935 `/webrtc/*` | 기본값, `MASC_WEBRTC_ENABLED=0`으로 비활성화 | **Experimental** (local interop only; live env-gated) |
 | stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-stdio` 실행 | Available |
@@ -518,7 +518,7 @@ Cloudflare tunnel origin은 cleartext h2(h2c)를 지원하지 않는다. 따라�
 
 ### 9.1 활성화
 
-기본값은 활성이다. `MASC_WS_ENABLED=0` 또는 `false`일 때만 비활성화된다. `GET /ws`는 업그레이드 엔드포인트가 아니라 standalone WS 소켓 discovery JSON을 반환한다.
+기본값은 활성이다. `MASC_WS_ENABLED=0` 또는 `false`일 때만 비활성화된다. `GET /ws`는 두 가지로 동작한다 — `Upgrade: websocket` 헤더가 있으면 same-origin 검사 후 WebSocket 업그레이드를 수행하고(`server_routes_http_routes_frontend.ml`의 `websocket_handler`), 헤더가 없으면 standalone WS 소켓 discovery JSON을 반환한다.
 
 ### 9.2 동작 방식
 
@@ -558,7 +558,7 @@ RPCs:
 
 ### 10.3 Wire Format
 
-JSON 인코딩된 문자열을 gRPC 프레이밍으로 전송. Protobuf 바이너리가 아닌 JSON을 사용한다. 각 메시지 타입은 `to_bytes`/`of_bytes`로 직렬화/역직렬화한다.
+Protobuf 바이너리를 gRPC 프레이밍으로 전송. 타입은 `proto/masc_workspace.proto`에서 `ocaml-protoc-plugin`으로 생성되며, 생성된 모듈은 `Masc_proto.Masc_workspace.Masc.Workspace.V1` 아래에 있다. 각 메시지 타입은 `to_bytes`/`of_bytes`로 직렬화/역직렬화한다.
 
 ### 10.4 Subscribe Streaming
 
@@ -894,7 +894,7 @@ sequenceDiagram
 
 | Module | LOC | 역할 |
 |--------|-----|------|
-| `lib/server/masc_grpc_types.ml` | 485 | gRPC 메시지 타입 (JSON wire format) |
+| `lib/server/masc_grpc_types.ml` | 596 | gRPC 메시지 타입 (protobuf wire format) |
 | `lib/server/masc_grpc_service.ml` | 417 | gRPC 서비스 핸들러 |
 | `lib/server/masc_grpc_server.ml` | 67 | gRPC 서버 시작 |
 | `lib/server/masc_grpc_client.ml` | 150 | gRPC 클라이언트 |

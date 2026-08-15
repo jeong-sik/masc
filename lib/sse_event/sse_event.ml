@@ -1,9 +1,7 @@
 (* RFC-0004 Phase A0.1 PR-1 — typed SSE event wrapper.
 
    Bridges atd-generated payload types (see [Sse_event_t],
-   [Sse_event_j]) and the manual envelope wrap that replicates
-   [lib/runtime/runtime_event_bridge.wrap_event] (lines 507-531) +
-   [json_string_opt] (lines 25-27) semantics.
+   [Sse_event_j]) and the manual envelope wrap.
 
    The envelope is intentionally hand-rolled in OCaml rather than
    declared in atd because [json_string_opt] coerces [Some ""] to
@@ -13,9 +11,8 @@
 
 (** Envelope metadata fields common to every SSE event.
 
-    Field semantics match [runtime_event_bridge.wrap_event]: optional
-    string fields use [json_string_opt] (empty string → null), and
-    [turn] uses plain [option fold] (None → null). *)
+    Optional string fields use [json_string_opt] (empty string →
+    null), and [turn] uses plain [option fold] (None → null). *)
 type envelope_meta =
   { event_type : string
   ; ts_unix : float
@@ -38,9 +35,9 @@ let json_string_opt = function
   | _ -> `Null
 ;;
 
-(** Wrap a typed payload with the standard envelope.  Returns the
-    same field shape and order as [wrap_event] so its output is
-    byte-identical when serialized via [Yojson.Safe.to_string]. *)
+(** Wrap a typed payload with the standard envelope.  Field order is
+    fixed by the [`Assoc] literal below and is part of the wire
+    contract. *)
 let wrap_envelope (meta : envelope_meta) (payload : Yojson.Safe.t) : Yojson.Safe.t =
   `Assoc
     [ "type", `String ("agent_core:" ^ meta.event_type)
@@ -61,10 +58,7 @@ let wrap_envelope (meta : envelope_meta) (payload : Yojson.Safe.t) : Yojson.Safe
 (** Emit a full [agent_started] envelope as JSON.
 
     [agent_name] and [task_id] in the envelope are populated from the
-    same values as the payload — this matches the
-    [runtime_event_bridge] AgentStarted arm at lines 556-560 which
-    passes [~agent_name ~task_id] to [wrap_event] alongside the
-    payload [`Assoc]. *)
+    same values as the payload, so consumers can read either. *)
 let agent_started
       ~(ts_unix : float)
       ~(correlation_id : string)

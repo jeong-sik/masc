@@ -62,7 +62,9 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     (RFC 1918 / fc00::/7), link-local ranges, the unspecified address,
     or an RFC 6761 localhost name.  The check is literal (no DNS
     resolution), so a public hostname resolving to a private address is
-    outside this boundary by contract.
+    outside this boundary by contract; NAT64-embedded IPv4 literals
+    (64:ff9b::/96) are likewise not unwrapped — only the standard
+    IPv4-mapped form (::ffff:0:0/96) is.
 
     Failure classes (RFC-0189):
     - [Workflow_rejection]: invalid or rejected URL — caller-input

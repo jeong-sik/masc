@@ -223,7 +223,7 @@ let add_task_with_result
                                  | None -> false) )
                           ]);
                   let _ =
-                    broadcast
+                    broadcast ~audience:System_record
                       config
                       ~from_agent:actor
                       ~content:(Printf.sprintf "New quest: %s" title)
@@ -364,7 +364,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                     (List.length added_tasks)
                     summary
                 in
-                (match broadcast config ~from_agent:actor ~content:msg with
+                (match broadcast ~audience:System_record config ~from_agent:actor ~content:msg with
                  | Ok _ -> ()
                  | Error error ->
                    Log.Workspace.error

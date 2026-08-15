@@ -131,7 +131,7 @@ val broadcast_delivery_to_yojson : broadcast_delivery -> Yojson.Safe.t
 
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
-           ?audience:audience ->
+           audience:audience ->
            Workspace_utils_backend_setup.config ->
            from_agent:string -> content:string ->
            (broadcast_delivery, broadcast_error) result

@@ -520,7 +520,7 @@ let transition_task_outcome_r
            | None -> ()
            | Some content ->
              (try
-                match broadcast config ~from_agent:agent_name ~content with
+                match broadcast ~audience:System_record config ~from_agent:agent_name ~content with
                 | Ok _ -> ()
                 | Error error ->
                   Log.TaskState.error

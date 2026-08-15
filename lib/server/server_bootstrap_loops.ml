@@ -372,9 +372,16 @@ let project_workspace_message_to_fleet
     (* A lifecycle or task-FSM announcement belongs to the activity record, not
        to anyone's conversation. Projecting it would also cost one full
        transcript read-and-scan per registered Keeper on the commit path — on
-       the reference workspace 3.73 MB per message, for the 17 of 18 messages
-       nobody would want to read. *)
-    ()
+       the reference workspace 4.53 MB per message, for the 17 of 18 messages
+       nobody would want to read.
+
+       A replayed row also lands here: [delivery_of_message] cannot recover the
+       live declaration, so a restart between commit and delivery loses the
+       projection. Logged rather than silent, because there is no second
+       chance — the outbox marker is deleted once the mention settles. *)
+    Log.Keeper.debug
+      "fleet projection skipped for a system record request_id=%s from=%s"
+      delivery.request_id delivery.from_agent
   | Workspace_broadcast.Fleet_conversation ->
   match Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id with
   | Error detail ->
@@ -385,22 +392,29 @@ let project_workspace_message_to_fleet
     let delivery_key =
       Keeper_chat_delivery_identity.Workspace_message request_id
     in
-    let author_id = Keeper_identity.Keeper_id.of_string delivery.from_agent in
     let speaker : Keeper_chat_store.speaker =
       { speaker_id = Some delivery.from_agent
       ; speaker_name = Some delivery.from_agent
       ; speaker_authority = Keeper_chat_store.External
       }
     in
-    let authored_by_recipient keeper_name =
-      match author_id, Keeper_identity.Keeper_id.of_string keeper_name with
-      | Some author, Some recipient ->
-        Keeper_identity.Keeper_id.equal author recipient
-      | Some _, None | None, Some _ | None, None -> false
+    (* Exact comparison against the identities the registry holds, not a minted
+       [Keeper_id]. That mint does not round-trip a keeper whose name has three
+       or more hyphenated parts: measured with [adm-race-cf-000], the minted
+       comparison failed to recognise the author and it received its own speech
+       back as an external line. The registry entry already carries both the
+       keeper name and the agent name, so this costs no extra read. *)
+    let authored_by_recipient ~keeper_name ~agent_name =
+      let same candidate =
+        String.equal
+          (String.lowercase_ascii (String.trim candidate))
+          (String.lowercase_ascii (String.trim delivery.from_agent))
+      in
+      same keeper_name || same agent_name
     in
     registered_keepers ()
-    |> List.iter (fun keeper_name ->
-      if not (authored_by_recipient keeper_name)
+    |> List.iter (fun (keeper_name, agent_name) ->
+      if not (authored_by_recipient ~keeper_name ~agent_name)
       then (
         match
           Keeper_chat_store.append_user_message_once
@@ -1508,7 +1522,7 @@ let start_keeper_loops_owned
          ~registered_keepers:(fun () ->
            Keeper_registry.all ~base_path ()
            |> List.map (fun (entry : Keeper_registry.registry_entry) ->
-             entry.name))
+             entry.name, entry.meta.Keeper_meta_contract.agent_name))
          delivery
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn

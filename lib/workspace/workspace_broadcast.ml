@@ -232,7 +232,7 @@ let set_on_broadcast_mention handler =
 
 let write_json_commit = Atomic.make write_json_commit_result
 
-let delivery_of_message ?(audience = System_record) (message : Masc_domain.message) =
+let delivery_of_message ~audience (message : Masc_domain.message) =
   { request_id = message.request_id
   ; seq = message.seq
   ; rendered =
@@ -383,14 +383,17 @@ let persist_delivery_status config message mention_delivery =
         message.request_id detail;
       Deferred Workspace_status_unavailable)
 
-let deliver_committed_mention ?audience config message =
-  delivery_of_message ?audience message
+let deliver_committed_mention ~audience config message =
+  delivery_of_message ~audience message
   |> deliver_delivery
   |> persist_delivery_status config message
 
 let reconcile_persisted_mention config message =
   match message.Masc_domain.mention_delivery with
-  | Mention_pending -> Some (deliver_committed_mention config message)
+  (* A replayed row cannot recover the live declaration, so reconciliation
+     redelivers the mention obligation only. *)
+  | Mention_pending ->
+    Some (deliver_committed_mention ~audience:System_record config message)
   | Mention_passive | Mention_accepted | Mention_rejected ->
     delete_outbox_marker config message.request_id
     |> Result.iter_error (fun detail ->
@@ -919,8 +922,8 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
      observe safe_msg_type;
      Ok { delivery with mention_delivery })
 
-let broadcast ?trace_context ?(msg_type = "broadcast")
-      ?(audience = System_record) config ~from_agent ~content =
+let broadcast ?trace_context ?(msg_type = "broadcast") ~audience config
+      ~from_agent ~content =
   (* Preserve original content and extract mention tokens before any
      fleet-wide invariant rewrite. Explicit mentions share the recovery lock,
      so sequence assignment, commit, intake materialization, and wake request

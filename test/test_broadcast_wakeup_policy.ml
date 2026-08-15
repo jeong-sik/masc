@@ -362,7 +362,8 @@ let test_fleet_projection_reaches_other_keepers () =
   List.iter (persist_meta config) [ "rondo"; "sangsu"; "taskmaster" ];
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
-    ~registered_keepers:(fun () -> [ "rondo"; "sangsu"; "taskmaster" ])
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu"; "taskmaster", Keeper_identity.keeper_agent_name "taskmaster" ])
     (fleet_delivery
        ~request_id
        ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
@@ -385,7 +386,8 @@ let test_fleet_projection_adds_no_queue_entry () =
   List.iter (persist_meta config) [ "rondo"; "sangsu" ];
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
-    ~registered_keepers:(fun () -> [ "rondo"; "sangsu" ])
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu" ])
     (fleet_delivery
        ~request_id
        ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
@@ -415,13 +417,20 @@ let test_fleet_projection_preserves_the_mention_row () =
        (delivery ~target ~request_id ~seq:41 ~content:"@sangsu please review"));
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
-    ~registered_keepers:(fun () -> [ "rondo"; target ])
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"
+       ; target, Keeper_identity.keeper_agent_name target
+       ])
     (fleet_delivery
        ~request_id
        ~from_agent:"external-agent"
        ~content:"@sangsu please review");
   check int "target keeps exactly one row" 1
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id);
+  (* Without this the case passes with no fanout at all: both assertions above
+     read only the row the mention path already wrote. *)
+  check int "the bystander received the fanout row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"rondo" ~request_id);
   match delivery_message ~base_path:config.base_path ~keeper_name:target ~request_id with
   | None -> fail "mention row disappeared after the fleet pass"
   | Some message ->
@@ -447,7 +456,8 @@ let test_system_record_is_not_projected () =
   in
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
-    ~registered_keepers:(fun () -> [ "rondo"; "sangsu" ])
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu" ])
     record;
   check int "a system record reaches no conversation window" 0
     (count_delivery_rows ~base_path:config.base_path ~keeper_name:"sangsu" ~request_id)
@@ -458,12 +468,39 @@ let test_system_record_is_not_projected () =
 let test_undeclared_broadcast_is_a_system_record () =
   with_workspace @@ fun config ->
   match
-    Workspace.broadcast config ~from_agent:"claude" ~content:"Claimed task-1"
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Claimed task-1"
   with
   | Error _ -> fail "broadcast was not persisted"
   | Ok delivery ->
     check bool "an undeclared producer is a system record" true
       (delivery.Workspace_broadcast.audience = Workspace_broadcast.System_record)
+;;
+
+(* Author exclusion has to compare the identities the registry holds. Minting a
+   [Keeper_id] does not round-trip a name of three or more hyphenated parts:
+   with the minted comparison this case fails on the second assertion —
+   `Expected: 0 / Received: 1` — because the author is not recognised and gets
+   its own speech back. Both names exist in the reference workspace. *)
+let test_hyphenated_names_do_not_collide_on_the_author () =
+  with_workspace @@ fun config ->
+  let author = "adm-race-cf-000" in
+  let listener = "adm-race-sf-000" in
+  let request_id = "wmsg-00fleet0000000005" in
+  List.iter (persist_meta config) [ author; listener ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () ->
+      [ author, Keeper_identity.keeper_agent_name author
+      ; listener, Keeper_identity.keeper_agent_name listener
+      ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:(Keeper_identity.keeper_agent_name author)
+       ~content:"a name-shaped collision must not eat this");
+  check int "the listener is not mistaken for the author" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:listener ~request_id);
+  check int "the author still gets nothing back" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:author ~request_id)
 ;;
 
 let () =
@@ -502,5 +539,7 @@ let () =
             test_system_record_is_not_projected
         ; test_case "an undeclared broadcast is a system record" `Quick
             test_undeclared_broadcast_is_a_system_record
+        ; test_case "hyphenated names do not collide on the author" `Quick
+            test_hyphenated_names_do_not_collide_on_the_author
         ] )
     ]

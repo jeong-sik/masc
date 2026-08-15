@@ -82,7 +82,13 @@ let handle_broadcast (workspace_config : Workspace_utils_backend_setup.config) (
           in
           mention_prefix ^ " " ^ req.message)
       in
-      (match Workspace.broadcast workspace_config ~from_agent:req.agent_name ~content with
+      (* An agent broadcasting over gRPC is speaking, same as the MCP tool;
+         the request even carries explicit mention targets. *)
+      (match
+         Workspace.broadcast
+           ~audience:Workspace_broadcast.Fleet_conversation
+           workspace_config ~from_agent:req.agent_name ~content
+       with
        | Ok delivery ->
          let success =
            match delivery.mention_delivery with

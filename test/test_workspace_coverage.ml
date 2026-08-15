@@ -2213,8 +2213,8 @@ let test_get_active_agents_filters_inactive_runtime_agents () =
 
 let test_get_messages_raw () =
   with_test_env (fun config ->
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 1" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 2" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 1" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 2" in
     let msgs = Workspace.get_messages_raw config ~since_seq:0 ~limit:10 in
     Alcotest.(check bool) "has messages" true (List.length msgs >= 2))
 ;;
@@ -2540,7 +2540,7 @@ let test_gc_restored_task_preserves_old_messages_same_pass () =
     Workspace.append_archive_tasks config [ orphan ];
     let content = "verification context for task-904" in
     let _ =
-      Workspace.broadcast
+      Workspace.broadcast ~audience:Workspace_broadcast.System_record
         config
         ~from_agent:"claude"
         ~content

@@ -156,7 +156,7 @@ module For_testing : sig
 
   val project_workspace_message_to_fleet :
     base_path:string ->
-    registered_keepers:(unit -> string list) ->
+    registered_keepers:(unit -> (string * string) list) ->
     Workspace_broadcast.broadcast_delivery ->
     unit
 

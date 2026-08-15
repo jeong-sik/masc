@@ -81,7 +81,10 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
       in
       let* result =
         match
-          Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message
+          (* The operator addressing the workspace is speech. *)
+          Workspace.broadcast
+            ~audience:Workspace_broadcast.Fleet_conversation
+            ctx.config ~from_agent:request.actor ~content:message
         with
         | Ok result -> Ok result
         | Error error -> Error (Workspace.broadcast_error_to_string error)

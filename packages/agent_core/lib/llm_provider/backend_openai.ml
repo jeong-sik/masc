@@ -1408,6 +1408,40 @@ let%test
   ctk |> member "enable_thinking" |> to_bool = true && json |> member "thinking" = `Null
 ;;
 
+(* llama-server RFC-0382/PR-6: a binding that declares return-progress asks the
+   server to stream prompt_progress chunks during prefill, so the first-event
+   and idle deadlines observe liveness instead of prefill silence. The field
+   rides only streamed requests — a non-stream request has no chunks to
+   carry progress on. *)
+let%test "build_request emits return_progress only on streamed requests" =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"qwen3.8-27b"
+      ~base_url:"http://127.0.0.1:9010"
+      ~return_progress:true
+      ()
+  in
+  let streamed = build_request ~stream:true ~config ~messages:[] () in
+  let plain = build_request ~config ~messages:[] () in
+  let open Yojson.Safe.Util in
+  Yojson.Safe.from_string streamed |> member "return_progress" = `Bool true
+  && Yojson.Safe.from_string plain |> member "return_progress" = `Null
+;;
+
+let%test "build_request omits return_progress by default" =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"qwen3.8-27b"
+      ~base_url:"http://127.0.0.1:9010"
+      ()
+  in
+  let streamed = build_request ~stream:true ~config ~messages:[] () in
+  let open Yojson.Safe.Util in
+  Yojson.Safe.from_string streamed |> member "return_progress" = `Null
+;;
+
 let%test "build_request emits chat_template_kwargs for declared qwen3 endpoint" =
   let config =
     Provider_config.make

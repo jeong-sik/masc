@@ -1755,6 +1755,42 @@ let test_runtime_toml_parses_optional_max_request_body_bytes () =
          binding.Runtime_schema.max_request_body_bytes
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
+(* RFC-0382 PR-6: return-progress is a binding-level opt-in (like keep-alive /
+   num-ctx) that asks an OpenAI-compat server to stream prompt_progress chunks
+   during prefill. Omitted must stay None — only an explicit declaration may
+   put the field on the wire. *)
+let test_runtime_toml_parses_optional_return_progress () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     return-progress = true\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse optional return-progress:\n%s" rendered
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option bool) "explicit return-progress opt-in" (Some true)
+         binding.Runtime_schema.return_progress
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
 let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
   (* Undeclared must stay None rather than acquiring a default. AGENT_CORE reads None as
      "no ceiling declared" and passes every size; a default here would silently
@@ -2690,6 +2726,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; price_output = None
     ; keep_alive = None
     ; num_ctx = None
+    ; return_progress = None
     }
   in
   match Runtime.of_binding cfg binding with
@@ -4186,6 +4223,8 @@ let () =
             test_runtime_toml_max_concurrent_flows_to_provider_config;
           test_case "max-request-body-bytes is optional opt-in" `Quick
             test_runtime_toml_parses_optional_max_request_body_bytes;
+          test_case "return-progress is optional opt-in" `Quick
+            test_runtime_toml_parses_optional_return_progress;
           test_case "omitted max-request-body-bytes stays None" `Quick
             test_runtime_toml_omitted_max_request_body_bytes_is_none;
           test_case

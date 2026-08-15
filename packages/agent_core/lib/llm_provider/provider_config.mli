@@ -127,6 +127,7 @@ type t =
 
         @since 0.208.4 *)
   ; keep_alive : string option
+  ; return_progress : bool
     (** Ollama [keep_alive] request field. Accepted values: integer
       seconds ({"-1"}, {"0"}, {"3600"}) or duration strings ({"5m"},
       {"30m"}, {"24h"}). [None] omits the field. Agent Core does not
@@ -238,6 +239,7 @@ val make
   -> ?supports_structured_output_override:bool
   -> ?model_capabilities_override:Capabilities.capabilities
   -> ?keep_alive:string
+  -> ?return_progress:bool
   -> ?internal_model_rotation_count:int
   -> ?num_ctx:int
   -> ?seed:int

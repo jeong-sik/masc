@@ -425,6 +425,17 @@ let build_request_assoc_artifact
     | None -> body
   in
   let body = if stream then ("stream", `Bool true) :: body else body in
+  (* llama-server streams prompt_progress chunks during prefill when asked,
+     so a long cold prefill produces SSE events instead of silence — the
+     first-event and idle deadlines then measure actual liveness rather
+     than time-to-first-token. Declared per binding (runtime.toml
+     [provider.model] return-progress), like keep_alive/num_ctx; servers
+     without the extension ignore the field. Meaningless without stream. *)
+  let body =
+    if stream && config.return_progress
+    then ("return_progress", `Bool true) :: body
+    else body
+  in
   let body =
     match caps.supports_seed, config.seed with
     | true, Some seed -> ("seed", `Int seed) :: body

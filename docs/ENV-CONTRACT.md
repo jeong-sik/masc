@@ -150,6 +150,11 @@ Precedence:
 | `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout. |
 | `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `900.0` | In-process WebSearch cache TTL. |
+| `BRAVE_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `brave` provider. |
+| `TAVILY_API_KEY` | `(none)` | Env-only credential; presence admits the `tavily` provider. |
+| `EXA_API_KEY` | `(none)` | Env-only credential; presence admits the `exa` provider. |
+| `BING_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `bing_api` provider. |
+| `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
 
 Equivalent `runtime.toml` keys:
 

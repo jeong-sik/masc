@@ -9,6 +9,10 @@ Captures, per run, into one JSON evidence file:
     bytes, and the body-duplication factor of the includeContent path
     (page_content chars vs content_text chars carried in one payload).
 
+The DuckDuckGo/Bing probes measure external endpoints masc no longer
+uses as providers — their run-to-run instability is the evidence the
+provider cut rests on, so the probes stay as time-series instruments.
+
 Stdlib only. Every failure is recorded as data, never swallowed:
 each probe result carries either measurements or an "error" field.
 

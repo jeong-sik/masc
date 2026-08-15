@@ -57,6 +57,7 @@ export const ATTENTION_REASONS = [
   'internal_error',
   'cancelled',
   'transcript_corruption',
+  'provider_attempt_effect_fenced',
   'unmapped_runtime_state',
 ] as const
 export type AttentionReason = typeof ATTENTION_REASONS[number]
@@ -78,6 +79,7 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
   internal_error: '내부 오류',
   cancelled: '취소됨',
   transcript_corruption: '대화 기록 손상 - 초기화 필요',
+  provider_attempt_effect_fenced: 'Provider 효과 결과 확인 필요',
   unmapped_runtime_state: '매핑되지 않은 runtime 상태',
 }
 

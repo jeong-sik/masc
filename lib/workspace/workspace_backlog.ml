@@ -142,6 +142,12 @@ let read_backlog_observation_r config =
 exception Backlog_read_failed of string
 exception Backlog_write_failed of string
 
+let protect_backlog_commit_settlement f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+  | Eio_guard.Non_eio -> f ()
+;;
+
 let read_backlog config =
   match read_backlog_with_source_r config with
   | Ok { observed_backlog; _ } -> observed_backlog
@@ -181,6 +187,7 @@ let write_backlog_result ?after_commit config backlog =
   match write_json_commit_result config primary_path json with
   | Error msg -> Error msg
   | Ok primary_commit ->
+    protect_backlog_commit_settlement (fun () ->
     Option.iter
       (fun message ->
          Log.TaskState.error
@@ -207,7 +214,21 @@ let write_backlog_result ?after_commit config backlog =
     in
     clear_backlog_cache_for primary_path;
     clear_backlog_cache_for recovery_path;
-    let post_commit_error =
+    let mutation_observer_error =
+      try
+        (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+        None
+      with
+      | exn ->
+        let message = Printexc.to_string exn in
+        Log.TaskState.error
+          "backlog primary committed but task mutation observer failed path=%s \
+           error=%s"
+          primary_path
+          message;
+        Some message
+    in
+    let caller_post_commit_error =
       match after_commit with
       | None -> None
       | Some f ->
@@ -215,7 +236,6 @@ let write_backlog_result ?after_commit config backlog =
            f ();
            None
          with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
            let message = Printexc.to_string exn in
            Log.TaskState.error
@@ -225,12 +245,23 @@ let write_backlog_result ?after_commit config backlog =
              message;
            Some message)
     in
+    let post_commit_error =
+      match mutation_observer_error, caller_post_commit_error with
+      | None, None -> None
+      | Some message, None | None, Some message -> Some message
+      | Some observer_error, Some caller_error ->
+        Some
+          (Printf.sprintf
+             "task mutation observer: %s; caller post-commit: %s"
+             observer_error
+             caller_error)
+    in
     Ok
       { committed_revision = backlog.version
       ; primary_mirror_error = primary_commit.mirror_error
       ; recovery_error
       ; post_commit_error
-      }
+      })
 
 (** [write_backlog ?after_commit config backlog] persists the primary SSOT,
     then observes secondary recovery/mirror/projection failures without

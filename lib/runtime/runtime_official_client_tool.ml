@@ -1,7 +1,21 @@
+type terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | External_effect_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; diagnostic : string
+      }
+
 type host_stop =
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
+      }
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
       }
 
 type dynamic_tool_result =

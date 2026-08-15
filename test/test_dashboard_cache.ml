@@ -264,6 +264,59 @@ let test_invalidate_prefix () =
   Alcotest.(check int) "proof entries recomputed" 4 !proof_counter;
   Alcotest.(check int) "non-matching prefix preserved" 1 !mission_counter
 
+let test_task_mutation_hook_invalidates_all_execution_variants () =
+  Dashboard_cache.invalidate_all ();
+  let default_counter = ref 0 in
+  let full_counter = ref 0 in
+  let unrelated_counter = ref 0 in
+  let read key counter =
+    Dashboard_cache.get_or_compute key ~ttl:120.0 (fun () ->
+      incr counter;
+      `Int !counter)
+  in
+  ignore (read "execution:default:light" default_counter);
+  ignore (read "execution:operator::full" full_counter);
+  ignore (read "workspace:default" unrelated_counter);
+  let stale_generation =
+    Server_dashboard_http_execution_surfaces.For_testing
+    .execution_publication_generation ()
+  in
+  Alcotest.(check bool)
+    "initial execution publication accepted"
+    true
+    (Server_dashboard_http_execution_surfaces.For_testing
+     .publish_execution_success_if_current
+       ~generation:stale_generation
+       (`Assoc [ "tasks", `List [] ]));
+  let previous = Atomic.get Workspace_hooks.on_task_mutation_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.on_task_mutation_fn previous;
+      Dashboard_cache.invalidate_all ())
+    (fun () ->
+      Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation ();
+      (Atomic.get Workspace_hooks.on_task_mutation_fn) ();
+      Alcotest.(check bool)
+        "pre-mutation execution publication rejected"
+        false
+        (Server_dashboard_http_execution_surfaces.For_testing
+         .publish_execution_success_if_current
+           ~generation:stale_generation
+           (`Assoc [ "tasks", `List [ `String "stale" ] ]));
+      Alcotest.(check bool)
+        "stale publication did not resurrect execution success"
+        true
+        (Option.is_none
+           (Server_dashboard_http_cache.snapshot
+              Server_dashboard_http_execution_surfaces.execution_cache)
+             .last_success_unix);
+      ignore (read "execution:default:light" default_counter);
+      ignore (read "execution:operator::full" full_counter);
+      ignore (read "workspace:default" unrelated_counter);
+      Alcotest.(check int) "default execution recomputed" 2 !default_counter;
+      Alcotest.(check int) "full execution recomputed" 2 !full_counter;
+      Alcotest.(check int) "unrelated cache preserved" 1 !unrelated_counter)
+
 (* -- 5. Stats reports active + computing ------------------------------------ *)
 
 let test_stats () =
@@ -800,6 +853,8 @@ let () =
             test_projection_digest_cache_separates_actors;
           test_case "invalidate" `Quick test_invalidate;
           test_case "invalidate_prefix" `Quick test_invalidate_prefix;
+          test_case "task mutation invalidates every execution variant" `Quick
+            test_task_mutation_hook_invalidates_all_execution_variants;
           test_case "stats" `Quick test_stats;
           test_case "stats detail surface" `Quick test_stats_detail_surface;
           test_case "stats empty table" `Quick test_stats_handles_empty_table;

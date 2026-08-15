@@ -72,6 +72,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_execution.mli` - execution-dispatch
 - `lib/keeper/keeper_tool_execution.ml` - execution-dispatch
 - `lib/keeper/keeper_tool_execution.mli` - execution-dispatch
+- `lib/keeper/keeper_tool_plan_executor.ml` - execution-dispatch
+- `lib/keeper/keeper_tool_plan_executor.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_join.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_join.mli` - execution-dispatch
 - `lib/keeper/keeper_hooks_agent_core_cost_events.ml` - hook-observation
@@ -163,6 +165,10 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_surface.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_surface_ops.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_plan.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_plan.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_composition_catalog.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_composition_catalog.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_agent_core_bundle.ml` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core_bundle.mli` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core_handler_exec.ml` - agent-core-tool-bridge
@@ -173,3 +179,5 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tools_agent_core_handler.mli` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core.ml` - agent-core-tool-bridge
 - `lib/keeper/keeper_tools_agent_core.mli` - agent-core-tool-bridge
+- `lib/keeper/keeper_tool_composition_surface.ml` - agent-core-tool-bridge
+- `lib/keeper/keeper_tool_composition_surface.mli` - agent-core-tool-bridge

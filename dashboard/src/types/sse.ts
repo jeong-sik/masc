@@ -40,6 +40,7 @@ export type SSEEventType =
   | 'ide_cursor_changed'
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
+  | 'keeper_tool_call_evidence_committed'
   | 'keeper_tool_skipped'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
@@ -203,6 +204,16 @@ export interface SSEEvent {
   tool_args_preview?: string
   tool_output_preview?: string
   tool_io_redacted?: boolean
+  composition_tool?: string
+  composition_run_id?: string
+  composition_node_id?: string
+  composition_execution?: 'inline' | 'async'
+  parent_tool_use_id?: string
+  tool_use_id?: string
+  planned_index?: number
+  batch_index?: number
+  batch_size?: number
+  execution_mode?: 'serial' | 'concurrent'
   reason_code?: string
   turn?: number
   phase?: string

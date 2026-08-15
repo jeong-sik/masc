@@ -27,6 +27,30 @@ end
     outcome enum is introduced between Keeper execution and {!Tool_result}. *)
 type executed_tool_result = Keeper_tool_execution.t
 
+(** Execute the exact canonical descriptor already admitted by a typed caller.
+    Unlike name dispatch, this path never resolves a second descriptor and so
+    cannot drift from the schema, execution mode, policy, or handler authority
+    that the caller validated. *)
+val execute_keeper_tool_descriptor_with_outcome
+  :  config:Workspace.config
+  -> meta:keeper_meta
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
+  -> ctx_work:working_context
+  -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
+  -> ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?mcp_session_id:string
+  -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> descriptor:Keeper_tool_descriptor.t
+  -> input:Yojson.Safe.t
+  -> unit
+  -> executed_tool_result
+
 val execute_keeper_tool_call_with_outcome
   :  config:Workspace.config
   -> meta:keeper_meta

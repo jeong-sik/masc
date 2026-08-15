@@ -300,6 +300,47 @@ let test_exact_agent_core_occurrence_persisted () =
         (Safe_ops.json_string_opt "execution_mode" entry)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_composition_action_context_persisted () =
+  with_tmp_log (fun () ->
+    let typed_result =
+      Tool_result.Completed
+        { Tool_result.tool_name = "keeper_fs_read"
+        ; data = `Assoc [ "content", `String "typed output" ]
+        ; metadata = None
+        ; duration_ms = 12.5
+        }
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"analyst"
+      ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
+      ~output_text:"typed output"
+      ~success:true
+      ~duration_ms:12.5
+      ~typed_result
+      ~composition_tool:"keeper_research_pipeline"
+      ~composition_run_id:"run-42"
+      ~composition_node_id:"fetch_sources"
+      ~composition_execution:Keeper_tool_composition_catalog.Async
+      ~parent_tool_use_id:"outer-7"
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      List.iter
+        (fun (label, key, expected) ->
+           Alcotest.(check (option string))
+             label
+             (Some expected)
+             (Safe_ops.json_string_opt key entry))
+        [ "typed disposition", "disposition", "completed"
+        ; "composition tool", "composition_tool", "keeper_research_pipeline"
+        ; "composition run", "composition_run_id", "run-42"
+        ; "composition node", "composition_node_id", "fetch_sources"
+        ; "composition execution", "composition_execution", "async"
+        ; "outer provider call", "parent_tool_use_id", "outer-7"
+        ]
+    | _ -> Alcotest.fail "expected exactly one composition action entry")
+
 (* ── Redaction: tool names do not suppress evidence ────────────── *)
 
 let test_sensitive_named_tool_logged_with_redaction () =
@@ -1028,6 +1069,42 @@ let test_dashboard_aggregate_missing_runtime_profile_is_unknown () =
       1
       (Safe_ops.json_int ~default:0 "calls" unknown_bucket))
 
+let test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate () =
+  with_tmp_log (fun () ->
+    let result =
+      Tool_result.make_deferred
+        ~tool_name:"keeper_wait"
+        ~start_time:(Time_compat.now ())
+        ~data:(`Assoc [ "reason", `String "external_effect_pending" ])
+        ()
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k-deferred"
+      ~tool_name:"keeper_wait"
+      ~input:(`Assoc [])
+      ~output_text:(Tool_result.message result)
+      ~success:(Tool_result.is_success result)
+      ~duration_ms:(Tool_result.duration_ms result)
+      ~typed_result:result
+      ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int)
+      "deferred remains visible as typed neutral outcome"
+      1
+      (Safe_ops.json_int ~default:0 "deferred" summary);
+    Alcotest.(check int)
+      "deferred excluded from settled quality total"
+      0
+      (Safe_ops.json_int ~default:(-1) "total" summary);
+    Alcotest.(check int)
+      "deferred is not a failure"
+      0
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    Alcotest.(check bool)
+      "deferred is absent from settled per-tool rates"
+      true
+      Yojson.Safe.Util.(member "by_tool" summary |> to_list |> List.is_empty))
+
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
     let store =
@@ -1314,6 +1391,30 @@ let test_output_inline_string_preserved () =
         "small inline result" s
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_output_preview_derives_truncation_metadata () =
+  with_tmp_log (fun () ->
+    let output_text = String.make 5000 'x' in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k"
+      ~tool_name:"tool_large"
+      ~input:(`Assoc [])
+      ~output_text
+      ~result_bytes:(String.length output_text)
+      ~success:true
+      ~duration_ms:1.0
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ `Assoc fields ] ->
+      Alcotest.(check (option int))
+        "producer bytes retained"
+        (Some 5000)
+        (List.assoc_opt "result_bytes" fields |> Option.map Yojson.Safe.Util.to_int);
+      Alcotest.(check (option int))
+        "log preview clamp is explicit"
+        (Some 4000)
+        (List.assoc_opt "truncated_to" fields |> Option.map Yojson.Safe.Util.to_int)
+    | _ -> Alcotest.fail "expected exactly one object entry")
+
 let test_string_input_keeps_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1445,6 +1546,8 @@ let () =
         ; eio_test "unfiltered read is exactly n; filtered still finds n"
             test_unfiltered_read_is_exactly_n_and_filtered_still_finds_n
         ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
+        ; eio_test "composition action context"
+            test_composition_action_context_persisted
         ] )
     ; ( "redaction",
         [ eio_test "sensitive-named tool logged with redaction"
@@ -1480,6 +1583,8 @@ let () =
             test_dashboard_aggregate_groups_runtime_fields
         ; eio_test "dashboard aggregate marks missing runtime profile unknown"
             test_dashboard_aggregate_missing_runtime_profile_is_unknown
+        ; eio_test "dashboard aggregate keeps deferred neutral"
+            test_dashboard_aggregate_excludes_typed_deferred_from_failure_rate
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"
@@ -1502,6 +1607,8 @@ let () =
             test_output_blob_marker_normalized
         ; eio_test "inline string output stays a JSON string"
             test_output_inline_string_preserved
+        ; eio_test "large output records preview truncation"
+            test_output_preview_derives_truncation_metadata
         ] )
     ; ( "action_radius",
         [ eio_test "string input does not break action radius"

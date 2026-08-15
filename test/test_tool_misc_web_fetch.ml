@@ -170,7 +170,37 @@ let test_truncation_offloads_full_text () =
           check bool "offloaded file holds the full extraction" true
             (String_util.contains_substring stored (line 200));
           check int "offloaded file is complete" 400
-            (List.length (String.split_on_char '\n' stored))))
+            (List.length (String.split_on_char '\n' stored));
+          (* RFC-0383: the same round trip appended one fact row to the
+             corpus index, and the row agrees with the artifact. *)
+          let index_path = Filename.concat (Filename.dirname path) "index.jsonl" in
+          let last_row =
+            In_channel.with_open_bin index_path In_channel.input_all
+            |> String.split_on_char '\n'
+            |> List.filter (fun row -> not (String.equal row ""))
+            |> List.rev |> List.hd
+          in
+          let row = Yojson.Safe.from_string last_row in
+          check string "index schema" "masc.web_artifact.v1"
+            (row |> member "schema" |> to_string);
+          check string "index sha256 matches the artifact name"
+            (Filename.basename path |> Filename.remove_extension)
+            (row |> member "sha256" |> to_string);
+          check string "index source_url" "https://example.com/long"
+            (row |> member "source_url" |> to_string);
+          check int "index bytes" (String.length stored)
+            (row |> member "bytes" |> to_int);
+          check bool "plain text carries no title field" true
+            (row |> member "title" = `Null);
+          (* Projection proof: removing the index changes no behavior. *)
+          Sys.remove index_path;
+          let json_again =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:2_000
+                 "https://example.com/long")
+          in
+          check bool "fetch still truncates without the index" true
+            (json_again |> member "truncated" |> to_bool)))
 
 (* Feature contract: cut points that miss a newline snap to UTF-8
    codepoint starts — a Korean page with no newlines truncates into a

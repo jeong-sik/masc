@@ -299,7 +299,36 @@ let truncation_share_den = 4
    canonical remedy message in the marker, and a #9903 test-isolation
    breach surfaces loudly as the offload reason instead of writing
    under the operator's HOME. *)
-let offload_full_text text =
+let web_artifact_index_schema = "masc.web_artifact.v1"
+
+(* RFC-0383: one append-only fact line per offload. The index is a
+   projection — the content-addressed file stays the truth, so an
+   append failure must not turn a successful offload into a failure.
+   The same sha256 offloaded again writes another row: an independent
+   observation that the URL still had that content, with dedup already
+   solved by content addressing at the file layer. *)
+let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes =
+  let row =
+    `Assoc
+      (List.concat
+         [ [ ("schema", `String web_artifact_index_schema)
+           ; ("sha256", `String sha256)
+           ; ("source_url", `String source_url)
+           ]
+         ; (match title with
+            | Some title -> [ ("title", `String title) ]
+            | None -> [])
+         ; [ ("bytes", `Int bytes)
+           ; ( "fetched_at"
+             , `String (Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday ())) )
+           ]
+         ])
+  in
+  try Ok (Fs_compat.append_jsonl (Filename.concat dir "index.jsonl") row) with
+  | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+  | Sys_error message -> Error message
+
+let offload_full_text ~source_url ~title text =
   match Env_config_core.base_path () with
   | exception Env_config_core.Config_error message -> Error message
   | base ->
@@ -317,7 +346,12 @@ let offload_full_text text =
       (try
          Fs_compat.mkdir_p dir;
          Fs_compat.save_file_atomic path text
-         |> Result.map (fun () -> path)
+         |> Result.map (fun () ->
+                let index =
+                  web_artifact_index_append ~dir ~sha256:digest ~source_url
+                    ~title ~bytes:(String.length text)
+                in
+                path, index)
        with
        | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
        | Sys_error message -> Error message)
@@ -402,7 +436,7 @@ let outline_block text =
       in
       Some (String.concat "\n" (header :: rows))
 
-let truncate_text ~max_chars text =
+let truncate_text ~max_chars ~source_url ~title text =
   let total = String.length text in
   if total <= max_chars then text, false, None
   else
@@ -423,14 +457,25 @@ let truncate_text ~max_chars text =
     in
     let head = String.sub text 0 head_cut in
     let tail = String.sub text tail_start (total - tail_start) in
-    let offloaded = offload_full_text text in
+    let offloaded = offload_full_text ~source_url ~title text in
     let marker =
       match offloaded with
-      | Ok path -> (
+      | Ok (path, index) -> (
           let base =
             Printf.sprintf
               "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text=%s]"
               total (String.length head) (String.length tail) path
+          in
+          (* RFC-0383: a failed index append never demotes a successful
+             offload — the artifact is the truth and the index only a
+             projection — but it does not pass silently either. The
+             marker carries the reason, mirroring full_text_unavailable. *)
+          let base =
+            match index with
+            | Ok () -> base
+            | Error reason ->
+                String.concat "\n"
+                  [ base; Printf.sprintf "[index_unavailable=%s]" reason ]
           in
           (* The outline only ships when the offload succeeded: its
              offsets address the artifact file, and a map without an
@@ -445,7 +490,7 @@ let truncate_text ~max_chars text =
     in
     ( String.concat "\n\n" [ head; marker; tail ]
     , true
-    , match offloaded with Ok path -> Some path | Error _ -> None )
+    , match offloaded with Ok (path, _) -> Some path | Error _ -> None )
 
 (** Response cache. Authorization and admission belong to the Keeper Gate; this
     leaf does not maintain a second, process-local request limiter. *)
@@ -655,7 +700,8 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
                 render_payload ~extract_mode ~content_kind response.body
               in
               let text, truncated, full_text_path =
-                truncate_text ~max_chars rendered
+                truncate_text ~max_chars ~source_url:response.final_url ~title
+                  rendered
               in
               Ok
                 ( response

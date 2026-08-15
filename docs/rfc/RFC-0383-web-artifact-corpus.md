@@ -91,9 +91,11 @@ append한다. 필요한 입력(`source_url`, `title`)은 호출자(handle/enrich
 ### 2.4 인덱스 append 실패의 처리
 
 오프로드는 성공했는데 인덱스 append가 실패하면(디스크·권한): **오프로드는 성공으로
-남는다.** 전문 보존이 1차 가치이고 인덱스는 projection이므로, 실패는 typed로 로그에
-남기되 도구 결과를 오염시키지 않는다. 이것은 counter-as-fix가 아니다 — 잃는 것은
-파생 데이터(행 하나)뿐이고 durable truth(아티팩트)는 온전하다.
+남는다.** 전문 보존이 1차 가치이고 인덱스는 projection이다. 실패는 조용히 지나가지도
+않는다 — 절단 마커에 `[index_unavailable=<reason>]` 행으로 드러난다. 기존
+`full_text_unavailable` 마커와 대칭인 표면이며, 도구 계층은 로깅 무의존(로그는
+dispatch 계층의 몫)이라는 기존 경계를 지킨다. 이것은 counter-as-fix가 아니다 —
+잃는 것은 파생 데이터(행 하나)뿐이고 durable truth(아티팩트)는 온전하다.
 
 ## 3. 구현 범위
 

@@ -950,13 +950,33 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
+                  (* masc#28762: [final_execution.runtime_id] names the
+                     deferred-lane assignment this cycle was budgeted under,
+                     not necessarily the concrete candidate
+                     [attempt_runtime_candidates] actually dispatched —
+                     [Runtime_lane_preference] sticky ordering can route a
+                     lane keyed by one runtime id to a different candidate
+                     first (observed: a lane entered as
+                     "ollama_cloud...deepseek..." consistently dispatched
+                     "glm-coding.glm-5-turbo" first, and this log named the
+                     untried lane key instead of the runtime that actually
+                     errored). [keeper_cycle_failed_runtime_attribution]
+                     reports the dispatched candidate's own id when a
+                     same-turn deferral hint is available. *)
+                  let runtime_attribution =
+                    keeper_cycle_failed_runtime_attribution
+                      ~deferred_runtime_lane:turn_state.deferred_runtime_lane
+                      ~execution_runtime_id:final_execution.runtime_id
+                  in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
-                    "%s: keeper cycle FAILED runtime=%s max_context=%d context_budget=%d \
+                    "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
+                     max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \
                      latency=%dms%s error=%s"
                     meta.name
-                    final_execution.runtime_id
+                    runtime_attribution.reported_runtime_id
+                    runtime_attribution.deferred_next_runtime_id
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget

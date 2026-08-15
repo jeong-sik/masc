@@ -33,6 +33,21 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
     Error err
 ;;
 
+type keeper_cycle_failed_runtime_attribution =
+  { reported_runtime_id : string
+  ; deferred_next_runtime_id : string
+  }
+
+let keeper_cycle_failed_runtime_attribution ~deferred_runtime_lane ~execution_runtime_id =
+  match deferred_runtime_lane with
+  | Some (hint : Keeper_turn_driver.deferred_runtime_lane) ->
+    { reported_runtime_id = hint.failed_runtime_id
+    ; deferred_next_runtime_id = hint.next_runtime_id
+    }
+  | None ->
+    { reported_runtime_id = execution_runtime_id; deferred_next_runtime_id = "none" }
+;;
+
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =

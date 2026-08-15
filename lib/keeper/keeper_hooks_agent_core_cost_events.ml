@@ -139,6 +139,7 @@ let assemble_cost_event_payload
       @ (match t.timings with
          | Some tm ->
            int_field "cache_n" tm.cache_n
+           @ int_field "prompt_n" tm.prompt_n
            @ float_field "prompt_per_second" tm.prompt_per_second
            @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])

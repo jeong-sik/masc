@@ -76,8 +76,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     websocket: {
       configured: true,
       listening: true,
-      mode: 'standalone',
-      port: 8936,
+      mode: 'same_origin',
       sessions: 0,
       relay_source: 'sse_external_subscriber',
       delivery: {

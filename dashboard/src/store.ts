@@ -29,6 +29,7 @@ import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-ho
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
+import { isAbortError } from './lib/async-state'
 import {
   keeperFreshnessTs,
   normalizeKeepers,
@@ -91,6 +92,8 @@ export const shellRuntimeResolution = signal<DashboardRuntimeResolution | null>(
 export const agents = signal<Agent[]>([])
 export const tasks = signal<Task[]>([])
 export const messages = signal<Message[]>([])
+export const workspaceMessagesLoading = signal(false)
+export const workspaceMessagesError = signal<string | null>(null)
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 // Authoritative backlog size from the execution payload's `task_counts.total`.
@@ -663,7 +666,107 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 let inflightDashboardRefresh: Promise<void> | null = null
 let inflightShellRefresh: Promise<boolean> | null = null
 let inflightShellRefreshLight = false
+let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
+let inflightWorkspaceMessagesRefreshProject: string | null = null
+let workspaceMessagesRefreshController: AbortController | null = null
+let workspaceMessagesRefreshGeneration = 0
+let workspaceMessagesRefreshInvalidated = false
+// Once the dedicated workspace endpoint has committed a snapshot, execution
+// payload messages are only a lower-fidelity fallback: they do not carry the
+// producer request id or durable mention-delivery status.  Letting a later
+// execution snapshot merge them back creates a second seq-identical row and
+// can make an accepted delivery look pending again.
+let workspaceMessagesDurableAuthority: { project: string | null } | null = null
 let lastShellRefreshAt = 0
+
+export function refreshDashboardWorkspaceMessages(
+  expectedProject = serverStatus.value?.project ?? null,
+): Promise<void> {
+  if (inflightWorkspaceMessagesRefresh) {
+    if (inflightWorkspaceMessagesRefreshProject === expectedProject) {
+      workspaceMessagesRefreshInvalidated = true
+      return inflightWorkspaceMessagesRefresh
+    }
+    // The inflight refresh targets a different project. Joining it would let
+    // its result satisfy this call's expectedProject guard by coincidence;
+    // abort it and start a fresh request scoped to this project instead.
+    workspaceMessagesRefreshController?.abort()
+  }
+
+  workspaceMessagesLoading.value = true
+  workspaceMessagesError.value = null
+  workspaceMessagesRefreshInvalidated = false
+  const generation = ++workspaceMessagesRefreshGeneration
+  const controller = new AbortController()
+  workspaceMessagesRefreshController = controller
+  inflightWorkspaceMessagesRefreshProject = expectedProject
+  inflightWorkspaceMessagesRefresh = (async () => {
+    try {
+      const { fetchDashboardWorkspaceMessages } = await import('./api/dashboard-workspace')
+      let settled = false
+      while (!settled && generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesRefreshInvalidated = false
+        const nextMessages = await fetchDashboardWorkspaceMessages({
+          signal: controller.signal,
+        })
+        if (generation !== workspaceMessagesRefreshGeneration || controller.signal.aborted) {
+          return
+        }
+        if (workspaceMessagesRefreshInvalidated) {
+          continue
+        }
+        if ((serverStatus.value?.project ?? null) === expectedProject) {
+          // This endpoint is the durable Workspace message SSOT. Replace the
+          // execution-derived cache instead of merging rows that the light
+          // execution response intentionally omits.
+          messages.value = nextMessages
+          workspaceMessagesDurableAuthority = { project: expectedProject }
+        }
+        settled = true
+      }
+    } catch (error) {
+      if (generation === workspaceMessagesRefreshGeneration && !isAbortError(error)) {
+        // The durable endpoint failed after previously committing a snapshot
+        // for this project: release authority so the execution-snapshot
+        // fallback (see the comment above workspaceMessagesDurableAuthority's
+        // declaration) can resume covering messages instead of freezing on
+        // the last durable snapshot. Scoped to expectedProject so a stale
+        // failure can't clear an authority a newer, still-inflight refresh
+        // already set for a different project.
+        if (workspaceMessagesDurableAuthority?.project === expectedProject) {
+          workspaceMessagesDurableAuthority = null
+        }
+        workspaceMessagesError.value = errorMessageOr(
+          error,
+          'Workspace messages failed to load',
+        )
+        console.warn('[Workspace messages] fetch error:', error)
+      }
+    } finally {
+      if (generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesLoading.value = false
+        workspaceMessagesRefreshController = null
+        inflightWorkspaceMessagesRefresh = null
+        inflightWorkspaceMessagesRefreshProject = null
+      }
+    }
+  })()
+  return inflightWorkspaceMessagesRefresh
+}
+
+export function cancelDashboardWorkspaceMessagesRefresh(): void {
+  workspaceMessagesRefreshGeneration += 1
+  workspaceMessagesRefreshInvalidated = false
+  workspaceMessagesRefreshController?.abort()
+  workspaceMessagesRefreshController = null
+  inflightWorkspaceMessagesRefresh = null
+  inflightWorkspaceMessagesRefreshProject = null
+  workspaceMessagesLoading.value = false
+  // The durable refresh loop is no longer running, so its snapshot can no
+  // longer be trusted to stay current — release authority so the
+  // execution-snapshot fallback resumes covering messages.
+  workspaceMessagesDurableAuthority = null
+}
 
 export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
@@ -1045,6 +1148,11 @@ export function hydrateExecutionSnapshot(
     previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
+  if (workspaceChanged) {
+    // cancelDashboardWorkspaceMessagesRefresh() releases
+    // workspaceMessagesDurableAuthority itself.
+    cancelDashboardWorkspaceMessagesRefresh()
+  }
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)
@@ -1059,7 +1167,14 @@ export function hydrateExecutionSnapshot(
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)
-  messages.value = workspaceChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
+  const currentProject = serverStatus.value?.project ?? null
+  const durableMessagesOwnCurrentProject =
+    workspaceMessagesDurableAuthority?.project === currentProject
+  if (!durableMessagesOwnCurrentProject) {
+    messages.value = workspaceChanged
+      ? executionMessages
+      : mergeMessages(messages.value, executionMessages)
+  }
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)

@@ -38,6 +38,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'masc/agent_unbound',
   'broadcast',
   'masc/broadcast',
+  'workspace_message_delivery_changed',
   'task_update',
   'board_post',
   'masc/board_post',

@@ -240,9 +240,98 @@ let render_payload ~extract_mode ~content_kind payload =
   | Plain_text -> (normalize_raw_text payload, Raw_text)
   | Json_text | Xml_text -> (String.trim payload, Raw_text)
 
+(* Deterministic truncation, following the head/tail window Hermes uses
+   for web extracts: keep the opening three quarters and the closing
+   quarter of the budget, cut on line boundaries, and point at the
+   offloaded full text instead of shipping it. Same input, same output. *)
+let truncation_head_share_num = 3
+let truncation_share_den = 4
+
+(* [Env_config_core.base_path] is the guarded public accessor
+   (RFC-0085 PR-9 hides the raw option form): unset becomes the
+   canonical remedy message in the marker, and a #9903 test-isolation
+   breach surfaces loudly as the offload reason instead of writing
+   under the operator's HOME. *)
+let offload_full_text text =
+  match Env_config_core.base_path () with
+  | exception Env_config_core.Config_error message -> Error message
+  | base ->
+      let dir =
+        List.fold_left
+          Filename.concat
+          base
+          [ Common.masc_dirname; "artifacts"; "web-fetch" ]
+      in
+      let digest = Digestif.SHA256.(digest_string text |> to_hex) in
+      let path = Filename.concat dir (digest ^ ".md") in
+      (* Filesystem failures become typed reasons in the marker; anything
+         else propagates to the tool dispatch boundary rather than being
+         flattened into a string here. *)
+      (try
+         Fs_compat.mkdir_p dir;
+         Fs_compat.save_file_atomic path text
+         |> Result.map (fun () -> path)
+       with
+       | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+       | Sys_error message -> Error message)
+
+let is_utf8_continuation_byte byte = Char.code byte land 0xC0 = 0x80
+
+(* When no newline is near the budget, the raw byte offset can land
+   inside a multi-byte codepoint and ship silent mojibake. Snap the cut
+   to a codepoint start: left for the head (excluded byte must start a
+   codepoint), right for the tail (included byte must start one). Both
+   walks are bounded and deterministic; invalid input degrades to an
+   empty window, never a loop. *)
+let snap_codepoint_left text index =
+  let rec loop i =
+    if i > 0 && is_utf8_continuation_byte text.[i] then loop (i - 1) else i
+  in
+  loop index
+
+let snap_codepoint_right text index =
+  let total = String.length text in
+  let rec loop i =
+    if i < total && is_utf8_continuation_byte text.[i] then loop (i + 1) else i
+  in
+  loop index
+
 let truncate_text ~max_chars text =
-  if String.length text <= max_chars then text, false
-  else String.sub text 0 max_chars ^ "\n[TRUNCATED]", true
+  let total = String.length text in
+  if total <= max_chars then text, false, None
+  else
+    let head_budget = max_chars * truncation_head_share_num / truncation_share_den in
+    let tail_budget = max_chars - head_budget in
+    let head_cut =
+      if head_budget = 0 then 0
+      else
+        match String.rindex_from_opt text (head_budget - 1) '\n' with
+        | Some idx when idx > 0 -> idx
+        | Some _ | None -> snap_codepoint_left text head_budget
+    in
+    let tail_start =
+      let minimum = total - tail_budget in
+      match String.index_from_opt text minimum '\n' with
+      | Some idx when idx + 1 < total -> idx + 1
+      | Some _ | None -> snap_codepoint_right text minimum
+    in
+    let head = String.sub text 0 head_cut in
+    let tail = String.sub text tail_start (total - tail_start) in
+    let offloaded = offload_full_text text in
+    let marker =
+      match offloaded with
+      | Ok path ->
+          Printf.sprintf
+            "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text=%s]"
+            total (String.length head) (String.length tail) path
+      | Error reason ->
+          Printf.sprintf
+            "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text_unavailable=%s]"
+            total (String.length head) (String.length tail) reason
+    in
+    ( String.concat "\n\n" [ head; marker; tail ]
+    , true
+    , match offloaded with Ok path -> Some path | Error _ -> None )
 
 (** Response cache. Authorization and admission belong to the Keeper Gate; this
     leaf does not maintain a second, process-local request limiter. *)
@@ -448,7 +537,9 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
               let rendered, extraction_source =
                 render_payload ~extract_mode ~content_kind response.body
               in
-              let text, truncated = truncate_text ~max_chars rendered in
+              let text, truncated, full_text_path =
+                truncate_text ~max_chars rendered
+              in
               Ok
                 ( response
                 , status
@@ -457,7 +548,8 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
                 , title
                 , description
                 , text
-                , truncated ))
+                , truncated
+                , full_text_path ))
       | Some status -> Error (Http_status status)
       | None -> Error No_http_status)
 
@@ -521,7 +613,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                         , title
                         , description
                         , text
-                        , truncated ) ->
+                        , truncated
+                        , full_text_path ) ->
                         let fields =
                           [
                             ("url", `String url);
@@ -536,6 +629,10 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                             ("content_chars", `Int (String.length text));
                             ("truncated", `Bool truncated);
                           ]
+                          @
+                          (match full_text_path with
+                          | Some path -> [ ("full_text_path", `String path) ]
+                          | None -> [])
                           @
                           (match response.content_type with
                           | Some value -> [ ("content_type", `String value) ]

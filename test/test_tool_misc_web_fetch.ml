@@ -107,6 +107,108 @@ let test_invalid_redirect_is_workflow_rejection () =
       check bool "message" true
         (String_util.contains_substring (Tool_result.message result) "invalid redirect"))
 
+let with_base_path_env path f =
+  let key = "MASC_BASE_PATH" in
+  let original = Sys.getenv_opt key in
+  Unix.putenv key path;
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Unix.putenv key value
+      | None -> Unix.putenv key "")
+    f
+
+(* Feature contract: past maxChars the text becomes a deterministic
+   head/tail window around a [TRUNCATED ...] marker, and the complete
+   extraction is offloaded content-addressed under
+   <base>/.masc/artifacts/web-fetch/ with its path in full_text_path. *)
+let test_truncation_offloads_full_text () =
+  let tmp_base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-trunc-%d" (Unix.getpid ()))
+  in
+  Unix.mkdir tmp_base 0o755;
+  let line index = Printf.sprintf "line %04d of the long page" index in
+  let body =
+    String.concat "\n" (List.init 400 line)
+  in
+  with_base_path_env tmp_base (fun () ->
+      Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+          Ok
+            { Masc.Tool_misc_web_fetch.http_status = Some 200
+            ; final_url = "https://example.com/long"
+            ; redirect_count = 0
+            ; content_type = Some "text/plain"
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            })
+        (fun () ->
+          let json =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:2_000
+                 "https://example.com/long")
+          in
+          let open Yojson.Safe.Util in
+          check bool "truncated" true (json |> member "truncated" |> to_bool);
+          let text = json |> member "text" |> to_string in
+          check bool "head kept" true
+            (String_util.contains_substring text (line 0));
+          check bool "tail kept" true
+            (String_util.contains_substring text (line 399));
+          check bool "marker present" true
+            (String_util.contains_substring text "[TRUNCATED total_chars=");
+          let path = json |> member "full_text_path" |> to_string in
+          check bool "marker names the path" true
+            (String_util.contains_substring text ("full_text=" ^ path));
+          check bool "path under base" true
+            (String_util.contains_substring path
+               (Filename.concat tmp_base ".masc"));
+          let stored = In_channel.with_open_bin path In_channel.input_all in
+          check bool "offloaded file holds the full extraction" true
+            (String_util.contains_substring stored (line 200));
+          check int "offloaded file is complete" 400
+            (List.length (String.split_on_char '\n' stored))))
+
+(* Feature contract: cut points that miss a newline snap to UTF-8
+   codepoint starts — a Korean page with no newlines truncates into a
+   window that is still valid UTF-8 end to end. *)
+let test_truncation_preserves_utf8_boundaries () =
+  let tmp_base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-utf8-%d" (Unix.getpid ()))
+  in
+  Unix.mkdir tmp_base 0o755;
+  let body =
+    String.concat " "
+      (List.init 300 (fun index -> Printf.sprintf "한글본문조각%04d" index))
+  in
+  with_base_path_env tmp_base (fun () ->
+      Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+          Ok
+            { Masc.Tool_misc_web_fetch.http_status = Some 200
+            ; final_url = "https://example.com/korean"
+            ; redirect_count = 0
+            ; content_type = Some "text/plain"
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            })
+        (fun () ->
+          let json =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:1_000
+                 "https://example.com/korean")
+          in
+          let open Yojson.Safe.Util in
+          check bool "truncated" true (json |> member "truncated" |> to_bool);
+          let text = json |> member "text" |> to_string in
+          check bool "window is valid utf8" true (String.is_valid_utf_8 text);
+          check bool "head kept" true
+            (String_util.contains_substring text "한글본문조각0000");
+          check bool "tail kept" true
+            (String_util.contains_substring text "한글본문조각0299")))
+
 let () =
   run "tool_misc_web_fetch"
     [
@@ -118,5 +220,9 @@ let () =
             test_plain_text_preserves_angle_brackets;
           test_case "invalid redirect class" `Quick
             test_invalid_redirect_is_workflow_rejection;
+          test_case "truncation offloads full text" `Quick
+            test_truncation_offloads_full_text;
+          test_case "truncation preserves utf8 boundaries" `Quick
+            test_truncation_preserves_utf8_boundaries;
         ] );
     ]

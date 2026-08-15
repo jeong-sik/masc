@@ -247,10 +247,15 @@ let render_payload ~extract_mode ~content_kind payload =
 let truncation_head_share_num = 3
 let truncation_share_den = 4
 
+(* [Env_config_core.base_path] is the guarded public accessor
+   (RFC-0085 PR-9 hides the raw option form): unset becomes the
+   canonical remedy message in the marker, and a #9903 test-isolation
+   breach surfaces loudly as the offload reason instead of writing
+   under the operator's HOME. *)
 let offload_full_text text =
-  match Env_config_core.base_path_opt () with
-  | None -> Error "MASC base path is not configured"
-  | Some base ->
+  match Env_config_core.base_path () with
+  | exception Env_config_core.Config_error message -> Error message
+  | base ->
       let dir =
         List.fold_left
           Filename.concat

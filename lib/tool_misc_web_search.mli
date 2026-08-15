@@ -6,10 +6,15 @@
     [Tavily] / [Exa] / [Bing_api]) with response caching. Only
     providers whose credentials are present enter the chain; an
     empty chain is an explicit configuration failure, never an
-    empty success.
+    empty success. [Brave_llm_context] joins only through explicit
+    provider config (never the default order) and answers with a
+    grounded context envelope — [context_text] + [sources] — in
+    place of result rows; its token budget is negotiated in the
+    provider request, not re-truncated locally.
 
-    Internal: ~50+ helpers + 5 internal types stay private —
-    [normalized_hit] / [provider] (5-variant) /
+    Internal: ~50+ helpers + internal types stay private —
+    [normalized_hit] / [provider] (6-variant) /
+    [grounded_source] / [grounded_context] / [search_payload] /
     [provider_response] / [cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
     state),
@@ -34,12 +39,17 @@
 
 (** Per-provider outcome closure for the test simulator —
     [`Hits] supplies pre-fabricated (title, url, snippet)
-    triples; [`Empty] simulates a successful response with no
-    hits; [`Error msg] simulates a transport-layer failure. *)
+    triples; [`Grounded] supplies (url, title, snippets) grounded
+    entries rendered through the same envelope as the live
+    grounded provider (no client-side truncation, matching the
+    request-negotiated budget of the real path); [`Empty]
+    simulates a successful response with no hits; [`Error msg]
+    simulates a transport-layer failure. *)
 type simulated_provider_outcome =
   [ `Error of string
   | `Empty
   | `Hits of (string * string * string) list
+  | `Grounded of (string * string * string list) list
   ]
 
 (** {1 Provider fallback plan} *)
@@ -47,7 +57,8 @@ type simulated_provider_outcome =
 val provider_plan : unit -> string list
 (** [provider_plan ()] returns the resolved provider order as
     canonical lowercase labels ([searxng] / [brave] / [tavily] /
-    [exa] / [bing_api]).  Reads
+    [exa] / [bing_api], plus [brave_llm_context] when explicitly
+    configured).  Reads
     {!Env_config.Tools.web_search_provider_opt} and
     [web_search_fallbacks_opt] at call time, dedupes preserving
     order, then appends the default provider order to fill any
@@ -113,6 +124,14 @@ val parse_bing_search_json : string -> (string * string * string) list
 (** Parse Bing Search API JSON response from
     [{ "webPages": { "value": \[{name, url, snippet}, ...\] } }]. *)
 
+val parse_brave_llm_context_json : string -> (string * string * string list) list
+(** Parse a Brave LLM Context response from
+    [{ "grounding": { "generic": \[{url, title, snippets}, ...\] } }]
+    into (url, title, snippets) entries.  Total like its sibling
+    parsers: malformed JSON or an unexpected shape yields [[]].
+    Entries without a valid http(s) url or with zero snippets are
+    dropped; a missing title falls back to the url. *)
+
 (** {1 HTML cleaning} *)
 
 val clean_search_text : string -> string
@@ -135,7 +154,11 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     and [contentTimeout] controls. This module remains the search-provider
     boundary to avoid depending on fetch.
 
-    On success [data] is the typed search result envelope.
+    On success [data] is the typed search result envelope. When the
+    serving provider is [brave_llm_context] the envelope carries
+    [grounded=true], [context_text] (the pre-extracted chunks) and
+    [sources] (url/title/snippet_count metadata) instead of [results]
+    rows.
 
     Failure classes (RFC-0189):
     - [Workflow_rejection]: empty query input.

@@ -262,6 +262,7 @@ Keeper WebSearch/WebFetch backend 메모:
 - `scripts/searxng-local.sh status|smoke|logs|stop`으로 로컬 provider를 점검한다. 기본 config는 `${MASC_BASE_PATH:-$HOME/me}/.local/share/masc-searxng/settings.yml`에 생성되며 MASC가 쓰는 JSON search format을 켠다.
 - 기본 auto 모드는 자격이 설정된 provider만 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 시도한다.
 - 자격이 하나도 없으면 검색은 빈 결과가 아니라 설정 방법을 담은 실패로 끝난다.
+- `brave_llm_context`는 명시 설정 시에만 체인에 들어온다 (`BRAVE_SEARCH_API_KEY` 필요). URL+스니펫 행 대신 토큰 예산이 요청에 걸린 추출 청크(`context_text` + `sources`)를 반환한다.
 - env:
   - `MASC_SEARXNG_URL` (self-hosted SearXNG instance URL)
   - `MASC_WEB_SEARCH_PROVIDER`

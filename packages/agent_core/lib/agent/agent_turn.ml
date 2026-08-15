@@ -110,6 +110,7 @@ let provider_config_with_agent_config
   ; disable_parallel_tool_use = config.disable_parallel_tool_use
   ; response_format = config.response_format
   ; cache_system_prompt = config.cache_system_prompt
+  ; cache_extended_ttl = config.cache_extended_ttl
   }
 ;;
 

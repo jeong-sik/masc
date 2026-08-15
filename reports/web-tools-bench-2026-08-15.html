@@ -206,11 +206,59 @@ provider(Ollama)로 넘어가는 체인 순회를 코드와 결과 양쪽에서 
 </ol>
 </div>
 
+<h2>품질 하네스 Q1 — 고정 쿼리셋 첫 실측 (2026-08-16, web-quality r1)</h2>
+
+<p class="note">계측기: <code>scripts/bench-web-quality.py</code> (신규) ·
+원본 증거: <code>docs/evidence/web-quality-2026-08-16-r1.json</code>.
+고정 8쿼리(공식문서 2·레퍼런스 1·기술QA 1·니치 1·최신성 1·한국어 2)에 기대 도메인 포함 여부를
+순위로 채점(hit@1/hit@5), 한국어는 반환 본문의 한글 비율로 채점. 채점은 결정론,
+변하는 것은 provider 뒤의 웹뿐 — 그 drift를 시계열로 추적하는 것이 목적이다.
+임계값·게이트 없음: 측정기다.</p>
+
+<h2>표 6. 같은 8쿼리, provider 품질 (r1)</h2>
+<table>
+<tr><th>provider</th><th>hit@1</th><th>hit@5</th><th>한국어 본문</th><th>중앙값 지연</th><th>비고</th></tr>
+<tr><td>Ollama</td><td><strong>5/6</strong></td><td>5/6</td><td><strong>2/2</strong> (한글 비율 0.80·0.75)</td><td>1,231ms</td>
+<td>유일한 miss는 기술QA — <code>git-scm.dev</code>(비공식 미러)가 1위로 와서 기대 도메인 판정 밖</td></tr>
+<tr><td>SearXNG</td><td>2/6</td><td>2/6</td><td>0/2</td><td>1,921ms</td>
+<td>부분 회복 관측: 8쿼리 중 2개(공식문서 계열)만 10건, 나머지 6개는 0건 — 특정 상류 엔진만 생존한 상태</td></tr>
+<tr><td>Brave grounded</td><td colspan="4">skip</td><td>BRAVE_SEARCH_API_KEY 부재 — 키 투입 즉시 같은 쿼리셋으로 A/B 활성화</td></tr>
+</table>
+
+<div class="verdict">
+<p><strong>판정 3줄.</strong></p>
+<ol>
+<li>"품질이 늘었나"에 처음으로 수치로 답할 수 있다 — 같은 쿼리셋에서 새 기본 경로(Ollama)가
+hit@1 <strong>5/6</strong>, 옛 유일 경로(SearXNG)는 부분 회복 상태에서도 <strong>2/6</strong>.
+한국어 품질 격차는 더 크다(2/2 vs 0/2).</li>
+<li>SearXNG 붕괴의 해부가 정밀해졌다 — 전면 0건이 아니라 <strong>쿼리 계열별 선택적 생존</strong>
+(공식문서 계열만 10건). "컨테이너 생존 + 상류 부분 소진"의 세 번째 층위.</li>
+<li>Ollama의 유일한 miss는 오답이 아니라 채점 기준의 경계(비공식 미러 도메인이 1위) —
+기대 도메인 목록은 하네스 fixture로 버전 관리되므로 필요 시 근거와 함께 갱신한다.</li>
+</ol>
+</div>
+
+<h2>개선 라운드 2 — 하네스·아웃라인·코퍼스 (2026-08-16 병합분)</h2>
+
+<table>
+<tr><th>개선</th><th>내용</th><th>PR</th></tr>
+<tr><td>품질 회귀 하네스</td><td>고정 8쿼리 결정론 채점(hit@1/hit@5, 한글 비율). Brave grounded는 키 투입 즉시 같은 쿼리셋으로 A/B 활성</td><td>#28779</td></tr>
+<tr><td>내용 인식 절단</td><td>절단 마커 뒤 <code>[OUTLINE ...]</code> — 헤딩별 <strong>바이트 오프셋 지도</strong>(최대 32행, 펜스 제외). 각 행이 곧 <code>keeper_artifact_read(sha256, offset, max_bytes)</code> 인자라 keeper가 64KB 창을 맹목으로 넘기는 대신 섹션을 골라 읽는다. compile-only였던 web_fetch 스위트도 CI 배선</td><td>#28781</td></tr>
+<tr><td>코퍼스 인덱스</td><td>RFC-0383: 오프로드마다 <code>index.jsonl</code>에 사실 한 줄(sha256·source_url·title·bytes·fetched_at). 인덱스는 projection(삭제해도 무영향 — 테스트로 핀), 소비는 기존 Grep→artifact_read 2단으로 <strong>새 도구 0·게이트 0</strong>. keeper가 같은 주제를 웹 왕복 없이 재질의할 수 있는 기반</td><td>#28783 (RFC), #28794 (구현), PR-2 (소비 문서)</td></tr>
+</table>
+
+<p class="note">구현 중 determinism 게이트가 인덱스 행 생성부의 <code>Unix.gettimeofday</code>를
+정확히 FAIL로 잡았고, 마커 주석 대신 <strong>시각 주입</strong>(handle의 start_time을 체인으로 전달)으로
+수리했다 — 비결정 시계 읽기는 dispatch 경계에 남고 그 아래는 입력에 결정론적이다.</p>
+
 <h2>다음 반복</h2>
 <ul>
-<li><strong>Iteration 6</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로
-(<code>maximum_number_of_tokens</code> 예산 준수) 실측.</li>
-<li>매 반복은 <code>python3 scripts/bench-web-tools.py -o docs/evidence/web-tools-bench-&lt;date&gt;-rN.json</code> 실행 후 이 문서에 섹션 추가.</li>
+<li><strong>Iteration 6</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로 —
+<code>bench-web-quality.py</code>가 같은 쿼리셋으로 자동 A/B.</li>
+<li><strong>코퍼스 재질의 실측</strong>: RFC-0383 acceptance 3 — keeper가 Grep→artifact_read
+2단으로 과거 본문에 도달하는 턴 실측 (Iteration 5와 같은 방법).</li>
+<li>품질은 <code>python3 scripts/bench-web-quality.py -o docs/evidence/web-quality-&lt;date&gt;-rN.json</code>,
+가용성·토큰은 <code>bench-web-tools.py</code> — 실행 후 이 문서에 섹션 추가.</li>
 </ul>
 
 </body>

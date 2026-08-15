@@ -54,10 +54,12 @@ type t =
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
+  ; cache_extended_ttl : bool
   ; supports_tool_choice_override : bool option
   ; supports_structured_output_override : bool option
   ; model_capabilities_override : Capabilities.capabilities option
   ; keep_alive : string option
+  ; return_progress : bool
   ; internal_model_rotation_count : int option
   ; num_ctx : int option
   ; seed : int option
@@ -92,10 +94,12 @@ let make
       ?(disable_parallel_tool_use = false)
       ?(response_format = Types.Off)
       ?(cache_system_prompt = false)
+      ?(cache_extended_ttl = false)
       ?supports_tool_choice_override
       ?supports_structured_output_override
       ?model_capabilities_override
       ?keep_alive
+      ?(return_progress = false)
       ?internal_model_rotation_count
       ?num_ctx
       ?seed
@@ -148,10 +152,12 @@ let make
   ; disable_parallel_tool_use
   ; response_format
   ; cache_system_prompt
+  ; cache_extended_ttl
   ; supports_tool_choice_override
   ; supports_structured_output_override
   ; model_capabilities_override
   ; keep_alive
+  ; return_progress
   ; internal_model_rotation_count
   ; num_ctx
   ; seed

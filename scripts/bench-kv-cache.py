@@ -46,6 +46,25 @@ USER_TURNS = [
 ]
 
 
+def erase_slots(base, slots=4):
+    """Best-effort slot-cache erase between scenarios so a scenario's turn 1
+    cannot silently reuse the previous scenario's residue (observed in the
+    2026-08-16 evidence run: volatile turn 1 matched strip's leftover system
+    prefix, cache_n=559). Requires the endpoint to be enabled server-side;
+    a refusal downgrades to a warning because relative turn-2..4 comparisons
+    do not depend on it."""
+    for slot in range(slots):
+        req = urllib.request.Request(
+            f"{base}/slots/{slot}?action=erase", data=b"", method="POST"
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                pass
+        except Exception as exn:  # noqa: BLE001 - diagnostic path only
+            print(f"warn: slot {slot} erase unavailable: {exn}", file=sys.stderr)
+            return
+
+
 def call(base, body, timeout):
     req = urllib.request.Request(
         base + "/v1/chat/completions",
@@ -131,6 +150,7 @@ def main():
 
     with open(args.out, "a") as out:
         for scenario in args.scenarios.split(","):
+            erase_slots(args.base)
             print(f"### scenario={scenario}", file=sys.stderr, flush=True)
             run_scenario(args.base, scenario, args.turns, args.max_tokens,
                          args.model, args.timeout, out)

@@ -1,5 +1,5 @@
 ---
-rfc: "0382"
+rfc: "0383"
 title: "웹 아티팩트는 쌓이기만 한다 — 오프로드 파일을 재질의 가능한 코퍼스로"
 status: Draft
 created: 2026-08-16
@@ -11,7 +11,7 @@ related: ["0381"]
 implementation_prs: []
 ---
 
-# RFC-0382: 웹 아티팩트는 쌓이기만 한다
+# RFC-0383: 웹 아티팩트는 쌓이기만 한다
 
 ## 0. Summary
 

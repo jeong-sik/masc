@@ -956,13 +956,14 @@ let run_keeper_cycle
                      [attempt_runtime_candidates] actually dispatched —
                      [Runtime_lane_preference] sticky ordering can route a
                      lane keyed by one runtime id to a different candidate
-                     first (observed: a lane entered as
-                     "ollama_cloud...deepseek..." consistently dispatched
-                     "glm-coding.glm-5-turbo" first, and this log named the
-                     untried lane key instead of the runtime that actually
-                     errored). [keeper_cycle_failed_runtime_attribution]
-                     reports the dispatched candidate's own id when a
-                     same-turn deferral hint is available. *)
+                     first (observed 2026-08-15T11:49Z: the lane-entry
+                     runtime was consistently logged while a
+                     sticky-reordered sibling candidate actually dispatched,
+                     so this log named the untried lane key instead of the
+                     runtime that actually errored).
+                     [keeper_cycle_failed_runtime_attribution] reports the
+                     dispatched candidate's own id when a same-turn
+                     deferral hint is available. *)
                   let runtime_attribution =
                     keeper_cycle_failed_runtime_attribution
                       ~deferred_runtime_lane:turn_state.deferred_runtime_lane

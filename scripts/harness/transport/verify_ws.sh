@@ -15,15 +15,29 @@ require_server
 
 echo "--- WebSocket Transport E2E ---"
 
-ws_discovery="$(curl -fsS "${MASC_HTTP_BASE_URL}/ws" 2>&1 || true)"
-read -r ws_enabled ws_url <<EOF
+# The HTTP listener accepts requests before the WebSocket MCP dispatcher is
+# installed, and discovery withholds ws_url until then (see
+# set_ws_same_origin_runtime_ready). Wait for the advertised URL rather than
+# probing into that window.
+ws_enabled=""
+ws_url=""
+for _ in $(seq 1 40); do
+  ws_discovery="$(curl -fsS "${MASC_HTTP_BASE_URL}/ws" 2>&1 || true)"
+  read -r ws_enabled ws_url <<EOF
 $(WS_DISCOVERY="$ws_discovery" python3 - <<'PY'
 import json, os
-payload = json.loads(os.environ["WS_DISCOVERY"])
-print(str(payload.get("enabled", False)).lower(), payload.get("ws_url", ""))
+try:
+    payload = json.loads(os.environ["WS_DISCOVERY"])
+except Exception:
+    print("false", "")
+else:
+    print(str(payload.get("enabled", False)).lower(), payload.get("ws_url") or "")
 PY
 )
 EOF
+  [[ "$ws_enabled" = "true" && -n "$ws_url" ]] && break
+  sleep 0.25
+done
 
 if [[ "$ws_enabled" = "true" && -n "$ws_url" ]]; then
   pass "WebSocket: /ws returns discovery JSON"

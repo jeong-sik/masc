@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## [0.23.0] - 2026-08-16
+
+- **Keeper messages reach the linear event queue**: a workspace message that
+  names a Keeper is committed as a typed `Keeper_event_queue.Keeper_message`
+  entry in that Keeper's per-Keeper drain, ordered against every other
+  stimulus and deduplicated by the workspace request id. The same path now
+  emits the `keeper_chat_appended` SSE it was missing, so the conversation
+  window updates without a reload.
+- **Keeper speech reaches every Keeper's conversation window**: a committed
+  `Fleet_conversation` message is projected into each registered Keeper's
+  transcript (author excluded), with no mention stamp, no queue entry and no
+  wake. Before this, 17 of the 18 retained workspace messages were unmentioned
+  Keeper broadcasts that reached nobody — the dispatcher answered `Passive`
+  without calling the delivery handler at all.
+- `Workspace_broadcast.audience` is declared by the producer. `masc_broadcast`
+  and the operator's dashboard broadcast are `Fleet_conversation`; the task FSM
+  and session lifecycle are `System_record` and reach no conversation window.
+  The default is the record. Measured cost of projecting one message across
+  the reference fleet: 4.53 MB of locked transcript, 22-95 ms per append.
+
 ## [0.22.0] - 2026-08-14
 
 - **Breaking (keeper output contract, RFC-0376)**: an autonomous turn's final

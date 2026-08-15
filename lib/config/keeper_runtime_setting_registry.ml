@@ -641,6 +641,14 @@ let all =
       ~category:"web_search"
       "Azure-issued Bing Search API key (same admission as BING_SEARCH_API_KEY)"
   ; setting
+      ~env_name:"OLLAMA_API_KEY"
+      ~exposure:Env_only
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:[ "Tool_misc_web_search" ]
+      ~category:"web_search"
+      "Ollama account API key (admits the ollama provider)"
+  ; setting
       ~range:(int_range ~min:1 ~max:60 ())
       ~env_name:"MASC_WEB_SEARCH_TIMEOUT_SEC"
       ~exposure:(Toml_and_env "web_search.timeout_sec")

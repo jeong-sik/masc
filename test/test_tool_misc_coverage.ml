@@ -297,6 +297,7 @@ let () = test "parse_searxng_json_malformed" (fun () ->
 )
 
 let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
   with_env "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
     with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
       with_env "TAVILY_API_KEY" None (fun () ->
@@ -308,10 +309,11 @@ let () = test "web_search_provider_plan_includes_searxng_when_configured" (fun (
                   with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
                     assert
                       (Tool_misc.web_search_provider_plan ()
-                       = [ "searxng" ]))))))))))
+                       = [ "searxng" ])))))))))))
 )
 
 let () = test "web_search_provider_plan_reads_toml_boot_override" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
   with_unset_env "MASC_SEARXNG_URL" (fun () ->
     with_boot_override "MASC_SEARXNG_URL" (Some "http://localhost:8888") (fun () ->
       with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
@@ -324,13 +326,14 @@ let () = test "web_search_provider_plan_reads_toml_boot_override" (fun () ->
                     with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
                       assert
                         (Tool_misc.web_search_provider_plan ()
-                         = [ "searxng" ])))))))))))
+                         = [ "searxng" ]))))))))))))
 )
 
 (* Feature contract: with zero credentials the plan is empty and the
    search boundary reports the configuration failure with its remedy —
    never an empty success. *)
 let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
   with_env "MASC_SEARXNG_URL" None (fun () ->
     with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
       with_env "TAVILY_API_KEY" None (fun () ->
@@ -372,10 +375,11 @@ let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
                            (str_contains
                               (Tool_result.message dispatched)
                               "no web search provider is configured")
-                     | None -> failwith "masc_web_search was not dispatched"))))))))))
+                     | None -> failwith "masc_web_search was not dispatched")))))))))))
 )
 
 let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
   with_env "MASC_SEARXNG_URL" None (fun () ->
     with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
       with_env "TAVILY_API_KEY" None (fun () ->
@@ -387,7 +391,7 @@ let () = test "web_search_provider_plan_prefers_configured_official_provider" (f
                   with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
                     assert
                       (Tool_misc.web_search_provider_plan ()
-                       = [ "brave"; "tavily"; "exa" ]))))))))))
+                       = [ "brave"; "tavily"; "exa" ])))))))))))
 )
 
 let () = test "parse_brave_llm_context_json" (fun () ->
@@ -418,12 +422,41 @@ let () = test "parse_brave_llm_context_json" (fun () ->
         (Printf.sprintf "expected two grounded entries, got %d" (List.length entries))
 )
 
+let () = test "parse_ollama_search_json" (fun () ->
+  let payload =
+    {|{"results":[
+        {"title":"Effect Handlers","url":"https://example.com/effects","content":"OCaml 5 effects."},
+        {"title":"Bad scheme","url":"ftp://example.com/x","content":"dropped"}
+      ]}|}
+  in
+  assert
+    (Tool_misc.parse_ollama_search_json payload
+     = [ ("Effect Handlers", "https://example.com/effects", "OCaml 5 effects.") ]);
+  assert (Tool_misc.parse_ollama_search_json "not json" = [])
+)
+
+let () = test "web_search_provider_plan_admits_ollama_with_key" (fun () ->
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" None (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                    with_env "OLLAMA_API_KEY" (Some "ollama-key") (fun () ->
+                      assert
+                        (Tool_misc.web_search_provider_plan () = [ "ollama" ])))))))))))
+)
+
 let () = test "parse_brave_llm_context_json_malformed" (fun () ->
   assert (Tool_misc.parse_brave_llm_context_json "not json" = []);
   assert (Tool_misc.parse_brave_llm_context_json {|{"grounding":{}}|} = [])
 )
 
 let () = test "web_search_provider_plan_admits_brave_llm_context_only_explicitly" (fun () ->
+  with_env "OLLAMA_API_KEY" None (fun () ->
   with_env "MASC_SEARXNG_URL" None (fun () ->
     with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
       with_env "TAVILY_API_KEY" None (fun () ->
@@ -439,7 +472,7 @@ let () = test "web_search_provider_plan_admits_brave_llm_context_only_explicitly
                     (fun () ->
                       assert
                         (Tool_misc.web_search_provider_plan ()
-                         = [ "brave_llm_context"; "brave" ]))))))))))
+                         = [ "brave_llm_context"; "brave" ])))))))))))
 )
 
 (* Feature contract: a grounded provider answer flows through dispatch as

@@ -16,6 +16,7 @@ type provider =
   | Tavily
   | Exa
   | Bing_api
+  | Ollama
 
 type provider_response = {
   engine : string;
@@ -127,6 +128,13 @@ let parse_tavily_json payload =
     ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"content" payload
 
+let parse_ollama_search_json payload =
+  parse_json_search_results
+    (* Absent "results" resolves to `Null → zero hits, so the chain
+       reports "no results" instead of inventing content. DET-OK *)
+    ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
+    ~title_field:"title" ~snippet_field:"content" payload
+
 let parse_exa_json payload =
   parse_json_search_results
     ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
@@ -184,6 +192,7 @@ let provider_to_string = function
   | Tavily -> "tavily"
   | Exa -> "exa"
   | Bing_api -> "bing_api"
+  | Ollama -> "ollama"
 
 let provider_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
@@ -193,6 +202,7 @@ let provider_of_string raw =
   | "tavily" -> Some Tavily
   | "exa" -> Some Exa
   | "bing" | "bing_api" -> Some Bing_api
+  | "ollama" -> Some Ollama
   | "auto" | "" -> None
   | _ -> None
 
@@ -216,6 +226,7 @@ let provider_has_credentials = function
   | Exa -> env_present "EXA_API_KEY"
   | Bing_api ->
       env_present "BING_SEARCH_API_KEY" || env_present "AZURE_BING_SEARCH_API_KEY"
+  | Ollama -> env_present "OLLAMA_API_KEY"
 
 (* Only credentialed providers search. An empty order is a
    configuration fact and surfaces as an explicit failure in
@@ -225,7 +236,7 @@ let provider_has_credentials = function
    response shape (context text, no result rows) is a caller choice
    made through provider config, not a fallback. *)
 let default_provider_order () =
-  [ Searxng; Brave; Tavily; Exa; Bing_api ]
+  [ Searxng; Brave; Tavily; Exa; Bing_api; Ollama ]
   |> List.filter provider_has_credentials
 
 let provider_order () =
@@ -604,6 +615,46 @@ let fetch_brave_llm_context ~timeout_sec ~query ~limit =
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
+(* Contract: https://docs.ollama.com/capabilities/web-search
+   POST /api/web_search with {query, max_results (default 5, max 10)}
+   answers {results: [{title, url, content}]}. *)
+let fetch_ollama ~timeout_sec ~query ~limit =
+  match
+    Sys.getenv_opt "OLLAMA_API_KEY"
+    |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty
+  with
+  | None -> Error (Config "missing OLLAMA_API_KEY")
+  | Some api_key ->
+      let search_url = "https://ollama.com/api/web_search" in
+      let body_json =
+        `Assoc [ ("query", `String query); ("max_results", `Int limit) ]
+        |> Yojson.Safe.to_string
+      in
+      match
+        Tool_local_runtime_http.http_post_json_text_with_status_with_headers
+          ~timeout_sec
+          ~headers:
+            [ ("Accept", "application/json")
+            ; ("Authorization", "Bearer " ^ api_key)
+            ]
+          ~url:search_url
+          ~body_json ()
+      with
+      | Error detail ->
+          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
+      | Ok (Some 200, payload) ->
+          Safe_ops.protect
+            ~default:(Error (Parse "provider returned invalid JSON"))
+            (fun () ->
+              let hits =
+                parse_ollama_search_json payload
+                |> take_results limit
+                |> normalize_hits ~source:(provider_to_string Ollama)
+              in
+              Ok { engine = provider_to_string Ollama; search_url; hits })
+      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
+      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+
 let fetch_provider ~query ~limit provider =
   let timeout_sec = Env_config.Tools.web_search_timeout_sec () in
   match provider with
@@ -631,6 +682,9 @@ let fetch_provider ~query ~limit provider =
       |> Result.map (fun response -> Hits response)
   | Bing_api ->
       fetch_bing_api ~timeout_sec ~query ~limit
+      |> Result.map (fun response -> Hits response)
+  | Ollama ->
+      fetch_ollama ~timeout_sec ~query ~limit
       |> Result.map (fun response -> Hits response)
 
 let cache_key ~query ~limit =
@@ -671,7 +725,7 @@ let cache_store key response now =
 let no_provider_configured_message =
   "no web search provider is configured: set web_search.searxng_url \
    (MASC_SEARXNG_URL) or a provider API key (BRAVE_SEARCH_API_KEY / \
-   TAVILY_API_KEY / EXA_API_KEY / BING_SEARCH_API_KEY)"
+   TAVILY_API_KEY / EXA_API_KEY / BING_SEARCH_API_KEY / OLLAMA_API_KEY)"
 
 let search_impl ~query ~limit =
   let rec loop errors = function

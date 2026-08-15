@@ -2064,6 +2064,81 @@ let test_delivery_key_malformed_reads_none () =
            Alcotest.failf "expected 1 message, got %d" (List.length messages));
       Alcotest.(check (float 0.001)) "drop counted as invalid payload" 1.0
         (drop_value invalid_payload -. before))
+
+let operation_delivery_key value =
+  match Keeper_chat_delivery_identity.Request_id.of_string value with
+  | Ok request_id -> Keeper_chat_delivery_identity.Operation request_id
+  | Error detail -> Alcotest.fail detail
+
+(* Async/queued user rows are accepted before a turn_ref exists. The terminal
+   assistant's typed delivery key is the only authority that may join that
+   user row into the exact turn transcript; a different operation must not
+   leak in even when it is adjacent in the same chat file. *)
+let test_transcript_joins_accepted_user_by_delivery_key () =
+  let base_dir = temp_base_path "keeper-chat-store-transcript-delivery" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-transcript-delivery" in
+      let matching_key = operation_delivery_key "kmsg-transcript-match" in
+      let other_key = operation_delivery_key "kmsg-transcript-other" in
+      let turn_ref =
+        Ids.Turn_ref.make ~trace_id:"trace-delivery" ~absolute_turn:7
+      in
+      (match
+         K.append_user_message_once
+           ~base_dir
+           ~keeper_name
+           ~delivery_key:matching_key
+           ~content:"accepted before turn"
+           ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "matching user already present"
+       | Error detail -> Alcotest.fail detail);
+      (match
+         K.append_user_message_once
+           ~base_dir
+           ~keeper_name
+           ~delivery_key:other_key
+           ~content:"different operation"
+           ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "other user already present"
+       | Error detail -> Alcotest.fail detail);
+      (match
+         K.append_assistant_message_once
+           ~base_dir
+           ~keeper_name
+           ~delivery_key:matching_key
+           ~content:"terminal reply"
+           ~turn_ref
+           ()
+       with
+       | Ok (K.Appended _) -> ()
+       | Ok (K.Already_present _) -> Alcotest.fail "assistant already present"
+       | Error detail -> Alcotest.fail detail);
+      let transcript =
+        K.load ~base_dir ~keeper_name
+        |> K.transcript_of_messages ~turn_ref
+      in
+      (match transcript.user with
+       | [ message ] ->
+         Alcotest.(check string)
+           "matching accepted user"
+           "accepted before turn"
+           message.content
+       | rows ->
+         Alcotest.failf "expected one joined user row, got %d" (List.length rows));
+      (match transcript.assistant with
+       | [ message ] ->
+         Alcotest.(check string) "terminal assistant" "terminal reply" message.content
+       | rows ->
+         Alcotest.failf
+           "expected one terminal assistant row, got %d"
+           (List.length rows)))
+
 let test_transcript_of_messages_joins_turn_ref () =
   let base_dir = temp_base_path "keeper-chat-store-transcript" in
   Fun.protect
@@ -2266,6 +2341,9 @@ let () =
           Alcotest.test_case
             "transcript_of_messages joins turn_ref (RFC-0233 §7)" `Quick
             test_transcript_of_messages_joins_turn_ref;
+          Alcotest.test_case
+            "transcript joins accepted user by exact delivery key" `Quick
+            test_transcript_joins_accepted_user_by_delivery_key;
           Alcotest.test_case
             "transcript absent returns empty + found=false (RFC-0233 §7)"
             `Quick test_transcript_absent_returns_empty;

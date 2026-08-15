@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0381"]
-implementation_prs: []
+implementation_prs: [28794]
 ---
 
 # RFC-0383: 웹 아티팩트는 쌓이기만 한다
@@ -37,7 +37,7 @@ RFC-0381이 만든 오프로드 경로는 검색·추출 전문을
 |---|---|
 | Ledger는 evidence authority | 인덱스는 **projection**이다. 진실은 아티팩트 파일 자체(내용 주소)이고, 인덱스 행은 "그 시각에 이렇게 저장했다"는 사실 기록. 인덱스가 유실·손상돼도 아티팩트 읽기는 그대로 동작한다 |
 | 행동을 유도·강제하는 장치 금지 | 신선도 필드(`fetched_at`)는 사실이다. 만료·TTL·재검증을 **강제하지 않는다** — 오래된 본문을 쓸지 다시 가져올지는 Keeper가 선택한다 |
-| Gate 0 | 어떤 경로에도 새 gate가 없다. 인덱스 append 실패는 오프로드 성공을 실패로 바꾸지 않는다(아래 §3.2) |
+| Gate 0 | 어떤 경로에도 새 gate가 없다. 인덱스 append 실패는 오프로드 성공을 실패로 바꾸지 않는다(아래 §2.4) |
 | 도구 표면 최소 | **새 keeper 도구를 추가하지 않는다.** 인덱스는 JSONL 파일이고 keeper는 이미 Grep/Read를 가진다 — 파일 계약을 문서화하면 소비 표면은 이미 존재한다 |
 | 레거시 금지 | 인덱스 스키마는 v1 단일. reader/converter/migration 없음. 스키마가 바뀌면 hard cut |
 | SSOT | URL→내용 매핑의 진실은 웹이다. 인덱스는 "우리가 관측한 시점의 사실"만 기록하며, 같은 URL의 다른 시점 관측은 서로 다른 행(그리고 대개 다른 sha256)이다 |
@@ -91,9 +91,11 @@ append한다. 필요한 입력(`source_url`, `title`)은 호출자(handle/enrich
 ### 2.4 인덱스 append 실패의 처리
 
 오프로드는 성공했는데 인덱스 append가 실패하면(디스크·권한): **오프로드는 성공으로
-남는다.** 전문 보존이 1차 가치이고 인덱스는 projection이므로, 실패는 typed로 로그에
-남기되 도구 결과를 오염시키지 않는다. 이것은 counter-as-fix가 아니다 — 잃는 것은
-파생 데이터(행 하나)뿐이고 durable truth(아티팩트)는 온전하다.
+남는다.** 전문 보존이 1차 가치이고 인덱스는 projection이다. 실패는 조용히 지나가지도
+않는다 — 절단 마커에 `[index_unavailable=<reason>]` 행으로 드러난다. 기존
+`full_text_unavailable` 마커와 대칭인 표면이며, 도구 계층은 로깅 무의존(로그는
+dispatch 계층의 몫)이라는 기존 경계를 지킨다. 이것은 counter-as-fix가 아니다 —
+잃는 것은 파생 데이터(행 하나)뿐이고 durable truth(아티팩트)는 온전하다.
 
 ## 3. 구현 범위
 

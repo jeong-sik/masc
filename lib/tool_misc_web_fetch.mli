@@ -56,7 +56,13 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 	      [full_text_unavailable=<reason>] instead of hiding it. MASC never
 	      deletes these files; retention is operator-managed. Cut points that
 	      fall away from a newline snap to UTF-8 codepoint starts, so a
-	      window never splits a multi-byte sequence
+	      window never splits a multi-byte sequence. Each successful offload
+	      also appends one [masc.web_artifact.v1] fact row (sha256,
+	      source_url, optional title, bytes, fetched_at) to [index.jsonl] in
+	      the same directory — RFC-0383's requeryable corpus. The index is a
+	      projection: deleting it changes no behavior, and an append failure
+	      surfaces as an [\[index_unavailable=<reason>\]] marker line without
+	      demoting the offload
 	    - [content_type]: optional upstream content type
 	    - [downloaded_bytes]: optional curl-reported download size
 	    - [title]: optional, extracted from [<title>] tag

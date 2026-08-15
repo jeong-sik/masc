@@ -108,6 +108,13 @@ type stimulus_payload =
           with no Goal link reaches no one. The cancelling Keeper's reason is
           carried here because it is the author's only account of why the work
           it asked for stopped. *)
+  | Workspace_message of workspace_message
+      (** A committed workspace message named this Keeper. The transcript row
+          the delivery boundary appends is the content SSOT; this payload
+          carries the durable workspace request identity so the message is
+          also an entry in the linear per-Keeper drain — ordered against every
+          other stimulus, deduplicated by request identity, and durable across
+          a restart. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -211,6 +218,21 @@ and task_cancellation = {
 (** Payload for [Task_cancelled]. [tc_reason] is [None] when the canceller gave
     none; it is not defaulted to a placeholder, so the author can tell "no
     reason was given" from "the reason was empty text". *)
+
+and workspace_message = {
+  wmsg_request_id : string;
+  wmsg_from : string;
+}
+(** Payload for [Workspace_message]. [wmsg_request_id] is the workspace message's
+    durable request id, which is also the [external_message_id] of the chat
+    row the delivery boundary committed — one identity, two stores, so the
+    content is never duplicated here. [wmsg_from] is the authoring agent, kept
+    because a drained stimulus has to name its sender without a second read. *)
+
+val workspace_message_post_id : workspace_message -> post_id
+(** Dedup/correlation id for [Workspace_message]:
+    ["workspace-message:<request_id>"]. Redelivery of the same committed
+    workspace message collapses onto the entry already queued. *)
 
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always

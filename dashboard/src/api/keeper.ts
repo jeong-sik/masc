@@ -638,6 +638,12 @@ export interface KeeperEventQueuePendingItem {
   cancelledTaskId?: string
   cancelledBy?: string
   cancelledReason?: string
+  /** A workspace message that named this Keeper. `messageRequestId` is also
+      the transcript row's external message id, so an operator reading the
+      queue can find the line it refers to. Absent on a backend that predates
+      the fields. */
+  messageRequestId?: string
+  messageFrom?: string
 }
 
 export interface KeeperEventQueuePendingSnapshot {
@@ -733,6 +739,12 @@ export function parseKeeperEventQueuePendingSnapshot(
         : {}),
       ...(typeof raw.cancelled_reason === 'string' && raw.cancelled_reason.trim()
         ? { cancelledReason: raw.cancelled_reason.trim() }
+        : {}),
+      ...(typeof raw.message_request_id === 'string' && raw.message_request_id.trim()
+        ? { messageRequestId: raw.message_request_id.trim() }
+        : {}),
+      ...(typeof raw.message_from === 'string' && raw.message_from.trim()
+        ? { messageFrom: raw.message_from.trim() }
         : {}),
     }
   })

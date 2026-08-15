@@ -177,6 +177,8 @@ let parse_brave_llm_context_json payload =
              in
              match string_field "url", snippets with
              | Some url, _ :: _ when valid_search_result_url url ->
+                 (* DET-OK: a missing title deterministically falls back to
+                    the url — documented in the .mli, visible in output. *)
                  Some (url, Option.value (string_field "title") ~default:url, snippets)
              | _ -> None)
 

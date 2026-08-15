@@ -869,12 +869,27 @@ let task_of_yojson json =
   with e -> Error (Printexc.to_string e)
 
 (** Message - broadcast or direct *)
+type message_mention_delivery =
+  | Mention_passive
+  | Mention_pending
+  | Mention_accepted
+  | Mention_rejected
+[@@deriving yojson, show]
+
+let message_mention_delivery_to_string = function
+  | Mention_passive -> "passive"
+  | Mention_pending -> "pending"
+  | Mention_accepted -> "accepted"
+  | Mention_rejected -> "rejected"
+
 type message = {
+  request_id: string;
   seq: int;
   from_agent: string; [@key "from"]
   msg_type: string; [@key "type"] [@default "broadcast"]
   content: string;
   mention: string option; [@default None]
+  mention_delivery: message_mention_delivery;
   timestamp: string;
   trace_context: string option; [@default None]
   expires_at: float option; [@default None]

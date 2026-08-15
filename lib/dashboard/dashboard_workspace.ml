@@ -110,6 +110,9 @@ let message_json (msg : Masc_domain.message) =
   let mentions = mentions_of_message msg in
   let base =
     [ "id", `String (message_id msg)
+    ; "request_id", `String msg.request_id
+    ; ( "mention_delivery"
+      , `String (Masc_domain.message_mention_delivery_to_string msg.mention_delivery) )
     ; "workspace_id", `String workspace_id
     ; "ts", `String msg.timestamp
     ; "sender", `String msg.from_agent
@@ -142,6 +145,10 @@ let mention_inbox_json ?me (msg : Masc_domain.message) =
     Some
       (`Assoc
           [ "message_id", `String (message_id msg)
+          ; "request_id", `String msg.request_id
+          ; ( "mention_delivery"
+            , `String
+                (Masc_domain.message_mention_delivery_to_string msg.mention_delivery) )
           ; "workspace_id", `String workspace_id
           ; "ts", `String msg.timestamp
           ; "sender", `String msg.from_agent

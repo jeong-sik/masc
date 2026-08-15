@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Keeper 기능 상태·증거 매트릭스</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg:#070a10; --panel:#101722; --panel2:#151f2d; --line:#29384b;
+      --text:#edf4fb; --muted:#9fb0c1; --cyan:#64d8ff; --green:#5ee6a8;
+      --amber:#ffc857; --red:#ff7979; --violet:#ad8cff; --blue:#78a9ff;
+    }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:radial-gradient(circle at 80% -10%,#172848 0,transparent 32%),var(--bg); color:var(--text); font:14px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    main { max-width:1540px; margin:auto; padding:36px 22px 90px; }
+    h1 { max-width:900px; margin:0; font-size:clamp(30px,5vw,54px); line-height:1.06; letter-spacing:-.04em; }
+    h2 { margin:42px 0 14px; font-size:23px; }
+    h3 { margin:0 0 8px; font-size:15px; }
+    p { margin:8px 0; }
+    a { color:var(--cyan); }
+    code { color:#d8e8ff; background:#1a2636; padding:2px 5px; border-radius:4px; }
+    .eyebrow { color:var(--cyan); letter-spacing:.14em; text-transform:uppercase; font-weight:750; }
+    .lead { max-width:990px; color:#bdcad8; font-size:17px; }
+    .muted { color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; }
+    .card { background:linear-gradient(150deg,var(--panel2),var(--panel)); border:1px solid var(--line); border-radius:13px; padding:16px; }
+    .metric { font-size:27px; font-weight:800; line-height:1.1; }
+    .good { color:var(--green); } .warn { color:var(--amber); } .bad { color:var(--red); } .info { color:var(--cyan); }
+    .notice { margin-top:18px; border-left:4px solid var(--amber); }
+    .flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .node { border:1px solid var(--line); border-radius:9px; background:var(--panel); padding:9px 12px; }
+    .arrow { color:var(--cyan); font-weight:900; }
+    .toolbar { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px; margin:0 -8px 12px; padding:10px 8px; background:rgba(7,10,16,.92); backdrop-filter:blur(12px); }
+    input,select { color:var(--text); background:#101a28; border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
+    input { flex:1; min-width:230px; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:12px; }
+    table { width:100%; min-width:1680px; border-collapse:collapse; background:var(--panel); }
+    table.compact { min-width:1080px; }
+    th,td { border-bottom:1px solid var(--line); border-right:1px solid var(--line); padding:10px; text-align:left; vertical-align:top; }
+    th { background:#172334; color:#dfeaf7; white-space:nowrap; }
+    tr:last-child td { border-bottom:0; } td:last-child,th:last-child { border-right:0; }
+    tbody tr:hover { background:#142033; }
+    .feature { min-width:150px; font-weight:760; }
+    .badge { display:inline-block; border:1px solid currentColor; border-radius:99px; padding:2px 8px; font-size:11px; font-weight:800; white-space:nowrap; }
+    .axis { white-space:nowrap; color:#c5d1de; font-size:12px; }
+    .verified { color:var(--green); } .partial { color:var(--amber); } .source { color:var(--blue); } .missing { color:var(--red); } .blocked { color:var(--violet); }
+    .evidence { margin:4px 0 0; padding-left:17px; color:#c5d1de; }
+    .evidence li { margin:2px 0; }
+    .stack { display:grid; gap:8px; }
+    .step { display:grid; grid-template-columns:54px 180px 1fr; gap:12px; align-items:start; }
+    .step strong { color:var(--cyan); }
+    .lane { border-left:4px solid var(--blue); }
+    .lane.block { border-left-color:var(--red); }
+    .lane.next { border-left-color:var(--green); }
+    .refs li { margin:7px 0; }
+    details { border:1px solid var(--line); border-radius:10px; background:var(--panel); padding:11px 13px; }
+    summary { cursor:pointer; font-weight:750; }
+    footer { margin-top:42px; color:var(--muted); border-top:1px solid var(--line); padding-top:18px; }
+    @media (max-width:760px) { .step { grid-template-columns:46px 1fr; } .step p { grid-column:1/-1; } }
+  </style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">MASC / Keeper product truth · source audit refreshed 2026-08-14</p>
+  <h1>기능 상태·증거 매트릭스</h1>
+  <p class="lead">기능 이름이 코드에 존재하는지와 Keeper가 실제로 오래, 반복해서, 여러 Runtime에서 그 기능을 끝까지 수행하는지는 다른 사실이다. 이 문서는 source → feature test → exact-head CI → live receipt/log → Dashboard/browser → 장기 실행의 증거를 분리한다.</p>
+
+  <article class="card notice">
+    <h3>증거 시점 분리</h3>
+    <p>fleet·runtime·live 수치는 아래 cutoff에서 동결한 역사적 증거이고 현재값으로 읽지 않는다. source와 PR 상태는 2026-08-14에 다시 조회했다. source/CI/merged/deployed/live/browser를 서로 대체하지 않으며, 이번 렌더는 새 evidence JSON과 Chromium screenshot으로 별도 고정한다.</p>
+  </article>
+
+  <section class="grid">
+    <article class="card"><h3>Upstream main</h3><div class="metric info">ff6a8fa6af</div><p class="muted">2026-08-14T07:00Z 전후 직접 조회. #28706, #28707, #28710, RFC-0378(#28645/#28688), #28716, #28713, #28715, #28718, #28709, #28648이 추가로 병합됐다. live runtime checkout과 같은 커밋이지만 이는 repo HEAD 메타데이터이고 바이너리 내용 증거가 아니다.</p></article>
+    <article class="card"><h3>Live binary 기준</h3><div class="metric warn">0.22.0 / exe build 04:55:36Z</div><p class="muted">05:59:52Z 시작한 process는 <code>ff6a8fa6af</code>를 보고하지만 <code>commit_source=runtime_repo_head</code>다. 실행 파일 mtime이 04:55:36Z라 04:57Z 병합 #28709와 05:11Z 병합 #28648은 포함될 수 없고, 04:51~04:53Z 병합 #28713/#28715/#28718은 checkout 시점 불명의 경계다. #28694는 Monitor typed band 렌더로 행동 증명됐다.</p></article>
+    <article class="card"><h3>Runtime catalog</h3><div class="metric good">48 / 48</div><p class="muted">8 provider family, 11 lane, 27 assignment. 07:00Z <code>/api/v1/runtime/resolved</code> 기준 dispatch blocked 0 — Local Ollama request-body 차단이 해소됐다.</p></article>
+    <article class="card"><h3>10-turn continuity</h3><div class="metric warn">3 runtime pass</div><p class="muted">Ollama Cloud·Codex·Claude Code(sonnet-5) canary가 각각 10쌍 대화와 9개 사실 전부 회상을 통과. 다른 45개는 미실행.</p></article>
+    <article class="card"><h3>Queue / Scheduler</h3><div class="metric warn">회전 backlog / oldest 39분</div><p class="muted">sangsu·kidsnote·rondo 순으로 정체가 회전했다. 07:2xZ 진단(High): durable 이벤트는 사이클 입구에서만 투입되는데 사이클 벽시계 시간에 상한이 없다 — provider 실패가 사이클을 태우거나(sangsu 39m36s), 정상 장기 tool 루프(rondo 32m+, 실패 0)면 같은 증상이 난다. 소비 코드는 <code>keeper_unified_turn.ml:259-285</code> 계약대로 동작. transient 실패 시 <code>Defer_to_queue_tail</code>이 큐 위치를 잃어 이벤트 나이를 배로 불리는 설계 질문과 stale 판정축(이벤트 나이 vs holder cycle)은 RFC 사안으로 남는다.</p></article>
+    <article class="card"><h3>Fleet health</h3><div class="metric warn">8 running / degraded</div><p class="muted">06:48Z에는 analyst·rondo가 recovering 2였고 06:59Z 8 running으로 회복됐다. 그러나 event queue 정체와 reaction ledger stale로 overall_status는 degraded, operator_action_required true다. recovering의 원인은 provider 실패였다: ollama.com hostname 해석 실패·broken pipe·stream idle 9건(sangsu/kidsnote/rondo/lane-smith), antigravity 600s timeout 20건(analyst/taskmaster), 06:46:31Z 이후 신규 실패 0건.</p></article>
+  </section>
+
+  <p class="muted">source/PR audit는 <code>2026-08-14T07:00Z</code> 전후로 갱신했다. 현재 process 시작은 <code>05:59:52Z</code>, 실행 파일 build mtime은 <code>04:55:36Z</code>, health capture는 <code>06:59:29Z</code>, browser capture는 <code>06:57:24Z</code>다. upstream main, PR source, runtime checkout, live process, embedded binary identity를 각각 분리한다.</p>
+
+  <article class="card notice">
+    <h3>문서 전달 상태</h3>
+    <p>현재 산출물은 Draft <a href="https://github.com/jeong-sik/masc/pull/28698">#28698</a>의 branch <code>docs/keeper-feature-state-matrix-current-20260814</code>에 있다. 이번 refresh는 최신 main <code>ff6a8fa6af</code>에 재기반한 뒤 07:00Z 실측(health·browser·PR audit)으로 다시 고정한다.</p>
+  </article>
+
+  <article class="card notice">
+    <h3>현재 판정</h3>
+    <p><strong>기능 기반은 넓지만 제품 목표는 아직 완료가 아니다.</strong> 48개 runtime이 설정돼 있다는 사실과 그 runtime에서 Keeper 기능이 동작한다는 사실을 분리한다. Ollama Cloud·Codex·Claude Code(sonnet-5) 각 한 runtime의 세션 내 10-turn 의미 연속성은 통과했다. 05:59Z 재기동으로 #28625/#28650/#28647 등 수리 다수가 실행 후보가 됐고 #28694는 browser로 행동 증명됐다. 실측된 runnable 정체(최대 39분)는 07:2xZ 진단에서 소비 결함이 아니라 무제한 사이클 길이와 600s stale 임계의 축 불일치로 판정됐고(소비 코드는 계약대로 동작), 06:57Z의 dashboard WS 차단은 환경변수의 stale 토큰 탓으로 귀속됐다. 대신 별건 신규 결함 2건이 났다: 개명 이전 turn_record 행 영구 판독 불가(WARN 5,372건, <a href="https://github.com/jeong-sik/masc/issues/28727">#28727</a>)와 은퇴한 board candidate 참조 잔존(ERROR 170건, <a href="https://github.com/jeong-sik/masc/issues/28728">#28728</a>) — 둘 다 partial cleanup 모양이다. Memory restart recall canary는 07:47Z에 11/11 무유실로 닫혔고(mid-flight join만 미증명), create admission overlap은 08:10Z fresh-name race 6/6으로 닫혔다. 나머지 45 runtime, 5 provider family, Task/Goal/Fusion/Judge/Connector/멀티모달/Failover/Async·Batch, 모든 팀 시나리오와 chat browser 대조도 남아 있다.</p>
+  </article>
+
+  <article class="card notice">
+    <h3>Dashboard count 수리 확인과 WS auth 관측의 귀속</h3>
+    <p>06:57Z browser 재실측에서 build label은 <code>v0.22.0 · ff6a8fa6af</code>, Monitor는 legacy 문구 없이 typed band <strong>정상 7 · 일시정지 19 · 중지 2 · 주의 1</strong>을 렌더했다 — #28694 수리의 행동 증명이다. 같은 캡처의 <strong>Client WS · disconnected</strong>·<strong>Auth error</strong>·401 2건은 07:11Z 추적으로 제품 결함이 아니라 <code>MASC_DASHBOARD_URL</code> 환경변수에 박힌 재기동 이전 admin 토큰 탓으로 귀속됐다 — 토큰은 05:59Z 재기동에서 회전됐고 dashboard는 fail-closed로 배너와 차단을 정확히 보여줬다. 깨끗한 localhost 로드는 배너 없이 <code>ws://127.0.0.1:8935/ws</code>를 열고 유지한다. 상단 칩 주의 41, Overview 카드 주의 필요 19(일시정지 canary 목록), Monitor band 주의 1은 서로 다른 분모의 관측이며 이번 캡처에서는 해석하지 않는다. <a href="../evidence/keeper-runtime-health-live-2026-08-14T065929Z.json">07:00Z health·browser 증거</a>.</p>
+  </article>
+
+  <article class="card notice">
+    <h3>Board 브라우저 검증에서 드러난 실제 결함</h3>
+    <p><code>board-interaction-matrix.mjs</code>는 첫 post에서 20초 timeout으로 멈췄고 screenshot은 생성되지 않았다. timeout을 늘리지 않고 고유 canary로 다시 계측하자 durable post는 저장됐지만 HTTP 201이 <strong>46.836초</strong> 뒤에 왔다. 직후 Board read는 92.007초, exact-id cleanup은 27.081초였다. 즉 Board 기능을 통과로 올릴 근거가 아니라, durable mutation receipt가 후속 Keeper·surface effect에 붙잡히는 결함의 E4 증거다. 원본은 <a href="../evidence/keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json">Board latency evidence</a>에 보존했다. #28620·#28707이 포함된 05:59Z 재기동 뒤의 동일 matrix 재실행은 아직 없다.</p>
+  </article>
+
+  <article class="card notice">
+    <h3>Librarian graceful shutdown에서 확인한 실제 기억 유실</h3>
+    <p>Codex turn 1·4·7 Librarian pass는 revision 1·2·3을 커밋했지만 turn 10의 <code>librarian-exact-a7a2373…</code>는 Harbor-3·glasswing을 포함한 입력을 가진 채 106.097초 후 <code>keeper_down</code>에 취소됐다. 이전 snapshot은 보존됐으나 취소된 immutable input은 durable replay되지 않는다. 따라서 세션 내 10T 회상과 restart Memory 연속성은 별개이며, 후자는 현재 BLOCKED다. 수리 <a href="https://github.com/jeong-sik/masc/pull/28625">#28625</a>는 merge commit <code>23d0ebb3cd</code>로 착륙했고, 07:47Z drain-restart canary가 새 binary에서 무유실·재진술 없는 백로그 회복을 행동으로 확인했다(<a href="../evidence/keeper-drain-restart-recall-live-2026-08-14T074735Z.json">증거</a>) — mid-flight pass join만 미증명으로 남는다. <a href="../evidence/keeper-librarian-graceful-shutdown-live-2026-08-13T160506Z.json">원본 증거</a>.</p>
+  </article>
+
+  <h2>1. 완료 판정 모델</h2>
+  <div class="flow" aria-label="evidence progression">
+    <span class="node">E0 사용자 시나리오</span><span class="arrow">→</span>
+    <span class="node">E1 Source 경계</span><span class="arrow">→</span>
+    <span class="node">E2 Feature test</span><span class="arrow">→</span>
+    <span class="node">E3 exact-head CI</span><span class="arrow">→</span>
+    <span class="node">E4 Live receipt/log</span><span class="arrow">→</span>
+    <span class="node">E5 Browser/UI 대조</span><span class="arrow">→</span>
+    <span class="node">E6 10-turn / 1h / 2h / 4h / 24h</span>
+  </div>
+  <p class="muted">모든 기능에 E6를 억지로 붙이지 않는다. 다만 지속성·재개·Failover·Memory를 약속하는 기능은 E6 없이는 완료가 아니다. 개수나 비율은 관측치일 뿐 admission gate가 아니다.</p>
+
+  <h2>2. 기능별 현재 상태</h2>
+  <div class="toolbar">
+    <input id="query" type="search" placeholder="기능, 근거, 남은 일 검색" aria-label="매트릭스 검색">
+    <select id="status" aria-label="상태 필터">
+      <option value="">모든 상태</option><option value="verified">Live verified</option><option value="partial">Partial</option><option value="source">Source only</option><option value="missing">Missing proof</option><option value="blocked">Blocked</option>
+    </select>
+    <select id="domain" aria-label="도메인 필터">
+      <option value="">모든 도메인</option><option>Coordination</option><option>Autonomy</option><option>Reasoning</option><option>Memory</option><option>Execution</option><option>Surface</option><option>Operations</option>
+    </select>
+  </div>
+  <div class="table-wrap">
+    <table id="matrix">
+      <thead><tr><th>도메인</th><th>기능</th><th>현재</th><th>Keeper / Runtime 범위</th><th>10T · 1h · 2h · 4h · 24h</th><th>Source / 설정</th><th>실증</th><th>빠진 일</th><th>필수 축</th></tr></thead>
+      <tbody>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Task</td><td><span class="badge"></span></td><td>Fleet 범위 미측정</td><td class="axis">10T — · 1/2/4/24h —</td><td><code>workspace_task_*</code>, verification transition</td><td>typed store와 feature tests.</td><td>create→claim→work→verification→terminal을 같은 task_id로 live/browser 대조.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live"><td>Coordination</td><td class="feature">Board</td><td><span class="badge"></span></td><td>minprobe: post 0.047s · read 0.063s · delete 0.191s</td><td class="axis">latency 결함 행동 해소 · full matrix/browser —</td><td><code>board_tool_registry</code>, post-commit hooks</td><td>과거 201 receipt 46.836초·read 92.007초의 E4 결함이 08:1xZ 최소 프로브에서 post 0.047초·read 0.063초·delete 0.191초로 행동 해소 확인(#28620·#28707 포함 build, <a href="../evidence/keeper-board-write-latency-minprobe-2026-08-14.json">증거</a>). full matrix 재실행 3회는 공유 rate bucket(429)에 막힘 — 결함이 아니라 병렬 부하 관측(<a href="https://github.com/jeong-sik/masc/issues/28730">#28730</a>).</td><td>rate bucket 경합 해소(#28730) 후 comment·vote·reaction·karma·browser 축의 full matrix 재실행과 E5 대조.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Comment</td><td><span class="badge"></span></td><td>Keeper별 범위 미측정</td><td class="axis">미측정</td><td>board comment tools/read model</td><td>source/tests; live comment receipt 미동결.</td><td>mention→comment→consumer cursor를 동일 ID로 저장.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Karma / Vote</td><td><span class="badge"></span></td><td>Keeper별 범위 미측정</td><td class="axis">미측정</td><td>karma ledger, vote projection</td><td>source/tests; live vote receipt 미동결.</td><td>다른 Keeper 글 vote→ledger→UI를 같은 event_id로 대조.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test"><td>Coordination</td><td class="feature">Goal</td><td><span class="badge"></span></td><td>Fleet 범위 미측정</td><td class="axis">미측정</td><td>goal index/reconciliation, Dashboard tree</td><td>source와 UI tests.</td><td>Goal→Task→progress→completion reconciliation canary.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Coordination" data-required="source test ci live" data-evidence="source test ci"><td>Coordination</td><td class="feature">Broadcast</td><td><span class="badge"></span></td><td>2 Keeper 수신 미측정</td><td class="axis">#28590·#28648 merged · 잔여 #28666/#28669 · live —</td><td><code>workspace_broadcast</code>, wake policy, durable delivery receipt</td><td>#28590과 #28648(05:11Z merge)이 main에 있다. #28667/#28668은 main이 아니라 stack 부모 브랜치로 접혀 들어갔고, 잔여 내용은 open PR #28666(base main)과 그 위 #28669에 쌓여 있으며 두 head 모두 current CI가 없다.</td><td>#28666을 current main에 재기반해 exact full CI 후 착륙, 이어 #28669. 그 뒤 하이픈 identity 포함 2 Keeper 수신, restart recovery, 중복 없음, Dashboard hydration을 live/browser로 대조. #28648은 04:55Z build 이후 병합이라 live 검증엔 재배포가 선행한다.</td><td>E1·E2·E3·E4</td></tr>
+        <tr data-domain="Coordination" data-required="source test ci live duration" data-evidence="source test ci live"><td>Coordination</td><td class="feature">Drain Queue</td><td><span class="badge"></span></td><td>event queue 1 runnable; memory lane 과거 cancel 1</td><td class="axis">source/CI/merge/deploy PASS · live drain/restart 무유실 실측 · 24h —</td><td><code>Keeper_event_queue</code>, <code>Keeper_memory_lane</code></td><td>#28625가 graceful drain·restart lifecycle·exact token restore feature tests와 full CI를 통과해 <code>23d0ebb3cd</code>로 병합됐고 04:55Z build에 포함 추정이다. 06:59Z sangsu runnable 3건(oldest 2,343s)의 정체는 07:2xZ 진단에서 소비 결함이 아니라 provider 실패로 길어진 사이클과 입구 전용 admission의 조합으로 판정됐다 — autonomous 사이클의 durable 양보(kidsnote 06:22Z 실측)는 정상 동작했다.</td><td>07:47Z canary가 shutdown 무유실·trace_id 보존·재시작 회복을 실측(PASS_WITH_CAVEAT). 남은 것: mid-flight join 직접 증명과 24h 지속.</td><td>E1·E2·E3·E4·E6</td></tr>
+        <tr data-domain="Coordination" data-required="source test live browser" data-evidence="source test live"><td>Coordination</td><td class="feature">Schedule Job</td><td><span class="badge"></span></td><td>runner 1,630 ticks</td><td class="axis">발화 구간 미측정</td><td><code>schedule_service</code>, runner</td><td>1,630 success, failure/crash 0; snapshot의 latest tick은 due/emitted/dispatch 모두 0.</td><td>occurrence create→due→wake→terminal→cancel receipt/UI.</td><td>E1·E2·E4·E5</td></tr>
+
+        <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">Autonomous</td><td><span class="badge"></span></td><td>tool-turn counter 9/26; executable 7/8</td><td class="axis">durable turn span ≥24h 7/26 · semantic 24h —</td><td>heartbeat, supervisor, turn counters</td><td>current feature proof는 persisted runtime turn 25/26과 autonomous action/tool-turn counter 9/26을 보고한다.</td><td>disabled canary와 active denominator를 분리하고, 7개 장기 log가 실제 새 진척·도구 사용·비반복을 보이는지 같은 identity로 판정.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">Proactive</td><td><span class="badge"></span></td><td>scheduled evidence 24/26</td><td class="axis">durable turn span ≥24h 7/26 · semantic 24h —</td><td>scheduled decision log</td><td>current feature proof는 proactive evidence 24/26, board-reactive counter 8/26을 보고한다.</td><td>실제 새 진척·비반복·실패율과 due occurrence 처리를 1/2/4/24h로 판정.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Autonomy" data-required="source test live duration" data-evidence="source test live"><td>Autonomy</td><td class="feature">MultiTurn continuity</td><td><span class="badge"></span></td><td>3 Keeper / 3 runtime / 3 provider family</td><td class="axis">session 10T 3/3 PASS · restart recall PASS_WITH_CAVEAT(1 runtime) · 1/2/4/24h —</td><td>turn driver, chat transcript, owner operation ledger</td><td>Ollama Cloud·Codex·Claude Code(sonnet-5, 08:32Z) 각각 10 user + 10 assistant record, turn 10에서 앞선 9개 사실·순서·예외 전부 정확히 회상 — Claude canary는 fact 9와 fact 3의 모순/세분화 관계까지 스스로 설명. #28625 source/CI/merge는 완료됐지만 live restart proof는 아니다. <a href="../evidence/keeper-multiturn-live-2026-08-13T120751Z.json">Ollama evidence</a> · <a href="../evidence/keeper-multiturn-codex-live-2026-08-13T155130Z.json">Codex evidence</a>.</td><td>graceful stop→restart recall은 07:47Z canary로 1 runtime 실측 완료. 다른 46 runtime, compaction, 1/2/4/24h 비반복·진척 campaign.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Autonomy" data-required="scenario source test ci live browser duration" data-evidence=""><td>Autonomy</td><td class="feature">Team scenarios</td><td><span class="badge"></span></td><td>PoC·QA·소설·연구 모두 미측정</td><td class="axis">전 구간 —</td><td>조합 가능한 하위 기능만 존재</td><td>campaign evidence 없음.</td><td>성공조건·역할·artifact·반론·검증 manifest로 실행.</td><td>E0–E6</td></tr>
+
+        <tr data-domain="Reasoning" data-required="source test ci live browser" data-evidence="source test"><td>Reasoning</td><td class="feature">Fusion</td><td><span class="badge"></span></td><td>preset별 범위 미측정</td><td class="axis">미측정</td><td><code>lib/fusion</code>, TOML panels</td><td>source/focused suites.</td><td>partial/all-fail→judge→consumer를 동일 run_id로 저장.</td><td>E1–E5</td></tr>
+        <tr data-domain="Reasoning" data-required="source test live" data-evidence="source test"><td>Reasoning</td><td class="feature">Judge</td><td><span class="badge"></span></td><td>provider별 미측정</td><td class="axis">미측정</td><td>typed schema, failure judge</td><td>fail-closed source/tests.</td><td>invalid schema/provider failure의 typed live 결과.</td><td>E1·E2·E4</td></tr>
+        <tr data-domain="Reasoning" data-required="source test live browser" data-evidence="source"><td>Reasoning</td><td class="feature">Judge of Judge</td><td><span class="badge"></span></td><td>2/6 judge preset</td><td class="axis">미측정</td><td><code>quorum</code>, <code>council</code>, staged TOML</td><td>topology source.</td><td>identity·stage·meta verdict·partial failure 실행.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Reasoning" data-required="source test live browser" data-evidence="source test"><td>Reasoning</td><td class="feature">Cross-Verification</td><td><span class="badge"></span></td><td>Task별 범위 미측정</td><td class="axis">미측정</td><td>protocol/store/authority</td><td>source/tests; 전역 gate 아님.</td><td>owner를 막지 않는 verifier evidence chain.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Reasoning" data-required="source test ci live" data-evidence="source"><td>Reasoning</td><td class="feature">Thinking</td><td><span class="badge"></span></td><td>provider별 미측정</td><td class="axis">미측정</td><td>provider reasoning dialect</td><td>source; 관련 PR 별도.</td><td>provider별 typed reasoning metadata와 실패 의미.</td><td>E1–E4</td></tr>
+        <tr data-domain="Reasoning" data-required="source test ci live browser" data-evidence="source"><td>Reasoning</td><td class="feature">CoT privacy</td><td><span class="badge"></span></td><td>surface별 미측정</td><td class="axis">미측정</td><td>private checkpoint/public projection</td><td>설계/source 경계.</td><td>private continuation 유지, public raw trace에는 metadata만.</td><td>E1–E5</td></tr>
+
+        <tr data-domain="Memory" data-required="source test ci live duration" data-evidence="source test ci live"><td>Memory</td><td class="feature">Memory OS recall</td><td><span class="badge"></span></td><td>drain-recall canary 11/11 · shutdown 2회 무유실</td><td class="axis">session 10T PASS · restart recall 11/11 PASS_WITH_CAVEAT · 1/2/4/24h —</td><td><code>memory-current.json</code>, recall CAS</td><td>07:47Z drain-restart canary(ollama_cloud): shutdown 응답 5ms·cancel 로그 0건이 2회, 미커밋 사실 3개가 재시작 후 재진술 없이 Librarian cadence 재스캔으로 revision 6에 커밋, 재시작 첫 턴 11/11 회상. 과거 증거의 "later turn replays the cancelled input" 미증명 항목을 실측으로 닫았다.</td><td>mid-flight LLM pass를 실제로 join하는지는 미증명(runtime이 빨라 in-flight를 못 잡음) — 느린 runtime 재실행과 Librarian dispatch-start 로그 관측이 후속. 1/2/4/24h·compaction 연장.</td><td>E1·E2·E3·E4·E6</td></tr>
+        <tr data-domain="Memory" data-required="source test ci live duration" data-evidence="source test ci live"><td>Memory</td><td class="feature">Librarian</td><td><span class="badge"></span></td><td>07:47Z canary: 무유실 2회, 재진술 없는 백로그 회복</td><td class="axis">source/CI/merge/deploy PASS · graceful stop/restart 실측 PASS_WITH_CAVEAT</td><td><code>keeper_librarian_runtime</code>, <code>Keeper_memory_lane</code>, exact registry</td><td>과거 turn 10 pass가 106.097초 실행 후 pre-commit cancel됐다. #28625는 current+retained-latest drain, lifecycle rollback/restart, exact token restore를 feature test로 고정해 <code>23d0ebb3cd</code>로 병합됐다. <a href="../evidence/keeper-librarian-graceful-shutdown-live-2026-08-13T160506Z.json">live failure evidence</a>.</td><td>mid-flight pass join의 직접 증명(느린 runtime + dispatch-start 로그)과 crash/process-restart unconsumed work 보존은 별도 후속.</td><td>E1·E2·E3·E4·E6</td></tr>
+        <tr data-domain="Memory" data-required="source test ci live duration" data-evidence="source test ci"><td>Memory</td><td class="feature">Counterpart relationship</td><td><span class="badge"></span></td><td>live fleet 미측정</td><td class="axis">session restart — · 24h —</td><td>#28592/#28598/#28600, typed evidence</td><td>source 병합 확인; live binary SHA 미확인.</td><td>재빌드 후 동명이인·관계 변화·근거 창 multi-session 검증.</td><td>E1·E2·E3·E4·E6</td></tr>
+
+        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Multi Lane</td><td><span class="badge"></span></td><td>lane/runtime별 미측정</td><td class="axis">10T — · 장기 —</td><td>ordered runtime lanes, independent Keeper lanes</td><td>source contract.</td><td>lane 격리·공정성·실패 전파를 live receipt로 대조.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Execution" data-required="source test live browser" data-evidence="source test live"><td>Execution</td><td class="feature">Tool</td><td><span class="badge"></span></td><td>typed descriptor 전체 surface; 2개 10T canary에서 실제 호출</td><td class="axis">provider parity 2/8 · Browser —</td><td><code>Keeper_tool_descriptor</code> → <code>Tool_bridge</code> → Agent Core invocation</td><td>descriptor registry/dispatch feature tests와 Ollama Cloud·Codex transcript의 실제 tool result. 모든 tool family와 provider parity는 미증명.</td><td>동일 invocation ID로 model call→authorization→handler→result→observation→UI를 provider 대표별 대조.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Execution" data-required="scenario source test live" data-evidence="source test ci"><td>Execution</td><td class="feature">Parallel Tool</td><td><span class="badge"></span></td><td>Z.AI canary에서 한 turn에 2 tool result; concurrent mode live 미증명; cancellation 수리는 #28713로 main 착륙</td><td class="axis">#28605·#28713 merged · live —</td><td>Agent Core batch + typed descriptor execution mode</td><td>#28605는 <code>e98e7fcfc5</code>로 병합됐고, 함께 들어온 observation cancellation P1은 mutation check와 production hook 회귀를 실은 #28713(<code>87b778f4</code>, 04:51Z merge)로 main에서 수리됐다. #28701은 supersede close 합의가 코멘트에 기록됐다.</td><td>#28701 supersede close 실행. #28713은 04:51Z 병합이라 04:55Z build 포함이 경계이므로 재배포 뒤 real ActivityGraph/SSE cancellation과 live mixed batch의 planned order·partial failure·observation identity를 증명.</td><td>E0·E1·E2·E3·E4</td></tr>
+        <tr data-domain="Execution" data-required="scenario source test live" data-evidence="source test"><td>Execution</td><td class="feature">Batch Tool / Composition</td><td><span class="badge"></span></td><td>6단 draft stack; main·live 미착륙</td><td class="axis">stack feature tests · full main CI — · live —</td><td><code>Keeper_tool_plan</code> typed IR → executor → TOML catalog/surface</td><td>stack 자식 #28662/#28665/#28670/#28674/#28675/#28677/#28685/#28689/#28690은 전부 부모 브랜치로 접혀 병합됐고 main에는 없다. 전체 내용은 open 바닥 PR #28656(head <code>bd25f76a77</code>)에 모여 있으며 adversarial-non-pass 라벨과 current CI 부재가 남아 있다.</td><td>#28656을 current main에 재기반해 exact full CI와 non-pass 재판정 후 착륙. 그 뒤 serial/concurrent batch, 부분 실패, committed-effect 이후 defer, cancellation을 실제 Keeper invocation으로 검증.</td><td>E0·E1·E2·E3·E4</td></tr>
+        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source test"><td>Execution</td><td class="feature">Async Tool / Job</td><td><span class="badge"></span></td><td>기존 durable async request + composition draft</td><td class="axis">restart source/test · full main CI — · live/장기 —</td><td><code>keeper_msg_async</code>, durable request accept/status/cancel/recovery</td><td>기존 terminal/inventory/path tests에 더해 #28674가 explicit <code>inline | async</code>, read-only-only admission, request별 switch/sandbox와 ownerless recovery를 정의한다. #28675는 nested action telemetry를 이었고 둘 다 #28656으로 접혀 들어갔다.</td><td>#28656 착륙 뒤 accept→poll→cancel→process restart→typed terminal과 Dashboard action receipt를 동일 request/run ID로 증명.</td><td>E1·E2·E3·E4·E5·E6</td></tr>
+        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source"><td>Execution</td><td class="feature">Multi Runtime</td><td><span class="badge"></span></td><td>8 provider / 48 runtime; 48 dispatchable</td><td class="axis">10T 3/48 · per-runtime 1/2/4/24h 0/48</td><td><code>runtime.toml</code>, 10 lane, 26 assignment</td><td>live catalog·admission 확인. Ollama Cloud·Codex·Claude Code 각 1개 10T pass. 7/26 Keeper의 24h decision-log span은 특정 runtime semantic campaign으로 귀속하지 않는다.</td><td>나머지 provider family 대표부터 10T→restart→1/2/4/24h 확장. Local Ollama 차단 해소는 07:00Z resolved catalog로 확인했고 해당 3개 canary는 미실행.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source test ci"><td>Execution</td><td class="feature">Model / Provider Free</td><td><span class="badge"></span></td><td>8 provider family catalog 확인</td><td class="axis">semantic parity 3/8 · #28687/#28672/#28658 merged</td><td>capability flags; typed selected-model receipt; effect boundary는 실제 tool entry</td><td>Ollama Cloud·Codex·Claude Code의 동일 9-fact 10T contract는 통과. Antigravity tool-entry effect fence #28687, selected_model 보존 #28672, Ollama probe effect authority #28658이 각각 <code>8b52088c3f</code>, <code>237aed4657</code>, <code>13dd32a37a</code>로 착륙했다.</td><td>새 source를 배포한 뒤 Antigravity pre-tool 회전, post-tool fenced receipt, final selected_model과 Ollama probe effect authority를 live turn에서 증명.</td><td>E1·E2·E3·E4·E6</td></tr>
+        <tr data-domain="Execution" data-required="source test live duration" data-evidence="source test"><td>Execution</td><td class="feature">Runtime Failover</td><td><span class="badge"></span></td><td>A→B 경로별 미측정</td><td class="axis">10T/restart —</td><td>ordered lanes, failover tests</td><td>focused tests.</td><td>A 실패→B 전환 시 중복 없이 turn/memory 유지.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Execution" data-required="source test live browser" data-evidence="source test"><td>Execution</td><td class="feature">TOML configuration</td><td><span class="badge"></span></td><td>reload class별 미측정</td><td class="axis">미측정</td><td>boot/sweep/request reload matrix</td><td>parser/boot tests.</td><td>edit→trigger→effective meta/runtime→Dashboard.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Execution" data-required="source test live" data-evidence="source test live"><td>Execution</td><td class="feature">File System</td><td><span class="badge"></span></td><td>effective base 1개 live</td><td class="axis">재기동 1회</td><td>base-path resolution</td><td><code>/Users/dancer/me/.masc</code> live.</td><td>상대/절대 경로와 restart artifact 동일성 확장.</td><td>E1·E2·E4</td></tr>
+        <tr data-domain="Execution" data-required="source test ci live" data-evidence="source test ci"><td>Execution</td><td class="feature">Sandbox</td><td><span class="badge"></span></td><td>Local/Docker 경로별 live 미측정</td><td class="axis">#28585 merged · live —</td><td>typed Local/Docker sandbox</td><td>#28585 head <code>015b16aa26</code>는 Docker 요청의 image/factory/daemon 실패를 Host 성공으로 강등하던 fallback을 삭제했고 exact Build·CI를 통과했다. PR 설명도 <code>RFC-WAIVED</code> 사유와 기존 typed sandbox boundary 문서를 명시하며 main에 병합됐다.</td><td>Docker 실패가 typed failure로 남고 Host effect가 없음을 재배포 뒤 live로 증명.</td><td>E1–E4</td></tr>
+        <tr data-domain="Execution" data-required="source test live browser" data-evidence="source"><td>Execution</td><td class="feature">MultiModal</td><td><span class="badge"></span></td><td>runtime/provider별 미측정</td><td class="axis">미측정</td><td><code>lib/multimodal</code>, artifact/vision</td><td>source와 UI surface.</td><td>image→context→tool action→provenance Browser capture.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Execution" data-required="source test live" data-evidence="source test"><td>Execution</td><td class="feature">GitHub Credential</td><td><span class="badge"></span></td><td>identity별 미측정</td><td class="axis">미측정</td><td><code>keeper_github_identity</code>, redaction</td><td>focused tests.</td><td>optional identity 실패가 일반 Keeper를 막지 않는지 live 확인.</td><td>E1·E2·E4</td></tr>
+
+        <tr data-domain="Surface" data-required="source test live browser" data-evidence="source test"><td>Surface</td><td class="feature">Connector routing</td><td><span class="badge"></span></td><td>Dashboard/Discord/Slack</td><td class="axis">미측정</td><td><code>keeper_surface_read/post</code>, ingress</td><td>source/tests.</td><td>맥락 기반 surface 선택과 승인되지 않은 재배달 없음.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Surface" data-required="source test live browser" data-evidence="source test"><td>Surface</td><td class="feature">Web</td><td><span class="badge"></span></td><td><code>WebSearch</code>·<code>WebFetch</code> model surface</td><td class="axis">Keeper live research —</td><td><code>masc_web_search</code>/<code>masc_web_fetch</code>, typed approval replay</td><td>descriptor/dispatch와 승인된 exact request replay feature tests. 실제 Keeper가 검색→원문→인용 artifact를 만든 campaign은 없음.</td><td>검색 결과·fetch 원문·citation·최종 artifact를 같은 run ID로 저장하고 provider 실패/fallback 의미를 검증.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Surface" data-required="scenario source test live browser" data-evidence=""><td>Surface</td><td class="feature">Browser automation</td><td><span class="badge"></span></td><td>Keeper model-visible 독립 browser tool 확인 안 됨</td><td class="axis">E2E —</td><td>Dashboard browser 검증과 Keeper의 웹 행동은 별개</td><td>이 문서 자체의 Chromium capture는 UI 증거일 뿐 Keeper가 browser를 조작했다는 증거가 아니다.</td><td>필요성을 먼저 시나리오로 확정. 도입한다면 typed navigate/read/act receipt, sandbox, screenshot provenance를 한 surface로 구현하고 WebFetch facade를 겹치지 않는다.</td><td>E0–E5</td></tr>
+        <tr data-domain="Surface" data-required="source test ci live browser" data-evidence="source test ci" data-blocked="true"><td>Surface</td><td class="feature">Discord</td><td><span class="badge"></span></td><td>gateway alive; 3 live 시나리오 미완</td><td class="axis">10T/장기 —</td><td>gateway + typed terminal replay outcome</td><td>gate replay settlement 수정은 main에 병합. 현재 배포 binary SHA는 여전히 불명.</td><td>재배포 후 침묵·명시 post·무발화, continuation 중복 없음, browser/Discord 대조.</td><td>E1–E5</td></tr>
+        <tr data-domain="Surface" data-required="source test live browser" data-evidence="source test"><td>Surface</td><td class="feature">Slack</td><td><span class="badge"></span></td><td>실채널 미측정</td><td class="axis">미측정</td><td>Socket/REST gateway, directory</td><td>source/focused tests.</td><td>mention→reply, no-op silence, reconnect canary.</td><td>E1·E2·E4·E5</td></tr>
+        <tr data-domain="Surface" data-required="source test ci live browser" data-evidence="source test live browser"><td>Surface</td><td class="feature">Dashboard</td><td><span class="badge"></span></td><td>0.22.0 build ff6a8fa6af 보고; clean-path WS 정상</td><td class="axis">Overview→Monitor 재실측 PASS(#28694 행동 증명) · clean WS 정상</td><td>API read models + TS UI</td><td>06:57Z 재실측에서 build label <code>v0.22.0 · ff6a8fa6af</code>, Overview 8/27, Monitor typed band 정상 7·일시정지 19·중지 2·주의 1 — #28694 행동 증명. 동일 캡처의 WS/auth 실패는 env의 stale 토큰 탓으로 귀속됐고, 07:11Z 깨끗한 로드는 WS까지 정상이다.</td><td>주의 카운트 3종(칩 41/카드 19/band 1)의 분모 의미 확정, #28650 SSE/replay counter 단일 투영의 browser 증거 저장.</td><td>E1–E5</td></tr>
+
+        <tr data-domain="Operations" data-required="source test ci live browser" data-evidence="source test live" data-blocked="true"><td>Operations</td><td class="feature">Observability</td><td><span class="badge"></span></td><td>file sink active; OTel inactive; replay/live identity 수리 merged</td><td class="axis">snapshot 1회 · #28650 Build + Dashboard + CI PASS</td><td>producer <code>event_id</code>, receipts, metrics, activity, OTel</td><td>health/log snapshot. #28650 exact head <code>cd2a035949</code>는 OS entropy로 canonical ID를 만들고 동일 envelope를 JSONL/SSE에 투영하며 dashboard replay/live도 그 global ID로 한 번만 투영한다. 초기 replay hydration 동안 live ingress를 큐잉하고 최신 generation만 fence를 소유해 stale fetch가 live event를 지우거나 묶어두지 못한다. P0/P1 source review와 exact-head Build, Dashboard, Meta Guards, CI Gate를 통과해 merge commit <code>394bbf74c6</code>로 착륙했고 consumer-only #28556은 superseded closed다.</td><td>#28650은 04:55Z build 포함 추정이고 clean-path WS도 정상이므로 같은 event_id의 replay+SSE 단일 counter browser 증거를 지금 저장할 수 있다.</td><td>E1·E2·E3·E4·E5</td></tr>
+        <tr data-domain="Operations" data-required="source test ci live" data-evidence="source test ci live"><td>Operations</td><td class="feature">Keeper create admission</td><td><span class="badge"></span></td><td>fresh-name race 6/6: create 완주 · shutdown 무오염 거절</td><td class="axis">source/test/CI/merged PASS · live overlap 6/6 PASS</td><td><code>create_keeper</code>, durable intake fence, owner registry</td><td>#28647 exact head <code>89064d6e57</code>가 기존 exact-name intake transaction을 session·checkpoint·runtime·config·Owner commit·registry/lane handoff까지 유지한다. production overlap feature test, 독립 source review P0/P1 없음, exact-head Build and Test·TLA·Meta·CI Gate를 통과해 <code>1487385def</code>로 착륙했다. 08:10Z live probe: 미존재 이름 6개에 boot/shutdown 동시 발사(양방향) — 6/6에서 create가 exact lane launch와 FSM 턴 완주까지 무방해, shutdown은 2–8ms 무오염 거절, config/runtime 오염 0 (<a href="../evidence/keeper-create-admission-overlap-live-2026-08-14T081000Z.json">증거</a>). 미존재 대상 shutdown의 오해 소지 있는 에러 문구는 <a href="https://github.com/jeong-sik/masc/issues/28731">#28731</a>.</td><td>내부 <code>Intake_shutdown_reserved</code> 마이크로초 창의 직접 적중은 외부 타이밍으로는 불가(create가 300ms에 완주) — 그 분기는 feature test 레벨 증명이 후속. admission 이후 일반 partial-write rollback도 별도 후속.</td><td>E1·E2·E3·E4</td></tr>
+        <tr data-domain="Operations" data-required="source test live duration" data-evidence="source test live"><td>Operations</td><td class="feature">Log</td><td><span class="badge"></span></td><td>53,042 total / 50k retained</td><td class="axis">24h 완전성 —</td><td>structured/file sinks, raw trace</td><td>sink active. 08-14 실측: 개명 이전 turn_record 거부 WARN 5,372건(#28727), retired candidate 참조 ERROR 170건(#28728) — 로그가 partial cleanup 두 건을 드러냈다.</td><td>rotation을 건넌 causal completeness와 누락 projection 검증.</td><td>E1·E2·E4·E6</td></tr>
+        <tr data-domain="Operations" data-required="source live duration" data-evidence="source live"><td>Operations</td><td class="feature">Long-run performance</td><td><span class="badge"></span></td><td>8 running / 8 executable · overall degraded</td><td class="axis">uptime 59m at capture · duration clock 재초기화 · 1/2/4/24h —</td><td>GC/FD/queue metrics, sweeper</td><td>05:59:52Z 재기동으로 duration clock이 다시 초기화됐다. 06:48Z fleet 6 running/2 recovering(원인: provider 실패 32건)이 06:59Z 8 running으로 회복됐다. degraded 표기는 장기 사이클 중 대기 이벤트 나이가 600s 임계를 넘는 관측이다.</td><td>같은 process identity로 RSS·CPU·FD·latency·queue age·실제 진척을 1/2/4/24h 수집한다.</td><td>E1·E4·E6</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>3. Runtime / Provider 검증 매트릭스</h2>
+  <p class="muted">catalog에 있다는 것은 TOML 파싱과 dispatch admission 증거다. 실제 Keeper turn, semantic continuity, failover, browser, 장기 성능은 별도 축이다. 분모는 <code>2026-08-13T15:32:49Z</code>의 47개 runtime으로 고정했다.</p>
+  <div class="table-wrap">
+    <table class="compact">
+      <thead><tr><th>Provider family</th><th>Catalog / dispatch</th><th>현재 live 실행</th><th>10T</th><th>Restart</th><th>1h</th><th>2h</th><th>4h</th><th>24h</th><th>Browser</th><th>빠진 일</th></tr></thead>
+      <tbody>
+        <tr><td class="feature">Ollama Cloud</td><td>11 / 11</td><td><span class="badge partial">PARTIAL</span> DeepSeek v4 Flash 한 canary</td><td>1 / 11 PASS</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>나머지 10 runtime 10T, restart/compaction, 전 장기 구간, UI transcript 대조.</td></tr>
+        <tr><td class="feature">Z.AI Coding</td><td>1 / 1</td><td><span class="badge partial">PARTIAL</span> GLM-5-Turbo 한 turn에 tool result 2개</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>동시 실행 여부부터 invocation evidence로 증명한 뒤 10T·failover·장기 실행.</td></tr>
+        <tr><td class="feature">Antigravity Google Subscription</td><td>11 / 11</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>대표 runtime 10T 후 모델별 capability 차이를 확장.</td></tr>
+        <tr><td class="feature">Claude Code Max Subscription</td><td>7 / 7</td><td><span class="badge partial">PARTIAL</span> claude-sonnet-5 한 canary</td><td>1 / 7 PASS</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>08:32Z 9/9 회상 PASS(모순-세분화 구분 포함), latency median 10.3s·max 24.8s(CLI 기동 비용), tool 0건 계약 준수. 나머지 6 runtime 10T, tool feedback, compaction/restart, duration, browser. boot 직후 config PATCH 5m53s 정체는 <a href="https://github.com/jeong-sik/masc/issues/28733">#28733</a>(runtime 귀속 불가).</td></tr>
+        <tr><td class="feature">Codex ChatGPT Subscription</td><td>10 / 10</td><td><span class="badge partial">PARTIAL</span> gpt-5.4 한 canary</td><td>1 / 10 PASS</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>세션 내 10T는 통과. 종료 Librarian run은 latest input을 가진 채 cancel되어 restart Memory는 BLOCKED. #28625 후 나머지 9 runtime, compaction, tool-only, duration, browser.</td></tr>
+        <tr><td class="feature">Kimi For Coding Subscription</td><td>3 / 3</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>10T와 tool/async contract, restart, duration.</td></tr>
+        <tr><td class="feature">Local Llama Server</td><td>1 / 1</td><td><span class="badge missing">NOT RUN</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>local capacity·latency를 함께 기록하는 10T/장기 canary.</td></tr>
+        <tr><td class="feature">Local Ollama</td><td>1 / 3</td><td><span class="badge blocked">2 CONFIG BLOCKED</span></td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td><code>gemma4-26b-a4b-qat</code>, <code>gemma-4-E2B-it-qat-GGUF</code>에 positive <code>max-request-body-bytes</code>를 TOML로 설정; 3개 모두 canary.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>4. 팀 시나리오 검증 매트릭스</h2>
+  <p class="muted">하위 기능 source가 있다는 이유로 팀 시나리오를 통과 처리하지 않는다. 각 행은 고유 Goal/Task/artifact/run ID, 역할별 Keeper, 반론·검증 결과, terminal receipt, browser 결과가 하나의 chain으로 이어져야 한다.</p>
+  <div class="table-wrap">
+    <table class="compact">
+      <thead><tr><th>시나리오</th><th>사용자 관점 성공조건</th><th>필수 기능 조합</th><th>현재</th><th>현재 근거</th><th>빠진 실행</th></tr></thead>
+      <tbody>
+        <tr><td class="feature">협업</td><td>여러 Keeper가 역할을 나눠 하나의 결과물을 완성하고 서로의 상태를 안다.</td><td>Goal · Task · Board · Comment · Memory · Multi Lane</td><td><span class="badge missing">NOT RUN</span></td><td>개별 source만 존재.</td><td>planner/worker/reviewer 3-lane canary, 동일 artifact와 causal ID, 10T.</td></tr>
+        <tr><td class="feature">PoC</td><td>아이디어에서 실행 가능한 작은 산출물과 검증 결과까지 도달한다.</td><td>Goal · Task · Tool · File System · Verification</td><td><span class="badge missing">NOT RUN</span></td><td>campaign evidence 없음.</td><td>요구→구현→실행 proof→review→terminal artifact.</td></tr>
+        <tr><td class="feature">QA 100% coverage</td><td>대상 범위를 명시하고 실제 coverage 100%와 기능 동작을 함께 증명한다.</td><td>Task · Parallel/Batch Tool · Log · Cross-Verification</td><td><span class="badge missing">NOT RUN</span></td><td>coverage campaign 없음.</td><td>대상 패키지와 측정 명령을 manifest에 고정하고 기능 E2E와 coverage artifact 대조.</td></tr>
+        <tr><td class="feature">동작 증명 팀</td><td>구현자와 검증자가 독립 근거로 같은 동작을 재현한다.</td><td>Task · Judge · Cross-Verification · Dashboard</td><td><span class="badge missing">NOT RUN</span></td><td>개별 verification source만 존재.</td><td>producer와 verifier를 다른 lane/runtime에 배치하고 상충 결과도 보존.</td></tr>
+        <tr><td class="feature">연작 소설</td><td>인물·사건·톤·연속성을 10T 이상 유지하며 여러 편을 완성한다.</td><td>MultiTurn · Memory · Librarian · Comment</td><td><span class="badge missing">NOT RUN</span></td><td>9-fact 단일 Keeper 회상만 통과.</td><td>다중 Keeper 작가/편집자, session restart, 설정·인물 관계·반복 검출.</td></tr>
+        <tr><td class="feature">정부 지침 반론</td><td>원문 근거를 인용하고 서로 다른 관점의 반론·재반론·종합을 만든다.</td><td>Web · Librarian · Fusion · Judge of Judge</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>출처 snapshot, 입장별 Keeper, 반박 chain, 최종 synthesis provenance.</td></tr>
+        <tr><td class="feature">논문·개념 실측</td><td>가설·방법·측정·재현·한계를 하나의 artifact로 남긴다.</td><td>Goal · Tool · Log · Fusion · Verification</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>측정 데이터와 분석 code/artifact, 독립 재현, judge verdict.</td></tr>
+        <tr><td class="feature">새 연구주제 발견</td><td>검색 결과를 단순 요약하지 않고 새로운 질문과 검증 계획을 도출한다.</td><td>Web · Memory · Fusion · Judge</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>검색 corpus, novelty 반론, 선행연구 충돌, 후속 experiment plan.</td></tr>
+        <tr><td class="feature">과학·수학·CS 난제</td><td>가정·추론·계산·반례·검증을 분리하고 틀린 경로도 식별한다.</td><td>Thinking · Tool · Fusion · Cross-Verification</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>문제별 verifier와 계산 도구, 반례 lane, 최종 uncertainty.</td></tr>
+        <tr><td class="feature">웹 연구</td><td>검색·원문 확인·출처 비교·변경 가능성 표시까지 수행한다.</td><td>Connector · Web · Librarian · Citation · Browser</td><td><span class="badge missing">NOT RUN</span></td><td>외부 참고 조사만 존재; Keeper campaign 아님.</td><td>Keeper가 직접 검색하고 source URL/artifact와 결과를 UI에서 대조.</td></tr>
+        <tr><td class="feature">기고문 작성</td><td>조사·초안·편집·사실검증·게시 대상 선택을 끝낸다.</td><td>Memory · Comment · Connector · Slack/Discord/Dashboard</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>작성/편집/검증 역할과 승인된 surface 한 곳의 exact delivery.</td></tr>
+        <tr><td class="feature">상호 반론·이해·피드백·도구 사용</td><td>서로의 주장을 정확히 재진술하고 근거로 반박·수정하며 필요한 도구를 쓴다.</td><td>Board · Comment · Fusion · MultiTurn · Tool · Memory</td><td><span class="badge missing">NOT RUN</span></td><td>scenario run 없음.</td><td>주장 identity, steelman, 반론, 수정 이력, tool receipt, 합의/비합의 terminal.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>5. 병렬 트랙과 실제 의존성</h2>
+  <div class="stack">
+    <article class="card lane next"><div class="step"><strong>Track A</strong><h3>독립 merge 상태</h3><p><strong>#28587, #28605, #28611, #28626, #28658, #28694, #28700까지 추가 착륙했다.</strong> main은 <code>ff6a8fa6af</code>다. #28605의 cancellation P1은 #28713(<code>87b778f4</code>)로 main에서 수리됐고 #28701은 supersede close 대상이다. Draft + do-not-merge와 사람 승인 경계는 유지한다. me#1254는 destructive reaper P1이 남아 후보가 아니다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>A0</strong><h3>Release version truth · #28657 merged</h3><p>#28657 head <code>60b127a3ee</code>가 exact-head Build/Meta/CI를 두 번 통과한 뒤 merge commit <code>bca8c9f36c</code>로 착륙했다. 현재 main의 <code>dune-project</code>, <code>masc.opam</code>, locked package truth는 모두 <code>0.22.0</code>이다. guard는 exact published-tag repair만 허용하고 same-major downgrade, prerelease/numeric-suffix package version, active 0.x→legacy major 역주행을 거부한다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>A0.5</strong><h3>Release merge-result truth · #28673 merged</h3><p>#28673 exact head <code>7ebaf2525b</code>는 remote branch identity는 PR head SHA로 유지하고 package truth만 synthetic merge result <code>HEAD</code>에서 평가한다. 실제 <code>0.22.0→0.21.2</code> downgrade가 merge result에서도 계속 실패하는 production-script feature scenario, exact full CI, stable patch review를 통과해 merge commit <code>f4fdc67961</code>로 착륙했다. 새 hard gate·timeout·환경변수는 추가하지 않았다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>A0.75</strong><h3>Runtime probe authority · #28658 merged</h3><p>#28658은 stable patch-id, exact full CI, 독립 overlap review를 유지한 채 merge commit <code>13dd32a37a</code>로 착륙했다. #28687과 #28672도 각각 <code>8b52088c3f</code>, <code>237aed4657</code>로 들어왔다. source/CI/merge는 PASS지만 새 binary에서 provider effect authority와 selected-model receipt를 아직 live 증명하지 않았다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>A1</strong><h3>Agent Core event identity · #28650 merged</h3><p>#28650 exact head <code>cd2a035949</code>의 11개 feature commit은 최신 main 재기반 전후 <code>range-diff =</code>였고, Build·Dashboard·Meta·TLA·CI Gate를 모두 통과해 merge commit <code>394bbf74c6</code>로 착륙했다. producer가 OS entropy global <code>event_id</code>를 한 번 mint하고 Keeper JSONL/SSE와 dashboard replay/live가 같은 identity를 보존한다. source/CI/merged는 PASS지만 배포와 실제 replay+SSE browser counter 단일 투영은 아직 증명하지 않았으므로 live 축은 BLOCKED다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>A →</strong><h3>Broadcast · #28590</h3><p>main 병합은 확인했다. full hyphen target과 first-mention ordering의 source/CI 증거는 있으나, 새 binary 배포와 하이픈 identity를 포함한 2 Keeper live 수신·중복 없음은 아직 증명하지 않았다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>Track B</strong><h3>Parallel Tool · #28605·#28713 merged</h3><p>#28605의 invocation identity와 concurrent descriptors는 <code>e98e7fcfc5</code>로, observation cancellation P1 수리는 mutation check와 production hook 회귀를 실은 #28713 <code>87b778f4</code>(04:51Z)로 main에 있다. #28701은 supersede close 합의가 기록됐다. real ActivityGraph/SSE blocking path feature test와 live batch proof는 후속 축이다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>B2</strong><h3>Batch / Async / persistence proof · 10단 draft stack</h3><p>10단 stack의 자식 9개는 전부 부모 브랜치로 접혀 병합됐고 main에는 없다. typed plan, executor, TOML catalog, async request, telemetry, durable tiers, Dashboard projection, fenced-effect 분류 내용은 open 바닥 PR #28656(head <code>bd25f76a77</code>) 하나에 모였다. 08:0xZ 최신 main 재기반 완료(head <code>83e8d96f21</code>, MERGEABLE 전환, delta 127파일 보존 검증). 초기 CI 게이트 수리와 non-pass 재판정 뒤 착륙하고 live Keeper composition으로 증명한다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>Track C</strong><h3>Exact binary identity와 재배포</h3><p>현재 live process는 version <code>0.22.0</code>, runtime checkout <code>ff6a8fa6af</code>, 시작 <code>05:59:52Z</code>를 보고한다. 실행 파일 mtime <code>04:55:36Z</code> 기준 #28709/#28648은 미포함 확정, #28713/#28715/#28718은 경계다. embedded binary SHA가 여전히 없어 exact build provenance는 BLOCKED로 남는다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>C0</strong><h3>Board producer 경계 · #28620</h3><p>실 browser matrix는 첫 post에서 멈췄고 고유 canary는 46.836초 delayed 201을 증명했다. #28620은 timeout 상향이나 전역 gate 없이 discoverable fan-out을 durable owner cursor로 옮겨 main에 병합됐다. 배포 후 동일 browser matrix 재실행과 pre-registration lifecycle gap이 남았다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>C0.5</strong><h3>Keeper create admission · #28647 merged</h3><p>#28647 exact head <code>89064d6e57</code>는 최신 main 재기반 전후 <code>range-diff =</code>였고 Build·TLA·Meta·CI Gate를 통과해 merge commit <code>1487385def</code>로 착륙했다. 새 gate·timeout 없이 기존 durable-intake token을 전체 creation mutation과 registry/lane handoff에 전달한다. preexisting shutdown 거절은 session/config/runtime/Owner를 바꾸지 않고, create-wins overlap은 후발 reservation을 지우지 않은 채 exact lane launch까지 완료한다. live create/shutdown overlap proof는 새 binary 배포 뒤다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>C0.75</strong><h3>Worktree sweeper orphan reaper · me#1254 BLOCK</h3><p>exact head <code>560742a9d2</code>는 Repo Guardrails/test CI가 green이지만 병합 불가다. PID file + PPID 1 + 6시간 + command substring은 session 종료 증거가 아니며 live daemon도 PPID 1이었다. 최대 5초 뒤 숫자 PID를 재검증 없이 KILL해 PID reuse가 무관한 process를 죽일 수 있고, concurrent same-session restart의 새 pid/socket을 지울 수 있다. scheduler PID file도 command/start identity 없이 TERM하고 start check/fork/write가 잠기지 않아 중복 loop를 만들 수 있다. README가 약속한 <code>.masc-lock</code> guard는 delegated stale cleaner가 실제 호출하지 않고, forced KILL은 daemon의 <code>.stream</code> cleanup을 건너뛴다. owner lease/start identity, compare-and-delete, 실제 lock guard와 destructive-path feature test 전에는 start하지 않는다.</p></div></article>
+    <article class="card lane next"><div class="step"><strong>C1</strong><h3>Runtime representative canaries · #28658/#28672/#28687 merged</h3><p>Ollama Cloud와 Codex 10T pass를 템플릿으로 삼아 Claude Code, Antigravity, Kimi, Z.AI, local llama-server, Local Ollama 대표 runtime을 비교한다. 세 source 수리는 모두 main에 착륙했고 새 timeout·budget·문자열 정책은 없다. live failover/effect/receipt proof는 endpoint 복구 뒤 미실행 상태에서 이어간다.</p></div></article>
+    <article class="card lane block"><div class="step"><strong>C2</strong><h3>Memory graceful drain · #28625 merged/deployed, live proof 대기</h3><p>과거 turn-10 Librarian 입력은 최신 사실을 포함했지만 0.21.2 graceful stop이 106.097초 후 cancel했다. #28625는 graceful drain, restart lifecycle, exact lane/token restore와 full CI를 통과해 merge commit <code>23d0ebb3cd</code>로 착륙했고 새 0.22.0 process에 포함됐다. source/CI/merge/deploy는 PASS지만 current+retained-latest drain과 restart recall canary는 아직 다시 실행하지 않았으므로 live verdict는 BLOCKED다.</p></div></article>
+    <article class="card lane"><div class="step"><strong>C3</strong><h3>Memory restart와 시나리오 campaign</h3><p>#28625 live proof 뒤 같은 9-fact canary를 restart/compaction까지 연장하고, crash/process-restart unconsumed work 보존을 별도 slice로 다룬다. 그 다음 협업 코드·연구/논문·연작 글·반론/변론을 Goal/Task/Board/Fusion/Verification/Memory 조합으로 실행한다.</p></div></article>
+  </div>
+
+  <h2>6. 구현 규칙</h2>
+  <div class="grid">
+    <article class="card"><h3>기능 우선</h3><p>실제 canary 실패를 먼저 재현한다. 관측 인프라가 없다는 이유로 정상 기능을 막는 전역 gate를 만들지 않는다.</p></article>
+    <article class="card"><h3>Typed boundary</h3><p><code>Raw → Resolved → Decision → Command</code>. 문자열/substring/regex가 도메인 상태를 대신하지 않는다.</p></article>
+    <article class="card"><h3>Effect outside</h3><p>pure transition에서 command를 만들고 filesystem/network/process effect는 바깥 owner가 실행한다.</p></article>
+    <article class="card"><h3>Current only</h3><p>producer/reader/writer/caller를 함께 바꾸고 old reader, dual write, fallback facade, 죽은 테스트를 남기지 않는다.</p></article>
+    <article class="card"><h3>설정 진실</h3><p>경로는 <code>&lt;base-path&gt;</code>에서 resolve한다. env를 추가하기 전에 TOML과 기존 runtime params를 확인한다.</p></article>
+    <article class="card"><h3>Heuristic gate 금지</h3><p>임의 숫자·substring·regex·timeout·budget으로 정상 흐름을 차단하지 않는다. 정말 필요한 제한은 측정된 자원 경계와 typed outcome으로 설명하고, 희귀 실패는 우선 관측 가능하게 만든다.</p></article>
+    <article class="card"><h3>Reuse before abstraction</h3><p>표준 라이브러리와 기존 typed module을 먼저 찾는다. 새 facade·환경변수·hard-coded path·중복 store를 만들기 전에 현재 owner와 API를 확장하고, 깊은 공통화보다 읽히는 국소 중복을 택한다.</p></article>
+    <article class="card"><h3>증거 분리</h3><p>Source, CI, merged, deployed, live, screenshot은 서로 대체하지 않는다. 동일 canary identity로 연결한다.</p></article>
+  </div>
+
+  <h2>7. 외부 구현에서 가져올 것</h2>
+  <div class="grid">
+    <article class="card"><h3>Hermes Agent</h3><p>항상 주입되는 작은 user/profile memory와 on-demand session search/procedural skills를 분리한다. MASC도 사람·관계 핵심 snapshot과 상세 사건 검색을 같은 저장소로 뭉개지 않는 편이 맞다.</p></article>
+    <article class="card"><h3>OpenClaw</h3><p>agent별 workspace·identity·user·memory·session store 분리와 runtime/provider 경계를 참고한다. bootstrap file은 context이지 실행 권한이 아니다.</p></article>
+    <article class="card"><h3>Orca</h3><p>CLI agent를 worktree 단위로 격리하고 diff comment·snapshot·automation을 같은 operator surface에서 다루는 점을 가져온다. 다만 IDE가 execution truth를 소유하게 하거나 UI click을 durable task completion으로 간주하는 것은 거부한다.</p></article>
+    <article class="card"><h3>Claude Code</h3><p>subagent별 독립 context·tool/permission·persistent memory scope와 worktree isolation을 참고한다. 반면 hook의 stop decision을 제품 전체의 보편적 hard gate로 복제하지 않고, Keeper lifecycle authority는 runtime owner에 둔다.</p></article>
+    <article class="card"><h3>Codex</h3><p>여러 thread의 worktree 격리, 중간 steering, diff·screenshot·log를 agent가 직접 읽는 검증 루프를 가져온다. app/session UI를 durable Goal·Task·receipt의 SSOT로 만들지는 않는다.</p></article>
+    <article class="card"><h3>Generative Agents</h3><p>observation·reflection·planning의 분리가 장기 행동 품질에 기여한다. 관계 기억도 단순 사실 저장이 아니라 다음 계획에서 실제 사용됐는지를 평가해야 한다.</p></article>
+    <article class="card"><h3>MemGPT</h3><p>bounded active context와 external memory tier 사이 이동, interrupt 기반 control flow를 참고한다. 저장량보다 올바른 recall/reinjection과 실패 가시성이 핵심이다.</p></article>
+  </div>
+
+  <h2>8. 근거와 갱신 계약</h2>
+  <details open><summary>저장소·라이브 근거</summary><ul class="refs">
+    <li><code>docs/KEEPER-CAPABILITY-MATRIX.md</code> — Keeper가 실제 받는 typed capability family.</li>
+    <li><code>docs/TOML-RELOAD-MATRIX.md</code> — boot/sweep/request reload 구분.</li>
+    <li><code>lib/dashboard/dashboard_keeper_feature_proof.ml</code> — 현재 5개 autonomy feature proof read model.</li>
+    <li><a href="../evidence/keeper-multiturn-claude-live-2026-08-14T083200Z.json"><code>keeper-multiturn-claude-live-2026-08-14T083200Z.json</code></a> — Claude Code claude-sonnet-5 10T canary: 9/9 회상 PASS, latency min 8.6s/median 10.3s/max 24.8s, tool 호출 0건 계약 준수, boot 직후 config PATCH 5m53s 정체 anomaly(#28733, runtime 귀속 불가)를 동결.</li>
+    <li><a href="../evidence/keeper-create-admission-overlap-live-2026-08-14T081000Z.json"><code>keeper-create-admission-overlap-live-2026-08-14T081000Z.json</code></a> — 미존재 이름 6개 boot/shutdown 동시 발사 race: 6/6 create 완주(FSM done까지), shutdown 2–8ms 무오염 거절, durable write 0, 내부 reserved-branch 미적중 한계와 기존 keeper overlap 2회 실측을 동결.</li>
+    <li><a href="../evidence/keeper-drain-restart-recall-live-2026-08-14T074735Z.json"><code>keeper-drain-restart-recall-live-2026-08-14T074735Z.json</code></a> — drain→restart recall canary: 9+2 사실, shutdown 2회(5ms, cancel 로그 0), trace_id 보존, 재진술 없는 Librarian 백로그 회복으로 revision 6 커밋, 재시작 11/11 회상, mid-flight join 미증명 한계와 setup anomaly(proactive 기본값) 동결.</li>
+    <li><a href="../evidence/keeper-runtime-health-live-2026-08-14T065929Z.json"><code>keeper-runtime-health-live-2026-08-14T065929Z.json</code></a> — 05:59Z 재기동 process(checkout ff6a8fa6af 보고, exe mtime 04:55:36Z), sangsu runnable 지속 정체(3건·2,343s), fleet 회복 8/8, #28694 typed band browser 행동 증명, stale env 토큰으로 귀속된 WS/auth 실패 관측과 07:11Z clean-context 정상 probe, Overview/Monitor screenshot digest를 동결.</li>
+    <li><a href="../evidence/keeper-runtime-health-live-2026-08-14T021815Z.json"><code>keeper-runtime-health-live-2026-08-14T021815Z.json</code></a> — 새 process build label <code>13dd32a37a</code>, fleet 8/8, sangsu runnable 1, Overview→Monitor interaction, #28694 미배포와 legacy count를 동결.</li>
+    <li><a href="../evidence/keeper-feature-matrix-source-refresh-2026-08-14T020705Z.json"><code>keeper-feature-matrix-source-refresh-2026-08-14T020705Z.json</code></a> — current main <code>0d8f33eaaf</code>, #28701 재기반 head와 이전/현재 exact CI 구분, 8935 connection refusal, 동시 build 관측과 비판정 한계를 동결.</li>
+    <li><a href="../evidence/keeper-runtime-health-live-2026-08-14T013507Z.json"><code>keeper-runtime-health-live-2026-08-14T013507Z.json</code></a> — main f4fdc67961, 0.22.0 새 process, fleet 8/8, sangsu runnable 1, Overview→Monitor interaction, active-band label 결함과 #28694 수리를 함께 동결.</li>
+    <li><a href="../evidence/keeper-runtime-health-live-2026-08-14T004800Z.json"><code>keeper-runtime-health-live-2026-08-14T004800Z.json</code></a> — 재기동 전 live 0.21.2 fleet 8 running/7 executable·queue idle과 당시 source/PR 경계를 동결.</li>
+    <li><a href="../evidence/keeper-runtime-health-live-2026-08-13T153254Z.json"><code>keeper-runtime-health-live-2026-08-13T153254Z.json</code></a> — upstream main, live checkout probe와 binary identity 한계, fleet/queue/scheduler/log, 8 provider·47 runtime·45 dispatchable catalog를 동결.</li>
+    <li><a href="../evidence/keeper-runtime-health-live-2026-08-14T001741Z.json"><code>keeper-runtime-health-live-2026-08-14T001741Z.json</code></a> — live 0.21.2/runtime checkout identity 한계, 6h49m uptime, degraded fleet, 순간 queue backlog, 8 provider·47 runtime·45 dispatchable와 7/26 durable 24h turn span을 동결.</li>
+    <li><a href="../evidence/keeper-dashboard-overview-monitor-live-2026-08-14T003500Z.json"><code>keeper-dashboard-overview-monitor-live-2026-08-14T003500Z.json</code></a> — Overview→Monitor 실제 클릭, 8/26 대 7 count mismatch, 0 console/network error, 두 screenshot digest와 stale live version을 동결.</li>
+    <li><a href="../evidence/keeper-multiturn-live-2026-08-13T120751Z.json"><code>keeper-multiturn-live-2026-08-13T120751Z.json</code></a> — 20-record transcript SHA, 10 user/assistant 쌍, turn 10의 9개 사실 회상, runtime/TOML/terminal state와 증거 한계를 동결.</li>
+    <li><a href="../evidence/keeper-multiturn-codex-live-2026-08-13T155130Z.json"><code>keeper-multiturn-codex-live-2026-08-13T155130Z.json</code></a> — Codex gpt-5.4의 trace #1–#10, 20-record transcript, 10 terminal owner operation, exact pause cleanup과 Librarian shutdown 경고를 동결.</li>
+    <li><a href="../evidence/keeper-librarian-graceful-shutdown-live-2026-08-13T160506Z.json"><code>keeper-librarian-graceful-shutdown-live-2026-08-13T160506Z.json</code></a> — revision 1·2·3 commit, turn-10 exact input, 106.097초 cancellation, journal failure, input replay 부재와 #28625 remediation head를 동결.</li>
+    <li><a href="../evidence/keeper-feature-matrix-browser-2026-08-14.json"><code>keeper-feature-matrix-browser-2026-08-14.json</code></a> — 이번 source refresh 뒤 Chromium full-page screenshot SHA, feature/provider/scenario 행 수, console error와 body overflow를 새로 고정한다.</li>
+    <li><a href="../evidence/keeper-create-admission-source-2026-08-14.json"><code>keeper-create-admission-source-2026-08-14.json</code></a> — #28647 exact head, source 경계, production overlap feature tests, no-local-build 검증과 CI 상태를 동결.</li>
+    <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T134626Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T134626Z.json</code></a> — latest health/feature-proof/PR head를 <code>2026-08-13T13:46:26Z</code>에 동결. checkout과 binary identity 불일치도 보존한다.</li>
+    <li><a href="../evidence/keeper-feature-state-matrix-live-2026-08-13T132546Z.json"><code>keeper-feature-state-matrix-live-2026-08-13T132546Z.json</code></a> — 이전 snapshot. live 수치 변화와 재기동 이후 구간을 비교할 때만 사용한다.</li>
+    <li><a href="../evidence/keeper-multi-collaboration-preflight-2026-08-13T133813Z.json"><code>keeper-multi-collaboration-preflight-2026-08-13T133813Z.json</code></a> — mutation 없이 검증한 16 mission catalog와 live preflight blocker.</li>
+    <li><a href="../evidence/keeper-pr-transition-2026-08-13T134218Z.json"><code>keeper-pr-transition-2026-08-13T134218Z.json</code></a> — #28574/#28597 병합 및 #28470/#28488 재배치 exact head.</li>
+    <li><a href="../evidence/keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json"><code>keeper-board-write-effect-boundary-live-2026-08-13T140550Z.json</code></a> — browser 20초 실패, 46.836초 delayed 201, 92.007초 read, exact-id cleanup을 한 canary로 동결.</li>
+    <li><code>/health?full=1</code>, <code>/api/v1/runtime/resolved</code>, <code>/api/v1/dashboard/runtime-defaults</code>, <code>/api/v1/dashboard/keeper-feature-proof</code> — live 원본 route. 동결 JSON 이후의 현재값은 새 캡처 없이는 주장하지 않는다.</li>
+    <li>#28597 exact head <code>abe0e09c2b4cd43398f14533858b24913f06371b</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704177944">31704177944</a>.</li>
+    <li>#28574 exact head <code>c9df777b836477c9a60ecf89fe9e3b3e70e4a770</code> / run <a href="https://github.com/jeong-sik/masc/actions/runs/31704238533">31704238533</a>.</li>
+  </ul></details>
+  <details><summary>외부 근거</summary><ul class="refs">
+    <li><a href="https://github.com/NousResearch/hermes-agent">NousResearch/hermes-agent</a> 및 <a href="https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/">Persistent Memory</a>.</li>
+    <li><a href="https://github.com/openclaw/openclaw/blob/main/docs/agent-runtime-architecture.md">OpenClaw agent runtime architecture</a>와 <a href="https://github.com/openclaw/openclaw/blob/main/docs/concepts/agent.md">Agent workspace/context</a>.</li>
+    <li><a href="https://github.com/stablyai/orca">stablyai/orca</a> — worktree 기반 다중 coding-agent operator surface.</li>
+    <li><a href="https://code.claude.com/docs/en/sub-agents">Claude Code custom subagents</a> — 독립 context, memory scope, tool/permission, worktree isolation.</li>
+    <li><a href="https://openai.com/index/introducing-the-codex-app/">OpenAI Codex app</a>와 <a href="https://openai.com/index/harness-engineering/">Harness engineering</a> — 병렬 worktree, skills, browser/log/metric 기반 검증.</li>
+    <li><a href="https://arxiv.org/abs/2304.03442">Generative Agents</a>, <a href="https://arxiv.org/abs/2310.08560">MemGPT</a>.</li>
+  </ul></details>
+  <p class="muted">갱신 규칙: live 수치는 캡처 시각이 지나면 역사적 증거다. PR head가 바뀌면 이전 CI는 무효다. 기능 행의 상태는 더 강한 증거가 생길 때만 올리고, source가 사라지거나 live가 모순되면 즉시 내린다.</p>
+
+  <footer>source/PR audit <code>2026-08-14T07:00Z</code> · live process start <code>05:59:52Z</code> · exe build mtime <code>04:55:36Z</code> · upstream main = runtime checkout <code>ff6a8fa6af</code> · binary 미포함 확정: #28709, #28648 · 경계: #28713/#28715/#28718 · #28701 supersede → #28713 <code>87b778f4</code> · B2 #28656 재기반 <code>83e8d96f21</code> MERGEABLE·CI 수리 중 · broadcast #28666 재기반 <code>10150c0b86</code> MERGEABLE·CI 수리 중, #28669 대기 · #28694 browser 행동 증명 · 06:57Z WS/auth 실패는 stale env 토큰 귀속(clean-path 정상) · 큐 정체 진단: 무제한 사이클×600s 임계 축 불일치(코드는 계약대로) · 신규 이슈 #28727/#28728/#28730/#28731 · drain-restart recall canary 11/11 PASS_WITH_CAVEAT · create admission overlap 6/6 PASS · Claude Code 10T 9/9 PASS · Board minprobe 0.047s(과거 46.8s) · RFC-0380 #28729 적대 리뷰 pass·Ready · #28698 matrix Draft refresh · embedded binary SHA unknown · effective base <code>/Users/dancer/me</code></footer>
+</main>
+<script>
+  const query = document.querySelector('#query');
+  const status = document.querySelector('#status');
+  const domain = document.querySelector('#domain');
+  const rows = [...document.querySelectorAll('#matrix tbody tr')];
+  const statusLabels = {
+    verified: 'VERIFIED', partial: 'PARTIAL', source: 'SOURCE ONLY',
+    missing: 'MISSING PROOF', blocked: 'BLOCKED'
+  };
+  for (const row of rows) {
+    const required = new Set(row.dataset.required.split(' ').filter(Boolean));
+    const evidence = new Set(row.dataset.evidence.split(' ').filter(Boolean));
+    const complete = [...required].every(axis => evidence.has(axis));
+    const derived = row.dataset.blocked === 'true' ? 'blocked'
+      : evidence.size === 0 ? 'missing'
+      : complete ? 'verified'
+      : evidence.size === 1 && evidence.has('source') ? 'source'
+      : 'partial';
+    row.dataset.status = derived;
+    const badge = row.querySelector('.badge');
+    badge.classList.add(derived);
+    badge.textContent = statusLabels[derived];
+  }
+  function filterRows() {
+    const q = query.value.trim().toLowerCase();
+    for (const row of rows) {
+      const matchesQuery = !q || row.textContent.toLowerCase().includes(q);
+      const matchesStatus = !status.value || row.dataset.status === status.value;
+      const matchesDomain = !domain.value || row.dataset.domain === domain.value;
+      row.hidden = !(matchesQuery && matchesStatus && matchesDomain);
+    }
+  }
+  query.addEventListener('input', filterRows);
+  status.addEventListener('change', filterRows);
+  domain.addEventListener('change', filterRows);
+</script>
+</body>
+</html>

@@ -106,6 +106,16 @@ message BroadcastRequest {
 message BroadcastResponse {
   bool success = 1;
   int64 seq = 2;
+  // Exact producer identity for observing a committed broadcast.
+  optional string request_id = 3;
+  // passive | accepted | already_accepted | pending | deferred | rejected
+  // | not_persisted | outcome_unknown
+  string delivery_status = 4;
+  optional string delivery_reason = 5;
+  // persisted | not_persisted | outcome_unknown
+  string workspace_persistence_status = 6;
+  // do_not_resend | retry_allowed | outcome_unknown
+  string retry_disposition = 7;
 }
 
 // ===== Status =====

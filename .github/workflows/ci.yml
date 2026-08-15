@@ -4,7 +4,14 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-    branches: [main, develop]
+    # No base filter. The filter matches the *base* branch, so a stacked PR --
+    # one opened against another PR's branch rather than main -- did not start
+    # this workflow at all. Those PRs collected only the handful of checks other
+    # workflows contribute and reached review with no compile or test evidence;
+    # on 2026-08-14 five of them sat that way at once. A stack is how work over
+    # 20k tokens is supposed to arrive here, so the shape that needs evidence
+    # most was the one getting none.
+    #
     # Drafts stay cheap through pr-live-gate. ready_for_review starts the exact
     # source and real-world product gates once the author asks for a verdict.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -872,6 +879,17 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}"
+            # This job checks out shallow (no fetch-depth), so fetching the
+            # base branch brings its tip and nothing behind it. The ratchet
+            # wants pull_request.base.sha, which is an ancestor of that tip on
+            # a PR whose base branch has moved on, so it stays absent and the
+            # ratchet hard-fails with "base revision is unavailable". Fetch the
+            # exact commit; depth 1 is enough because the ratchet only reads
+            # two files at that revision, never its history.
+            if ! git cat-file -e "${OCAML_BOUNDARY_BASE_REF}^{commit}" 2>/dev/null; then
+              bash scripts/ci/git-fetch-retry.sh \
+                origin "${OCAML_BOUNDARY_BASE_REF}" --depth=1
+            fi
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             bash scripts/ci/git-fetch-retry.sh \
               origin \
@@ -1567,6 +1585,302 @@ jobs:
           else
             echo "::notice::main_eio.exe not found, skipping config-diagnostic"
           fi
+
+  trusted-macos-arm64-runtime:
+    name: Trusted macOS arm64 Runtime
+    runs-on: macos-14
+    needs: [pr-live-gate, changes, ci-gate]
+    if: >-
+      ${{
+        always() &&
+        !cancelled() &&
+        (
+          github.event_name == 'push' ||
+          github.event_name == 'workflow_dispatch'
+        ) &&
+        github.ref == 'refs/heads/main' &&
+        github.ref_protected == true &&
+        needs.pr-live-gate.outputs.run_heavy == 'true' &&
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.keeper_realworld == 'true' &&
+        needs.ci-gate.result == 'success'
+      }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout exact protected-main revision
+        uses: actions/checkout@v7
+
+      - name: Verify protected-main source provenance
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          EXPECTED_SOURCE_REF: ${{ github.ref }}
+          EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
+          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          expected_workflow_ref="${GITHUB_REPOSITORY}/.github/workflows/ci.yml@refs/heads/main"
+          case "$EVENT_NAME" in
+            push|workflow_dispatch) ;;
+            *)
+              echo "trusted macOS runtime requires push or workflow_dispatch, got $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+          if [ "$EXPECTED_SOURCE_REF" != "refs/heads/main" ]; then
+            echo "trusted macOS runtime requires refs/heads/main, got $EXPECTED_SOURCE_REF" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_REF_PROTECTED" != "true" ]; then
+            echo "trusted macOS runtime requires protected main" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_WORKFLOW_REF" != "$expected_workflow_ref" ]; then
+            echo "workflow ref mismatch: expected=$expected_workflow_ref actual=$EXPECTED_WORKFLOW_REF" >&2
+            exit 1
+          fi
+          if [ "$EXPECTED_WORKFLOW_SHA" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "workflow/source mismatch: workflow=$EXPECTED_WORKFLOW_SHA source=$EXPECTED_SOURCE_SHA" >&2
+            exit 1
+          fi
+          actual_source_sha="$(git rev-parse HEAD)"
+          if [ "$actual_source_sha" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "checkout mismatch: expected=$EXPECTED_SOURCE_SHA actual=$actual_source_sha" >&2
+            exit 1
+          fi
+
+      - name: Setup OCaml
+        uses: ./.github/actions/setup-ocaml-toolchain
+
+      - name: Install native dependencies
+        run: |
+          set -euo pipefail
+          brew install flock gmp libpq openssl@3 zstd
+
+          libpq_prefix="$(brew --prefix libpq)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+
+          {
+            echo "$libpq_prefix/bin"
+            echo "$openssl_prefix/bin"
+          } >> "$GITHUB_PATH"
+
+          {
+            echo "PKG_CONFIG_PATH=$openssl_prefix/lib/pkgconfig:$libpq_prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+            echo "CPATH=$openssl_prefix/include:${CPATH:-}"
+            echo "LIBRARY_PATH=$openssl_prefix/lib:${LIBRARY_PATH:-}"
+            echo "CPPFLAGS=-I$openssl_prefix/include ${CPPFLAGS:-}"
+            echo "LDFLAGS=-L$openssl_prefix/lib ${LDFLAGS:-}"
+          } >> "$GITHUB_ENV"
+
+      - name: Pin private dependencies
+        run: |
+          set -euo pipefail
+          command -v flock >/dev/null
+          chmod +x scripts/opam-pin-external-deps.sh
+          scripts/opam-pin-external-deps.sh --with-compact-protocol
+
+      - name: Install OCaml dependencies
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            opam install . --deps-only -y && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "opam install failed after ${attempt} attempts" >&2
+              exit 1
+            fi
+            echo "opam install failed (attempt ${attempt}); retrying in 15s..." >&2
+            sleep 15
+          done
+
+      - name: Build macOS arm64 runtime
+        run: opam exec -- dune build --release bin/main_eio.exe
+
+      - name: Verify architecture, dylibs, and runtime smoke
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          binary=_build/default/bin/main_eio.exe
+          if [ "$RUNNER_OS" != "macOS" ]; then
+            echo "expected macOS runner, got $RUNNER_OS" >&2
+            exit 1
+          fi
+          machine="$(uname -m)"
+          if [ "$machine" != "arm64" ]; then
+            echo "expected arm64 runner, got $machine" >&2
+            exit 1
+          fi
+          file_output="$(file "$binary")"
+          printf '%s\n' "$file_output"
+          case "$file_output" in
+            *"Mach-O 64-bit executable arm64"*) ;;
+            *)
+              echo "runtime is not a Mach-O arm64 executable" >&2
+              exit 1
+              ;;
+          esac
+          lipo_archs="$(lipo -archs "$binary")"
+          if [ "$lipo_archs" != "arm64" ]; then
+            echo "expected only arm64 architecture, got: $lipo_archs" >&2
+            exit 1
+          fi
+          otool -L "$binary" | tee "$RUNNER_TEMP/masc-runtime-otool.txt"
+          while IFS= read -r dylib; do
+            case "$dylib" in
+              /usr/lib/*|/System/Library/*) ;;
+              /opt/homebrew/opt/gmp/*|/opt/homebrew/opt/libpq/*|/opt/homebrew/opt/openssl@3/*|/opt/homebrew/opt/zstd/*) ;;
+              *)
+                echo "runtime links an unsupported dylib path: $dylib" >&2
+                exit 1
+                ;;
+            esac
+          done < <(awk 'NR > 1 { print $1 }' "$RUNNER_TEMP/masc-runtime-otool.txt")
+          chmod +x scripts/release-binary-smoke.sh
+          MASC_BUILD_GIT_COMMIT="$EXPECTED_SOURCE_SHA" \
+            scripts/release-binary-smoke.sh "$binary"
+
+          identity_root="$(mktemp -d "$RUNNER_TEMP/masc-build-identity.XXXXXX")"
+          identity_log="$identity_root/server.log"
+          identity_health="$identity_root/health.json"
+          identity_port=18936
+          identity_pid=""
+          cleanup_identity_probe() {
+            if [ -n "$identity_pid" ]; then
+              kill "$identity_pid" 2>/dev/null || true
+              wait "$identity_pid" 2>/dev/null || true
+            fi
+            rm -rf "$identity_root"
+          }
+          trap cleanup_identity_probe EXIT
+          mkdir -p "$identity_root/.masc/config"
+          cp config/runtime.toml "$identity_root/.masc/config/runtime.toml"
+          MASC_BUILD_GIT_COMMIT="$EXPECTED_SOURCE_SHA" \
+          MASC_BASE_PATH="$identity_root" \
+          MASC_BASE_PATH_INPUT="$identity_root" \
+          MASC_KEEPER_AUTONOMOUS_ENABLED=false \
+          MASC_OTEL_ENABLED=0 \
+            "$binary" --base-path "$identity_root" --port "$identity_port" \
+            >"$identity_log" 2>&1 &
+          identity_pid=$!
+          identity_ready=false
+          for _attempt in $(seq 1 50); do
+            if curl -fsS --max-time 2 \
+                "http://127.0.0.1:${identity_port}/health" >"$identity_health"
+            then
+              identity_ready=true
+              break
+            fi
+            if ! kill -0 "$identity_pid" 2>/dev/null; then
+              echo "runtime exited before build-identity health probe" >&2
+              tail -50 "$identity_log" >&2
+              exit 1
+            fi
+            sleep 0.2
+          done
+          if [ "$identity_ready" != "true" ]; then
+            echo "runtime did not expose health for build-identity probe" >&2
+            tail -50 "$identity_log" >&2
+            exit 1
+          fi
+          actual_binary_commit="$(jq -r '.build.binary_commit // empty' "$identity_health")"
+          if [ "$actual_binary_commit" != "$EXPECTED_SOURCE_SHA" ]; then
+            echo "runtime build identity mismatch: expected=$EXPECTED_SOURCE_SHA actual=${actual_binary_commit:-null}" >&2
+            exit 1
+          fi
+          cleanup_identity_probe
+          trap - EXIT
+
+      - name: Package trusted macOS arm64 runtime
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          EXPECTED_SOURCE_REF: ${{ github.ref }}
+          EXPECTED_REF_PROTECTED: ${{ github.ref_protected }}
+          EXPECTED_WORKFLOW_REF: ${{ github.workflow_ref }}
+          EXPECTED_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          runtime_dir=trusted-macos-arm64-runtime
+          mkdir -p "$runtime_dir"
+          cp _build/default/bin/main_eio.exe "$runtime_dir/masc"
+          chmod +x "$runtime_dir/masc"
+          binary_sha256="$(scripts/lib/runtime-artifact-contract.sh hash "$runtime_dir/masc")"
+          actual_source_sha="$(git rev-parse HEAD)"
+          linked_dylibs_json="$(
+            awk 'NR > 1 { print $1 }' "$RUNNER_TEMP/masc-runtime-otool.txt" \
+              | jq -Rsc 'split("\n") | map(select(length > 0))'
+          )"
+          jq -n \
+            --arg schema "masc.trusted_runtime.v1" \
+            --arg event_name "$EVENT_NAME" \
+            --arg source_sha "$actual_source_sha" \
+            --arg source_ref "$EXPECTED_SOURCE_REF" \
+            --argjson source_ref_protected "$EXPECTED_REF_PROTECTED" \
+            --arg workflow_ref "$EXPECTED_WORKFLOW_REF" \
+            --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
+            --arg workflow_run_id "$WORKFLOW_RUN_ID" \
+            --arg workflow_run_attempt "$WORKFLOW_RUN_ATTEMPT" \
+            --arg target_os "macos" \
+            --arg target_arch "arm64" \
+            --arg binary_format "mach-o" \
+            --arg binary_sha256 "$binary_sha256" \
+            --argjson linked_dylibs "$linked_dylibs_json" \
+            '{
+              schema: $schema,
+              event_name: $event_name,
+              source_sha: $source_sha,
+              source_ref: $source_ref,
+              source_ref_protected: $source_ref_protected,
+              workflow_ref: $workflow_ref,
+              workflow_sha: $workflow_sha,
+              workflow_run_id: $workflow_run_id,
+              workflow_run_attempt: $workflow_run_attempt,
+              target_os: $target_os,
+              target_arch: $target_arch,
+              binary_format: $binary_format,
+              binary_sha256: $binary_sha256,
+              required_launch_env: {
+                MASC_BUILD_GIT_COMMIT: $source_sha
+              },
+              linked_dylibs: $linked_dylibs,
+              supported_homebrew_prefixes: [
+                "/opt/homebrew/opt/gmp/",
+                "/opt/homebrew/opt/libpq/",
+                "/opt/homebrew/opt/openssl@3/",
+                "/opt/homebrew/opt/zstd/"
+              ]
+            }' > "$runtime_dir/manifest.json"
+          jq -e \
+            --arg source_sha "$EXPECTED_SOURCE_SHA" \
+            --arg workflow_sha "$EXPECTED_WORKFLOW_SHA" \
+            --arg binary_sha256 "$binary_sha256" \
+            '.schema == "masc.trusted_runtime.v1" and
+             .source_sha == $source_sha and
+             .workflow_sha == $workflow_sha and
+             .source_ref == "refs/heads/main" and
+             .source_ref_protected == true and
+             .target_os == "macos" and
+             .target_arch == "arm64" and
+             .binary_format == "mach-o" and
+             .binary_sha256 == $binary_sha256 and
+             .required_launch_env.MASC_BUILD_GIT_COMMIT == $source_sha and
+             (.linked_dylibs | type == "array" and length > 0)' \
+            "$runtime_dir/manifest.json" >/dev/null
+
+      - name: Upload trusted macOS arm64 runtime
+        uses: actions/upload-artifact@v7
+        with:
+          name: masc-runtime-macos-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: trusted-macos-arm64-runtime/
+          if-no-files-found: error
+          retention-days: 7
 
   keeper-realworld-acceptance:
     name: Keeper Real-World Acceptance

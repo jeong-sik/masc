@@ -80,7 +80,9 @@ let find_scheduler key state =
     state
 ;;
 
-let test_key = key ~kind:"test" ~base_url:"https://provider.test" ~secret:None
+let[@warning "-32"] test_key =
+  key ~kind:"test" ~base_url:"https://provider.test" ~secret:None
+;;
 
 let%test "first declaration installs its scheduler" =
   let state, resolution =

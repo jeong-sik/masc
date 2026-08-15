@@ -114,6 +114,7 @@ let run_ref ~path ~worker_run_id ~start_seq =
 
 let write_turn_record config ~absolute_turn ~generation ~turn_kind ~raw_trace_run_ref =
   Keeper_turn_record_writer.write
+    ~model_input_window:None
     ~config
     ~keeper_name
     ~agent_name

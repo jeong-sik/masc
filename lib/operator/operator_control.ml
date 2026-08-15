@@ -67,9 +67,9 @@ let keeper_recovery_outcome after_diagnostic =
 
 (** {1 Domain-specific action handlers} *)
 
-let workspace_action_result request result =
+let workspace_action_result ?(result_status = ActionOk) request result =
   let* tool_name = delegated_tool_for request.action_type in
-  Ok (`Assoc [ ("tool_name", `String tool_name); ("result", result) ])
+  Ok (`Assoc [ ("tool_name", `String tool_name); ("result", result) ], result_status)
 
 let execute_workspace_action (ctx : 'a context) (request : action_request) =
   match request.action_type with
@@ -79,9 +79,24 @@ let execute_workspace_action (ctx : 'a context) (request : action_request) =
         require_payload_field request.payload "message"
           "payload.message is required"
       in
-      (match Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message with
-       | Ok result -> workspace_action_result request (`String result.rendered)
-       | Error error -> Error (Workspace.broadcast_error_to_string error))
+      let* result =
+        match
+          Workspace.broadcast ctx.config ~from_agent:request.actor ~content:message
+        with
+        | Ok result -> Ok result
+        | Error error -> Error (Workspace.broadcast_error_to_string error)
+      in
+      let result_status =
+        match result.mention_delivery with
+        | Workspace_broadcast.Passive
+        | Workspace_broadcast.Accepted
+        | Workspace_broadcast.Already_accepted -> ActionOk
+        | Workspace_broadcast.Pending
+        | Workspace_broadcast.Deferred _ -> ActionDeferred
+        | Workspace_broadcast.Rejected _ -> ActionError
+      in
+      workspace_action_result ~result_status request
+        (Workspace_broadcast.broadcast_delivery_to_yojson result)
   | "namespace_pause" ->
       let* () = validate_target_type Operator_action_constants.Workspace request in
       let reason =
@@ -223,12 +238,12 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
 
 let execute_action (ctx : 'a context) (request : action_request) :
-    (Yojson.Safe.t, string) result =
+    (Yojson.Safe.t * action_result_status, string) result =
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" ->
       execute_workspace_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
-      execute_keeper_action ctx request
+      execute_keeper_action ctx request |> Result.map (fun result -> result, ActionOk)
   | "" -> Error "action_type is required"
   | other -> Error (Printf.sprintf "unsupported action_type: %s" other)
 
@@ -292,7 +307,7 @@ let action_json ?actor_hint (ctx : _ context) args :
            ("expires_at", `String expires_at);
          ]))
   else
-    let* executed = execute_action ctx request in
+    let* executed, result_status = execute_action ctx request in
     let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
     append_action_log ctx.config
       {
@@ -305,18 +320,22 @@ let action_json ?actor_hint (ctx : _ context) args :
         target_id = request.target_id;
         delegated_tool;
         confirmation_state = Immediate;
-        result_status = ActionOk;
+        result_status;
         latency_ms;
         created_at = Masc_domain.now_iso ();
       };
+    let fields =
+      [ ("trace_id", `String trace_id)
+      ; ("confirm_required", `Bool false)
+      ; ("tool_name", `String delegated_tool)
+      ; ("result", executed)
+      ]
+    in
     Ok
-      (Tool_args.ok_assoc
-         [
-           ("trace_id", `String trace_id);
-           ("confirm_required", `Bool false);
-           ("tool_name", `String delegated_tool);
-           ("result", executed);
-         ])
+      (match result_status with
+       | ActionOk -> Tool_args.ok_assoc fields
+       | ActionDeferred -> `Assoc (("status", `String "deferred") :: fields)
+       | ActionError -> Tool_args.error_assoc fields)
 
 let confirm_json ?actor_hint (ctx : _ context) args :
     (Yojson.Safe.t, string) result =
@@ -422,7 +441,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               }
             in
             let* () = remove_pending_confirm ctx.config confirm_token in
-            let* executed = execute_action ctx request in
+            let* executed, result_status = execute_action ctx request in
             let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
             append_action_log ctx.config
               {
@@ -435,7 +454,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 target_id = entry.target_id;
                 delegated_tool = entry.delegated_tool;
                 confirmation_state = Confirmed;
-                result_status = ActionOk;
+                result_status;
                 latency_ms;
                 created_at = Masc_domain.now_iso ();
               };
@@ -443,12 +462,16 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               ~agent_id:entry.actor ~trace_id:entry.trace_id
               ~decision:Audit_log.Gate_confirm ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Confirmed) ();
+            let fields =
+              [ ("trace_id", `String entry.trace_id)
+              ; ("decision", `String "confirm")
+              ; ("tool_name", `String entry.delegated_tool)
+              ; ("result", executed)
+              ; ("executed_action", pending_confirm_to_yojson entry)
+              ]
+            in
             Ok
-              (Tool_args.ok_assoc
-                 [
-                   ("trace_id", `String entry.trace_id);
-                   ("decision", `String "confirm");
-                   ("tool_name", `String entry.delegated_tool);
-                   ("result", executed);
-                   ("executed_action", pending_confirm_to_yojson entry);
-                 ]))
+              (match result_status with
+               | ActionOk -> Tool_args.ok_assoc fields
+               | ActionDeferred -> `Assoc (("status", `String "deferred") :: fields)
+               | ActionError -> Tool_args.error_assoc fields))

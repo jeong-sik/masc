@@ -553,6 +553,7 @@ let run_named
     ?event_bus
     ?on_runtime_observation
     ?on_request_wire_observation
+    ?on_model_input_window_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
     ?deferred_runtime_lane
@@ -1229,6 +1230,7 @@ let run_named
             ; agent_ref
             ; on_runtime_observation
             ; on_request_wire_observation
+            ; on_model_input_window_observation
             ; event_bus
             ; runtime_manifest_context
             ; runtime_manifest_append

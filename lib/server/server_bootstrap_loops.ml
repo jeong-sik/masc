@@ -157,16 +157,6 @@ let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
 
-type broadcast_mention_delivery_outcome =
-  | Broadcast_without_target
-  | Broadcast_target_missing_meta of string
-  | Broadcast_target_meta_unavailable of string * string
-  | Broadcast_target_invalid of string
-  | Broadcast_request_invalid of string * string
-  | Broadcast_intake_failed of string * string
-  | Broadcast_persisted_and_woken of string
-  | Broadcast_persisted_wake_deferred of string
-
 let resolve_broadcast_mention_target ~config target =
   match Keeper_meta_store.read_effective_meta config target with
   | Error detail -> Error detail
@@ -198,7 +188,7 @@ let deliver_broadcast_mention
       (delivery : Workspace_broadcast.broadcast_delivery)
   =
   match broadcast_mention_wakeup_action delivery.mention with
-  | `Suppress_no_target -> Broadcast_without_target
+  | `Suppress_no_target -> Workspace_broadcast.Passive
   | `Wake_keeper requested_target ->
     let delivery_key =
       Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id
@@ -207,43 +197,101 @@ let deliver_broadcast_mention
     in
     (match resolve_broadcast_mention_target ~config requested_target with
      | Error message ->
-       Broadcast_target_meta_unavailable (requested_target, message)
-     | Ok None -> Broadcast_target_missing_meta requested_target
+       Log.Keeper.error
+         "broadcast mention target metadata is unavailable; delivery deferred keeper=%s request_id=%s seq=%d: %s"
+         requested_target delivery.request_id delivery.seq message;
+       Workspace_broadcast.Deferred Workspace_broadcast.Target_state_unavailable
+     | Ok None ->
+       Log.Keeper.warn
+         "broadcast mention target has no persisted Keeper metadata; delivery rejected keeper=%s request_id=%s seq=%d"
+         requested_target delivery.request_id delivery.seq;
+       Workspace_broadcast.Rejected Workspace_broadcast.Target_not_configured
      | Ok (Some (target, meta)) ->
        (match Keeper_identity.Keeper_id.of_string target, delivery_key with
+        | None, _ ->
+          Log.Keeper.error
+            "broadcast mention target identity is invalid; delivery rejected keeper=%s request_id=%s seq=%d"
+            target delivery.request_id delivery.seq;
+          Workspace_broadcast.Rejected Workspace_broadcast.Invalid_target
+        | Some _, Error message ->
+          Log.Keeper.error
+            "broadcast mention request identity is invalid; delivery rejected keeper=%s request_id=%s seq=%d: %s"
+            target delivery.request_id delivery.seq message;
+          Workspace_broadcast.Rejected Workspace_broadcast.Invalid_request
         | Some _target_id, Ok delivery_key ->
-       let speaker : Keeper_chat_store.speaker =
-         { speaker_id = Some delivery.from_agent
-         ; speaker_name = Some delivery.from_agent
-         ; speaker_authority = Keeper_chat_store.External
-         }
-       in
-       let mention_ids =
-         target :: meta.Keeper_meta_contract.mention_targets
-         |> List.filter_map Keeper_identity.Keeper_id.of_string
-         |> List.sort_uniq Keeper_identity.Keeper_id.compare
-       in
-       (match
-          Keeper_chat_store.append_user_message_once
-            ~base_dir:base_path
-            ~keeper_name:target
-            ~delivery_key
-            ~content:delivery.content
-            ~surface:Surface_ref.Agent
-            ~external_message_id:delivery.request_id
-            ~speaker
-            ~extra_mentions:mention_ids
-            ()
-        with
-        | Ok (Keeper_chat_store.Appended _ | Keeper_chat_store.Already_present _) ->
-          if is_running target
-          then (
-            wakeup target;
-            Broadcast_persisted_and_woken target)
-          else Broadcast_persisted_wake_deferred target
-        | Error message -> Broadcast_intake_failed (target, message))
-        | None, _ -> Broadcast_target_invalid target
-        | Some _, Error message -> Broadcast_request_invalid (target, message)))
+          let speaker : Keeper_chat_store.speaker =
+            { speaker_id = Some delivery.from_agent
+            ; speaker_name = Some delivery.from_agent
+            ; speaker_authority = Keeper_chat_store.External
+            }
+          in
+          let mention_ids =
+            target :: meta.Keeper_meta_contract.mention_targets
+            |> List.filter_map Keeper_identity.Keeper_id.of_string
+            |> List.sort_uniq Keeper_identity.Keeper_id.compare
+          in
+          let request_wake () =
+            if is_running target
+            then (
+              wakeup target;
+              Log.Keeper.info
+                "broadcast mention accepted; wake requested for registered keeper=%s request_id=%s seq=%d"
+                target delivery.request_id delivery.seq)
+            else
+              Log.Keeper.info
+                "broadcast mention accepted for stopped keeper; pending chat row retained keeper=%s request_id=%s seq=%d"
+                target delivery.request_id delivery.seq
+          in
+          (match
+             Keeper_chat_store.append_user_message_once
+               ~base_dir:base_path
+               ~keeper_name:target
+               ~delivery_key
+               ~content:delivery.content
+               ~surface:Surface_ref.Agent
+               ~external_message_id:delivery.request_id
+               ~speaker
+               ~extra_mentions:mention_ids
+               ()
+           with
+           | Ok (Keeper_chat_store.Appended _) ->
+             request_wake ();
+             Workspace_broadcast.Accepted
+           | Ok (Keeper_chat_store.Already_present { row_id }) ->
+             let messages =
+               Keeper_chat_store.load_all ~base_dir:base_path ~keeper_name:target
+             in
+             if not
+                  (List.exists
+                     (fun (message : Keeper_chat_store.chat_message) ->
+                        String.equal message.id row_id)
+                     messages)
+             then (
+               Log.Keeper.error
+                 "broadcast mention accepted row could not be reloaded keeper=%s request_id=%s row_id=%s"
+                 target delivery.request_id row_id;
+               Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)
+             else (
+               let pending =
+                 Keeper_world_observation_message_scope.pending_messages_of_messages
+                   ?ack_id:meta.runtime.message_scope_ack_id
+                   ~targets:
+                     (Keeper_world_observation_message_scope.message_feed_targets meta)
+                   messages
+                 |> List.exists
+                      (fun (pending : Keeper_world_observation_message_scope.pending_message) ->
+                         String.equal pending.message_id row_id)
+               in
+               if pending then request_wake ();
+               Log.Keeper.info
+                 "broadcast mention was already accepted keeper=%s request_id=%s seq=%d pending=%b"
+                 target delivery.request_id delivery.seq pending;
+               Workspace_broadcast.Already_accepted)
+           | Error message ->
+             Log.Keeper.error
+               "broadcast mention intake deferred; wake suppressed keeper=%s request_id=%s seq=%d: %s"
+               target delivery.request_id delivery.seq message;
+             Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)))
 
 module Projection_for_testing = struct
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
@@ -922,6 +970,10 @@ let start_keeper_loops_owned
       f
   in
   let config = workspace_scope.Mcp_server.config in
+  (match Workspace_broadcast.validate_current_message_schema config with
+   | Ok () -> ()
+   | Error rejections ->
+     raise (Workspace_broadcast.Current_message_schema_rejected rejections));
   (* The owner inventory is installed by [initialize_owner_state_blocking]
      before persistence preparation. Shutdown admission recovery is itself an
      Owner command after the single-owner hard cut, so installing it here was
@@ -1302,48 +1354,70 @@ let start_keeper_loops_owned
     fun (delivery : Workspace_broadcast.broadcast_delivery) ->
     let config = Mcp_server.workspace_config state in
     let base_path = config.base_path in
-    match
-      deliver_broadcast_mention
-        ~config
-        ~base_path
-        ~is_running:(fun target ->
-          Option.is_some (Keeper_registry.get ~base_path target))
-        ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
-        delivery
-    with
-    | Broadcast_without_target ->
-      Log.Keeper.info
-        "broadcast without mention -> keeper wakeup suppressed (passive fanout)"
-    | Broadcast_persisted_and_woken target ->
-      Log.Keeper.info
-        "broadcast mention delivered → wakeup keeper %s request_id=%s seq=%d"
-        target delivery.request_id delivery.seq
-    | Broadcast_persisted_wake_deferred target ->
-      Log.Keeper.info
-        "broadcast mention persisted for stopped keeper; wake deferred keeper=%s request_id=%s seq=%d"
-        target delivery.request_id delivery.seq
-    | Broadcast_target_missing_meta target ->
-      Log.Keeper.warn
-        "broadcast mention target has no persisted Keeper metadata; delivery suppressed keeper=%s request_id=%s seq=%d"
-        target delivery.request_id delivery.seq
-    | Broadcast_target_meta_unavailable (target, message) ->
-      Log.Keeper.error
-        "broadcast mention target metadata is unavailable; delivery suppressed keeper=%s request_id=%s seq=%d: %s"
-        target delivery.request_id delivery.seq message
-    | Broadcast_target_invalid target ->
-      Log.Keeper.error
-        "broadcast mention target identity is invalid; delivery suppressed keeper=%s request_id=%s seq=%d"
-        target delivery.request_id delivery.seq
-    | Broadcast_request_invalid (target, message) ->
-      Log.Keeper.error
-        "broadcast mention request identity is invalid; delivery suppressed keeper=%s request_id=%s seq=%d: %s"
-        target delivery.request_id delivery.seq message
-    | Broadcast_intake_failed (target, message) ->
-      Log.Keeper.error
-        "broadcast mention intake failed; wake suppressed keeper=%s request_id=%s seq=%d: %s"
-        target delivery.request_id delivery.seq message
+    deliver_broadcast_mention
+      ~config
+      ~base_path
+      ~is_running:(fun target ->
+        Option.is_some (Keeper_registry.get ~base_path target))
+      ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
+      delivery
   in
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
+  Atomic.set Workspace_hooks.on_workspace_message_mutation_fn
+    (fun config ~request_id ~mention_delivery ->
+       try
+         Dashboard_cache.invalidate_prefix
+           (Printf.sprintf "dashboard.workspace:%s;" config.base_path);
+         Dashboard_cache.invalidate_prefix
+           (Printf.sprintf "workspace:%s:" config.base_path);
+         Sse.broadcast
+           (`Assoc
+              [ "type", `String "workspace_message_delivery_changed"
+              ; "request_id", `String request_id
+              ; ( "mention_delivery"
+                , `String
+                    (Masc_domain.message_mention_delivery_to_string mention_delivery) )
+              ])
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "workspace message projection invalidation failed request_id=%s: %s"
+           request_id
+           (Printexc.to_string exn));
+  let workspace_config = Mcp_server.workspace_config state in
+  fork_logged_fiber
+    ~sw
+    ~on_error:(Server_bootstrap_loops_fiber.log_server_fiber_crash
+                 "broadcast mention recovery")
+    (fun () ->
+       Eio.Fiber.yield ();
+       match Workspace_broadcast.reconcile_pending_mentions workspace_config with
+       | Error detail ->
+         Log.Keeper.error "broadcast mention recovery unavailable: %s" detail
+       | Ok report ->
+         List.iter
+           (fun (receipt : Workspace_broadcast.mention_outbox_quarantine_receipt) ->
+              Log.Keeper.error
+                "broadcast mention quarantine source=%s quarantine=%s reason=%s sha256=%s detail=%s"
+                receipt.source_name
+                receipt.quarantine_name
+                (Workspace_broadcast.mention_outbox_quarantine_reason_to_string
+                   receipt.reason)
+                receipt.raw_sha256
+                receipt.detail)
+           report.quarantine_receipts;
+         if report.pending_rows > 0 || report.corrupt_rows > 0
+         then
+           Log.Keeper.info
+             "broadcast mention recovery outbox=%d pending=%d accepted=%d already_accepted=%d deferred=%d rejected=%d corrupt=%d"
+             report.outbox_rows
+             report.pending_rows
+             report.accepted
+             report.already_accepted
+             report.deferred
+             report.rejected
+             report.corrupt_rows);
   (* Orchestrator needs synchronous registration for shutdown hook *)
   (try
      let cancel_orchestrator =

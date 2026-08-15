@@ -118,7 +118,7 @@ val remote_confirm_ttl_seconds : float
     {!Operator_control} reads it via the runtime-include
     of this module to compute expiration timestamps. *)
 
-type action_result_status = ActionOk | ActionError
+type action_result_status = ActionOk | ActionDeferred | ActionError
 
 type confirmation_state =
   | Preview

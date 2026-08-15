@@ -53,6 +53,7 @@ let sample_record
   ; ttfrc_ms = None
   ; request_wire_observation =
       Some { runtime_profile = "glm-coding.glm-5-turbo"; body_bytes = 560_513 }
+  ; model_input_window = None
   ; raw_trace_run_ref = None
   ; sampling =
       { temperature = None

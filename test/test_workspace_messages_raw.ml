@@ -69,7 +69,7 @@ let test_repeated_mention_delivers_each_canonical_event () =
     let previous_activity = Atomic.get Workspace_hooks.activity_emit_fn in
     let previous_wake =
       Workspace_broadcast.For_testing.replace_on_broadcast_mention
-        (fun _mention -> ())
+        (fun _mention -> Workspace_broadcast.Passive)
     in
     Eio.Switch.run @@ fun sw ->
     Eio.Switch.on_release sw (fun () ->
@@ -95,7 +95,9 @@ let test_repeated_mention_delivers_each_canonical_event () =
         in
         activities := (kind, subject) :: !activities);
     Workspace_broadcast.set_on_broadcast_mention
-      (fun delivery -> wakes := delivery.mention :: !wakes);
+      (fun delivery ->
+        wakes := delivery.mention :: !wakes;
+        Workspace_broadcast.Accepted);
     let content = "@gemini review the canonical event" in
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
     ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
@@ -154,7 +156,8 @@ let test_failed_authoritative_write_suppresses_fanout () =
       Atomic.get Workspace_hooks.workspace_broadcast_observed_fn
     in
     let previous_mention =
-      Workspace_broadcast.For_testing.replace_on_broadcast_mention ignore
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention (fun _ ->
+        Workspace_broadcast.Passive)
     in
     let previous_write =
       Workspace_broadcast.For_testing.replace_write_json_commit
@@ -195,12 +198,14 @@ let test_failed_authoritative_write_suppresses_fanout () =
             incr activities);
         Atomic.set Workspace_hooks.workspace_broadcast_observed_fn
           (fun ~msg_type:_ ~elapsed_s:_ -> incr observations);
-        Workspace_broadcast.set_on_broadcast_mention (fun _ -> incr mentions);
+        Workspace_broadcast.set_on_broadcast_mention (fun _ ->
+          incr mentions;
+          Workspace_broadcast.Accepted);
         (match
            Workspace.broadcast
              config
              ~from_agent:"claude"
-             ~content:"@gemini must not fan out"
+             ~content:"passive message must not fan out"
          with
          | Error (Workspace_broadcast.Broadcast_not_persisted detail) ->
            Alcotest.(check string)
@@ -213,6 +218,155 @@ let test_failed_authoritative_write_suppresses_fanout () =
         Alcotest.(check int) "mention callback suppressed" 0 !mentions;
         Alcotest.(check int) "success latency observation suppressed" 0 !observations))
 ;;
+
+let with_failed_message_commit f =
+  let previous_write =
+    Workspace_broadcast.For_testing.replace_write_json_commit
+      (fun _config _path _json -> Error "injected canonical message failure")
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      let (_ :
+        Workspace_utils_backend_setup.config ->
+        string ->
+        Yojson.Safe.t ->
+        (Workspace_utils.write_json_commit, string) result) =
+        Workspace_broadcast.For_testing.replace_write_json_commit previous_write
+      in
+      ())
+    f
+
+let test_durable_outbox_defers_failed_message_commit () =
+  with_test_env (fun config ->
+    let previous_wake =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun _delivery -> Workspace_broadcast.Accepted)
+    in
+    Fun.protect
+      ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous_wake)
+      (fun () ->
+         let delivery =
+           with_failed_message_commit (fun () ->
+             Workspace.broadcast config ~from_agent:"claude"
+               ~content:"@gemini recover me"
+             |> Result.get_ok)
+         in
+         Alcotest.(check string)
+           "durably queued mention is explicitly deferred"
+           "deferred"
+           (Workspace_broadcast.mention_delivery_kind delivery.mention_delivery);
+         let report =
+           Workspace_broadcast.reconcile_pending_mentions config
+           |> Result.get_ok
+         in
+         Alcotest.(check int) "recovery accepts retained outbox" 1 report.accepted;
+         let recovered =
+           Workspace.get_all_messages_raw config ~since_seq:0
+           |> List.filter (fun (message : Masc_domain.message) ->
+             String.equal message.request_id delivery.request_id)
+         in
+         Alcotest.(check int) "one canonical message is recovered" 1
+           (List.length recovered)))
+
+let test_malformed_outbox_is_quarantined_before_successor_delivery () =
+  with_test_env (fun config ->
+    let previous_wake =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun _delivery -> Workspace_broadcast.Accepted)
+    in
+    Fun.protect
+      ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous_wake)
+      (fun () ->
+    let outbox_dir =
+      Filename.concat (Workspace_utils.masc_root_dir config) "message-mention-outbox"
+    in
+    let malformed_path = Filename.concat outbox_dir "malformed.json" in
+    let successor =
+      with_failed_message_commit (fun () ->
+        Workspace.broadcast config ~from_agent:"claude"
+          ~content:"@gemini follows quarantined row"
+        |> Result.get_ok)
+    in
+    Workspace_utils.write_json config
+      malformed_path
+      (`Assoc [ "unexpected", `Bool true ]);
+    Alcotest.(check string)
+      "successor waits in the durable outbox"
+      "deferred"
+      (Workspace_broadcast.mention_delivery_kind successor.mention_delivery);
+    let report =
+      Workspace_broadcast.reconcile_pending_mentions config
+      |> Result.get_ok
+    in
+    Alcotest.(check bool) "quarantine releases the global barrier" false
+      report.global_barrier;
+    Alcotest.(check int) "malformed outbox remains observable" 1 report.corrupt_rows;
+    Alcotest.(check int) "successor is delivered after quarantine" 1 report.accepted;
+    let receipt =
+      match report.quarantine_receipts with
+      | [ receipt ] -> receipt
+      | receipts ->
+        Alcotest.failf "expected one quarantine receipt, got %d" (List.length receipts)
+    in
+    (match receipt.reason with
+     | Workspace_broadcast.Malformed_filename -> ()
+     | _ -> Alcotest.fail "wrong typed quarantine reason");
+    Alcotest.(check bool) "corrupt source removed" false (Sys.file_exists malformed_path);
+    let quarantine_path =
+      Filename.concat
+        (Filename.concat
+           (Workspace_utils.masc_root_dir config)
+           "message-mention-outbox-quarantine")
+        receipt.quarantine_name
+    in
+    Alcotest.(check bool) "quarantine evidence committed" true
+      (Sys.file_exists quarantine_path);
+    let evidence = Workspace_utils.read_json config quarantine_path in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "quarantine evidence schema"
+      "masc.workspace_mention_outbox_quarantine.v1"
+      (evidence |> member "schema" |> to_string);
+    Alcotest.(check string) "quarantine evidence source"
+      "malformed.json"
+      (evidence |> member "source_name" |> to_string);
+    Alcotest.(check string) "quarantine evidence reason"
+      "malformed_filename"
+      (evidence |> member "reason" |> to_string);
+    Alcotest.(check string) "quarantine evidence raw digest"
+      receipt.raw_sha256
+      (evidence |> member "raw_sha256" |> to_string);
+    let encoded_raw = evidence |> member "raw_base64" |> to_string in
+    Alcotest.(check string) "quarantine evidence preserves raw row"
+      (Yojson.Safe.to_string (`Assoc [ "unexpected", `Bool true ]))
+      (encoded_raw |> Base64.decode_exn |> Yojson.Safe.from_string
+       |> Yojson.Safe.to_string)))
+
+let test_startup_schema_preflight_rejects_unpurged_message () =
+  with_test_env (fun config ->
+    let old_row =
+      `Assoc
+        [ "seq", `Int 1
+        ; "from_agent", `String "claude"
+        ; "content", `String "pre-current-schema"
+        ; "timestamp", `Float 1.0
+        ; "mention", `Null
+        ; "msg_type", `String "broadcast"
+        ]
+    in
+    Workspace_utils.write_json
+      config
+      (Filename.concat
+         (Workspace_utils.messages_dir config)
+         "000000001_claude_old_broadcast.json")
+      old_row;
+    match Workspace_broadcast.validate_current_message_schema config with
+    | Ok () -> Alcotest.fail "unpurged old message schema passed startup preflight"
+    | Error [ rejection ] ->
+      (match rejection.kind with
+       | Workspace_broadcast.Message_row_incompatible -> ()
+       | _ -> Alcotest.fail "old message row had the wrong rejection kind")
+    | Error rejections ->
+      Alcotest.failf "expected one schema rejection, got %d" (List.length rejections))
 
 let () =
   Alcotest.run "Workspace raw message regression" [
@@ -227,5 +381,11 @@ let () =
         test_repeated_mention_delivers_each_canonical_event;
       Alcotest.test_case "failed write suppresses fanout" `Quick
         test_failed_authoritative_write_suppresses_fanout;
+      Alcotest.test_case "durable outbox defers failed message commit" `Quick
+        test_durable_outbox_defers_failed_message_commit;
+      Alcotest.test_case "malformed outbox quarantines before successor" `Quick
+        test_malformed_outbox_is_quarantined_before_successor_delivery;
+      Alcotest.test_case "startup rejects unpurged message schema" `Quick
+        test_startup_schema_preflight_rejects_unpurged_message;
     ]);
   ]

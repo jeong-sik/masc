@@ -670,6 +670,11 @@ let run_turn
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
     let request_evidence_ref = ref None in
+    (* Kept apart from [request_evidence_ref] rather than folded into it: the
+       window cut is observed before serialization, so a turn whose request was
+       refused at the wire has a real cut and no wire observation. Sharing one
+       cell would let the missing half erase the half that was measured. *)
+    let model_input_window_ref = ref None in
     let current_request_input_messages_ref = ref None in
     let source_model_input_projection =
       s.Keeper_run_tools.model_input_projection
@@ -890,6 +895,9 @@ let run_turn
                       ~on_runtime_observation:
                         (fun observation ->
                            receipt_runtime_observation_ref := Some observation)
+                      ~on_model_input_window_observation:
+                        (fun observation ->
+                           model_input_window_ref := Some observation)
                       ~on_request_wire_observation:
                         (fun
                           ~runtime_id
@@ -1302,6 +1310,19 @@ let run_turn
             (Option.map
                (fun evidence -> evidence.wire_observation)
                !request_evidence_ref)
+          ~model_input_window:
+            (Option.map
+               (fun
+                 (observation :
+                   Runtime_model_input_tail_window.window_observation)
+               ->
+                  { Turn_record.transmitted_atoms =
+                      observation
+                        .Runtime_model_input_tail_window.transmitted_atoms
+                  ; total_atoms =
+                      observation.Runtime_model_input_tail_window.total_atoms
+                  })
+               !model_input_window_ref)
           ~raw_trace_run_ref
           ~sampling:
             { temperature = Some temperature

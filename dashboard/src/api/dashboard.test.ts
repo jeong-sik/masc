@@ -1238,6 +1238,15 @@ describe('fetchDashboardFullHealth', () => {
   it('uses the full health path', async () => {
     const rawResponse = {
       health_detail: 'full',
+      full_health_snapshot: {
+        status: 'ready',
+        stale_reason: null,
+        last_good_available: true,
+        component_timed_out: false,
+      },
+      overall_status: 'degraded',
+      operator_action_required: true,
+      operator_action_reasons: ['keeper_fleet_safety', 'keeper_event_queue'],
       schedule_runner: {
         schema: 'masc.schedule.runner_status.v1',
         status: 'ok',
@@ -1293,6 +1302,17 @@ describe('fetchDashboardFullHealth', () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/health?full=1')
     expect(result.health_detail).toBe('full')
+    expect(result).toMatchObject({
+      full_health_snapshot: {
+        status: 'ready',
+        stale_reason: null,
+        last_good_available: true,
+        component_timed_out: false,
+      },
+      overall_status: 'degraded',
+      operator_action_required: true,
+      operator_action_reasons: ['keeper_fleet_safety', 'keeper_event_queue'],
+    })
     expect(result.schedule_runner).toMatchObject({
       schema: 'masc.schedule.runner_status.v1',
       status: 'ok',

@@ -52,6 +52,7 @@ vi.mock('../../api', () => ({
   commentPost: vi.fn(),
   createPost: vi.fn(),
   sendBroadcast: vi.fn(),
+  broadcastReceiptMessage: vi.fn(() => 'broadcast receipt'),
 }))
 
 vi.mock('../../api/actions', () => ({

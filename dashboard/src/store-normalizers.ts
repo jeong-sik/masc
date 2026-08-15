@@ -141,14 +141,24 @@ export function normalizeMessage(raw: unknown): Message | null {
   const content = asString(raw.content) ?? ''
   const timestamp = asString(raw.timestamp)
   const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel)
+  const rawMentionDelivery = asString(raw.mention_delivery)
+  const mentionDelivery =
+    rawMentionDelivery === 'passive'
+    || rawMentionDelivery === 'pending'
+    || rawMentionDelivery === 'accepted'
+    || rawMentionDelivery === 'rejected'
+      ? rawMentionDelivery
+      : undefined
   return {
     id: asString(raw.id),
+    requestId: asString(raw.request_id),
     seq: asNumber(raw.seq),
     from,
     content,
     timestamp,
     type: asString(raw.type),
     workspace,
+    mentionDelivery,
   }
 }
 
@@ -883,6 +893,7 @@ export function messageSortKey(message: Message): number {
 }
 
 function messageIdentityKey(message: Message): string {
+  if (message.requestId) return JSON.stringify(['request_id', message.requestId])
   if (typeof message.seq === 'number' && Number.isFinite(message.seq)) {
     return JSON.stringify(['seq', message.seq])
   }

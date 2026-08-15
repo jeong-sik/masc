@@ -97,12 +97,14 @@ interface TaskHandoffContext {
 
 export interface Message {
   id?: string
+  requestId?: string
   seq?: number
   from?: string
   content: string
   timestamp?: string
   type?: string
   workspace?: string
+  mentionDelivery?: 'passive' | 'pending' | 'accepted' | 'rejected'
 }
 
 // --- Board ---

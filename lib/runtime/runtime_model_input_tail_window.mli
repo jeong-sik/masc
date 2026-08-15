@@ -131,7 +131,36 @@ type projection =
         (** Exact raw-history cut chosen for [messages]. Projection stages that
             rewrite historical bytes use this as their cache-stable anchor: the
             rewrite boundary moves only when the authoritative cut moves. *)
+  ; atom_count : int
+        (** Atoms the input history contained, before the cut. [atom_count -
+            dropped_atoms] is what the provider receives. Both are reported
+            because a share is not recoverable from the transmitted list alone:
+            the dropped atoms leave no trace in [messages], so an observer
+            given only the result cannot tell a keeper that transmitted all of
+            a short history from one that transmitted the tail of a long one.
+            Pinned messages are not atoms and are counted in neither. *)
   }
+
+type window_observation =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  }
+(** How much of a history one projection carried, kept without the messages so
+    an observer can hold it for the length of a turn. *)
+
+val observe : history_atom_count:int -> projection -> window_observation
+(** [observe ~history_atom_count projection] pairs what [projection]
+    transmitted with the history it was measured against.
+
+    [history_atom_count] is passed in rather than read off [projection]
+    because a projection only knows the list it was handed. The demotion
+    pipeline cuts, materializes, and on a storage failure re-cuts the
+    surviving sublist — and that last projection's own [atom_count] is the
+    size of the sublist, not of the turn's history. Reading the denominator
+    from it inflates the share by whatever the earlier cuts already removed:
+    a keeper that reached over 800 of 5,000 atoms would report 800 of 1,000
+    (illustrative shape, not a measured trace). Supply the [atom_count] of the
+    first cut, which is the only one taken against the full history. *)
 
 val budget_error_to_string : budget_error -> string
 (** Diagnostic rendering carrying the measured values. Suitable as the

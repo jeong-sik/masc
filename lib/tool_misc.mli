@@ -33,6 +33,7 @@ val web_search_simulate_for_test :
    * [ `Error of string
      | `Empty
      | `Hits of (string * string * string) list
+     | `Grounded of (string * string * string list) list
      ])
   list ->
   Tool_result.result
@@ -43,6 +44,7 @@ val with_web_search_simulation_for_test :
      * [ `Error of string
        | `Empty
        | `Hits of (string * string * string) list
+       | `Grounded of (string * string * string list) list
        ])
     list ->
   (unit -> 'a) ->

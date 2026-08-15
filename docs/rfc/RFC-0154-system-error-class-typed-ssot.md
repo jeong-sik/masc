@@ -7,7 +7,7 @@ updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0042", "0088", "0097", "0105", "0122", "0142", "0148", "0149"]
+related: ["0088", "0097", "0105", "0122", "0142", "0148", "0149"]
 implementation_prs: [17064, 17073, 17072, 17078]
 ---
 

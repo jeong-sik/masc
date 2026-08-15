@@ -7,7 +7,7 @@ updated: 2026-07-19
 author: vincent
 supersedes: []
 superseded_by: []
-related: ["0042", "0257", "worldstate-observation-channel-split"]
+related: ["0257"]
 implementation_prs: [25270, 25281]
 ---
 

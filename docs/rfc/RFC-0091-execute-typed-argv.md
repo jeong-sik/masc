@@ -7,7 +7,7 @@ updated: 2026-05-21
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0042", "0084", "0089"]
+related: ["0084", "0089"]
 implementation_prs: [15720, 16235, 16238, 16296]
 ---
 

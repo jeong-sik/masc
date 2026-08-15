@@ -7,7 +7,7 @@ updated: 2026-06-16
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0239", "0241", "0243", "0244"]
+related: ["0239"]
 implementation_prs: ["#21299 CLOSED — recency-gate consolidation, withdrawn as wrong-layer scoring (see §-1)"]
 revision: "2026-06-16 — decision-layer correction; see §-1 (READ FIRST)"
 ---
@@ -110,8 +110,8 @@ selection → delete dead scoring (`stale_factor`, TTL-GC).**
 
 Three RFCs moved the Memory OS from a static dump toward a living store:
 
-- **RFC-0243 (MERGED `22bdf658c`)** made confidence *mutable*: the librarian write
-  path upserts via `reobserve_fact` keyed by `normalize_claim`, so confidence /
+- Confidence became *mutable* (MERGED `22bdf658c`): the librarian write path
+  upserts via `reobserve_fact` keyed by `normalize_claim`, so confidence /
   `access_count` / `last_verified_at` move on re-observation (synaptic
   strengthening). Accuracy-inversion's *first* half is closed.
 - **RFC-0244 P1 (MERGED #21224)** gave recall a *cue*: `score_fact` takes a

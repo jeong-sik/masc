@@ -7,7 +7,7 @@ updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0042"]
+related: []
 implementation_prs:
   - 15520  # G1 tool_help_registry tool_family
   - 15523  # G4 keeper_checkpoint_store ENOENT
@@ -71,8 +71,7 @@ RFC-0042 (Draft, `keeper_turn_terminal.t.code` closed sum) 가 동일 안티패�
 
 ## §3 Audit 결과 (sample)
 
-전체 인벤토리는 `docs/rfc/inventory/RFC-0089-string-classifier-sites.md` 참조.
-본 절은 결정에 영향을 준 sample만 inline.
+결정에 영향을 준 sample만 inline.
 
 ### §3.1 Scope-in (typed variant 교체 대상)
 

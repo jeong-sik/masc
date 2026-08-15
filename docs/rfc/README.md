@@ -47,11 +47,9 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0004 | Keep OCaml and TypeScript wire contracts exact | Active | - |
 | 0009 | Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist | Draft | - |
 | 0010 | ocamlformat config reconciliation | Implemented | - |
-| 0012 | Mid-Turn Progress Probe | Draft | - |
 | 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | - |
 | 0032 | Environment Knob Unification | Draft | - |
-| 0034 | Task Oscillation Mitigation (Cooldown + Severe-Level Human Escalation) | Draft | - |
 | 0036 | Multi-Keeper Docker Orchestration & Lifecycle Cleanup | Draft | - |
 | 0037 | Board Multimedia & Vision — Eio/File-Based Adaptation (`RFC-0037-board-multimedia-vision-adapted.md`)<br>Local-first Keeper Enablement: Harness/User Boundary (`RFC-0037-local-first-keeper-enablement-boundary.md`) | Draft<br>Draft | - |
 | 0038 | Opaque Identifier Types for Provider, Runtime, Model | Draft | - |
@@ -71,7 +69,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0070 | Keeper Sandbox Runtime — Pure/Edge Separation | Active | - |
 | 0071 | Exhaustive Match Sweep Codemod — Eliminate N-of-M `_ -> false/None` Anti-Pattern | Implemented | - |
 | 0072 | Type-encoded keeper sub-FSM transitions (runtime + turn_phase) | Implemented | - |
-| 0075 | Keeper Tools Smoke — Exhaustive Dispatch Coverage Regression Gate | Implemented | - |
 | 0077 | Write-side silent failure — typed propagation | Implemented | - |
 | 0079 | Log row typed encoder + silent-drop removal | Implemented | - |
 | 0080 | Registered descriptors are the tool-surface SSOT | Implemented | - |
@@ -123,20 +120,12 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0159 | Reason_internal_error typed split — close string-classifier catch-all | Draft | - |
 | 0161 | Tool Error Hint Symmetry Enforcement | Draft | - |
 | 0162 | JSONL Write-Path FD Pressure Root-Fix | Draft | - |
-| 0168 | Dashboard upstream-LLM-provider color palette purge | Draft | - |
-| 0169 | Dashboard common/* MCP-client attribution header purge | Draft | - |
-| 0170 | Dashboard provider-b palette closure (RFC-0168 N-of-M follow-up) | Draft | - |
-| 0171 | Design-canvas + ui_kits mock data vendor purge | Draft | - |
-| 0172 | Big-bang vendor purge across docs, audits, RFCs, design-system, tests | Draft | - |
-| 0173 | OCaml lib/bin/test vendor purge (identifier + string literal) | Draft | - |
 | 0174 | Dashboard substring classifier to typed — TypeScript | Draft | - |
 | 0175 | Godfile decomposition Wave D — keeper core 5-file split | Draft | - |
-| 0177 | Phonebook internal vendor-coupled enum purge | Draft | - |
 | 0178 | Types Sub-library Extraction with `_intf.ml` mli-only Surface (typed-SSOT) | Draft | - |
 | 0179 | ToolDescriptor Ecosystem Coverage Extension to Workspace Tools | Draft | - |
 | 0180 | 24h Runtime ERROR 7-Pattern Sweep Roadmap | Draft | - |
 | 0182 | masc_* Workspace Tool Descriptor Projection + Tool_spec SSOT Consolidation | Draft | - |
-| 0184 | Runtime phonebook typed roundtrip for protocol/flavor/provider identifiers | Draft (Deferred) | - |
 | 0189 | Typed Tool_result.result variant — eliminating boolean blindness in tool disp... | Draft | - |
 | 0190 | Descriptor as Visibility/Metadata SSOT — Surface Projection from descriptor.p... | Draft | - |
 | 0198 | Execute typed redirection | Implemented | - |
@@ -152,7 +141,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0214 | OTel GenAI Semantic Convention Migration | Draft | - |
 | 0215 | Keeper sub-library extraction campaign — sequence and per-PR gates | Draft | - |
 | 0216 | Per-Keeper Decline Memory (orphan-task churn root fix) | Draft | - |
-| 0219 | Remove Sandbox Repo Patrol Gates | Draft | - |
 | 0221 | Atomic verification submission — task_status as the sole outcome authority | Implemented (steps 1-3 merged #20613/#20617; steps 4-5 measured then dropped, §3.3/§3.4) | - |
 | 0223 | Typed connector surfaces: presence in world prompt, pull-based lane context, ... | Draft | - |
 | 0225 | Per-keeper turn single-flight admission | Draft | - |
@@ -166,9 +154,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0236 | Voice input transport: browser-captured speech-to-text for the dashboard comp... | Draft | - |
 | 0239 | Concurrency ownership model (per-site mutex/atomic → protection by construction) | Draft | - |
 | 0240 | Tool-pair invariant enforced at write-time (eliminate repair-on-read) | Draft | - |
-| 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | - |
-| 0247 | Memory OS as a brain: typed associative graph, spreading-activation recall, s... | Draft | Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) (`RFC-0247-purge-implementation-plan.md`, Draft) |
-| 0249 | Remove the dead `stale_factor` field (execute RFC-0239/0243/0244/0247) | Draft | - |
+| 0247 | Memory OS as a brain: typed associative graph, spreading-activation recall, s... | Draft | - |
 | 0251 | Memory OS: record well, do not value — remove the scoring layer | Draft | - |
 | 0252 | Fusion: 패널+심판(panel+judge) 심의 루프 (MASC 내장) | Draft | - |
 | 0253 | Dashboard keeper-v2 surfaces: canonical spacing/radius token scale + off-scal... | Draft | - |
@@ -180,7 +166,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0269 | Process Critic Loop for Keeper Work Traces | Draft | - |
 | 0270 | CI Gate merge guard: block merges on a non-success CI Gate and trip on red main | Draft | - |
 | 0274 | Workspace base_path SSOT — retire env runtime read, thread Workspace.config | Draft | - |
-| 0276 | Remove Keeper social-model self-report protocol | Implemented | - |
 | 0277 | Fusion: 이종 패널 그룹(heterogeneous panel groups) + 발동 예산 제거 | Draft | - |
 | 0278 | Fusion: 같은 model을 다른 prompt로 (same-model panels via panel labels) | Draft | - |
 | 0280 | Fusion: validated preset type (Parse, don't validate) | Draft | - |
@@ -189,7 +174,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0283 | Fusion: judge-of-judges 위상 (flat/staged reducer) | Draft | - |
 | 0284 | Fusion 심판 실행 관측 record (judge observation record) | Draft | - |
 | 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | - |
-| 0288 | Remove per-Keeper goal-horizon fields | Implemented | - |
 | 0289 | Extract progress-classification into its own library for a single substantive... | Draft | - |
 | 0290 | Generic keeper background-work tool (spawn → wake-on-completion) | Draft | - |
 | 0292 | Complete lib/auth de-duplication — remove drifted Masc.Auth* test copies | Draft | - |
@@ -244,7 +228,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0379 | Keeper Monitor: 조건 전이가 Keeper 를 깨운다 (Event-Driven Wake) | Draft | - |
 | 0380 | 대기 나이는 홀더의 사이클을 알아야 한다 — work liveness 판정 축 정정 | Draft | - |
 | 0381 | 웹 검색은 폴백이 있는 척한다 — provider 계약 정정과 토큰 예산 도입 | Draft | - |
-| RFC-0034d-stale-agent-sync | d — release_stale_claims agent-side sync | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |

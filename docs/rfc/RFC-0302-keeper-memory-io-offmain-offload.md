@@ -3,7 +3,7 @@
 - Status: Draft
 - Author: Claude Opus 4.8
 - Date: 2026-07-01
-- Related: issue #22823 (tracking), RFC-0243/0259/0272 (keeper memory store), 2026-06-19 keeper stall (mutex poison via Eio-in-systhread)
+- Related: issue #22823 (tracking), RFC-0259/0272 (keeper memory store), 2026-06-19 keeper stall (mutex poison via Eio-in-systhread)
 - 근거 메모리: `reference-masc-compaction-not-hol-cause-measured-7ms-20260630.md`
 
 **2026-07-29 current-state amendment**: periodic full-store Memory OS

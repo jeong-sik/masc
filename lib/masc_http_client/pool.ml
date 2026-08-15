@@ -329,6 +329,10 @@ let path_and_query uri =
   | [] -> p
   | _ -> p ^ "?" ^ Uri.encoded_of_query (Uri.query uri)
 
+(* STR-OK: HTTP boundary comparison. Header field names are untyped,
+   case-insensitive wire strings (RFC 7230 §3.2) — "host" is not a closed
+   domain enum this repo controls the shape of, so there is no variant to
+   parse it into. *)
 let has_host_header headers =
   List.exists
     (fun (name, _) -> String.lowercase_ascii name = "host")
@@ -353,6 +357,11 @@ let has_host_header headers =
    this only fills a gap Piaf leaves, it does not override a deliberate
    caller choice. *)
 let ensure_host_header ~uri headers =
+  (* DET-OK: sound, not a permissive default on unknown input. [None] here
+     is [?headers] genuinely omitted by the caller ("no headers"), not
+     unparsed/malformed external data — [[]] is the only value that means
+     "no headers" for a [(string * string) list], so no information is
+     lost. *)
   let headers = Option.value headers ~default:[] in
   if has_host_header headers
   then Some headers

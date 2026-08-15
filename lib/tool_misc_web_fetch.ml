@@ -307,7 +307,8 @@ let web_artifact_index_schema = "masc.web_artifact.v1"
    The same sha256 offloaded again writes another row: an independent
    observation that the URL still had that content, with dedup already
    solved by content addressing at the file layer. *)
-let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes =
+let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes
+    ~fetched_at_unix =
   let row =
     `Assoc
       (List.concat
@@ -320,7 +321,7 @@ let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes =
             | None -> [])
          ; [ ("bytes", `Int bytes)
            ; ( "fetched_at"
-             , `String (Masc_domain.iso8601_of_unix_seconds (Unix.gettimeofday ())) )
+             , `String (Masc_domain.iso8601_of_unix_seconds fetched_at_unix) )
            ]
          ])
   in
@@ -328,7 +329,7 @@ let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes =
   | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
   | Sys_error message -> Error message
 
-let offload_full_text ~source_url ~title text =
+let offload_full_text ~source_url ~title ~fetched_at_unix text =
   match Env_config_core.base_path () with
   | exception Env_config_core.Config_error message -> Error message
   | base ->
@@ -349,7 +350,7 @@ let offload_full_text ~source_url ~title text =
          |> Result.map (fun () ->
                 let index =
                   web_artifact_index_append ~dir ~sha256:digest ~source_url
-                    ~title ~bytes:(String.length text)
+                    ~title ~bytes:(String.length text) ~fetched_at_unix
                 in
                 path, index)
        with
@@ -436,7 +437,7 @@ let outline_block text =
       in
       Some (String.concat "\n" (header :: rows))
 
-let truncate_text ~max_chars ~source_url ~title text =
+let truncate_text ~max_chars ~source_url ~title ~fetched_at_unix text =
   let total = String.length text in
   if total <= max_chars then text, false, None
   else
@@ -457,7 +458,7 @@ let truncate_text ~max_chars ~source_url ~title text =
     in
     let head = String.sub text 0 head_cut in
     let tail = String.sub text tail_start (total - tail_start) in
-    let offloaded = offload_full_text ~source_url ~title text in
+    let offloaded = offload_full_text ~source_url ~title ~fetched_at_unix text in
     let marker =
       match offloaded with
       | Ok (path, index) -> (
@@ -668,7 +669,7 @@ let with_http_get_for_test http_get f =
     f
 
 (** Main fetch implementation *)
-let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
+let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
   let headers =
     [
       ( "User-Agent",
@@ -701,7 +702,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars =
               in
               let text, truncated, full_text_path =
                 truncate_text ~max_chars ~source_url:response.final_url ~title
-                  rendered
+                  ~fetched_at_unix rendered
               in
               Ok
                 ( response
@@ -770,7 +771,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       match cache_lookup key now with
       | Some cached -> ok_from_data cached
       | None ->
-        (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars with
+        (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars
+                 ~fetched_at_unix:start_time with
                     | Ok
                         ( response
                         , http_status

@@ -289,6 +289,70 @@ let test_complete_stream_http_rejects_typed_empty_completion () =
     [ Types.EndTurn, "end_turn"; Types.MaxTokens, "max_tokens" ]
 ;;
 
+(* llama-server (OpenAI-compat SSE) attaches a [timings] object — including
+   [cache_n], the KV-cache-reused prompt tokens — to the final chunk without
+   opt-in. The stream path must land it in response telemetry and emit
+   [Prefill_complete], exactly like the Ollama NDJSON done line does. *)
+let openai_sse_with_llama_timings =
+  "data: \
+   {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pong\"},\"finish_reason\":null}],\"id\":\"c-t\",\"model\":\"qwen3.8-27b\",\"object\":\"chat.completion.chunk\"}\n\n\
+   data: \
+   {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"delta\":{}}],\"id\":\"c-t\",\"model\":\"qwen3.8-27b\",\"object\":\"chat.completion.chunk\",\"timings\":{\"cache_n\":1741,\"prompt_n\":26,\"prompt_ms\":709.5,\"predicted_n\":2,\"predicted_ms\":122.7,\"predicted_per_second\":16.3}}\n\n\
+   data: [DONE]\n\n"
+;;
+
+let test_complete_stream_openai_captures_llama_server_timings () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url = start_mock_server ~sw ~net:env#net openai_sse_with_llama_timings in
+    let prefill = ref None in
+    let result =
+      Complete.complete_stream
+        ~sw
+        ~net:env#net
+        ~config:(make_openai_config url)
+        ~messages
+        ~on_telemetry:(fun evt ->
+          match evt with
+          | Telemetry_event.Prefill_complete { prompt_eval_tokens; cache_hit; _ } ->
+            prefill := Some (prompt_eval_tokens, cache_hit)
+          | _ -> ())
+        ~on_event:(fun _ -> ())
+        ()
+    in
+    (match result with
+     | Ok resp ->
+       (match resp.telemetry with
+        | Some { timings = Some t; _ } ->
+          check (option int) "cache_n" (Some 1741) t.cache_n;
+          check (option int) "prompt_n" (Some 26) t.prompt_n;
+          check (option int) "predicted_n" (Some 2) t.predicted_n
+        | Some { timings = None; _ } | None ->
+          Alcotest.fail "expected stream timings in response telemetry");
+       (match !prefill with
+        | Some (prompt_eval_tokens, cache_hit) ->
+          check int "prefill tokens" 26 prompt_eval_tokens;
+          check bool "cache_hit" true cache_hit
+        | None -> Alcotest.fail "expected Prefill_complete telemetry")
+     | Error err ->
+       Alcotest.fail
+         (Printf.sprintf
+            "expected Ok, got %s"
+            (match err with
+             | Http_client.NetworkError { message; _ }
+             | Http_client.TimeoutError { message; _ } -> message
+             | Http_client.HttpError { code; _ } -> Printf.sprintf "HTTP %d" code
+             | Http_client.AcceptRejected { reason } -> reason
+             | Http_client.ProviderTerminal { message; _ } -> message
+             | Http_client.ProviderFailure { message; _ } -> message)));
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 (* ── complete: HTTP error ────────────────────────────── *)
 
 let test_complete_http_error () =
@@ -3672,6 +3736,10 @@ let () =
             `Quick
             test_complete_stream_idle_timeout_still_fires
         ; test_case "streaming metrics" `Quick test_complete_stream_metrics
+        ; test_case
+            "OpenAI-compat stream captures llama-server timings"
+            `Quick
+            test_complete_stream_openai_captures_llama_server_timings
         ; test_case
             "unknown stream latency stays unknown"
             `Quick

@@ -130,6 +130,7 @@ let make_openai_chunk
   ; delta_tool_calls
   ; finish_reason = None
   ; chunk_usage = None
+  ; chunk_timings = None
   }
 ;;
 

@@ -357,6 +357,7 @@ type openai_chunk =
   ; delta_tool_calls : openai_tool_call_delta list
   ; finish_reason : string option
   ; chunk_usage : api_usage option
+  ; chunk_timings : inference_timings option
   }
 
 type openai_sse_parse_result =
@@ -613,6 +614,33 @@ let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_resu
                      ; cost_usd = None
                      })
                in
+               (* llama-server attaches a top-level [timings] object to the
+                  final chunk (the one with [finish_reason]) without opt-in;
+                  [cache_n] is the prompt-token count reused from the slot KV
+                  cache. Cloud OpenAI-compatible providers do not send it. *)
+               let chunk_timings =
+                 let t = json |> member "timings" in
+                 if t = `Null
+                 then None
+                 else (
+                   let int_field name = t |> member name |> to_int_option in
+                   let float_field name =
+                     match t |> member name with
+                     | `Float f -> Some f
+                     | `Int i -> Some (float_of_int i)
+                     | `Intlit s -> float_of_string_opt s
+                     | _ -> None
+                   in
+                   Some
+                     { Types.prompt_n = int_field "prompt_n"
+                     ; prompt_ms = float_field "prompt_ms"
+                     ; prompt_per_second = float_field "prompt_per_second"
+                     ; predicted_n = int_field "predicted_n"
+                     ; predicted_ms = float_field "predicted_ms"
+                     ; predicted_per_second = float_field "predicted_per_second"
+                     ; cache_n = int_field "cache_n"
+                     })
+               in
                match assoc_field_opt "choices" json with
                | Some (`List []) ->
                  (match chunk_usage with
@@ -627,6 +655,7 @@ let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_resu
                       ; delta_tool_calls = []
                       ; finish_reason = None
                       ; chunk_usage
+                      ; chunk_timings
                       })
                | Some (`List (choice :: _)) ->
                  let delta = choice |> member "delta" in
@@ -696,6 +725,7 @@ let parse_openai_sse_chunk ?streaming_reasoning data_str : openai_sse_parse_resu
                          ; delta_tool_calls
                          ; finish_reason
                          ; chunk_usage
+                         ; chunk_timings
                          }))
                | None | Some `Null ->
                  openai_parse_failed
@@ -1369,6 +1399,7 @@ let%test
         ]
     ; finish_reason = None
     ; chunk_usage = None
+    ; chunk_timings = None
     }
   in
   let events, _ = openai_chunk_to_events state chunk in
@@ -1392,6 +1423,7 @@ let%test "openai_chunk_to_events: id-less continuation fragment stays in its cal
     ; delta_tool_calls = []
     ; finish_reason = None
     ; chunk_usage = None
+    ; chunk_timings = None
     }
   in
   let state = create_openai_stream_state () in
@@ -1443,6 +1475,7 @@ let%test
     ; delta_tool_calls = []
     ; finish_reason = None
     ; chunk_usage = None
+    ; chunk_timings = None
     }
   in
   let tc tc_index tc_id tc_name args =
@@ -1490,6 +1523,7 @@ let%test "openai_chunk_to_events: id-less continuation on ambiguous index fails 
     ; delta_tool_calls = []
     ; finish_reason = None
     ; chunk_usage = None
+    ; chunk_timings = None
     }
   in
   let tc tc_id args =

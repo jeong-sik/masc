@@ -141,13 +141,39 @@ RFC-0381 스택 8개 PR(#28747, #28760, #28753~#28758)이 main에 전부 병합�
 </ol>
 </div>
 
-<p class="note">자격 투입 시(BRAVE_SEARCH_API_KEY / OLLAMA_API_KEY 발급 대기) grounded·Ollama 경로의
-지연·품질과 keeper 턴 경유 토큰 실측이 다음 반복이다.</p>
+<h2>Iteration 4 — Ollama 자격 투입 (2026-08-16, r7)</h2>
+
+<p class="note">원본 증거: <code>docs/evidence/web-tools-bench-2026-08-16-r7.json</code>.
+<code>OLLAMA_API_KEY</code> 발급·검증 후 서버 재기동(프로세스 env 상속 확인). bench 스크립트에
+Ollama 직접 프로브를 추가했다 — 서버의 <code>fetch_ollama</code>와 같은 endpoint·인증 헤더·body 형태로
+호출하므로 유사품이 아니라 실제 dispatch 대상 provider의 수치다.</p>
+
+<h2>표 4. 같은 3쿼리, SearXNG vs Ollama (r7, 동일 시점)</h2>
+<table>
+<tr><th>쿼리</th><th>SearXNG</th><th>Ollama</th><th>Ollama 지연</th><th>Ollama 본문 합</th></tr>
+<tr><td>OCaml 5.5 effect handlers tutorial</td><td class="dead">0건</td><td>5건</td><td>1099ms</td><td>117,596자</td></tr>
+<tr><td>Claude Opus latest model context window</td><td class="dead">0건</td><td>5건</td><td>1720ms</td><td>166,206자</td></tr>
+<tr><td>장마철 제습기 원리</td><td class="dead">0건</td><td>5건</td><td>927ms</td><td>29,430자</td></tr>
+</table>
+
+<div class="verdict">
+<p><strong>판정 3줄.</strong></p>
+<ol>
+<li>자격 하나로 검색이 죽음에서 살아났다 — SearXNG 붕괴 지속(0건×3) 상태에서 Ollama는
+<strong>3쿼리 전부 5건</strong>, 한국어 쿼리 포함. 키 검증 단독 프로브에서는 ocaml.org 공식 매뉴얼이
+최상위로 나오는 등 결과 품질도 목적에 부합한다.</li>
+<li>지연은 0.9~1.7초로 SearXNG(0.15~0.55초, 단 0건)보다 높지만 결과가 있는 유일한 경로다.
+본문 합 29k~166k자는 그대로 keeper에 실으면 토큰 폭발 — PR-6의 결정론적 절단(head 3/4 + tail 1/4)과
+전문 오프로드가 이 입력을 받아내는 구조이고, 서버 경로는 <code>max_results ≤ 10</code>으로 추가 제한된다.</li>
+<li>이 시점부터 기본 체인은 "죽은 SearXNG 단독"이 아니라 SearXNG → Ollama 폴백이 실제로 동작하는
+자격 체인이다(<code>provider_has_credentials</code> 필터 통과 provider가 1개 이상).</li>
+</ol>
+</div>
 
 <h2>다음 반복</h2>
 <ul>
-<li><strong>Iteration 4</strong> (자격 투입 후): Brave LLM Context / Ollama 라이브 경로 — 지연,
-결과 품질, <code>maximum_number_of_tokens</code> 예산 준수, keeper 턴 경유 토큰 소비.</li>
+<li><strong>Iteration 5</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로
+(<code>maximum_number_of_tokens</code> 예산 준수) 실측. keeper 턴 경유 토큰 소비는 대시보드 관측으로.</li>
 <li>매 반복은 <code>python3 scripts/bench-web-tools.py -o docs/evidence/web-tools-bench-&lt;date&gt;-rN.json</code> 실행 후 이 문서에 섹션 추가.</li>
 </ul>
 

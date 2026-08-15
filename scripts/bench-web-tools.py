@@ -4,6 +4,8 @@
 Captures, per run, into one JSON evidence file:
   - provider_direct: SearXNG / DuckDuckGo HTML / Bing RSS reachability,
     latency, and result counts measured against the real endpoints.
+    When OLLAMA_API_KEY is present, the Ollama cloud web_search endpoint
+    is probed with the same auth and body shape the server uses.
   - mcp_tool: masc web search/fetch calls against the running MASC server
     (default http://localhost:8935/mcp), with wall time, serialized payload
     bytes, and the body-duplication factor of the includeContent path
@@ -117,6 +119,42 @@ def probe_bing_rss(query: str) -> dict[str, Any]:
         "bytes": len(body),
         "item_count": text.count("<item>"),
     }
+
+
+def probe_ollama(api_key: str, query: str) -> dict[str, Any]:
+    """One live call against the credentialed provider masc dispatches to.
+
+    Same endpoint, auth header, and body shape as fetch_ollama in
+    lib/tool_misc_web_search.ml, so the numbers here measure the provider
+    the server actually uses rather than a lookalike.
+    """
+    status, _, body, ms = http(
+        "https://ollama.com/api/web_search",
+        body=json.dumps({"query": query, "max_results": 5}).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+    record: dict[str, Any] = {
+        "query": query,
+        "http_status": status,
+        "elapsed_ms": round(ms, 1),
+        "bytes": len(body),
+    }
+    parsed = json.loads(body)
+    results = parsed.get("results")
+    if results is None:
+        record["error_payload"] = parsed
+        return record
+    record.update(
+        {
+            "result_count": len(results),
+            "content_chars_total": sum(len(r.get("content", "")) for r in results),
+            "top_urls": [r.get("url", "") for r in results[:3]],
+        }
+    )
+    return record
 
 
 def token_candidates() -> list[tuple[str, str]]:
@@ -316,6 +354,9 @@ def main() -> None:
             "searxng": [probe(probe_searxng, q) for q in QUERIES],
             "duckduckgo_html": probe(probe_ddg_html, QUERIES[0]),
             "bing_rss": probe(probe_bing_rss, QUERIES[0]),
+            "ollama": [probe(probe_ollama, ollama_key, q) for q in QUERIES]
+            if (ollama_key := os.environ.get("OLLAMA_API_KEY"))
+            else {"skipped": "OLLAMA_API_KEY absent"},
         },
         "mcp_tool": probe(probe_mcp, MCP_URL),
     }

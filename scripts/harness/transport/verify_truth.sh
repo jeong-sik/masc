@@ -120,7 +120,6 @@ import sys
 
 host = sys.argv[1]
 port = int(sys.argv[2])
-path = sys.argv[3] if len(sys.argv) > 3 else "/ws"
 try:
     with socket.create_connection((host, port), timeout=2):
         pass
@@ -141,6 +140,7 @@ import sys
 
 host = sys.argv[1]
 port = int(sys.argv[2])
+path = sys.argv[3] if len(sys.argv) > 3 else "/ws"
 try:
     sock = socket.create_connection((host, port), timeout=3)
     key = base64.b64encode(os.urandom(16)).decode("ascii")

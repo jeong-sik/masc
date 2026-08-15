@@ -291,6 +291,37 @@ let test_unknown_outcome_label_is_an_error () =
   remove_if_exists path
 ;;
 
+(* Deploy contract for the retryable field this PR adds to [Not_reviewed]
+   (masc, task-336 P1 review): [retryable] is required, not optional-with-a-
+   default, because a missing-field default would make this a legacy-shape
+   compat reader — exactly what the repo's hard-cut policy forbids (#28735's
+   turn_record precedent: required field + a store cut at deploy, never a
+   silent default). A pre-this-PR [not_reviewed] row therefore does not
+   survive replay: it is malformed, dropped, and left on disk untouched
+   (fold_replay_events reports it through [malformed], which also blocks
+   [compact_replay_log] from ever running again on this file — the intended
+   operator action is to cut the store at deploy, not to let old rows
+   accumulate forever behind a permanently malformed line). This pins that
+   behavior as the deliberate contract, not a regression to fix later. *)
+let test_pre_retryable_not_reviewed_row_is_malformed_on_replay () =
+  let path = fresh_path ".pre-retryable-not-reviewed.jsonl" in
+  let content =
+    String.concat
+      "\n"
+      [ {|{"event":"register","id":"vrf-pre-retryable","started_at":1.0,"registration":{"task_id":"task-336","producer":"keeper-rondo-agent","authority_kind":"system_llm_agent","authority_actor":"reviewer"}}|}
+      ; {|{"event":"complete","id":"vrf-pre-retryable","completion":{"outcome":"not_reviewed","elapsed_s":1.0,"gate":"evaluator_unavailable","detail":"no runtime"}}|}
+      ; ""
+      ]
+  in
+  Fs_compat.save_file path content;
+  let replayed = R.replay path in
+  check bool "pre-retryable not_reviewed row is not replayed" true
+    (Option.is_none (R.get replayed ~verification_id:"vrf-pre-retryable"));
+  check bool "the malformed row is left on disk, not silently compacted away" true
+    (String_util.contains_substring (Fs_compat.load_file path) "vrf-pre-retryable");
+  remove_if_exists path
+;;
+
 let test_missing_outcome_payload_is_an_error () =
   let path = fresh_path ".missing-outcome-detail.jsonl" in
   let content =
@@ -434,6 +465,10 @@ let () =
             "rejected without a reason is an error"
             `Quick
             test_missing_outcome_payload_is_an_error
+        ; test_case
+            "a pre-retryable not_reviewed row is malformed on replay (deploy contract)"
+            `Quick
+            test_pre_retryable_not_reviewed_row_is_malformed_on_replay
         ; test_case "completed runs are pruned" `Quick test_completed_runs_are_pruned
         ; test_case
             "tool evidence keeps input and typed disposition"

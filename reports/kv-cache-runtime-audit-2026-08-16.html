@@ -36,16 +36,16 @@
 <div class="verdict">
 <p><strong>판정 5줄.</strong></p>
 <ol>
-<li>MASC의 프롬프트 조립은 이미 캐시 인지형이다 — 안정 system 헤드 / append-only 히스토리 / window 양자화 컷 / 변동 컨텍스트 꼬리 주입이 코드에 설계 주석과 함께 존재한다 (<code>agent_turn.ml:31</code> "critical for local LLM KV-cache reuse").</li>
+<li>MASC의 프롬프트 조립은 이미 캐시 인지형이다 — 안정 system 헤드 / append-only 히스토리 / window 양자화 컷 / 변동 컨텍스트 꼬리 주입이 코드에 설계 주석과 함께 존재한다 (<code>agent_turn.ml:33-34</code> "critical for local LLM KV-cache reuse").</li>
 <li>llama-server + Qwen3.8-27B에서 <strong>preserve-thinking + append-only</strong>는 턴당 prefill을 <span class="good">26~34 토큰(≈0.7s)</span>으로 만든다. 이전 턴에 생성된 thinking의 KV가 슬롯에 남아 있고, 같은 reasoning_content를 히스토리로 되돌려주면 재처리가 새 user 메시지 분량으로 수렴하기 때문이다.</li>
 <li>시스템 헤드에 타임스탬프 <em>한 줄</em>을 매턴 갱신하면 재처리 토큰이 <span class="dead">314 → 863 → 1,892(14.4s)</span>로 히스토리에 비례해 배증한다. 같은 정보를 대화 꼬리로 옮기면 61~69 토큰 상수 — <strong>턴4 기준 31배 차이</strong>. 변동 정보의 위치가 캐시의 전부다.</li>
 <li>llama-server는 스트리밍 최종 청크에 <code>timings.cache_n</code>(재사용 토큰 수)을 opt-in 없이 싣는데, agent-core 스트리밍 경로는 Ollama NDJSON에서만 timings를 읽어 <span class="dead">로컬 행(전부 streaming=true)의 캐시 관측이 유실</span>된다 (G1).</li>
-<li>라이브 fleet(8/15, 760턴)의 캐시 히트율은 클라이언트 구조가 아니라 provider가 결정했다: gemini 84.1% / GLM 40.6% / <span class="dead">ollama_cloud(deepseek) 0%</span> — 하루 2,340만 input 토큰 전량 재프리필. 멀티턴 keeper를 캐시 없는 provider에 태우는 배치가 지연·비용의 주범이다.</li>
+<li>라이브 fleet(8/15, 762턴)의 캐시 히트율은 클라이언트 구조가 아니라 provider가 결정했다: gemini 84.1% / GLM 68.5% / <span class="dead">ollama_cloud(deepseek) 0%</span> — 하루 2,340만 input 토큰 전량 재프리필 (GLM 수치는 최초 게재분 40.6%의 정정, 표 3 참조). 멀티턴 keeper를 캐시 없는 provider에 태우는 배치가 지연·비용의 주범이다.</li>
 </ol>
 </div>
 
 <h2>표 1. 히스토리 정책별 턴당 재처리 비용 (같은 대화, 같은 모델, 같은 서버)</h2>
-<p class="note">각 셀: <code>prompt_n</code>(이번 턴에 다시 처리한 토큰) / <code>prompt_ms</code>. cache_n·전체 원값은 evidence JSONL 참조. 턴1은 콜드 스타트라 제외.</p>
+<p class="note">각 셀: <code>prompt_n</code>(이번 턴에 다시 처리한 토큰) / <code>prompt_ms</code>. cache_n·전체 원값은 evidence JSONL 참조. 턴1 제외 사유: 하네스가 시나리오 간 슬롯 캐시를 지우지 않아 턴1은 직전 시나리오 잔여 캐시에 오염될 수 있다(volatile 턴1 cache_n=559). strip·volatile 일부 턴은 thinking이 max_tokens를 소진한 퇴화 생성(content_chars=0)으로, 턴2~4 상대 비교에는 영향 없으나 volatile의 절대 수치엔 생성 길이 변동이 혼입될 수 있다.</p>
 <table>
 <tr><th>히스토리 정책</th><th>턴2</th><th>턴3</th><th>턴4</th><th>경향</th></tr>
 <tr><td><strong>preserve</strong> — append-only + reasoning_content 재주입 (<code>chat_template_kwargs {"preserve_thinking": true}</code>)</td>
@@ -68,11 +68,12 @@
 </table>
 <p class="note">ollama의 3.2 t/s는 qwen35 아키텍처(Gated DeltaNet hybrid)의 SSM Metal 경로가 느린 빌드였고, brew b10180은 같은 GGUF에서 5.5배를 낸다. 로컬 레인이 "느려서 강등"된 2026-08-07~08의 근거가 더 이상 성립하지 않는다.</p>
 
-<h2>표 3. 라이브 fleet 캐시 히트 (2026-08-15, ~/.masc/costs, 760턴)</h2>
+<h2>표 3. 라이브 fleet 캐시 히트 (2026-08-15, 762턴)</h2>
+<p class="note">정정(2026-08-16 적대적 리뷰): GLM의 <code>input_tokens</code>는 캐시 재사용분 포함형(input = cache_read + cache_miss, 표본 불일치 0건)이라 히트율은 r/i. 최초 게재분의 40.6% = r/(r+i)는 분모 이중 계산 오류였다 — G6(provider별 usage 의미론)가 이 표에서 실현된 사례. gemini는 배제형이라 r/(r+i)가 맞다. 원본 로그는 라이브 증가 파일로 사후 재현 불가, 수치는 8/15 스냅샷.</p>
 <table>
 <tr><th>모델 (런타임)</th><th>턴</th><th>cache_read</th><th>input</th><th>히트율</th></tr>
-<tr><td>gemini-3.6-flash-high (antigravity)</td><td>127</td><td>145.5M</td><td>27.6M</td><td class="good">84.1%</td></tr>
-<tr><td>GLM-5-Turbo (glm-coding)</td><td>364</td><td>13.1M</td><td>19.2M</td><td>40.6%</td></tr>
+<tr><td>gemini-3.6-flash-high (antigravity)</td><td>127</td><td>145.5M</td><td>27.6M</td><td class="good">84.1% (r/(r+i), 배제형)</td></tr>
+<tr><td>GLM-5-Turbo (glm-coding)</td><td>364</td><td>13.1M</td><td>19.2M</td><td>68.5% (r/i, 포함형)</td></tr>
 <tr><td>deepseek-v4-flash:0731 (ollama_cloud)</td><td>271</td><td>0</td><td>23.4M</td><td class="dead">0%</td></tr>
 </table>
 
@@ -95,6 +96,16 @@
 <tr><td>G4</td><td>Anthropic 히스토리 캐시 breakpoint 없음 (system+tools만)</td><td>PR-5: top-level 자동 cache_control 옵트인 (read 0.1x)</td></tr>
 <tr><td>G5</td><td>대시보드가 캐시를 bool로 축약</td><td>PR-3: cache_n/prompt_n 원값 노출</td></tr>
 <tr><td>G6</td><td>provider별 usage 의미론(input에 cached 포함 여부) 미감사</td><td>후속 감사</td></tr>
+</table>
+
+<h2>추가: 라이브 fleet 검증 (2026-08-16 04:10~04:25 KST)</h2>
+<p class="note">위 하네스 측정 이후, llama_cpp 레인을 실제 keeper fleet에 올려 검증했다. 절차와 수치는 RFC-0382 §7 참조.</p>
+<table>
+<tr><th>관측</th><th>값</th></tr>
+<tr><td>턴 15 (콜드, 35K 프리픽스)</td><td>first-event 120s 데드라인에 3회 취소 — 취소마다 슬롯 KV 적립(12K→22K→32K), 4번째 시도 완주. 재시도 사다리가 수렴하지만 수 분 낭비</td></tr>
+<tr><td>턴 16 (웜)</td><td class="good">LCP 유사도 0.949 · 캐시 재사용 94.6% — 신규 1,769tok/19.3s 프리필, ttfrc 27.2s, finish=completed, enable_thinking=true, input 34,468 / output 717</td></tr>
+<tr><td>대시보드</td><td>컨텍스트 미터 34.5k/65.5k(53%)가 provider 실측 토큰으로 표시, 런타임 패널에 chat-template-kwargs 축 노출</td></tr>
+<tr><td>파생 수정</td><td>콜드 프리필의 SSE 침묵 → <code>return_progress</code>(prefill 중 prompt_progress 청크, b10180 검증)로 근본 해결 — PR #28791. 타임아웃 값(120s)은 유지</td></tr>
 </table>
 
 <p class="note">이 리포트의 모든 수치는 위 명시된 환경에서의 단일 측정이다. mlx 서버와 동시 상주 상태라 decode 절대값에는 Metal 경합이 섞여 있고, 정책 간 <em>상대</em> 비교(같은 세션 내 연속 측정)가 이 리포트의 주장 범위다.</p>

@@ -1,0 +1,38 @@
+{
+  "schema": "masc.keeper_dashboard.browser_render_evidence.v1",
+  "captured_at": "2026-08-15T18:45:30Z",
+  "server": {
+    "version": "0.22.0",
+    "build_label": "v0.22.0 · binary unknown",
+    "runtime_checkout_commit": "341791ff6f",
+    "commit_source": "runtime_repo_head",
+    "note": "TopBar still reports 'binary unknown' — embedded binary identity (Track C) remains open despite #28714/#28744."
+  },
+  "overview": {
+    "screenshot": "/Users/dancer/me/reports/masc-live-dashboard-overview-20260816-loop2.jpg",
+    "sha256": "bce3386e8d2402c0c779846649d083b0502190fad0dda403629e54cb3a0f2765",
+    "client_ws": "open · 1 deltas / 60s",
+    "keepers_runnable": "10 / 37",
+    "attention_chip": 55,
+    "attention_needed_card": 27,
+    "open_gate": 0,
+    "telemetry": { "peak_samples_5m": 143, "events": "560+", "sources": "9/9", "gaps": 0 }
+  },
+  "monitor_keeper_fleet": {
+    "screenshot": "/Users/dancer/me/reports/masc-live-dashboard-monitor-20260816-loop2.jpg",
+    "sha256": "36e51aefd6ff621c1bd07ea2cdc107ae0253d1dd28ac7a2a0ffe8d251a9052d8",
+    "typed_bands": { "normal": 9, "paused": 27, "stopped": 0, "attention": 3 },
+    "client_ws": "open · 3 deltas / 60s",
+    "attention_keepers": ["analyst", "rondo", "taskmaster"],
+    "selected_keeper_live_detail": {
+      "keeper": "analyst",
+      "runtime": "antigravity_subscription.gemini-3-6-flash-high",
+      "turn": 2433,
+      "context_usage_pct": 250,
+      "context_bytes": "320.1K / 128.0K",
+      "note": "compact 임계 근접 배지 렌더 — context overflow 관측이 UI에 실시간 투영됨"
+    }
+  },
+  "console_errors": 0,
+  "capture_method": "claude-in-chrome, viewport 1653x1051, live server :8935"
+}

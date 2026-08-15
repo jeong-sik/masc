@@ -100,6 +100,12 @@ function TimelineMessage({ row }: { row: TimelineRow }) {
           ${row.message.type
             ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.type}</span>`
             : null}
+          ${row.message.mentionDelivery
+            ? html`<span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] px-2 py-0.5 text-2xs font-medium uppercase tracking-[var(--track-caps)] text-[var(--color-fg-secondary)]">${row.message.mentionDelivery === 'passive' ? 'Passive fanout' : `Keeper intake ${row.message.mentionDelivery}`}</span>`
+            : null}
+          ${row.message.requestId
+            ? html`<span class="max-w-48 truncate font-mono text-2xs text-[var(--color-fg-muted)]" title=${row.message.requestId} translate="no">${row.message.requestId}</span>`
+            : null}
         </div>
         <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">
           <${RichContent} text=${preview} previewLimit=${2} />

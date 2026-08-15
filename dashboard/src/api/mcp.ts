@@ -238,17 +238,58 @@ interface McpCallResponse {
     isError?: boolean
     structuredContent?: unknown
   }
-  error?: { message?: string }
+  error?: { message?: string; code?: number }
+}
+
+class McpProtocolError extends Error {
+  readonly code: number | null
+
+  constructor(message: string, code: number | null) {
+    super(message)
+    this.name = 'McpProtocolError'
+    this.code = code
+  }
 }
 
 class McpToolCallError extends Error {
   readonly authErrorCode: unknown
+  readonly structuredContent: unknown
 
-  constructor(message: string, authErrorCode: unknown) {
+  constructor(message: string, authErrorCode: unknown, structuredContent: unknown) {
     super(message)
     this.name = 'McpToolCallError'
     this.authErrorCode = authErrorCode
+    this.structuredContent = structuredContent
   }
+}
+
+export function mcpStructuredContentFromError(error: unknown): unknown {
+  return error instanceof McpToolCallError ? error.structuredContent : null
+}
+
+export type McpCallFailureDisposition =
+  | 'known_tool_response'
+  | 'known_pre_effect'
+  | 'outcome_unknown'
+
+export function mcpCallFailureDisposition(error: unknown): McpCallFailureDisposition {
+  if (error instanceof McpToolCallError) return 'known_tool_response'
+  if (error instanceof McpProtocolError && error.code === -32001) {
+    return 'known_pre_effect'
+  }
+  if (
+    error instanceof ApiRequestError
+    && !error.timeout
+    && error.status !== undefined
+    && error.status >= 400
+    && error.status < 500
+  ) {
+    return 'known_pre_effect'
+  }
+  if (error instanceof Error && error.message === MCP_BLOCKED_MESSAGE) {
+    return 'known_pre_effect'
+  }
+  return 'outcome_unknown'
 }
 
 function structuredAuthErrorCode(value: unknown): unknown {
@@ -263,12 +304,18 @@ function parseMcpHttpResponse(raw: string): McpCallResponse {
 }
 
 function extractMcpText(res: McpCallResponse): string {
-  if (res.error?.message) throw new Error(res.error.message)
+  if (res.error?.message) {
+    throw new McpProtocolError(
+      res.error.message,
+      typeof res.error.code === 'number' ? res.error.code : null,
+    )
+  }
   if (res.result?.isError) {
     const err = res.result.content?.[0]?.text ?? 'MCP tool call failed'
     throw new McpToolCallError(
       err,
       structuredAuthErrorCode(res.result.structuredContent),
+      res.result.structuredContent,
     )
   }
   return res.result?.content?.[0]?.text ?? ''

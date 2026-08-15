@@ -459,11 +459,14 @@ let test_dashboard_keeper_unknown_context_is_informational () =
          |> to_string))
 
 let make_message ?mention ~seq ~from_agent ~content () : Types.message =
-  { seq;
+  { request_id = Printf.sprintf "wmsg-test-%d" seq;
+    seq;
     from_agent;
     msg_type = "broadcast";
     content;
     mention;
+    mention_delivery =
+      (match mention with None -> Types.Mention_passive | Some _ -> Types.Mention_accepted);
     timestamp = "";
     trace_context = None;
     expires_at = None;

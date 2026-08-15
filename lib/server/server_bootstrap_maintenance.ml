@@ -551,6 +551,37 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              recovery_ctx)
         transition_projection_budget
     in
+    let reconcile_broadcast_mentions () =
+      match
+        Workspace_broadcast.reconcile_pending_mentions
+          (Mcp_server.workspace_config state)
+      with
+      | Error detail ->
+        Log.Server.warn "broadcast mention reconciliation unavailable: %s" detail
+      | Ok report ->
+        List.iter
+          (fun (receipt : Workspace_broadcast.mention_outbox_quarantine_receipt) ->
+             Log.Server.error
+               "broadcast mention quarantine source=%s quarantine=%s reason=%s sha256=%s detail=%s"
+               receipt.source_name
+               receipt.quarantine_name
+               (Workspace_broadcast.mention_outbox_quarantine_reason_to_string
+                  receipt.reason)
+               receipt.raw_sha256
+               receipt.detail)
+          report.quarantine_receipts;
+        if report.pending_rows > 0 || report.corrupt_rows > 0
+        then
+          Log.Server.info
+            "broadcast mention reconciliation outbox=%d pending=%d accepted=%d already_accepted=%d deferred=%d rejected=%d corrupt=%d"
+            report.outbox_rows
+            report.pending_rows
+            report.accepted
+            report.already_accepted
+            report.deferred
+            report.rejected
+            report.corrupt_rows
+    in
     recover_durable_demand_owners Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
@@ -564,6 +595,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
       recover_durable_demand_owners Maintenance_projection;
+      reconcile_broadcast_mentions ();
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

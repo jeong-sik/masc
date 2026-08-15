@@ -76,6 +76,7 @@
   eio.unix
   uri
   uuidm
+  base64
   digestif
   masc_random_id)
  (preprocess

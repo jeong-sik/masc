@@ -65,28 +65,69 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
       let from_agent = delivery.from_agent in
       let mention = delivery.mention in
       let message = delivery.content in
-      let _ =
-        Session.push_message registry ~from_agent ~content:message ~mention
+      let project_auxiliary label project =
+        try project () with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Mcp.warn
+            "broadcast auxiliary projection failed projection=%s request_id=%s: %s"
+            label
+            delivery.request_id
+            (Printexc.to_string exn)
       in
+      project_auxiliary "session" (fun () ->
+        let recipients =
+          Session.push_message registry ~from_agent ~content:message ~mention
+        in
+        Log.Mcp.debug
+          "broadcast session push delivered to %d recipient(s) request_id=%s"
+          (List.length recipients)
+          delivery.request_id);
       let notification_fields =
         [ ("type", `String "masc/broadcast")
+        ; ("request_id", `String delivery.request_id)
         ; ("from", `String from_agent)
         ; ("content", `String message)
         ; ("mention", Json_util.string_opt_to_json mention)
+        ; ( "mention_delivery"
+          , Workspace_broadcast.mention_delivery_to_yojson
+              delivery.mention_delivery )
         ; ("timestamp", `Float (Time_compat.now ()))
         ]
       in
       let notification =
         `Assoc (Otel_trace_context.inject_json notification_fields trace_context)
       in
-      Mcp_server.sse_broadcast state notification;
-      Subscriptions.push_event_to_sessions notification;
-      (match mention with
-       | Some target ->
-         Notify.notify_mention ~from_agent ~target_agent:target ~message ()
-       | None -> ());
-      Audit_log.log_broadcast config ~agent_id:from_agent ~message_preview:message ();
-      Some (Tool_result.ok ~tool_name ~start_time delivery.rendered)
+      project_auxiliary "sse" (fun () ->
+        Mcp_server.sse_broadcast state notification);
+      project_auxiliary "subscriptions" (fun () ->
+        Subscriptions.push_event_to_sessions notification);
+      project_auxiliary "notification" (fun () ->
+        match mention with
+        | Some target ->
+          Notify.notify_mention ~from_agent ~target_agent:target ~message ()
+        | None -> ());
+      project_auxiliary "audit" (fun () ->
+        Audit_log.log_broadcast config ~agent_id:from_agent ~message_preview:message ());
+      let data = Workspace_broadcast.broadcast_delivery_to_yojson delivery in
+      Some
+        (match delivery.mention_delivery with
+         | Workspace_broadcast.Passive
+         | Workspace_broadcast.Accepted
+         | Workspace_broadcast.Already_accepted ->
+           Tool_result.make_ok ~tool_name ~start_time ~data ()
+         | Workspace_broadcast.Pending
+         | Workspace_broadcast.Deferred _ ->
+           Tool_result.make_deferred ~tool_name ~start_time ~data ()
+         | Workspace_broadcast.Rejected _ ->
+           Tool_result.make_err
+             ~tool_name
+             ~class_:Tool_result.Workflow_rejection
+             ~start_time
+             ~data
+             (Printf.sprintf
+                "Broadcast persisted, but the explicit Keeper delivery was rejected; do not resend; request_id=%s"
+                delivery.request_id))
 
 (** masc_messages — retrieve recent messages *)
 let handle_messages ~tool_name ~start_time (ctx : context) : tool_result option =

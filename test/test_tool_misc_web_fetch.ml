@@ -158,6 +158,8 @@ let test_truncation_offloads_full_text () =
             (String_util.contains_substring text (line 399));
           check bool "marker present" true
             (String_util.contains_substring text "[TRUNCATED total_chars=");
+          check bool "no outline for heading-free text" false
+            (String_util.contains_substring text "[OUTLINE");
           let path = json |> member "full_text_path" |> to_string in
           check bool "marker names the path" true
             (String_util.contains_substring text ("full_text=" ^ path));
@@ -208,6 +210,65 @@ let test_truncation_preserves_utf8_boundaries () =
             (String_util.contains_substring text "한글본문조각0000");
           check bool "tail kept" true
             (String_util.contains_substring text "한글본문조각0299")))
+
+(* Feature contract: when the truncated extraction carries markdown
+   headings, the marker is followed by an [OUTLINE ...] byte-offset map
+   addressing the offloaded file — reading the artifact at a listed
+   offset lands exactly on that heading line. Fenced-code [#] lines stay
+   out of the count, and collection caps at 32 rows while the header
+   still reports the full heading total. *)
+let test_truncation_outline_maps_headings () =
+  let tmp_base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-outline-%d" (Unix.getpid ()))
+  in
+  Unix.mkdir tmp_base 0o755;
+  let section index =
+    Printf.sprintf
+      "## section %02d\npadding %02d alpha filler text\npadding %02d beta filler text"
+      index index index
+  in
+  let preamble = [ "# Doc Title"; "```"; "# not a heading"; "```" ] in
+  let body =
+    String.concat "\n" (preamble @ List.init 40 (fun i -> section (i + 1)))
+  in
+  (* Offset of "## section 10" computed from construction, not by
+     parsing the outline back: the map row must agree with it. *)
+  let expected_offset =
+    String.length
+      (String.concat "\n" (preamble @ List.init 9 (fun i -> section (i + 1))))
+    + 1
+  in
+  with_base_path_env tmp_base (fun () ->
+      Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+          Ok
+            { Masc.Tool_misc_web_fetch.http_status = Some 200
+            ; final_url = "https://example.com/sections"
+            ; redirect_count = 0
+            ; content_type = Some "text/plain"
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            })
+        (fun () ->
+          let json =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:1_000
+                 "https://example.com/sections")
+          in
+          let open Yojson.Safe.Util in
+          check bool "truncated" true (json |> member "truncated" |> to_bool);
+          let text = json |> member "text" |> to_string in
+          check bool "outline header counts headings, not fenced hashes" true
+            (String_util.contains_substring text "[OUTLINE headings=41 shown=32");
+          let row = Printf.sprintf "\n%d ## section 10" expected_offset in
+          check bool "outline row carries the constructed offset" true
+            (String_util.contains_substring text row);
+          let path = json |> member "full_text_path" |> to_string in
+          let stored = In_channel.with_open_bin path In_channel.input_all in
+          let heading = "## section 10" in
+          check string "offset addresses that heading in the artifact" heading
+            (String.sub stored expected_offset (String.length heading))))
 
 (* Feature contract: web content chooses the next fetch, so loopback,
    private, link-local, unspecified, and localhost destinations are
@@ -281,6 +342,8 @@ let () =
             test_truncation_offloads_full_text;
           test_case "truncation preserves utf8 boundaries" `Quick
             test_truncation_preserves_utf8_boundaries;
+          test_case "truncation outline maps headings" `Quick
+            test_truncation_outline_maps_headings;
           test_case "destination boundary" `Quick test_destination_boundary;
         ] );
     ]

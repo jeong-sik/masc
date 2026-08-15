@@ -343,6 +343,65 @@ let snap_codepoint_right text index =
   in
   loop index
 
+let outline_max_entries = 32
+
+(* Byte-offset map of the extraction's markdown ATX headings, in order.
+   Offsets index the offloaded artifact, so every entry doubles as a
+   read address for keeper_artifact_read(sha256, offset, max_bytes) —
+   the keeper picks a section instead of paging blindly. A one-bit
+   fence toggle keeps `#` lines inside ``` blocks out of the map;
+   imperfect fencing costs map precision, never correctness. Collection
+   stops at [outline_max_entries] while the total keeps counting, so
+   the marker can say how much of the document the map covers. *)
+let document_outline text =
+  let total = String.length text in
+  let line_end offset =
+    match String.index_from_opt text offset '\n' with
+    | Some idx -> idx
+    | None -> total
+  in
+  let rec walk offset in_fence collected collected_count heading_total =
+    if offset >= total then List.rev collected, heading_total
+    else
+      let stop = line_end offset in
+      let line = String.sub text offset (stop - offset) in
+      let line_len = String.length line in
+      let fence_line = line_len >= 3 && String.equal (String.sub line 0 3) "```" in
+      let heading =
+        (not in_fence) && (not fence_line)
+        &&
+        let rec hashes i =
+          if i < line_len && Char.equal line.[i] '#' then hashes (i + 1) else i
+        in
+        let count = hashes 0 in
+        count >= 1 && count <= 6 && count < line_len && Char.equal line.[count] ' '
+      in
+      let collected, collected_count =
+        if heading && collected_count < outline_max_entries then
+          (offset, line) :: collected, collected_count + 1
+        else collected, collected_count
+      in
+      let heading_total = if heading then heading_total + 1 else heading_total in
+      let in_fence = if fence_line then not in_fence else in_fence in
+      walk (stop + 1) in_fence collected collected_count heading_total
+  in
+  walk 0 false [] 0 0
+
+let outline_block text =
+  match document_outline text with
+  | [], _ -> None
+  | entries, heading_total ->
+      let header =
+        Printf.sprintf
+          "[OUTLINE headings=%d shown=%d — byte offsets into full_text for \
+           keeper_artifact_read]"
+          heading_total (Stdlib.List.length entries)
+      in
+      let rows =
+        List.map (fun (offset, line) -> Printf.sprintf "%d %s" offset line) entries
+      in
+      Some (String.concat "\n" (header :: rows))
+
 let truncate_text ~max_chars text =
   let total = String.length text in
   if total <= max_chars then text, false, None
@@ -367,10 +426,18 @@ let truncate_text ~max_chars text =
     let offloaded = offload_full_text text in
     let marker =
       match offloaded with
-      | Ok path ->
-          Printf.sprintf
-            "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text=%s]"
-            total (String.length head) (String.length tail) path
+      | Ok path -> (
+          let base =
+            Printf.sprintf
+              "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text=%s]"
+              total (String.length head) (String.length tail) path
+          in
+          (* The outline only ships when the offload succeeded: its
+             offsets address the artifact file, and a map without an
+             address surface would send the keeper nowhere. *)
+          match outline_block text with
+          | None -> base
+          | Some outline -> String.concat "\n" [ base; outline ])
       | Error reason ->
           Printf.sprintf
             "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text_unavailable=%s]"

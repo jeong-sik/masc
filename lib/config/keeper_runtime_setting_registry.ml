@@ -597,6 +597,49 @@ let all =
       ~consumers:[ "Env_config_runtime.Inference"; "Tool_misc_web_search" ]
       ~category:"web_search"
       "Web-search fallback provider list"
+    (* Provider credentials are Env_only on purpose: runtime.toml is
+       committed, so secrets never gain a TOML key. Presence of a key
+       admits its provider into the search chain. *)
+  ; setting
+      ~env_name:"BRAVE_SEARCH_API_KEY"
+      ~exposure:Env_only
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:[ "Tool_misc_web_search" ]
+      ~category:"web_search"
+      "Brave Search API key (admits the brave provider)"
+  ; setting
+      ~env_name:"TAVILY_API_KEY"
+      ~exposure:Env_only
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:[ "Tool_misc_web_search" ]
+      ~category:"web_search"
+      "Tavily API key (admits the tavily provider)"
+  ; setting
+      ~env_name:"EXA_API_KEY"
+      ~exposure:Env_only
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:[ "Tool_misc_web_search" ]
+      ~category:"web_search"
+      "Exa API key (admits the exa provider)"
+  ; setting
+      ~env_name:"BING_SEARCH_API_KEY"
+      ~exposure:Env_only
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:[ "Tool_misc_web_search" ]
+      ~category:"web_search"
+      "Bing Search API key (admits the bing_api provider)"
+  ; setting
+      ~env_name:"AZURE_BING_SEARCH_API_KEY"
+      ~exposure:Env_only
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:[ "Tool_misc_web_search" ]
+      ~category:"web_search"
+      "Azure-issued Bing Search API key (same admission as BING_SEARCH_API_KEY)"
   ; setting
       ~range:(int_range ~min:1 ~max:60 ())
       ~env_name:"MASC_WEB_SEARCH_TIMEOUT_SEC"

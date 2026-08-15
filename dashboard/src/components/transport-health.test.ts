@@ -26,6 +26,7 @@ import {
   agentPoolTone,
   transportTruthLine,
   transportEyebrow,
+  sameOriginEyebrow,
   webrtcEyebrow,
   type StatusTone,
 } from './transport-health'
@@ -726,6 +727,16 @@ describe('transportEyebrow', () => {
     [true, false, 50052, ':50052 중단'],
   ] as const)('transportEyebrow(%s,%s,%s) → %s', (configured, listening, port, expected) => {
     expect(transportEyebrow(configured, listening, port)).toBe(expected)
+  })
+})
+
+describe('sameOriginEyebrow', () => {
+  it.each([
+    [false, true, '비활성'],
+    [true, true, '/ws 활성'],
+    [true, false, '/ws 중단'],
+  ] as const)('sameOriginEyebrow(%s,%s) → %s', (configured, listening, expected) => {
+    expect(sameOriginEyebrow(configured, listening)).toBe(expected)
   })
 })
 

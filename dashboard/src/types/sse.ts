@@ -229,6 +229,12 @@ export interface SSEEvent {
   cost_usd?: number
   tool_calls_made?: number
   total_turns?: number
+  // Per-turn cache observability (RFC-0382). `cache_read_tokens` is
+  // usage-reported (cloud providers); `cache_n`/`prompt_n` are wire timings
+  // (llama-server, Ollama): KV-reused vs freshly prefilled prompt tokens.
+  cache_read_tokens?: number | null
+  cache_n?: number | null
+  prompt_n?: number | null
   // Agent Core bridge payload (generic container for Event_bus events).
   payload?: Record<string, unknown> | string
   // Wall-clock time attached to runtime events such as masc/task_claimed.

@@ -76,6 +76,24 @@ function keeperTraceNameFromEvent(event: SSEEvent, fallback: string): string {
   )
 }
 
+// Per-turn cache observability (RFC-0382). Two sources with different
+// semantics, shown side by side and never merged: `cache_read_tokens` is
+// usage-reported by cloud providers; `cache_n`/`prompt_n` are wire timings
+// (llama-server, Ollama) — KV-reused vs freshly prefilled prompt tokens.
+function turnCacheSuffix(event: SSEEvent): string {
+  const parts: string[] = []
+  const cacheRead = asNumber(event.cache_read_tokens)
+  if (cacheRead != null && cacheRead > 0) parts.push(`캐시 read ${cacheRead}tok`)
+  const cacheN = asNumber(event.cache_n)
+  const promptN = asNumber(event.prompt_n)
+  if (cacheN != null && promptN != null) {
+    const seen = cacheN + promptN
+    const pct = seen > 0 ? ` (${Math.round((cacheN / seen) * 100)}%)` : ''
+    parts.push(`KV 재사용 ${cacheN}/${seen}tok${pct}`)
+  }
+  return parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
+}
+
 // --- Signals ---
 
 const eventCount = signal(0)
@@ -451,7 +469,7 @@ function handleEvent(event: SSEEvent): void {
       }
       addTypedJournalEntry(
         event.name ?? agent,
-        `Turn ${event.turn ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}`,
+        `Turn ${event.turn ?? '?'} tok=${((event.input_tokens ?? 0) + (event.output_tokens ?? 0))} tools=${event.tool_calls_made ?? 0}${turnCacheSuffix(event)}`,
         'keepers',
         'unknown',
         {

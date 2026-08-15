@@ -40,7 +40,13 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 	    - [text]: readable extracted content. Over [maxChars] it becomes a
 	      deterministic head/tail window (three quarters of the budget from
 	      the start, one quarter from the end, cut on line boundaries) around
-	      a [\[TRUNCATED ...\]] marker that names the offloaded full text
+	      a [\[TRUNCATED ...\]] marker that names the offloaded full text.
+	      When the extraction carries markdown ATX headings and the offload
+	      succeeded, the marker is followed by an [\[OUTLINE ...\]] block:
+	      up to 32 [<byte-offset> <heading-line>] rows addressing the
+	      offloaded file, so a reader fetches one section by offset instead
+	      of paging blindly. Fenced-code [#] lines are excluded;
+	      heading-free documents carry no outline
 	    - [content_chars]: length of [text]
 	    - [truncated]: whether output truncation was applied
 	    - [full_text_path]: present only when truncation offloaded the full

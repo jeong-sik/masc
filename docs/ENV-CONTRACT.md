@@ -149,7 +149,7 @@ Precedence:
 | `MASC_WEB_SEARCH_PROVIDER_ORDER` | built-in order | Overrides provider order for auto mode. |
 | `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout. |
-| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `30.0` | In-process WebSearch cache TTL. |
+| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `900.0` | In-process WebSearch cache TTL. |
 
 Equivalent `runtime.toml` keys:
 
@@ -160,7 +160,7 @@ provider = "auto"
 provider_order = "searxng,brave,tavily,exa,bing_api"
 fallbacks = "duckduckgo,bing_rss"
 timeout_sec = 15
-cache_ttl_sec = 30.0
+cache_ttl_sec = 900.0
 ```
 
 Representative code paths:

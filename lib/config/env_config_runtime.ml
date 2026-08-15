@@ -288,8 +288,17 @@ module Tools = struct
     let v = get_int ~default:15 "MASC_WEB_SEARCH_TIMEOUT_SEC" in
     max 1 (min 60 v)
 
+  (* 15 min, matching the Hermes/OpenClaw web-tool cache window. The
+     previous 30 s default expired before a keeper research loop could
+     even repeat a query inside one turn. *)
+  let web_search_cache_ttl_default_sec = 900.0
+
   let web_search_cache_ttl_sec () =
-    let v = get_float ~default:30.0 "MASC_WEB_SEARCH_CACHE_TTL_SEC" in
+    let v =
+      get_float
+        ~default:web_search_cache_ttl_default_sec
+        "MASC_WEB_SEARCH_CACHE_TTL_SEC"
+    in
     if v < 0.0 then 0.0 else v
 
 end

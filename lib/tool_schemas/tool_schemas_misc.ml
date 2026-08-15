@@ -29,8 +29,8 @@ let web_search_schema : tool_schema =
       "Search the public web. Use exact tool name WebSearch. Example input: \
        {\"query\":\"OCaml 5.2 release date\",\"limit\":5,\"includeContent\":true}. \
        Returns result.results with title, url, snippet. With includeContent:true \
-       each result also has page_content and the response has a human-readable \
-       content_text summary. Do not use snake_case names like web_search."
+       the response gains a human-readable content_text rendering of every \
+       fetched page. Do not use snake_case names like web_search."
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -54,12 +54,12 @@ let web_search_schema : tool_schema =
                     [ "type", `String "boolean"
                     ; ( "description"
                       , `String
-                          "When true, also fetch each result page and add raw page_content plus a human-readable content_text summary. Recommended for research." )
+                          "When true, also fetch each result page and add a human-readable content_text rendering. Recommended for research." )
                     ] )
               ; ( "contentMaxChars"
                 , `Assoc
                     [ "type", `String "integer"
-                    ; "description", `String "Maximum raw page_content characters per result."
+                    ; "description", `String "Maximum fetched characters per result inside content_text."
                     ; "minimum", `Int 100
                     ; "maximum", `Int 20000
                     ; "default", `Int 4000

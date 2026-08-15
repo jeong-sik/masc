@@ -561,17 +561,11 @@ let () = test "dispatch_web_search_include_content_enriches_results" (fun () ->
               assert
                 (str_contains content_text
                    "[Standards ©](https://example.com/standards)");
-              assert (hit |> member "page_content_status" |> to_string = "ok");
-              assert (hit |> member "page_content_http_status" |> to_int = 200);
-              assert (hit |> member "page_content_truncated" |> to_bool = false);
-              assert
-                (str_contains
-                   (hit |> member "page_content" |> to_string)
-                   "# Result Page");
-              assert
-                (str_contains
-                   (hit |> member "page_content" |> to_string)
-                   "Readable page content & proof.")
+              (* Single-carriage contract: fetched bodies ride only in
+                 content_text, never mirrored into per-hit fields. *)
+              assert (hit |> member "page_content" = `Null);
+              assert (hit |> member "page_content_status" = `Null);
+              assert (hit |> member "page_content_http_status" = `Null)
           | None -> failwith "dispatch returned None"))
 )
 
@@ -613,15 +607,10 @@ let () = test "dispatch_web_search_include_content_keeps_result_on_fetch_error" 
               assert (str_contains content_text "Content status: error");
               assert (str_contains content_text "_Failed to retrieve page content:");
               assert (str_contains content_text ("Source: " ^ url));
-              assert (hit |> member "page_content_status" |> to_string = "error");
-              assert
-                (str_contains
-                   (hit |> member "page_content" |> to_string)
-                   "_Failed to retrieve page content:");
-              assert
-                (str_contains
-                   (hit |> member "page_content" |> to_string)
-                   ("Source: " ^ url))
+              (* Failure detail also rides only in content_text. *)
+              assert (hit |> member "page_content" = `Null);
+              assert (hit |> member "page_content_status" = `Null);
+              assert (hit |> member "page_content_error" = `Null)
           | None -> failwith "dispatch returned None"))
 )
 

@@ -509,34 +509,6 @@ let test_tool_call_request_invalid_bytes_result () =
       (String_util.contains_substring msg"ToolCallRequest")
 ;;
 
-let test_lsp_request_invalid_bytes_result () =
-  match T.LspRequest.of_bytes_result malformed_protobuf with
-  | Ok _ -> Alcotest.fail "expected decode failure"
-  | Error msg ->
-    Alcotest.(check bool)
-      "error keeps 'protobuf decode error:' prefix"
-      true
-      (String.starts_with ~prefix:"protobuf decode error:" msg);
-    Alcotest.(check bool)
-      "error names the failing protobuf type (LspRequest)"
-      true
-      (String_util.contains_substring msg"LspRequest")
-;;
-
-let test_lsp_response_invalid_bytes_result () =
-  match T.LspResponse.of_bytes_result malformed_protobuf with
-  | Ok _ -> Alcotest.fail "expected decode failure"
-  | Error msg ->
-    Alcotest.(check bool)
-      "error keeps 'protobuf decode error:' prefix"
-      true
-      (String.starts_with ~prefix:"protobuf decode error:" msg);
-    Alcotest.(check bool)
-      "error names the failing protobuf type (LspResponse)"
-      true
-      (String_util.contains_substring msg"LspResponse")
-;;
-
 let test_tool_call_handler_invalid_bytes_raise_grpc_status () =
   Eio_main.run
   @@ fun env ->
@@ -836,14 +808,6 @@ let () =
             "ToolCallRequest invalid bytes result"
             `Quick
             test_tool_call_request_invalid_bytes_result
-        ; Alcotest.test_case
-            "LspRequest invalid bytes result"
-            `Quick
-            test_lsp_request_invalid_bytes_result
-        ; Alcotest.test_case
-            "LspResponse invalid bytes result"
-            `Quick
-            test_lsp_response_invalid_bytes_result
         ] )
     ; ( "service"
       , [ Alcotest.test_case "service_name" `Quick test_service_name

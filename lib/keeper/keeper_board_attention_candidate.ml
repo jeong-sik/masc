@@ -2036,64 +2036,80 @@ let record_and_wake ~base_path candidate =
       }
 ;;
 
+type judgment_delivery_outcome =
+  | Delivered of candidate
+  | Candidate_absent
+      (** The candidate this partition's [Completed] item names is not in the
+          live ledger. A retire moves the whole candidate store aside as one
+          directory (scripts/check-runtime-deployment-preflight.sh); it never
+          leaves a tombstone the live ledger can read back, so this cannot
+          distinguish "retired" from any other cause a candidate is gone —
+          both mean the same thing for this delivery: it cannot succeed on a
+          retry of the identical request, because the row it would update no
+          longer exists. Every other failure below stays a typed [Error],
+          because those represent a live candidate in an unexpected state,
+          which is a bug this function must keep reporting loudly rather than
+          quietly resolve. *)
+
 let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
   let* candidates = load_candidates ~base_path ~keeper_name in
-  let* candidate =
-    match find_candidate candidates candidate_id with
-    | Some candidate -> Ok candidate
-    | None -> Error ("Board attention candidate not found: " ^ candidate_id)
-  in
-  let* judged_candidate =
-    match status_view candidate.status with
-    | Direct_resumable (Resumable_pending _)
-    | Requeued_resumable { resumable = Resumable_pending _; _ } ->
-      record_judgment ~base_path candidate judgment
-    | Direct_resumable (Resumable_judged judged)
-    | Requeued_resumable
-        { resumable = Resumable_judged judged; _ }
-      when same_judgment judged.judgment judgment ->
-      Ok candidate
-    | Direct_resumable (Resumable_consumed consumed)
-    | Requeued_resumable
-        { resumable = Resumable_consumed consumed; _ }
-      when same_judgment consumed.judgment judgment ->
-      Ok candidate
-    | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
-    | Requeued_resumable
-        { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
-      Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
-    | Suspended_quarantine _ ->
-      Error
-        ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
-         ^ candidate_id)
-  in
-  match status_view judged_candidate.status with
-  | Direct_resumable (Resumable_consumed _)
-  | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
-    normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
-  | Direct_resumable (Resumable_pending _)
-  | Requeued_resumable { resumable = Resumable_pending _; _ } ->
-    Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
-  | Direct_resumable (Resumable_judged judged)
-  | Requeued_resumable
-      { resumable = Resumable_judged judged; _ } ->
-    let* delivered = consume_judged ~base_path judged_candidate judged in
-    (match status_view delivered.status with
-     | Direct_resumable (Resumable_consumed _)
-     | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
-       normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
-     | Direct_resumable (Resumable_pending _ | Resumable_judged _)
-     | Requeued_resumable
-         { resumable = (Resumable_pending _ | Resumable_judged _); _ } ->
-       Error
-         ("Board attention candidate delivery did not reach Consumed: "
-          ^ candidate_id)
-     | Suspended_quarantine _ ->
-       Error
-         ("Board attention candidate became quarantined during delivery: "
-          ^ candidate_id))
-  | Suspended_quarantine _ ->
-    Error
-      ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
-       ^ candidate_id)
+  match find_candidate candidates candidate_id with
+  | None -> Ok Candidate_absent
+  | Some candidate ->
+    let* judged_candidate =
+      match status_view candidate.status with
+      | Direct_resumable (Resumable_pending _)
+      | Requeued_resumable { resumable = Resumable_pending _; _ } ->
+        record_judgment ~base_path candidate judgment
+      | Direct_resumable (Resumable_judged judged)
+      | Requeued_resumable
+          { resumable = Resumable_judged judged; _ }
+        when same_judgment judged.judgment judgment ->
+        Ok candidate
+      | Direct_resumable (Resumable_consumed consumed)
+      | Requeued_resumable
+          { resumable = Resumable_consumed consumed; _ }
+        when same_judgment consumed.judgment judgment ->
+        Ok candidate
+      | Direct_resumable (Resumable_judged _ | Resumable_consumed _)
+      | Requeued_resumable
+          { resumable = (Resumable_judged _ | Resumable_consumed _); _ } ->
+        Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
+      | Suspended_quarantine _ ->
+        Error
+          ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+           ^ candidate_id)
+    in
+    let* delivered_candidate =
+      match status_view judged_candidate.status with
+      | Direct_resumable (Resumable_consumed _)
+      | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
+        normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+      | Direct_resumable (Resumable_pending _)
+      | Requeued_resumable { resumable = Resumable_pending _; _ } ->
+        Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
+      | Direct_resumable (Resumable_judged judged)
+      | Requeued_resumable
+          { resumable = Resumable_judged judged; _ } ->
+        let* delivered = consume_judged ~base_path judged_candidate judged in
+        (match status_view delivered.status with
+         | Direct_resumable (Resumable_consumed _)
+         | Requeued_resumable { resumable = Resumable_consumed _; _ } ->
+           normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+         | Direct_resumable (Resumable_pending _ | Resumable_judged _)
+         | Requeued_resumable
+             { resumable = (Resumable_pending _ | Resumable_judged _); _ } ->
+           Error
+             ("Board attention candidate delivery did not reach Consumed: "
+              ^ candidate_id)
+         | Suspended_quarantine _ ->
+           Error
+             ("Board attention candidate became quarantined during delivery: "
+              ^ candidate_id))
+      | Suspended_quarantine _ ->
+        Error
+          ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+           ^ candidate_id)
+    in
+    Ok (Delivered delivered_candidate)
 ;;

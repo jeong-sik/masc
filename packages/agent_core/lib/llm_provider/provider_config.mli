@@ -82,6 +82,7 @@ type t =
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
   ; cache_system_prompt : bool
+  ; cache_extended_ttl : bool
   ; supports_tool_choice_override : bool option
     (** Override the registry default for [supports_tool_choice].
       [None] = use the per-kind default from {!Capabilities}.
@@ -232,6 +233,7 @@ val make
   -> ?disable_parallel_tool_use:bool
   -> ?response_format:Types.response_format
   -> ?cache_system_prompt:bool
+  -> ?cache_extended_ttl:bool
   -> ?supports_tool_choice_override:bool
   -> ?supports_structured_output_override:bool
   -> ?model_capabilities_override:Capabilities.capabilities

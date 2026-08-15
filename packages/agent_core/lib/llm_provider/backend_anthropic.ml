@@ -329,14 +329,35 @@ let build_request_payload
            (Provider_config.string_of_provider_kind config.kind))
   in
   let msgs_json = List.map message_to_json messages in
+  (* One cache_control object for every breakpoint this request emits.
+     [cache_extended_ttl] selects the 1h tier (2x write, same 0.1x read);
+     the default is the API's 5m tier, expressed by omitting [ttl]. *)
+  let cache_control_json =
+    if config.cache_extended_ttl
+    then `Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]
+    else `Assoc [ "type", `String "ephemeral" ]
+  in
   let body =
     match request_mode with
     | Completion { output_token_receipt; stream } ->
-      [ "model", `String config.model_id
-      ; "max_tokens", `Int (required_output_token_value output_token_receipt)
-      ; "messages", `List msgs_json
-      ; "stream", `Bool stream
-      ]
+      let base =
+        [ "model", `String config.model_id
+        ; "max_tokens", `Int (required_output_token_value output_token_receipt)
+        ; "messages", `List msgs_json
+        ; "stream", `Bool stream
+        ]
+      in
+      if config.cache_system_prompt
+      then
+        (* Top-level automatic caching: the API applies the breakpoint to the
+           last cacheable block and advances it as the conversation grows, so
+           the message history is read from cache each turn (0.1x input
+           price) instead of being re-prefilled. Coexists with the explicit
+           system/tools breakpoints below (well under the 4-breakpoint cap,
+           which is when automatic caching would be refused). Count_tokens
+           carries no cache_control: nothing is cached by counting. *)
+        ("cache_control", cache_control_json) :: base
+      else base
     | Count_tokens -> [ "model", `String config.model_id; "messages", `List msgs_json ]
   in
   let body =
@@ -353,7 +374,7 @@ let build_request_payload
           `Assoc
             [ "type", `String "text"
             ; "text", `String s
-            ; "cache_control", `Assoc [ "type", `String "ephemeral" ]
+            ; "cache_control", cache_control_json
             ]
         in
         ("system", `List [ block ]) :: body)
@@ -400,7 +421,7 @@ let build_request_payload
           let last_with_cache =
             match last with
             | `Assoc fields ->
-              `Assoc (("cache_control", `Assoc [ "type", `String "ephemeral" ]) :: fields)
+              `Assoc (("cache_control", cache_control_json) :: fields)
             | other -> other
           in
           List.rev (last_with_cache :: rest)

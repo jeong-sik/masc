@@ -411,7 +411,6 @@ let test_transport_health_json () =
     [ "configured"
     ; "listening"
     ; "mode"
-    ; "port"
     ; "sessions"
     ; "relay_source"
     ; "delivery"

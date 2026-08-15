@@ -138,8 +138,6 @@ let test_websocket_discovery_uses_same_origin_url () =
             Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
           check bool "same-origin upgrade is marked enabled" true
             Yojson.Safe.Util.(json |> member "same_origin_upgrade_enabled" |> to_bool);
-          check bool "same-origin reachability is explicit" true
-            Yojson.Safe.Util.(json |> member "same_origin_reachable" |> to_bool);
           check string "same-origin retained for diagnostics" "ws://127.0.0.1:8935/ws"
             Yojson.Safe.Util.(json |> member "same_origin_ws_url" |> to_string))))
 

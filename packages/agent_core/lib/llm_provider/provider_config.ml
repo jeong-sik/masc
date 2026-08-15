@@ -59,6 +59,7 @@ type t =
   ; supports_structured_output_override : bool option
   ; model_capabilities_override : Capabilities.capabilities option
   ; keep_alive : string option
+  ; return_progress : bool
   ; internal_model_rotation_count : int option
   ; num_ctx : int option
   ; seed : int option
@@ -98,6 +99,7 @@ let make
       ?supports_structured_output_override
       ?model_capabilities_override
       ?keep_alive
+      ?(return_progress = false)
       ?internal_model_rotation_count
       ?num_ctx
       ?seed
@@ -155,6 +157,7 @@ let make
   ; supports_structured_output_override
   ; model_capabilities_override
   ; keep_alive
+  ; return_progress
   ; internal_model_rotation_count
   ; num_ctx
   ; seed

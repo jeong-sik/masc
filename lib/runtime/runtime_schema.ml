@@ -284,6 +284,7 @@ type binding =
   ; price_output : float option
   ; keep_alive : string option
   ; num_ctx : int option
+  ; return_progress : bool option
   }
 [@@deriving show, eq]
 

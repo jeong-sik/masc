@@ -67,6 +67,32 @@ let test_parse_final_chunk_llama_server_timings () =
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
 
+(* Verbatim prompt_progress chunk shape from llama-server b10180 (matches
+   upstream server-task.cpp to_json_oaicompat_chat is_progress branch): a
+   choice whose delta carries only role with content:null, no finish_reason,
+   and the progress payload on an unknown top-level key. The parser must
+   treat it as an ordinary empty chunk — zero events, so it feeds the SSE
+   idle/first-event deadlines (RFC-0382 §7) without fabricating a message
+   start or polluting first-token metrics. *)
+let test_parse_prompt_progress_chunk_yields_no_events () =
+  let data =
+    {|{"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1786821448,"id":"chatcmpl-Fdm6BTycfa2vhBZkSBkKeuDjyviIE2Ve","model":"qwen3.8-27b","system_fingerprint":"b10180-11b068d06","object":"chat.completion.chunk","prompt_progress":{"total":15,"cache":0,"processed":11,"time_ms":7}}|}
+  in
+  let parsed = S.parse_openai_sse_chunk data in
+  (match parsed with
+   | S.Openai_chunk chunk ->
+     Alcotest.(check (option string)) "no content delta" None chunk.delta_content;
+     Alcotest.(check (option string)) "no reasoning delta" None chunk.delta_reasoning;
+     Alcotest.(check int) "no tool_calls" 0 (List.length chunk.delta_tool_calls);
+     Alcotest.(check (option string)) "no finish" None chunk.finish_reason;
+     Alcotest.(check bool) "no timings" true (chunk.chunk_timings = None)
+   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+     -> Alcotest.fail "expected OpenAI chunk");
+  let state = S.create_openai_stream_state ~provider:"openai" ~model:"m" () in
+  let events, _telemetry = S.openai_sse_parse_result_to_events state parsed in
+  Alcotest.(check int) "zero events" 0 (List.length events)
+;;
+
 let test_parse_final_chunk_timings_cache_hit () =
   let data =
     {|{"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"id":"c-9","model":"qwen3.8-27b","object":"chat.completion.chunk","timings":{"cache_n":1741,"prompt_n":26,"prompt_ms":709.5,"predicted_n":512,"predicted_ms":54893.4,"predicted_per_second":9.3}}|}
@@ -1646,6 +1672,10 @@ let () =
             "final chunk timings cache hit"
             `Quick
             test_parse_final_chunk_timings_cache_hit
+        ; test_case
+            "prompt_progress chunk yields no events"
+            `Quick
+            test_parse_prompt_progress_chunk_yields_no_events
         ; test_case "tool_call start" `Quick test_parse_tool_call_start
         ; test_case "tool_call args" `Quick test_parse_tool_call_args
         ; test_case "usage" `Quick test_parse_usage

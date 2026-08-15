@@ -314,6 +314,13 @@ let preserving_capabilities =
   }
 ;;
 
+let non_replaying_capabilities =
+  { Capabilities.default_capabilities with
+    supports_reasoning = true
+  ; reasoning_replay_override = Force_no_replay
+  }
+;;
+
 let latest_user_turn_capabilities =
   { Capabilities.default_capabilities with
     supports_reasoning = true
@@ -327,6 +334,143 @@ let source_for_config config =
   match Reasoning_dialect.reasoning_source_for_provider_config config with
   | Ok source -> source
   | Error detail -> Alcotest.fail detail
+;;
+
+(* A caller that has to size a request before building one asks
+   [Complete_common.transmitted_history]. If that answer and the serializer's
+   own removal could differ, the caller would budget for bytes the wire drops —
+   which is how a keeper ends up charging 23.6% of its window to reasoning the
+   provider never receives. Both sides now run the same per-codec function; this
+   pins that the answer tracks the replay contract rather than a second
+   opinion. *)
+let transmitted_history_exn ~config messages =
+  match Complete_common.transmitted_history ~config messages with
+  | Ok projected -> projected
+  | Error error ->
+    Alcotest.fail (Reasoning_history_projection.error_to_string error)
+;;
+
+let reasoning_block_count messages =
+  List.fold_left
+    (fun total (message : message) ->
+       total
+       + List.length (List.filter reasoning_supported message.content))
+    0
+    messages
+;;
+
+let history_with_reasoning source =
+  [ message User [ Text "first request" ]
+  ; with_source source Assistant [ Thinking { content = "deliberation"; signature = None }; Text "answer" ]
+  ; message User [ Text "second request" ]
+  ]
+;;
+
+let test_transmitted_history_drops_what_the_wire_drops () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:non_replaying_capabilities
+      ()
+  in
+  let dialect = Reasoning_dialect.for_provider_config config in
+  check_bool
+    "this config replays nothing"
+    true
+    ((Reasoning_dialect.replay_contract dialect).replay_policy = No_replay);
+  let messages = history_with_reasoning (source_for_config config) in
+  check_int "the history carries reasoning" 1 (reasoning_block_count messages);
+  check_int
+    "and the transmitted view carries none"
+    0
+    (reasoning_block_count (transmitted_history_exn ~config messages));
+  check_int
+    "while the conversation itself survives"
+    3
+    (List.length (transmitted_history_exn ~config messages))
+;;
+
+let test_transmitted_history_keeps_what_the_wire_keeps () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:preserving_capabilities
+      ()
+  in
+  let messages = history_with_reasoning (source_for_config config) in
+  check_int
+    "a replaying config transmits its reasoning"
+    1
+    (reasoning_block_count (transmitted_history_exn ~config messages))
+;;
+
+(* Every codec has to answer, because the caller asks before it knows which
+   serializer will run. The expectation is not written down per codec — it is
+   read off that codec's own replay contract, so a codec whose dispatch was
+   forgotten fails here instead of quietly returning unprojected history, and a
+   codec whose contract legitimately differs is not forced to match its
+   neighbours. *)
+let test_every_codec_answers_its_own_contract () =
+  List.iter
+    (fun (label, kind, base_url) ->
+       let config =
+         Provider_config.make
+           ~kind
+           ~model_id:"model-a"
+           ~base_url
+           ~model_capabilities_override:non_replaying_capabilities
+           ()
+       in
+       let dialect = Reasoning_dialect.for_provider_config config in
+       let expected =
+         if
+           Reasoning_dialect.should_replay_reasoning
+             dialect
+             ~assistant_had_tool_call:false
+         then 1
+         else 0
+       in
+       let messages = history_with_reasoning (source_for_config config) in
+       Alcotest.(check int)
+         (label ^ ": transmits exactly what its contract replays")
+         expected
+         (reasoning_block_count (transmitted_history_exn ~config messages)))
+    [ "openai-compatible", Provider_config.OpenAI_compat, "https://provider.example"
+    ; "anthropic", Provider_config.Anthropic, "https://api.anthropic.com"
+    ; "ollama", Provider_config.Ollama, "http://localhost:11434"
+    ]
+;;
+
+(* The projection validates reasoning provenance across the whole list it is
+   handed, so a caller that hands it a keeper's entire checkpoint inherits a
+   failure mode the serializer never had: one malformed tag anywhere aborts the
+   projection, including tags on messages far outside any transmission window.
+   Pinned here so a caller knows this is a refusal it has to absorb rather than
+   propagate. *)
+let test_a_malformed_tag_anywhere_refuses_the_projection () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"model-a"
+      ~base_url:"https://provider.example"
+      ~model_capabilities_override:non_replaying_capabilities
+      ()
+  in
+  let source = source_for_config config in
+  (* Reasoning provenance on a User message: the tag says a role carried
+     reasoning that cannot have produced it. *)
+  let messages =
+    [ with_source source User [ Text "first request" ]
+    ; message Assistant [ Text "answer" ]
+    ]
+  in
+  match Complete_common.transmitted_history ~config messages with
+  | Ok _ -> Alcotest.fail "expected the malformed tag to refuse the projection"
+  | Error _ -> ()
 ;;
 
 let test_explicit_preserve_promotes_latest_user_policy_to_full_history () =
@@ -1000,6 +1144,22 @@ let () =
             "OpenAI Responses opaque boundary"
             `Quick
             test_openai_responses_replays_only_opaque_item
+        ; Alcotest.test_case
+            "transmitted history drops what the wire drops"
+            `Quick
+            test_transmitted_history_drops_what_the_wire_drops
+        ; Alcotest.test_case
+            "transmitted history keeps what the wire keeps"
+            `Quick
+            test_transmitted_history_keeps_what_the_wire_keeps
+        ; Alcotest.test_case
+            "a malformed tag anywhere refuses the projection"
+            `Quick
+            test_a_malformed_tag_anywhere_refuses_the_projection
+        ; Alcotest.test_case
+            "every codec answers its own contract"
+            `Quick
+            test_every_codec_answers_its_own_contract
         ] )
     ]
 ;;

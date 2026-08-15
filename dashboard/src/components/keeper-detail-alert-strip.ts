@@ -15,6 +15,7 @@ import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
 import {
   trustDispositionLabel,
   isTurnTerminalFailureCode,
+  operatorDispositionReasonLabel,
   type RuntimeAttemptObservation,
 } from './fsm-hub-types'
 import { keeperNeedsDiagnosticAttention, refreshAfterRuntimeAction } from './keeper-detail-helpers'
@@ -149,6 +150,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     && !isTurnTerminalFailureCode(latestTerminalCode)
   const latestNextAction = canonicalNextHumanAction(keeper.trust?.latest_next_action?.trim() || null)
   const operatorDispositionReason = keeper.trust?.operator_disposition_reason?.trim() || null
+  const operatorDispositionReasonText = operatorDispositionReasonLabel(operatorDispositionReason)
   const shouldShowOperatorDispositionReason =
     operatorDispositionReason !== null && operatorDispositionReason !== trustSummary
   const executionSummary = keeper.trust?.execution_summary ?? null
@@ -366,7 +368,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span title=${latestNextAction}><strong class="text-[var(--color-fg-secondary)]">권장 조치</strong> · ${nextHumanActionLabel(latestNextAction)}</span>`
           : null}
         ${shouldShowOperatorDispositionReason && operatorDispositionReason
-          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReason}</span>`
+          ? html`<span><${StrongSecondary}>운영자 판단</${StrongSecondary}> · ${operatorDispositionReasonText}</span>`
           : null}
         ${trustDisposition
           ? html`

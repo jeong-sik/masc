@@ -10,13 +10,29 @@
     here once and the three re-export it by type equation, which makes those
     copies unnecessary rather than merely shorter. *)
 
+type terminal_boundary_outcome =
+  | Terminal_completed
+  | Durable_stimulus_deferred
+  | External_effect_deferred
+  | Terminal_failed of
+      { failure_class : Tool_result.tool_failure_class
+      ; effect_disposition : Tool_result.failure_effect_disposition
+      ; diagnostic : string
+      }
+
 type host_stop =
   | Repeated_tool_call of
       { tool_name : string
       ; repeated_count : int
       }
-(** A host-owned, non-failure terminal that must stop a vendor-owned model
-    loop after the current tool outcome has been returned. *)
+  | Terminal_tool_boundary of
+      { tool_name : string
+      ; outcome : terminal_boundary_outcome
+      }
+(** A host-owned terminal that must stop a vendor-owned model loop after the
+    current tool outcome has been returned. The Keeper bundle remains the
+    authority for terminal effect completion/failure; this value carries only
+    the transport stop reason. *)
 
 type dynamic_tool_result =
   { success : bool

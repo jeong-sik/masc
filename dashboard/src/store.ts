@@ -29,6 +29,7 @@ import { fetchDashboardBootstrap, fetchDashboardShell } from './api/dashboard-ho
 import { journal } from './sse'
 import { showToast } from './components/common/toast'
 import { errorMessageOr } from './lib/format-string'
+import { isAbortError } from './lib/async-state'
 import {
   keeperFreshnessTs,
   normalizeKeepers,
@@ -91,6 +92,8 @@ export const shellRuntimeResolution = signal<DashboardRuntimeResolution | null>(
 export const agents = signal<Agent[]>([])
 export const tasks = signal<Task[]>([])
 export const messages = signal<Message[]>([])
+export const workspaceMessagesLoading = signal(false)
+export const workspaceMessagesError = signal<string | null>(null)
 export const keepers = signal<Keeper[]>([])
 export const serverStatus = signal<ServerStatus | null>(null)
 // Authoritative backlog size from the execution payload's `task_counts.total`.
@@ -663,7 +666,107 @@ export const staleKeepers: ReadonlySignal<Set<string>> = computed(() => {
 let inflightDashboardRefresh: Promise<void> | null = null
 let inflightShellRefresh: Promise<boolean> | null = null
 let inflightShellRefreshLight = false
+let inflightWorkspaceMessagesRefresh: Promise<void> | null = null
+let inflightWorkspaceMessagesRefreshProject: string | null = null
+let workspaceMessagesRefreshController: AbortController | null = null
+let workspaceMessagesRefreshGeneration = 0
+let workspaceMessagesRefreshInvalidated = false
+// Once the dedicated workspace endpoint has committed a snapshot, execution
+// payload messages are only a lower-fidelity fallback: they do not carry the
+// producer request id or durable mention-delivery status.  Letting a later
+// execution snapshot merge them back creates a second seq-identical row and
+// can make an accepted delivery look pending again.
+let workspaceMessagesDurableAuthority: { project: string | null } | null = null
 let lastShellRefreshAt = 0
+
+export function refreshDashboardWorkspaceMessages(
+  expectedProject = serverStatus.value?.project ?? null,
+): Promise<void> {
+  if (inflightWorkspaceMessagesRefresh) {
+    if (inflightWorkspaceMessagesRefreshProject === expectedProject) {
+      workspaceMessagesRefreshInvalidated = true
+      return inflightWorkspaceMessagesRefresh
+    }
+    // The inflight refresh targets a different project. Joining it would let
+    // its result satisfy this call's expectedProject guard by coincidence;
+    // abort it and start a fresh request scoped to this project instead.
+    workspaceMessagesRefreshController?.abort()
+  }
+
+  workspaceMessagesLoading.value = true
+  workspaceMessagesError.value = null
+  workspaceMessagesRefreshInvalidated = false
+  const generation = ++workspaceMessagesRefreshGeneration
+  const controller = new AbortController()
+  workspaceMessagesRefreshController = controller
+  inflightWorkspaceMessagesRefreshProject = expectedProject
+  inflightWorkspaceMessagesRefresh = (async () => {
+    try {
+      const { fetchDashboardWorkspaceMessages } = await import('./api/dashboard-workspace')
+      let settled = false
+      while (!settled && generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesRefreshInvalidated = false
+        const nextMessages = await fetchDashboardWorkspaceMessages({
+          signal: controller.signal,
+        })
+        if (generation !== workspaceMessagesRefreshGeneration || controller.signal.aborted) {
+          return
+        }
+        if (workspaceMessagesRefreshInvalidated) {
+          continue
+        }
+        if ((serverStatus.value?.project ?? null) === expectedProject) {
+          // This endpoint is the durable Workspace message SSOT. Replace the
+          // execution-derived cache instead of merging rows that the light
+          // execution response intentionally omits.
+          messages.value = nextMessages
+          workspaceMessagesDurableAuthority = { project: expectedProject }
+        }
+        settled = true
+      }
+    } catch (error) {
+      if (generation === workspaceMessagesRefreshGeneration && !isAbortError(error)) {
+        // The durable endpoint failed after previously committing a snapshot
+        // for this project: release authority so the execution-snapshot
+        // fallback (see the comment above workspaceMessagesDurableAuthority's
+        // declaration) can resume covering messages instead of freezing on
+        // the last durable snapshot. Scoped to expectedProject so a stale
+        // failure can't clear an authority a newer, still-inflight refresh
+        // already set for a different project.
+        if (workspaceMessagesDurableAuthority?.project === expectedProject) {
+          workspaceMessagesDurableAuthority = null
+        }
+        workspaceMessagesError.value = errorMessageOr(
+          error,
+          'Workspace messages failed to load',
+        )
+        console.warn('[Workspace messages] fetch error:', error)
+      }
+    } finally {
+      if (generation === workspaceMessagesRefreshGeneration) {
+        workspaceMessagesLoading.value = false
+        workspaceMessagesRefreshController = null
+        inflightWorkspaceMessagesRefresh = null
+        inflightWorkspaceMessagesRefreshProject = null
+      }
+    }
+  })()
+  return inflightWorkspaceMessagesRefresh
+}
+
+export function cancelDashboardWorkspaceMessagesRefresh(): void {
+  workspaceMessagesRefreshGeneration += 1
+  workspaceMessagesRefreshInvalidated = false
+  workspaceMessagesRefreshController?.abort()
+  workspaceMessagesRefreshController = null
+  inflightWorkspaceMessagesRefresh = null
+  inflightWorkspaceMessagesRefreshProject = null
+  workspaceMessagesLoading.value = false
+  // The durable refresh loop is no longer running, so its snapshot can no
+  // longer be trusted to stay current — release authority so the
+  // execution-snapshot fallback resumes covering messages.
+  workspaceMessagesDurableAuthority = null
+}
 
 export function invalidateDashboardCache(): void {
   // Projection endpoints are intentionally fresh-first after the operator-console rewrite.
@@ -677,7 +780,10 @@ async function refreshDashboardFallback(opts?: RefreshOptions): Promise<void> {
   await Promise.all([refreshShell(opts), refreshExecution(opts)])
 }
 
-function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
+function hydrateDashboardBootstrap(
+  data: DashboardBootstrapResponse,
+  executionRequestGeneration: number,
+): void {
   if (!data.shell || bootstrapSliceError(data.shell)) {
     throw new Error('dashboard bootstrap shell slice unavailable')
   }
@@ -686,7 +792,7 @@ function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
   }
 
   hydrateShellSnapshot(data.shell, { light: true })
-  hydrateExecutionSnapshot(data.execution)
+  hydrateExecutionSnapshot(data.execution, { requestGeneration: executionRequestGeneration })
 
   if (data.planning && !bootstrapSliceError(data.planning)) {
     hydratePlanningSnapshot(data.planning)
@@ -714,11 +820,15 @@ export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
   if (inflightDashboardRefresh) return inflightDashboardRefresh
   dashboardLoading.value = true
   inflightDashboardRefresh = (async () => {
+    const executionRequestGeneration = executionSnapshotRequestGeneration()
     try {
       executionLoading.value = true
       executionError.value = null
       try {
-        hydrateDashboardBootstrap(await fetchDashboardBootstrap())
+        hydrateDashboardBootstrap(
+          await fetchDashboardBootstrap(),
+          executionRequestGeneration,
+        )
       } catch (bootstrapErr) {
         console.warn('[Dashboard] bootstrap refresh failed, falling back:', bootstrapErr)
         await refreshDashboardFallback(opts)
@@ -897,9 +1007,138 @@ export async function refreshShell(opts?: RefreshOptions): Promise<boolean> {
   return inflightShellRefresh
 }
 
+let executionPublicationEpoch: string | null = null
+let executionReconnectPreviousEpoch: string | null = null
+let executionReconnectAwaitingHttp = false
+const executionReconnectInvalidationFloors = new Map<string, number>()
+let executionPublicationGenerationWatermark = -1
+let executionHydrationRequestGeneration = 0
+const retiredExecutionPublicationEpochs = new Set<string>()
+
+function retireExecutionPublicationEpoch(epoch: string): void {
+  retiredExecutionPublicationEpochs.add(epoch)
+}
+
+function executionSnapshotRequestGeneration(): number {
+  return executionHydrationRequestGeneration
+}
+
+function executionPublicationIdentityOf(
+  data: DashboardExecutionResponse,
+): { epoch: string; generation: number } | null {
+  const epoch = data.execution_publication_epoch
+  const generation = data.execution_publication_generation
+  return typeof epoch === 'string'
+    && epoch.trim() !== ''
+    && typeof generation === 'number'
+    && Number.isSafeInteger(generation)
+    && generation >= 0
+    ? { epoch, generation }
+    : null
+}
+
+export function invalidateExecutionSnapshotGeneration(
+  epoch: string,
+  generation: number,
+): boolean {
+  if (
+    epoch.trim() === ''
+    || !Number.isSafeInteger(generation)
+    || generation < 0
+    || retiredExecutionPublicationEpochs.has(epoch)
+  ) return false
+  if (executionReconnectAwaitingHttp) {
+    executionReconnectInvalidationFloors.set(
+      epoch,
+      Math.max(executionReconnectInvalidationFloors.get(epoch) ?? -1, generation),
+    )
+    return true
+  }
+  if (executionPublicationEpoch !== epoch) {
+    const previousEpoch = executionPublicationEpoch ?? executionReconnectPreviousEpoch
+    if (previousEpoch !== null && previousEpoch !== epoch) {
+      retireExecutionPublicationEpoch(previousEpoch)
+    }
+    executionPublicationEpoch = epoch
+    executionReconnectPreviousEpoch = null
+    executionPublicationGenerationWatermark = generation
+    return true
+  }
+  executionPublicationGenerationWatermark = Math.max(
+    executionPublicationGenerationWatermark,
+    generation,
+  )
+  return true
+}
+
+export function resetExecutionSnapshotGeneration(): void {
+  executionReconnectPreviousEpoch = executionPublicationEpoch
+  executionPublicationEpoch = null
+  executionPublicationGenerationWatermark = -1
+  executionReconnectAwaitingHttp = true
+  executionReconnectInvalidationFloors.clear()
+  executionHydrationRequestGeneration += 1
+}
+
 /** Hydrate all execution-related signals from a raw data payload.
  *  Shared by doFetchExecution (HTTP) and SSE execution_snapshot handler. */
-export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void {
+export function hydrateExecutionSnapshot(
+  data: DashboardExecutionResponse,
+  opts?: { requestGeneration?: number },
+): boolean {
+  if (
+    opts?.requestGeneration !== undefined
+    && opts.requestGeneration !== executionHydrationRequestGeneration
+  ) {
+    return false
+  }
+  const identity = executionPublicationIdentityOf(data)
+  if (executionReconnectAwaitingHttp && opts?.requestGeneration === undefined) {
+    return false
+  }
+  if (identity !== null && retiredExecutionPublicationEpochs.has(identity.epoch)) {
+    return false
+  }
+  if (
+    executionReconnectAwaitingHttp
+    && (
+      identity === null
+      || (
+        identity.generation
+        < (executionReconnectInvalidationFloors.get(identity.epoch) ?? -1)
+      )
+    )
+  ) {
+    return false
+  }
+  if (
+    executionPublicationEpoch !== null
+    && (
+      identity === null
+      || identity.epoch !== executionPublicationEpoch
+      || identity.generation < executionPublicationGenerationWatermark
+    )
+  ) {
+    return false
+  }
+  if (identity !== null) {
+    if (executionPublicationEpoch === null) {
+      if (
+        executionReconnectPreviousEpoch !== null
+        && executionReconnectPreviousEpoch !== identity.epoch
+      ) {
+        retireExecutionPublicationEpoch(executionReconnectPreviousEpoch)
+      }
+      executionPublicationEpoch = identity.epoch
+      executionReconnectPreviousEpoch = null
+      executionReconnectAwaitingHttp = false
+      executionReconnectInvalidationFloors.clear()
+    }
+    executionPublicationGenerationWatermark = Math.max(
+      executionPublicationGenerationWatermark,
+      identity.generation,
+    )
+  }
   const normalizedStatus = normalizeServerStatus(data.status, data.generated_at)
   const previousProject = serverStatus.value?.project
   if (normalizedStatus) {
@@ -909,6 +1148,11 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     previousProject != null
     && normalizedStatus?.project != null
     && previousProject !== normalizedStatus.project
+  if (workspaceChanged) {
+    // cancelDashboardWorkspaceMessagesRefresh() releases
+    // workspaceMessagesDurableAuthority itself.
+    cancelDashboardWorkspaceMessagesRefresh()
+  }
   const normalizedAgents = (Array.isArray(data.agents) ? data.agents : [])
     .map(normalizeAgent)
     .filter((row): row is Agent => row !== null)
@@ -923,7 +1167,14 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
   const executionMessages = (Array.isArray(data.messages) ? data.messages : [])
     .map(normalizeMessage)
     .filter((row): row is Message => row !== null)
-  messages.value = workspaceChanged ? executionMessages : mergeMessages(messages.value, executionMessages)
+  const currentProject = serverStatus.value?.project ?? null
+  const durableMessagesOwnCurrentProject =
+    workspaceMessagesDurableAuthority?.project === currentProject
+  if (!durableMessagesOwnCurrentProject) {
+    messages.value = workspaceChanged
+      ? executionMessages
+      : mergeMessages(messages.value, executionMessages)
+  }
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
@@ -934,6 +1185,7 @@ export function hydrateExecutionSnapshot(data: DashboardExecutionResponse): void
     .filter((row): row is DashboardExecutionContinuityBrief => row !== null)
   setArrayByKeyIfChanged(executionContinuityBriefs, normalizedContinuityBriefs, c => c.name, stableValueEqual)
   executionLoaded.value = true
+  return true
 }
 
 let nextExecutionForce = false
@@ -941,12 +1193,13 @@ let nextExecutionForce = false
 async function doFetchExecution(): Promise<void> {
   const force = nextExecutionForce
   nextExecutionForce = false
+  const requestGeneration = executionSnapshotRequestGeneration()
   executionLoading.value = true
   executionError.value = null
   try {
     const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
-    hydrateExecutionSnapshot(data)
+    hydrateExecutionSnapshot(data, { requestGeneration })
   } catch (err) {
     console.warn('[Dashboard] execution fetch error:', err)
     executionError.value = errorMessageOr(err, 'Execution projection load failed')

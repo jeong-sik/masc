@@ -16,6 +16,8 @@
     descriptor's typed policy before dispatch. *)
 val make_keeper_tool_handler
   :  name:string
+  -> ?descriptor:Keeper_tool_descriptor.t
+  -> ?model_name:string
   -> input_schema:Yojson.Safe.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
@@ -29,6 +31,10 @@ val make_keeper_tool_handler
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?record_gate_result:
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?observe_execution_evidence:
+       (failure_effect_disposition:Tool_result.failure_effect_disposition option
+        -> deferred_kind:Keeper_tool_execution.deferred_kind option
+        -> unit)
   -> ?on_completed:
        (Keeper_tool_execution.terminal_effect_receipt option -> unit)
   -> ?on_deferred:(unit -> unit)

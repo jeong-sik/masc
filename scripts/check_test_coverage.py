@@ -252,6 +252,54 @@ def get_changed_test_files():
 
 OCAML_SUFFIXES = {".ml", ".mli"}
 SLASH_COMMENT_SUFFIXES = {".ts", ".tsx", ".js", ".jsx", ".css", ".scss"}
+# Config formats stay covered on purpose (see
+# .ci/test-coverage-non-code-suffixes.txt), and a runtime binding is where the
+# reason for a value belongs. Without this the gate counted every explanatory
+# line as new code, so writing down why a number changed cost more than
+# changing it silently.
+HASH_COMMENT_SUFFIXES = {".toml"}
+
+
+def hash_comment_line_numbers(text):
+    """1-indexed comment-only lines of a `#`-commented, string-quoting format.
+
+    Kept apart from the depth counter the other families share: TOML's
+    multi-line delimiters are `\"\"\"` and `\'\'\'`, which close themselves rather
+    than nest, so a depth counter cannot represent them. Inside such a string
+    a leading `#` is content — `config/runtime.toml` carries keeper prompts in
+    those blocks, and a markdown heading in one would otherwise read as a
+    comment and drop real added lines from the gate's count.
+
+    A line inside a multi-line string is code, whatever it starts with.
+    """
+    comment_only = set()
+    open_delimiter = None
+    for lineno, line in enumerate(text.split("\n"), 1):
+        started_inside = open_delimiter is not None
+        i = 0
+        saw_code = started_inside
+        while i < len(line):
+            three = line[i : i + 3]
+            if open_delimiter is not None:
+                if three == open_delimiter:
+                    open_delimiter = None
+                    i += 3
+                    continue
+                i += 1
+                continue
+            if three in ('\"\"\"', "\'\'\'"):
+                open_delimiter = three
+                saw_code = True
+                i += 3
+                continue
+            if line[i] == "#":
+                break  # rest of the line is comment
+            if not line[i].isspace():
+                saw_code = True
+            i += 1
+        if not saw_code:
+            comment_only.add(lineno)
+    return comment_only
 
 
 def comment_line_numbers(text, suffix):
@@ -267,6 +315,8 @@ def comment_line_numbers(text, suffix):
         openers, closers, line_comment = ["(*"], ["*)"], None
     elif suffix in SLASH_COMMENT_SUFFIXES:
         openers, closers, line_comment = ["/*"], ["*/"], "//"
+    elif suffix in HASH_COMMENT_SUFFIXES:
+        return hash_comment_line_numbers(text)
     else:
         return set()
 
@@ -277,7 +327,11 @@ def comment_line_numbers(text, suffix):
         i = 0
         while i < len(line):
             two = line[i : i + 2]
-            if depth == 0 and line_comment and two == line_comment:
+            if (
+                depth == 0
+                and line_comment
+                and line[i : i + len(line_comment)] == line_comment
+            ):
                 break  # rest of the line is comment
             if two in openers:
                 depth += 1

@@ -83,6 +83,101 @@ let test_incident_sized_result_stays_inline () =
       Alcotest.(check bool) "no blob marker" false (O.is_marker content)
     | Error _ -> Alcotest.fail "expected inline result")
 
+let test_typed_artifact_result_becomes_durable_manifest () =
+  with_temp_base_path (fun base_path ->
+    let store = Tool_blob_store.create ~base_path in
+    let child =
+      Tool_blob_store.put_durable
+        store
+        ~bytes:"exact child output"
+        ~mime:"text/plain"
+    in
+    let structured_content =
+      `Assoc
+        [ "ok", `Bool true
+        ; "output_artifact", O.normalized_artifact_ref_to_json child
+        ]
+    in
+    let result =
+      Tool_result.make_ok
+        ~tool_name:"Execute"
+        ~start_time:0.0
+        ~data:structured_content
+        ()
+      |> B.attach_artifact_manifest ~base_path
+    in
+    let result =
+      match result with
+      | Ok result -> result
+      | Error { message; _ } -> Alcotest.fail message
+    in
+    (match B.to_agent_core_typed_result result with
+     | Ok { content; _ } ->
+       Alcotest.(check bool)
+         "manifest marker requires artifact-reader capability"
+         false
+         (O.is_marker content)
+     | Error { message; _ } -> Alcotest.fail message);
+    match B.to_agent_core_typed_result ~base_path result with
+    | Error { message; _ } -> Alcotest.fail message
+    | Ok { content; _ } ->
+      (match O.decode_from_agent_core content with
+       | O.Not_marker -> Alcotest.fail "typed artifact result stayed unrooted inline"
+       | O.Invalid_marker { detail } -> Alcotest.fail detail
+       | O.Decoded manifest_ref ->
+         Alcotest.(check string)
+           "typed manifest media type"
+           O.artifact_manifest_mime
+           manifest_ref.mime;
+         let manifest =
+           match Tool_blob_store.fetch store ~sha256:manifest_ref.sha256 with
+           | Ok (Some payload) -> Yojson.Safe.from_string payload
+           | Ok None -> Alcotest.fail "manifest blob is absent"
+           | Error error ->
+             Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+         in
+         (match O.artifact_manifest_of_json manifest with
+          | O.Decoded_artifact_manifest
+              { structured_content = restored; artifact_refs; _ } ->
+            Alcotest.(check bool)
+              "structured result is exact"
+              true
+              (Yojson.Safe.equal structured_content restored);
+            Alcotest.(check int) "one child ownership edge" 1 (List.length artifact_refs);
+            Alcotest.(check string)
+              "child identity is exact"
+              child.sha256
+              (List.hd artifact_refs).sha256
+          | O.Not_artifact_manifest -> Alcotest.fail "manifest schema is absent"
+          | O.Invalid_artifact_manifest { detail } -> Alcotest.fail detail)))
+
+let test_manifest_producer_rejects_mixed_malformed_reference () =
+  with_temp_base_path (fun base_path ->
+    let child =
+      Tool_blob_store.put_durable
+        (Tool_blob_store.create ~base_path)
+        ~bytes:"valid child"
+        ~mime:"text/plain"
+    in
+    let result =
+      Tool_result.make_ok
+        ~tool_name:"Execute"
+        ~start_time:0.0
+        ~data:
+          (`Assoc
+             [ "valid", O.normalized_artifact_ref_to_json child
+             ; "malformed", `Assoc [ "_blob", `Assoc [ "sha256", `String child.sha256 ] ]
+             ])
+        ()
+    in
+    match B.attach_artifact_manifest ~base_path result with
+    | Ok _ -> Alcotest.fail "mixed malformed artifact data produced a manifest"
+    | Error { message; _ } ->
+      Alcotest.(check bool)
+        "strict producer reports malformed reserved wrapper"
+        true
+        (String.length message > 0))
+
 let test_bounded_inline_rejects_oversized_result () =
   let payload = String.make (B.default_externalize_threshold_bytes + 1) 'x' in
   match
@@ -412,6 +507,10 @@ let () =
           Alcotest.test_case "small inlined" `Quick test_to_agent_core_typed_small_inlined;
           Alcotest.test_case "2.5KB result stays inline" `Quick
             test_incident_sized_result_stays_inline;
+          Alcotest.test_case "typed artifact result owns durable manifest" `Quick
+            test_typed_artifact_result_becomes_durable_manifest;
+          Alcotest.test_case "manifest producer rejects malformed child" `Quick
+            test_manifest_producer_rejects_mixed_malformed_reference;
           Alcotest.test_case "bounded inline rejects oversize" `Quick
             test_bounded_inline_rejects_oversized_result;
           Alcotest.test_case "artifact reader owns inline projection" `Quick

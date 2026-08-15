@@ -158,7 +158,31 @@ let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
          (Printexc.to_string exn))
 ;;
 
-let write_goal_task_links_result ?(rollback_on_recovery_failure = true) ?previous_links config links =
+type task_mutation_notification =
+  | Notify_on_failure
+  | Notify_always
+
+let protect_goal_link_settlement f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+  | Eio_guard.Non_eio -> f ()
+;;
+
+let notify_task_mutation () =
+  try (Atomic.get Workspace_hooks.on_task_mutation_fn) () with
+  | exn ->
+    Log.Misc.warn
+      "goal-task link settlement observer failed: %s"
+      (Printexc.to_string exn)
+;;
+
+let write_goal_task_links_result_internal
+      ?(rollback_on_recovery_failure = true)
+      ?previous_links
+      ~task_mutation_notification
+      config
+      links
+  =
   let json = links_to_yojson links in
   let primary_path = goal_task_links_path config in
   let recovery_path = goal_task_links_recovery_path config in
@@ -212,16 +236,41 @@ let write_goal_task_links_result ?(rollback_on_recovery_failure = true) ?previou
            "write_goal_task_links_result: recovery rollback failed after write failure: %s"
            rollback_msg)
   in
-  match write_primary () with
-  | Error _ as error ->
-    rollback ();
-    error
-  | Ok () ->
-    (match write_recovery () with
-     | Ok () -> Ok ()
-     | Error _ as error ->
-       if rollback_on_recovery_failure then rollback ();
-       error)
+  let notify_after_settlement ~failed =
+    match task_mutation_notification, failed with
+    | Notify_on_failure, false -> ()
+    | Notify_on_failure, true | Notify_always, _ -> notify_task_mutation ()
+  in
+  protect_goal_link_settlement (fun () ->
+    match write_primary () with
+    | Error _ as error ->
+      rollback ();
+      notify_after_settlement ~failed:true;
+      error
+    | Ok () ->
+      let recovery_result = write_recovery () in
+      (match recovery_result with
+       | Ok () ->
+         notify_after_settlement ~failed:false;
+         Ok ()
+       | Error _ as error ->
+         if rollback_on_recovery_failure then rollback ();
+         notify_after_settlement ~failed:true;
+         error))
+;;
+
+let write_goal_task_links_result
+      ?rollback_on_recovery_failure
+      ?previous_links
+      config
+      links
+  =
+  write_goal_task_links_result_internal
+    ?rollback_on_recovery_failure
+    ?previous_links
+    ~task_mutation_notification:Notify_always
+    config
+    links
 ;;
 
 let write_goal_task_links config links =
@@ -301,7 +350,11 @@ let link_task_to_goal_result config ~goal_id ~task_id =
       | Error _ as error -> error
       | Ok links ->
         let new_links = add_link_to_links links ~goal_id ~task_id in
-        write_goal_task_links_result config ~previous_links:links new_links)
+        write_goal_task_links_result_internal
+          config
+          ~previous_links:links
+          ~task_mutation_notification:Notify_on_failure
+          new_links)
 ;;
 
 let before_unlink_task_from_goal_for_testing = Atomic.make None
@@ -316,10 +369,11 @@ let unlink_task_from_goal_result_impl config ~goal_id ~task_id =
       | Error _ as error -> error
       | Ok links ->
         let new_links = remove_link_from_links links ~goal_id ~task_id in
-        write_goal_task_links_result
+        write_goal_task_links_result_internal
           config
           ~rollback_on_recovery_failure:false
           ~previous_links:links
+          ~task_mutation_notification:Notify_always
           new_links)
 ;;
 
@@ -389,7 +443,11 @@ let link_tasks_to_goals_result config links =
             existing_links
             trimmed_links
         in
-        write_goal_task_links_result config ~previous_links:existing_links updated_links)
+        write_goal_task_links_result_internal
+          config
+          ~previous_links:existing_links
+          ~task_mutation_notification:Notify_on_failure
+          updated_links)
 ;;
 
 (** Build a reverse index from goal_id to its linked tasks.

@@ -12,6 +12,7 @@ type normalized_hit = {
 type provider =
   | Searxng
   | Brave
+  | Brave_llm_context
   | Tavily
   | Exa
   | Bing_api
@@ -21,6 +22,26 @@ type provider_response = {
   search_url : string;
   hits : normalized_hit list;
 }
+
+(* Brave LLM Context answers with pre-extracted, relevance-ranked
+   chunks instead of (title, url, snippet) rows. The token budget is a
+   request parameter (maximum_number_of_tokens, provider default 8192),
+   so the payload arrives already sized for a model turn and nothing is
+   re-truncated on our side. *)
+type grounded_source = {
+  source_url : string;
+  source_title : string;
+  snippets : string list;
+}
+
+type grounded_context = {
+  context_search_url : string;
+  items : grounded_source list;
+}
+
+type search_payload =
+  | Hits of provider_response
+  | Grounded of grounded_context
 
 (* RFC-0189 PR-2 — per-provider errors are lifted to typed variants so the
    fallback chain can distinguish transport vs server vs config vs parse
@@ -44,6 +65,7 @@ type simulated_provider_outcome =
   [ `Error of string
   | `Empty
   | `Hits of (string * string * string) list
+  | `Grounded of (string * string * string list) list
   ]
 
 let whitespace_re = Re.Pcre.re "[ \t\r\n]+" |> Re.compile
@@ -117,9 +139,48 @@ let parse_bing_search_json payload =
       Json_util.assoc_member_opt "value" web |> Option.value ~default:`Null)
     ~title_field:"name" ~snippet_field:"snippet" payload
 
+(* Total like its sibling parsers — and through the same mechanism:
+   Safe_ops.protect, so every exception class malformed third-party
+   input can raise (not just Json_error) degrades to []. Response
+   contract:
+   { "grounding": { "generic": [ { url, title, snippets: [string] } ] } } *)
+let parse_brave_llm_context_json payload =
+  let member_list key json =
+    match Json_util.assoc_member_opt key json with
+    | Some (`List entries) -> entries
+    | _ -> []
+  in
+  Safe_ops.protect ~default:[] (fun () ->
+      let json = Yojson.Safe.from_string payload in
+      let generic =
+        match Json_util.assoc_member_opt "grounding" json with
+        | Some grounding -> member_list "generic" grounding
+        | None -> []
+      in
+      generic
+      |> List.filter_map (fun entry ->
+             let string_field key =
+               match Json_util.assoc_member_opt key entry with
+               | Some (`String value) -> String_util.trim_nonempty value
+               | _ -> None
+             in
+             let snippets =
+               member_list "snippets" entry
+               |> List.filter_map (function
+                    | `String snippet -> String_util.trim_nonempty snippet
+                    | _ -> None)
+             in
+             match string_field "url", snippets with
+             | Some url, _ :: _ when valid_search_result_url url ->
+                 (* DET-OK: a missing title deterministically falls back to
+                    the url — documented in the .mli, visible in output. *)
+                 Some (url, Option.value (string_field "title") ~default:url, snippets)
+             | _ -> None))
+
 let provider_to_string = function
   | Searxng -> "searxng"
   | Brave -> "brave"
+  | Brave_llm_context -> "brave_llm_context"
   | Tavily -> "tavily"
   | Exa -> "exa"
   | Bing_api -> "bing_api"
@@ -128,6 +189,7 @@ let provider_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
   | "searxng" | "searx" -> Some Searxng
   | "brave" -> Some Brave
+  | "brave_llm_context" | "brave-llm-context" -> Some Brave_llm_context
   | "tavily" -> Some Tavily
   | "exa" -> Some Exa
   | "bing" | "bing_api" -> Some Bing_api
@@ -149,7 +211,7 @@ let env_present name =
 
 let provider_has_credentials = function
   | Searxng -> env_present "MASC_SEARXNG_URL"
-  | Brave -> env_present "BRAVE_SEARCH_API_KEY"
+  | Brave | Brave_llm_context -> env_present "BRAVE_SEARCH_API_KEY"
   | Tavily -> env_present "TAVILY_API_KEY"
   | Exa -> env_present "EXA_API_KEY"
   | Bing_api ->
@@ -157,7 +219,11 @@ let provider_has_credentials = function
 
 (* Only credentialed providers search. An empty order is a
    configuration fact and surfaces as an explicit failure in
-   [search_impl], never as an empty success. *)
+   [search_impl], never as an empty success.
+
+   [Brave_llm_context] never enters the default order: its grounded
+   response shape (context text, no result rows) is a caller choice
+   made through provider config, not a fallback. *)
 let default_provider_order () =
   [ Searxng; Brave; Tavily; Exa; Bing_api ]
   |> List.filter provider_has_credentials
@@ -239,6 +305,50 @@ let result_data ~query ~search_url ~engine hits =
             ("search_url", `String search_url);
             ("result_count", `Int (List.length hits));
             ("results", `List results);
+          ] );
+    ]
+
+(* Grounded envelope: the fetched content lives once in [context_text];
+   [sources] carries url/title metadata only. There is deliberately no
+   [results] row list — the provider returns chunks, not hits. *)
+let render_grounded_context_text ~query items =
+  let render_item index { source_url; source_title; snippets } =
+    let bullet_lines = List.map (fun snippet -> "- " ^ snippet) snippets in
+    String.concat "\n"
+      ((Printf.sprintf "%d. %s" (index + 1) source_title)
+       :: ("URL: " ^ source_url)
+       :: bullet_lines)
+  in
+  String.concat "\n"
+    [ "WebSearch grounded context"
+    ; "Query: " ^ query
+    ; ""
+    ; String.concat "\n\n---\n\n" (List.mapi render_item items)
+    ]
+
+let grounded_result_data ~query context =
+  let sources =
+    context.items
+    |> List.map (fun item ->
+           `Assoc
+             [
+               ("url", `String item.source_url);
+               ("title", `String item.source_title);
+               ("snippet_count", `Int (List.length item.snippets));
+             ])
+  in
+  Tool_args.ok_assoc
+    [
+      ( "result",
+        `Assoc
+          [
+            ("query", `String query);
+            ("engine", `String (provider_to_string Brave_llm_context));
+            ("search_url", `String context.context_search_url);
+            ("grounded", `Bool true);
+            ("result_count", `Int (List.length context.items));
+            ("context_text", `String (render_grounded_context_text ~query context.items));
+            ("sources", `List sources);
           ] );
     ]
 
@@ -453,6 +563,47 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 
+(* Contract:
+   https://api-dashboard.search.brave.com/api-reference/summarizer/llm_context/get
+   The response token budget is negotiated in the request
+   (maximum_number_of_tokens, provider default 8192); [limit] maps to
+   maximum_number_of_urls. A valid response with zero grounded items
+   stays Ok so the chain records it as "no results". *)
+let fetch_brave_llm_context ~timeout_sec ~query ~limit =
+  match
+    Sys.getenv_opt "BRAVE_SEARCH_API_KEY"
+    |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty
+  with
+  | None -> Error (Config "missing BRAVE_SEARCH_API_KEY")
+  | Some api_key ->
+      let search_url =
+        Printf.sprintf
+          "https://api.search.brave.com/res/v1/llm/context?q=%s&maximum_number_of_urls=%d"
+          (Uri.pct_encode query) limit
+      in
+      match
+        Tool_local_runtime_http.http_get_text_with_status_with_headers
+          ~timeout_sec
+          ~headers:
+            [ ("Accept", "application/json"); ("X-Subscription-Token", api_key) ]
+          search_url
+      with
+      | Error detail ->
+          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
+      | Ok (Some 200, payload) ->
+          Safe_ops.protect
+            ~default:(Error (Parse "provider returned invalid JSON"))
+            (fun () ->
+              Ok
+                { context_search_url = search_url
+                ; items =
+                    parse_brave_llm_context_json payload
+                    |> List.map (fun (url, title, snippets) ->
+                           { source_url = url; source_title = title; snippets })
+                })
+      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
+      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+
 let fetch_provider ~query ~limit provider =
   let timeout_sec = Env_config.Tools.web_search_timeout_sec () in
   match provider with
@@ -465,11 +616,22 @@ let fetch_provider ~query ~limit provider =
             |> take_results limit
             |> normalize_hits ~source:(provider_to_string Searxng)
           in
-          Ok { engine = provider_to_string Searxng; search_url; hits })
-  | Brave -> fetch_brave ~timeout_sec ~query ~limit
-  | Tavily -> fetch_tavily ~timeout_sec ~query ~limit
-  | Exa -> fetch_exa ~timeout_sec ~query ~limit
-  | Bing_api -> fetch_bing_api ~timeout_sec ~query ~limit
+          Ok (Hits { engine = provider_to_string Searxng; search_url; hits }))
+  | Brave ->
+      fetch_brave ~timeout_sec ~query ~limit
+      |> Result.map (fun response -> Hits response)
+  | Brave_llm_context ->
+      fetch_brave_llm_context ~timeout_sec ~query ~limit
+      |> Result.map (fun context -> Grounded context)
+  | Tavily ->
+      fetch_tavily ~timeout_sec ~query ~limit
+      |> Result.map (fun response -> Hits response)
+  | Exa ->
+      fetch_exa ~timeout_sec ~query ~limit
+      |> Result.map (fun response -> Hits response)
+  | Bing_api ->
+      fetch_bing_api ~timeout_sec ~query ~limit
+      |> Result.map (fun response -> Hits response)
 
 let cache_key ~query ~limit =
   String.concat "|"
@@ -521,8 +683,9 @@ let search_impl ~query ~limit =
              ^ String.concat "; " (List.rev errors))
     | provider :: rest -> (
         match fetch_provider ~query ~limit provider with
-        | Ok ({ hits = _ :: _; _ } as response) -> Ok response
-        | Ok _ ->
+        | Ok (Hits { hits = _ :: _; _ } as payload) -> Ok payload
+        | Ok (Grounded { items = _ :: _; _ } as payload) -> Ok payload
+        | Ok (Hits _ | Grounded _) ->
             loop
               (provider_error provider (provider_error_to_string (Parse "no results"))
                :: errors)
@@ -563,12 +726,24 @@ let simulated_search_impl ~outcomes ~query ~limit =
         match outcome with
         | `Hits hits when Stdlib.List.length hits > 0 ->
             Ok
-              {
-                engine = provider_name;
-                search_url = "test://" ^ provider_name;
-                hits = normalize provider_name hits;
-              }
-        | `Hits _ | `Empty ->
+              (Hits
+                 {
+                   engine = provider_name;
+                   search_url = "test://" ^ provider_name;
+                   hits = normalize provider_name hits;
+                 })
+        | `Grounded ((_ :: _) as entries) ->
+            Ok
+              (Grounded
+                 {
+                   context_search_url = "test://" ^ provider_name;
+                   items =
+                     List.map
+                       (fun (url, title, snippets) ->
+                         { source_url = url; source_title = title; snippets })
+                       entries;
+                 })
+        | `Hits _ | `Empty | `Grounded [] ->
             loop ((provider_name ^ ": no results") :: errors) rest
         | `Error message ->
             loop ((provider_name ^ ": " ^ message) :: errors) rest)
@@ -615,10 +790,13 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       | Some cached -> data_ok ~tool_name ~start_time cached
       | None ->
         (match (current_search_impl ()) ~query ~limit with
-         | Ok response ->
+         | Ok payload ->
            let data =
-             result_data ~query ~search_url:response.search_url
-               ~engine:response.engine response.hits
+             match payload with
+             | Hits response ->
+               result_data ~query ~search_url:response.search_url
+                 ~engine:response.engine response.hits
+             | Grounded context -> grounded_result_data ~query context
            in
            cache_store key data now;
            data_ok ~tool_name ~start_time data
@@ -626,11 +804,14 @@ let handle ~tool_name ~start_time args : Tool_result.result =
 
 let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   match simulated_search_impl ~outcomes ~query ~limit with
-  | Ok response ->
+  | Ok (Hits response) ->
       data_ok ~tool_name:"masc_web_search" ~start_time:0.0
         (result_data ~query
            ~search_url:response.search_url
            ~engine:response.engine
            response.hits)
+  | Ok (Grounded context) ->
+      data_ok ~tool_name:"masc_web_search" ~start_time:0.0
+        (grounded_result_data ~query context)
   | Error message ->
       runtime_err ~tool_name:"masc_web_search" ~start_time:0.0 message

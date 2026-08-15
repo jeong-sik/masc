@@ -390,6 +390,102 @@ let () = test "web_search_provider_plan_prefers_configured_official_provider" (f
                        = [ "brave"; "tavily"; "exa" ]))))))))))
 )
 
+let () = test "parse_brave_llm_context_json" (fun () ->
+  let payload =
+    {|{"grounding":{"generic":[
+        {"url":"https://example.com/effects",
+         "title":"Effect Handlers",
+         "snippets":["OCaml 5 introduces effect handlers.","| Table row | data |"]},
+        {"url":"javascript:alert(1)",
+         "title":"Invalid scheme",
+         "snippets":["dropped"]},
+        {"url":"https://example.com/untitled",
+         "snippets":["Title falls back to the url."]},
+        {"url":"https://example.com/empty","title":"No snippets","snippets":[]}
+      ],"map":[]},
+      "sources":{"https://example.com/effects":{"title":"Effect Handlers","hostname":"example.com"}}}|}
+  in
+  match Tool_misc.parse_brave_llm_context_json payload with
+  | [ (url1, title1, snippets1); (url2, title2, snippets2) ] ->
+      assert (url1 = "https://example.com/effects");
+      assert (title1 = "Effect Handlers");
+      assert (snippets1 = [ "OCaml 5 introduces effect handlers."; "| Table row | data |" ]);
+      assert (url2 = "https://example.com/untitled");
+      assert (title2 = "https://example.com/untitled");
+      assert (snippets2 = [ "Title falls back to the url." ])
+  | entries ->
+      failwith
+        (Printf.sprintf "expected two grounded entries, got %d" (List.length entries))
+)
+
+let () = test "parse_brave_llm_context_json_malformed" (fun () ->
+  assert (Tool_misc.parse_brave_llm_context_json "not json" = []);
+  assert (Tool_misc.parse_brave_llm_context_json {|{"grounding":{}}|} = [])
+)
+
+let () = test "web_search_provider_plan_admits_brave_llm_context_only_explicitly" (fun () ->
+  with_env "MASC_SEARXNG_URL" None (fun () ->
+    with_env "BRAVE_SEARCH_API_KEY" (Some "brave-key") (fun () ->
+      with_env "TAVILY_API_KEY" None (fun () ->
+        with_env "EXA_API_KEY" None (fun () ->
+          with_env "BING_SEARCH_API_KEY" None (fun () ->
+            with_env "AZURE_BING_SEARCH_API_KEY" None (fun () ->
+              with_env "MASC_WEB_SEARCH_PROVIDER_ORDER" None (fun () ->
+                with_env "MASC_WEB_SEARCH_FALLBACKS" None (fun () ->
+                  with_env "MASC_WEB_SEARCH_PROVIDER" None (fun () ->
+                    (* Default order never contains the grounded provider. *)
+                    assert (Tool_misc.web_search_provider_plan () = [ "brave" ]));
+                  with_env "MASC_WEB_SEARCH_PROVIDER" (Some "brave_llm_context")
+                    (fun () ->
+                      assert
+                        (Tool_misc.web_search_provider_plan ()
+                         = [ "brave_llm_context"; "brave" ]))))))))))
+)
+
+(* Feature contract: a grounded provider answer flows through dispatch as
+   grounded=true + context_text + sources, with no results rows and no
+   client-side truncation of the request-budgeted content. *)
+let () = test "dispatch_web_search_grounded_envelope" (fun () ->
+  let ctx = make_test_ctx () in
+  let query = "grounded envelope contract" in
+  Tool_misc.with_web_search_simulation_for_test
+    ~outcomes:
+      [ ( "brave_llm_context"
+        , `Grounded
+            [ ( "https://example.com/effects"
+              , "Effect Handlers"
+              , [ "OCaml 5 introduces effect handlers."; "Second chunk." ] )
+            ] )
+      ]
+    (fun () ->
+      let args = `Assoc [ ("query", `String query); ("limit", `Int 3) ] in
+      match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
+      | Some result ->
+          assert (Tool_result.is_success result);
+          let json = parse_json (Tool_result.message result) in
+          let open Yojson.Safe.Util in
+          let result_json = json |> member "result" in
+          assert (result_json |> member "grounded" |> to_bool);
+          assert (result_json |> member "engine" |> to_string = "brave_llm_context");
+          assert (result_json |> member "result_count" |> to_int = 1);
+          assert (result_json |> member "results" = `Null);
+          let context_text = result_json |> member "context_text" |> to_string in
+          assert (str_contains context_text "WebSearch grounded context");
+          assert (str_contains context_text ("Query: " ^ query));
+          assert (str_contains context_text "1. Effect Handlers");
+          assert (str_contains context_text "URL: https://example.com/effects");
+          assert (str_contains context_text "- OCaml 5 introduces effect handlers.");
+          assert (str_contains context_text "- Second chunk.");
+          (match result_json |> member "sources" with
+           | `List [ source ] ->
+               assert (source |> member "url" |> to_string = "https://example.com/effects");
+               assert (source |> member "title" |> to_string = "Effect Handlers");
+               assert (source |> member "snippet_count" |> to_int = 2)
+           | other ->
+               failwith ("expected one source, got: " ^ Yojson.Safe.to_string other))
+      | None -> failwith "dispatch returned None")
+)
+
 let () = test "web_search_simulate_for_test_falls_back_after_error" (fun () ->
   let result =
     Tool_misc.web_search_simulate_for_test ~query:"ocaml eio" ~limit:3

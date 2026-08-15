@@ -607,7 +607,7 @@ let all =
       ~default:"(none)"
       ~consumers:[ "Tool_misc_web_search" ]
       ~category:"web_search"
-      "Brave Search API key (admits the brave provider)"
+      "Brave Search API key (admits the brave and brave_llm_context providers)"
   ; setting
       ~env_name:"TAVILY_API_KEY"
       ~exposure:Env_only

@@ -30,9 +30,17 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
 	    - [content_kind]: [html], [text], [json], or [xml]
 	    - [extraction_source]: [article], [main], [body], [document], or
 	      [raw_text]
-	    - [text]: readable extracted content, truncated at [maxChars]
+	    - [text]: readable extracted content. Over [maxChars] it becomes a
+	      deterministic head/tail window (three quarters of the budget from
+	      the start, one quarter from the end, cut on line boundaries) around
+	      a [\[TRUNCATED ...\]] marker that names the offloaded full text
 	    - [content_chars]: length of [text]
 	    - [truncated]: whether output truncation was applied
+	    - [full_text_path]: present only when truncation offloaded the full
+	      extracted text under [<base>/.masc/artifacts/web-fetch/] (content
+	      addressed by sha256, so identical pages reuse one file); absent when
+	      no truncation happened or the offload failed — the marker then says
+	      [full_text_unavailable=<reason>] instead of hiding it
 	    - [content_type]: optional upstream content type
 	    - [downloaded_bytes]: optional curl-reported download size
 	    - [title]: optional, extracted from [<title>] tag

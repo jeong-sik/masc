@@ -180,7 +180,9 @@ let websocket_discovery_json (ctx : http_context) =
     if enabled
     then
       base_fields
-      @ [ "ws_url", `String same_origin_ws_url
+      @ [ (* Withheld until the inbound dispatcher is installed: a client
+             that connects before then gets an upgrade with no handler. *)
+          "ws_url", (if ready then `String same_origin_ws_url else `Null)
         ; "same_origin_upgrade_enabled", `Bool ready
         ; "same_origin_upgrade_path", `String "/ws"
         ; "same_origin_ws_url", `String same_origin_ws_url

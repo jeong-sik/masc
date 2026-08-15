@@ -199,23 +199,8 @@ The server reads the token from `MASC_TOKEN` at runtime via
 `bearer_token_env_var`; hardcoding a literal token in the config file persists
 the raw value on disk and causes auth drift when the token is rotated.
 
-To initialise or repair the Agent-Code config from the repo:
-
-```bash
-BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
-scripts/init-agent-code-mcp-config.sh --base-path "$BASE_PATH"
-```
-
-To let the server auto-repair the config on startup, set:
-
-```bash
-export MASC_SYNC_AGENT-CODE_MCP_CONFIG=1
-```
-
-The startup sync replaces any `http_headers` binding with the canonical form
-and strips any bare `Authorization = ...` binding directly in
-`[mcp_servers.masc]`.  It does **not** touch other MCP server sections or
-sub-sections.
+The config is written by whatever external generator the operator uses; MASC
+neither ships one nor repairs `~/.agent-code/config.toml` on startup.
 
 ## 5. Agent-LLM-A / Provider-F MCP Bearers
 

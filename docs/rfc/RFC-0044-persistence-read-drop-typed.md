@@ -177,11 +177,10 @@ growth is bounded by the closed sum.
 
 ## 5. Drift guards
 
--   `scripts/lint/no-free-string-read-drop-reason.sh`: greps for
+-   Free-string guard (not built): would reject
     `Otel_metric_store.inc_counter ... metric_persistence_read_drops`
     invocations whose `reason` argument is a string literal not
-    sourced from `Read_drop_reason.to_wire`. Runs in
-    `fundamental-check.yml`.
+    sourced from `Read_drop_reason.to_wire`.
 -   Linter for `Other` reuse: any PR that adds a `Read_drop_reason.Other "X"`
     where `X` is already used at another site fails CI; the value must
     be promoted to a constructor.

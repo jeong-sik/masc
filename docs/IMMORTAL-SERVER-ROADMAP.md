@@ -12,19 +12,17 @@ code_refs:
 
 ## 현재 상태
 
-### ✅ 있는 것
-- `workspace_resilience.ml` - 시간 파싱과 관찰 헬퍼
-- `rate_limit.ml` - 요청 제한
-- `cancellation.ml` - 취소 처리
+### 있는 것
+- `workspace_resilience.ml` — 시간 파싱과 관찰 헬퍼
+- `rate_limit.ml` — 요청 제한
+- `cancellation.ml` — 취소 처리
+- `lib/keeper/keeper_supervisor.ml` — keeper 단위 감독
+- `lib/dashboard/dashboard_feature_health.ml`, `dashboard_harness_health.ml` — 표면별 health 판정
+- `lib/fs_compat/capability_recovery_*.ml`, `publication_recovery_*.ml` — 파일 표면 복구
 
-### 제거된 레거시
-- `ZeroZombie` - 경과 시간 기반 Agent/Task 생명주기 mutation 프로토콜
-
-### ❌ 없거나 부족한 것
-- Supervision Tree
-- Health Check 시스템
+### 없는 것
+- 프로세스 전체를 덮는 Supervision Tree (감독은 keeper 단위에 머문다)
 - Graceful Shutdown
-- Auto Recovery
 - Circuit Breaker
 - State Persistence (재시작 복구)
 
@@ -48,7 +46,7 @@ code_refs:
      [workers]          [workers]         [workers]
 ```
 
-**구현 파일**: `lib/supervisor.ml` — 구현됐으나 production 배선 없이 fan-in zero로 남아 #20798에서 삭제됨. 아래 스케치는 재구현 시 설계 참고용.
+아래는 설계 스케치다. 배선되는 감독자만 만든다 — 소비자 없는 감독 트리는 이전에 한 번 만들었다가 아무도 부르지 않아 사라졌다.
 ```ocaml
 type restart_strategy = 
   | OneForOne      (* 하나 죽으면 그것만 재시작 *)

@@ -67,8 +67,8 @@ test/                         # Alcotest suites + fixtures
 | Subsystem | Entry Point | Description |
 |-----------|-------------|-------------|
 | **MCP Server** | `bin/main_eio.ml`, `lib/mcp_server_eio_*` | JSON-RPC over Streamable HTTP |
-| **Board** | `lib/board/`, `lib/tool_board.ml` | Posts, votes, comments |
-| **Keeper** | `lib/keeper/`, `lib/tool_keeper.ml` | long-running keeper runtime |
+| **Board** | `lib/board/`, `lib/board_tool_adapter/` | Posts, votes, comments |
+| **Keeper** | `lib/keeper/` | long-running keeper runtime |
 | **Worker Contracts** | `lib/worker_contract_types/` | shared worker/runtime contract types |
 
 ### Testing
@@ -218,19 +218,12 @@ keeper unified metrics redacted variants). It must **NOT** redact at
 **internal observability** surfaces (boot log, audit log,
 operator-facing `Log.*.info`).
 
-Before adding a new `*_to_yojson` function or metric emitter that
-touches provider/model identity, read
-and apply its 3-question decision rule (who reads it / is there a
-`redacted_*` companion / sibling field consistency).
+Before adding a new `*_to_yojson` function or metric emitter that touches
+provider/model identity, answer three questions: who reads this surface,
+is there a `redacted_*` companion, and do sibling fields agree.
 
-Regression coverage lives in
-`test/test_runtime_catalog_runtime_yojson.ml` — 8 cases across the two
-internal carve-out sites. New internal serializers should add a
-companion test there using the helpers (`assoc_string`, substring
-scanner).
-
-History: #15040 (introduced lens, over-applied) → #15070 (carve-out for
-boot log + audit log) → #15089 (test pins + this section).
+The two internal carve-out sites (boot log, audit log) have no regression
+test. A new internal serializer should come with one.
 
 ## Reporting Issues
 

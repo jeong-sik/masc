@@ -233,19 +233,21 @@ let delivery_of_message (message : Masc_domain.message) =
       (match message.mention with None -> Passive | Some _ -> Pending)
   }
 
+(* Every committed message reaches the handler, not only the ones carrying a
+   mention. Delivery is more than the named wake: an unmentioned broadcast is
+   still conversation the fleet sits in, and the handler is the only place
+   that sees a committed message. The installed handler decides what an
+   absent mention means and the default answers [Passive], so short-circuiting
+   here only hid the message from whoever is installed. *)
 let deliver_delivery delivery =
-  match delivery.mention with
-  | None -> Passive
-  | Some _ ->
-    (try (Atomic.get on_broadcast_mention) delivery
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Misc.warn
-         "on_broadcast_mention callback failed request_id=%s: %s"
-         delivery.request_id
-         (Printexc.to_string exn);
-       Deferred Handler_failed)
+  try (Atomic.get on_broadcast_mention) delivery with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "on_broadcast_mention callback failed request_id=%s: %s"
+      delivery.request_id
+      (Printexc.to_string exn);
+    Deferred Handler_failed
 
 let message_file config (message : Masc_domain.message) =
   Filename.concat (messages_dir config)

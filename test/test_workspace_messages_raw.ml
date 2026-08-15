@@ -368,6 +368,37 @@ let test_startup_schema_preflight_rejects_unpurged_message () =
     | Error rejections ->
       Alcotest.failf "expected one schema rejection, got %d" (List.length rejections))
 
+(* The delivery handler is the only place that sees a committed message. The
+   dispatcher used to answer [Passive] for an unmentioned broadcast without
+   calling the handler at all, so anything the handler does for the fleet —
+   projecting the message into every Keeper's window — was wired to a call
+   that never happened. *)
+let test_unmentioned_broadcast_reaches_the_delivery_handler () =
+  with_test_env (fun config ->
+    let seen = ref [] in
+    let previous =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun (delivery : Workspace_broadcast.broadcast_delivery) ->
+           seen := delivery.content :: !seen;
+           Workspace_broadcast.Passive)
+    in
+    Fun.protect
+      ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous)
+      (fun () ->
+        match
+          Workspace.broadcast config ~from_agent:"claude"
+            ~content:"fleet announcement with no mention"
+        with
+        | Error _ -> Alcotest.fail "broadcast was not persisted"
+        | Ok delivery ->
+          Alcotest.(check bool)
+            "an unmentioned broadcast stays a passive mention delivery" true
+            (delivery.mention_delivery = Workspace_broadcast.Passive);
+          Alcotest.(check (list string))
+            "the handler saw the committed message"
+            [ "fleet announcement with no mention" ]
+            !seen))
+
 let () =
   Alcotest.run "Workspace raw message regression" [
     ("messages_raw", [
@@ -387,5 +418,7 @@ let () =
         test_malformed_outbox_is_quarantined_before_successor_delivery;
       Alcotest.test_case "startup rejects unpurged message schema" `Quick
         test_startup_schema_preflight_rejects_unpurged_message;
+      Alcotest.test_case "unmentioned broadcast reaches the delivery handler" `Quick
+        test_unmentioned_broadcast_reaches_the_delivery_handler;
     ]);
   ]

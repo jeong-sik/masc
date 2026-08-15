@@ -1489,12 +1489,25 @@ let start_keeper_loops_owned
         ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
         delivery
     in
-    project_workspace_message_to_fleet
-      ~base_path
-      ~registered_keepers:(fun () ->
-        Keeper_registry.all ~base_path ()
-        |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name))
-      delivery;
+    (* The fanout must not be able to change what the mention delivery
+       reported. The dispatcher turns an escaping exception into
+       [Deferred Handler_failed], which would relabel an accepted mention as
+       an undelivered one. *)
+    (try
+       project_workspace_message_to_fleet
+         ~base_path
+         ~registered_keepers:(fun () ->
+           Keeper_registry.all ~base_path ()
+           |> List.map (fun (entry : Keeper_registry.registry_entry) ->
+             entry.name))
+         delivery
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn
+         "fleet projection failed request_id=%s: %s"
+         delivery.request_id
+         (Printexc.to_string exn));
     mention_outcome
   in
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;

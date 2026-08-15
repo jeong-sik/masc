@@ -352,7 +352,7 @@ let () = test "web_search_provider_plan_empty_without_credentials" (fun () ->
                     assert
                       (str_contains
                          (Tool_result.message result)
-                         "no web search provider is configured")))))))))))
+                         "no web search provider is configured"))))))))))
 )
 
 let () = test "web_search_provider_plan_prefers_configured_official_provider" (fun () ->

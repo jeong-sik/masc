@@ -111,3 +111,19 @@
 - Blaizzy/mlx-vlm#999, ml-explore/mlx-lm#980 (mlx 캐시 결함)
 - NousResearch/hermes-agent#56004, earendil-works/pi#3325 (preserve_thinking 부재로 인한 multi-turn 결함 사례)
 - DeepSeek context caching 문서 (프리픽스 유닛 완전 일치 시에만 히트)
+
+## 7. 라이브 검증 (2026-08-16 04:10~04:25 KST, 추가)
+
+§4 계획의 PR-2(#28777)·PR-3(#28778)·PR-4(#28782)를 병합하고, llama_cpp 레인을 실제 fleet에 올려 keeper 턴으로 검증했다.
+
+절차: overlay + runtime.toml에 `llama_cpp.qwen3-8-27b-llama` 등록 → preview API 검증 → 핫리로드 → `/api/v1/runtime/resolved`에서 `keeper_dispatchable: true` 확인 → `canary-multiturn-localollama-20260814-0839`를 레인에 배정, thinking/preserve on.
+
+| 관측 | 값 | 근거 |
+|---|---|---|
+| 턴 15 (콜드) | 35K 프리픽스 프리필 중 first-event 120s 데드라인에 3회 취소, 취소마다 슬롯 KV 적립 12K→22K→32K, 4번째 시도 완주 | llama-server 로그 task 0/14/27/70 |
+| 턴 16 (웜) | LCP 유사도 0.949, **캐시 재사용 94.6%** — 신규 1,769tok만 19.3s 프리필, ttfrc 27.2s, `finish_reason: completed`, `enable_thinking: true` | turn-record absolute_turn=16, llama-server 로그 |
+| 대시보드 | 컨텍스트 미터 34.5k/65.5k(53%)가 provider 실측 입력 토큰으로 표시, 런타임 패널에 `chat-template-kwargs` 축 노출 | keeper 상세 화면 실측 |
+
+파생 수정: 콜드/딥 프리필의 first-event 침묵은 타임아웃 완화가 아니라 llama-server `return_progress`(prefill 중 `prompt_progress{total, cache, processed}` SSE 청크, b10180 검증)로 푼다 — PR-6 (#28791). `[turn] stream_idle_timeout_sec = 120`은 본래 역할(죽은 서버 감지)로 유지.
+
+병합 이력: #28774(본 RFC) → #28777(G1) → #28778(G5) → #28782(G2/G3 runbook) → #28785(G4, anthropic) → #28791(return_progress).

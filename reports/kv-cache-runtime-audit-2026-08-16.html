@@ -97,6 +97,16 @@
 <tr><td>G6</td><td>provider별 usage 의미론(input에 cached 포함 여부) 미감사</td><td>후속 감사</td></tr>
 </table>
 
+<h2>추가: 라이브 fleet 검증 (2026-08-16 04:10~04:25 KST)</h2>
+<p class="note">위 하네스 측정 이후, llama_cpp 레인을 실제 keeper fleet에 올려 검증했다. 절차와 수치는 RFC-0382 §7 참조.</p>
+<table>
+<tr><th>관측</th><th>값</th></tr>
+<tr><td>턴 15 (콜드, 35K 프리픽스)</td><td>first-event 120s 데드라인에 3회 취소 — 취소마다 슬롯 KV 적립(12K→22K→32K), 4번째 시도 완주. 재시도 사다리가 수렴하지만 수 분 낭비</td></tr>
+<tr><td>턴 16 (웜)</td><td class="good">LCP 유사도 0.949 · 캐시 재사용 94.6% — 신규 1,769tok/19.3s 프리필, ttfrc 27.2s, finish=completed, enable_thinking=true, input 34,468 / output 717</td></tr>
+<tr><td>대시보드</td><td>컨텍스트 미터 34.5k/65.5k(53%)가 provider 실측 토큰으로 표시, 런타임 패널에 chat-template-kwargs 축 노출</td></tr>
+<tr><td>파생 수정</td><td>콜드 프리필의 SSE 침묵 → <code>return_progress</code>(prefill 중 prompt_progress 청크, b10180 검증)로 근본 해결 — PR #28791. 타임아웃 값(120s)은 유지</td></tr>
+</table>
+
 <p class="note">이 리포트의 모든 수치는 위 명시된 환경에서의 단일 측정이다. mlx 서버와 동시 상주 상태라 decode 절대값에는 Metal 경합이 섞여 있고, 정책 간 <em>상대</em> 비교(같은 세션 내 연속 측정)가 이 리포트의 주장 범위다.</p>
 
 </body>

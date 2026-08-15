@@ -38,6 +38,88 @@ type externalization_error =
   ; message : string
   }
 
+let artifact_manifest_metadata_key = "masc.artifact_manifest"
+
+let metadata_with_artifact_manifest metadata reference =
+  let manifest = Tool_output.normalized_artifact_ref_to_json reference in
+  match metadata with
+  | None -> `Assoc [ artifact_manifest_metadata_key, manifest ]
+  | Some (`Assoc fields) ->
+    `Assoc
+      ((artifact_manifest_metadata_key, manifest)
+       :: List.remove_assoc artifact_manifest_metadata_key fields)
+  | Some payload ->
+    `Assoc
+      [ artifact_manifest_metadata_key, manifest
+      ; "masc.payload", payload
+      ]
+;;
+
+let artifact_manifest_from_metadata metadata =
+  let rec decode = function
+    | `Assoc fields ->
+      (match List.assoc_opt artifact_manifest_metadata_key fields with
+     | Some json ->
+       (match Tool_output.normalized_artifact_ref_of_json json with
+        | Tool_output.Decoded_normalized_artifact_ref reference
+          when String.equal reference.mime Tool_output.artifact_manifest_mime ->
+          Ok reference
+        | Tool_output.Decoded_normalized_artifact_ref _ ->
+          Error "artifact manifest metadata has the wrong media type"
+        | Tool_output.Not_normalized_artifact_ref ->
+          Error "artifact manifest metadata is not a normalized reference"
+        | Tool_output.Invalid_normalized_artifact_ref { detail } -> Error detail)
+     | None ->
+       (match List.assoc_opt "producer" fields with
+        | Some producer -> decode producer
+        | None ->
+          (match List.assoc_opt "masc.payload" fields with
+           | Some payload -> decode payload
+           | None -> Error "typed artifact result is missing its durable manifest")))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "typed artifact result is missing its durable manifest"
+  in
+  match metadata with
+  | Some metadata -> decode metadata
+  | None -> Error "typed artifact result is missing its durable manifest"
+;;
+
+let attach_artifact_manifest ~base_path (result : Tool_result.result) =
+  match
+    Tool_output.normalized_artifact_refs_in_json_strict
+      (Tool_result.data result)
+  with
+  | Error message -> Error { kind = Artifact_storage_failure; message }
+  | Ok [] -> Ok result
+  | Ok (_ :: _) ->
+    (try
+       let manifest =
+         Tool_output.artifact_manifest_to_json
+           ~content:(Tool_result.message result)
+           ~structured_content:(Tool_result.data result)
+         |> Yojson.Safe.to_string
+       in
+       let reference =
+         Tool_blob_store.put_durable
+           (Tool_blob_store.create ~base_path)
+           ~bytes:manifest
+           ~mime:Tool_output.artifact_manifest_mime
+         |> fun reference -> Tool_output.with_preview reference ""
+       in
+       Ok
+         (Tool_result.with_metadata
+            (metadata_with_artifact_manifest (Tool_result.metadata result) reference)
+            result)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       let message = Printexc.to_string exn in
+       Log.Misc.error
+         "tool_bridge: result manifest persistence failed: %s"
+         message;
+       Error { kind = Artifact_storage_failure; message })
+;;
+
 let resolve_blob_store ?base_path () =
   match base_path with
   | None -> None
@@ -167,11 +249,28 @@ let project_result
       ?on_externalization_error
       ~externalization_error_recoverable
       ~model_projection
+      ~structured_content
+      ~metadata
       message
       on_content
   : Agent_core.Types.tool_result
   =
-  match project_content ?base_path ~model_projection message with
+  let project () = project_content ?base_path ~model_projection message in
+  let projected =
+    match Tool_output.normalized_artifact_refs_in_json structured_content with
+    | [] -> project ()
+    | _ :: _ when Option.is_none base_path -> project ()
+    | _ :: _ ->
+      (match Tool_output.normalized_artifact_refs_in_json_strict structured_content with
+       | Error message -> Error { kind = Artifact_storage_failure; message }
+       | Ok [] -> Error { kind = Artifact_storage_failure; message = "typed artifact result lost its normalized references" }
+       | Ok (_ :: _) ->
+         (match artifact_manifest_from_metadata metadata with
+          | Ok reference ->
+            Ok (Tool_output.encode_for_agent_core (Tool_output.Stored reference))
+          | Error message -> Error { kind = Artifact_storage_failure; message }))
+  in
+  match projected with
   | Ok content -> on_content content
   | Error error ->
     Option.iter (fun observe -> observe error) on_externalization_error;
@@ -195,6 +294,8 @@ let to_agent_core_typed_result
       ?on_externalization_error
       ~externalization_error_recoverable
       ~model_projection
+      ~structured_content:(Tool_result.data tr)
+      ~metadata:(Tool_result.metadata tr)
       (Tool_result.message tr)
       (fun content ->
          Ok { Agent_core.Types.content; _meta = output.metadata })
@@ -213,6 +314,8 @@ let to_agent_core_typed_result
       ?on_externalization_error
       ~externalization_error_recoverable
       ~model_projection
+      ~structured_content:(Tool_result.data tr)
+      ~metadata:(Tool_result.metadata tr)
       (Tool_result.message tr)
       (fun content ->
          Ok { Agent_core.Types.content; _meta = Some metadata })
@@ -233,6 +336,8 @@ let to_agent_core_typed_result
       ?on_externalization_error
       ~externalization_error_recoverable
       ~model_projection
+      ~structured_content:(Tool_result.data tr)
+      ~metadata:(Tool_result.metadata tr)
       message
       (fun message ->
        make_tool_error

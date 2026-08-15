@@ -97,6 +97,67 @@ let gate_causal_initial
     ]
 ;;
 
+let composition_catalog_config_error detail =
+  Agent_core.Error.Config
+    (Agent_core.Error.InvalidConfig
+       { field = "tool-compositions.toml"; detail })
+;;
+
+let composition_catalog_io_error ~op ~path exn =
+  Agent_core.Error.Io
+    (Agent_core.Error.FileOpFailed
+       { op; path; detail = Printexc.to_string exn })
+;;
+
+let load_composition_catalog ~config_root =
+  let path = Keeper_tool_composition_catalog.path ~config_root in
+  match
+    try Ok (Fs_compat.exact_path_kind path) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (composition_catalog_io_error ~op:"inspect" ~path exn)
+  with
+  | Error _ as error -> error
+  | Ok Fs_compat.Exact_missing -> Ok None
+  | Ok (Fs_compat.Exact_kind Unix.S_REG) ->
+    (match
+       try Ok (Fs_compat.load_file path) with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn -> Error (composition_catalog_io_error ~op:"read" ~path exn)
+     with
+     | Error _ as error -> error
+     | Ok content ->
+       (match Keeper_tool_composition_catalog.parse content with
+        | Ok catalog -> Ok (Some catalog)
+        | Error error ->
+          Error
+            (composition_catalog_config_error
+               (Keeper_tool_composition_catalog.error_to_string error))))
+  | Ok
+      (Fs_compat.Exact_kind
+        ( Unix.S_DIR
+        | Unix.S_CHR
+        | Unix.S_BLK
+        | Unix.S_LNK
+        | Unix.S_FIFO
+        | Unix.S_SOCK )) ->
+    Error (composition_catalog_config_error "catalog path is not a regular file")
+  | Ok Fs_compat.Exact_unknown ->
+    Error (composition_catalog_config_error "catalog path kind is unavailable")
+;;
+
+let expected_model_tool_names ~model_visible_descriptors ~composition_catalog =
+  let descriptor_names =
+    model_visible_descriptors
+    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
+  in
+  let composition_names =
+    match composition_catalog with
+    | None -> []
+    | Some catalog -> Keeper_tool_composition_catalog.model_tool_names catalog
+  in
+  List.sort_uniq String.compare (descriptor_names @ composition_names)
+;;
+
 let prepare_agent_setup
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -143,6 +204,7 @@ let prepare_agent_setup
            ~dynamic_context)
   in
   let agent_name = meta.agent_name in
+  let* composition_catalog = load_composition_catalog ~config_root in
   let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
@@ -176,6 +238,8 @@ let prepare_agent_setup
       ?continuation_channel
       ~gate_context
       ?hitl_resolution
+      ?composition_catalog
+      ~turn_ctx_cell
       ()
   in
   let replay_delivery =
@@ -299,9 +363,9 @@ let prepare_agent_setup
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
   let expected_model_names =
-    model_visible_descriptors
-    |> List.concat_map Keeper_tool_descriptor.keeper_model_names
-    |> List.sort_uniq String.compare
+    expected_model_tool_names
+      ~model_visible_descriptors
+      ~composition_catalog
   in
   let actual_model_names = List.sort_uniq String.compare all_tool_names in
   let all_model_eligible_tools_visible =

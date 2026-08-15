@@ -27,8 +27,9 @@
 
     [of_wire] is a {e priority-ranked partition}: it tests the buckets in
     the same order the old [operator_disposition] [if/else] chain tested
-    its string predicates, plus the exact canonical
-    [Capacity_backpressure] policy bucket, and returns the first match.
+    its string predicates, plus exact canonical policy buckets for
+    [Capacity_backpressure] and [Provider_attempt_effect_fenced], and returns
+    the first match.
     Only canonical producer wire forms select specialized buckets. The order
     remains load-bearing for canonical overlaps; see the [.ml] for the ranked
     list.
@@ -69,6 +70,12 @@ type t =
       {!Keeper_internal_error.incomplete_tool_transcript_kind}. Provider
       dispatch did not occur; automatic retry is forbidden until an operator
       resets the corrupted checkpoint. *)
+  | Provider_attempt_effect_fenced of string
+  (** Exact canonical wire
+      {!Keeper_internal_error.provider_attempt_effect_fenced_kind}. A provider
+      attempt may have crossed an effect boundary, so same-turn replay is
+      forbidden and the operator-facing receipt must retain an explicit alert
+      rather than treating it as an unmapped internal state. *)
   | Internal_error of string
   (** Exact wire ["internal_error"]. Payload is the original
           string, carried only for [to_wire] round-trip fidelity. *)

@@ -110,10 +110,21 @@ val execution_actor_for_request :
 
 val invalidate_execution_cache : unit -> unit
 (** Drops the cached execution surface so the next
-    snapshot read recomputes from upstream.  Swallows
-    [Eio.Cancel.Cancelled] re-raise plus logs and counts other
-    exceptions through
+    snapshot read recomputes from upstream. Runs the cache/tombstone
+    settlement cancellation-protected and logs/counts projection failures
+    through
     {!Keeper_metrics.(to_string LifecycleCallbackFailures)}. *)
+
+val install_task_mutation_cache_invalidation : unit -> unit
+(** Connects task mutation commits to {!invalidate_execution_cache}. Server
+    bootstrap installs this before Workspace mutation hooks become available. *)
+
+module For_testing : sig
+  val execution_publication_generation : unit -> int
+
+  val publish_execution_success_if_current :
+    generation:int -> Yojson.Safe.t -> bool
+end
 
 val invalidate_execution_cache_with_hooks_for_testing :
   invalidate_execution_surface:(unit -> unit) ->

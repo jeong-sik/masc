@@ -108,6 +108,96 @@ let normalized_artifact_ref_of_json = function
   | _ -> Not_normalized_artifact_ref
 ;;
 
+let collect_normalized_artifact_refs ~reject_invalid json =
+  let add_reference references reference =
+    if
+      List.exists
+        (fun existing ->
+           String.equal existing.sha256 reference.sha256
+           && String.equal existing.mime reference.mime)
+        references
+    then references
+    else reference :: references
+  in
+  let rec collect references = function
+    | (`Assoc fields as json) ->
+      (match normalized_artifact_ref_of_json json with
+       | Decoded_normalized_artifact_ref reference ->
+         Ok (add_reference references reference)
+       | Invalid_normalized_artifact_ref { detail } when reject_invalid ->
+         Error detail
+       | Invalid_normalized_artifact_ref _ | Not_normalized_artifact_ref ->
+         List.fold_left
+           (fun result (_, value) ->
+              Result.bind result (fun references -> collect references value))
+           (Ok references)
+           fields)
+    | `List values ->
+      List.fold_left
+        (fun result value ->
+           Result.bind result (fun references -> collect references value))
+        (Ok references)
+        values
+    | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ ->
+      Ok references
+  in
+  Result.map List.rev (collect [] json)
+;;
+
+let normalized_artifact_refs_in_json json =
+  match collect_normalized_artifact_refs ~reject_invalid:false json with
+  | Ok references -> references
+  | Error _ -> []
+;;
+
+let normalized_artifact_refs_in_json_strict json =
+  collect_normalized_artifact_refs ~reject_invalid:true json
+;;
+
+let artifact_manifest_mime = "application/vnd.masc.tool-result-manifest+json"
+let artifact_manifest_schema = "masc.tool-result-artifact-manifest.v1"
+
+let artifact_manifest_to_json ~content ~structured_content =
+  `Assoc
+    [ "schema", `String artifact_manifest_schema
+    ; "content", `String content
+    ; "structured_content", structured_content
+    ]
+;;
+
+type artifact_manifest_decode =
+  | Not_artifact_manifest
+  | Invalid_artifact_manifest of { detail : string }
+  | Decoded_artifact_manifest of
+      { content : string
+      ; structured_content : Yojson.Safe.t
+      ; artifact_refs : artifact_ref list
+      }
+
+let artifact_manifest_of_json = function
+  | `Assoc
+      [ "schema", `String schema
+      ; "content", `String content
+      ; "structured_content", structured_content
+      ]
+    when String.equal schema artifact_manifest_schema ->
+    (match normalized_artifact_refs_in_json_strict structured_content with
+     | Ok artifact_refs ->
+       Decoded_artifact_manifest
+         { content; structured_content; artifact_refs }
+     | Error detail -> Invalid_artifact_manifest { detail })
+  | `Assoc fields when List.mem_assoc "schema" fields ->
+    (match List.assoc_opt "schema" fields with
+     | Some (`String schema) when not (String.equal schema artifact_manifest_schema) ->
+       Not_artifact_manifest
+     | _ ->
+       Invalid_artifact_manifest
+         { detail =
+             "expected exact fields schema, content, and structured_content"
+         })
+  | _ -> Not_artifact_manifest
+;;
+
 type t =
   | Inline of string
   | Stored of artifact_ref

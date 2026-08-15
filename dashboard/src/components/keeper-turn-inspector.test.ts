@@ -361,6 +361,46 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(text).toContain('16.0%')
   })
 
+  // A narrower window with no reason attached reads as an ordinary bad turn.
+  // The decline does not age out, so a keeper can sit in it indefinitely —
+  // which is why the basis is recorded rather than only logged.
+  it('says when a turn was measured against the checkpoint instead of the wire', async () => {
+    const records = turnRecordsWithMemoryOs()
+    const latestRow = records.entries.at(-1)
+    if (!latestRow) throw new Error('fixture must carry a latest turn')
+    latestRow.record.transmitted_atoms = 12
+    latestRow.record.total_atoms = 7000
+    latestRow.record.model_input_measurement = 'durable_shape'
+    fetchKeeperTurnRecordsMock.mockResolvedValue(records)
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    expect(container.querySelector('[data-testid="turn-measurement-declined"]')).toBeTruthy()
+  })
+
+  it('says nothing extra when the wire shape was measured', async () => {
+    const records = turnRecordsWithMemoryOs()
+    const latestRow = records.entries.at(-1)
+    if (!latestRow) throw new Error('fixture must carry a latest turn')
+    latestRow.record.transmitted_atoms = 12
+    latestRow.record.total_atoms = 7000
+    latestRow.record.model_input_measurement = 'wire_shape'
+    fetchKeeperTurnRecordsMock.mockResolvedValue(records)
+
+    const { container } = render(html`<${KeeperTurnInspector} keeperName="albini" />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('T42')
+    })
+
+    expect(container.querySelector('[data-testid="turn-transmitted-atoms"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="turn-measurement-declined"]')).toBeNull()
+  })
+
   // Absence has to read as absence: a turn on a runtime that assembles its own
   // input carries no observation, and rendering 0 would say the keeper saw
   // nothing.

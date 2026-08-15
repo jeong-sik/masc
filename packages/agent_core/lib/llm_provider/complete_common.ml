@@ -634,6 +634,29 @@ type anthropic_serialization_policy =
   | Frozen_anthropic_thinking_control of Capabilities.anthropic_thinking_control option
   | Resolve_nonexact_anthropic_thinking_control
 
+(* What this config's serializer will put on the wire, decided by the same
+   codec dispatch that decides which serializer runs. Exhaustive over
+   [Provider_http_codec.t]: a new codec cannot be added without answering this,
+   which is the point — a caller that sizes a request against unprojected
+   history charges for bytes the wire drops. *)
+let transmitted_history ~(config : Provider_config.t) messages =
+  let projected =
+    match Provider_http_codec.of_config config with
+    | Provider_http_codec.Anthropic_messages ->
+      Backend_anthropic.project_history config messages
+    | Provider_http_codec.Ollama_chat -> Backend_ollama.project_history config messages
+    | Provider_http_codec.Openai_responses ->
+      Backend_openai_responses.project_history config messages
+    | Provider_http_codec.Gemini_generate_content ->
+      Backend_gemini.project_history config messages
+    | Provider_http_codec.Openai_chat | Provider_http_codec.Glm_chat ->
+      Backend_openai_serialize.project_history config messages
+  in
+  Result.map
+    (fun (projection : Reasoning_history_projection.t) -> projection.messages)
+    projected
+;;
+
 let serialize_http_request_with_policy
       ~stream
       ~anthropic_serialization_policy

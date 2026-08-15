@@ -1244,9 +1244,16 @@ function TurnRow({
             + ' atom ('
             + ((transmitted / total) * 100).toFixed(1)
             + '% 전송)'
+          // A turn measured against the durable shape budgeted for reasoning
+          // the wire deletes, so its window is narrower than it needed to be.
+          // Said here because the count alone reads as an ordinary bad turn.
+          const declined = record.model_input_measurement === 'durable_shape'
           return html`
             <div data-testid="turn-transmitted-atoms" class="flex items-center gap-2 text-2xs font-mono v2-monitoring-row">
               <span class="text-[var(--color-fg-muted)]">${label}</span>
+              ${declined
+                ? html`<span data-testid="turn-measurement-declined" class="text-[var(--color-status-warn)]">· 체크포인트 형태로 측정 (전송되지 않는 reasoning 포함)</span>`
+                : null}
             </div>
           `
         })()}

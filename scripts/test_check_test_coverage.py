@@ -272,6 +272,44 @@ class CommentLineNumbersTest(unittest.TestCase):
             coverage.comment_line_numbers(text, suffix), expected, msg=label
         )
 
+    def test_toml_comment_lines_are_comment(self):
+        # A runtime binding carries its reason above the value it explains.
+        self.assert_comment_lines(
+            ".toml",
+            "# why this value\n# and the evidence\nmax-request-body-bytes = 524288",
+            {1, 2},
+            "toml hash comments",
+        )
+
+    def test_toml_multiline_string_content_is_code(self):
+        # config/runtime.toml carries keeper prompts in triple-quoted blocks. A
+        # markdown heading inside one is content, and counting it as comment
+        # would drop real added lines from the gate's total.
+        self.assert_comment_lines(
+            ".toml",
+            'prompt = """\n# Heading\nbody\n"""\nkey = 1',
+            set(),
+            "hash inside a multi-line string",
+        )
+
+    def test_toml_comment_after_a_multiline_string_closes(self):
+        self.assert_comment_lines(
+            ".toml",
+            'prompt = """\nbody\n"""\n# real comment\nkey = 1',
+            {4},
+            "comment after the string ends",
+        )
+
+    def test_toml_value_containing_a_hash_is_code(self):
+        # `#` only opens a comment where a value has not already started; a
+        # line that begins with a key is code however it ends.
+        self.assert_comment_lines(
+            ".toml",
+            'name = "sharp#note"  # trailing',
+            set(),
+            "hash inside a value",
+        )
+
     def test_block_continuation_lines_are_comment(self):
         self.assert_comment_lines(
             ".mli",

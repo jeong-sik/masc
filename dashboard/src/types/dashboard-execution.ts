@@ -553,6 +553,9 @@ export interface DashboardExecutionContinuityBrief {
 }
 
 export interface DashboardExecutionResponse {
+  execution_publication_epoch?: string
+  execution_publication_generation?: number
+  execution_invalidated?: boolean
   generated_at?: string
   status?: ServerStatus
   summary?: DashboardExecutionSummary

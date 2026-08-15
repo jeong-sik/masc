@@ -17,6 +17,7 @@ let producer_payload ~raw = function
 
 let execute_with_observers
       ~(name : string)
+      ?descriptor
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
       ~(publication_recovery :
@@ -50,23 +51,43 @@ let execute_with_observers
   try
     let result, duration_ms =
       Inference_utils.timed (fun () ->
-        Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
-          ~config
-          ~meta
-          ~publication_recovery
-          ~ctx_work:ctx_snapshot
-          ?turn_sandbox_factory
-          ?sw
-          ?clock
-          ?proc_mgr
-          ?net
-          ?mcp_session_id
-          ?continuation_channel
-          ?gate_context
-          ?gate_grant
-          ~name
-          ~input
-          ())
+        match descriptor with
+        | None ->
+          Keeper_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
+            ~config
+            ~meta
+            ~publication_recovery
+            ~ctx_work:ctx_snapshot
+            ?turn_sandbox_factory
+            ?sw
+            ?clock
+            ?proc_mgr
+            ?net
+            ?mcp_session_id
+            ?continuation_channel
+            ?gate_context
+            ?gate_grant
+            ~name
+            ~input
+            ()
+        | Some descriptor ->
+          Keeper_tool_dispatch_runtime.execute_keeper_tool_descriptor_with_outcome
+            ~config
+            ~meta
+            ~publication_recovery
+            ~ctx_work:ctx_snapshot
+            ?turn_sandbox_factory
+            ?sw
+            ?clock
+            ?proc_mgr
+            ?net
+            ?mcp_session_id
+            ?continuation_channel
+            ?gate_context
+            ?gate_grant
+            ~descriptor
+            ~input
+            ())
     in
     let raw_result = result.Keeper_tool_execution.raw_output in
     let producer_data = result.data in

@@ -466,17 +466,14 @@ module BroadcastResponse = struct
            value)
   ;;
 
-  let nonempty_option value =
-    if String.trim value = "" then None else Some value
-  ;;
 
   let of_bytes bytes =
     let p = decode ~type_name:"BroadcastResponse" P.BroadcastResponse.from_proto bytes in
     { success = p.success
     ; seq = p.seq
-    ; request_id = nonempty_option p.request_id
+    ; request_id = p.request_id
     ; delivery_status = delivery_status_of_wire p.delivery_status
-    ; delivery_reason = nonempty_option p.delivery_reason
+    ; delivery_reason = p.delivery_reason
     ; workspace_persistence_status =
         workspace_persistence_status_of_wire p.workspace_persistence_status
     ; retry_disposition = retry_disposition_of_wire p.retry_disposition
@@ -488,9 +485,9 @@ module BroadcastResponse = struct
       P.BroadcastResponse.to_proto
       { success = t.success
       ; seq = t.seq
-      ; request_id = Option.value t.request_id ~default:""
+      ; request_id = t.request_id
       ; delivery_status = delivery_status_to_wire t.delivery_status
-      ; delivery_reason = Option.value t.delivery_reason ~default:""
+      ; delivery_reason = t.delivery_reason
       ; workspace_persistence_status =
           workspace_persistence_status_to_wire t.workspace_persistence_status
       ; retry_disposition = retry_disposition_to_wire t.retry_disposition

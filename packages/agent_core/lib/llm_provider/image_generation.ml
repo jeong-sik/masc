@@ -341,7 +341,8 @@ let generate
 
 let test_caps task = { Capabilities.default_capabilities with task }
 
-let test_config kind task =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] test_config kind task =
   Provider_config.make
     ~kind
     ~provider_id:"test-image"
@@ -352,7 +353,8 @@ let test_config kind task =
     ()
 ;;
 
-let catalog_declares_image_task provider_label model_id =
+(* Inline-test-only; the release profile strips the tests that call it. *)
+let[@warning "-32"] catalog_declares_image_task provider_label model_id =
   match
     Capabilities.for_provider_model_id
       ~allow_bare_fallback:false

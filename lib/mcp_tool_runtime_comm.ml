@@ -76,7 +76,13 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
             (Printexc.to_string exn)
       in
       project_auxiliary "session" (fun () ->
-        ignore (Session.push_message registry ~from_agent ~content:message ~mention));
+        let recipients =
+          Session.push_message registry ~from_agent ~content:message ~mention
+        in
+        Log.Mcp.debug
+          "broadcast session push delivered to %d recipient(s) request_id=%s"
+          (List.length recipients)
+          delivery.request_id);
       let notification_fields =
         [ ("type", `String "masc/broadcast")
         ; ("request_id", `String delivery.request_id)

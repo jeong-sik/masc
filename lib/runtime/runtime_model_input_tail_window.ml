@@ -38,7 +38,19 @@ type budget_error =
 type projection =
   { messages : Agent_core.Types.message list
   ; dropped_atoms : int
+  ; atom_count : int
   }
+
+type window_observation =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  }
+
+let observe ~history_atom_count (projection : projection) =
+  { transmitted_atoms = projection.atom_count - projection.dropped_atoms
+  ; total_atoms = history_atom_count
+  }
+;;
 
 let budget_error_to_string = function
   | Reservation_exceeds_capacity
@@ -319,7 +331,7 @@ let project_with_drop
       (Reservation_exceeds_capacity
          { capacity_bytes; reserved_bytes; undroppable_bytes })
   else if atom_count = 0
-  then Ok { messages; dropped_atoms = 0 }
+  then Ok { messages; dropped_atoms = 0; atom_count }
   else (
     let per_atom, suffix =
       atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
@@ -330,6 +342,7 @@ let project_with_drop
         { messages =
             assemble ~allow_empty_history ~atom_count ~drop ~messages labelled
         ; dropped_atoms = drop
+        ; atom_count
         }
     | None ->
       let drop = exact_drop ~available_bytes ~atom_count suffix in
@@ -343,6 +356,7 @@ let project_with_drop
           { messages =
               assemble ~allow_empty_history ~atom_count ~drop ~messages labelled
           ; dropped_atoms = drop
+          ; atom_count
           })
 ;;
 

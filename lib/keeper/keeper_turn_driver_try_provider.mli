@@ -69,6 +69,32 @@ type try_provider_ctx =
        body_bytes:int ->
        unit)
         option
+  ; on_model_input_window_observation :
+      (Runtime_model_input_tail_window.window_observation -> unit) option
+        (** Called with the cut the window stage selected over the keeper's
+            conversation history, as that stage saw it.
+
+            Two kinds of material in the same request are outside these counts,
+            for two different reasons. Pinned extra-system context and the
+            synthetic preamble are excluded by rule: {!annotate} classifies
+            them [Pinned] every turn because they are re-assembled rather than
+            conversed. Anything [ctx.model_input_projection] appends afterwards
+            — a pending Gate approval replay, for instance — is excluded only
+            because it arrives after this stage has run. That one is ordinary
+            conversation, it is persisted, and from the next turn it is counted
+            like any other atom; the turn it is appended on undercounts by
+            exactly that message and then self-corrects.
+
+            So this is not a decomposition of {!on_request_wire_observation}:
+            that one measures the bytes the provider admitted, and those bytes
+            cover material these atoms do not.
+
+            A turn issues one provider request (7,763 API calls over 7,646
+            turns on a live 2026-08-14 trace), so a later call within one turn
+            belongs to a failover attempt and supersedes the earlier one. Never
+            invoked when the projection refuses — the turn carries a typed
+            budget error instead, and reporting a cut that was never dispatched
+            would fabricate evidence. *)
   ; event_bus : Agent_core.Event_bus.t option
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option

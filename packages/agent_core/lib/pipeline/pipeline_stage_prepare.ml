@@ -99,14 +99,19 @@ let stage_input ?raw_trace_run ?clock ~turn agent =
          ~decision:before_decision)
 ;;
 
-let last_tool_results_from = Agent_turn.last_tool_results_from
 
-(* Wiring coverage (Agent Core contract WP8 Inc1): the consumed [last_tool_results_from]
-   path routes [ToolResult] blocks through
-   [Canonical_tool.tool_result_of_block] and lowers the projection back to
-   [Types.tool_result]. A result carrying a [json] (WP4 structured) payload
-   must still lower to [Ok { content; _meta = None }] — the projection surfaces
-   [structured_content] without disturbing the existing string contract. *)
+(* Agent Core contract WP8 Inc1. [Agent_turn.last_tool_results_from] routes
+   [ToolResult] blocks through [Canonical_tool.tool_result_of_block] and lowers
+   the projection back to [Types.tool_result]. A result carrying a [json] (WP4
+   structured) payload must still lower to [Ok { content; _meta = None }] — the
+   projection surfaces [structured_content] without disturbing the existing
+   string contract.
+
+   This file used to re-export the function so the test below could name it
+   unqualified, and pipeline.ml re-exported that in turn. Neither rung had a
+   caller outside these tests, and the wording here ("the consumed path")
+   claimed a wiring this stage does not have: the consumer is Agent_turn
+   itself (agent_turn.ml:221). The test now names the function it pins. *)
 let%test "last_tool_results_from routes through canonical projection (with json)" =
   let msgs =
     [ { role = Tool
@@ -133,7 +138,7 @@ let%test "last_tool_results_from routes through canonical projection (with json)
       }
     ]
   in
-  match last_tool_results_from msgs with
+  match Agent_turn.last_tool_results_from msgs with
   | [ Ok { content = "ok payload"; _meta = _ }
     ; Error { message = "boom"; recoverable = false; error_class = None }
     ] -> true

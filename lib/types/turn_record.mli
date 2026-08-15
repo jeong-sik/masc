@@ -64,6 +64,29 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type model_input_window =
+  { transmitted_atoms : int
+  ; total_atoms : int
+  }
+(** How much of the keeper's own history the dispatched request carried, in
+    atoms — one organic user message, or one assistant message together with
+    the tool messages answering it.
+
+    Reported beside {!request_wire_observation}, never in place of it: that one
+    counts the bytes the provider admitted, this one counts how much
+    conversation the turn reached back over. The two do not decompose into each
+    other — the admitted bytes also carry pinned context, the synthetic
+    preamble, and anything the per-turn assembler appends after the window
+    stage has run, none of which these atoms cover.
+    [input_components] answers a third question: which block kinds the bytes
+    went to.
+
+    Both counts are recorded because a share cannot be recovered from the
+    transmitted messages alone: dropped atoms leave no trace, so a reader given
+    only the request cannot distinguish a keeper that sent all of a short
+    history from one that sent the tail of a long one. Pinned messages are not
+    atoms and appear in neither count. *)
+
 type turn_kind =
   | Autonomous
   | Direct
@@ -156,6 +179,10 @@ type t =
        indistinguishable from a measurement (§9.6), so decode stays
        not_recorded until a provider reports it natively. *)
   ; request_wire_observation : request_wire_observation option
+  ; model_input_window : model_input_window option
+    (* [None] is an explicit observation that no model-input projection ran for
+       this turn — a runtime that assembles its own input, or a turn that ended
+       before any cut was selected. It is not a zero-length history. *)
   ; raw_trace_run_ref : raw_trace_run_ref option
     (* Exact AGENT_CORE run selected by this turn's completed provider dispatch.
        [None] is an explicit observation that the raw-trace sink degraded or

@@ -129,12 +129,19 @@ let annotate_response_cost ?provider_id (response : Types.api_response) =
 
 let close_enough a b = Float.abs (a -. b) < 1e-9
 
-let option_close_enough expected = function
+let[@warning "-32"] option_close_enough expected = function
   | Some actual -> close_enough expected actual
   | None -> false
 ;;
 
-let test_catalog_entry ?provider_name ?input ?output ?cache_write ?cache_read id_prefix =
+let[@warning "-32"] test_catalog_entry
+      ?provider_name
+      ?input
+      ?output
+      ?cache_write
+      ?cache_read
+      id_prefix
+  =
   { Model_catalog.id_prefix
   ; base_label = None
   ; provider_name
@@ -184,7 +191,7 @@ let test_catalog_entry ?provider_name ?input ?output ?cache_write ?cache_read id
   }
 ;;
 
-let with_catalog entries f =
+let[@warning "-32"] with_catalog entries f =
   let original = Model_catalog.global () in
   Model_catalog.set_global (Model_catalog.of_model_entries entries);
   Fun.protect

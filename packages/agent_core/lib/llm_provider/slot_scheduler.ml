@@ -221,7 +221,7 @@ let permit_is_held p = p.state = Held
 [@@@coverage off]
 (* === Inline tests === *)
 
-let await_queue_length clock t expected =
+let[@warning "-32"] await_queue_length clock t expected =
   Eio.Time.with_timeout_exn clock 1.0 (fun () ->
     while queue_length t < expected do
       Eio.Fiber.yield ()

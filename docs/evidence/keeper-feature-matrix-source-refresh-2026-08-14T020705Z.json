@@ -1,0 +1,68 @@
+{
+  "schema": "masc.keeper_feature_matrix.source_refresh.v1",
+  "captured_at": "2026-08-14T02:07:05Z",
+  "last_updated_at": "2026-08-14T02:37:21Z",
+  "source_truth": {
+    "upstream_main": "0d8f33eaafd6ae53d771aafa15c966eecef4a50b",
+    "recent_merges": {
+      "28605": "e98e7fcfc5",
+      "28611": "8ff9cb1329",
+      "28626": "2c2b18ceb5",
+      "28658": "13dd32a37a",
+      "28694": "686007ea1d",
+      "28700": "0d8f33eaaf"
+    },
+    "repair_pr": {
+      "number": 28701,
+      "head": "ba341ff1b63196cc9548bd851382fd4e8b526c8e",
+      "base": "0d8f33eaafd6ae53d771aafa15c966eecef4a50b",
+      "state": "open_draft_mergeable_rebased_exact_ci_running",
+      "repair": "replace cancellation shield with cancellable exception-safe observer serialization",
+      "rebase_evidence": {
+        "previous_head": "a3a3ef8c480b475fd0dd7a1c4c22bc33d188ae7d",
+        "stable_patch_id": "ad489cf4719b71d33d1d51f042dd510c1abf398d",
+        "patch_identity_preserved": true,
+        "main_delta_and_repair_changed_files_disjoint": true
+      },
+      "previous_exact_ci": {
+        "head": "a3a3ef8c480b475fd0dd7a1c4c22bc33d188ae7d",
+        "run_id": 31762643047,
+        "conclusion": "success",
+        "passed": [
+          "Build and Test",
+          "focused OCaml behavior suites",
+          "transport harness suite",
+          "contract harness suite",
+          "Meta Guards",
+          "Health",
+          "TLA+ Model Checking",
+          "CI Regression Gate",
+          "Keeper Real-World Gate",
+          "CI Gate"
+        ]
+      },
+      "current_exact_ci": {
+        "head": "ba341ff1b63196cc9548bd851382fd4e8b526c8e",
+        "run_id": 31764250415,
+        "status": "in_progress"
+      }
+    },
+    "matrix_pr": {
+      "number": 28698,
+      "state_before_refresh": "open_draft_mergeable_build_running"
+    }
+  },
+  "live_probe": {
+    "url": "http://127.0.0.1:8935/health?full=1",
+    "result": "connection_refused",
+    "server_process_observed": false,
+    "concurrent_ocaml_build_process_observed": true,
+    "interpretation": "temporarily unavailable during build; not classified as deployment or runtime regression"
+  },
+  "last_successful_live_evidence": "keeper-runtime-health-live-2026-08-14T013507Z.json",
+  "limits": [
+    "No server restart or process mutation was performed.",
+    "The latest source state is not deployed or live-verified by this evidence.",
+    "GitHub CI and PR state may move after capture."
+  ]
+}

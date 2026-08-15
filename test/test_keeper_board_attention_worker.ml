@@ -62,6 +62,18 @@ let ok label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
+(* Every direct A.apply_judgment_and_deliver call in this file targets a
+   candidate the test just persisted, so Candidate_absent here is a fixture
+   bug, not the case under test — test_settle_one_completed_terminalizes_a_
+   partition_whose_candidate_was_retired below drives the actually-missing
+   path through the finalizer it exists to cover. *)
+let delivered label = function
+  | Ok (A.Delivered candidate) -> candidate
+  | Ok A.Candidate_absent ->
+    Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
 let signal post_id : Masc.Board_dispatch.board_signal =
   { kind = Masc.Board_dispatch.Board_post_created
   ; post_id
@@ -1451,7 +1463,7 @@ let test_existing_consumed_skips_exact_flow_and_settles () =
        (A.record_judgment ~base_path persisted (judgment exact J.Not_relevant))
       : A.candidate);
   ignore
-    (ok
+    (delivered
        "consume before worker"
        (A.apply_judgment_and_deliver
           ~base_path
@@ -1490,7 +1502,7 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
   let exact = provenance "consumed-completed-crash" in
   let completed_judgment = judgment exact J.Relevant in
   let consumed =
-    ok
+    delivered
       "consume Relevant candidate before crash"
       (A.apply_judgment_and_deliver
          ~base_path
@@ -2305,6 +2317,92 @@ let test_undrained_outcomes_are_not_routine () =
        (W.Retry_later { contention; reason = W.Selected_generation_changed }))
 ;;
 
+(* task-336 sibling defect (masc, 2026-08-16): before this fix,
+   settle_one_completed's Error propagated all the way up whenever the
+   candidate a Completed item named had been retired — the whole per-keeper
+   candidate store moved aside as one directory, per
+   scripts/check-runtime-deployment-preflight.sh, with no tombstone left for
+   a later re-check. The partition never advanced past Completed, so the
+   identical error repeated on every heartbeat forever (sangsu 170x one day,
+   rondo 13x/25min the next, before both were data-cut by hand). This pins
+   that the finalizer now settles such a partition once, terminally, and
+   never revisits it. *)
+let test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired
+  ()
+  =
+  with_temp_base "board-attention-worker-candidate-retired" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  ignore
+    (ok
+       "create Ready root"
+       (P.ensure_roots ~base_path ~keeper_name:"sangsu" [ persisted ])
+      : int);
+  let attempt = provenance "candidate-retired" in
+  let execute ~before_dispatch ~before_advance _prepared =
+    ok "bind" (before_dispatch attempt);
+    ignore before_advance;
+    (* Relevant, not Not_relevant: an ordinary Relevant completion is an
+       admission (settles_without_admitting returns false), which stops the
+       owner-turn settlement batch. If the retired candidate's lost verdict
+       leaked into that discard decision, a batch could incorrectly hold open
+       on a partition nothing was, or ever will be, delivered for. *)
+    Ok (judgment attempt J.Relevant)
+  in
+  (match
+     ok
+       "judge to Completed"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "fixture did not reach Completed");
+  (match (load_one_partition ~base_path).state with
+   | P.Completed _ -> ()
+   | _ -> Alcotest.fail "fixture partition is not Completed before the retire simulation");
+  (* Simulate the retire exactly as the preflight script instructs an
+     operator to run it: move the whole per-keeper candidate ledger aside.
+     The partition ledger is a separate append-only journal that a retire
+     never touches, so it still names this candidate_id afterward. *)
+  let ledger_path =
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         "board_attention_candidates")
+      "sangsu.jsonl"
+  in
+  Sys.remove ledger_path;
+  Alcotest.(check int)
+    "candidate ledger is empty after the simulated retire"
+    0
+    (ok
+       "load after retire"
+       (A.load_candidates ~base_path ~keeper_name:"sangsu")
+     |> List.length);
+  (match
+     ok
+       "first settlement attempt"
+       (W.settle_one_completed ~base_path ~keeper_name:"sangsu")
+   with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
+   | W.No_completed_partition ->
+     Alcotest.fail
+       "the Completed partition with the retired candidate was not settled");
+  (match (load_one_partition ~base_path).state with
+   | P.Settled _ -> ()
+   | _ -> Alcotest.fail "partition with a retired candidate did not reach Settled");
+  match
+    ok
+      "second settlement attempt"
+      (W.settle_one_completed ~base_path ~keeper_name:"sangsu")
+  with
+  | W.No_completed_partition -> ()
+  | W.Partition_settled _ ->
+    Alcotest.fail
+      "the terminalized partition was offered for settlement again (infinite retry)"
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_worker"
@@ -2445,6 +2543,10 @@ let () =
             "drain outcome labels stay distinct"
             `Quick
             test_drain_outcome_labels_stay_distinct
+        ; Alcotest.test_case
+            "settle_one_completed terminalizes a partition whose candidate was retired"
+            `Quick
+            test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired
         ] )
     ]
 ;;

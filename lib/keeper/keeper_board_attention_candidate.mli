@@ -282,15 +282,28 @@ val normalize_requeued_consumed :
     consumed resumable state. Direct [Consumed] is idempotent; every other
     state is rejected. *)
 
+type judgment_delivery_outcome =
+  | Delivered of candidate
+  | Candidate_absent
+      (** The named candidate is not in the live ledger — a retire moves the
+          whole store aside as one directory and never leaves a tombstone, so
+          this is indistinguishable from any other cause of absence and is
+          treated the same: the delivery cannot succeed on a retry of the
+          identical request, because there is no row left to update. *)
+
 val apply_judgment_and_deliver :
   base_path:string ->
   keeper_name:string ->
   candidate_id:string ->
   judgment:judgment ->
-  (candidate, string) result
+  (judgment_delivery_outcome, string) result
 (** Idempotently apply one completed worker judgment and finish its durable
-    event delivery. Success means the candidate is [Consumed]. Conflicting
-    prior judgment or a non-terminal delivery result is explicit. *)
+    event delivery. [Delivered] means the candidate is [Consumed].
+    [Candidate_absent] is explicit rather than folded into [Error] so a caller
+    can settle the partition without delivery instead of retrying an update
+    that structurally cannot land. Conflicting prior judgment or a
+    non-terminal delivery result against a candidate that does exist remains
+    an [Error]. *)
 
 val record_and_wake :
   base_path:string -> candidate -> (record_acceptance, string) result

@@ -196,4 +196,12 @@ module For_testing : sig
     idle_timeout_sec:float ->
     Piaf.Body.t ->
     (string * body_progress, string * body_progress) result
+
+  (** [ensure_host_header ~uri headers] fills in a correct
+      ["host"] header (including the port when [uri] names one) when
+      [headers] does not already carry one, case-insensitively. Exposed so
+      unit tests can pin the Host-header-port fix (masc, 2026-08-16)
+      without standing up a real HTTP server. *)
+  val ensure_host_header :
+    uri:Uri.t -> (string * string) list option -> (string * string) list option
 end

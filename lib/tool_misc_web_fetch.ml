@@ -259,11 +259,16 @@ let offload_full_text text =
       in
       let digest = Digestif.SHA256.(digest_string text |> to_hex) in
       let path = Filename.concat dir (digest ^ ".md") in
+      (* Filesystem failures become typed reasons in the marker; anything
+         else propagates to the tool dispatch boundary rather than being
+         flattened into a string here. *)
       (try
          Fs_compat.mkdir_p dir;
          Fs_compat.save_file_atomic path text
          |> Result.map (fun () -> path)
-       with exn -> Error (Printexc.to_string exn))
+       with
+       | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+       | Sys_error message -> Error message)
 
 let truncate_text ~max_chars text =
   let total = String.length text in

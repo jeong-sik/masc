@@ -148,8 +148,10 @@ let parse_bing_search_json payload =
       Json_util.assoc_member_opt "value" web |> Option.value ~default:`Null)
     ~title_field:"name" ~snippet_field:"snippet" payload
 
-(* Total like its sibling parsers: malformed JSON or an unexpected shape
-   yields [], never an exception. Response contract:
+(* Total like its sibling parsers — and through the same mechanism:
+   Safe_ops.protect, so every exception class malformed third-party
+   input can raise (not just Json_error) degrades to []. Response
+   contract:
    { "grounding": { "generic": [ { url, title, snippets: [string] } ] } } *)
 let parse_brave_llm_context_json payload =
   let member_list key json =
@@ -157,9 +159,8 @@ let parse_brave_llm_context_json payload =
     | Some (`List entries) -> entries
     | _ -> []
   in
-  match Yojson.Safe.from_string payload with
-  | exception Yojson.Json_error _ -> []
-  | json ->
+  Safe_ops.protect ~default:[] (fun () ->
+      let json = Yojson.Safe.from_string payload in
       let generic =
         match Json_util.assoc_member_opt "grounding" json with
         | Some grounding -> member_list "generic" grounding
@@ -183,7 +184,7 @@ let parse_brave_llm_context_json payload =
                  (* DET-OK: a missing title deterministically falls back to
                     the url — documented in the .mli, visible in output. *)
                  Some (url, Option.value (string_field "title") ~default:url, snippets)
-             | _ -> None)
+             | _ -> None))
 
 let provider_to_string = function
   | Searxng -> "searxng"
@@ -602,13 +603,16 @@ let fetch_brave_llm_context ~timeout_sec ~query ~limit =
       | Error detail ->
           Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
       | Ok (Some 200, payload) ->
-          Ok
-            { context_search_url = search_url
-            ; items =
-                parse_brave_llm_context_json payload
-                |> List.map (fun (url, title, snippets) ->
-                       { source_url = url; source_title = title; snippets })
-            }
+          Safe_ops.protect
+            ~default:(Error (Parse "provider returned invalid JSON"))
+            (fun () ->
+              Ok
+                { context_search_url = search_url
+                ; items =
+                    parse_brave_llm_context_json payload
+                    |> List.map (fun (url, title, snippets) ->
+                           { source_url = url; source_title = title; snippets })
+                })
       | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "provider returned no HTTP status")
 

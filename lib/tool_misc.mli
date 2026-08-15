@@ -27,27 +27,16 @@ val parse_bing_search_json : string -> (string * string * string) list
 val redact_transport_error_detail : string -> string
 val web_search_provider_error_to_string : Tool_misc_web_search.provider_error -> string
 val web_search_provider_plan : unit -> string list
+(* The outcome type is referenced by name, never restated inline, so a
+   variant added to the named type can never leave a stale copy here. *)
 val web_search_simulate_for_test :
   query:string ->
   limit:int ->
-  (string
-   * [ `Error of string
-     | `Empty
-     | `Hits of (string * string * string) list
-     | `Grounded of (string * string * string list) list
-     ])
-  list ->
+  (string * Tool_misc_web_search.simulated_provider_outcome) list ->
   Tool_result.result
 
 val with_web_search_simulation_for_test :
-  outcomes:
-    (string
-     * [ `Error of string
-       | `Empty
-       | `Hits of (string * string * string) list
-       | `Grounded of (string * string * string list) list
-       ])
-    list ->
+  outcomes:(string * Tool_misc_web_search.simulated_provider_outcome) list ->
   (unit -> 'a) ->
   'a
 

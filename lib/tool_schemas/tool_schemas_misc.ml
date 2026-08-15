@@ -32,7 +32,8 @@ let web_search_schema : tool_schema =
        the response gains a human-readable content_text rendering of every \
        fetched page. When the configured provider is brave_llm_context the \
        response instead carries grounded=true, context_text (pre-extracted \
-       chunks) and sources metadata, with no results rows. Do not use \
+       chunks) and sources metadata, with no results rows — includeContent \
+       is then a no-op since the content already rides inline. Do not use \
        snake_case names like web_search."
   ; input_schema =
       `Assoc

@@ -175,6 +175,52 @@ let rec mkdir_p path =
     Unix.mkdir path 0o755
   end
 
+let test_keeper_msg_startup_recovery_settles_disk_only_running_request () =
+  with_temp_dir "keeper-msg-startup-recovery" (fun base_path ->
+    Eio_main.run @@ fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let request_id = "startup_recovery_running_0" in
+    let active_path =
+      match
+        Keeper_msg_async.For_testing.active_record_path ~base_path ~request_id
+      with
+      | Some path -> path
+      | None -> Alcotest.fail "startup recovery request id was rejected"
+    in
+    mkdir_p (Filename.dirname active_path);
+    `Assoc
+      [ "schema_version", `Int Keeper_msg_async.For_testing.record_schema_version
+      ; "request_id", `String request_id
+      ; "keeper_name", `String "startup-recovery-keeper"
+      ; "base_path", `String (Fs_compat.realpath base_path)
+      ; "submitted_by", `String "startup-recovery-caller"
+      ; "status", `String "running"
+      ; "submitted_at", `Float 1.0
+      ]
+    |> Yojson.Safe.to_string
+    |> Fs_compat.save_file active_path;
+    let report =
+      Server_bootstrap_maintenance.recover_keeper_msg_requests_on_startup
+        ~base_path
+    in
+    Alcotest.(check int) "startup recovered one request" 1 report.lost;
+    match
+      Keeper_msg_async.poll
+        ~base_path
+        ~caller:"startup-recovery-caller"
+        request_id
+    with
+    | Keeper_msg_async.Found { status = Keeper_msg_async.Lost _; _ } -> ()
+    | Keeper_msg_async.Found entry ->
+      Alcotest.failf
+        "startup recovery retained status=%s"
+        (Keeper_msg_async.status_to_string entry.status)
+    | Keeper_msg_async.Absent
+    | Keeper_msg_async.Unreadable _
+    | Keeper_msg_async.Rejected _ ->
+      Alcotest.fail "startup recovery lost the durable request row")
+;;
+
 (* The example keeper must satisfy the fail-closed profile contract
    (#24144/#24226): a TOML without inline instructions requires a non-empty
    keepers/<name>/AGENT.md, and a keeper whose profile fails to load is
@@ -5439,6 +5485,10 @@ let () =
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick
             test_startup_state_readiness_after_init;
+          Alcotest.test_case
+            "startup recovery settles disk-only keeper message request"
+            `Quick
+            test_keeper_msg_startup_recovery_settles_disk_only_running_request;
           Alcotest.test_case "MCP requires explicit readiness" `Quick
             test_mcp_transport_requires_explicit_readiness;
           Alcotest.test_case

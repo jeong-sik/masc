@@ -3,6 +3,9 @@
     Live references are the union of exact {!Tool_output} markers in the
     closed durable-consumer registry: Keeper state/checkpoints, Gate replay,
     tool-call logs, traces, messages, Keeper chat, and bounded wire captures.
+    A marker whose media type is {!Tool_output.artifact_manifest_mime} adds the
+    manifest's strictly decoded normalized children transitively. No other
+    blob content is parsed or treated as an ownership edge.
     Trajectory previews, repository mirrors, build products, operator config,
     and unrelated observational logs are not blob consumers and are never
     traversed. A new durable consumer must be added to this registry in the
@@ -46,6 +49,14 @@ type error =
   | Malformed_structured_artifact_reference of
       { path : string
       ; line : int
+      ; detail : string
+      }
+  | Artifact_manifest_read_failed of
+      { sha256 : string
+      ; reason : string
+      }
+  | Artifact_manifest_invalid of
+      { sha256 : string
       ; detail : string
       }
   | Candidate_snapshot_invalid of

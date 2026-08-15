@@ -121,6 +121,7 @@ val run_named :
   ?checkpoint_sink:Agent_core.Agent.checkpoint_sink ->
   ?context_injector:Agent_core.Hooks.context_injector ->
   ?context:Agent_core.Context.t ->
+  ?terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   ?enable_thinking:bool ->
   ?cooperative_yield_probe:Runtime_agent.cooperative_yield_probe ->
   ?agent_core_checkpoint:Agent_core.Checkpoint.t ->
@@ -133,7 +134,9 @@ val run_named :
      body_bytes:int ->
      unit) ->
   ?on_model_input_window_observation:
-    (Runtime_model_input_tail_window.window_observation -> unit) ->
+    (measurement:Turn_record.model_input_measurement
+     -> Runtime_model_input_tail_window.window_observation
+     -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
   ?deferred_runtime_lane:deferred_runtime_lane ->
@@ -191,6 +194,13 @@ module For_testing : sig
   val apply_accept :
     runtime_id:string ->
     accept:(Agent_core.Types.api_response -> bool) ->
+    Runtime_agent.run_result ->
+    (Runtime_agent.run_result, Agent_core.Error.t) result
+
+  val apply_official_client_accept :
+    runtime_id:string ->
+    accept:(Agent_core.Types.api_response -> bool) ->
+    terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_core.Error.t) result
 

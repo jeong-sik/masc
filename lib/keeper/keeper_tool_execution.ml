@@ -2,6 +2,11 @@ type deferred_kind =
   | Generic_deferred
   | External_effect_deferred
 
+let deferred_kind_to_string = function
+  | Generic_deferred -> "generic_deferred"
+  | External_effect_deferred -> "external_effect_deferred"
+;;
+
 type terminal_effect_receipt =
   | Surface_post_completed of Keeper_surface_post.post_target
 

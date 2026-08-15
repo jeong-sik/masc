@@ -86,6 +86,9 @@ type store_state =
   }
 
 let store_state = Atomic.make { store = None; configured = None }
+let committed_revision_ref = Atomic.make 0
+
+let committed_revision () = Atomic.get committed_revision_ref
 
 type append_entry =
   { store : Dated_jsonl.t
@@ -171,6 +174,7 @@ let init ?cluster_name ~base_path () =
 
 let reset_for_testing () =
   Atomic.set store_state { store = None; configured = None };
+  Atomic.set committed_revision_ref 0;
   Atomic.set async_append_active false;
   Atomic.set append_queue_dropped 0;
   with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
@@ -262,6 +266,8 @@ let record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id () =
 let append_to_store_result (entry : append_entry) =
   try
     Dated_jsonl.append entry.store entry.json;
+    (* fire-and-forget: pre-increment count is unused; committed_revision () reads the counter directly. *)
+    ignore (Atomic.fetch_and_add committed_revision_ref 1 : int);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -388,6 +394,13 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
   | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> `String output
 ;;
 
+let normalized_artifact_refs_in_typed_data data =
+  Tool_output.normalized_artifact_refs_in_json data
+  |> List.map (fun reference ->
+    Tool_output.with_preview reference ""
+    |> Tool_output.normalized_artifact_ref_to_json)
+;;
+
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   (* Per-leaf marker-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
@@ -421,6 +434,12 @@ let log_call
       ?batch_index
       ?batch_size
       ?execution_mode
+      ?typed_result
+      ?composition_tool
+      ?composition_run_id
+      ?composition_node_id
+      ?composition_execution
+      ?parent_tool_use_id
       ?trace_id
       ?session_id
       ?generation
@@ -464,6 +483,15 @@ let log_call
         match result_bytes with
         | Some n -> [ "result_bytes", `Int n ]
         | None -> []
+      in
+      (* The dated log itself clamps [output_text] to [max_output_len].  Derive
+         the observation truncation marker here when callers supplied exact
+         producer bytes but no stricter upstream clamp.  This keeps direct and
+         composed invocations on the same metric contract. *)
+      let truncated_to =
+        match truncated_to, result_bytes with
+        | None, Some n when n > max_output_len -> Some max_output_len
+        | explicit, _ -> explicit
       in
       let truncated_to_field =
         match truncated_to with
@@ -535,6 +563,36 @@ let log_call
         | Some value ->
           [ ( "execution_mode"
             , Agent_core.Tool_contract.execution_mode_to_yojson value ) ]
+        | None -> []
+      in
+      let typed_result_fields =
+        match typed_result with
+        | Some result ->
+          let artifact_refs =
+            normalized_artifact_refs_in_typed_data (Tool_result.data result)
+          in
+          [ "disposition", `String (Tool_result.string_of_disposition result) ]
+          @ (if artifact_refs = []
+             then []
+             else [ "artifact_refs", `List artifact_refs ])
+        | None -> []
+      in
+      let composition_fields =
+        [ "composition_tool", composition_tool
+        ; "composition_run_id", composition_run_id
+        ; "composition_node_id", composition_node_id
+        ; "parent_tool_use_id", parent_tool_use_id
+        ]
+        |> List.filter_map (fun (key, value) ->
+          Option.map (fun value -> key, `String value) value)
+      in
+      let composition_execution_field =
+        match composition_execution with
+        | Some value ->
+          [ ( "composition_execution"
+            , `String
+                (Keeper_tool_composition_catalog.execution_mode_to_string value) )
+          ]
         | None -> []
       in
       let session_id_field =
@@ -644,6 +702,9 @@ let log_call
            @ batch_index_field
            @ batch_size_field
            @ execution_mode_field
+           @ typed_result_fields
+           @ composition_fields
+           @ composition_execution_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

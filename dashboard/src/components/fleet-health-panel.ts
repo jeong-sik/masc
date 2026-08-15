@@ -90,6 +90,7 @@ export interface ToolMonitorSummary {
   total: number
   successRate: number
   failure: number
+  deferred: number
   rows: ToolMonitorTool[]
 }
 
@@ -104,6 +105,7 @@ export function summarizeToolMonitorQuality(
     total: quality?.total ?? 0,
     successRate: quality?.success_rate ?? 0,
     failure: quality?.failure ?? 0,
+    deferred: quality?.deferred ?? 0,
     rows: quality?.by_tool ?? [],
   }
 }
@@ -552,7 +554,7 @@ function ToolMonitorDefaultBoard() {
         ` : null}
       </div>
 
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div class="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <${StatTile}
           label="Success"
           value=${`${summary.successRate.toFixed(1)}%`}
@@ -564,6 +566,10 @@ function ToolMonitorDefaultBoard() {
         <${StatTile}
           label="Failures"
           value=${formatNumber(summary.failure)}
+        />
+        <${StatTile}
+          label="Deferred"
+          value=${formatNumber(summary.deferred)}
         />
       </div>
 

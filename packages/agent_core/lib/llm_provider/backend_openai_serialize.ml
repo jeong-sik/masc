@@ -600,6 +600,21 @@ let render_history_projection
   }
 ;;
 
+(* The reasoning blocks the OpenAI-compatible codecs put on the wire, and the
+   ones they drop. [Backend_openai] and [Backend_glm] both serialize through
+   this module, so both read this one answer. Pure — [observe] belongs to
+   whoever dispatches. *)
+let project_history config messages =
+  match Reasoning_dialect.replay_capability_for_provider_config config with
+  | Error detail ->
+    Error (Reasoning_history_projection.Invalid_reasoning_target detail)
+  | Ok replay_capability ->
+    typed_history_projection
+      ~replay_capability
+      (Reasoning_dialect.for_provider_config config)
+      messages
+;;
+
 let dialect_history_projection
       ?assistant_tool_content_format
       ~replay_capability

@@ -744,6 +744,95 @@ let test_maintenance_keeps_normalized_tool_call_blob_reference () =
         (Some "normalized tool-call output")
         (fetch_ok store ~sha256:reference.sha256))
 
+let test_maintenance_follows_typed_result_manifest () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let child =
+        B.put_durable store ~bytes:"manifest-owned child" ~mime:"text/plain"
+      in
+      let structured_content =
+        `Assoc [ "output_artifact", O.normalized_artifact_ref_to_json child ]
+      in
+      let manifest_payload =
+        O.artifact_manifest_to_json
+          ~content:(Yojson.Safe.to_string structured_content)
+          ~structured_content
+        |> Yojson.Safe.to_string
+      in
+      let manifest =
+        B.put_durable
+          store
+          ~bytes:manifest_payload
+          ~mime:O.artifact_manifest_mime
+      in
+      let checkpoint =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/checkpoint.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname checkpoint);
+      Fs_compat.save_file
+        checkpoint
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ ( "tool_result"
+               , `String (O.encode_for_agent_core (O.Stored manifest)) ) ]));
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "checkpoint marker roots manifest and child"
+        2
+        observed.live_references;
+      Alcotest.(check int) "manifest graph has no candidates" 0 observed.candidates_recorded;
+      let swept =
+        maintenance_ok ~base_path ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "manifest graph survives the second pass" 0 swept.deleted;
+      Alcotest.(check (option string))
+        "manifest-owned child remains readable"
+        (Some "manifest-owned child")
+        (fetch_ok store ~sha256:child.sha256))
+
+let test_maintenance_rejects_malformed_typed_result_manifest () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let survivor =
+        B.put_durable store ~bytes:"survive malformed manifest" ~mime:"text/plain"
+      in
+      let malformed =
+        O.artifact_manifest_to_json
+          ~content:"malformed"
+          ~structured_content:
+            (`Assoc
+               [ ( "output_artifact"
+                 , `Assoc [ "_blob", `Assoc [ "sha256", `String survivor.sha256 ] ]
+                 )
+               ])
+        |> Yojson.Safe.to_string
+      in
+      let manifest =
+        B.put_durable store ~bytes:malformed ~mime:O.artifact_manifest_mime
+      in
+      let checkpoint =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/checkpoint.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname checkpoint);
+      Fs_compat.save_file
+        checkpoint
+        (Yojson.Safe.to_string
+           (`String (O.encode_for_agent_core (O.Stored manifest))));
+      (match M.run ~base_path ~mode:M.Delete_previous_candidates with
+       | Error (M.Artifact_manifest_invalid { sha256; _ }) ->
+         Alcotest.(check string) "exact malformed manifest" manifest.sha256 sha256
+       | Error error ->
+         Alcotest.failf "unexpected maintenance error: %s" (M.error_to_string error)
+       | Ok _ -> Alcotest.fail "malformed typed manifest reached deletion");
+      Alcotest.(check (option string))
+        "malformed manifest abort preserves unrelated blobs"
+        (Some "survive malformed manifest")
+        (fetch_ok store ~sha256:survivor.sha256))
+
 let test_maintenance_malformed_normalized_blob_fails_closed () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -1150,6 +1239,14 @@ let () =
             "maintenance keeps normalized tool-call blob reference"
             `Quick
             test_maintenance_keeps_normalized_tool_call_blob_reference;
+          Alcotest.test_case
+            "maintenance follows typed result manifest"
+            `Quick
+            test_maintenance_follows_typed_result_manifest;
+          Alcotest.test_case
+            "maintenance rejects malformed typed result manifest"
+            `Quick
+            test_maintenance_rejects_malformed_typed_result_manifest;
           Alcotest.test_case
             "maintenance malformed normalized blob fails closed"
             `Quick

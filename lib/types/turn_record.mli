@@ -64,9 +64,21 @@ type request_wire_observation =
   ; body_bytes : int
   }
 
+type model_input_measurement =
+  | Wire_shape
+      (** Blocks the target's dialect will not replay were removed before the
+          history was sized, so the budget counted what the request carries. *)
+  | Durable_shape
+      (** The projection declined and the budget counted the checkpoint's
+          shape instead, which includes reasoning the wire deletes. The turn
+          is correct and its window is narrower than it needs to be — a
+          keeper can sit here indefinitely, because nothing about the decline
+          ages out, so this is recorded rather than only logged. *)
+
 type model_input_window =
   { transmitted_atoms : int
   ; total_atoms : int
+  ; measurement : model_input_measurement
   }
 (** How much of the keeper's own history the dispatched request carried, in
     atoms — one organic user message, or one assistant message together with

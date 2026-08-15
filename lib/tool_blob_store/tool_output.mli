@@ -68,6 +68,45 @@ val normalized_artifact_ref_of_json :
     {!normalized_artifact_ref_to_json}. A malformed wrapper is reported
     explicitly so retention code fails closed. *)
 
+val normalized_artifact_refs_in_json : Yojson.Safe.t -> artifact_ref list
+(** Collect every valid normalized reference nested in typed JSON, deduplicated
+    by content address and declared media type in first-occurrence order.
+    Malformed wrappers are not references; authoritative decoders remain
+    responsible for rejecting them. *)
+
+val normalized_artifact_refs_in_json_strict :
+  Yojson.Safe.t -> (artifact_ref list, string) result
+(** As {!normalized_artifact_refs_in_json}, but reject the first malformed
+    reserved [_blob] wrapper. Durable manifest producers and consumers must
+    use this form so they share one closed validity contract. *)
+
+(** {1 Durable result manifests}
+
+    A tool result that itself contains normalized artifact references is
+    stored as one typed manifest blob. The durable transcript owns the
+    manifest through an exact AGENT_CORE marker, while offline maintenance
+    follows only this explicit MIME/schema edge to the referenced child
+    artifacts. Arbitrary JSON blobs are never traversed. *)
+
+val artifact_manifest_mime : string
+
+val artifact_manifest_to_json :
+  content:string -> structured_content:Yojson.Safe.t -> Yojson.Safe.t
+
+type artifact_manifest_decode =
+  | Not_artifact_manifest
+  | Invalid_artifact_manifest of { detail : string }
+  | Decoded_artifact_manifest of
+      { content : string
+      ; structured_content : Yojson.Safe.t
+      ; artifact_refs : artifact_ref list
+      }
+
+val artifact_manifest_of_json : Yojson.Safe.t -> artifact_manifest_decode
+(** Strictly decode the closed manifest envelope. The decoded child set is
+    derived only from [structured_content] using the normalized reference
+    codec above. *)
+
 (** {1 Wire codec} *)
 
 type t =

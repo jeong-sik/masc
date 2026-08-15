@@ -130,9 +130,8 @@ let parse_tavily_json payload =
 
 let parse_ollama_search_json payload =
   parse_json_search_results
-    (* DET-OK: absent "results" resolves to `Null, which the shared
-       parser reads as zero hits — the chain then reports "no results"
-       instead of inventing content. Same shape as the sibling parsers. *)
+    (* Absent "results" resolves to `Null → zero hits, so the chain
+       reports "no results" instead of inventing content. DET-OK *)
     ~results_path:(fun j -> Json_util.assoc_member_opt "results" j |> Option.value ~default:`Null)
     ~title_field:"title" ~snippet_field:"content" payload
 

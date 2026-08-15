@@ -668,6 +668,9 @@ function KeeperQueueControlPanel({
               ${item.rejectionReason
                 ? html`<div class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]">${item.rejectionTaskId ? `${item.rejectionTaskId}: ` : ''}${item.rejectionReason}</div>`
                 : null}
+              ${item.messageFrom
+                ? html`<div class="whitespace-pre-wrap text-2xs text-[var(--color-fg-secondary)]">${item.messageFrom} 님의 메시지${item.messageRequestId ? ` · ${item.messageRequestId}` : ''}</div>`
+                : null}
               <div class="break-all font-mono text-3xs text-[var(--color-fg-muted)]">
                 source ref ${item.sourceRef}
               </div>

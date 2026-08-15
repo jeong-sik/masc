@@ -154,6 +154,12 @@ module For_testing : sig
     Workspace_broadcast.broadcast_delivery ->
     Workspace_broadcast.mention_delivery
 
+  val project_workspace_message_to_fleet :
+    base_path:string ->
+    registered_keepers:(unit -> string list) ->
+    Workspace_broadcast.broadcast_delivery ->
+    unit
+
   val reset_keeper_persistence_lifecycle : unit -> unit
 
   val prepared_base_paths : prepared_keeper_persistence -> string * string

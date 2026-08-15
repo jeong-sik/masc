@@ -335,6 +335,97 @@ let test_stopped_keeper_keeps_queue_entry () =
        (queued_keeper_messages ~base_path:config.base_path ~keeper_name:target))
 ;;
 
+let fleet_delivery ~request_id ~from_agent ~content
+  : Workspace_broadcast.broadcast_delivery
+  =
+  { request_id
+  ; seq = 40
+  ; rendered = content
+  ; from_agent
+  ; content
+  ; mention = None
+  ; msg_type = "broadcast"
+  ; mention_delivery = Workspace_broadcast.Passive
+  }
+;;
+
+(* A Keeper broadcast reached no other Keeper's conversation window: without a
+   mention the delivery was passive SSE plus a workspace row, and the chat
+   scan's Scope lane admits only Owner-authored lines, so an External Keeper
+   line could not arrive that way either. On the reference workspace 17 of 18
+   retained messages were exactly this shape. *)
+let test_fleet_projection_reaches_other_keepers () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000001" in
+  List.iter (persist_meta config) [ "rondo"; "sangsu"; "taskmaster" ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [ "rondo"; "sangsu"; "taskmaster" ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
+       ~content:"task-209 is mine, do not claim it");
+  let rows keeper_name =
+    count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id
+  in
+  check int "listener sees the broadcast" 1 (rows "sangsu");
+  check int "second listener sees the broadcast" 1 (rows "taskmaster");
+  (* The author already knows what it said; echoing it back would put the
+     Keeper's own speech in front of it as someone else's line. *)
+  check int "author does not receive its own broadcast" 0 (rows "rondo")
+;;
+
+(* Visibility, not a request: the fanout must not put an entry in anyone's
+   linear drain, or one status announcement opens a turn on every Keeper. *)
+let test_fleet_projection_adds_no_queue_entry () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000002" in
+  List.iter (persist_meta config) [ "rondo"; "sangsu" ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [ "rondo"; "sangsu" ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
+       ~content:"status ping");
+  check int "listener row is visibility only" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"sangsu" ~request_id);
+  check int "no queue entry for a fleet broadcast" 0
+    (List.length
+       (queued_keeper_messages ~base_path:config.base_path ~keeper_name:"sangsu"))
+;;
+
+(* The named target's row is written by the mention path with its mention ids.
+   The fanout runs afterwards over the same delivery key, so it must find that
+   row already present and leave the stamp — not overwrite it with an
+   unmentioned copy or append a second row. *)
+let test_fleet_projection_preserves_the_mention_row () =
+  with_workspace @@ fun config ->
+  let target = "sangsu" in
+  let request_id = "wmsg-00fleet0000000003" in
+  List.iter (persist_meta config) [ "rondo"; target ];
+  ignore
+    (Broadcast_wakeup.deliver_broadcast_mention
+       ~config
+       ~base_path:config.base_path
+       ~is_running:(fun _ -> true)
+       ~wakeup:(fun _ -> ())
+       (delivery ~target ~request_id ~seq:41 ~content:"@sangsu please review"));
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [ "rondo"; target ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:"external-agent"
+       ~content:"@sangsu please review");
+  check int "target keeps exactly one row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id);
+  match delivery_message ~base_path:config.base_path ~keeper_name:target ~request_id with
+  | None -> fail "mention row disappeared after the fleet pass"
+  | Some message ->
+    check bool "mention stamp survived the fleet pass" true (message.mentions <> [])
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -358,5 +449,14 @@ let () =
             test_delivery_enqueues_linear_queue_entry
         ; test_case "stopped Keeper keeps the queue entry" `Quick
             test_stopped_keeper_keeps_queue_entry
+        ] )
+    ; ( "fleet_projection"
+      , [
+          test_case "broadcast reaches other Keepers' windows" `Quick
+            test_fleet_projection_reaches_other_keepers
+        ; test_case "fleet projection adds no queue entry" `Quick
+            test_fleet_projection_adds_no_queue_entry
+        ; test_case "fleet projection preserves the mention row" `Quick
+            test_fleet_projection_preserves_the_mention_row
         ] )
     ]

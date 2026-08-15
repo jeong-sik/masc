@@ -350,11 +350,79 @@ let deliver_broadcast_mention
                target delivery.request_id delivery.seq message;
              Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)))
 
+(* A committed workspace message is conversation the whole fleet sits in, the
+   same way a bound connector channel is conversation the Keeper bound to it
+   sits in. Every registered Keeper other than the author gets the transcript
+   row, so a Keeper's window shows what the other Keepers said and not only
+   what the operator said to it.
+
+   The row is visibility, not a request: no mention is stamped, no queue entry
+   is committed and no Keeper is woken, so one announcement cannot open a turn
+   on every Keeper. Run this after {!deliver_broadcast_mention}: the named
+   target's row is written there with its mention ids, and
+   [append_user_message_once] keeps that first write, so the stamp survives
+   and this pass reports the target as already present. *)
+let project_workspace_message_to_fleet
+      ~base_path
+      ~registered_keepers
+      (delivery : Workspace_broadcast.broadcast_delivery)
+  =
+  match Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id with
+  | Error detail ->
+    Log.Keeper.error
+      "fleet projection skipped; request identity invalid request_id=%s: %s"
+      delivery.request_id detail
+  | Ok request_id ->
+    let delivery_key =
+      Keeper_chat_delivery_identity.Workspace_message request_id
+    in
+    let author_id = Keeper_identity.Keeper_id.of_string delivery.from_agent in
+    let speaker : Keeper_chat_store.speaker =
+      { speaker_id = Some delivery.from_agent
+      ; speaker_name = Some delivery.from_agent
+      ; speaker_authority = Keeper_chat_store.External
+      }
+    in
+    let authored_by_recipient keeper_name =
+      match author_id, Keeper_identity.Keeper_id.of_string keeper_name with
+      | Some author, Some recipient ->
+        Keeper_identity.Keeper_id.equal author recipient
+      | Some _, None | None, Some _ | None, None -> false
+    in
+    registered_keepers ()
+    |> List.iter (fun keeper_name ->
+      if not (authored_by_recipient keeper_name)
+      then (
+        match
+          Keeper_chat_store.append_user_message_once
+            ~base_dir:base_path
+            ~keeper_name
+            ~delivery_key
+            ~content:delivery.content
+            ~surface:Surface_ref.Agent
+            ~external_message_id:delivery.request_id
+            ~speaker
+            ()
+        with
+        | Ok (Keeper_chat_store.Appended _) ->
+          Keeper_chat_broadcast.chat_appended
+            ~keeper_name
+            ~source:workspace_message_chat_source
+            ~content:delivery.content
+            ()
+        | Ok (Keeper_chat_store.Already_present _) -> ()
+        | Error detail ->
+          Log.Keeper.error
+            "fleet projection failed keeper=%s request_id=%s: %s"
+            keeper_name delivery.request_id detail))
+;;
+
 module Projection_for_testing = struct
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
   let deliver_broadcast_mention = deliver_broadcast_mention
+  let project_workspace_message_to_fleet = project_workspace_message_to_fleet
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
@@ -1403,21 +1471,31 @@ let start_keeper_loops_owned
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
         (Printexc.to_string exn));
-  (* Wire broadcast -> keeper wakeup. Explicit mentions wake the target
-     keeper immediately; unmentioned broadcasts remain passive SSE/message
-     fanout so one broad announcement cannot create a fleet-wide turn storm.
-     Board signals have their own capped keeper wake path above. *)
+  (* Wire broadcast -> keeper delivery. An explicit mention commits a queue
+     entry and wakes the named keeper. Every registered keeper then gets the
+     same transcript row for its conversation window, with no mention stamp,
+     no queue entry and no wake, so one broad announcement cannot create a
+     fleet-wide turn storm. Board signals have their own capped wake path. *)
   let broadcast_mention_handler =
     fun (delivery : Workspace_broadcast.broadcast_delivery) ->
     let config = Mcp_server.workspace_config state in
     let base_path = config.base_path in
-    deliver_broadcast_mention
-      ~config
+    let mention_outcome =
+      deliver_broadcast_mention
+        ~config
+        ~base_path
+        ~is_running:(fun target ->
+          Option.is_some (Keeper_registry.get ~base_path target))
+        ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
+        delivery
+    in
+    project_workspace_message_to_fleet
       ~base_path
-      ~is_running:(fun target ->
-        Option.is_some (Keeper_registry.get ~base_path target))
-      ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
-      delivery
+      ~registered_keepers:(fun () ->
+        Keeper_registry.all ~base_path ()
+        |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name))
+      delivery;
+    mention_outcome
   in
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   Atomic.set Workspace_hooks.on_workspace_message_mutation_fn

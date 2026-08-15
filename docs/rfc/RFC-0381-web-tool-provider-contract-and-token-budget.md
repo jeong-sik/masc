@@ -125,6 +125,13 @@ match provider_order () with
 | providers -> run_chain providers
 ```
 
+구현 주(PR-2 반영): `Config`는 per-provider 오류 변형이고 aggregate 경계는
+RFC-0189 관례대로 `Runtime_failure`를 유지한다 — `search_impl`의 반환
+시그니처가 이미 `(_, string) result`라 aggregate를 typed로 올리는 것은 이
+RFC 범위 밖의 리팩터다. 빈 체인은 해결 방법을 담은
+`no_provider_configured_message`로 `Runtime_failure`가 되며, 위 의사코드의
+의도(빈 성공 금지 + 안내 동봉)는 그대로다.
+
 ### 3.2 capability별 backend 분리
 
 Hermes의 축을 그대로 채택한다. 검색과 추출은 서로 다른 provider가 잘한다.

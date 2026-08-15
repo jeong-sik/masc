@@ -2,6 +2,11 @@ type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   instructions : string option;
+  (* Per-keeper autonomous-turn instructions. When non-empty and the turn
+     channel is Scheduled_autonomous, this replaces [instructions] in the
+     system prompt. When absent, autonomous turns fall back to [instructions]
+     — zero behavioral change for keepers that don't set it. *)
+  autonomous_instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
@@ -35,6 +40,7 @@ let empty_keeper_profile_defaults =
     id = None;
     manifest_path = None;
     instructions = None;
+    autonomous_instructions = None;
     autoboot_enabled = None;
     mention_targets = [];
     proactive_enabled = None;

@@ -38,6 +38,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'masc/agent_unbound',
   'broadcast',
   'masc/broadcast',
+  'workspace_message_delivery_changed',
   'task_update',
   'board_post',
   'masc/board_post',
@@ -68,6 +69,7 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'ide_cursor_changed',
   'keeper_tool_call',
   'masc/keeper_tool_call',
+  'keeper_tool_call_evidence_committed',
   'keeper_tool_skipped',
   'keeper_turn_complete',
   'masc/keeper_turn_complete',
@@ -143,6 +145,13 @@ const STRING_FIELDS = new Set([
   'error_text',
   'tool_args_preview',
   'tool_output_preview',
+  'composition_tool',
+  'composition_run_id',
+  'composition_node_id',
+  'composition_execution',
+  'parent_tool_use_id',
+  'tool_use_id',
+  'execution_mode',
   'reason_code',
   'phase',
   'from_state',
@@ -175,6 +184,9 @@ const NUMBER_FIELDS = new Set([
   'revision',
   'duration_ms',
   'turn',
+  'planned_index',
+  'batch_index',
+  'batch_size',
   'input_tokens',
   'output_tokens',
   'cost_usd',
@@ -785,6 +797,39 @@ export const SSEMessageSchema = schema<SSEMessage>((value) => {
         'disposition',
         'Expected keeper_tool_call disposition to be completed, deferred, or failed',
       )
+    }
+  }
+
+  if (value.type === 'keeper_tool_call_evidence_committed') {
+    const requiredStrings = [
+      'name',
+      'tool_name',
+      'composition_tool',
+      'composition_run_id',
+      'composition_node_id',
+      'tool_use_id',
+    ] as const
+    for (const field of requiredStrings) {
+      const candidate = value[field]
+      if (typeof candidate !== 'string' || candidate.trim() === '') {
+        return fail(field, `Expected a non-empty ${field}`)
+      }
+    }
+    if (typeof value.parent_tool_use_id !== 'string') {
+      return fail('parent_tool_use_id', 'Expected parent_tool_use_id to be a string')
+    }
+    if (value.composition_execution !== 'inline' && value.composition_execution !== 'async') {
+      return fail('composition_execution', 'Expected inline or async composition_execution')
+    }
+    if (value.execution_mode !== 'serial' && value.execution_mode !== 'concurrent') {
+      return fail('execution_mode', 'Expected serial or concurrent execution_mode')
+    }
+    for (const field of ['turn', 'planned_index', 'batch_index', 'batch_size'] as const) {
+      const candidate = value[field]
+      const minimum = field === 'batch_size' ? 1 : 0
+      if (typeof candidate !== 'number' || !Number.isInteger(candidate) || candidate < minimum) {
+        return fail(field, `Expected an integer ${field}`)
+      }
     }
   }
 

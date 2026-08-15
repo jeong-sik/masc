@@ -35,6 +35,10 @@ let prompt_too_long_result =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-overflow-1","result":"Prompt is too long · the request is ~250000 tokens (limit 200000)","api_error_status":400}|}
 ;;
 
+let prompt_too_long_statusless_result =
+  {|{"type":"result","subtype":"success","is_error":true,"session_id":"__SESSION__","uuid":"turn-statusless-overflow-1","result":"Prompt is too long"}|}
+;;
+
 let mcp_initialize =
   {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
@@ -755,7 +759,7 @@ let history_uses_current_schema history =
     history
 ;;
 
-let test_keeper_shrinks_history_after_typed_context_error () =
+let test_keeper_shrinks_history_after_statusless_context_error () =
   let base_path = temp_workspace () in
   let first_prompt_marker = Filename.concat base_path "overflow-full-prompt.json" in
   let second_prompt_marker = Filename.concat base_path "overflow-shrunk-prompt.json" in
@@ -778,7 +782,7 @@ let test_keeper_shrinks_history_after_typed_context_error () =
        with_fixture_sequence
          ~first_prompt_marker
          ~second_prompt_marker
-         [ Emit prompt_too_long_result ]
+         [ Emit prompt_too_long_statusless_result ]
          [ Emit (assistant ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ; Emit (result ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
          ]
@@ -1122,7 +1126,8 @@ let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
                     ~event_bus:None
                     ~raw_trace:None
                     ~on_event:None
-                    ~config)))))
+                    ~config
+                    ())))))
 ;;
 
 let check_pre_dispatch_attempt label attempt =
@@ -1294,9 +1299,9 @@ let () =
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
         ; test_case
-            "shrinks history after typed context error"
+            "shrinks history after statusless context error"
             `Quick
-            test_keeper_shrinks_history_after_typed_context_error
+            test_keeper_shrinks_history_after_statusless_context_error
         ; test_case
             "projects typed tool history and lifecycle"
             `Quick

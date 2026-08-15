@@ -1,0 +1,57 @@
+[[compositions]]
+name = "mission-snapshot"
+description = "Read clock, board, and tool state concurrently, then search durable memory with the exact clock output."
+execution = "inline"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "board"
+tool = "masc_board_stats"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "board-peer"
+tool = "masc_board_stats"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "memory"
+tool = "keeper_memory_search"
+after = ["clock"]
+[compositions.nodes.input]
+kind = "object"
+[[compositions.nodes.input.fields]]
+name = "query"
+[compositions.nodes.input.fields.value]
+kind = "output"
+node = "clock"
+pointer = "/now_iso"
+
+[[compositions]]
+name = "background-snapshot"
+description = "Collect independent clock and board state through the durable async broker."
+execution = "async"
+
+[[compositions.nodes]]
+id = "clock"
+tool = "keeper_time_now"
+[compositions.nodes.input]
+kind = "literal"
+value = {}
+
+[[compositions.nodes]]
+id = "board"
+tool = "masc_board_stats"
+[compositions.nodes.input]
+kind = "literal"
+value = {}

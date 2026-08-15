@@ -15,6 +15,7 @@ import {
   DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA,
   DASHBOARD_KEEPER_NON_EXECUTABLE_CAUSES,
 } from './types/dashboard-execution'
+import { MENTION_DELIVERY_STATUSES } from './types/core'
 import type {
   Agent, Task, Message, ServerStatus,
   DashboardExecutionSummary, DashboardExecutionHandoff,
@@ -143,11 +144,9 @@ export function normalizeMessage(raw: unknown): Message | null {
   const workspace = asString(raw.workspace) ?? asString(raw.workspace_id) ?? asString(raw.channel)
   const rawMentionDelivery = asString(raw.mention_delivery)
   const mentionDelivery =
-    rawMentionDelivery === 'passive'
-    || rawMentionDelivery === 'pending'
-    || rawMentionDelivery === 'accepted'
-    || rawMentionDelivery === 'rejected'
-      ? rawMentionDelivery
+    rawMentionDelivery != null
+    && (MENTION_DELIVERY_STATUSES as readonly string[]).includes(rawMentionDelivery)
+      ? (rawMentionDelivery as Message['mentionDelivery'])
       : undefined
   return {
     id: asString(raw.id),
@@ -159,6 +158,7 @@ export function normalizeMessage(raw: unknown): Message | null {
     type: asString(raw.type),
     workspace,
     mentionDelivery,
+    mentions: Array.isArray(raw.mentions) ? asStringArray(raw.mentions) : undefined,
   }
 }
 

@@ -95,6 +95,12 @@ interface TaskHandoffContext {
   updated_by?: string | null
 }
 
+// SSOT for mention-delivery status values. Consumers that decode this field
+// from the wire (api/dashboard-workspace.ts, store-normalizers.ts) derive
+// their guard from this array instead of repeating the literal set.
+export const MENTION_DELIVERY_STATUSES = ['passive', 'pending', 'accepted', 'rejected'] as const
+export type MentionDeliveryStatus = (typeof MENTION_DELIVERY_STATUSES)[number]
+
 export interface Message {
   id?: string
   requestId?: string
@@ -104,7 +110,8 @@ export interface Message {
   timestamp?: string
   type?: string
   workspace?: string
-  mentionDelivery?: 'passive' | 'pending' | 'accepted' | 'rejected'
+  mentionDelivery?: MentionDeliveryStatus
+  mentions?: string[]
 }
 
 // --- Board ---

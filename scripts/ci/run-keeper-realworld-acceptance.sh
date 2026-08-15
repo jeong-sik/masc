@@ -96,6 +96,8 @@ mkdir -p "$OUTPUT_DIR" "$base_path/.masc/config"
 cp "$ROOT_DIR/config/runtime.toml" "$base_path/.masc/config/runtime.toml"
 cp "$ROOT_DIR/config/agent-core-models-overlay.toml" \
   "$base_path/.masc/config/agent-core-models-overlay.toml"
+cp "$ROOT_DIR/scripts/fixtures/keeper-multi-collaboration/tool-compositions.toml" \
+  "$base_path/.masc/config/tool-compositions.toml"
 cp "$MANIFEST" "$OUTPUT_DIR/runtime-artifact-manifest.json"
 
 server_log="$OUTPUT_DIR/server.log"
@@ -179,6 +181,7 @@ common_args=(
   --expected-base-path "$base_path"
   --expected-source-sha "$EXPECTED_SHA"
   --timeout "$TURN_TIMEOUT_SEC"
+  --browser-proof-script "$ROOT_DIR/dashboard/e2e/keeper-composition-real-backend.mjs"
 )
 
 python3 "$ROOT_DIR/scripts/harness/workload/keeper_multi_collaboration_acceptance.py" \

@@ -1,7 +1,7 @@
 
 (** Tool_misc — miscellaneous MASC tool handlers.
 
-    Dispatches: transport_status, websocket_discovery, webrtc,
+    Dispatches: transport_status, websocket_discovery,
     dashboard, verify_handoff, gc, tool_help, config introspection,
     and web helpers. *)
 

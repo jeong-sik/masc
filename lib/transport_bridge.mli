@@ -15,7 +15,7 @@
 (** Contract that every transport must satisfy. *)
 module type PROVIDER = sig
   val name : string
-  (** Short identifier: "sse", "ws", "grpc", "webrtc". *)
+  (** Short identifier: "sse", "ws", "grpc". *)
 
   val protocol : Transport.protocol
   (** Which protocol enum this provider implements. *)

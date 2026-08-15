@@ -122,7 +122,6 @@ let transport_entries =
        slice. Catch-all events (no slice mapping) still reach every session. \
        masc_ws_slice_fanout_skipped_total advances per skip. RFC #10119 \
        Phase 2. Set to false for emergency rollback only.";
-    entry ~default:"true" "MASC_WEBRTC_ENABLED" "Enable WebRTC transport";
     Env_config_runtime.Transport.h2_snapshot_entry;
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
       "Startup watchdog timeout (seconds)";

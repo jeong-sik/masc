@@ -310,7 +310,7 @@ Extend `subscribe_external` to accept an optional
 subscribers whose filter returns false.
 
 Rejected: changes the shared `Sse` API for a WS-specific concern.
-Bleeds into `grpc`, `webrtc`, and any future subscriber.
+Bleeds into `grpc` and any future subscriber.
 
 ### 9.2 Make the parse cache produce (slice × payload) pairs consumed by the fanout
 

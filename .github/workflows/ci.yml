@@ -1380,7 +1380,6 @@ jobs:
           chmod +x scripts/harness/transport/verify_grpc_subscribe.sh
           chmod +x scripts/harness/transport/verify_h2c_autodetect.sh
           chmod +x scripts/harness/transport/verify_ws.sh
-          chmod +x scripts/harness/transport/verify_webrtc_signaling.sh
           chmod +x scripts/harness/lib/server_bootstrap.sh
           scripts/ci-run-tests.sh "bash scripts/harness/transport/run_all.sh"
 

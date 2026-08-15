@@ -351,7 +351,6 @@ let test_transport_health_json () =
   let streamable_json = json |> U.member "streamable_http" in
   let grpc_json = json |> U.member "grpc" in
   let ws_json = json |> U.member "websocket" in
-  let webrtc_json = json |> U.member "webrtc" in
   let http2_json = json |> U.member "http2" in
   let summary_json = json |> U.member "summary" in
   let agent_health_json = json |> U.member "agent_health" in
@@ -361,7 +360,6 @@ let test_transport_health_json () =
     ; "sse"
     ; "grpc"
     ; "websocket"
-    ; "webrtc"
     ; "streamable_http"
     ; "http2"
     ; "agent_health"
@@ -428,18 +426,6 @@ let test_transport_health_json () =
     ]
     (ws_json |> U.member "delivery");
   check_assoc_keys
-    "WebRTC exact keys"
-    [ "configured"
-    ; "signaling_available"
-    ; "signaling_mode"
-    ; "pending_offers"
-    ; "active_peers"
-    ; "live_connections"
-    ; "connected_channels"
-    ; "ice_server_count"
-    ]
-    webrtc_json;
-  check_assoc_keys
     "streamable HTTP exact keys"
     [ "endpoint"
     ; "observer_stream"
@@ -483,14 +469,6 @@ let test_transport_health_json () =
     (match ws_json |> U.member "listening" with `Bool _ -> true | _ -> false);
   check bool "websocket section exists" true
     (match ws_json with `Assoc _ -> true | _ -> false);
-  check bool "webrtc section exists" true
-    (match webrtc_json with `Assoc _ -> true | _ -> false);
-  check bool "webrtc configured field exists" true
-    (match webrtc_json |> U.member "configured" with `Bool _ -> true | _ -> false);
-  check bool "webrtc signaling_available field exists" true
-    (match webrtc_json |> U.member "signaling_available" with `Bool _ -> true | _ -> false);
-  check bool "webrtc signaling_mode field exists" true
-    (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
   check string "http2 reports the startup mode" "h1_only"
     (http2_json |> U.member "listener_mode" |> U.to_string);
   check bool "h1-only is not multiplex ready" false

@@ -137,7 +137,6 @@ env \
   MASC_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
-  MASC_WEBRTC_ENABLED=0 \
   MASC_KEEPER_BOOTSTRAP_ENABLED=false \
   ZAI_API_KEY_SB="$ZAI_API_KEY_SB" \
   "$BINARY" --host 127.0.0.1 --port "$port" --base-path "$base_path" \

@@ -229,20 +229,6 @@ let try_mcp_validation_block
 let dispatch_route ~router ~request ~path ~upgrade reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
-  | `POST, "/webrtc/offer" when Server_webrtc_transport.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match Server_webrtc_transport.handle_offer_request body with
-      | Ok json -> Http.Response.json json reqd
-      | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-  | `POST, "/webrtc/answer" when Server_webrtc_transport.is_enabled () ->
-    Http.Request.read_body_async reqd (fun body ->
-      match Server_webrtc_transport.handle_answer_request body with
-      | Ok json -> Http.Response.json json reqd
-      | Error msg ->
-        Http.Response.json ~status:`Bad_request
-          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
   | `DELETE, "/mcp" -> handle_delete_mcp request reqd
   | `DELETE, "/mcp/managed" ->
       handle_delete_mcp

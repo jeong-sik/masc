@@ -62,7 +62,6 @@ let scrubbed_env_names =
       "MASC_BASE_PATH_RESOLUTION_SOURCE";
       "MASC_CONFIG_DIR";
       "MASC_WS_ENABLED";
-      "MASC_WEBRTC_ENABLED";
     ]
 
 let env_array overrides =
@@ -157,7 +156,6 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_GRPC_PORT=%%s\n' "${MASC_GRPC_PORT:-}"
   printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
-  printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
@@ -374,8 +372,6 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
       let captured_default = read_file capture_default in
       check bool "ws enabled by default" true
         (String_util.contains_substring captured_default "MASC_WS_ENABLED=1");
-      check bool "webrtc enabled by default" true
-        (String_util.contains_substring captured_default "MASC_WEBRTC_ENABLED=1");
       check bool "config dir defaults to base path config" true
         (String_util.contains_substring captured_default
            ("MASC_CONFIG_DIR=" ^ bootstrapped_config));
@@ -390,7 +386,6 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
               ("MASC_BASE_PATH", dir);
               ("MASC_CONFIG_DIR", Filename.concat dir "custom-config");
               ("MASC_WS_ENABLED", "0");
-              ("MASC_WEBRTC_ENABLED", "0");
             ]
           [ "--http"; "--port"; "9957"; "--base-path"; dir ]
       in
@@ -402,9 +397,7 @@ let test_realtime_transports_default_to_base_path_config_and_preserve_override (
         (String_util.contains_substring captured_override
            ("MASC_CONFIG_DIR=" ^ Filename.concat dir "custom-config"));
       check bool "ws override preserved" true
-        (String_util.contains_substring captured_override "MASC_WS_ENABLED=0");
-      check bool "webrtc override preserved" true
-        (String_util.contains_substring captured_override "MASC_WEBRTC_ENABLED=0"))
+        (String_util.contains_substring captured_override "MASC_WS_ENABLED=0"))
 
 let test_bootstraps_base_path_config_from_repo_when_unset () =
   with_temp_dir "start-masc-script" (fun dir ->

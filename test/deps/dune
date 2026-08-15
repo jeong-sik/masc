@@ -171,7 +171,6 @@
   (re_export mirage-crypto-rng.unix)
   (re_export multimodal)
   (re_export ocaml-protoc-plugin)
-  (re_export ocaml-webrtc)
   (re_export opentelemetry)
   ; RFC-0129 — Pool.For_testing.read_body_with_idle tests build a mock
   ; Piaf.Body via Piaf.Stream.create + Piaf.Body.of_string_stream.

@@ -183,10 +183,6 @@ module Transport = struct
       Accessor-shaped reader; listener lifecycle is still decided at boot. *)
   let ws_enabled () = Feature_flag_registry.get_bool "MASC_WS_ENABLED"
 
-  (** Whether WebRTC transport is enabled. Default: true.
-      Accessor-shaped reader; listener lifecycle is still decided at boot. *)
-  let webrtc_enabled () = Feature_flag_registry.get_bool "MASC_WEBRTC_ENABLED"
-
   type h2_resolution =
     { value : h2_mode
     ; source : Env_config_snapshot_core.effective_source
@@ -543,7 +539,7 @@ module InternalTimers = struct
     get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
 
   (** Bootstrap janitor tick interval (seconds). Drives the SSE/session/
-      rate-limit/webrtc reaper loop in [server_bootstrap_loops]. Default:
+      rate-limit reaper loop in [server_bootstrap_loops]. Default:
       60 (1 min). Shorter interval reclaims stale connections faster at
       the cost of more wake-ups; longer interval is fine if the process
       is sized for the steady-state connection count. *)

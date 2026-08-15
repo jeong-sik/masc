@@ -4,15 +4,14 @@ type t =
   | Http
   | Grpc
   | Ws
-  | Webrtc
   | Local
 
 let env_name = "MASC_AGENT_TRANSPORT"
 let default = Local
-let description = "Agent transport (http|grpc|ws|webrtc|local)"
+let description = "Agent transport (http|grpc|ws|local)"
 
 let accepted_values =
-  [ "http", Http; "grpc", Grpc; "ws", Ws; "webrtc", Webrtc; "local", Local ]
+  [ "http", Http; "grpc", Grpc; "ws", Ws; "local", Local ]
 
 let of_env_value raw =
   match List.assoc_opt raw accepted_values with
@@ -64,7 +63,6 @@ let to_string = function
   | Http -> "http"
   | Grpc -> "grpc"
   | Ws -> "ws"
-  | Webrtc -> "webrtc"
   | Local -> "local"
 ;;
 

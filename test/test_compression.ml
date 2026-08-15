@@ -71,7 +71,6 @@ let backend_tests = [
   "JSON passthrough", `Quick, test_backend_json_passthrough;
 ]
 
-(* DataChannel Compression tests removed — use ocaml-webrtc library *)
 
 (* ===== Compression Threshold Tests ===== *)
 

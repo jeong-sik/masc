@@ -433,66 +433,6 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           in
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
-      | `POST, "/webrtc/offer" ->
-          if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json_value h2_reqd
-              (`Assoc [ ("error", `String "webrtc transport disabled") ])
-              ~status:`Not_found ~extra_headers:cors
-          else
-            with_server_state h2_reqd (fun state ->
-              match
-                authorize_permission_request
-                  ~base_path:(Mcp_server.workspace_config state).base_path
-                  ~permission:Masc_domain.CanBroadcast
-                  httpun_request
-              with
-              | Error err ->
-                  let status = http_status_of_auth_error err in
-                  h2_respond_json
-                    h2_reqd
-                    (auth_error_json err)
-                    ~status:(status :> H2.Status.t)
-                    ~extra_headers:(auth_error_headers ~status ~cors)
-              | Ok () ->
-                  h2_read_body h2_reqd (fun body_str ->
-                    match Server_webrtc_transport.handle_offer_request body_str with
-                    | Ok body ->
-                        h2_respond_json h2_reqd body ~extra_headers:cors
-                    | Error msg ->
-                        h2_respond_json_value h2_reqd
-                          (`Assoc [ ("error", `String msg) ])
-                          ~status:`Bad_request ~extra_headers:cors))
-
-      | `POST, "/webrtc/answer" ->
-          if not (Server_webrtc_transport.is_enabled ()) then
-            h2_respond_json_value h2_reqd
-              (`Assoc [ ("error", `String "webrtc transport disabled") ])
-              ~status:`Not_found ~extra_headers:cors
-          else
-            with_server_state h2_reqd (fun state ->
-              match
-                authorize_permission_request
-                  ~base_path:(Mcp_server.workspace_config state).base_path
-                  ~permission:Masc_domain.CanBroadcast
-                  httpun_request
-              with
-              | Error err ->
-                  let status = http_status_of_auth_error err in
-                  h2_respond_json
-                    h2_reqd
-                    (auth_error_json err)
-                    ~status:(status :> H2.Status.t)
-                    ~extra_headers:(auth_error_headers ~status ~cors)
-              | Ok () ->
-                  h2_read_body h2_reqd (fun body_str ->
-                    match Server_webrtc_transport.handle_answer_request body_str with
-                    | Ok body ->
-                        h2_respond_json h2_reqd body ~extra_headers:cors
-                    | Error msg ->
-                        h2_respond_json_value h2_reqd
-                          (`Assoc [ ("error", `String msg) ])
-                          ~status:`Bad_request ~extra_headers:cors))
-
       (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics
          now export via OTLP push (Otel_metrics observable). *)
       | `GET, "/" ->

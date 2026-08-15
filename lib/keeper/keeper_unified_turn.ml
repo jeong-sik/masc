@@ -195,7 +195,7 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Keeper_message _ ->
+  | Keeper_event_queue.Workspace_message _ ->
     false
 ;;
 

@@ -23,7 +23,7 @@ type stimulus_kind =
       (** System completion authority rejected Keeper evidence. *)
   | Task_cancelled
       (** Another Keeper cancelled a Task this Keeper authored. *)
-  | Keeper_message
+  | Workspace_message
       (** A committed workspace message named this Keeper. *)
 
 type reaction_kind =

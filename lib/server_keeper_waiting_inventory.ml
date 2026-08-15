@@ -120,7 +120,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Goal_reconciliation_ready _ -> Keeper_goal_reconciliation
   | Completion_authority_rejected _ -> Completion_authority
   | Task_cancelled _ -> Keeper_task_cancellation
-  | Keeper_message _ -> Keeper_workspace_message
+  | Workspace_message _ -> Keeper_workspace_message
 ;;
 
 let unix_iso_json = function

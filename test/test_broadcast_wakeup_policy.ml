@@ -257,14 +257,14 @@ let test_canonical_delivery_stamps_configured_feed_target () =
       (List.mem alias mentions)
 ;;
 
-let queued_keeper_messages ~base_path ~keeper_name =
+let queued_workspace_messages ~base_path ~keeper_name =
   match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
   | Error detail -> failf "event queue load failed: %s" detail
   | Ok queue ->
     Keeper_event_queue.to_list queue
     |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
       match stimulus.payload with
-      | Keeper_event_queue.Keeper_message message ->
+      | Keeper_event_queue.Workspace_message message ->
         Some (stimulus.post_id, stimulus.urgency, message)
       | Keeper_event_queue.Board_signal _
       | Keeper_event_queue.Board_attention _
@@ -299,21 +299,21 @@ let test_delivery_enqueues_linear_queue_entry () =
       (delivery ~target ~request_id ~seq:6 ~content:"drain me")
   in
   ignore (deliver ());
-  (match queued_keeper_messages ~base_path:config.base_path ~keeper_name:target with
+  (match queued_workspace_messages ~base_path:config.base_path ~keeper_name:target with
    | [ (post_id, urgency, message) ] ->
      check string "queue entry keys on the workspace request"
        ("workspace-message:" ^ request_id) post_id;
      check bool "an addressed message is immediate" true
        (urgency = Keeper_event_queue.Immediate);
      check string "queue entry names its sender" "external-agent"
-       message.Keeper_event_queue.kmsg_from
+       message.Keeper_event_queue.wmsg_from
    | entries ->
      failf "expected one queued keeper message, got %d" (List.length entries));
   (* Redelivery of the same committed message is the same durable event. *)
   ignore (deliver ());
   check int "redelivery does not duplicate the queue entry" 1
     (List.length
-       (queued_keeper_messages ~base_path:config.base_path ~keeper_name:target))
+       (queued_workspace_messages ~base_path:config.base_path ~keeper_name:target))
 ;;
 
 (* The wake is a hint; the delivery is durable. A Keeper that is not running
@@ -332,7 +332,7 @@ let test_stopped_keeper_keeps_queue_entry () =
        (delivery ~target ~request_id ~seq:7 ~content:"queued while stopped"));
   check int "stopped Keeper still holds the queue entry" 1
     (List.length
-       (queued_keeper_messages ~base_path:config.base_path ~keeper_name:target))
+       (queued_workspace_messages ~base_path:config.base_path ~keeper_name:target))
 ;;
 
 let () =

@@ -1389,12 +1389,12 @@ describe('parseKeeperEventQueuePendingSnapshot workspace message fields', () => 
       source_incarnation: '9',
       urgency: 'immediate',
       arrived_at_unix: 1786822060,
-      payload_kind: 'keeper_message',
+      payload_kind: 'workspace_message',
       ...extra,
     }],
   })
 
-  // Without these the operator row reads "wake reason keeper_message" and
+  // Without these the operator row reads "wake reason workspace_message" and
   // nothing else: no sender, and no way back to the transcript line.
   it('carries the sender and the request id through', () => {
     const parsed = parseKeeperEventQueuePendingSnapshot(snapshot({

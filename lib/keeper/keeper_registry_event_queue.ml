@@ -359,7 +359,7 @@ let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
   | Keeper_event_queue.Task_cancelled _
-  | Keeper_event_queue.Keeper_message _ ->
+  | Keeper_event_queue.Workspace_message _ ->
     None
 ;;
 

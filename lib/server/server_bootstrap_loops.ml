@@ -254,17 +254,17 @@ let deliver_broadcast_mention
              by the hint always finds the entry. *)
           let commit_queue_entry () =
             let message =
-              { Keeper_event_queue.kmsg_request_id = delivery.request_id
-              ; kmsg_from = delivery.from_agent
+              { Keeper_event_queue.wmsg_request_id = delivery.request_id
+              ; wmsg_from = delivery.from_agent
               }
             in
             let stimulus =
               { Keeper_event_queue.post_id =
-                  Keeper_event_queue.keeper_message_post_id message
+                  Keeper_event_queue.workspace_message_post_id message
               ; urgency = Keeper_event_queue.Immediate
               ; arrived_at = Unix.gettimeofday ()
                 (* NDT-OK: stimulus receipt time, used only for ordering/age *)
-              ; payload = Keeper_event_queue.Keeper_message message
+              ; payload = Keeper_event_queue.Workspace_message message
               }
             in
             match
@@ -279,7 +279,7 @@ let deliver_broadcast_mention
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string KeepaliveSignalFailures)
                 ~labels:
-                  [ "keeper", target; "phase", "keeper_message_delivery" ]
+                  [ "keeper", target; "phase", "workspace_message_delivery" ]
                 ();
               Log.Keeper.error
                 "keeper message durable delivery failed keeper=%s request_id=%s: %s"

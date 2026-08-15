@@ -108,7 +108,7 @@ type stimulus_payload =
           with no Goal link reaches no one. The cancelling Keeper's reason is
           carried here because it is the author's only account of why the work
           it asked for stopped. *)
-  | Keeper_message of keeper_message
+  | Workspace_message of workspace_message
       (** A committed workspace message named this Keeper. The transcript row
           the delivery boundary appends is the content SSOT; this payload
           carries the durable workspace request identity so the message is
@@ -219,18 +219,18 @@ and task_cancellation = {
     none; it is not defaulted to a placeholder, so the author can tell "no
     reason was given" from "the reason was empty text". *)
 
-and keeper_message = {
-  kmsg_request_id : string;
-  kmsg_from : string;
+and workspace_message = {
+  wmsg_request_id : string;
+  wmsg_from : string;
 }
-(** Payload for [Keeper_message]. [kmsg_request_id] is the workspace message's
+(** Payload for [Workspace_message]. [wmsg_request_id] is the workspace message's
     durable request id, which is also the [external_message_id] of the chat
     row the delivery boundary committed — one identity, two stores, so the
-    content is never duplicated here. [kmsg_from] is the authoring agent, kept
+    content is never duplicated here. [wmsg_from] is the authoring agent, kept
     because a drained stimulus has to name its sender without a second read. *)
 
-val keeper_message_post_id : keeper_message -> post_id
-(** Dedup/correlation id for [Keeper_message]:
+val workspace_message_post_id : workspace_message -> post_id
+(** Dedup/correlation id for [Workspace_message]:
     ["workspace-message:<request_id>"]. Redelivery of the same committed
     workspace message collapses onto the entry already queued. *)
 

@@ -297,9 +297,9 @@ jobs:
           # foreign stubs by suffix so new source dirs are covered without
           # editing this list, and keep explicit prefixes for Dune-declared
           # non-source deps (e.g. tools/tlc_test_gen/test/fixtures/*.tla).
-          # Over-triggering on dune-excluded dirs (archive/, dashboard_bonsai/
-          # per the root dune (dirs ...) stanza) is harmless: the Build job
-          # runs but dune build skips those dirs.
+          # Over-triggering on dune-excluded dirs (dashboard_bonsai/ per the
+          # root dune (dirs ...) stanza) is harmless: the Build job runs but
+          # dune build skips those dirs.
           # scripts/harness/ stays a prefix match (not suffix): the Build and
           # Test job executes scripts/harness/contract/run_all.sh, so any
           # harness file — including non-.sh/.json ones and future extensions —

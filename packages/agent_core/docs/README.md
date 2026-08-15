@@ -28,13 +28,6 @@ These files are those specifications, moved to sit beside the code they govern.
 | `EVENT-CATALOG.md`, `RUNTIME-OUTPUT-SCHEMA-INDEX.md` | event and output schema indexes |
 | `schemas/`, `schema-surfaces/` | machine-readable schema surfaces |
 
-## What was deliberately left in the archive
-
-`docs/archive/` (superseded RFCs and retired TLA+ models), `docs/_audit/`
-(point-in-time coverage evidence from 2026-05), and `docs/migrations/`
-(upgrade notes for the standalone package, which no longer has consumers now
-that the library is embedded). Those describe states that no longer exist;
-carrying them here would reproduce dead context.
 
 ## Status fields are not filtered
 

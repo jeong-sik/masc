@@ -35,7 +35,13 @@ let handle_broadcast state agent_name reqd body_str =
     match Json_util.assoc_member_opt "message" json with
     | Some (`String message) ->
         let config = (Mcp_server.workspace_config state) in
-        (match Workspace.broadcast config ~from_agent:agent_name ~content:message with
+        (* The operator addressing the workspace is speech, same as a
+           Keeper's masc_broadcast. *)
+        (match
+           Workspace.broadcast
+             ~audience:Workspace_broadcast.Fleet_conversation
+             config ~from_agent:agent_name ~content:message
+         with
          | Ok delivery -> reply_delivery delivery
          | Error error ->
            reply false (Some (Workspace.broadcast_error_to_string error)))

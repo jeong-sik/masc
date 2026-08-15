@@ -367,6 +367,15 @@ let project_workspace_message_to_fleet
       ~registered_keepers
       (delivery : Workspace_broadcast.broadcast_delivery)
   =
+  match delivery.audience with
+  | Workspace_broadcast.System_record ->
+    (* A lifecycle or task-FSM announcement belongs to the activity record, not
+       to anyone's conversation. Projecting it would also cost one full
+       transcript read-and-scan per registered Keeper on the commit path — on
+       the reference workspace 3.73 MB per message, for the 17 of 18 messages
+       nobody would want to read. *)
+    ()
+  | Workspace_broadcast.Fleet_conversation ->
   match Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id with
   | Error detail ->
     Log.Keeper.error

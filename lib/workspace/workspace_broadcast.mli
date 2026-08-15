@@ -28,6 +28,15 @@ type mention_delivery =
   | Deferred of mention_delivery_deferred
   | Rejected of mention_delivery_rejected
 
+(** Whether a committed message is conversation the fleet should see in its
+    Keeper windows, or a record of something the system did. Declared by the
+    producer; never derived from the message text. A call site that declares
+    nothing is a [System_record], so a new producer cannot silently fan a
+    machine announcement out to every Keeper's transcript. *)
+type audience =
+  | Fleet_conversation
+  | System_record
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -37,6 +46,7 @@ type broadcast_delivery =
   ; mention : string option
   ; msg_type : string
   ; mention_delivery : mention_delivery
+  ; audience : audience
   }
 
 type mention_outbox_quarantine_reason =
@@ -121,6 +131,7 @@ val broadcast_delivery_to_yojson : broadcast_delivery -> Yojson.Safe.t
 
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
+           ?audience:audience ->
            Workspace_utils_backend_setup.config ->
            from_agent:string -> content:string ->
            (broadcast_delivery, broadcast_error) result

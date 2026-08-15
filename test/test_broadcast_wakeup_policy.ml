@@ -34,6 +34,7 @@ let delivery ~target ~request_id ~seq ~content : Workspace_broadcast.broadcast_d
   ; mention = Some target
   ; msg_type = "broadcast"
   ; mention_delivery = Workspace_broadcast.Pending
+  ; audience = Workspace_broadcast.Fleet_conversation
   }
 ;;
 
@@ -346,6 +347,7 @@ let fleet_delivery ~request_id ~from_agent ~content
   ; mention = None
   ; msg_type = "broadcast"
   ; mention_delivery = Workspace_broadcast.Passive
+  ; audience = Workspace_broadcast.Fleet_conversation
   }
 ;;
 
@@ -426,6 +428,44 @@ let test_fleet_projection_preserves_the_mention_row () =
     check bool "mention stamp survived the fleet pass" true (message.mentions <> [])
 ;;
 
+(* The task FSM announces every claim/start/release through the same
+   broadcast entry point. Those are a record of what the system did, not
+   conversation, and projecting them would cost one full transcript
+   read-and-scan per registered Keeper for 17 of every 18 messages. A
+   producer that declares no audience gets none of that. *)
+let test_system_record_is_not_projected () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000004" in
+  List.iter (persist_meta config) [ "rondo"; "sangsu" ];
+  let record =
+    { (fleet_delivery
+         ~request_id
+         ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
+         ~content:"Claimed task-209")
+      with Workspace_broadcast.audience = Workspace_broadcast.System_record
+    }
+  in
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () -> [ "rondo"; "sangsu" ])
+    record;
+  check int "a system record reaches no conversation window" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"sangsu" ~request_id)
+;;
+
+(* The default is the record, so a producer added later cannot silently fan a
+   machine announcement out to every Keeper. *)
+let test_undeclared_broadcast_is_a_system_record () =
+  with_workspace @@ fun config ->
+  match
+    Workspace.broadcast config ~from_agent:"claude" ~content:"Claimed task-1"
+  with
+  | Error _ -> fail "broadcast was not persisted"
+  | Ok delivery ->
+    check bool "an undeclared producer is a system record" true
+      (delivery.Workspace_broadcast.audience = Workspace_broadcast.System_record)
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -458,5 +498,9 @@ let () =
             test_fleet_projection_adds_no_queue_entry
         ; test_case "fleet projection preserves the mention row" `Quick
             test_fleet_projection_preserves_the_mention_row
+        ; test_case "a system record is not projected" `Quick
+            test_system_record_is_not_projected
+        ; test_case "an undeclared broadcast is a system record" `Quick
+            test_undeclared_broadcast_is_a_system_record
         ] )
     ]

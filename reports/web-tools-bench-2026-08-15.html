@@ -170,10 +170,46 @@ Ollama 직접 프로브를 추가했다 — 서버의 <code>fetch_ollama</code>�
 </ol>
 </div>
 
+<h2>Iteration 5 — keeper 턴 경유 end-to-end, 전/후 비교 (2026-08-15 18:08 UTC)</h2>
+
+<p class="note">원본 증거: <code>docs/evidence/web-tools-keeper-turn-2026-08-16.md</code> (로그 발췌·아티팩트 목록).
+같은 keeper(<code>sangsu</code>, GLM-5-Turbo 런타임)가 옛 바이너리와 새 바이너리에서 남긴
+<code>WebSearch</code> 호출 로그를 직접 비교한다. "전" 표본은 8/15 16:17 UTC까지(재기동 전) 로그의
+includeContent=true 성공 호출 33건, "후"는 브로드캐스트 자극("OCaml 5.5 effect handlers tutorial",
+includeContent=true) 35초 뒤 sangsu가 실제로 실행한 턴이다.</p>
+
+<h2>표 5. keeper 컨텍스트에 실리는 도구 응답 크기 (out_len, 문자)</h2>
+<table>
+<tr><th></th><th>전 (옛 바이너리, n=33)</th><th>후 (새 바이너리 + Ollama 자격, 동일 keeper·동일 계열 쿼리)</th></tr>
+<tr><td>중앙값</td><td>29,433</td><td rowspan="3"><strong>348</strong> (히트 목록 + 오프로드 참조만)</td></tr>
+<tr><td>p75</td><td>36,325</td></tr>
+<tr><td>최대</td><td>49,807</td></tr>
+</table>
+
+<div class="verdict">
+<p><strong>판정 4줄.</strong></p>
+<ol>
+<li><strong>강제 적재가 98.8% 줄었다</strong> — 검색 1회가 keeper 컨텍스트에 밀어넣는 도구 응답이
+중앙값 29,433자 → 348자. 본문(3문서, 80,193바이트)은
+<code>.masc/artifacts/web-fetch/&lt;sha256&gt;.md</code>로 오프로드됐고(도구 호출과 같은 초에 생성 확인),
+내용은 검색 주제와 일치하는 실제 웹 문서다.</li>
+<li><strong>선택적 재적재가 실제로 일어났다</strong> — 8초 뒤 sangsu가
+<code>keeper_artifact_read(sha256, offset, max_bytes)</code>로 65,536바이트 <em>한 페이지만</em> 읽었다.
+"무조건 전부 밀어넣기"가 "필요한 문서를 페이지 단위로 골라 읽기"로 바뀐 것이 로그로 증명된다.</li>
+<li><strong>폴백 체인이 살아있다</strong> — SearXNG는 이 시각에도 0건이었지만(직접 프로브 r7),
+같은 쿼리로 본문 3건이 확보됐다. 0건 응답은 <code>Parse "no results"</code>로 기록되고 다음
+provider(Ollama)로 넘어가는 체인 순회를 코드와 결과 양쪽에서 확인.</li>
+<li><strong>"전"의 실패 모드가 로그에 실존한다</strong> — 옛 바이너리 시절 sangsu의 검색 4연발이
+148,330바이트 대화 원자를 만들어 입력 예산(135,852바이트)을 초과,
+<code>Hook model_input_projection failed ... newest atom does not fit</code>으로 <strong>턴 자체가 죽었다</strong>.
+새 구조에서는 같은 4연발이 ~1,400자다.</li>
+</ol>
+</div>
+
 <h2>다음 반복</h2>
 <ul>
-<li><strong>Iteration 5</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로
-(<code>maximum_number_of_tokens</code> 예산 준수) 실측. keeper 턴 경유 토큰 소비는 대시보드 관측으로.</li>
+<li><strong>Iteration 6</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로
+(<code>maximum_number_of_tokens</code> 예산 준수) 실측.</li>
 <li>매 반복은 <code>python3 scripts/bench-web-tools.py -o docs/evidence/web-tools-bench-&lt;date&gt;-rN.json</code> 실행 후 이 문서에 섹션 추가.</li>
 </ul>
 

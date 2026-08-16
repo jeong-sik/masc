@@ -13,21 +13,12 @@ type turn =
   ; calls : call list
   }
 
-(* Bounds on what one call contributes to the prompt. The argument object is
-   what the keeper must see to recognise its own mistake (an empty object, a
-   finished task id), so it is kept wider than the failure text, which only has
-   to identify the refusal. *)
-let input_max_chars = 240
-let failure_max_chars = 200
-
-(* Rows to read per requested turn. Measured on taskmaster 2026-08-16: 818 calls
-   over 80 turns, median 8 per turn and p90 21. Reading 24 covers the 90th
-   percentile turn whole. *)
-let rows_per_turn = 24
-
-let clip max_chars s =
-  if String.length s <= max_chars then s else String.sub s 0 max_chars ^ "…"
-;;
+(* Sizing hint for the read window, not a bound on any row: how many calls a
+   turn typically makes. Measured on taskmaster 2026-08-16 over 932 calls --
+   median 8 per turn, p90 21. Reading short costs turns, never a partial turn:
+   only the oldest group can be clipped by the window edge, and
+   {!turns_of_rows} drops it. *)
+let typical_calls_per_turn = 24
 
 let string_field name json =
   match Json_util.assoc_member_opt name json with
@@ -45,13 +36,20 @@ let turn_id_field json =
   | _ -> None
 ;;
 
-(* A refusal the tool did not describe stays [None]. Substituting an empty
-   string here would render as a refusal with no reason, indistinguishable from
-   one the tool declined to explain. *)
+(* Only a refusal carries its output. What a successful call returned is not
+   what the keeper needs -- that the call landed is the fact -- and it is where
+   the bytes are: measured 2026-08-16, a success returns a median 1310 bytes
+   against a refusal's 417 (max 2116). Carrying both would put a 10-turn window
+   over 80 KB for no added recall, and would force a truncation rule over the
+   exact text the keeper has to read to recognise its mistake.
+
+   A refusal the tool did not describe stays [None]. Substituting an empty
+   string would render as a refusal with no reason, indistinguishable from one
+   the tool declined to explain. *)
 let outcome_of_row json =
   match Json_util.assoc_member_opt "success" json with
   | Some (`Bool true) -> Ok_call
-  | _ -> Failed_call (Option.map (clip failure_max_chars) (string_field "output" json))
+  | _ -> Failed_call (string_field "output" json)
 ;;
 
 let call_of_row json =
@@ -61,16 +59,27 @@ let call_of_row json =
     let input =
       match Json_util.assoc_member_opt "input" json with
       | None | Some `Null -> "{}"
-      | Some (`String s) -> clip input_max_chars s
-      | Some value -> clip input_max_chars (Yojson.Safe.to_string value)
+      | Some (`String s) -> s
+      | Some value -> Yojson.Safe.to_string value
     in
     Some { tool; input; outcome = outcome_of_row json }
 ;;
 
-let turns_of_rows ~keeper_name ~max_turns rows =
+(* A saturated tail read starts mid-turn, so its oldest group is missing that
+   turn's earliest calls. Rendering a turn with some calls silently absent is
+   worse than not rendering it: the keeper would read a complete-looking
+   history that omits the call it needs to see. *)
+let drop_clipped_leading_turn rows =
+  match List.find_map turn_id_field rows with
+  | None -> rows
+  | Some clipped -> List.filter (fun row -> turn_id_field row <> Some clipped) rows
+;;
+
+let turns_of_rows ~keeper_name ~max_turns ~window_saturated rows =
   if max_turns <= 0
   then []
   else (
+    let rows = if window_saturated then drop_clipped_leading_turn rows else rows in
     (* One pass in persisted order builds each turn's call list; the turn order
        is then the order the turns first appeared, so both stay source order
        without a sort. *)
@@ -98,10 +107,16 @@ let turns_of_rows ~keeper_name ~max_turns rows =
 let collect ~keeper_name ~max_turns =
   if max_turns <= 0
   then []
-  else
-    Keeper_tool_call_log.read_recent
-      ~keeper_name
-      ~n:(max_turns * rows_per_turn)
-      ()
-    |> turns_of_rows ~keeper_name ~max_turns
+  else begin
+    (* One turn's worth of slack, so discarding the clipped group still leaves
+       [max_turns] whole ones. *)
+    let n = (max_turns + 1) * typical_calls_per_turn in
+    let rows = Keeper_tool_call_log.read_recent ~keeper_name ~n () in
+    (* Short of the window means the store held nothing older, so nothing was
+       cut. *)
+    turns_of_rows
+      ~keeper_name ~max_turns
+      ~window_saturated:(List.length rows >= n)
+      rows
+  end
 ;;

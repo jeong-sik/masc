@@ -247,7 +247,7 @@ let test_only_the_newest_turns_of_this_keeper_are_replayed () =
     ; log_row ~keeper:"me" ~turn:3 ~tool:"c" ~success:false ()
     ]
   in
-  let turns = Actions.turns_of_rows ~keeper_name:"me" ~max_turns:2 rows in
+  let turns = Actions.turns_of_rows ~keeper_name:"me" ~max_turns:2 ~window_saturated:false rows in
   check (list int) "newest two turns, oldest first" [ 2; 3 ]
     (List.map (fun (t : Actions.turn) -> t.turn_id) turns);
   check (list string) "another keeper's row never appears" [ "b"; "c" ]
@@ -269,7 +269,7 @@ let test_calls_keep_the_order_they_ran_in () =
     ; log_row ~keeper:"me" ~turn:9 ~tool:"third" ~success:true ()
     ]
   in
-  match Actions.turns_of_rows ~keeper_name:"me" ~max_turns:5 rows with
+  match Actions.turns_of_rows ~keeper_name:"me" ~max_turns:5 ~window_saturated:false rows with
   | [ turn ] ->
     check (list string) "persisted order" [ "first"; "second"; "third" ]
       (List.map (fun (c : Actions.call) -> c.tool) turn.calls)
@@ -279,7 +279,25 @@ let test_calls_keep_the_order_they_ran_in () =
 let test_disabling_the_depth_replays_nothing () =
   let rows = [ log_row ~keeper:"me" ~turn:1 ~tool:"a" ~success:true () ] in
   check int "zero turns means nothing is read back" 0
-    (List.length (Actions.turns_of_rows ~keeper_name:"me" ~max_turns:0 rows))
+    (List.length (Actions.turns_of_rows ~keeper_name:"me" ~max_turns:0 ~window_saturated:false rows))
+;;
+
+(* Replaces the old character caps: a turn is whole or absent, never rendered
+   with some of its calls silently missing. *)
+let test_a_turn_the_read_window_cut_is_dropped_whole () =
+  let rows =
+    [ log_row ~keeper:"me" ~turn:1 ~tool:"cut-off-tail" ~success:true ()
+    ; log_row ~keeper:"me" ~turn:2 ~tool:"whole" ~success:true ()
+    ]
+  in
+  check (list int) "the clipped oldest turn is gone, not trimmed" [ 2 ]
+    (List.map
+       (fun (t : Actions.turn) -> t.turn_id)
+       (Actions.turns_of_rows ~keeper_name:"me" ~max_turns:5 ~window_saturated:true rows));
+  check (list int) "an unsaturated read keeps it" [ 1; 2 ]
+    (List.map
+       (fun (t : Actions.turn) -> t.turn_id)
+       (Actions.turns_of_rows ~keeper_name:"me" ~max_turns:5 ~window_saturated:false rows))
 ;;
 
 let test_no_recent_actions_no_section () =
@@ -647,5 +665,7 @@ let () =
             test_calls_keep_the_order_they_ran_in;
           test_case "disabling the depth replays nothing" `Quick
             test_disabling_the_depth_replays_nothing;
+          test_case "a turn the read window cut is dropped whole" `Quick
+            test_a_turn_the_read_window_cut_is_dropped_whole;
         ] );
     ]

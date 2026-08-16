@@ -9,12 +9,15 @@
 type outcome =
   | Ok_call
   | Failed_call of string option
-      (** Bounded head of the failure text, [None] when the tool refused
-          without describing why. *)
+      (** The refusal text verbatim, [None] when the tool refused without
+          describing why. A successful call carries no output: that it landed
+          is the fact, and the returned body is where the bytes are. *)
 
 type call =
   { tool : string
-  ; input : string  (** Bounded rendering of the argument object. *)
+  ; input : string
+      (** The argument object verbatim. Not truncated: it is the thing the
+          keeper has to read to recognise the call it got refused for. *)
   ; outcome : outcome
   }
 
@@ -23,13 +26,23 @@ type turn =
   ; calls : call list  (** Persisted order: oldest call of the turn first. *)
   }
 
-val turns_of_rows : keeper_name:string -> max_turns:int -> Yojson.Safe.t list -> turn list
+val turns_of_rows
+  :  keeper_name:string
+  -> max_turns:int
+  -> window_saturated:bool
+  -> Yojson.Safe.t list
+  -> turn list
 (** Groups already-read log rows into the newest [max_turns] turns belonging to
     [keeper_name], oldest turn first. Rows without a turn id are dropped: they
-    cannot be attributed to a turn the keeper would recognise. [max_turns <= 0]
-    returns the empty list. Pure. *)
+    cannot be attributed to a turn the keeper would recognise.
+
+    [window_saturated] states that the caller's read filled its window, which
+    means it began mid-turn and the oldest group is missing that turn's
+    earliest calls; that group is then discarded rather than rendered
+    incomplete. [max_turns <= 0] returns the empty list. Pure. *)
 
 val collect : keeper_name:string -> max_turns:int -> turn list
-(** Reads the durable tool-call log and applies {!turns_of_rows}. The read
-    window is sized from [max_turns]; a turn that ran more calls than the
-    window covers is returned truncated rather than dropped. *)
+(** Reads the durable tool-call log and applies {!turns_of_rows}. Every turn
+    returned is whole: a saturated tail read begins mid-turn, so its oldest
+    group is discarded rather than rendered with calls silently missing. A
+    short read window therefore costs turns, never parts of one. *)

@@ -196,7 +196,10 @@ let externalization_tool_error ~recoverable error =
 let agent_core_error_class_of_tool_failure_class = function
   | Tool_result.Transient_error -> Agent_core.Types.Transient
   | Tool_result.Policy_rejection
-  | Tool_result.Workflow_rejection ->
+  | Tool_result.Workflow_rejection
+  (* Operator interrupt: final for the model — it must not re-attempt what
+     an operator explicitly stopped (#28810). *)
+  | Tool_result.Operator_cancelled ->
     Agent_core.Types.Deterministic
   | Tool_result.Runtime_failure -> Agent_core.Types.Unknown
 ;;

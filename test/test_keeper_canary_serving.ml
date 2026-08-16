@@ -116,10 +116,12 @@ let test_rows_before_window_are_ignored () =
     [ (1, "agy.x") ]
     c.S.served
 
-let test_later_completion_wins_for_a_turn () =
+(* Wire order is not chronological order (the classify lesson): the later
+   timestamp must win even when it arrives earlier in the list. *)
+let test_chronologically_later_completion_wins_for_a_turn () =
   let attempts =
-    [ completed ~turn:1 ~ts:"2026-08-17T01:00:00Z" ~runtime:"agy.x" ()
-    ; completed ~turn:1 ~ts:"2026-08-17T01:00:05Z" ~runtime:"oc.fallback" ()
+    [ completed ~turn:1 ~ts:"2026-08-17T01:00:05Z" ~runtime:"oc.fallback" ()
+    ; completed ~turn:1 ~ts:"2026-08-17T01:00:00Z" ~runtime:"agy.x" ()
     ]
   in
   let c =
@@ -129,9 +131,29 @@ let test_later_completion_wins_for_a_turn () =
       ~turn_ids:[ 1 ]
       ~attempts
   in
-  Alcotest.(check (list turn_pair)) "the later row decides"
+  Alcotest.(check (list turn_pair)) "the later timestamp decides"
     [ (1, "oc.fallback") ]
     c.S.mismatched
+
+(* [served] is the full windowed completion record: rows for turns the
+   harness never sent stay visible instead of silently vanishing. *)
+let test_served_keeps_rows_for_unmeasured_turns () =
+  let attempts =
+    [ completed ~turn:1 ~ts:"2026-08-17T01:00:00Z" ~runtime:"agy.x" ()
+    ; completed ~turn:99 ~ts:"2026-08-17T01:05:00Z" ~runtime:"oc.other" ()
+    ]
+  in
+  let c =
+    S.check
+      ~expected_runtime:"agy.x"
+      ~window_start:"2026-08-17T00:59:00Z"
+      ~turn_ids:[ 1 ]
+      ~attempts
+  in
+  Alcotest.(check bool) "measured turn is clean" true (S.all_as_expected c);
+  Alcotest.(check (list turn_pair)) "served keeps the unmeasured row"
+    [ (1, "agy.x"); (99, "oc.other") ]
+    c.S.served
 
 let test_json_carries_the_verdict_inputs () =
   let c =
@@ -171,8 +193,10 @@ let () =
             test_turn_without_completion_is_unattributed
         ; Alcotest.test_case "pre-window rows ignored" `Quick
             test_rows_before_window_are_ignored
-        ; Alcotest.test_case "later completion wins" `Quick
-            test_later_completion_wins_for_a_turn
+        ; Alcotest.test_case "chronologically later completion wins" `Quick
+            test_chronologically_later_completion_wins_for_a_turn
+        ; Alcotest.test_case "served keeps unmeasured turns" `Quick
+            test_served_keeps_rows_for_unmeasured_turns
         ; Alcotest.test_case "json carries verdict inputs" `Quick
             test_json_carries_the_verdict_inputs
         ] )

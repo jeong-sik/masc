@@ -41,8 +41,10 @@ val check :
     [1..n]). Attempts before [window_start] are ignored (ISO8601 strings
     compare chronologically, same convention as
     {!Keeper_canary_failover.classify}). When one turn carries several
-    [Completed] rows the later row wins — it is the one whose reply the
-    transcript kept. *)
+    [Completed] rows the chronologically last one wins — its reply is the
+    one the transcript kept, and the wire does not guarantee list order
+    (same lesson classify already carries); a ts tie falls to the later
+    row. *)
 
 val all_as_expected : check -> bool
 (** True iff [mismatched] and [unattributed] are both empty. Derived, not

@@ -743,7 +743,8 @@ let autonomous_trigger_lines
                [ Printf.sprintf "- Reasons: %s" (String.concat ", " reasons) ]))
   | _ -> []
 
-let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
+let effective_autonomous_instructions
+    ~(meta : Keeper_meta_contract.keeper_meta)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(channel : Keeper_world_observation.turn_channel option)
     ()
@@ -766,6 +767,14 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
       | Some s when String.trim s <> "" -> s
       | _ -> base)
   | _ -> base
+;;
+
+let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ?(channel : Keeper_world_observation.turn_channel option)
+    ()
+  =
+  effective_autonomous_instructions ~meta ?profile_defaults ?channel ()
 ;;
 
 (* Titles for the goals the world observation already narrowed to the ones a

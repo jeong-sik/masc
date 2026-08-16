@@ -72,16 +72,21 @@ val of_response_parse_error
 
 (** Coarse projection for call sites that do not consume attribution.
     Provider call paths use {!of_http_error} so attribution is retained through
-    the detailed boundary. *)
+    the detailed boundary. [provider] labels the mapped provider errors
+    (timeout/terminal/failure) so operators see which provider the failure
+    belongs to; omitted, the error keeps the typed 'unknown' label (#28852). *)
 val core_error_of_http_error
   :  ?accept_rejected:accept_rejected
+  -> ?provider:string
   -> Llm_provider.Http_client.http_error
   -> Error.t
 
 (** Central transport-error mapping. Ownership is derived only from closed or
-    status evidence and the agent-core binding identity. *)
+    status evidence and the agent-core binding identity. [provider] labels the
+    mapped provider errors as in {!core_error_of_http_error}. *)
 val of_http_error
   :  ?accept_rejected:accept_rejected
+  -> ?provider:string
   -> binding:Binding_identity.t
   -> Llm_provider.Http_client.http_error
   -> detailed_error

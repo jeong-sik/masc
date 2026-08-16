@@ -96,6 +96,7 @@ let endpoint_unavailable_guard_names =
     "masc_interrupt";
     "masc_pending_interrupts";
     "masc_reject";
+    "masc_operator_snapshot";
   ]
 
 let endpoint_unavailable_guard_fragments =
@@ -105,15 +106,10 @@ let endpoint_unavailable_guard_fragments =
     "not available on this MCP endpoint";
   ]
 
-let generic_matrix_excluded_names =
-  [
-    "masc_keeper_delegate";
-    "masc_operator_snapshot";
-    (* Excluded: masc_keeper_delegate / masc_operator_snapshot require a live
-       keeper context to pass tag_registry validation in the standalone runner.
-       TODO: wire into the matrix runner with a minimal keeper stub,
-       or split into a keeper-matrix suite. *)
-  ]
+let generic_matrix_excluded_names = []
+(* Was [masc_keeper_delegate; masc_operator_snapshot] — both now have proper
+   expectations: delegate has strict_guard_cases, operator_snapshot is in
+   endpoint_unavailable_guard_names. *)
 
 let string_starts_with ~prefix s =
   let plen = String.length prefix in

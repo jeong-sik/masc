@@ -83,7 +83,7 @@ auto-judge가 web_search 유예를 3회 reject (05:45:26 / 05:56:10 / ≈06:13).
 
 ## 5. acceptance 1 신 레인 — 유기적 라이브 PASS (07:30Z, 프로덕션)
 
-§4에서 예고한 (c) 유기 트래픽 관측이 닫혔다. 프로덕션(:8935, base=`~/me/.masc`, 신 바이너리 05:55:53Z 기동)에서 keeper 유기 트래픽의 web-fetch 오프로드 2건:
+§4에서 예고한 (c) 유기 트래픽 관측이 닫혔다. 프로덕션(:8935, base path `~/me` 아래 `.masc`, 신 바이너리 05:55:53Z 기동)에서 keeper 유기 트래픽의 web-fetch 오프로드 2건:
 
 | fetched_at(Z) | sha256(전위) | bytes | source |
 |---|---|---|---|

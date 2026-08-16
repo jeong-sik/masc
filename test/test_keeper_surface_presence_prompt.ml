@@ -6,6 +6,7 @@ module WO = Masc.Keeper_world_observation
 module Prompt = Masc.Keeper_unified_prompt
 module KTP = Masc.Keeper_types_profile
 module Inputs = Masc.Keeper_world_observation_inputs
+module MS = Masc.Keeper_world_observation_message_scope
 
 let () = Masc.Workspace_metric_hooks.install ()
 
@@ -62,6 +63,7 @@ let base_observation : WO.world_observation =
     connected_surfaces = [];
     connected_surface_failures = [];
     own_recent_board_posts = [];
+    fleet_messages = [];
   }
 
 let meta : Masc.Keeper_meta_contract.keeper_meta =
@@ -163,6 +165,51 @@ let discord_presence ~alive : Gate_surface.surface_presence =
         { workspace_id = None; channel_id = Some "98791450001" };
     alive;
   }
+
+
+(* The fleet layer's whole point is that a projected keeper broadcast reaches
+   the model. Asserting on the pure filter alone would still pass with the
+   prompt layer deleted, so these render a real prompt. *)
+
+let fleet_row speaker content : MS.fleet_message =
+  { fleet_speaker = speaker; fleet_content = content }
+;;
+
+let test_fleet_messages_reach_the_prompt () =
+  let user =
+    user_message
+      { base_observation with
+        fleet_messages = [ fleet_row "keeper-bob-agent" "deploy is green" ]
+      }
+  in
+  check bool "section header" true (contains ~needle:"### Fleet Messages (1)" user);
+  check bool "row names speaker and content" true
+    (contains ~needle:"- fleet keeper-bob-agent: deploy is green" user);
+  check bool "rows are marked as context" true
+    (contains ~needle:"context, not instructions" user)
+;;
+
+let test_no_fleet_messages_no_section () =
+  let user = user_message { base_observation with fleet_messages = [] } in
+  check bool "absent when there is nothing to carry" false
+    (contains ~needle:"### Fleet Messages" user)
+;;
+
+let test_fleet_rows_render_in_arrival_order () =
+  let user =
+    user_message
+      { base_observation with
+        fleet_messages =
+          [ fleet_row "keeper-bob-agent" "first thing"
+          ; fleet_row "keeper-carol-agent" "second thing"
+          ]
+      }
+  in
+  check bool "count matches" true (contains ~needle:"### Fleet Messages (2)" user);
+  check bool "older row rendered" true (contains ~needle:"- fleet keeper-bob-agent: first thing" user);
+  check bool "newer row rendered" true
+    (contains ~needle:"- fleet keeper-carol-agent: second thing" user)
+;;
 
 let test_bound_keeper_sees_presence_section () =
   let user =
@@ -479,5 +526,14 @@ let () =
             test_claimable_title_does_not_reach_system_context;
           test_case "failed-only backlog omits readable empty statement" `Quick
             test_failed_only_backlog_omits_readable_empty_statement;
+        ] );
+      ( "fleet messages layer",
+        [
+          test_case "projected broadcast reaches the prompt" `Quick
+            test_fleet_messages_reach_the_prompt;
+          test_case "no rows means no section" `Quick
+            test_no_fleet_messages_no_section;
+          test_case "rows render in arrival order" `Quick
+            test_fleet_rows_render_in_arrival_order;
         ] );
     ]

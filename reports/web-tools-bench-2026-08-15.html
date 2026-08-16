@@ -251,12 +251,40 @@ hit@1 <strong>5/6</strong>, 옛 유일 경로(SearXNG)는 부분 회복 상태�
 정확히 FAIL로 잡았고, 마커 주석 대신 <strong>시각 주입</strong>(handle의 start_time을 체인으로 전달)으로
 수리했다 — 비결정 시계 읽기는 dispatch 경계에 남고 그 아래는 입력에 결정론적이다.</p>
 
+<h2>코퍼스 acceptance 라이브 실측 (8/16, :8949 격리 인스턴스)</h2>
+
+<p>rtprobe keeper에게 mention 자극으로 <code>WebSearch(includeContent=true, limit=5)</code>를
+발화시켜 RFC-0383을 keeper 레인에서 처음으로 끝까지 밟았다.
+상세 로그·경로는 <code>docs/evidence/web-artifact-corpus-acceptance-2026-08-16.md</code>.</p>
+
+<table>
+<tr><th>acceptance</th><th>판정</th><th>실측</th></tr>
+<tr><td>1 — 오프로드마다 index 행</td><td><strong>라이브 PASS</strong></td>
+<td>절단 5건 → <code>index.jsonl</code> 5행(전부 <code>masc.web_artifact.v1</code>, sha256=파일명) + 본문 4파일.
+서로 다른 URL 2개(저장소 루트와 그 README)가 같은 내용 해시 <code>2dd3ef61…</code> 한 파일로 dedup되는 것까지 관측 —
+파일이 진실, 인덱스는 projection이라는 설계 그대로.</td></tr>
+<tr><td>3 — 웹 왕복 없는 재질의</td><td><strong>keeper 레인 FAIL → #28820</strong></td>
+<td>① index Grep: keeper sandbox가 상대경로를 playground 기준으로 이중 결합해 rg exit 2.
+② <code>keeper_artifact_read</code>: reader는 <code>tool_blobs/</code>만 resolve하는데 본문은
+<code>artifacts/web-fetch/</code>에 있어 도달 불가(rtprobe는 지시 sha 대신 컨텍스트의 replay blob으로 대체 호출).
+문서화된 2단 소비는 <strong>agent 레인만 성립</strong> — 본문 저장 단일화 + discovery 표면 결정이 수정 방향.</td></tr>
+</table>
+
+<p class="note">부산물로 배달 계층의 결함을 하나 잡았다: 승인된 Gate resolution이 재배달 stimulus 뒤에
+줄을 서면 <code>hitl_resolution=None</code>으로 checkpoint가 재개되어 RFC-0356 host replay가 영영 안 붙고,
+무제한 재개 런이 single-flight를 점유해 20분+ 기아를 실측했다 (#28809).
+인스턴스 재기동이 배달을 복구하자 replay가 즉시 실행된 것
+(<code>gate replay … applied output_bytes=31614</code>)이 "결여는 배달뿐"이라는 판정의 실증이다.
+수정은 PR #28818 — 턴 시작 시 ready resolution을 큐 소비 없이 투영 + grant 미소비 승인만
+post-tool boundary에서 소스 런을 선점.</p>
+
 <h2>다음 반복</h2>
 <ul>
 <li><strong>Iteration 6</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로 —
 <code>bench-web-quality.py</code>가 같은 쿼리셋으로 자동 A/B.</li>
-<li><strong>코퍼스 재질의 실측</strong>: RFC-0383 acceptance 3 — keeper가 Grep→artifact_read
-2단으로 과거 본문에 도달하는 턴 실측 (Iteration 5와 같은 방법).</li>
+<li><strong>#28820 수정 후 재실측</strong>: 본문 저장 단일화가 병합되면 acceptance 3을
+같은 자극으로 다시 밟아 keeper 레인 PASS를 확인.</li>
+<li><strong>PR #28818 병합 후</strong>: 유예→승인→즉시 배달(재기동 없이)을 격리 인스턴스에서 재확인.</li>
 <li>품질은 <code>python3 scripts/bench-web-quality.py -o docs/evidence/web-quality-&lt;date&gt;-rN.json</code>,
 가용성·토큰은 <code>bench-web-tools.py</code> — 실행 후 이 문서에 섹션 추가.</li>
 </ul>

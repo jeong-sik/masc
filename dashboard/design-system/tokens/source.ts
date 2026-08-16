@@ -152,12 +152,8 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
     out.push(t(`k-${i}-glow`, rgbTriplet(hex), "raw", "color"));
   }
 
-  // RFC-0168: per-provider color palette was a closed roster of
-  // upstream LLM provider names (anthropic/kimi/openai/xai/gemini/...)
-  // with zero production consumers. Removed in the big-bang sweep.
-  // If a provider-distinct visual treatment is needed in the future,
-  // it should derive from runtime palette entries (operator-supplied)
-  // rather than a hardcoded palette.
+  // A provider-distinct visual treatment derives from runtime palette
+  // entries (operator-supplied), never from a hardcoded vendor roster.
 
   // Type scale — tabular, compact
   out.push(t("font-sans",
@@ -485,9 +481,6 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
     out.push(...fourSlotForRgbTriplet(`k-${i}`, triplet,
       { softAlpha: 0.10, borderAlpha: 0.35, ringInner: 0.45, ringOuter: 0.35, ringBlur: "8px" }));
   }
-
-  // RFC-0168: per-provider soft/border variants removed with the
-  // raw palette above. No production consumers existed.
 
   // ── Color role aliases — late-binding semantic layer ────────────────
   // These mirror tokens.css §end. Components prefer --color-* over raw bg-N.

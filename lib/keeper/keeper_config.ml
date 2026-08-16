@@ -53,6 +53,25 @@ let keeper_board_own_recent_max_rp =
     ~description:"Own recent board posts injected into the world observation per turn (0 = disable)" ()
 let keeper_board_own_recent_max () : int =
   Runtime_params.get keeper_board_own_recent_max_rp
+
+(* Fleet-message context layer. A keeper broadcast is projected into every
+   other keeper's transcript, but the pending-message lanes admit only rows
+   that mention this keeper or that the Owner authored, so a projected row
+   reaches the dashboard and never the prompt. This layer carries the newest
+   projected rows as raw observation data.
+
+   [max] bounds how many rows the world observation carries per turn. The
+   layer is cursor-independent standing context, like own recent board posts:
+   there is no acknowledgement watermark, so nothing accumulates for a keeper
+   that never runs an autonomous turn. *)
+let keeper_fleet_messages_max_rp =
+  _rp_int ~key:"keeper.fleet.messages.max"
+    ~default:(fun () -> 10)
+    ~min_v:0 ~max_v:1000
+    ~description:"Fleet messages injected into the world observation per turn (0 = disable)" ()
+let keeper_fleet_messages_max () : int =
+  Runtime_params.get keeper_fleet_messages_max_rp
+
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"

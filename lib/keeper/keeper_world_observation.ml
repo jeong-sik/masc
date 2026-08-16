@@ -151,6 +151,7 @@ type world_observation =
   ; connected_surfaces : Gate_surface.surface_presence list
   ; connected_surface_failures : Gate_surface.presence_failure list
   ; own_recent_board_posts : Board.post list
+  ; fleet_messages : Keeper_world_observation_message_scope.fleet_message list
   }
 
 type keeper_cycle_channel =
@@ -229,7 +230,7 @@ module Message_scope = Keeper_world_observation_message_scope
 let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
 
-let collect_message_scope = Message_scope.collect_message_scope
+let collect_message_scope_and_fleet = Message_scope.collect_message_scope_and_fleet
 let read_backlog_snapshot = Inputs.read_backlog_snapshot
 
 let claimable_task_count observation = List.length observation.claimable_tasks
@@ -1201,7 +1202,12 @@ let observe
       ~(meta : keeper_meta)
   : world_observation
   =
-  let pending_messages = collect_message_scope ~config ~meta in
+  let pending_messages, fleet_messages =
+    collect_message_scope_and_fleet
+      ~config
+      ~meta
+      ~fleet_limit:(Keeper_config.keeper_fleet_messages_max ())
+  in
   let backlog_snapshot = read_backlog_snapshot ~config ~meta in
   let unclaimed_task_count = backlog_snapshot.unclaimed_count in
   let claimable_tasks = backlog_snapshot.claimable_tasks in
@@ -1240,6 +1246,7 @@ let observe
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
   ; own_recent_board_posts = collect_own_recent_board_posts ~meta
+  ; fleet_messages
   }
 ;;
 
@@ -1273,6 +1280,13 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
   ; own_recent_board_posts = collect_own_recent_board_posts ~meta
+    (* No fleet layer here. This path answers a direct keeper message and
+       empties the reactive lanes because the triggering message is the point,
+       and collecting fleet rows would mean a full transcript read
+       ([Keeper_chat_store.load_all], 1.8 MB in production) on a path that
+       performs no transcript I/O at all. The keeper sees fleet context on its
+       next [observe] turn, where the same load already happens. *)
+  ; fleet_messages = []
   }
 ;;
 

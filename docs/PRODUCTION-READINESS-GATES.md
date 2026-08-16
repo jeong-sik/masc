@@ -102,22 +102,23 @@ If a live environment cannot run the performance harness, the release evidence
 must say `blocked` or `not evaluated`; it must not silently treat missing
 performance data as green.
 
-## Gate 4: agent core Pin And Boundary
+## Gate 4: agent core Boundary
+
+`agent_core` is a source subtree in this workspace, not an independently
+released package. Dune owns dependency resolution; the gate owns the package
+shape that Dune's library graph does not describe.
 
 Commands:
 
 ```bash
-scripts/check-agent-core-pin.sh --local-only
-scripts/agent-core-drift-check.sh
+bash scripts/check-agent-core-boundary.sh
 ```
 
 Threshold:
 
 | metric | required value |
 |---|---:|
-| declared agent core base version | matches installed `agent_core` |
-| declared agent core SHA | matches local or remote API surface |
-| agent core API fingerprint drift | 0 |
+| `packages/agent_core` package shape (lib/dune, test/dune, models.toml, no symlink) | intact |
 | MASC-specific semantics added to agent core | 0 |
 
 agent core remains the generic runtime/proof layer.  MASC owns keeper runtime evidence,

@@ -294,12 +294,8 @@ type binding =
     The declaration carries opaque runtime ids; resolution to materialized
     runtimes happens in [Runtime] so this module stays dependency-free. *)
 
-type lane_strategy = Ordered
-[@@deriving show, eq]
-
 type lane_decl =
   { id : string
-  ; strategy : lane_strategy
   ; candidate_ids : string list
   }
 [@@deriving show, eq]

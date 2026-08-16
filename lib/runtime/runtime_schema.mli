@@ -203,12 +203,8 @@ type binding =
     Declarations carry opaque runtime ids; [Runtime] resolves them to
     materialized runtimes at load time. *)
 
-type lane_strategy = Ordered
-[@@deriving show, eq]
-
 type lane_decl =
   { id : string
-  ; strategy : lane_strategy
   ; candidate_ids : string list
   }
 [@@deriving show, eq]

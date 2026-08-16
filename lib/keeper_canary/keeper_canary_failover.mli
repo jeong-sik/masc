@@ -23,6 +23,9 @@ type attempt = {
   keeper_turn_id : int option;
   event : attempt_event;
   runtime_id : string;
+      (** The attempted candidate: [decision.runtime_id] when the row came
+          from a lane walk (the top-level id is the lane id there), the
+          top-level [runtime_id] otherwise (#28871). *)
   error_kind : error_kind option;  (** Present on [Failed] rows. *)
 }
 

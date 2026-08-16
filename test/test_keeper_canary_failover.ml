@@ -5,7 +5,18 @@
 
 module F = Keeper_canary_failover
 
-let row ?(turn = Some 7) ?(error_kind = None) ~ts ~event ~runtime () : Yojson.Safe.t =
+let row ?(turn = Some 7) ?(error_kind = None) ?candidate ~ts ~event ~runtime ()
+  : Yojson.Safe.t
+  =
+  let decision_fields =
+    (match candidate with
+     | Some candidate -> [ ("runtime_id", `String candidate) ]
+     | None -> [])
+    @
+    match error_kind with
+    | Some kind -> [ ("error_kind", `String kind) ]
+    | None -> []
+  in
   `Assoc
     ([ ("ts", `String ts)
      ; ("event", `String event)
@@ -13,9 +24,9 @@ let row ?(turn = Some 7) ?(error_kind = None) ~ts ~event ~runtime () : Yojson.Sa
      ]
      @ (match turn with Some n -> [ ("keeper_turn_id", `Int n) ] | None -> [])
      @
-     match error_kind with
-     | Some kind -> [ ("decision", `Assoc [ ("error_kind", `String kind) ]) ]
-     | None -> [])
+     match decision_fields with
+     | [] -> []
+     | fields -> [ ("decision", `Assoc fields) ])
 
 let response rows = `Assoc [ ("manifest_rows", `List rows) ]
 
@@ -145,6 +156,42 @@ let test_classify_window_excludes_earlier_rows () =
   Alcotest.(check string) "mode" "not_observed" (F.mode_to_string mode);
   Alcotest.(check int) "only windowed rows" 2 (List.length windowed)
 
+let test_lane_walk_attribution_prefers_decision_candidate () =
+  (* #28871: rows from a lane walk keep the lane id at top level and put
+     the attempted candidate in decision.runtime_id. The turn-44 live
+     shape: llama fails at idx 0, glm completes at idx 1, every top-level
+     runtime_id identical. Attribution by candidate must classify this as
+     an in-turn walk; attribution by top-level id would call it a
+     same-runtime retry. *)
+  let lane = "llama_cpp.qwen3-8-27b-llama" in
+  let attempts =
+    parsed
+      "lane walk"
+      [ row ~ts:"2026-08-16T00:00:01Z" ~event:"runtime_routed" ~runtime:lane
+          ~candidate:lane ()
+      ; row
+          ~ts:"2026-08-16T00:00:02Z"
+          ~event:"runtime_failed"
+          ~runtime:lane
+          ~candidate:lane
+          ~error_kind:(Some "api")
+          ()
+      ; row ~ts:"2026-08-16T00:00:03Z" ~event:"runtime_routed" ~runtime:lane
+          ~candidate:"glm-coding.glm-5-turbo" ()
+      ; row ~ts:"2026-08-16T00:00:04Z" ~event:"runtime_completed" ~runtime:lane
+          ~candidate:"glm-coding.glm-5-turbo" ()
+      ]
+  in
+  (match attempts with
+   | _ :: _ :: routed_glm :: _ ->
+     Alcotest.(check string)
+       "candidate id wins over lane id"
+       "glm-coding.glm-5-turbo"
+       routed_glm.F.runtime_id
+   | _ -> Alcotest.fail "unexpected attempt shape");
+  let mode, _ = F.classify ~window_start:"2026-08-16T00:00:00Z" ~attempts in
+  Alcotest.(check string) "mode" "in_turn" (F.mode_to_string mode)
+
 let test_classify_same_runtime_failure_is_not_failover () =
   (* a fails, then a completes on retry — same runtime, no switch. *)
   let attempts =
@@ -179,6 +226,8 @@ let () =
         ; Alcotest.test_case "not observed" `Quick test_classify_not_observed
         ; Alcotest.test_case "window excludes earlier rows" `Quick
             test_classify_window_excludes_earlier_rows
+        ; Alcotest.test_case "lane walk attribution prefers decision candidate" `Quick
+            test_lane_walk_attribution_prefers_decision_candidate
         ; Alcotest.test_case "same-runtime retry is not failover" `Quick
             test_classify_same_runtime_failure_is_not_failover
         ] )

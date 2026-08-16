@@ -49,10 +49,25 @@ let parse_row (j : Yojson.Safe.t) : (attempt option, string) result =
             | Some (`String ts) -> Ok ts
             | _ -> Error (Printf.sprintf "%s row: missing ts" wire_event)
           in
+          let decision_kvs =
+            match List.assoc_opt "decision" kvs with
+            | Some (`Assoc decision_kvs) -> decision_kvs
+            | _ -> []
+          in
+          (* Attribution source: the lane walk records the attempted
+             candidate as decision.runtime_id while the row's top-level
+             runtime_id stays the lane id ("lanes shadow runtimes").
+             Rows emitted outside a lane walk carry no decision.runtime_id
+             and there the top-level id is already the concrete runtime
+             (#28871). *)
           let* runtime_id =
-            match List.assoc_opt "runtime_id" kvs with
-            | Some (`String id) -> Ok id
-            | _ -> Error (Printf.sprintf "%s row: missing runtime_id" wire_event)
+            match List.assoc_opt "runtime_id" decision_kvs with
+            | Some (`String candidate) -> Ok candidate
+            | _ ->
+              (match List.assoc_opt "runtime_id" kvs with
+               | Some (`String id) -> Ok id
+               | _ ->
+                 Error (Printf.sprintf "%s row: missing runtime_id" wire_event))
           in
           let keeper_turn_id =
             match List.assoc_opt "keeper_turn_id" kvs with
@@ -60,11 +75,8 @@ let parse_row (j : Yojson.Safe.t) : (attempt option, string) result =
             | _ -> None
           in
           let error_kind =
-            match List.assoc_opt "decision" kvs with
-            | Some (`Assoc decision_kvs) ->
-              (match List.assoc_opt "error_kind" decision_kvs with
-               | Some (`String kind) -> Some (error_kind_of_wire kind)
-               | _ -> None)
+            match List.assoc_opt "error_kind" decision_kvs with
+            | Some (`String kind) -> Some (error_kind_of_wire kind)
             | _ -> None
           in
           Ok (Some { ts; keeper_turn_id; event; runtime_id; error_kind }))

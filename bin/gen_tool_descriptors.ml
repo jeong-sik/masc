@@ -330,9 +330,9 @@ let masc_broadcast_spec : tool_spec =
         ; p_description = "Your agent name"
         ; p_required = true
         }
-      ; { p_name = "message"
+      ; { p_name = "content"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Message content (use @mention for specific agents)"
+        ; p_description = "Broadcast body text (use @mention for specific agents)"
         ; p_required = true
         }
       ]

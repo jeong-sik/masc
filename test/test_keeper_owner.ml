@@ -1311,6 +1311,82 @@ let test_operator_interrupt_settles_as_typed_cancel () =
   | _ -> fail "operator interrupt did not settle the operation as failed"
 ;;
 
+let test_is_operator_interrupt_unwraps_every_shape () =
+  let interrupt = Keeper_registry_types.Operator_interrupt in
+  let bt = Printexc.get_callstack 0 in
+  let is = Keeper_registry_types.is_operator_interrupt in
+  check bool "bare" true (is interrupt);
+  check bool "cancelled-wrapped" true (is (Eio.Cancel.Cancelled interrupt));
+  check bool "finally over cancelled" true
+    (is (Stdlib.Fun.Finally_raised (Eio.Cancel.Cancelled interrupt)));
+  check bool "multiple of interrupt shapes" true
+    (is
+       (Eio.Exn.Multiple
+          [ (interrupt, bt); (Eio.Cancel.Cancelled interrupt, bt) ]));
+  check bool "multiple with a real error keeps crash classification" false
+    (is (Eio.Exn.Multiple [ (interrupt, bt); (Failure "real crash", bt) ]));
+  check bool "empty multiple is not an interrupt" false
+    (is (Eio.Exn.Multiple []));
+  check bool "unrelated exception" false (is (Failure "boom"))
+;;
+
+let test_operator_interrupt_combined_shape_settles_as_typed_cancel () =
+  (* #28868 review P1: Eio combines the switch failure with what cancelled
+     fibers raise into [Multiple] (finalizers add [Finally_raised]). The
+     wrapper ladder must classify the combined shape too. *)
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let operation_executor ~sw:_ ~keeper_name:_ ~claim =
+    match claim () with
+    | Error error ->
+      Owner.Operation_failed
+        { kind = Chat_operation.Store_unavailable
+        ; detail = Owner.error_to_string error
+        ; outcome_ref = None
+        }
+    | Ok None -> failwith "missing FIFO head"
+    | Ok (Some (_ : Chat_operation.t)) ->
+      let bt = Printexc.get_callstack 0 in
+      raise
+        (Eio.Exn.Multiple
+           [ (Eio.Cancel.Cancelled Keeper_registry_types.Operator_interrupt, bt)
+           ; ( Stdlib.Fun.Finally_raised
+                 (Eio.Cancel.Cancelled Keeper_registry_types.Operator_interrupt)
+             , bt )
+           ])
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some operation_executor)
+         ~keeper_name:"operator-interrupt-combined"
+         ~initial_meta:(Some (make_meta "operator-interrupt-combined"))
+         ())
+  in
+  let operation_id = operation_id "kmsg-operator-interrupt-combined" in
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id
+          ~source:operation_source
+          ~input:(operation_input "interrupt me, combined")));
+  let terminal = await_terminal owner operation_id 1_000 in
+  match terminal.state with
+  | Chat_operation.Failed { failure = { kind; detail; _ }; _ } ->
+    check string
+      "combined-shape failure kind"
+      "Turn_cancelled"
+      (Chat_operation.failure_kind_to_string kind);
+    check string
+      "combined-shape detail"
+      Keeper_registry_types.operator_interrupt_detail
+      detail
+  | _ -> fail "combined-shape interrupt did not settle the operation as failed"
+;;
+
 let test_paused_owner_preserves_queue_until_resume () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -2618,6 +2694,14 @@ let () =
             "operator interrupt settles as typed cancel"
             `Quick
             test_operator_interrupt_settles_as_typed_cancel
+        ; test_case
+            "is_operator_interrupt unwraps every shape"
+            `Quick
+            test_is_operator_interrupt_unwraps_every_shape
+        ; test_case
+            "combined-shape operator interrupt settles as typed cancel"
+            `Quick
+            test_operator_interrupt_combined_shape_settles_as_typed_cancel
         ; test_case
             "paused owner preserves queue until resume"
             `Quick

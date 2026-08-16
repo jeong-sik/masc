@@ -211,7 +211,7 @@ measure_avg "masc_status" "masc_status" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_agents" "masc_agents" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_tasks" "masc_tasks" '{}' "$BENCH_ITERATIONS"
 measure_avg "masc_messages (5)" "masc_messages" '{"limit":5}' "$BENCH_ITERATIONS"
-measure_avg "masc_broadcast" "masc_broadcast" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,message:"quick-bench",format:"compact"}')" "$BENCH_ITERATIONS"
+measure_avg "masc_broadcast" "masc_broadcast" "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,content:"quick-bench",format:"compact"}')" "$BENCH_ITERATIONS"
 measure_avg "masc_runtime_verify" "masc_runtime_verify" '{}' "$BENCH_ITERATIONS"
 
 echo ""

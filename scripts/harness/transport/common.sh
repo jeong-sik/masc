@@ -214,10 +214,10 @@ mcp_join_agent() {
 mcp_broadcast() {
   local session_id="$1"
   local agent_name="$2"
-  local message="$3"
+  local content="$3"
   mcp_call_tool \
     "$session_id" \
     "masc_broadcast" \
-    "$(printf '{"agent_name":"%s","message":"%s"}' "$agent_name" "$message")" \
+    "$(printf '{"agent_name":"%s","content":"%s"}' "$agent_name" "$content")" \
     3
 }

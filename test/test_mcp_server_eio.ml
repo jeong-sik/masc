@@ -1983,7 +1983,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
   let result =
     Masc.Mcp_server_eio_caller_identity.resolve ~config
       ~tool_name:"masc_broadcast"
-      ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
+      ~arguments:(`Assoc [ ("content", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
       ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy

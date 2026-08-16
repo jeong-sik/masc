@@ -435,7 +435,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("note", `String "tool matrix person note") ]
   | "keeper_tasks_list" -> `Assoc [ ("include_done", `Bool true) ]
   | "keeper_broadcast" ->
-      `Assoc [ ("message", `String "tool matrix broadcast") ]
+      `Assoc [ ("content", `String "tool matrix broadcast") ]
   | "keeper_task_done" ->
       (* The completion text intentionally contains the "follow-up"
          excuse pattern so the anti-rationalization gate fast-rejects

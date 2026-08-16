@@ -459,12 +459,12 @@ let handle_keeper_task_tool_with_outcome
                    else Keeper_tool_outcome.Progress) )
             ]))
     | Broadcast ->
-    let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
+    let message = Safe_ops.json_string ~default:"" "content" args |> String.trim in
     if message = ""
     then
       Keeper_tool_execution.failure
         ~class_:Tool_result.Policy_rejection
-        (error_json "message is required. Good: message='Build complete, all tests pass.'.")
+        (error_json "content is required. Good: content='Build complete, all tests pass.'.")
     else (
       match
         (* A Keeper calling keeper_broadcast is speaking to the workspace,

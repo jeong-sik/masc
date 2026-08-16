@@ -202,6 +202,11 @@ let https_error message = Error message
 
 let build_https_connector_result () =
   try
+    (* The TLS handshake draws from the process-global RNG default; guard
+       it here like llm_provider's tls_client_config does, so a binary
+       whose first TLS contact is this connector cannot die on
+       No_default_generator (#28896). *)
+    Crypto_rng.ensure_default ();
     match Ca_certs.authenticator () with
     | Error (`Msg msg) -> https_error ("CA certs unavailable: " ^ msg)
     | Error _ -> https_error "CA certs unavailable: unknown error"

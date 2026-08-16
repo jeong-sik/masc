@@ -98,6 +98,33 @@ type invocation =
       }
   | Provider_rejected of { detail : string }
 
+(* Every arm is spelled out. A wildcard here would fold a new transport
+   failure into the same string as a quota rejection, and telling those
+   apart is the reason this lane exists. The Unknown_provider_failure
+   reason must survive into the detail: it carries the raw exception
+   (e.g. No_default_generator), and dropping it turned a one-line
+   diagnosis into an archaeology dig (2026-08-16). *)
+let detail_of_http_error (err : Llm_provider.Http_client.http_error) : string =
+  match err with
+  | Llm_provider.Http_client.HttpError { code; body; _ } ->
+    Printf.sprintf "HTTP %d: %s" code (String.trim body)
+  | Llm_provider.Http_client.NetworkError { message; _ } ->
+    Printf.sprintf "network: %s" message
+  | Llm_provider.Http_client.TimeoutError { message; _ } ->
+    Printf.sprintf "timeout: %s" message
+  | Llm_provider.Http_client.AcceptRejected { reason } ->
+    Printf.sprintf "accept rejected: %s" reason
+  | Llm_provider.Http_client.ProviderTerminal { message; _ } ->
+    Printf.sprintf "provider terminal: %s" message
+  | Llm_provider.Http_client.ProviderFailure
+      { kind = Llm_provider.Http_client.Unknown_provider_failure { reason = Some reason }
+      ; message
+      } ->
+    Printf.sprintf "provider failure: %s (%s)" message reason
+  | Llm_provider.Http_client.ProviderFailure { message; _ } ->
+    Printf.sprintf "provider failure: %s" message
+;;
+
 let invocation_to_string = function
   | Tool_invoked { tool; elapsed_s } ->
     Printf.sprintf "invoked %s in %.1fs" tool elapsed_s
@@ -263,26 +290,7 @@ let probe_invocation ~sw ~net ?clock ~now ~runtime_id ~tool ~prompt () =
                   ~tools:[ tool_json ]
                   ()
               with
-              | Error err ->
-                (* Every arm is spelled out. A wildcard here would fold a new
-                   transport failure into the same string as a quota rejection,
-                   and telling those apart is the reason this lane exists. *)
-                let detail =
-                  match err with
-                  | Llm_provider.Http_client.HttpError { code; body; _ } ->
-                    Printf.sprintf "HTTP %d: %s" code (String.trim body)
-                  | Llm_provider.Http_client.NetworkError { message; _ } ->
-                    Printf.sprintf "network: %s" message
-                  | Llm_provider.Http_client.TimeoutError { message; _ } ->
-                    Printf.sprintf "timeout: %s" message
-                  | Llm_provider.Http_client.AcceptRejected { reason } ->
-                    Printf.sprintf "accept rejected: %s" reason
-                  | Llm_provider.Http_client.ProviderTerminal { message; _ } ->
-                    Printf.sprintf "provider terminal: %s" message
-                  | Llm_provider.Http_client.ProviderFailure { message; _ } ->
-                    Printf.sprintf "provider failure: %s" message
-                in
-                Ok (Provider_rejected { detail })
+              | Error err -> Ok (Provider_rejected { detail = detail_of_http_error err })
               | Ok response ->
                 let elapsed_s = now () -. started in
                 (match tool_use_names response with

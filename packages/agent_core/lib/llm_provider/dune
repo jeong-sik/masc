@@ -54,6 +54,7 @@
   ca-certs
   digestif
   cstruct
+  mirage-crypto-rng
   mirage-crypto-rng.unix
   mtime.clock.os
   domain-name

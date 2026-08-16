@@ -131,7 +131,6 @@ trap cleanup EXIT INT TERM
 chmod +x "$BINARY"
 env \
   MASC_BASE_PATH="$base_path" \
-  MASC_BUILD_GIT_COMMIT="$EXPECTED_SHA" \
   MASC_ADMIN_TOKEN= \
   MASC_INTERNAL_MCP_TOKEN= \
   MASC_TOKEN= \

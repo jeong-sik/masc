@@ -218,9 +218,8 @@ val telemetry_enabled : unit -> bool
 
 (** Whether malformed env parses are escalated to {!Config_error} (fail-fast)
     instead of warn + default. Controlled by [MASC_PARSE_WARN]. Default: false. *)
-(** {1 Build identity / pubsub} *)
+(** {1 PubSub} *)
 
-val build_git_commit_opt : unit -> string option
 val pubsub_max_messages : unit -> int
 
 (** {1 Keeper defaults} *)

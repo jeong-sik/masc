@@ -249,13 +249,10 @@ let probe_commit_unix_ts commit_hash_opt =
     List.find_map probe_one repo_roots
 ;;
 
-let resolve_commit ~embedded ~env_value ~probe =
+let resolve_commit ~embedded ~probe =
   match Option.bind embedded String_util.trim_to_option with
   | Some commit -> Some commit
-  | None ->
-    (match Option.bind env_value String_util.trim_to_option with
-     | Some commit -> Some commit
-     | None -> probe ())
+  | None -> probe ()
 ;;
 
 type commit_resolution =
@@ -268,22 +265,17 @@ type commit_resolution =
   }
 
 let embedded_commit_source = "embedded"
-let build_env_commit_source = "env:MASC_BUILD_GIT_COMMIT"
 let runtime_repo_head_source = "runtime_repo_head"
 
-let resolve_commit_details ~embedded ~env_value ~probe =
+let resolve_commit_details ~embedded ~probe =
   (* The binary's own testimony wins: the embedded hash is stamped by the
-     build rule from the checkout being compiled, while the env var is a
-     launcher claim (historically set only by CI) and the repo-head probe
+     build rule from the checkout being compiled, while the repo-head probe
      describes the source tree next to the process, which moves
      independently of the binary. *)
   let binary_commit, binary_commit_source =
     match Option.bind embedded String_util.trim_to_option with
     | Some commit -> Some commit, Some embedded_commit_source
-    | None ->
-      (match Option.bind env_value String_util.trim_to_option with
-       | Some commit -> Some commit, Some build_env_commit_source
-       | None -> None, None)
+    | None -> None, None
   in
   let repo_head_commit = probe () in
   let commit, commit_source =
@@ -316,11 +308,10 @@ let resolved_executable_dir = Filename.dirname resolved_executable_path
 
 (** Commit hashes — eagerly resolved at startup.
     Not using [Eio.Lazy] because this is called from tests without Eio context.
-    Env var check + git probe are fast and side-effect-free. *)
+    Embedded stamp + git probe are fast and side-effect-free. *)
 let commit_resolution =
   resolve_commit_details
     ~embedded:Build_commit_generated.commit
-    ~env_value:(Env_config_core.build_git_commit_opt ())
     ~probe:probe_git_commit
 ;;
 

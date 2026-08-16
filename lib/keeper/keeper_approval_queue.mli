@@ -120,6 +120,12 @@ type grant_consumption =
 type pending_submission_disposition =
   | Pending_created of Keeper_approval.Audit.receipt
   | Pending_deduplicated
+  | Folded_onto_unconsumed_grant
+      (** The same effect request is already approved and its one-shot grant
+          has not been consumed: the host owes the Keeper a replay of exactly
+          this call, so no second approval is opened. Rejected and
+          grant-consumed deliveries never fold — those retries are a new
+          approval cycle and a new effect respectively. *)
 
 type pending_submission =
   { approval_id : string
@@ -283,10 +289,14 @@ end
 (** {1 Nonblocking submission and explicit resolution} *)
 
 (** Durably enqueue an exact request without suspending the caller. Returns an
-    existing id only when the same Keeper, operation identity, canonical input,
-    turn/task/goal identity, and continuation channel are already pending. A
-    deduplicated request does not consume a durable queue sequence or emit a new
-    pending audit event. *)
+    existing id when the same Keeper, operation identity, canonical input,
+    task/goal identity, and continuation channel are already pending, or are
+    already approved with their one-shot grant unconsumed
+    ({!Folded_onto_unconsumed_grant}). The turn that asked is recorded on the
+    entry but is not part of the request's identity: a next-turn retry of the
+    same call folds onto the approval already in flight instead of opening a
+    second one (#28866). A deduplicated or folded request does not consume a
+    durable queue sequence or emit a new pending audit event. *)
 val submit_pending :
   keeper_name:string ->
   tool_name:string ->

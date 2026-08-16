@@ -1470,7 +1470,8 @@ let defer request reason =
     let audit_receipts =
       match submission.disposition with
       | Keeper_approval_queue.Pending_created receipt -> [ receipt ]
-      | Keeper_approval_queue.Pending_deduplicated -> []
+      | Keeper_approval_queue.Pending_deduplicated
+      | Keeper_approval_queue.Folded_onto_unconsumed_grant -> []
     in
     let reason =
       match reason with

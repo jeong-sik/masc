@@ -21,10 +21,11 @@ llama-server \
 |---|---|---|
 | `--jinja` | 필수 | GGUF 내장 chat template 사용. `chat_template_kwargs`(enable_thinking / preserve_thinking)가 이 경로로만 동작한다 |
 | `--reasoning-format` | `deepseek` | thinking을 `message.reasoning_content`로 분리. MASC의 `reasoning_streaming_format = "delta:reasoning_content"` 행과 짝 |
-| `--cache-reuse` | `256` | 프리픽스 중간이 달라진 요청에서 KV shifting으로 청크 재사용. 기본 0(꺼짐) |
+| `--cache-reuse` | `256` | 프리픽스 중간이 달라진 요청에서 KV shifting으로 청크 재사용. 기본 0(꺼짐). **hybrid(SSM) 모델에서는 서버가 로드 시 무효화한다** (`cache_reuse is not supported by this context` — Qwen3.8 실측). 그 경우 프리픽스 재사용은 슬롯 LCP + `--ctx-checkpoints`가 담당 |
 | `--ctx-checkpoints` | 기본 32 유지 | hybrid(SSM)/SWA 모델의 부분 롤백 지점. Qwen3.8 같은 hybrid에 필수 (llama.cpp PR #15293) |
 | `-sps` | 기본 0.10 유지 | 슬롯 선택이 프리픽스 유사도로 이미 동작. 다수 keeper가 한 서버를 공유할 때 슬롯 오염을 줄인다 |
 | `--slot-save-path <dir>` | 선택 | 서버 재시작 간 슬롯 KV 영속화. `POST /slots/{id}?action=save\|restore` |
+| (운영 주의) 벤치 요청 금지 | — | `-np 1` 운영 서버에 즉석 벤치/테스트 요청을 보내면 단일 슬롯의 은행된 keeper KV를 덮어쓰고 측정도 경합으로 오염된다. 성능 측정은 별도 포트의 전용 인스턴스에서 |
 | `--reasoning-preserve` | 켜지 않는다 | 서버 전역 강제 대신 MASC가 요청별 `chat_template_kwargs {"preserve_thinking": true}`로 제어한다. 템플릿이 `supports_preserve_reasoning`을 선언하면 로드 로그에 안내가 찍힌다 |
 | `cache_prompt` | 건드리지 않는다 | 요청 기본값이 이미 true |
 

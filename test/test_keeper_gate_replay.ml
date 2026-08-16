@@ -874,6 +874,39 @@ let test_connector_post_rejects_heuristic_or_truncated_input () =
     ]
 ;;
 
+(* The deferred payload is what the model reads when the Gate holds a call.
+   Without the replay contract stated there, the model resubmits the same
+   call while the approval is in flight (#28866: three duplicate approvals
+   of one web_search). This pins the stated fact, not its wording. *)
+let test_deferred_payload_states_the_replay_contract () =
+  let payload =
+    Masc.Keeper_gate.decision_to_yojson
+      (Masc.Keeper_gate.Deferred
+         { approval_id = "appr_test"
+         ; reason = Masc.Keeper_gate.Judge_requested
+         ; audit_receipts = []
+         })
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "deferred decision"
+    "deferred"
+    (payload |> member "decision" |> to_string);
+  let on_approve =
+    match payload |> member "on_approve" with
+    | `String text -> text
+    | _ -> Alcotest.fail "deferred payload has no on_approve string"
+  in
+  Alcotest.(check bool)
+    "on_approve states host replay delivery"
+    true
+    (Astring.String.is_infix ~affix:"delivers its output" on_approve);
+  Alcotest.(check bool)
+    "on_approve tells the model not to resubmit"
+    true
+    (Astring.String.is_infix ~affix:"Do not resubmit" on_approve)
+;;
+
 let () =
   Alcotest.run
     "keeper_gate_replay"
@@ -983,6 +1016,10 @@ let () =
             "memory write replay rejects invalid input"
             `Quick
             test_memory_write_replay_rejects_invalid_input
+        ; Alcotest.test_case
+            "deferred payload states the replay contract"
+            `Quick
+            test_deferred_payload_states_the_replay_contract
         ] )
     ]
 ;;

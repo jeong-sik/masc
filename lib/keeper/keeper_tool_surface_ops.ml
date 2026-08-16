@@ -7,7 +7,6 @@ open Keeper_types_profile
 open Keeper_runtime
 open Result.Syntax
 module Turn = Keeper_turn
-module Status = Keeper_status
 type 'a context = 'a Keeper_types_profile.context = {
   config : Workspace.config;
   agent_name : string;

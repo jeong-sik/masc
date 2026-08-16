@@ -1016,3 +1016,35 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
                schema.Masc_domain.name (Printexc.to_string exn)))
   in
   (base_path, result)
+
+(* Regression: contains_any must match fatal/guard fragments case-insensitively.
+   PR #28206 replaced the local lowercasing helper with a byte-wise
+   case-sensitive contains_substring; contains_any now uses
+   String_util.contains_substring_ci so mixed-case responses such as
+   "Internal Error" or "Already joined" still match the lowercase fragments. *)
+let test_mixed_case_contains_any () =
+  let assert_matches haystack needle =
+    if not (contains_any haystack [ needle ]) then
+      failwith
+        (Printf.sprintf "contains_any should match %S against %S" needle haystack)
+  in
+  let assert_not_matches haystack needle =
+    if contains_any haystack [ needle ] then
+      failwith
+        (Printf.sprintf "contains_any should NOT match %S against %S" needle haystack)
+  in
+  (* fatal fragments *)
+  assert_matches "Internal Error" "internal error";
+  assert_matches "internal error" "internal error";
+  assert_matches "TOOL TIMED OUT AFTER 30s" "tool timed out after";
+  assert_matches "Unknown Tool" "unknown tool";
+  (* guard fragments *)
+  assert_matches "Already Joined" "already joined";
+  assert_matches "Not Available on this MCP endpoint" "not available on this MCP endpoint";
+  (* negative: distinct text must not match *)
+  assert_not_matches "internal success" "internal error";
+  assert_not_matches "already done" "already joined";
+  ()
+
+let () =
+  test_mixed_case_contains_any ()

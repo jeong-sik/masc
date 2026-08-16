@@ -67,7 +67,7 @@ val format_current_task_observation
 val effective_autonomous_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?channel:Keeper_world_observation.turn_channel ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   unit ->
   string
 (** Resolve the single instructions value used by every system-prompt
@@ -78,7 +78,7 @@ val effective_autonomous_instructions :
 val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?channel:Keeper_world_observation.turn_channel ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   unit ->
   string
 (** Alias of [effective_autonomous_instructions]; kept for callers that
@@ -128,7 +128,7 @@ val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
-  ?channel:Keeper_world_observation.turn_channel ->
+  ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?active_goal_summaries:(string * string) list ->
   unit ->
   string

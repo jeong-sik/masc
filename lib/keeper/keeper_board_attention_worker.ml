@@ -1282,22 +1282,37 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
     | [] -> Ok ()
     | partition :: rest ->
       let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
-      let* candidate =
-        match
-          List.find_opt
-            (fun candidate ->
-               String.equal
-                 candidate.Candidate.candidate_id
-                 partition.Partition.candidate_id)
-            candidates
-        with
-        | Some candidate -> Ok candidate
-        | None ->
-          Error
-            ("partition candidate is absent during quarantine reconciliation: "
-             ^ partition.candidate_id)
-      in
-      (match partition.state, Candidate.status_view candidate.status with
+      (match
+         List.find_opt
+           (fun candidate ->
+              String.equal
+                candidate.Candidate.candidate_id
+                partition.Partition.candidate_id)
+           candidates
+       with
+       | None ->
+         (* Mirror of the Completed finalizer's [Candidate_absent] outcome
+            (#28770): a retire moves the whole candidate store aside and
+            leaves no tombstone, so a quarantine naming a retired candidate
+            can never be acknowledged or requeued. Erroring here fataled the
+            whole worker at every process start (stage=process_recovery,
+            2026-08-16, three fleet keepers), which is exactly the permanent
+            re-encounter the finalizer branch exists to stop. Terminal
+            Blocked settles; every other state passes through the same way a
+            present candidate with a non-quarantine status does below. *)
+         (match partition.state with
+          | Partition.Blocked _ ->
+            Log.Keeper.error
+              "Board attention candidate permanently absent during quarantine reconciliation; settling blocked partition keeper=%s partition=%s candidate=%s"
+              keeper_name
+              partition.partition_id
+              partition.candidate_id;
+            let* (_ : Partition.t) = Partition.settle ~now ~base_path ~partition in
+            loop rest
+          | Partition.Ready | Partition.Running _ | Partition.Completed _
+          | Partition.Settled _ -> loop rest)
+       | Some candidate ->
+         (match partition.state, Candidate.status_view candidate.status with
        | ( Partition.Blocked _
          , (Candidate.Suspended_quarantine state
            | Candidate.Requeued_resumable { quarantine = state; _ }) )
@@ -1377,11 +1392,11 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
          Error
            ("Ready partition is not the quarantined generation successor: "
             ^ partition.partition_id)
-       | Partition.Ready, _
-       | Partition.Running _, _
-       | Partition.Completed _, _
-       | Partition.Settled _, _ ->
-         loop rest)
+          | Partition.Ready, _
+          | Partition.Running _, _
+          | Partition.Completed _, _
+          | Partition.Settled _, _ ->
+            loop rest))
   in
   loop partitions
 ;;
@@ -1937,6 +1952,7 @@ let run
 module For_testing = struct
   type nonrec rearm_scheduler = rearm_scheduler
 
+  let reconcile_quarantines = reconcile_quarantines
   let process_next = process_next
   let process_next_exact = process_next_exact
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact

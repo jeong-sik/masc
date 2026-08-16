@@ -2328,6 +2328,50 @@ let test_undrained_outcomes_are_not_routine () =
    rondo 13x/25min the next, before both were data-cut by hand). This pins
    that the finalizer now settles such a partition once, terminally, and
    never revisits it. *)
+let test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_retired
+  ()
+  =
+  with_temp_base "board-attention-worker-quarantine-retired" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let attempt = provenance "quarantine-retired" in
+  let execute ~before_dispatch ~before_advance:_ _prepared =
+    ok "bind quarantine attempt" (before_dispatch attempt);
+    Error (E.Exact_execution_failed [ attempt ])
+  in
+  (match
+     ok
+       "fail to Blocked"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | _ -> Alcotest.fail "fixture did not reach Blocked");
+  (* Same retire simulation as
+     test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired:
+     move the whole per-keeper candidate ledger aside; the partition journal
+     still names the candidate. *)
+  let ledger_path =
+    Filename.concat
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         "board_attention_candidates")
+      "sangsu.jsonl"
+  in
+  Sys.remove ledger_path;
+  (* Before the fix this returned Error "partition candidate is absent during
+     quarantine reconciliation: ..." and fataled the worker at process start. *)
+  ok
+    "reconcile settles the orphaned quarantine instead of failing"
+    (W.For_testing.reconcile_quarantines ~now:10.0 ~base_path ~keeper_name:"sangsu");
+  (match (load_one_partition ~base_path).state with
+   | P.Settled _ -> ()
+   | _ ->
+     Alcotest.fail "blocked partition with a retired candidate did not reach Settled");
+  ok
+    "second reconciliation pass stays a no-op"
+    (W.For_testing.reconcile_quarantines ~now:11.0 ~base_path ~keeper_name:"sangsu")
+;;
+
 let test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired
   ()
   =
@@ -2548,6 +2592,10 @@ let () =
             "settle_one_completed terminalizes a partition whose candidate was retired"
             `Quick
             test_settle_one_completed_terminalizes_a_partition_whose_candidate_was_retired
+        ; Alcotest.test_case
+            "reconcile_quarantines settles a blocked partition whose candidate was retired"
+            `Quick
+            test_reconcile_quarantines_settles_a_blocked_partition_whose_candidate_was_retired
         ] )
     ]
 ;;

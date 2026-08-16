@@ -102,6 +102,12 @@ val settle_one_completed :
 module For_testing : sig
   type rearm_scheduler
 
+  val reconcile_quarantines :
+    now:float -> base_path:string -> keeper_name:string -> (unit, string) result
+  (** The process-start quarantine reconciliation pass [run] performs.
+      Exposed so a test can drive the retired-candidate settlement without
+      standing up the full Eio worker lifecycle. *)
+
   val drain_outcome_label : drain_outcome -> string
   (** The drain verdict as one token, as logged. Retry_later keeps its reason
       so a worker stuck on a moved generation is distinguishable from one

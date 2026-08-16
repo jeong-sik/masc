@@ -3,7 +3,7 @@
     Verifies cross-layer event flow without starting a full HTTP server:
     1. SSE broadcast → gRPC Subscribe stream (via external subscriber)
     2. SSE broadcast → WebSocket sessions (via external subscriber)
-    3. Dead external subscribers are dropped on the next broadcast
+    3. Dead subscribers are dropped on the next broadcast (is_alive)
     4. Transport enum consistency across modules *)
 
 module T = Masc_grpc_types
@@ -169,7 +169,7 @@ let test_ws_derives_dashboard_event_from_real_broadcast () =
               (parsed.broadcast_ts = ev.Masc.Sse.ext_emitted_at))
 
 (* ============================================================
-   3. Dead External Subscriber Removal
+   3. Dead Subscriber Auto-Cleanup (is_alive)
    ============================================================ *)
 
 let test_dead_subscriber_auto_removed () =

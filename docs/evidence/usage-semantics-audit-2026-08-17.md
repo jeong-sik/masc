@@ -43,7 +43,7 @@ Anthropic 형식 + 캐시 활성(system/tools cache_control) 조합에서:
 | 표면 | 처분 | 근거 |
 |---|---|---|
 | `cache.ml` 응답 캐시 | **schema "2" 하드컷** (이 PR) | 유일하게 구 값이 *canonical 자리로 재유입*되는 코덱 — 버전 가드가 은퇴 |
-| turn_record (RFC-0233 점유율 원천) | 조치 불요 | 점유율 소비자는 `keeper_context_observation_projection.ml`의 trace_id 가드가 현재 턴 record만 통과시킴 — 배포(=재시작) 이후 구 record는 구조적으로 소비 불가. `last_turn_usage` 표시 표면은 첫 턴에 세척되는 1턴 잔상 |
+| turn_record (RFC-0233 점유율 원천) | 조치 불요 — 단 잔류는 1턴 | **정정(재검증 반영)**: 재시작은 trace_id를 보존하므로(메타 로드가 그대로 파싱, 재발급은 Handoff뿐) trace_id 가드는 배포 경계를 거르지 못한다 — 초판의 "혼합 창이 빔" 주장은 오류. 올바른 근거: (1) record는 내부 일관 — tokens와 window가 같은 요청에서 나와 record 단위 교차-의미론 산술이 없음, 구 record의 과소 표시는 그 record가 기록될 당시 동작 그대로, (2) 다음 턴 완료가 포함형 record로 덮어써 keeper당 최대 1턴 잔류, (3) 소비자는 관측 표면(대시보드 점유율·last_turn_usage)이고 게이트 없음. 버전 필드 추가는 legacy-detection 필드라 부적격 |
 | checkpoint `usage_stats.total_*` 누적치 | 문서화(아래 epoch 주석) | 이 총합은 PR 이전부터 provider 혼합 의미론(배제형 Anthropic + 포함형 나머지)의 합이라 "순수한 v1 의미"가 애초에 없음. 전 소비자(codec 왕복, durable_event carry, tool_agent_timeline rollup, dashboard JSON ×3)가 관측 표면이고 게이트 0건. checkpoint 폐기는 transcript(durable truth) 파괴라 비례성 위반 |
 | `execution_provider_response_snapshot` 실행 저널 | 조치 불요 | 소비자는 `execution_event.ml` 단일 — 기록 시점 사실의 evidence 저널이며, 재해석/재작성은 ledger 원칙 위반 |
 

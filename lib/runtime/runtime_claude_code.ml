@@ -737,8 +737,10 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
              { input_tokens
              ; output_tokens
              ; cache_creation_input_tokens =
+                 (* DET-OK: absent wire field is 0 by api_usage convention *)
                  Option.value (int_field "cache_creation_input_tokens") ~default:0
              ; cache_read_input_tokens =
+                 (* DET-OK: absent wire field is 0 by api_usage convention *)
                  Option.value (int_field "cache_read_input_tokens") ~default:0
              }
          | Some _, None | None, Some _ | None, None -> None)

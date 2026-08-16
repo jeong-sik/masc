@@ -61,13 +61,6 @@ let test_transport_status_http_shape_extends_tool_shape () =
      with
     | `Bool _ -> true
     | _ -> false);
-  check bool "http webrtc surface adds configured"
-    true
-    (match
-       Yojson.Safe.Util.(http_json |> member "webrtc" |> member "configured")
-     with
-    | `Bool _ -> true
-    | _ -> false);
   check bool "http surface exposes streamable configured"
     true
     (match
@@ -103,13 +96,6 @@ let test_transport_status_http_shape_extends_tool_shape () =
     true
     (match
        Yojson.Safe.Util.(http_json |> member "websocket" |> member "reachable")
-     with
-    | `Bool _ -> true
-    | _ -> false);
-  check bool "webrtc surface exposes signaling availability"
-    true
-    (match
-       Yojson.Safe.Util.(http_json |> member "webrtc" |> member "signaling_available")
      with
     | `Bool _ -> true
     | _ -> false);

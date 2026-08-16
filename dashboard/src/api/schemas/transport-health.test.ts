@@ -58,16 +58,6 @@ const currentWire = {
       client_buffered_bytes_count: 0,
     },
   },
-  webrtc: {
-    configured: false,
-    signaling_available: false,
-    signaling_mode: 'shared_http',
-    pending_offers: 0,
-    active_peers: 0,
-    live_connections: 0,
-    connected_channels: 0,
-    ice_server_count: 0,
-  },
   streamable_http: {
     endpoint: '/mcp',
     observer_stream: '/mcp?sse_kind=observer',
@@ -116,7 +106,6 @@ describe('decodeTransportHealthData', () => {
     expect(result.sse.hot_sessions).toEqual([])
     expect(result.grpc.port).toBe(8936)
     expect(result.websocket.mode).toBe('same_origin')
-    expect(result.webrtc.signaling_mode).toBe('shared_http')
     expect(result.http2.listener_mode).toBe('auto')
     expect(result.projection_diagnostics.source).toBe('cached_surface')
   })
@@ -204,13 +193,6 @@ describe('decodeTransportHealthData', () => {
       {
         ...currentWire,
         websocket: { ...currentWire.websocket, mode: 'relay' },
-      },
-    ],
-    [
-      'webrtc signaling mode',
-      {
-        ...currentWire,
-        webrtc: { ...currentWire.webrtc, signaling_mode: 'auto' },
       },
     ],
     [

@@ -70,7 +70,6 @@ if [[ "${active_ocaml_version}" != "${required_ocaml_version}" ]]; then
 fi
 
 # --- Pin SHAs (bump these when upstream changes are needed) ---
-readonly WEBRTC_SHA="1b7993605b293f45169369d488f970ba15132a9f"
 readonly GRPC_DIRECT_SHA="d7269ebebf9e4688486cc6591c66e794607e7b0f"
 readonly WS_DIRECT_SHA="05e01cf008d4a5024474d13cee35cda42e2bea09"
 readonly NEO4J_BOLT_SHA="a1ca30c1247db5c58934e99306fe330419f7b21a"
@@ -137,8 +136,6 @@ fi
 # as sub-libraries (mcp-protocol-sdk#60). Pin the released single-package line.
 opam_pin_add mcp_protocol https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0 -n -y
 pinned_pkgs+=("mcp_protocol")
-opam_pin_add ocaml-webrtc "https://github.com/jeong-sik/ocaml-webrtc.git#${WEBRTC_SHA}" -n -y
-pinned_pkgs+=("ocaml-webrtc")
 opam_pin_add grpc-direct-core "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y
 pinned_pkgs+=("grpc-direct-core")
 opam_pin_add grpc-direct "https://github.com/jeong-sik/grpc-direct.git#${GRPC_DIRECT_SHA}" -n -y

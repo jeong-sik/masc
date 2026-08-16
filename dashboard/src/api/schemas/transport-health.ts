@@ -16,7 +16,6 @@ export type HotSession = Schema.Schema.Type<typeof HotSessionSchema>
 
 const SummarySchema = Schema.Struct({
   primary_path: Schema.Literal(
-    'webrtc_datachannel',
     'grpc_subscribe',
     'websocket',
     'sse',
@@ -76,17 +75,6 @@ const WebsocketSchema = Schema.Struct({
   delivery: WebsocketDeliverySchema,
 })
 
-const WebrtcSchema = Schema.Struct({
-  configured: Schema.Boolean,
-  signaling_available: Schema.Boolean,
-  signaling_mode: Schema.Literal('shared_http'),
-  pending_offers: NonNegativeIntegerSchema,
-  active_peers: NonNegativeIntegerSchema,
-  live_connections: NonNegativeIntegerSchema,
-  connected_channels: NonNegativeIntegerSchema,
-  ice_server_count: NonNegativeIntegerSchema,
-})
-
 const StreamableHttpSchema = Schema.Struct({
   endpoint: Schema.Literal('/mcp'),
   observer_stream: Schema.Literal('/mcp?sse_kind=observer'),
@@ -130,7 +118,6 @@ const TransportHealthReadySchema = Schema.Struct({
   sse: SseOuterSchema,
   grpc: GrpcSchema,
   websocket: WebsocketSchema,
-  webrtc: WebrtcSchema,
   streamable_http: StreamableHttpSchema,
   http2: Http2Schema,
   agent_health: AgentHealthSchema,

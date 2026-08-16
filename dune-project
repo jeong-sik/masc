@@ -31,7 +31,6 @@
   ; [{>= "3.22" & >= "3.22"}] (audited continuous-loop iter #10).
   ; External dependencies (opam pin)
   (mcp_protocol (>= 1.3.0))
-  (ocaml-webrtc (>= 0.2.3))
   (grpc-direct-core (>= 0.1.0))
   (grpc-direct (>= 0.1.0))
   (ws-direct-core (>= 0.1.0))
@@ -88,11 +87,6 @@
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
-  ; [ctypes] + [ctypes-foreign] removed: zero callers in lib/ bin/ test/
-  ; since webrtc_bindings.ml was removed (per lib/dune:252 comment).
-  ; Confirmed by `rg '\bctypes\b' lib/ bin/ test/` = empty.  Audited
-  ; continuous-loop iter #17 (2026-05-15).  Re-add if native FFI work
-  ; resumes.
   ; [pbrt_services] removed: no caller in lib/ bin/ test/ since
   ; continuous-loop iter #11 audit (2026-05-15).  Re-add if gRPC
   ; service support resumes.

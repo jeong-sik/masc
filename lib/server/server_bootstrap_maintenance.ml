@@ -666,15 +666,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            (Sse.external_subscriber_count_with_prefix "grpc-subscribe-");
          if ext_reaped > 0
          then Log.Server.info "reaped %d dead external subscribers" ext_reaped;
-         if Server_webrtc_transport.is_enabled ()
-         then (
-           let webrtc_expired = Server_webrtc_transport.cleanup_expired_offers () in
-           let webrtc_stale_peers = Server_webrtc_transport.cleanup_stale_peers () in
-           if webrtc_expired > 0 || webrtc_stale_peers > 0
-           then
-             Log.Server.info "WebRTC: cleaned %d expired offers, %d stale peers"
-               webrtc_expired
-               webrtc_stale_peers);
          (* Rate-limit buckets: evict keys unused for
              [MASC_RATE_LIMIT_BUCKET_TTL_SEC] (default 5 minutes) *)
          let rl = Eio.Lazy.force Rate_limit.global in

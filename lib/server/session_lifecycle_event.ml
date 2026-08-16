@@ -1,4 +1,4 @@
-type transport = SSE | WS | GRPC | WebRTC
+type transport = SSE | WS | GRPC
 
 type evict_reason =
   | Cap_exceeded
@@ -46,13 +46,11 @@ let transport_to_string = function
   | SSE -> "sse"
   | WS -> "ws"
   | GRPC -> "grpc"
-  | WebRTC -> "webrtc"
 
 let transport_of_string = function
   | "sse" -> Some SSE
   | "ws" -> Some WS
   | "grpc" -> Some GRPC
-  | "webrtc" -> Some WebRTC
   | _ -> None
 
 let evict_reason_to_string = function

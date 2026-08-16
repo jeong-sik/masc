@@ -291,11 +291,3 @@ val inc_agent_stale : unit -> unit
     [Otel_metric_store.metric_value_or_zero] and performs no Workspace I/O. *)
 val transport_health_json : unit -> Yojson.Safe.t
 
-val register_webrtc_metrics :
-  is_enabled:(unit -> bool) ->
-  pending_count:(unit -> int) ->
-  peers_count:(unit -> int) ->
-  live_count:(unit -> int) ->
-  channels_count:(unit -> int) ->
-  ice_servers_urls:(unit -> string list) ->
-  unit

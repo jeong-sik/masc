@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-contract test-transport test-webrtc-live-env test-contract-live test-all clean clean-tlc-artifacts coverage coverage-summary coverage-percent coverage-html
+.PHONY: test test-unit test-contract test-transport test-contract-live test-all clean clean-tlc-artifacts coverage coverage-summary coverage-percent coverage-html
 
 # Run tests (alias for test-unit)
 test: test-unit
@@ -14,10 +14,6 @@ test-contract:
 # Transport harness (self-bootstrapping, hermetic local server)
 test-transport:
 	bash scripts/harness/transport/run_all.sh
-
-# Env-gated browser/STUN/TURN WebRTC interop proof
-test-webrtc-live-env:
-	bash scripts/harness/transport/verify_webrtc_live_env.sh
 
 # Contract harness against an already running server (default :8935)
 test-contract-live:

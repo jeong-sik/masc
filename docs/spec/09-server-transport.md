@@ -27,14 +27,14 @@ code_refs:
 
 ## 1. Purpose
 
-MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebSocket, gRPC, WebRTC, stdio)로 제공하는 서버 레이어. JSON-RPC 2.0 기반 MCP 요청을 받아 도구 디스패치로 라우팅하고, SSE(Server-Sent Events)로 이벤트를 스트리밍한다.
+MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebSocket, gRPC, stdio)로 제공하는 서버 레이어. JSON-RPC 2.0 기반 MCP 요청을 받아 도구 디스패치로 라우팅하고, SSE(Server-Sent Events)로 이벤트를 스트리밍한다.
 
 핵심 설계 결정:
 
 - **httpun-eio** 기반 HTTP/1.1이 canonical transport. Eio direct-style async.
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
 - HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
-- gRPC, WebSocket, WebRTC는 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
+- gRPC, WebSocket은 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
 - stdio 모드는 CLI-Tool-A MCP 클라이언트의 표준 연결 방식.
 
 ---
@@ -48,7 +48,7 @@ graph TB
         GC[CLI-Tool-C<br/>MCP HTTP]
         CX[CLI-Tool-B<br/>MCP HTTP]
         DB[Dashboard<br/>Browser SSE]
-        EXT[외부 에이전트<br/>gRPC / WS / WebRTC]
+        EXT[외부 에이전트<br/>gRPC / WS]
     end
 
     subgraph EntryPoints["Entry Points"]
@@ -61,7 +61,6 @@ graph TB
         H2_GW[server_h2_gateway<br/>HTTP/2 h2c]
         WS_T[server_mcp_transport_ws<br/>GET /ws same-origin upgrade]
         GRPC_S[masc_grpc_server<br/>:8936 h2c]
-        WEBRTC[server_webrtc_transport<br/>/webrtc/*]
     end
 
     subgraph CoreServer["Core Server"]
@@ -82,12 +81,11 @@ graph TB
     EXT -->|gRPC / WS| GRPC_S & WS_T
 
     STDIO --> MCP_EIO
-    HTTP --> MCP_HTTP & H2_GW & WS_T & WEBRTC & ROUTES
+    HTTP --> MCP_HTTP & H2_GW & WS_T & ROUTES
     MCP_HTTP --> MCP_EIO
     H2_GW --> MCP_EIO
     WS_T -.->|Sse.subscribe_external| SSE_MOD
     GRPC_S --> MCP_EIO
-    WEBRTC -.->|signaling only| MCP_EIO
 
     MCP_EIO --> TD
     MCP_EIO --> SSE_MOD
@@ -105,7 +103,6 @@ graph TB
 | HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
 | WebSocket | ws-direct (`ws-direct-eio` / `ws-direct-gluten`) | `server_mcp_transport_ws` | HTTP 리스너의 `/ws` same-origin 업그레이드 | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
 | gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본값, `MASC_GRPC_ENABLED=0`으로 비활성화 | Available |
-| WebRTC | ocaml-webrtc | `server_webrtc_transport` | 8935 `/webrtc/*` | 기본값, `MASC_WEBRTC_ENABLED=0`으로 비활성화 | **Experimental** (local interop only; live env-gated) |
 | stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-stdio` 실행 | Available |
 
 **Experimental** 상태의 의미: 해당 transport는 코드가 존재하고 로컬 테스트에서 동작하지만, 프로덕션 interop 검증이 미완료. API/프로토콜은 향후 breaking change가 발생할 수 있음. 기본값으로 활성화되어 있으나, 주의해서 사용.
@@ -115,12 +112,12 @@ graph TB
 `lib/config/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
 
 ```ocaml
-type t = Http | Grpc | Ws | Webrtc | Local
+type t = Http | Grpc | Ws | Local
 ```
 
 선택 순서:
 1. API 호출 시 명시된 `~transport` 파라미터
-2. `MASC_AGENT_TRANSPORT` 환경변수 (`"grpc"`, `"http"`, `"ws"`, `"webrtc"`, `"local"`)
+2. `MASC_AGENT_TRANSPORT` 환경변수 (`"grpc"`, `"http"`, `"ws"`, `"local"`)
 3. 기본값: `Local` (파일시스템 기반 Workspace 직접 호출)
 
 ---
@@ -360,8 +357,6 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 | DELETE | `/mcp/operator` | `handle_delete_mcp ~profile:Operator_remote` | Operator 세션 종료 |
 | GET | `/sse` | `sse_simple_handler` | 단순 SSE (Observer) |
 | GET | `/ws` | `websocket_discovery_json` | WebSocket discovery JSON (`enabled`, `ws_url`) |
-| POST | `/webrtc/offer` | `handle_offer_request` | WebRTC offer signaling |
-| POST | `/webrtc/answer` | `handle_answer_request` | WebRTC answer signaling |
 | OPTIONS | `*` | `options_handler` | CORS preflight |
 
 ### 6.2 REST API 라우트 (server_routes_http 조립)
@@ -572,72 +567,6 @@ JSON 인코딩된 문자열을 gRPC 프레이밍으로 전송. Protobuf 바이�
 
 ---
 
-## 11. WebRTC Transport
-
-**소스**: `lib/server/server_webrtc_transport.ml` (183 LOC)
-
-### 11.1 활성화
-
-기본값은 활성이다. `MASC_WEBRTC_ENABLED=0` 또는 `false`일 때만 비활성화된다. 로컬 signaling + server-side peer 경로는 hermetic harness로 검증하고, live ICE/TURN/browser interop은 env-gated로 분리한다.
-
-### 11.2 Signaling Flow
-
-```
-Agent A                    MASC Server                    Agent B
-   |                           |                             |
-   |-- POST /webrtc/offer ---->|                             |
-   |   {agent_name, ice, dtls} |                             |
-   |<-- {offer_id} ------------|                             |
-   |                           |                             |
-   |                           |<-- POST /webrtc/answer -----|
-   |                           |    {offer_id, agent_name}   |
-   |                           |--- {peer_id, channel} ----->|
-   |                           |                             |
-   |<======= "masc-events" DataChannel (P2P) =============>|
-```
-
-ICE + DTLS 완료 후 `"masc-events"` DataChannel을 통해 JSON-RPC 메시지를 P2P로 교환한다. 서버는 signaling만 중계하고, 데이터 전송은 서버를 경유하지 않는다.
-
-만료된 offer는 60초 후 자동 정리 (`cleanup_expired_offers`).
-
-### 11.3 ICE Server Configuration
-
-서버 측 ICE server는 다음 우선순위로 읽는다.
-
-1. `MASC_WEBRTC_ICE_SERVERS_JSON`
-2. `MASC_WEBRTC_ICE_URLS` + 선택적 `MASC_WEBRTC_ICE_USERNAME` / `MASC_WEBRTC_ICE_CREDENTIAL` / `MASC_WEBRTC_ICE_TLS_CA`
-3. `ocaml-webrtc` 기본 ICE server (기본 STUN)
-
-운영자는 `/health`의 `transport.webrtc.ice_server_urls`로 현재 적용된 URL 목록을 확인할 수 있다.
-
-### 11.4 Env-Gated Live Interop Proof
-
-hermetic CI는 signaling + peer lifecycle만 검증한다. 실제 인터넷 상호운용성은 env-gated proof lane으로 분리한다.
-
-- local/manual entrypoint: `bash scripts/harness/transport/verify_webrtc_live_env.sh`
-- GitHub Actions entrypoint: `.github/workflows/webrtc-live-interop.yml`
-- browser-side env:
-  - `MASC_WEBRTC_LIVE_ICE_URLS`
-  - 선택적 `MASC_WEBRTC_LIVE_ICE_USERNAME`
-  - 선택적 `MASC_WEBRTC_LIVE_ICE_CREDENTIAL`
-- server-side env:
-  - `MASC_WEBRTC_ICE_URLS`
-  - 선택적 `MASC_WEBRTC_ICE_USERNAME`
-  - 선택적 `MASC_WEBRTC_ICE_CREDENTIAL`
-
-현재 proof lane은 다음을 보장한다.
-
-- 브라우저가 실제 ICE candidate를 gather한다.
-- `/health`가 서버 ICE server URL 구성을 노출한다.
-- 서버가 브라우저가 생성한 candidate 문자열을 받아 offer/answer signaling을 완료한다.
-
-현재 proof lane이 아직 보장하지 않는 것:
-
-- 브라우저와 서버 사이의 완전한 SDP answer 교환
-- end-to-end DataChannel 메시지 교환
-
----
-
 ## 12. Stdio Transport
 
 **소스**: `bin/main_stdio_eio.ml` (50 LOC), `lib/mcp_server_eio.ml` (`run_stdio`), `lib/mcp_server_eio_protocol.ml` (`detect_mode`)
@@ -782,7 +711,6 @@ sequenceDiagram
 | `MASC_WS_ENABLED` | 1 | WebSocket 활성화 (`0`으로 비활성화) |
 | `MASC_GRPC_ENABLED` | 1 | gRPC 활성화 (`0`으로 비활성화) |
 | `MASC_GRPC_PORT` | 8936 | gRPC 포트 |
-| `MASC_WEBRTC_ENABLED` | 1 | WebRTC 활성화 (`0`으로 비활성화) |
 | `MASC_AGENT_TRANSPORT` | `local` | 에이전트 측 트랜스포트 선택 |
 
 ### 15.3 인증 설정
@@ -824,7 +752,7 @@ sequenceDiagram
 
 ## 17. Invariants
 
-**INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2는 opt-in이고, WS/gRPC/WebRTC는 default-on이며 `MASC_*_ENABLED=0`일 때만 비활성화된다.
+**INV-SERVER-001**: HTTP/1.1 서버는 항상 활성. H2는 opt-in이고, WS/gRPC는 default-on이며 `MASC_*_ENABLED=0`일 때만 비활성화된다.
 
 **INV-SERVER-002**: 모든 MCP POST 요청은 `initialize`/`ping` 제외 `Mcp-Session-Id` 헤더 필수. 없으면 `validate_session_requirement`가 거부한다.
 
@@ -884,7 +812,6 @@ sequenceDiagram
 | `server_h2_gateway.ml` | 740 | HTTP/2 게이트웨이 (전체 라우팅) |
 | `server_h2_gateway_routes_extra.ml` | 171 | H2 추가 라우트 |
 | `server_mcp_transport_ws.ml` | 160 | WebSocket 트랜스포트 |
-| `server_webrtc_transport.ml` | 183 | WebRTC signaling |
 | `server_auth.ml` | 491 | HTTP 레벨 인증/권한 |
 | `server_routes_http.ml` | 17 | 라우트 조립 진입점 |
 | `server_dashboard_http.ml` | 566 | Dashboard API 핸들러 |

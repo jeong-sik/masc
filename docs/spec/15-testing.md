@@ -72,7 +72,6 @@ Contract harness는 서버가 이미 떠 있다고 가정하지 않고 hermetic 
 
 | 게이트 | 테스트 파일 | 필요 환경 |
 |--------|-----------|----------|
-| Live network | `scripts/harness/transport/verify_webrtc_live_env.sh` | 네트워크 접근 |
 | Local viewer | `scripts/viewer-local-e2e-check.sh` | 빌드 도구 |
 
 규칙: env 미설정 시 skip 또는 not run. CI 로그에 "왜 안 돌았는지"가 명시되어야 한다.

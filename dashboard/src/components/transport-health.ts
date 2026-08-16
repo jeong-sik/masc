@@ -107,14 +107,6 @@ const PRACTICAL_CASES: PracticalCase[] = [
     live: (data) => `${data.websocket.listening ? 'live' : 'down'} · ${data.websocket.sessions} sessions · same-origin`,
   },
   {
-    id: 'p2p-fastlane',
-    title: 'P2P 패스트 레인',
-    transport: 'WebRTC',
-    endpoint: () => '/webrtc/offer -> /webrtc/answer',
-    description: 'DataChannel P2P. signaling 후 직접 연결.',
-    live: (data) => `${data.webrtc.connected_channels} channels · ${data.webrtc.active_peers} peers`,
-  },
-  {
     id: 'stateless-control',
     title: '스테이트리스 스크립팅 / 큐 트리거',
     transport: 'Streamable HTTP',
@@ -263,20 +255,6 @@ export function websocketTone(data: TransportHealthData): StatusTone {
   return base
 }
 
-export function webrtcActive(data: TransportHealthData): boolean {
-  return data.webrtc.connected_channels > 0
-    || data.webrtc.live_connections > 0
-    || data.webrtc.active_peers > 0
-}
-
-export function webrtcTone(data: TransportHealthData): StatusTone {
-  return transportTone(
-    data.webrtc.configured,
-    data.webrtc.signaling_available,
-    webrtcActive(data),
-  )
-}
-
 export function http2Tone(data: TransportHealthData): StatusTone {
   return data.http2.multiplex_ready ? 'ok' : 'warn'
 }
@@ -330,13 +308,6 @@ export function transportEyebrow(configured: boolean, listening: boolean, port: 
 export function sameOriginEyebrow(configured: boolean, listening: boolean): string {
   if (!configured) return '비활성'
   return listening ? '/ws 활성' : '/ws 중단'
-}
-
-export function webrtcEyebrow(data: TransportHealthData): string {
-  if (!data.webrtc.configured) return '비활성'
-  return data.webrtc.signaling_available
-    ? `${data.webrtc.ice_server_count} ICE · 시그널링 준비`
-    : '시그널링 중단'
 }
 
 function TransportStatusBadge({ status, label }: { status: StatusTone; label: string }) {
@@ -418,10 +389,9 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
   const sseStatus = sseTone(data)
   const grpcStatus = grpcTone(data)
   const wsStatus = websocketTone(data)
-  const webrtcStatus = webrtcTone(data)
   const h2Status = http2Tone(data)
   const agentStatus = agentPoolTone(data)
-  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, webrtcStatus, h2Status, agentStatus].includes('bad')
+  const hasAnyBadTransport = [sseStatus, grpcStatus, wsStatus, h2Status, agentStatus].includes('bad')
   const truthLine = transportTruthLine(data)
 
   return html`
@@ -474,7 +444,6 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
             <${TransportStatusBadge} status=${sseStatus} label="SSE" />
             <${TransportStatusBadge} status=${grpcStatus} label="gRPC" />
             <${TransportStatusBadge} status=${wsStatus} label="WS" />
-            <${TransportStatusBadge} status=${webrtcStatus} label="RTC" />
             <${TransportStatusBadge} status=${h2Status} label="HTTP" />
           </span>
         </summary>
@@ -530,16 +499,6 @@ function TransportHealthContent({ data }: { data: TransportHealthSnapshot }) {
                   value=${data.websocket.delivery.throttled_deliveries}
                   sub=${data.websocket.delivery.throttled_deliveries > 0 ? '서킷 오픈' : '정상'}
                 />
-              </div>
-            <//>
-
-            <${SectionCard} label="WebRTC" status=${webrtcStatus} eyebrow=${webrtcEyebrow(data)}>
-              <div class="divide-y divide-card-border/50">
-                <${MetricRow} label="시그널링" value=${data.webrtc.signaling_available ? 'ready' : 'down'} sub=${data.webrtc.signaling_mode} />
-                <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
-                <${MetricRow} label="활성 피어" value=${data.webrtc.active_peers} />
-                <${MetricRow} label="대기 오퍼" value=${data.webrtc.pending_offers} />
-                <${MetricRow} label="라이브 연결" value=${data.webrtc.live_connections} />
               </div>
             <//>
 

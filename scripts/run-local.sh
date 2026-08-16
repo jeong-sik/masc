@@ -38,7 +38,7 @@ Usage: scripts/run-local.sh [--target-dir PATH] [--host HOST] [--port PORT] [--p
 Dir-local local-dev launcher:
   - runtime data root defaults to <target>/.masc/
   - config root defaults to <target>/.masc/config
-  - gRPC / WS / WebRTC are disabled by default
+  - gRPC / WS are disabled by default
   - --bootstrap-only materializes local config/build state but does not start the server
   - checked-in keeper manifests are excluded by default; pass --bootstrap-keepers to seed config/keepers
 
@@ -273,7 +273,6 @@ export MASC_BASE_PATH="$TARGET_DIR"
 set_default_env MASC_CONFIG_DIR "$LOCAL_CONFIG_DIR"
 set_default_env MASC_GRPC_ENABLED "0"
 set_default_env MASC_WS_ENABLED "0"
-set_default_env MASC_WEBRTC_ENABLED "0"
 
 echo "Starting MASC MCP local-dev server..." >&2
 echo "  Target dir: $TARGET_DIR" >&2
@@ -282,7 +281,7 @@ echo "  Config root: ${MASC_CONFIG_DIR}" >&2
 echo "  Host: $HOST" >&2
 echo "  Port: $PORT" >&2
 echo "  Dashboard build: $(if [ "$BUILD_DASHBOARD" = "1" ]; then echo enabled; else echo skipped; fi)" >&2
-echo "  Transports: http=on grpc=${MASC_GRPC_ENABLED} ws=${MASC_WS_ENABLED} webrtc=${MASC_WEBRTC_ENABLED}" >&2
+echo "  Transports: http=on grpc=${MASC_GRPC_ENABLED} ws=${MASC_WS_ENABLED}" >&2
 
 if [ -n "${MASC_LOG_FILE:-}" ]; then
   mkdir -p "$(dirname "$MASC_LOG_FILE")"

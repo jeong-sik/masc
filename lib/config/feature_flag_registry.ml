@@ -44,11 +44,6 @@ let all_flags : flag list = [
     default = true; category = "transport";
     lifecycle = Active };
 
-  { env_name = "MASC_WEBRTC_ENABLED";
-    description = "WebRTC DataChannel transport (opt-out via =0)";
-    default = true; category = "transport";
-    lifecycle = Active };
-
   { env_name = "MASC_HTTP_AUTH_STRICT";
     description = "Require auth for all HTTP endpoints (not just /mcp)";
     default = false; category = "transport";

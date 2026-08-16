@@ -89,7 +89,6 @@ module Transport : sig
   val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
   val ws_enabled : unit -> bool
-  val webrtc_enabled : unit -> bool
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
 end

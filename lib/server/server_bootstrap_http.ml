@@ -65,9 +65,7 @@ let print_startup_banner
       (Masc_grpc_server.configured_port ());
   if Transport_metrics.ws_enabled ()
   then
-    Printf.printf "   GET  /ws → same-origin WebSocket upgrade or discovery\n%!";
-  if Server_webrtc_transport.is_enabled ()
-  then Printf.printf "   POST /webrtc/offer, /webrtc/answer → WebRTC signaling\n%!"
+    Printf.printf "   GET  /ws → same-origin WebSocket upgrade or discovery\n%!"
 ;;
 
 (** Run a list of cleanups on [sw] release, executing all of them

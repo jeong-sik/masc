@@ -15,7 +15,7 @@
   - server executable 기반 SSE reconnect e2e
 - transport harness suite
   - `scripts/harness/transport/run_all.sh`
-  - self-bootstrapping local server + gRPC/WS/WebRTC/h2c smoke
+  - self-bootstrapping local server + gRPC/WS/h2c smoke
 - contract harness
   - `scripts/harness/contract/streamable_http_contract.sh`
   - `scripts/harness/contract/golden_path_1_contract.sh`
@@ -44,8 +44,6 @@ MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 
 - live network / realtime 환경 의존
   - live ICE/STUN/TURN/browser interop proof
-  - `scripts/harness/transport/verify_webrtc_live_env.sh`
-  - `.github/workflows/webrtc-live-interop.yml`
   - 공용 CI에서는 hermetic signaling/data-plane smoke만 돌리고, 인터넷 상호운용성은 env-gated로 분리한다
 - local viewer/toolchain 의존
   - `scripts/viewer-local-e2e-check.sh --build-viewer`
@@ -82,7 +80,7 @@ MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 이번 슬라이스의 목적은 다음 두 가지다.
 
 - `Hermetic Required`를 실제 기본 게이트로 올린다.
-- transport discovery + gRPC/WS/WebRTC local smoke를 기본 게이트로 올린다.
+- transport discovery + gRPC/WS local smoke를 기본 게이트로 올린다.
 - `Optional Env-Gated`와 `Manual Experiment`를 green으로 위장하지 않도록 분리해서 설명한다.
 
 즉, 이번 변경에서 CI 필수로 보려는 것은:

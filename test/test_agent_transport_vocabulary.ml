@@ -35,7 +35,7 @@ let accepted_spellings () =
   List.iter
     (fun raw ->
        with_env (Some raw) (fun () -> check string raw raw (spelling ())))
-    [ "http"; "grpc"; "ws"; "webrtc"; "local" ]
+    [ "http"; "grpc"; "ws"; "local" ]
 ;;
 
 let invalid_values_are_rejected () =
@@ -46,7 +46,7 @@ let invalid_values_are_rejected () =
            ("reject " ^ raw)
            (Env_config_core.Config_error
               (Printf.sprintf
-                 "malformed env MASC_AGENT_TRANSPORT=%S (expected http|grpc|ws|webrtc|local)"
+                 "malformed env MASC_AGENT_TRANSPORT=%S (expected http|grpc|ws|local)"
                  raw))
            (fun () -> ignore (T.from_env ()))))
     [ ""; "gprc"; "websocket"; " GRPC "; "Grpc" ]

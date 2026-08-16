@@ -40,9 +40,6 @@
   grpc-direct-core
   h2
   h2-eio
-  ;; ctypes/ctypes-foreign removed (was only used by webrtc_bindings.ml)
-  ;; WebRTC DataChannel transport (ocaml-webrtc library)
-  ocaml-webrtc
   ;; OCaml 5.x Eio concurrency (required for *_eio.ml modules)
   eio
   eio_main

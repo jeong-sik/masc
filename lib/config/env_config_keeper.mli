@@ -190,6 +190,19 @@ module KeeperKeepalive : sig
       value must be finite and strictly positive or configuration loading
       raises {!Env_config_core.Config_error}. *)
 
+  val first_event_failsafe_floor_sec : float
+  (** Resolved runtime fallback used only when the explicit first-event
+      timeout is absent. Kept beside {!stream_idle_failsafe_floor_sec} so
+      runtime execution and operator projection share one value. *)
+
+  val first_event_timeout_sec : unit -> float option
+  (** Explicit streaming-provider first-event (TTFT/prefill) timeout. Bounds
+      only the wait for the FIRST provider event; {!stream_idle_timeout_sec}
+      bounds inter-line gaps after it (RFC-OAS-037). [None] means no explicit
+      value (the resolved layer substitutes the fail-safe floor). A configured
+      value must be finite and strictly positive or configuration loading
+      raises {!Env_config_core.Config_error}. *)
+
   val body_timeout_sec_override : float option
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
       calls. [None] (env unset) leaves the runtime builder wire untouched.

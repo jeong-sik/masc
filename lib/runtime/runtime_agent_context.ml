@@ -46,6 +46,11 @@ type config =
   ; system_prompt : string
   ; tools : Agent_core.Tool.t list
   ; stream_idle_timeout_s : float option
+  ; first_event_timeout_s : float option
+    (** Bound on the silent wait for the FIRST streaming provider event
+        (TTFT/prefill). [stream_idle_timeout_s] arms only after that event;
+        when [None], AGENT_CORE's resolver falls back to [body_timeout_s],
+        then to [stream_idle_timeout_s] (RFC-OAS-037). *)
   ; body_timeout_s : float option
     (** Total HTTP body-consumption ceiling for non-streaming AGENT_CORE completion
         paths. Streaming paths deliberately ignore this knob so active long
@@ -132,6 +137,7 @@ let default_config
   ; system_prompt
   ; tools
   ; stream_idle_timeout_s = None
+  ; first_event_timeout_s = None
   ; body_timeout_s = None
   ; max_tokens = None
   ; temperature = provider_cfg.temperature
@@ -248,6 +254,11 @@ let builder
   let builder =
     match config.stream_idle_timeout_s with
     | Some timeout_s -> Agent_core.Builder.with_stream_idle_timeout timeout_s builder
+    | None -> builder
+  in
+  let builder =
+    match config.first_event_timeout_s with
+    | Some s -> Agent_core.Builder.with_first_event_timeout s builder
     | None -> builder
   in
   let builder =
@@ -393,6 +404,7 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_core.Checkpoint.t)
       hooks = (match config.hooks with Some hooks -> hooks | None -> Agent_core.Hooks.empty)
     ; provider_config = Some config.provider_cfg
     ; stream_idle_timeout_s = config.stream_idle_timeout_s
+    ; first_event_timeout_s = config.first_event_timeout_s
     ; body_timeout_s = config.body_timeout_s
     ; context_injector = config.context_injector
     ; event_bus = config.event_bus

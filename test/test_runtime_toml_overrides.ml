@@ -341,6 +341,43 @@ let test_resolved_stream_idle_timeout_defaults_to_failsafe_floor () =
     "failsafe_floor"
     (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
 
+let test_resolved_first_event_timeout_defaults_to_failsafe_floor () =
+  (* RFC-OAS-037: with no explicit env/toml value the resolver substitutes the
+     silent-prefill liveness ceiling (not [None]). Without it AGENT_CORE's
+     first-event resolver falls through to the much shorter inter-line idle
+     value and any provider that prefills silently past it dies at
+     awaiting_first_event (canary-multiturn-localmlx, 9/9 on 2026-08-16). *)
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "first-event timeout defaults to fail-safe floor"
+    (Some Keeper_runtime_resolved.first_event_failsafe_floor_sec)
+    runtime.first_event_timeout_sec.value;
+  check (option (float 0.0001)) "accessor returns the floor when unset"
+    (Some Keeper_runtime_resolved.first_event_failsafe_floor_sec)
+    (Keeper_runtime_resolved.first_event_timeout_sec ());
+  check string "first-event timeout floor source"
+    "failsafe_floor"
+    (Keeper_runtime_resolved.source_to_string runtime.first_event_timeout_sec.source)
+
+let test_resolved_first_event_timeout_uses_toml () =
+  (* End-to-end pin for the registry-driven mapping: runtime.toml
+     [turn.first_event_timeout_sec] must reach the resolver as
+     MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC. *)
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nfirst_event_timeout_sec = 480\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" (Keeper_runtime_config.load_failure_to_string msg)
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (option (float 0.0001)) "first-event timeout from toml"
+    (Some 480.0) runtime.first_event_timeout_sec.value;
+  check string "first-event timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.first_event_timeout_sec.source)
+
 let test_resolved_stream_idle_timeout_uses_toml () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
@@ -705,6 +742,8 @@ let () =
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
         ; test_case "resolved stream idle timeout defaults to fail-safe floor" `Quick test_resolved_stream_idle_timeout_defaults_to_failsafe_floor
+        ; test_case "resolved first-event timeout defaults to fail-safe floor" `Quick test_resolved_first_event_timeout_defaults_to_failsafe_floor
+        ; test_case "resolved first-event timeout uses toml" `Quick test_resolved_first_event_timeout_uses_toml
         ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "invalid stream idle TOML returns Error" `Quick test_stream_idle_timeout_invalid_toml_returns_error
         ; test_case "wrong-type stream idle TOML returns Error" `Quick test_stream_idle_timeout_toml_wrong_type_returns_error

@@ -529,6 +529,22 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
       Log.Runtime.info
         ~category:Log.Boundary
         "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
+  (* RFC-OAS-037: same boot observability for the first-event (TTFT/prefill)
+     budget — configured-vs-effective must stay distinguishable at runtime,
+     the exact ambiguity #25128 hit for the idle knob. *)
+  Keeper_runtime_resolved.(
+    let first_event = (current ()).first_event_timeout_sec in
+    match first_event.value with
+    | Some seconds ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper first-event (TTFT/prefill) timeout resolved: %.1fs (source: %s)"
+        seconds
+        (source_to_string first_event.source)
+    | None ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper first-event timeout resolved: disabled (no first-event bound)");
   Keeper_task_owner_backend.install_hooks ();
   Server_dashboard_http_execution_surfaces.install_task_mutation_cache_invalidation ();
   let state =

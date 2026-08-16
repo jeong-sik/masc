@@ -326,6 +326,15 @@ let all =
       ~category:"turn"
       "Streaming provider inter-line idle timeout"
   ; setting
+      ~range:(float_range ~min_exclusive:0.0 ())
+      ~env_name:"MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
+      ~exposure:(Toml_and_env "turn.first_event_timeout_sec")
+      ~value_kind:Float
+      ~default:"(failsafe 600)"
+      ~consumers:[ "Keeper_runtime_resolved"; "Runtime_agent_context" ]
+      ~category:"turn"
+      "Streaming provider first-event (TTFT/prefill) timeout"
+  ; setting
       ~range:(float_range ~min:30.0 ~max:3600.0 ())
       ~env_name:"MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC"
       ~exposure:(Toml_and_env "turn.provider_call_deadline_sec")

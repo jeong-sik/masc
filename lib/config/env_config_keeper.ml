@@ -556,6 +556,45 @@ module KeeperKeepalive = struct
                  detail)))
   ;;
 
+  let first_event_timeout_env_key = "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC"
+
+  (* Fail-safe bound for the silent first-event (TTFT/prefill) wait; the
+     substitution rule lives in Keeper_runtime_resolved. Same magnitude as
+     [stream_idle_failsafe_floor_sec]: an order above real silent prefill
+     observed in production (152s mimo 1M-context 2026-07-20; ~200-525s local
+     MLX 20.7K-token keeper prompts 2026-08-16), not a per-provider tuning
+     (RFC-OAS-037 §3). *)
+  let first_event_failsafe_floor_sec = 600.0
+
+  (** Explicit first-event (TTFT/prefill) timeout for streaming AGENT_CORE
+      provider responses. Bounds only the wait for the FIRST provider event;
+      [stream_idle_timeout_sec] bounds the gaps after it. Providers that emit
+      no keepalives while prefilling are legitimately silent in this phase,
+      so this budget is distinct from — and typically longer than — the
+      inter-line idle gap (RFC-OAS-037). Unset means no explicit value; the
+      resolved layer substitutes {!first_event_failsafe_floor_sec}. A
+      configured value must be finite and strictly positive; malformed values
+      are operator configuration errors, never a fallback. Same value grammar
+      as the idle knob, hence the shared parser.
+
+      Env: [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC]. Default: unset -> [None].
+      @category Timeouts @ops_class operator *)
+  let first_event_timeout_sec () =
+    match Env_config_core.raw_value_opt first_event_timeout_env_key with
+    | None -> None
+    | Some raw ->
+      (match parse_stream_idle_timeout_sec raw with
+       | Ok seconds -> Some seconds
+       | Error detail ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "invalid %s=%S (%s)"
+                 first_event_timeout_env_key
+                 raw
+                 detail)))
+  ;;
+
   (** Total HTTP body-consumption deadline for non-streaming AGENT_CORE completion
       calls. In agent_core this wraps [Complete.complete]'s synchronous HTTP
       body read; streaming calls deliberately ignore the knob so active

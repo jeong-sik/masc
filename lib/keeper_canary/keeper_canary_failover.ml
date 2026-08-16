@@ -115,6 +115,8 @@ let classify ~(window_start : string) ~(attempts : attempt list) :
     (fun (a : attempt) ->
       match a.event, a.keeper_turn_id with
       | Routed, Some turn ->
+        (* DET-OK: absent table entry = first routed row seen for this
+           turn (empty accumulator), not an unknown-input default. *)
         let known = Option.value (Hashtbl.find_opt routed_by_turn turn) ~default:[] in
         if not (List.mem a.runtime_id known)
         then Hashtbl.replace routed_by_turn turn (a.runtime_id :: known)

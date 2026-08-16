@@ -99,7 +99,6 @@ specs/boundary/ToolCallContract_TTrace_1776849071.tla
 specs/checkpoint-trim/CheckpointTrim.tla
 specs/closure/ContractClosure.tla
 specs/task-lifecycle/TaskLifecycle.tla
-docs/MASC_A2A.tla
 ```
 
 `KeeperCompositeLifecycle.tla` (mentioned in `~/.../memory/MEMORY.md`, 449 LOC) acts as observer over 5 sub-FSMs; this means the roadmap's "GatePipeline" / "LivelockFSM" / "Recovery" should likely *extend* `KeeperCompositeLifecycle.tla` and `RuntimeKeeperRecovery.tla` rather than create from scratch.

@@ -1,8 +1,7 @@
 (** Single-keeper status detail handler.
 
-    Owns the [keeper_status] tool dispatch. The list / trajectory / eval
-    handlers are in [Keeper_status]; this module only handles the per-keeper
-    detail view.
+    Owns the [keeper_status] tool dispatch; this module handles the
+    per-keeper detail view.
 
     Selective .mli — internal helpers ([latest_metrics_json],
     [model_observability_json], dispatch helpers, etc.) stay private. *)

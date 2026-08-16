@@ -719,12 +719,38 @@ let run_keepalive_unified_turn
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
           let hitl_resolution =
-            List.find_map
-              (fun (stim : Keeper_event_queue.stimulus) ->
-                match stim.Keeper_event_queue.payload with
-                | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
-                | _ -> None)
-              !consumed_stimuli
+            match
+              List.find_map
+                (fun (stim : Keeper_event_queue.stimulus) ->
+                  match stim.Keeper_event_queue.payload with
+                  | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
+                  | _ -> None)
+                !consumed_stimuli
+            with
+            | Some resolution -> Some resolution
+            | None ->
+              (* #28809: a ready resolution may be queued behind the stimulus
+                 that woke this turn (e.g. a redelivered workspace message
+                 whose own earlier turn deferred on this very approval).
+                 Project the durable resolution into this turn instead of
+                 waiting for its queue position; the untouched queue entry is
+                 retired as a spent grant by [reconcile_spent_selection]
+                 without costing a turn. *)
+              (match
+                 Stimulus_intake.ready_hitl_resolution_peek
+                   ~base_path:ctx.config.base_path
+                   ~keeper_name:meta_after_triage.name
+               with
+               | None -> None
+               | Some resolution ->
+                 Log.Keeper.info
+                   "hitl resolution projected from pending queue approval=%s \
+                    decision=%s (keeper=%s)"
+                   resolution.Keeper_event_queue.approval_id
+                   (Keeper_event_queue.hitl_resolution_decision_to_string
+                      resolution.Keeper_event_queue.decision)
+                   meta_after_triage.name;
+                 Some resolution)
           in
           (* The event intake is the exact turn input. Keep its attribution in
              the existing wake record even when the cadence, rather than a

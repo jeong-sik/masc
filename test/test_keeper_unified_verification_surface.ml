@@ -22,6 +22,7 @@ let base_observation : WO.world_observation =
     connected_surfaces = [];
     connected_surface_failures = [];
     own_recent_board_posts = [];
+    fleet_messages = [];
   }
 
 let sample_board_event : WO.pending_board_event =

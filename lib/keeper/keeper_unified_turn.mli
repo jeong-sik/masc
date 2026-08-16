@@ -180,6 +180,25 @@ val manual_compaction_preemption_request
     pending. The summary names that exact runtime stimulus as the next
     source; a turn already consuming manual compaction never yields to itself. *)
 
+val hitl_replay_preemption_request
+  :  resolution_deliverable:(Keeper_event_queue.hitl_resolution -> bool)
+  -> now:float
+  -> Keeper_event_queue.t
+  -> Keeper_agent_run.autonomous_yield_request option
+(** Pure post-tool boundary decision (#28809): yield the in-flight source when
+    a queued [Hitl_resolved] passes [resolution_deliverable]. The runtime
+    predicate accepts only an approved resolution whose one-shot grant is
+    still unspent, so a resolution already threaded into the current turn
+    (grant consumed at tool-bundle build) never preempts its own run. *)
+
+val hitl_replay_yield_request
+  :  base_path:string
+  -> keeper_name:string
+  -> (Keeper_agent_run.autonomous_yield_request option, string) result
+(** [hitl_replay_preemption_request] over the keeper's durable queue snapshot
+    with the runtime deliverability predicate (approval left the pending map,
+    grant durably unspent). *)
+
 
 val run_keeper_cycle
   :  before_dispatch_authority:(unit -> (unit, string) result)

@@ -120,9 +120,8 @@ let test_wall_clock_target_serializes_when_present () =
   | `Null -> ()
   | _ -> Alcotest.fail "expected transport.wall_clock_target_s to be null when unset"
 
-let sample_injection : Keeper_canary_evidence.injection =
-  { injection_kind = Keeper_canary_evidence.Restart
-  ; after_turn = 5
+let sample_restart : Keeper_canary_evidence.restart_injection =
+  { after_turn = 5
   ; started_at = "2026-08-16T00:00:03Z"
   ; duration_s = 4.5
   ; trace_id_before = "trace-abc"
@@ -134,7 +133,9 @@ let sample_injection : Keeper_canary_evidence.injection =
 let test_injection_serializes_with_continuation () =
   let json =
     Keeper_canary_evidence.to_yojson
-      { sample_evidence with injections = [ sample_injection ] }
+      { sample_evidence with
+        injections = [ Keeper_canary_evidence.Restart sample_restart ]
+      }
   in
   (match json |> member "injections" with
    | `List [ `Assoc kvs ] ->
@@ -146,18 +147,56 @@ let test_injection_serializes_with_continuation () =
        (match List.assoc "continuation" kvs with `Bool b -> b | _ -> false)
    | _ -> Alcotest.fail "expected one injection object");
   (* Identity loss must read as continuation=false. *)
-  let broken =
-    { sample_injection with trace_id_after = "trace-xyz" }
-  in
+  let broken = { sample_restart with trace_id_after = "trace-xyz" } in
   Alcotest.(check bool)
     "changed trace_id is not a continuation"
     false
-    (Keeper_canary_evidence.injection_is_continuation broken);
-  let bumped = { sample_injection with generation_after = 2 } in
+    (Keeper_canary_evidence.restart_is_continuation broken);
+  let bumped = { sample_restart with generation_after = 2 } in
   Alcotest.(check bool)
     "bumped generation is not a continuation"
     false
-    (Keeper_canary_evidence.injection_is_continuation bumped)
+    (Keeper_canary_evidence.restart_is_continuation bumped)
+
+let test_failover_injection_serializes () =
+  let attempt : Keeper_canary_failover.attempt =
+    { ts = "2026-08-16T00:00:04Z"
+    ; keeper_turn_id = Some 7
+    ; event = Keeper_canary_failover.Failed
+    ; runtime_id = "llama_cpp.local-head"
+    ; error_kind = Some (Keeper_canary_failover.error_kind_of_wire "provider_unreachable")
+    }
+  in
+  let failover : Keeper_canary_evidence.failover_injection =
+    { after_turn = 2
+    ; started_at = "2026-08-16T00:00:03Z"
+    ; duration_s = 0.2
+    ; down_cmd = "kill-head"
+    ; up_cmd = Some "start-head"
+    ; window_start = "2026-08-16T00:00:03Z"
+    ; mode = Keeper_canary_failover.In_turn
+    ; attempts = [ attempt ]
+    }
+  in
+  let json =
+    Keeper_canary_evidence.to_yojson
+      { sample_evidence with injections = [ Keeper_canary_evidence.Failover failover ] }
+  in
+  match json |> member "injections" with
+  | `List [ `Assoc kvs ] ->
+    Alcotest.(check string)
+      "kind" "failover"
+      (match List.assoc "kind" kvs with `String s -> s | _ -> "?");
+    Alcotest.(check string)
+      "mode" "in_turn"
+      (match List.assoc "mode" kvs with `String s -> s | _ -> "?");
+    (match List.assoc "attempts" kvs with
+     | `List [ `Assoc attempt_kvs ] ->
+       Alcotest.(check string)
+         "attempt event" "failed"
+         (match List.assoc "event" attempt_kvs with `String s -> s | _ -> "?")
+     | _ -> Alcotest.fail "expected one attempt row")
+  | _ -> Alcotest.fail "expected one injection object"
 
 let test_injections_empty_by_default () =
   match Keeper_canary_evidence.to_yojson sample_evidence |> member "injections" with
@@ -269,6 +308,10 @@ let () =
             "injection serializes with continuation"
             `Quick
             test_injection_serializes_with_continuation
+        ; Alcotest.test_case
+            "failover injection serializes"
+            `Quick
+            test_failover_injection_serializes
         ; Alcotest.test_case
             "injections empty by default"
             `Quick

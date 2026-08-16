@@ -58,7 +58,31 @@ let url_of ~host ~port ~path =
 
    Returns [Error detail] uniformly for connection failure, non-2xx status,
    and unparseable SSE — the caller does not need to distinguish those to
-   decide "this turn did not produce a usable reply." *)
+   decide "this turn did not produce a usable reply." The one exception is
+   HTTP 429: the loopback rate bucket is shared per IP and per admin token
+   (#28730), so a burst from a parallel session can throttle a turn that
+   would succeed seconds later. 429 retries with exponential backoff and
+   the same request_id — the server keys idempotent dedup on it, so a
+   retry can never double-send the turn. Every other non-2xx surfaces
+   immediately: a blind retry of a 500/409 would hide a real failure. *)
+let rate_limited_status = 429
+
+(* Five attempts spaced 2s/4s/8s/16s cover ~30s of sustained throttling —
+   the observed #28730 bursts (parallel session sweeps) drain within that;
+   anything longer is a real outage the run should surface. *)
+let max_rate_limit_attempts = 5
+let rate_limit_backoff_base_s = 2.0
+
+(* bin/keeper_canary_run.ml always publishes the Eio clock before any call
+   lands here; the Unix.sleepf arm only exists so this helper stays total
+   if that ever changes, and a blocking sleep is then the lesser harm. *)
+let sleep_s seconds =
+  if seconds > 0.0
+  then (
+    match Eio_context.get_clock_opt () with
+    | Some clock -> Eio.Time.sleep clock seconds
+    | None -> Unix.sleepf seconds)
+
 let send_turn ?(timeout_sec = default_timeout_sec) ~host ~port ~keeper_name
     ~request_id ~message () : (string, string) result
   =
@@ -71,19 +95,32 @@ let send_turn ?(timeout_sec = default_timeout_sec) ~host ~port ~keeper_name
         ; ("message", `String message)
         ])
   in
-  match
-    Masc_http_client.post_sync
-      ?clock:(Eio_context.get_clock_opt ())
-      ~timeout_sec
-      ~url
-      ~headers:(json_headers ())
-      ~body
-      ()
-  with
-  | Error detail -> Error (Printf.sprintf "POST %s failed: %s" url detail)
-  | Ok (status, response_body) ->
-    if status < 200 || status >= 300
-    then
-      Error
-        (Printf.sprintf "POST %s returned HTTP %d: %s" url status response_body)
-    else Masc.Tui_decode.parse_keeper_chat_response response_body
+  let rec attempt n =
+    match
+      Masc_http_client.post_sync
+        ?clock:(Eio_context.get_clock_opt ())
+        ~timeout_sec
+        ~url
+        ~headers:(json_headers ())
+        ~body
+        ()
+    with
+    | Error detail -> Error (Printf.sprintf "POST %s failed: %s" url detail)
+    | Ok (status, response_body) ->
+      if status = rate_limited_status && n < max_rate_limit_attempts
+      then (
+        let delay = rate_limit_backoff_base_s *. Float.pow 2.0 (float_of_int (n - 1)) in
+        Printf.eprintf
+          "[keeper_canary_run] HTTP 429 (attempt %d/%d), retrying in %.0fs\n%!"
+          n
+          max_rate_limit_attempts
+          delay;
+        sleep_s delay;
+        attempt (n + 1))
+      else if status < 200 || status >= 300
+      then
+        Error
+          (Printf.sprintf "POST %s returned HTTP %d: %s" url status response_body)
+      else Masc.Tui_decode.parse_keeper_chat_response response_body
+  in
+  attempt 1

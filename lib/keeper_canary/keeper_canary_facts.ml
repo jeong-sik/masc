@@ -227,3 +227,6 @@ let score ~(facts : fact list) ~(reply : string) : score =
       |> List.map (fun r -> r.category)
   ; per_fact
   }
+
+let interval_for_wall_clock ~gaps ~target_s =
+  if gaps <= 0 then 0.0 else target_s /. float_of_int gaps

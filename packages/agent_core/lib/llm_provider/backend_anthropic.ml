@@ -11,6 +11,29 @@ type request_artifact = string Request_artifact_internal.t
 let request_payload = Request_artifact_internal.payload
 let request_output_token_receipt = Request_artifact_internal.output_token_receipt
 
+(* The Messages wire reports exclusive input: "input_tokens: Number of input
+   tokens which were not read from or used to create a cache", with
+   total_input_tokens = cache_read_input_tokens + cache_creation_input_tokens
+   + input_tokens (platform.claude.com/docs prompt-caching, checked
+   2026-08-17). {!Types.api_usage.input_tokens} is the canonical inclusive
+   prompt total, so every parse of this wire shape must build through this
+   constructor. *)
+let usage_of_wire_counts
+      ~input_tokens
+      ~output_tokens
+      ~cache_creation_input_tokens
+      ~cache_read_input_tokens
+  : api_usage
+  =
+  { input_tokens =
+      input_tokens + cache_creation_input_tokens + cache_read_input_tokens
+  ; output_tokens
+  ; cache_creation_input_tokens
+  ; cache_read_input_tokens
+  ; cost_usd = None
+  }
+;;
+
 (** Parse Anthropic API response JSON into {!api_response}. *)
 let parse_response json =
   let open Yojson.Safe.Util in
@@ -45,12 +68,11 @@ let parse_response json =
         Cli_common_json.member_int "cache_read_input_tokens" u
       in
       Some
-        { input_tokens
-        ; output_tokens
-        ; cache_creation_input_tokens
-        ; cache_read_input_tokens
-        ; cost_usd = None
-        })
+        (usage_of_wire_counts
+           ~input_tokens
+           ~output_tokens
+           ~cache_creation_input_tokens
+           ~cache_read_input_tokens))
   in
   let has_tool_blocks =
     List.exists

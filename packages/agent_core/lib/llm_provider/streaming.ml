@@ -51,13 +51,14 @@ let parse_sse_event event_type data_str =
                |> to_int_option
                |> Option.value ~default:0
              in
+             (* output_tokens stays 0: the start event owns input+cache and
+                the final message_delta owns output in the accumulator. *)
              Some
-               { input_tokens
-               ; output_tokens = 0
-               ; cache_creation_input_tokens
-               ; cache_read_input_tokens
-               ; cost_usd = None
-               })
+               (Backend_anthropic.usage_of_wire_counts
+                  ~input_tokens
+                  ~output_tokens:0
+                  ~cache_creation_input_tokens
+                  ~cache_read_input_tokens))
          in
          Some (MessageStart { id; model; usage })
        | "content_block_start" ->
@@ -139,6 +140,12 @@ let parse_sse_event event_type data_str =
                |> to_int_option
                |> Option.value ~default:0
              in
+             (* Not built through [Backend_anthropic.usage_of_wire_counts]:
+                message_delta usage is wire-cumulative, and the accumulator
+                adds delta fields onto the start event's already-inclusive
+                totals — folding cache components into input here would count
+                them twice. input_tokens stays pinned to 0 for the same
+                reason. The add-vs-cumulative mismatch itself is #28903. *)
              Some
                { input_tokens = 0
                ; output_tokens

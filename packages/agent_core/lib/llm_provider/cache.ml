@@ -33,11 +33,14 @@ let request_fingerprint
 
 (* ── Serialization ──────────────────────────────────── *)
 
-let schema_version = "1"
+let schema_version = "2"
 
 (* stop_reason wire serialization is the SSOT [Types.stop_reason_to_string]
-   (this module's former local copy was byte-identical). Cache schema_version
-   "1" is preserved because the emitted strings are unchanged. *)
+   (this module's former local copy was byte-identical). schema_version "2":
+   [api_usage.input_tokens] became the inclusive prompt total (Anthropic wire
+   normalization) — entries written under "1" hold exclusive input for
+   Anthropic responses, so the version guard retires them instead of
+   replaying mixed semantics. *)
 
 (* Cache replay routes through [Types.stop_reason_of_string] so that a cached
    response parses identically to a live one. A local copy here previously

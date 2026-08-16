@@ -181,7 +181,8 @@ let test_anthropic_cache_usage_parsing () =
   match resp.usage with
   | None -> fail "expected usage"
   | Some u ->
-    check int "input" 1000 u.input_tokens;
+    (* Inclusive prompt total: exclusive wire 1000 + creation 500 + read 300. *)
+    check int "input" 1800 u.input_tokens;
     check int "output" 200 u.output_tokens;
     check int "cache write" 500 u.cache_creation_input_tokens;
     check int "cache read" 300 u.cache_read_input_tokens

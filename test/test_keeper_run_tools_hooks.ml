@@ -680,6 +680,88 @@ let test_failed_tool_observer_releases_next_completion () =
   check bool "a reported observer failure does not poison later receipts" true !observed
 ;;
 
+
+(* A call refused before the handler runs used to leave only a counter. The
+   keeper's own history showed nothing, so it repeated the same malformed call
+   every turn. An executed failure must still be written once, not twice:
+   [post_tool_use] already records that one. *)
+let rejected_rows_for ~stage =
+  with_temp_base_path @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () -> Masc.Keeper_tool_call_log.reset_for_testing ())
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       Masc.Keeper_tool_call_log.init ~base_path ();
+       let config = Masc.Workspace.default_config base_path in
+       let meta_ref = ref (make_meta "rejection-keeper") in
+       let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
+       let hooks =
+         Masc.Keeper_hooks_agent_core.make_hooks
+           ~config ~meta_ref ~turn_ctx_cell ~generation:0
+           ~trace_id:"rejection-trace" ~keeper_turn_id:1
+           ~on_after_turn_ordinal:ignore ()
+       in
+       let hook =
+         match hooks.Agent_core.Hooks.post_tool_use_failure with
+         | Some hook -> hook
+         | None -> fail "post_tool_use_failure hook is not installed"
+       in
+       let invocation =
+         Agent_core.Tool_contract.Invocation.create
+           ~tool_use_id:"call-1" ~turn:1
+           ~completion:Agent_core.Tool_contract.Continue_after_success
+           ~schedule:
+             { planned_index = 0
+             ; batch_index = 0
+             ; batch_size = 1
+             ; execution_mode = Agent_core.Tool_contract.Serial
+             }
+       in
+       let _ =
+         hook
+           (Agent_core.Hooks.PostToolUseFailure
+              { invocation
+              ; tool_name = "keeper_broadcast"
+              ; input = `Assoc []
+              ; stage
+              ; duration_ms = 1.0
+              ; error = {|"message": MISSING (required: string)|}
+              })
+       in
+       Masc.Keeper_tool_call_log.flush_now ();
+       Masc.Keeper_tool_call_log.read_recent ~keeper_name:"rejection-keeper" ())
+;;
+
+let test_a_rejected_call_leaves_a_row () =
+  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Validation_before_execution in
+  check int "exactly one row" 1 (List.length rows);
+  match rows with
+  | [ row ] ->
+    let field name =
+      match Json_util.assoc_member_opt name row with
+      | Some (`String s) -> s
+      | Some (`Bool b) -> string_of_bool b
+      | Some other -> Yojson.Safe.to_string other
+      | None -> "<absent>"
+    in
+    check string "the tool that refused" "keeper_broadcast" (field "tool");
+    check string "recorded as a failure" "false" (field "success");
+    check bool "the argument object it was refused for" true
+      (String.length (field "input") > 0);
+    check bool "the refusal text" true
+      (let out = field "output" in
+       String.length out > 0
+       && (try ignore (Str.search_forward (Str.regexp_string "MISSING") out 0); true
+           with Not_found -> false))
+  | _ -> fail "expected exactly one row"
+;;
+
+let test_an_executed_failure_is_not_written_twice () =
+  let rows = rejected_rows_for ~stage:Agent_core.Hooks.Execution in
+  check int "post_tool_use owns that row, this hook adds none" 0 (List.length rows)
+;;
+
 let test_production_post_tool_hook_cancellation_releases_next_completion () =
   with_temp_base_path @@ fun base_path ->
   Fun.protect
@@ -890,6 +972,16 @@ let () =
             "production hook cancellation releases the next completion"
             `Quick
             test_production_post_tool_hook_cancellation_releases_next_completion
+        ] )
+    ; ( "rejected_tool_calls"
+      , [ test_case
+            "a call refused before execution leaves a row"
+            `Quick
+            test_a_rejected_call_leaves_a_row
+        ; test_case
+            "an executed failure is not written twice"
+            `Quick
+            test_an_executed_failure_is_not_written_twice
         ] )
     ]
 ;;

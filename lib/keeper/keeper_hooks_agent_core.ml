@@ -687,7 +687,8 @@ let make_hooks
       | _event -> Agent_core.Hooks.Continue);
 
     post_tool_use_failure = Some (function
-      | Agent_core.Hooks.PostToolUseFailure { tool_name; error; _ } ->
+      | Agent_core.Hooks.PostToolUseFailure
+          { invocation; tool_name; input; stage; duration_ms; error } ->
         let meta = !meta_ref in
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
@@ -699,6 +700,50 @@ let make_hooks
           tool_name error;
         (* #9919: this path is a count event, not a heuristic decision. *)
         record_tool_use_failure ~keeper_name:meta.name ~tool_name;
+        (match stage with
+         | Agent_core.Hooks.Execution ->
+           (* [post_tool_use] fires for this same call and already wrote its
+              row. Writing again here would double every executed failure. *)
+           ()
+         | Agent_core.Hooks.Validation_before_execution ->
+           (* The handler never ran, so [post_tool_use] never fires and no
+              other site records the call. Until this row existed a rejected
+              call left only a counter: the keeper could not see the argument
+              object it got refused for, and repeated it. *)
+           let tctx : Keeper_tool_call_log_context.turn_context =
+             Keeper_tool_call_log_context.get_turn_context_record
+               ~cell:turn_ctx_cell ()
+           in
+           (try
+              Keeper_tool_call_log.log_call
+                ~keeper_name:meta.name
+                ~tool_name ~input ~output_text:error
+                ~success:false ~duration_ms
+                ~model:(current_keeper_model meta)
+                ?agent_name:tctx.agent_name
+                ?lane:tctx.lane
+                ~execution_id:(Ids.Execution_id.generate ())
+                ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+                ~turn:(Agent_core.Tool_contract.Invocation.turn invocation)
+                ?trace_id:tctx.trace_id ?session_id:tctx.session_id
+                ?generation:tctx.generation
+                ?keeper_turn_id:tctx.keeper_turn_id
+                ?task_id:tctx.task_id ?goal_ids:tctx.goal_ids
+                ~result_bytes:(String.length error)
+                ()
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string LifecycleCallbackFailures)
+                ~labels:
+                  [ (label_keeper, meta.name)
+                  ; (label_callback, callback_label_post_tool_log_write)
+                  ]
+                ();
+              Log.Keeper.warn ~keeper_name:meta.name
+                "tool=%s rejected-call log_call write failed: %s"
+                tool_name (Printexc.to_string exn)));
         Agent_core.Hooks.Continue
       | _event -> Agent_core.Hooks.Continue);
   }

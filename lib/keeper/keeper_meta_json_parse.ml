@@ -113,19 +113,113 @@ let parse_trace_history fields =
   | Some trace_id -> invalidf "trace_history contains invalid trace id %S" trace_id
 ;;
 
+let canonical_multimodal_policy_opt raw =
+  match multimodal_policy_of_string raw with
+  | Some policy when String.equal raw (multimodal_policy_to_string policy) ->
+    Some policy
+  | Some _ | None -> None
+;;
+
 let parse_multimodal_policy fields =
   let* raw = string_field fields "multimodal_policy" in
-  match multimodal_policy_of_string raw with
-  | Some policy when String.equal raw (multimodal_policy_to_string policy) -> Ok policy
-  | Some _ | None -> invalidf "multimodal_policy has non-canonical value %S" raw
+  match canonical_multimodal_policy_opt raw with
+  | Some policy -> Ok policy
+  | None -> invalidf "multimodal_policy has non-canonical value %S" raw
+;;
+
+let canonical_proactive_outcome_opt raw =
+  let outcome = proactive_cycle_outcome_of_string raw in
+  if String.equal raw (proactive_cycle_outcome_to_string outcome)
+  then Some outcome
+  else None
 ;;
 
 let parse_proactive_outcome fields =
   let* raw = string_field fields "last_proactive_outcome" in
-  let outcome = proactive_cycle_outcome_of_string raw in
-  if String.equal raw (proactive_cycle_outcome_to_string outcome)
-  then Ok outcome
-  else invalidf "last_proactive_outcome has non-canonical value %S" raw
+  match canonical_proactive_outcome_opt raw with
+  | Some outcome -> Ok outcome
+  | None -> invalidf "last_proactive_outcome has non-canonical value %S" raw
+;;
+
+type enum_field_repair =
+  { field : string
+  ; previous_value : string
+  ; repaired_value : string
+  }
+
+(* Issue #28844: repair target for one non-canonical enumerated value.
+   [None] means already canonical (no repair).  [Some repaired] is the
+   canonical spelling of the recognized value when the field's [of_string]
+   accepts [raw] — both parsers trim and lowercase, so a case/whitespace
+   misspelling keeps the operator's intent.  Only a value the parser does
+   not recognize at all falls back to the field's canonical default (the
+   value the create path writes for a keeper that never exercised the
+   corresponding machinery), which is the lossless reset. *)
+let proactive_outcome_repair_value raw =
+  match canonical_proactive_outcome_opt raw with
+  | Some _ -> None
+  | None ->
+    (* [proactive_cycle_outcome_of_string] is total: unrecognized garbage
+       lands on [Proactive_unknown], so a recognized misspelling is exactly
+       a parse to any other variant.  A misspelled ["unknown"] is
+       indistinguishable from garbage through the total parser and resets
+       with it. *)
+    (match proactive_cycle_outcome_of_string raw with
+     | Proactive_unknown ->
+       Some (proactive_cycle_outcome_to_string Proactive_never_started)
+     | outcome -> Some (proactive_cycle_outcome_to_string outcome))
+;;
+
+let multimodal_policy_repair_value raw =
+  match canonical_multimodal_policy_opt raw with
+  | Some _ -> None
+  | None ->
+    (match multimodal_policy_of_string raw with
+     | Some policy -> Some (multimodal_policy_to_string policy)
+     | None -> Some (multimodal_policy_to_string default_multimodal_policy))
+;;
+
+(* Persisted enumerated fields repairable in place.  A field belongs here
+   only when an unrecognized value has exactly one sane fallback; anything
+   else keeps failing loud. *)
+let repairable_enum_fields =
+  [ "last_proactive_outcome", proactive_outcome_repair_value
+  ; "multimodal_policy", multimodal_policy_repair_value
+  ]
+;;
+
+let repair_non_canonical_enum_fields json =
+  match json with
+  | `Assoc fields ->
+    let repairs =
+      List.filter_map
+        (fun (field, repair_value) ->
+           match List.assoc_opt field fields with
+           | Some (`String raw) ->
+             (match repair_value raw with
+              | Some repaired_value ->
+                Some { field; previous_value = raw; repaired_value }
+              | None -> None)
+           | Some _ | None -> None)
+        repairable_enum_fields
+    in
+    (match repairs with
+     | [] -> None
+     | repairs ->
+       let repaired_fields =
+         List.map
+           (fun (key, value) ->
+              match
+                List.find_opt
+                  (fun repair -> String.equal repair.field key)
+                  repairs
+              with
+              | Some repair -> key, `String repair.repaired_value
+              | None -> key, value)
+           fields
+       in
+       Some (`Assoc repaired_fields, repairs))
+  | _ -> None
 ;;
 
 let parse_last_blocker fields =

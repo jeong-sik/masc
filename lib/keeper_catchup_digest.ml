@@ -581,7 +581,9 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
   in
   let paused_now =
     let meta_path = Filename.concat keepers_dir (keeper_name ^ ".json") in
-    match Keeper_meta_store.read_meta_file_path meta_path with
+    match
+      Keeper_meta_store.read_meta_file_path ~ownership_root:base_path meta_path
+    with
     | Ok (Some m) -> m.Keeper_meta_contract.paused
     | Ok None -> false
     | Error e ->

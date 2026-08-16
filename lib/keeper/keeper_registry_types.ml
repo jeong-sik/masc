@@ -14,6 +14,12 @@ include Keeper_registry_types_failure
 
 exception Operator_interrupt
 
+(* One string for every [Operator_interrupt] terminal (ledger rows, queued
+   outcomes, tool responses) so the incident class stays greppable as one
+   thing. The classification itself is typed on the exception; this is only
+   the human-facing detail. *)
+let operator_interrupt_detail = "operator interrupted the turn"
+
 (* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
    [Keeper_registry_types_turn_phase] (500-line decomp). *)
 include Keeper_registry_types_turn_phase

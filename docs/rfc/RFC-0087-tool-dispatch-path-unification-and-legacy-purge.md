@@ -73,7 +73,6 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 
 - `dune build --root . @lib/check` green at every PR commit
 - 각 PR에 source-AST regression test (RFC-0085 PR-1 도입 `test_lib/ast_grep.ml`)
-- `ci/lint-no-direct-dispatch.sh` green at every PR
 
 ## §6 학습 (memory에 저장)
 

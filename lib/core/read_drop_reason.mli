@@ -53,12 +53,11 @@ type t =
           on the not-a-loss side rather than on the data-integrity
           counter. *)
   | Other of string
-  (** Escape hatch for one-off surfaces. PR introducing a new
+  (** Escape hatch for one-off surfaces. A PR introducing a new
           [Other] payload must justify why the value cannot be
-          promoted to a constructor. The lint
-          [scripts/lint/no-free-string-read-drop-reason.sh] (PR-2)
-          flags PRs that add [Other] for a value already used at
-          another site. *)
+          promoted to a constructor. Nothing enforces this yet; a
+          value that appears at a second site belongs in a
+          constructor. *)
 
 (** Stable wire format. The strings produced here are byte-for-byte
     compatible with the existing string constants in

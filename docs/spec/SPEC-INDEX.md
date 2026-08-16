@@ -82,7 +82,6 @@ graph TB
 
 | Document | Description | Related Spec |
 |----------|-------------|--------------|
-| `docs/ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md` | Dashboard operator control surface and review queue UX | `10-dashboard.md` |
 | `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core-integration.md` |
 | `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core-integration.md` |
 
@@ -124,12 +123,6 @@ graph TB
 - Invariant: `INV-WORKSPACE-001`
 - 외부 문서: `docs/<document-name>.md`
 
-### Supersession
+### SSOT
 
-이 spec suite가 최종 진실 원본(SSOT)이다.
-
-| 이전 문서 | 상태 |
-|----------|------|
-| `docs/SPEC.md` | Historical snapshot. 이 suite로 대체. |
-| `docs/MERGED-ARCHITECTURE-SSOT.md` | Layer map과 canonical paths는 `01-system-overview.md`로 이관. |
-| `docs/GLOSSARY.md` | `00-glossary.md`로 통합. |
+이 spec suite가 최종 진실 원본이다.

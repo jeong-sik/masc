@@ -291,7 +291,7 @@ jobs:
           # line 1206), so any code-bearing PR that does NOT set build=true
           # merges with a green "CI Gate" while the Build job (dune compile)
           # never ran. The prefix list below (bin/ lib/ test/ proto/ config/)
-          # missed build-graph dirs examples/ ppx/ ppx_tla/ test_lib/ tools/
+          # missed build-graph dirs ppx/ ppx_tla/ test_lib/ tools/
           # and the root dune file, so a PR touching only those compiled
           # nowhere yet reported success. Match any OCaml/dune source plus C
           # foreign stubs by suffix so new source dirs are covered without

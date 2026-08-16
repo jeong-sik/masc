@@ -28,7 +28,7 @@
      dune exec bin/keeper_canary_run.exe -- \
        --keeper NAME --run-id ID [--runtime LABEL] [--base PATH] \
        [--host HOST] [--port N] [--facts N] [--turn-interval SECONDS] \
-       [--out PATH] *)
+       [--turn-timeout SECONDS] [--out PATH] *)
 
 let default_facts = 9
 let default_turn_interval_s = 0.0
@@ -36,7 +36,7 @@ let default_turn_interval_s = 0.0
 let usage =
   "usage: keeper_canary_run --keeper NAME --run-id ID [--runtime LABEL] \
    [--base PATH] [--host HOST] [--port N] [--facts N] \
-   [--turn-interval SECONDS] [--out PATH]"
+   [--turn-interval SECONDS] [--turn-timeout SECONDS] [--out PATH]"
 
 type args = {
   keeper : string;
@@ -47,6 +47,7 @@ type args = {
   port : int option;
   facts : int;
   turn_interval_s : float;
+  turn_timeout_s : float option;
   out : string option;
 }
 
@@ -59,6 +60,7 @@ let parse_args argv =
   let port = ref None in
   let facts = ref default_facts in
   let turn_interval_s = ref default_turn_interval_s in
+  let turn_timeout_s = ref None in
   let out = ref None in
   let rec parse = function
     | [] -> Ok ()
@@ -99,6 +101,12 @@ let parse_args argv =
        | Some s -> Error (Printf.sprintf "--turn-interval must be >= 0, got %g" s)
        | None -> Error ("--turn-interval must be a number, got " ^ v))
     | [ "--turn-interval" ] -> Error "missing value for --turn-interval"
+    | "--turn-timeout" :: v :: rest ->
+      (match float_of_string_opt v with
+       | Some s when s > 0.0 -> turn_timeout_s := Some s; parse rest
+       | Some s -> Error (Printf.sprintf "--turn-timeout must be > 0, got %g" s)
+       | None -> Error ("--turn-timeout must be a number, got " ^ v))
+    | [ "--turn-timeout" ] -> Error "missing value for --turn-timeout"
     | "--out" :: v :: rest ->
       out := Some v;
       parse rest
@@ -121,6 +129,7 @@ let parse_args argv =
          ; port = !port
          ; facts = !facts
          ; turn_interval_s = !turn_interval_s
+         ; turn_timeout_s = !turn_timeout_s
          ; out = !out
          })
 
@@ -282,6 +291,7 @@ let run (args : args) : (Keeper_canary_evidence.run_evidence, string) result =
       Printf.eprintf "[keeper_canary_run] %s -> %s\n%!" turn_label message;
       match
         Keeper_canary_http.send_turn
+          ?timeout_sec:args.turn_timeout_s
           ~host
           ~port
           ~keeper_name:args.keeper

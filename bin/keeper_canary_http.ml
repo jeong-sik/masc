@@ -16,7 +16,10 @@ let default_agent_name = "keeper-canary-run"
 
 (* A turn's whole exchange (request send through provider reply) can run
    well past masc_tui_http.ml's 10s default — that default is sized for
-   dashboard reads, not a live generation turn. *)
+   dashboard reads, not a live generation turn. Callers override per run
+   via --turn-timeout: turn latency is a property of the runtime under
+   test (a local llama.cpp keeper with a long transcript measured ~110s
+   for a one-line ack on 2026-08-16), not of this client. *)
 let default_timeout_sec = 120.0
 
 let sanitize_header_value value =
@@ -56,8 +59,8 @@ let url_of ~host ~port ~path =
    Returns [Error detail] uniformly for connection failure, non-2xx status,
    and unparseable SSE — the caller does not need to distinguish those to
    decide "this turn did not produce a usable reply." *)
-let send_turn ~host ~port ~keeper_name ~request_id ~message () :
-  (string, string) result
+let send_turn ?(timeout_sec = default_timeout_sec) ~host ~port ~keeper_name
+    ~request_id ~message () : (string, string) result
   =
   let url = url_of ~host ~port ~path:"/api/v1/keepers/chat/stream" in
   let body =
@@ -71,7 +74,7 @@ let send_turn ~host ~port ~keeper_name ~request_id ~message () :
   match
     Masc_http_client.post_sync
       ?clock:(Eio_context.get_clock_opt ())
-      ~timeout_sec:default_timeout_sec
+      ~timeout_sec
       ~url
       ~headers:(json_headers ())
       ~body

@@ -80,3 +80,20 @@ auto-judge가 web_search 유예를 3회 reject (05:45:26 / 05:56:10 / ≈06:13).
 신 레인 저장 경로의 대체 근거: (a) CI `test_tool_misc_web_fetch` — `put_durable` 후 reader와 같은 `Tool_blob_store.fetch`로 sha 동일성 핀, (b) 구 레인 라이브 PASS(§1, 메커니즘 동일·백엔드만 상이), (c) 프로덕션 유기 트래픽 후속 관측 — 신 바이너리 기동(05:55:53Z) 이후 첫 오프로드가 `tool_blobs/` blob + `full_text_sha256` 마커로 남는지 확인 (구 레인 마지막 오프로드는 04:33:12Z).
 
 부산물: 발신 주체(운영자 대리 발신 vs keeper 자율 발화 vs auto-judge)가 UI에서 구분되지 않는 문제를 #28841로 분리.
+
+## 5. acceptance 1 신 레인 — 유기적 라이브 PASS (07:30Z, 프로덕션)
+
+§4에서 예고한 (c) 유기 트래픽 관측이 닫혔다. 프로덕션(:8935, base=`~/me/.masc`, 신 바이너리 05:55:53Z 기동)에서 keeper 유기 트래픽의 web-fetch 오프로드 2건:
+
+| fetched_at(Z) | sha256(전위) | bytes | source |
+|---|---|---|---|
+| 07:30:42 | `7a0bdcd1d753c925` | 8,137 | kofic.or.kr 박스오피스 |
+| 07:30:44 | `995b6c0107359ffe` | 15,748 | dategom.com 8월 개봉작 |
+
+판정 근거 3중:
+
+1. **신 레인 상륙**: 두 본문 모두 `tool_blobs/<aa>/<sha>`에 존재 — `keeper_artifact_read`가 읽는 바로 그 store.
+2. **구 레인 무생성**: `artifacts/web-fetch/`에 새 `.md` 없음 (index.jsonl만 2행 증가, 5행) — hard cut 유지.
+3. **무결성**: 두 blob 모두 `shasum -a 256` = 파일명, bytes = index 행 값.
+
+이로써 acceptance 1은 CI 테스트·구 레인 라이브·**신 레인 유기 라이브** 세 겹으로 닫혔고, §4의 "라이브 미측정"은 계측용 자극 한정으로 좁혀진다 — 유기 트래픽은 게이트와 무관하게 경로를 실증했다.

@@ -57,7 +57,7 @@ let with_workspace f =
   f config
 ;;
 
-let unrouted = Keeper_continuation_channel.Unrouted { reason = "test" }
+let unrouted = Keeper_continuation_channel.unrouted "test"
 
 (* Submit + approve one grant. Resolving an approval for a keeper with no
    live lane durably enqueues its [Hitl_resolved] wake, which is exactly the

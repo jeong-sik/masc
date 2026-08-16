@@ -281,7 +281,6 @@ excepted_ml_over_500="$(extract_json_int "$ml_line_cap_json" "excepted_ml_over_5
 lib_ml_over_500="$(extract_json_int "$ml_line_cap_json" "lib_ml_over_500")"
 bin_ml_over_500="$(extract_json_int "$ml_line_cap_json" "bin_ml_over_500")"
 test_ml_over_500="$(extract_json_int "$ml_line_cap_json" "test_ml_over_500")"
-examples_ml_over_500="$(extract_json_int "$ml_line_cap_json" "examples_ml_over_500")"
 ml_line_cap_status="$(extract_json_field "$ml_line_cap_json" baseline status)"
 ml_line_cap_message="$(extract_json_field "$ml_line_cap_json" baseline message)"
 ml_line_cap_changed_status="$(extract_json_field "$ml_line_cap_json" changed status)"
@@ -362,7 +361,7 @@ echo "Anti-fake: status=${anti_fake_label} good=${anti_fake_good} suspect=${anti
 echo "Unsafe patterns (lib):  failwith=${lib_failwith} list_hd=${lib_list_hd} list_tl=${lib_list_tl} option_get=${lib_option_get} obj_magic=${lib_obj_magic}"
 echo "Unsafe patterns (test): failwith=${test_failwith} list_hd=${test_list_hd} list_tl=${test_list_tl} option_get=${test_option_get} obj_magic=${test_obj_magic}"
 echo "Base policy: mli_open_base=${mli_open_base} ml_base_stdlib_shadow=${ml_base_stdlib_shadow} bin_ml_base_stdlib_shadow=${bin_ml_base_stdlib_shadow}"
-echo "ML line cap: manual=${manual_ml_over_500} excepted=${excepted_ml_over_500} lib=${lib_ml_over_500} bin=${bin_ml_over_500} test=${test_ml_over_500} examples=${examples_ml_over_500}"
+echo "ML line cap: manual=${manual_ml_over_500} excepted=${excepted_ml_over_500} lib=${lib_ml_over_500} bin=${bin_ml_over_500} test=${test_ml_over_500}"
 echo "ML line cap changed: ${ml_line_cap_changed_status} (${ml_line_cap_changed_message})"
 echo "ML line cap aggregate: ${ml_line_cap_status} (${ml_line_cap_message})"
 echo "Ratchet: ${ratchet_status} (${ratchet_message})"
@@ -399,7 +398,6 @@ json_payload="$(cat <<EOF
     "lib_ml_over_500": ${lib_ml_over_500},
     "bin_ml_over_500": ${bin_ml_over_500},
     "test_ml_over_500": ${test_ml_over_500},
-    "examples_ml_over_500": ${examples_ml_over_500},
     "mli_open_base": ${mli_open_base},
     "ml_base_stdlib_shadow": ${ml_base_stdlib_shadow},
     "bin_ml_base_stdlib_shadow": ${bin_ml_base_stdlib_shadow}
@@ -462,7 +460,6 @@ if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     echo "| lib | $lib_ml_over_500 | n/a |"
     echo "| bin | $bin_ml_over_500 | n/a |"
     echo "| test | $test_ml_over_500 | n/a |"
-    echo "| examples | $examples_ml_over_500 | n/a |"
     echo ""
     echo "- Anti-fake: \`$anti_fake_label\` (good=$anti_fake_good suspect=$anti_fake_suspect fake=$anti_fake_fake total=$anti_fake_total)"
     echo "- Base policy: mli_open_base=\`$mli_open_base\` ml_base_stdlib_shadow=\`$ml_base_stdlib_shadow\` bin_ml_base_stdlib_shadow=\`$bin_ml_base_stdlib_shadow\`"

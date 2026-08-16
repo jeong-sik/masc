@@ -408,7 +408,7 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 **Files requiring semantic validation:**
 - `lib/config/feature_flag_registry.ml` - env_name uniqueness
-- `lib/tool_catalog.ml` - public tool list
+- `lib/tool/tool_catalog.ml` - public tool list
 - `dune` files - module list completeness
 - Dashboard TypeScript - type consistency
 
@@ -431,11 +431,11 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 **규칙:** counter는 caller site에서만 emit. pure function은 transition/decision 만 반환.
 
-**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `keeper_state_machine.ml` no-savings warn). counter는 예외 없음.
+**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `lib/keeper_registry/keeper_state_machine.ml` no-savings warn). counter는 예외 없음.
 
 **PR 체크:**
 ```bash
-rg -nP 'inc_counter' lib/keeper_state/keeper_state_machine.ml lib/keeper/keeper_runtime_routing.ml
+rg -nP 'inc_counter' lib/keeper_registry/keeper_state_machine.ml
 # 기대: 0 매치
 ```
 
@@ -528,7 +528,7 @@ bash scripts/validate-keeper-fsm-graph.sh
 - [ ] Config 추가/변경했는가? → Section #9 체크
 - [ ] Partial function 사용했는가? → Section #12 체크
 - [ ] Registry-like file 수정했는가? → Section #13 체크
-- [ ] `keeper_state_machine` 또는 `keeper_runtime_routing` 수정했는가? → Section #14.1 체크
+- [ ] `keeper_state_machine` 수정했는가? → Section #14.1 체크
 - [ ] ADT variant 추가했는가? → Section #14.2 체크
 - [ ] `*.tla` 추가/수정했는가? → Section #14.3 체크
 - [ ] FSM edge counter 추가/제거했는가? → Section #14.4 체크

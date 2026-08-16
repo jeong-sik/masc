@@ -29,7 +29,7 @@
        --keeper NAME --run-id ID [--runtime LABEL] [--base PATH] \
        [--host HOST] [--port N] [--facts N] [--turn-interval SECONDS] \
        [--turn-timeout SECONDS] [--wall-clock-target SECONDS] \
-       [--judge-runtime ID] [--out PATH] *)
+       [--inject-restart-after N] [--judge-runtime ID] [--out PATH] *)
 
 let default_facts = 9
 let default_turn_interval_s = 0.0
@@ -38,7 +38,8 @@ let usage =
   "usage: keeper_canary_run --keeper NAME --run-id ID [--runtime LABEL] \
    [--base PATH] [--host HOST] [--port N] [--facts N] \
    [--turn-interval SECONDS] [--turn-timeout SECONDS] \
-   [--wall-clock-target SECONDS] [--judge-runtime ID] [--out PATH]"
+   [--wall-clock-target SECONDS] [--inject-restart-after N] \
+   [--judge-runtime ID] [--out PATH]"
 
 type args = {
   keeper : string;
@@ -51,6 +52,7 @@ type args = {
   turn_interval_s : float;
   turn_timeout_s : float option;
   wall_clock_target_s : float option;
+  inject_restart_after : int option;
   judge_runtime : string option;
   out : string option;
 }
@@ -66,6 +68,7 @@ let parse_args argv =
   let turn_interval_s = ref default_turn_interval_s in
   let turn_timeout_s = ref None in
   let wall_clock_target_s = ref None in
+  let inject_restart_after = ref None in
   let judge_runtime = ref None in
   let out = ref None in
   let rec parse = function
@@ -119,6 +122,12 @@ let parse_args argv =
        | Some s -> Error (Printf.sprintf "--wall-clock-target must be > 0, got %g" s)
        | None -> Error ("--wall-clock-target must be a number, got " ^ v))
     | [ "--wall-clock-target" ] -> Error "missing value for --wall-clock-target"
+    | "--inject-restart-after" :: v :: rest ->
+      (match int_of_string_opt v with
+       | Some n when n >= 1 -> inject_restart_after := Some n; parse rest
+       | Some n -> Error (Printf.sprintf "--inject-restart-after must be >= 1, got %d" n)
+       | None -> Error ("--inject-restart-after must be an integer, got " ^ v))
+    | [ "--inject-restart-after" ] -> Error "missing value for --inject-restart-after"
     | "--judge-runtime" :: v :: rest ->
       judge_runtime := Some v;
       parse rest
@@ -153,6 +162,7 @@ let parse_args argv =
          ; turn_interval_s = !turn_interval_s
          ; turn_timeout_s = !turn_timeout_s
          ; wall_clock_target_s = !wall_clock_target_s
+         ; inject_restart_after = !inject_restart_after
          ; judge_runtime = !judge_runtime
          ; out = !out
          })
@@ -270,6 +280,234 @@ let correlate_turn ~(messages : Masc.Keeper_chat_store.chat_message list)
          }
        , None ))
 
+(* --inject-restart-after: the four-step lifecycle sequence the 08-14
+   drain-restart canary established live (docs/evidence/
+   keeper-drain-restart-recall-live-2026-08-14T074735Z.json):
+   shutdown -> read owner nonce -> directive resume -> boot. /boot answers
+   409 while the owner is operator-paused, and the nonce comes from the
+   trajectory projection's "generation" — the one place the durable owner
+   nonce is exposed over HTTP. trace_id and generation surviving the whole
+   sequence is the continuation signal (reset would mint new ones). *)
+
+let trajectory_identity ~host ~port ~keeper_name :
+  (string * int, string) result
+  =
+  let ( let* ) = Result.bind in
+  let path = Printf.sprintf "/api/v1/keepers/%s/trajectory" keeper_name in
+  let* status, body = Keeper_canary_http.admin_get ~host ~port ~path () in
+  if status < 200 || status >= 300
+  then Error (Printf.sprintf "GET %s returned HTTP %d: %s" path status body)
+  else (
+    match Yojson.Safe.from_string body with
+    | exception Yojson.Json_error msg -> Error ("trajectory: invalid JSON: " ^ msg)
+    | `Assoc kvs ->
+      (match List.assoc_opt "trace_id" kvs, List.assoc_opt "generation" kvs with
+       | Some (`String trace_id), Some (`Int generation) -> Ok (trace_id, generation)
+       | _ -> Error "trajectory: missing trace_id/generation")
+    | _ -> Error "trajectory: not a JSON object")
+
+let lifecycle_post ~host ~port ~keeper_name ~action ~body () :
+  (int * string, string) result
+  =
+  Keeper_canary_http.admin_post
+    ~host
+    ~port
+    ~path:(Printf.sprintf "/api/v1/keepers/%s/%s" keeper_name action)
+    ~body
+    ()
+
+(* Shutdown answers 200 when the drain is *accepted*; the registry lane
+   passes through draining before it reaches stopped, and both /boot and
+   the resume directive 409 while it is still in flight (observed live
+   2026-08-16: directive answered "Resume_owner requires a paused registry
+   lane, actual phase=running" two HTTP round-trips after a 200 shutdown).
+   Poll the gate projection until the keeper leaves active before booting. *)
+let wait_until_stopped ~host ~port ~keeper_name :
+  (unit, string) result
+  =
+  let ( let* ) = Result.bind in
+  let poll_interval_s = 1.0 in
+  let max_polls = 60 in
+  let status_of body =
+    match Yojson.Safe.from_string body with
+    | exception Yojson.Json_error msg -> Error ("gate/keepers: invalid JSON: " ^ msg)
+    | `Assoc kvs ->
+      (match List.assoc_opt "keepers" kvs with
+       | Some (`List rows) ->
+         let row =
+           List.find_opt
+             (fun row ->
+               match row with
+               | `Assoc kvs ->
+                 (match List.assoc_opt "name" kvs with
+                  | Some (`String n) -> String.equal n keeper_name
+                  | _ -> false)
+               | _ -> false)
+             rows
+         in
+         (match row with
+          | Some (`Assoc kvs) ->
+            (match List.assoc_opt "status" kvs with
+             | Some (`String s) -> Ok s
+             | _ -> Error "gate/keepers row missing status")
+          | _ -> Error (Printf.sprintf "keeper %s not in gate/keepers" keeper_name))
+       | _ -> Error "gate/keepers missing keepers list"
+      )
+    | _ -> Error "gate/keepers: not a JSON object"
+  in
+  let rec poll n =
+    let* status, body = Keeper_canary_http.admin_get ~host ~port ~path:"/api/v1/gate/keepers" () in
+    if status < 200 || status >= 300
+    then Error (Printf.sprintf "gate/keepers returned HTTP %d" status)
+    else
+      let* keeper_status = status_of body in
+      if not (String.equal keeper_status "active")
+      then Ok ()
+      else if n >= max_polls
+      then
+        Error
+          (Printf.sprintf
+             "keeper still active %d s after shutdown accepted"
+             max_polls)
+      else (
+        Keeper_canary_http.sleep_s poll_interval_s;
+        poll (n + 1))
+  in
+  poll 0
+
+let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
+  (Keeper_canary_evidence.injection, string) result
+  =
+  let ( let* ) = Result.bind in
+  let started = Unix.gettimeofday () in
+  let started_at = iso8601_now () in
+  let* trace_id_before, generation_before =
+    trajectory_identity ~host ~port ~keeper_name
+  in
+  Printf.eprintf
+    "[keeper_canary_run] inject restart after turn %d (trace=%s gen=%d)\n%!"
+    after_turn
+    trace_id_before
+    generation_before;
+  let* status, body =
+    lifecycle_post ~host ~port ~keeper_name ~action:"shutdown" ~body:"{}" ()
+  in
+  let* () =
+    if status >= 200 && status < 300
+    then Ok ()
+    else Error (Printf.sprintf "shutdown returned HTTP %d: %s" status body)
+  in
+  let* () = wait_until_stopped ~host ~port ~keeper_name in
+  (* The nonce is re-read after shutdown: that is the durable owner state
+     the resume directive must name. *)
+  let* _trace_id_paused, owner_nonce =
+    trajectory_identity ~host ~port ~keeper_name
+  in
+  let boot () = lifecycle_post ~host ~port ~keeper_name ~action:"boot" ~body:"{}" () in
+  let* status, body = boot () in
+  let* () =
+    if status >= 200 && status < 300
+    then Ok ()
+    else if status = 409
+    then (
+      (* Operator-paused: commit Resume_owner through the directive
+         endpoint, then boot again. operator_operation_id is run-id
+         derived so an idempotent retry names the same operation. *)
+      let directive_body =
+        Yojson.Safe.to_string
+          (`Assoc
+            [ ("action", `String "resume")
+            ; ("owner_nonce", `Int owner_nonce)
+            ; ( "operator_operation_id"
+              , `String (Printf.sprintf "canary-restart-%s" run_id) )
+            ])
+      in
+      let* status, body =
+        lifecycle_post ~host ~port ~keeper_name ~action:"directive" ~body:directive_body ()
+      in
+      let* () =
+        if status >= 200 && status < 300
+        then Ok ()
+        else Error (Printf.sprintf "directive resume returned HTTP %d: %s" status body)
+      in
+      let* status, body = boot () in
+      if status >= 200 && status < 300
+      then Ok ()
+      else Error (Printf.sprintf "boot after resume returned HTTP %d: %s" status body))
+    else Error (Printf.sprintf "boot returned HTTP %d: %s" status body)
+  in
+  let* trace_id_after, generation_after =
+    trajectory_identity ~host ~port ~keeper_name
+  in
+  let injection =
+    { Keeper_canary_evidence.injection_kind = Keeper_canary_evidence.Restart
+    ; after_turn
+    ; started_at
+    ; duration_s = Unix.gettimeofday () -. started
+    ; trace_id_before
+    ; trace_id_after
+    ; generation_before
+    ; generation_after
+    }
+  in
+  Printf.eprintf
+    "[keeper_canary_run] restart done in %.1fs continuation=%b (trace=%s gen=%d)\n%!"
+    injection.duration_s
+    (Keeper_canary_evidence.injection_is_continuation injection)
+    trace_id_after
+    generation_after;
+  Ok injection
+
+(* A restart mid-run only measures continuity if the keeper cannot slip
+   unattended turns into the transcript while the harness is not looking:
+   proactive keepalive turns after boot would add facts the plan never
+   sent (observed live 2026-08-14, setup_anomaly in the drain-restart
+   evidence). Fail loud before turn 1 instead of polluting the ledger. *)
+let require_proactive_disabled ~host ~port ~keeper_name :
+  (unit, string) result
+  =
+  let ( let* ) = Result.bind in
+  let* status, body = Keeper_canary_http.admin_get ~host ~port ~path:"/api/v1/gate/keepers" () in
+  if status < 200 || status >= 300
+  then Error (Printf.sprintf "gate/keepers returned HTTP %d" status)
+  else (
+    match Yojson.Safe.from_string body with
+    | exception Yojson.Json_error msg -> Error ("gate/keepers: invalid JSON: " ^ msg)
+    | json ->
+      let keepers =
+        match json with
+        | `Assoc kvs ->
+          (match List.assoc_opt "keepers" kvs with
+           | Some (`List rows) -> rows
+           | _ -> [])
+        | _ -> []
+      in
+      let row =
+        List.find_opt
+          (fun row ->
+            match row with
+            | `Assoc kvs ->
+              (match List.assoc_opt "name" kvs with
+               | Some (`String n) -> String.equal n keeper_name
+               | _ -> false)
+            | _ -> false)
+          keepers
+      in
+      (match row with
+       | None -> Error (Printf.sprintf "keeper %s not in gate/keepers" keeper_name)
+       | Some (`Assoc kvs) ->
+         (match List.assoc_opt "proactive_enabled" kvs with
+          | Some (`Bool false) -> Ok ()
+          | Some (`Bool true) ->
+            Error
+              (Printf.sprintf
+                 "keeper %s has proactive_enabled=true; unattended keepalive \
+                  turns after the injected boot would pollute the fact \
+                  ledger — disable proactive on this keeper first"
+                 keeper_name)
+          | _ -> Error "gate/keepers row missing proactive_enabled")
+       | Some _ -> Error "gate/keepers row is not an object"))
+
 type judge_fn =
   facts:Keeper_canary_facts.fact list ->
   recall_reply:string ->
@@ -363,6 +601,39 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
        turn) is Keeper_canary_facts.plan's job, not inline bookkeeping here
        — see that module for the (unit-tested) construction. *)
     let plan = Keeper_canary_facts.plan ~facts in
+    let* () =
+      match args.inject_restart_after with
+      | None -> Ok ()
+      | Some n ->
+        if n >= List.length plan
+        then
+          Error
+            (Printf.sprintf
+               "--inject-restart-after %d is at or past the recall turn (plan \
+                has %d turns); the restart must land between turns"
+               n
+               (List.length plan))
+        else require_proactive_disabled ~host ~port ~keeper_name:args.keeper
+    in
+    let injections = ref [] in
+    let inject_between ~completed_index =
+      match args.inject_restart_after with
+      | Some n when n = completed_index ->
+        (match
+           inject_restart
+             ~host
+             ~port
+             ~keeper_name:args.keeper
+             ~run_id:args.run_id
+             ~after_turn:n
+         with
+         | Ok injection ->
+           injections := injection :: !injections;
+           Ok ()
+         | Error detail ->
+           Error (Printf.sprintf "restart injection after turn %d failed: %s" n detail))
+      | Some _ | None -> Ok ()
+    in
     let rec send_all acc = function
       | [] -> Ok (List.rev acc)
       | (entry : Keeper_canary_facts.turn_plan_entry) :: rest ->
@@ -376,6 +647,7 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
          | Error detail ->
            Error (Printf.sprintf "turn %d (%s) failed: %s" entry.index kind_label detail)
          | Ok (request_id, sent_at, round_trip_s, reply_text) ->
+           let* () = inject_between ~completed_index:entry.index in
            (* No sleep after the last turn (the recall) — there is no next
               turn for it to space out from. *)
            if rest <> [] then sleep_between_turns ();
@@ -438,6 +710,7 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
       ; timing
       ; deterministic_signal
       ; judgment
+      ; injections = List.rev !injections
       ; notes = capped_note @ correlation_notes @ judge_notes
       })
 

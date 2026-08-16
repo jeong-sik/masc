@@ -50,6 +50,7 @@ let sample_evidence : Keeper_canary_evidence.run_evidence =
   ; timing = { min_s = 1.0; median_s = 1.25; max_s = 1.5 }
   ; deterministic_signal = sample_score
   ; judgment = None
+  ; injections = []
   ; notes = []
   }
 
@@ -87,6 +88,7 @@ let test_top_level_keys_are_present () =
     ; "timing"
     ; "deterministic_signal"
     ; "judgment"
+    ; "injections"
     ; "notes"
     ]
   in
@@ -117,6 +119,50 @@ let test_wall_clock_target_serializes_when_present () =
   with
   | `Null -> ()
   | _ -> Alcotest.fail "expected transport.wall_clock_target_s to be null when unset"
+
+let sample_injection : Keeper_canary_evidence.injection =
+  { injection_kind = Keeper_canary_evidence.Restart
+  ; after_turn = 5
+  ; started_at = "2026-08-16T00:00:03Z"
+  ; duration_s = 4.5
+  ; trace_id_before = "trace-abc"
+  ; trace_id_after = "trace-abc"
+  ; generation_before = 1
+  ; generation_after = 1
+  }
+
+let test_injection_serializes_with_continuation () =
+  let json =
+    Keeper_canary_evidence.to_yojson
+      { sample_evidence with injections = [ sample_injection ] }
+  in
+  (match json |> member "injections" with
+   | `List [ `Assoc kvs ] ->
+     Alcotest.(check string)
+       "kind" "restart"
+       (match List.assoc "kind" kvs with `String s -> s | _ -> "?");
+     Alcotest.(check bool)
+       "continuation derived true" true
+       (match List.assoc "continuation" kvs with `Bool b -> b | _ -> false)
+   | _ -> Alcotest.fail "expected one injection object");
+  (* Identity loss must read as continuation=false. *)
+  let broken =
+    { sample_injection with trace_id_after = "trace-xyz" }
+  in
+  Alcotest.(check bool)
+    "changed trace_id is not a continuation"
+    false
+    (Keeper_canary_evidence.injection_is_continuation broken);
+  let bumped = { sample_injection with generation_after = 2 } in
+  Alcotest.(check bool)
+    "bumped generation is not a continuation"
+    false
+    (Keeper_canary_evidence.injection_is_continuation bumped)
+
+let test_injections_empty_by_default () =
+  match Keeper_canary_evidence.to_yojson sample_evidence |> member "injections" with
+  | `List [] -> ()
+  | _ -> Alcotest.fail "expected empty injections list"
 
 let test_judgment_is_null_without_a_judge () =
   let json = Keeper_canary_evidence.to_yojson sample_evidence in
@@ -219,6 +265,14 @@ let () =
             "wall clock target serializes"
             `Quick
             test_wall_clock_target_serializes_when_present
+        ; Alcotest.test_case
+            "injection serializes with continuation"
+            `Quick
+            test_injection_serializes_with_continuation
+        ; Alcotest.test_case
+            "injections empty by default"
+            `Quick
+            test_injections_empty_by_default
         ; Alcotest.test_case
             "judgment is null without a judge"
             `Quick

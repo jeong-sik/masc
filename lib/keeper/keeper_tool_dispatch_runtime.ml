@@ -67,8 +67,12 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
       ; "runtime_handler", runtime_handler
       ]
     ();
+  (* The invariant break is a Runtime_failure by construction; deriving the
+     level from that same class keeps the log honest if the classification
+     ever changes (#28895 review). *)
+  let failure_class = Tool_result.Runtime_failure in
   Log.Keeper.emit
-    Log.Error
+    (Tool_result.log_level_of_failure_class failure_class)
     ~keeper_name
     ~category:Log.Tool
     ~details:
@@ -81,7 +85,7 @@ let descriptor_route_invariant_error ~keeper_name ~tool_name descriptor =
          ])
     "keeper descriptor route resolved but its typed runtime handler returned no result";
   Keeper_tool_execution.failure_data
-    ~class_:Tool_result.Runtime_failure
+    ~class_:failure_class
     ~message:(Yojson.Safe.to_string payload)
     payload
 ;;

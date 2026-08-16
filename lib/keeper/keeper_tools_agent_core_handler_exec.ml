@@ -158,7 +158,12 @@ let execute_with_observers
         Keeper_metrics.(to_string ToolsAgent_coreFailures)
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
-      Log.Keeper.error "tool %s returned error result: %s" name detail;
+      (* SSOT: the failure class owns its log level — a policy/workflow/
+         transient/operator-cancelled rejection is an expected outcome on
+         this path, not an Error-level event (#28895 review). *)
+      Log.Keeper.emit
+        (Tool_result.log_level_of_failure_class failure_class)
+        (Printf.sprintf "tool %s returned error result: %s" name detail);
       let projected_error = Tool_result.message dispatch_result in
       append_tool_exec_decision_log
         ~config

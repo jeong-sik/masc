@@ -112,6 +112,7 @@ normal_targets=(
   @test/runtest-test_keeper_canary_evidence
   @test/runtest-test_keeper_canary_judge
   @test/runtest-test_keeper_canary_failover
+  @test/runtest-test_keeper_meta_invalid_recovery
   @test/runtest-test_slack_user_directory
   @test/runtest-test_sidecar_lifecycle_routes
   @test/runtest-test_cancel_safe

@@ -28,6 +28,15 @@ export type KeeperStreamUsage = {
   cost_usd?: number
 }
 
+// Cumulative mid-stream counters: only the fields the delta actually
+// reported appear, and the producer never emits a total or a cost here.
+export type KeeperStreamDeltaUsage = {
+  input_tokens?: number
+  output_tokens?: number
+  cache_creation_input_tokens?: number
+  cache_read_input_tokens?: number
+}
+
 export type KeeperStreamProtocolErrorKind =
   | 'tool_start_duplicate_index'
   | 'tool_start_missing_identity'
@@ -77,7 +86,7 @@ type KeeperChatCustomEvent =
   | {
       type: 'CUSTOM'
       name: 'KEEPER_STREAM_MESSAGE_DELTA'
-      value: { stop_reason?: string; usage?: KeeperStreamUsage }
+      value: { stop_reason?: string; usage?: KeeperStreamDeltaUsage }
     }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_MESSAGE_STOP'; value: null }
   | { type: 'CUSTOM'; name: 'KEEPER_STREAM_PING'; value: null }

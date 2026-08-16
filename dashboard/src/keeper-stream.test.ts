@@ -132,6 +132,41 @@ describe('Keeper operation stream projection', () => {
     )
   })
 
+  it('overlays partial delta usage onto the start snapshot instead of replacing it', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_START',
+      value: {
+        provider_message_id: 'msg-1',
+        model: 'claude-sonnet-5',
+        usage: {
+          input_tokens: 60_882,
+          output_tokens: 1,
+          total_tokens: 60_883,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 50_000,
+        },
+      },
+    })
+    // The classic wire shape: the final delta reports only the cumulative
+    // output counter. It must not erase the start snapshot's counters.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_DELTA',
+      value: { stop_reason: 'end_turn', usage: { output_tokens: 510 } },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.details?.usage).toMatchObject({
+      inputTokens: 60_882,
+      outputTokens: 510,
+      totalTokens: 61_392,
+      cacheCreationInputTokens: 200,
+      cacheReadInputTokens: 50_000,
+    })
+  })
+
   it('routes server-pushed events by exact operation id', () => {
     for (const operationId of ['kmsg-operation-1', 'kmsg-operation-2']) {
       appendThreadEntry('sangsu', {

@@ -266,6 +266,39 @@ describe('SSEMessageSchema', () => {
     expect(r.success).toBe(true)
   })
 
+  it('accepts a message_delta usage that reports only some cumulative counters', () => {
+    const event = (usage: unknown) => ({
+      type: 'keeper_chat_operation_event',
+      name: 'sangsu',
+      operation_id: 'kmsg-operation-1',
+      ag_ui_event: {
+        type: 'CUSTOM',
+        threadId: 'keeper-consumer:sangsu',
+        runId: 'run-1',
+        name: 'KEEPER_STREAM_MESSAGE_DELTA',
+        value: { stop_reason: 'end_turn', usage },
+        timestamp: 1_712_000_000,
+      },
+    })
+    // The classic wire shape: the final delta reports only the cumulative
+    // output counter. The producer omits unreported fields entirely.
+    expect(SSEMessageSchema.safeParse(event({ output_tokens: 42 })).success).toBe(true)
+    // The server-tool shape: every counter repeated as a cumulative total —
+    // still no total_tokens or cost on a delta.
+    expect(
+      SSEMessageSchema.safeParse(
+        event({
+          input_tokens: 60_882,
+          output_tokens: 510,
+          cache_creation_input_tokens: 200,
+          cache_read_input_tokens: 50_000,
+        }),
+      ).success,
+    ).toBe(true)
+    expect(SSEMessageSchema.safeParse(event({ output_tokens: 4.2 })).success).toBe(false)
+    expect(SSEMessageSchema.safeParse(event({ total_tokens: 9 })).success).toBe(false)
+  })
+
   it('accepts an operator-visible projection error for an operation', () => {
     const r = SSEMessageSchema.safeParse({
       type: 'keeper_chat_operation_event',

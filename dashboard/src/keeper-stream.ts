@@ -353,6 +353,33 @@ function normalizeStreamUsage(raw: unknown): NonNullable<KeeperConversationDetai
   return usage
 }
 
+// Delta usage carries cumulative counters for only the fields the wire
+// reported, and normalizeStreamUsage null-fills the base trio — so replacing
+// the whole usage object would erase the start snapshot with nulls. Overlay
+// the reported (non-null) counters onto what is already known, mirroring the
+// producer-side replace-fold, and rederive the total from its parts.
+function mergeStreamUsage(
+  previous: KeeperConversationDetails['usage'],
+  next: NonNullable<KeeperConversationDetails['usage']>,
+): NonNullable<KeeperConversationDetails['usage']> {
+  const merged: NonNullable<KeeperConversationDetails['usage']> = { ...(previous ?? {}) }
+  for (const key of [
+    'inputTokens',
+    'outputTokens',
+    'totalTokens',
+    'cacheCreationInputTokens',
+    'cacheReadInputTokens',
+    'costUsd',
+  ] as const) {
+    const value = next[key]
+    if (value !== null && value !== undefined) merged[key] = value
+  }
+  if (merged.inputTokens != null && merged.outputTokens != null) {
+    merged.totalTokens = merged.inputTokens + merged.outputTokens
+  }
+  return merged
+}
+
 function mergeAssistantStreamDetails(
   keeperName: string,
   assistantEntryId: string,
@@ -363,7 +390,9 @@ function mergeAssistantStreamDetails(
     details: {
       ...(entry.details ?? {}),
       ...patch,
-      usage: patch.usage ?? entry.details?.usage ?? null,
+      usage: patch.usage
+        ? mergeStreamUsage(entry.details?.usage, patch.usage)
+        : entry.details?.usage ?? null,
       rawPayload: entry.details?.rawPayload,
     },
   }))

@@ -439,7 +439,18 @@ val stop_reason_to_string : stop_reason -> string
 val stop_reason_to_metric_label : stop_reason -> string
 
 (** API usage from a single provider response. Accumulated multi-call usage
-    belongs in agent-level usage stats. *)
+    belongs in agent-level usage stats.
+
+    [input_tokens] is the canonical inclusive prompt total: it counts every
+    prompt token the provider processed for the request, including the
+    [cache_creation_input_tokens] and [cache_read_input_tokens] components.
+    Consumers subtract the cache components to price the regular remainder
+    (see [Pricing.estimate_cost]) and divide by the context window for
+    occupancy. Wire formats that already report an inclusive prompt total
+    (OpenAI [prompt_tokens], Gemini [promptTokenCount], GLM) map verbatim;
+    the Anthropic Messages wire reports exclusive input and is normalized at
+    its parse boundary ([Backend_anthropic.usage_of_wire_counts]). A parser
+    that copies an exclusive wire count into [input_tokens] is a defect. *)
 type api_usage =
   { input_tokens : int
   ; output_tokens : int

@@ -26,7 +26,9 @@ let test_parse_usage_with_cache_tokens () =
   let resp = Agent_core.Llm_provider.Backend_anthropic.parse_response json in
   match resp.usage with
   | Some u ->
-    Alcotest.(check int) "input_tokens" 100 u.input_tokens;
+    (* Wire input 100 is exclusive of the cache components; the canonical
+       api_usage carries the inclusive prompt total 100+2000+1500. *)
+    Alcotest.(check int) "input_tokens" 3600 u.input_tokens;
     Alcotest.(check int) "output_tokens" 50 u.output_tokens;
     Alcotest.(check int) "cache_creation" 2000 u.cache_creation_input_tokens;
     Alcotest.(check int) "cache_read" 1500 u.cache_read_input_tokens

@@ -19,6 +19,22 @@ val project_history
 
 val parse_response : Yojson.Safe.t -> Types.api_response
 
+(** Build the canonical {!Types.api_usage} from Anthropic Messages wire
+    counts. The wire's [input_tokens] is exclusive — it counts only tokens
+    after the last cache breakpoint (official contract: total input =
+    cache_read + cache_creation + input_tokens) — while
+    {!Types.api_usage.input_tokens} is the inclusive prompt total, so this
+    constructor adds the cache components in. Every parse of this wire shape
+    (sync response, SSE [message_start]) must build through it; bypassing it
+    reintroduces the exclusive/inclusive mix that under-prices regular input
+    and under-reports context occupancy. *)
+val usage_of_wire_counts
+  :  input_tokens:int
+  -> output_tokens:int
+  -> cache_creation_input_tokens:int
+  -> cache_read_input_tokens:int
+  -> Types.api_usage
+
 type request_artifact
 
 val request_payload : request_artifact -> string

@@ -563,7 +563,9 @@ let test_parse_response_with_cache_tokens () =
   let resp = Llm_provider.Backend_anthropic.parse_response json in
   match resp.usage with
   | Some u ->
-    check int "input" 50 u.Types.input_tokens;
+    (* The wire's 50 is exclusive (tokens after the last cache breakpoint);
+       api_usage.input_tokens is the inclusive prompt total 50+1000+800. *)
+    check int "input" 1850 u.Types.input_tokens;
     check int "output" 25 u.output_tokens;
     check int "cache_creation" 1000 u.cache_creation_input_tokens;
     check int "cache_read" 800 u.cache_read_input_tokens
@@ -586,6 +588,21 @@ let test_parse_sse_message_start () =
      | Some u -> check int "input" 10 u.Types.input_tokens
      | None -> fail "expected usage")
   | _ -> fail "expected MessageStart"
+;;
+
+let test_parse_sse_message_start_cache_tokens () =
+  let data =
+    {|{"message":{"id":"msg_2","model":"claude-sonnet-4-6","usage":{"input_tokens":50,"cache_creation_input_tokens":1000,"cache_read_input_tokens":800}}}|}
+  in
+  match Llm_provider.Streaming.parse_sse_event (Some "message_start") data with
+  | Some (Types.MessageStart { usage = Some u; _ }) ->
+    (* Same inclusive normalization as the sync parse: wire input is
+       exclusive, api_usage.input_tokens carries the prompt total. *)
+    check int "input" 1850 u.Types.input_tokens;
+    check int "output pinned to the delta event" 0 u.output_tokens;
+    check int "cache_creation" 1000 u.cache_creation_input_tokens;
+    check int "cache_read" 800 u.cache_read_input_tokens
+  | _ -> fail "expected MessageStart with usage"
 ;;
 
 let test_parse_sse_content_block_delta_text () =
@@ -901,6 +918,10 @@ let () =
         ] )
     ; ( "parse_sse_event"
       , [ test_case "message_start" `Quick test_parse_sse_message_start
+        ; test_case
+            "message_start cache tokens"
+            `Quick
+            test_parse_sse_message_start_cache_tokens
         ; test_case
             "content_block_delta text"
             `Quick

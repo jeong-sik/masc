@@ -340,8 +340,14 @@ let test_result_usage_is_carried () =
       (match turn.usage with
        | None -> fail "usage block was dropped"
        | Some usage ->
+         (* turn_usage keeps the CLI's exclusive wire counts as-is; the
+            inclusive normalization happens in the keeper's api_usage
+            mapping. The frame's cache_read 42 must survive the parse and
+            its absent cache_creation reads as 0. *)
          check int "input tokens" 123456 usage.input_tokens;
-         check int "output tokens" 789 usage.output_tokens))
+         check int "output tokens" 789 usage.output_tokens;
+         check int "cache read carried" 42 usage.cache_read_input_tokens;
+         check int "absent cache creation is 0" 0 usage.cache_creation_input_tokens))
 ;;
 
 (* A usage block the CLI shapes differently must not fail the turn: the text is

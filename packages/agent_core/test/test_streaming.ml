@@ -294,7 +294,8 @@ let test_parse_message_start_with_cache () =
     Alcotest.(check string) "id" "msg_cache" id;
     (match usage with
      | Some u ->
-       Alcotest.(check int) "input_tokens" 100 u.input_tokens;
+       (* Inclusive prompt total: exclusive wire 100 + creation 50 + read 30. *)
+       Alcotest.(check int) "input_tokens" 180 u.input_tokens;
        Alcotest.(check int) "cache_creation" 50 u.cache_creation_input_tokens;
        Alcotest.(check int) "cache_read" 30 u.cache_read_input_tokens
      | None -> Alcotest.fail "expected Some usage")

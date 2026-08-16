@@ -514,6 +514,44 @@ describe('ChatTranscript', () => {
     expect(surfaceLink?.getAttribute('title')).toContain('thread_id=thread-1')
   })
 
+  it('names the agent surface without claiming the row is the viewer own', () => {
+    // A keeper broadcast projected into another keeper's transcript carries the
+    // agent surface, so the badge must not assert authorship — the speaker
+    // label is what identifies who spoke.
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'projected-1',
+            role: 'user',
+            source: 'direct_user',
+            speakerName: 'keeper-code-reviewer-agent',
+            speakerAuthority: 'external',
+            text: 'fleet announcement',
+            rawText: 'fleet announcement',
+            surface: { kind: 'agent' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="projected-1"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('agent')
+    expect(bubble.textContent).toContain('keeper-code-reviewer-agent')
+
+    // The badge is a span (ChatMetaChip renders an anchor only when url is a
+    // real link), so pin it by the chip attribute rather than bubble text:
+    // this fails when the badge disappears and cannot be perturbed by message
+    // content that happens to contain the same words.
+    const badge = bubble.querySelector('[title="surface=agent"]')
+    expect(badge?.getAttribute('data-chat-meta-chip')).toBe('Agent')
+  })
+
   it('renders connector speaker and route context for gate history rows', () => {
     render(
       html`<${ChatTranscript}

@@ -153,6 +153,7 @@ type run_evidence = {
   deterministic_signal : Keeper_canary_facts.score;
   judgment : Keeper_canary_judge.judgment option;
   injections : injection list;
+  serving : Keeper_canary_serving.check option;
   notes : string list;
 }
 
@@ -249,6 +250,10 @@ let to_yojson (e : run_evidence) =
         | Some j -> Keeper_canary_judge.judgment_to_yojson j
         | None -> `Null )
     ; ("injections", `List (List.map injection_to_yojson e.injections))
+    ; ( "serving"
+      , match e.serving with
+        | None -> `Null
+        | Some c -> Keeper_canary_serving.to_yojson c )
     ; ("notes", `List (List.map (fun n -> `String n) e.notes))
     ]
 

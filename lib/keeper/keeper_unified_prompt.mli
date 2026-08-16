@@ -67,10 +67,13 @@ val format_current_task_observation
 val effective_instructions :
   meta:Keeper_meta_contract.keeper_meta ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  ?channel:Keeper_world_observation.turn_channel ->
   unit ->
   string
 (** Resolve the single instructions value used by every system-prompt
-    entrypoint and its dashboard projection. *)
+    entrypoint and its dashboard projection. When [channel] is
+    [Scheduled_autonomous] and [meta.autonomous_instructions] is set and
+    non-empty, returns autonomous_instructions instead of the default. *)
 
 val owned_executing_goals_without_tasks :
   config:Workspace.config ->
@@ -116,6 +119,7 @@ val build_system_prompt :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
+  ?channel:Keeper_world_observation.turn_channel ->
   ?active_goal_summaries:(string * string) list ->
   unit ->
   string

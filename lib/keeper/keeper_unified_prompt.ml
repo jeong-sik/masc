@@ -744,15 +744,28 @@ let autonomous_trigger_lines
   | _ -> []
 
 let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
-    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option) ()
+    ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ?(channel : Keeper_world_observation.turn_channel option)
+    ()
   =
   (* Total deterministic resolution between two known instruction sources
      (profile default else meta), not a permissive unknown-input default;
      pre-existing pattern, was the 4th tuple element before RFC-0282. *)
   (* DET-OK: total default between two known sources (RFC-0282). *)
-  match profile_defaults with
-  | Some d -> Option.value d.instructions ~default:meta.instructions
-  | None -> meta.instructions
+  let base =
+    match profile_defaults with
+    | Some d -> Option.value d.instructions ~default:meta.instructions
+    | None -> meta.instructions
+  in
+  (* Channel-aware substitution: when the turn is scheduled-autonomous and
+     the keeper has set autonomous_instructions, use that instead of the
+     default instructions. When absent or empty, fall back to [base]. *)
+  match channel with
+  | Some Keeper_world_observation.Scheduled_autonomous -> (
+      match meta.autonomous_instructions with
+      | Some s when String.trim s <> "" -> s
+      | _ -> base)
+  | _ -> base
 ;;
 
 (* Titles for the goals the world observation already narrowed to the ones a
@@ -851,10 +864,11 @@ let unowned_executing_goals_without_tasks ~(config : Workspace.config) =
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
+    ?(channel : Keeper_world_observation.turn_channel option)
     ?(active_goal_summaries : (string * string) list option)
     ()
   =
-  let instructions = effective_instructions ~meta ?profile_defaults () in
+  let instructions = effective_instructions ~meta ?profile_defaults ?channel () in
   let active_goals =
     Option.value
       ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
@@ -927,6 +941,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       ~meta
       ~config
       ?profile_defaults
+      ?channel:(Option.map (fun (d : Keeper_world_observation.keeper_cycle_decision) -> d.channel) turn_decision)
       ?active_goal_summaries
       ()
   in

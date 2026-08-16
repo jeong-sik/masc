@@ -703,15 +703,10 @@ let reaped_pid () =
 
 let now_iso () = Masc_domain.iso8601_of_unix_seconds (Unix.time ())
 
-let observed_state_of_record ~updated_at ~pid =
+let observed_state_of_status_file contents =
   with_status_path_env (fun () ->
     with_temp_dir "sidecar-liveness" (fun base_path ->
-      write_file
-        (Routes.status_file ~base_path "discord")
-        (Printf.sprintf
-           {|{"connected":true,"pid":%d,"updated_at":"%s"}|}
-           pid
-           updated_at);
+      write_file (Routes.status_file ~base_path "discord") contents;
       (match
          Routes.write_desired_record
            ~base_path
@@ -725,6 +720,11 @@ let observed_state_of_record ~updated_at ~pid =
       |> Yojson.Safe.Util.member "sidecar_lifecycle"
       |> Yojson.Safe.Util.member "observed_state"
       |> Yojson.Safe.Util.to_string))
+;;
+
+let observed_state_of_record ~updated_at ~pid =
+  observed_state_of_status_file
+    (Printf.sprintf {|{"connected":true,"pid":%d,"updated_at":"%s"}|} pid updated_at)
 ;;
 
 let test_stopped_sidecar_parting_record_is_not_available () =
@@ -771,6 +771,18 @@ let test_unreadable_heartbeat_is_not_observed_available () =
     "a record with no readable heartbeat cannot claim liveness"
     "unavailable"
     (observed_state_of_record ~updated_at:"not-a-timestamp" ~pid:(Unix.getpid ()))
+;;
+
+let test_unparseable_status_file_is_not_observed_available () =
+  (* A status file the server cannot parse still reports [available: true]
+     with [status: null], because availability only means the file was found.
+     Liveness reads the record, and there is no record here — a half-written
+     or corrupt file must not be mistaken for a running sidecar. *)
+  check
+    string
+    "a corrupt status file is not a running sidecar"
+    "unavailable"
+    (observed_state_of_status_file {|{"connected": true, "pid":|})
 ;;
 
 let test_status_json_exposes_dashboard_provenance () =
@@ -1308,6 +1320,10 @@ let () =
             "unreadable heartbeat is not observed available"
             `Quick
             test_unreadable_heartbeat_is_not_observed_available
+        ; test_case
+            "corrupt status file is not observed available"
+            `Quick
+            test_unparseable_status_file_is_not_observed_available
         ] )
     ; ( "config_write_helpers"
       , [ test_case "escape: quotes + backslash" `Quick test_escape_quotes_and_backslash

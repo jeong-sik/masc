@@ -79,13 +79,19 @@ let owner_ok = function
   | Error error -> fail (Owner.error_to_string error)
 ;;
 
+let noop_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~execution:_ =
+  ()
+;;
+
 let start_owner_with_executor_ready
+      ?(on_execution_settled = noop_execution_settled)
       ~operation_ready
       ~sw
       ~store
       ~operation_executor
       ~keeper_name
       ~initial_meta
+      ()
   =
   let path = Filename.temp_file "keeper-owner-operations-" ".sqlite3" in
   Unix.unlink path;
@@ -98,21 +104,32 @@ let start_owner_with_executor_ready
     ~now:(fun () -> 42.0)
     ~operation_runner:
       (Option.map
-         (fun execute -> Owner.{ ready = operation_ready; execute })
+         (fun execute ->
+            Owner.{ ready = operation_ready; execute; on_execution_settled })
          operation_executor)
     ~on_turn_slot_released:None
     ~keeper_name
     ~initial_meta
 ;;
 
-let start_owner_with_executor ~sw ~store ~operation_executor ~keeper_name ~initial_meta =
+let start_owner_with_executor
+      ?on_execution_settled
+      ~sw
+      ~store
+      ~operation_executor
+      ~keeper_name
+      ~initial_meta
+      ()
+  =
   start_owner_with_executor_ready
+    ?on_execution_settled
     ~operation_ready:(fun ~keeper_name:_ -> true)
     ~sw
     ~store
     ~operation_executor
     ~keeper_name
     ~initial_meta
+    ()
 ;;
 
 let start_owner ~sw ~store ~keeper_name ~initial_meta =
@@ -122,6 +139,7 @@ let start_owner ~sw ~store ~keeper_name ~initial_meta =
     ~operation_executor:None
     ~keeper_name
     ~initial_meta
+    ()
 ;;
 
 let operation_id value =
@@ -717,6 +735,10 @@ let test_stopping_cancels_and_joins_active_child () =
   let child_started, resolve_child_started = Eio.Promise.create () in
   let child_released, resolve_child_released = Eio.Promise.create () in
   let never, _resolve_never = Eio.Promise.create () in
+  let settled = ref None in
+  let record_settled ~keeper_name ~claimed_operation_id ~execution =
+    settled := Some (keeper_name, claimed_operation_id, execution)
+  in
   let operation_executor ~sw:child_sw ~keeper_name:_ ~claim =
     match claim () with
     | Error error -> fail (Owner.error_to_string error)
@@ -731,11 +753,13 @@ let test_stopping_cancels_and_joins_active_child () =
   let owner =
     owner_ok
       (start_owner_with_executor
+         ~on_execution_settled:record_settled
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
          ~keeper_name:"stopping-active-child"
-         ~initial_meta:(Some (make_meta "stopping-active-child")))
+         ~initial_meta:(Some (make_meta "stopping-active-child"))
+         ())
   in
   let operation_id = operation_id "kmsg-stopping-active-child" in
   ignore
@@ -749,16 +773,38 @@ let test_stopping_cancels_and_joins_active_child () =
   ignore (owner_ok (Owner.begin_stopping owner));
   Eio.Promise.await child_released;
   let operation = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
-  match operation.state with
-  | Chat_operation.Failed { failure = { kind; _ }; _ } ->
-    check string
-      "stopped active child is terminal"
+  (match operation.state with
+   | Chat_operation.Failed { failure = { kind; _ }; _ } ->
+     check string
+       "stopped active child is terminal"
+       "Turn_cancelled"
+       (Chat_operation.failure_kind_to_string kind)
+   | state ->
+     fail
+       ("stopping returned before terminal persistence: "
+        ^ Chat_operation.state_to_string state));
+  match !settled with
+  | Some (settled_keeper, Some claimed_id, Owner.Operation_failed { kind; detail; _ })
+    ->
+    check string "settle hook keeper" "stopping-active-child" settled_keeper;
+    check
+      string
+      "settle hook operation id"
+      (Chat_operation.Operation_id.to_string operation_id)
+      (Chat_operation.Operation_id.to_string claimed_id);
+    check
+      string
+      "settle hook failure kind"
       "Turn_cancelled"
-      (Chat_operation.failure_kind_to_string kind)
-  | state ->
-    fail
-      ("stopping returned before terminal persistence: "
-       ^ Chat_operation.state_to_string state)
+      (Chat_operation.failure_kind_to_string kind);
+    check
+      string
+      "settle hook detail"
+      "Keeper owner stopped the active turn"
+      detail
+  | Some (_, None, _) -> fail "settle hook fired without a claimed operation id"
+  | Some (_, _, Owner.Operation_succeeded _) -> fail "cancelled turn settled as success"
+  | None -> fail "settle hook did not fire before stop completed"
 ;;
 
 let test_stopping_cancels_and_joins_autonomous_child () =
@@ -844,7 +890,12 @@ let test_turn_slot_release_signals_availability () =
          ~operation_store_path:path
          ~now:(fun () -> 42.0)
          ~operation_runner:
-           (Some Owner.{ ready = (fun ~keeper_name:_ -> true); execute })
+           (Some
+              Owner.
+                { ready = (fun ~keeper_name:_ -> true)
+                ; execute
+                ; on_execution_settled = noop_execution_settled
+                })
          ~on_turn_slot_released:(Some (fun () -> incr released))
          ~keeper_name:"slot-release"
          ~initial_meta:(Some (make_meta "slot-release")))
@@ -956,7 +1007,8 @@ let test_chat_lane_holder_blocks_autonomous_admission () =
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some execute)
          ~keeper_name:"cross-lane-exclusion"
-         ~initial_meta:(Some (make_meta "cross-lane-exclusion")))
+         ~initial_meta:(Some (make_meta "cross-lane-exclusion"))
+         ())
   in
   ignore
     (owner_ok
@@ -1104,7 +1156,8 @@ let test_operation_executor_claims_latest_input_and_drains_fifo () =
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
          ~keeper_name:"operation-executor"
-         ~initial_meta:(Some (make_meta "operation-executor")))
+         ~initial_meta:(Some (make_meta "operation-executor"))
+         ())
   in
   let first_id = operation_id "kmsg-operation-executor-first" in
   let second_id = operation_id "kmsg-operation-executor-second" in
@@ -1173,7 +1226,8 @@ let test_operation_executor_exception_is_terminal_and_next_runs () =
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
          ~keeper_name:"operation-exception"
-         ~initial_meta:(Some (make_meta "operation-exception")))
+         ~initial_meta:(Some (make_meta "operation-exception"))
+         ())
   in
   let first_id = operation_id "kmsg-operation-exception-first" in
   let second_id = operation_id "kmsg-operation-exception-second" in
@@ -1229,7 +1283,8 @@ let test_paused_owner_preserves_queue_until_resume () =
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
          ~keeper_name:"paused-operation"
-         ~initial_meta:(Some (make_meta "paused-operation")))
+         ~initial_meta:(Some (make_meta "paused-operation"))
+         ())
   in
   ignore
     (owner_ok
@@ -1311,7 +1366,8 @@ let test_pause_rechecks_pending_claim_admission () =
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
          ~keeper_name:"pause-pending-claim"
-         ~initial_meta:(Some (make_meta "pause-pending-claim")))
+         ~initial_meta:(Some (make_meta "pause-pending-claim"))
+         ())
   in
   let operation_id = operation_id "kmsg-pause-pending-claim" in
   ignore
@@ -1448,7 +1504,12 @@ let test_startup_queued_waits_for_runner_readiness () =
               ~operation_store_path:path
               ~now:(fun () -> 20.0)
               ~operation_runner:
-                (Some Owner.{ ready = (fun ~keeper_name:_ -> !ready); execute })
+                (Some
+                   Owner.
+                     { ready = (fun ~keeper_name:_ -> !ready)
+                     ; execute
+                     ; on_execution_settled = noop_execution_settled
+                     })
               ~on_turn_slot_released:None
               ~keeper_name:"ready-after-registration"
               ~initial_meta:(Some (make_meta "ready-after-registration")))
@@ -1590,7 +1651,8 @@ let test_owner_linearizes_autonomous_and_chat_children () =
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
          ~keeper_name:"single-turn-owner"
-         ~initial_meta:(Some (make_meta "single-turn-owner")))
+         ~initial_meta:(Some (make_meta "single-turn-owner"))
+         ())
   in
   let autonomous_result = Eio.Stream.create 1 in
   Eio.Fiber.fork ~sw (fun () ->
@@ -1662,7 +1724,8 @@ let test_unready_chat_queue_does_not_block_autonomous () =
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
          ~keeper_name:"unready-chat-owner"
-         ~initial_meta:(Some (make_meta "unready-chat-owner")))
+         ~initial_meta:(Some (make_meta "unready-chat-owner"))
+         ())
   in
   let operation_id = operation_id "kmsg-unready-chat-owner" in
   ignore

@@ -62,6 +62,7 @@ let base_observation : WO.world_observation =
     connected_surfaces = [];
     connected_surface_failures = [];
     own_recent_board_posts = [];
+    fleet_messages = [];
   }
 
 let meta : Masc.Keeper_meta_contract.keeper_meta =

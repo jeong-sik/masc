@@ -182,6 +182,14 @@ type world_observation = {
       [pending_board_events] tracks OTHER authors' unseen posts and advances
       past them, so without this field a keeper never observes its own
       published posts in-prompt. Raw observation only — no dedup gate. *)
+
+  fleet_messages : Keeper_world_observation_message_scope.fleet_message list;
+  (** Keeper broadcasts projected into this transcript, newest
+      [Keeper_config.keeper_fleet_messages_max] in arrival order. Standing
+      context with no acknowledgement cursor: the reactive lanes admit only
+      rows addressed to this keeper, so a projected broadcast would otherwise
+      reach the dashboard and never the prompt. Disjoint from
+      [pending_messages] by construction. *)
 }
 
 val claimable_task_count : world_observation -> int

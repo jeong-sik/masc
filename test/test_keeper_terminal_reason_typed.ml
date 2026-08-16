@@ -1051,6 +1051,7 @@ let () =
       ; connected_surfaces = []
       ; connected_surface_failures = []
       ; own_recent_board_posts = []
+      ; fleet_messages = []
       }
     in
     Masc.Keeper_unified_metrics.update_metrics_from_result

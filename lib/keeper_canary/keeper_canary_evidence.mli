@@ -5,10 +5,10 @@
     ["masc.keeper_feature_matrix.multiturn_evidence.v1"] — see the .ml doc
     comment for why this is a new schema rather than a reshape.
 
-    [judgment] is always [`Null] in this schema version: the pass/fail call
-    on whether the recall reply demonstrates real continuity belongs to an
-    LLM judge (a follow-up PR), not this harness's own substring check —
-    see {!Keeper_canary_facts.score} for that raw signal instead. *)
+    [judgment] is [`Null] unless an LLM judge ran (bin's [--judge-runtime]):
+    the pass/fail call on whether the recall reply demonstrates real
+    continuity belongs to that judge, not this harness's own substring
+    check — see {!Keeper_canary_facts.score} for that raw signal instead. *)
 
 val schema_version : string
 
@@ -61,6 +61,8 @@ type run_evidence = {
   recall : recall_evidence;
   timing : timing;
   deterministic_signal : Keeper_canary_facts.score;
+  judgment : Keeper_canary_judge.judgment option;
+      (** [None] renders as JSON null — no judge ran for this invocation. *)
   notes : string list;
 }
 

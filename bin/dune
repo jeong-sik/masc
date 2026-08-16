@@ -327,6 +327,10 @@
  (libraries
   masc
   masc.keeper_canary
+  masc.server
+  masc.runtime
+  masc.agent_core
+  masc.agent_core.llm_provider
   masc.crypto_rng
   masc.config
   masc.config_dir_resolver

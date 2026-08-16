@@ -38,7 +38,7 @@ Usage: scripts/run-local.sh [--target-dir PATH] [--host HOST] [--port PORT] [--p
 Dir-local local-dev launcher:
   - runtime data root defaults to <target>/.masc/
   - config root defaults to <target>/.masc/config
-  - gRPC / WS / WebRTC are disabled by default
+  - gRPC / WS are disabled by default
   - --bootstrap-only materializes local config/build state but does not start the server
   - checked-in keeper manifests are excluded by default; pass --bootstrap-keepers to seed config/keepers
 

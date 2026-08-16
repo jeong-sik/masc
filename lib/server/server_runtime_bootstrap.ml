@@ -1430,7 +1430,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       publish_server_state state;
       (* Global readiness is the transport-neutral owner capability, not a
          quorum over optional transports. Mark it before starting fallible
-         Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
+         Discord/gRPC/WS/dashboard auxiliaries so one transport cannot
          turn an already-published HTTP owner into a process-wide fatal
          pre-readiness failure. Each auxiliary owns its typed health state. *)
       (match mark_owner_state_ready () with

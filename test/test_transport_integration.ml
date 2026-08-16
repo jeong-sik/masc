@@ -3,7 +3,7 @@
     Verifies cross-layer event flow without starting a full HTTP server:
     1. SSE broadcast → gRPC Subscribe stream (via external subscriber)
     2. SSE broadcast → WebSocket sessions (via external subscriber)
-    3. WebRTC signaling full offer/answer/cleanup lifecycle
+    3. Dead external subscribers are dropped on the next broadcast
     4. Transport enum consistency across modules *)
 
 module T = Masc_grpc_types
@@ -169,7 +169,7 @@ let test_ws_derives_dashboard_event_from_real_broadcast () =
               (parsed.broadcast_ts = ev.Masc.Sse.ext_emitted_at))
 
 (* ============================================================
-   3. WebRTC Signaling Full Flow
+   3. Dead External Subscriber Removal
    ============================================================ *)
 
 let test_dead_subscriber_auto_removed () =
@@ -224,7 +224,7 @@ let test_grpc_stream_closed_triggers_cleanup () =
     Alcotest.(check int) "still 1 after close" 1 (Grpc_eio.Stream.length stream))
 
 (* ============================================================
-   5. Transport Enum Consistency
+   4. Transport Enum Consistency
    ============================================================ *)
 
 let test_all_protocol_variants_roundtrip () =

@@ -87,11 +87,6 @@
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
-  ; [ctypes] + [ctypes-foreign] removed: zero callers in lib/ bin/ test/
-  ; since webrtc_bindings.ml was removed (per lib/dune:252 comment).
-  ; Confirmed by `rg '\bctypes\b' lib/ bin/ test/` = empty.  Audited
-  ; continuous-loop iter #17 (2026-05-15).  Re-add if native FFI work
-  ; resumes.
   ; [pbrt_services] removed: no caller in lib/ bin/ test/ since
   ; continuous-loop iter #11 audit (2026-05-15).  Re-add if gRPC
   ; service support resumes.

@@ -112,7 +112,7 @@ graph TB
 `lib/config/masc_grpc_transport.ml`이 에이전트 측 트랜스포트 선택을 정의한다:
 
 ```ocaml
-type t = Http | Grpc | Ws | Webrtc | Local
+type t = Http | Grpc | Ws | Local
 ```
 
 선택 순서:

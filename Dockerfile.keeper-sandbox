@@ -89,8 +89,8 @@ USER opam
 # the image, and copying sources would pin the image to one commit of the repo
 # a keeper is about to clone itself.
 #
-# The pins are replayed explicitly. Eight dependencies (mcp_protocol,
-# grpc-direct, grpc-direct-core, ocaml-webrtc, ws-direct-core/-eio/-gluten and
+# The pins are replayed explicitly. Seven dependencies (mcp_protocol,
+# grpc-direct, grpc-direct-core, ws-direct-core/-eio/-gluten and
 # a bisect_ppx fork) are absent from opam-repository, so `--deps-only` alone
 # fails to solve. opam does not apply the lock file's `pin-depends:` on its own
 # here — see opam-pin-from-lock.sh for what was tried and how each option

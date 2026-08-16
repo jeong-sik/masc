@@ -1,6 +1,6 @@
 (** Transport_bridge — Unified transport provider interface.
 
-    Each transport (SSE, WS, gRPC, WebRTC) implements {!PROVIDER}
+    Each transport (SSE, WS, gRPC) implements {!PROVIDER}
     and registers at server bootstrap. The bridge centralizes:
     - Discovery: protocol enumeration, Agent Card generation
     - Metrics: aggregate session/connection counts

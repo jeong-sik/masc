@@ -708,6 +708,14 @@ let execute_keeper_stream_tool_streaming
         ( Masc_domain.masc_error_to_string
             (Masc_domain.System Masc_domain.System_error.NotInitialized)
         , Tool_result.Failed Tool_result.Runtime_failure )
+    | Keeper_registry.Operator_interrupt ->
+        (* #28810: operator-requested turn interrupt is a cancellation, not a
+           crash. The failure-class vocabulary has no cancellation class;
+           Transient (retryable by the caller, WARN severity) is the honest
+           nearest fit. *)
+        Log.Mcp.info "tools/call interrupted by operator (stream)";
+        ( Keeper_registry_types.operator_interrupt_detail
+        , Tool_result.Failed Tool_result.Transient_error )
     | exn ->
         let err = Printexc.to_string exn in
         Log.Mcp.error "tools/call crashed (stream): %s" err;
@@ -1685,6 +1693,18 @@ let process_single_turn ~user_row_origin ~submission
            (match Eio.Switch.run (fun request_sw -> run_turn request_sw) with
             | _ -> publish_inline_completion ()
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception Keeper_registry.Operator_interrupt ->
+              (* Typed operator cancellation (#28810): the interrupt fails
+                 the turn switch and the [Switch.run] boundary re-raises the
+                 bare exception here. A cancelled turn, not a crash. *)
+              let detail = Keeper_registry_types.operator_interrupt_detail in
+              push_worker_event
+                (Stream_terminal
+                   { status = Stream_error
+                   ; body = detail
+                   ; queued_outcome = Some (Failed { kind = Turn_cancelled; detail })
+                   });
+              publish_inline_completion ()
             | exception exn ->
               let detail = Printexc.to_string exn in
               push_worker_event

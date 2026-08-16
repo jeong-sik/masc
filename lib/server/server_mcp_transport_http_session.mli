@@ -194,19 +194,48 @@ val get_protocol_version : Httpun.Request.t -> string
 val get_protocol_version_header_opt :
   Httpun.Request.t -> string option
 
+type protocol_version_rejection =
+  | Unsupported_version of { requested : string }
+        (** The server does not implement the requested version. MCP
+            2026-07-28 fixes the answer: [-32022] carrying the supported
+            list. *)
+  | Session_version_mismatch of
+      { session_id : string
+      ; expected : string
+      ; got : string
+      }
+        (** The request contradicts the version this session already settled
+            on. A legacy-session concern with no wire shape in the modern
+            revision; answered as [Invalid_request]. *)
+
+val protocol_version_rejection_message : protocol_version_rejection -> string
+(** Operator-visible text. Strings pinned:
+    - [["Unsupported MCP-Protocol-Version: <v>"]]
+    - [["MCP-Protocol-Version mismatch for session <id>: expected <e>, got <g>."]] *)
+
+val protocol_version_rejection_code :
+  protocol_version_rejection -> Mcp_error_code.t
+(** Wire code per rejection. Callers deriving an HTTP status should pass this
+    through {!Mcp_error_code.to_http_status} rather than hardcoding one. *)
+
+val protocol_version_rejection_body : protocol_version_rejection -> string
+(** Complete JSON-RPC error body for the rejection. [Unsupported_version]
+    gets the mandated [data.supported]/[data.requested] payload built from
+    {!Mcp_transport_protocol.supported_protocol_versions}; every transport
+    answering a rejection MUST use this rather than assembling its own body,
+    or a client reading the 4xx will classify this server as legacy. *)
+
 val validate_protocol_version_continuity :
-  session_id:string -> Httpun.Request.t -> (unit, string) result
+  session_id:string ->
+  Httpun.Request.t ->
+  (unit, protocol_version_rejection) result
 (** [validate_protocol_version_continuity ~session_id request]
     enforces:
     - When the session has a remembered version: the request
       header (if present) must match.
     - When the session is unknown: the request header (if
       present) must be valid per {!is_valid_protocol_version}.
-    - Missing header is always [Ok ()].
-
-    Error messages pinned:
-    - [["Unsupported MCP-Protocol-Version: <v>"]]
-    - [["MCP-Protocol-Version mismatch for session <id>: expected <e>, got <g>."]] *)
+    - Missing header is always [Ok ()]. *)
 
 val get_protocol_version_for_session :
   ?session_id:string -> Httpun.Request.t -> string

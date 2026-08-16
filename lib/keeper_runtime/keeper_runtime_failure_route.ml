@@ -139,7 +139,14 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
         | Tool_result.Runtime_failure ->
           exhaust_failure Terminal_effect_runtime_failure
         | Tool_result.Workflow_rejection ->
-          exhaust_failure Terminal_effect_workflow_rejection))
+          exhaust_failure Terminal_effect_workflow_rejection
+        | Tool_result.Operator_cancelled ->
+          (* Operator interrupt observed as a terminal-effect failure class:
+             route like a transient outcome (it is not a crash and the
+             effect may be re-attempted by a later turn); the
+             operation-level classification already records the typed
+             cancel (#28810). *)
+          exhaust_failure Terminal_effect_transient_failure))
   | Keeper_internal_error.Provider_attempt_effect_fenced
       { effect_disposition; _ } ->
     (match effect_disposition with

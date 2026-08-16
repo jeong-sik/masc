@@ -46,13 +46,13 @@ let invalid_request ?(reason_kind = Retry.Unknown_invalid_request) reason =
     (Retry.InvalidRequest { message = reason; reason = reason_kind })
 ;;
 
-let core_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
+let core_error_of_http_error ?(accept_rejected = Api_invalid_request) ?provider err =
   match err with
   | Http.HttpError { code; body; retry_after_header } ->
     Error.Api (Retry.classify_error ~retry_after_header ~status:code ~body)
   | Http.NetworkError { message; kind } ->
     Error.Api (Retry.NetworkError { message; kind })
-  | Http.TimeoutError _ -> Error.Provider (Llm_provider.Error.of_http_error err)
+  | Http.TimeoutError _ -> Error.Provider (Llm_provider.Error.of_http_error ?provider err)
   | Http.AcceptRejected { reason } ->
     (match accept_rejected with
      | Api_invalid_request ->
@@ -94,7 +94,8 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
        dedicated variant, scheduled with the next breaking API change. *)
     (match Retry.verdict_of_empty_completion ~stop_reason ~message with
      | Retry.Empty_overflow overflow -> Error.Api overflow
-     | Retry.Empty_attributed -> Error.Provider (Llm_provider.Error.of_http_error err)
+     | Retry.Empty_attributed ->
+       Error.Provider (Llm_provider.Error.of_http_error ?provider err)
      | Retry.Empty_unattributed { token } ->
        Error.Api
          (Retry.InvalidRequest
@@ -106,7 +107,7 @@ let core_error_of_http_error ?(accept_rejected = Api_invalid_request) err =
             ; reason = Retry.Unknown_invalid_request
             }))
   | Http.ProviderTerminal _ | Http.ProviderFailure _ ->
-    Error.Provider (Llm_provider.Error.of_http_error err)
+    Error.Provider (Llm_provider.Error.of_http_error ?provider err)
 ;;
 
 let of_core_error error =
@@ -276,8 +277,9 @@ let attribution_of_http_error ~binding = function
     }
 ;;
 
-let of_http_error ?(accept_rejected = Api_invalid_request) ~binding http_error =
-  { error = core_error_of_http_error ~accept_rejected http_error
+let of_http_error ?(accept_rejected = Api_invalid_request) ?provider ~binding http_error
+  =
+  { error = core_error_of_http_error ~accept_rejected ?provider http_error
   ; provider_failure = Some (attribution_of_http_error ~binding http_error)
   }
 ;;

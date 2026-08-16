@@ -1364,17 +1364,13 @@ let run_turn
           ());
        receipt_result)
 with
-| Keeper_registry.Operator_interrupt as e ->
-  (* Bare form: [Switch.fail] on the turn switch re-raises the exception
-     itself at the [Switch.run] boundary; only fibers inside see the
-     [Cancelled]-wrapped form below (#28810). Same bookkeeping, same
-     re-raise. *)
+| exn when Keeper_registry_types.is_operator_interrupt exn ->
+  (* Every delivery shape — bare at the [Switch.run] boundary,
+     [Cancelled]-wrapped inside the switch, [Finally_raised]/[Multiple]
+     combinations — records the same failure reason and re-raises
+     unchanged (#28810, #28868 review). *)
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path meta.name (Some Keeper_registry.Operator_interrupt);
-  raise e
-| Eio.Cancel.Cancelled Keeper_registry.Operator_interrupt as ce ->
-  Keeper_registry.set_failure_reason
-    ~base_path:config.base_path meta.name (Some Keeper_registry.Operator_interrupt);
-  raise ce
+  raise exn
 | Eio.Cancel.Cancelled _ as ce ->
   raise ce

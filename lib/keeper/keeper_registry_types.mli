@@ -64,6 +64,14 @@ val operator_interrupt_detail : string
     so ledger rows, queued outcomes, and tool responses classify as one
     incident class. *)
 
+val is_operator_interrupt : exn -> bool
+(** Whether [exn] reduces to {!Operator_interrupt} through every wrapper
+    shape Eio can deliver: bare, [Eio.Cancel.Cancelled],
+    [Fun.Finally_raised], and [Eio.Exn.Multiple] (only when every member
+    reduces). Classification ladders must use this rather than matching the
+    constructor directly (#28868 review: constructor-only arms missed the
+    combined shapes). *)
+
 val failure_reason_to_string : failure_reason -> string
 
 (** #10584: cohort key for grouping failures by variant (ignores

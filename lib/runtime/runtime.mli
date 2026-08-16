@@ -311,11 +311,12 @@ val lanes : unit -> Runtime_lane.t list
 val get_lane_by_id : string -> Runtime_lane.t option
 (** Lane with the given id, or [None] if no such lane is configured. *)
 
-val resolve_assignment :
-  string -> [ `Lane of Runtime_lane.t | `Single_runtime of t | `Missing ]
-(** Resolve a keeper assignment id to either a lane or a single runtime. Lanes
-    shadow runtimes. [Missing] means the id does not name a known lane or
-    runtime. *)
+val resolve_assignment : string -> [ `Lane of Runtime_lane.t | `Missing ]
+(** Resolve a keeper assignment id to a lane. Declared lanes shadow runtimes;
+    an id naming a bare runtime gets a lane of its own, because the lane id is
+    what keys sticky candidate preference and quota demotion. Every lane ends
+    at [\[runtime\].default], so a walk always has a next candidate.
+    [Missing] means the id does not name a known lane or runtime. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id

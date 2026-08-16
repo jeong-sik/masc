@@ -257,10 +257,8 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
     let* () =
       match validate_protocol_version_continuity ~session_id request with
       | Ok () -> Ok ()
-      | Error msg ->
-          let body =
-            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
-          in
+      | Error rejection ->
+          let body = protocol_version_rejection_body rejection in
           let headers =
             Httpun.Headers.of_list
               (("content-length", string_of_int (String.length body))
@@ -593,10 +591,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       safe_respond_with_string reqd response msg
   | Ok () -> (
       match validate_protocol_version_continuity ~session_id request with
-      | Error msg ->
-          let body =
-            Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
-          in
+      | Error rejection ->
+          let body = protocol_version_rejection_body rejection in
           let headers =
             Httpun.Headers.of_list
               (("content-length", string_of_int (String.length body))
@@ -824,10 +820,8 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               safe_respond_with_string reqd response msg
           | Ok () -> (
               match validate_protocol_version_continuity ~session_id request with
-              | Error msg ->
-                  let body =
-                    Mcp_error_code.jsonrpc_error_body Invalid_request ~message:msg
-                  in
+              | Error rejection ->
+                  let body = protocol_version_rejection_body rejection in
                   let protocol_version =
                     get_protocol_version_for_session ~session_id request
                   in

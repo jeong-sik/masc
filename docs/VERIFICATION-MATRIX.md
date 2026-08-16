@@ -34,7 +34,6 @@ MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 
 - 기본 브랜치가 초록이면 core MCP/HTTP/keeper/operator 계약이 깨지지 않았다고 볼 수 있어야 한다.
 - contract/transport harness는 “서버가 이미 떠 있음”을 전제로 하지 않고 hermetic bootstrap 경로로 실행돼야 한다.
-- `archive/trpg/scripts/` 아래의 game-view/TRPG 계약 스크립트는 active CI-required contract suite가 아니라 archive/manual 성격으로 본다.
 
 ## 2. Optional Env-Gated
 

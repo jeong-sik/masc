@@ -208,7 +208,7 @@ let test_the_keeper_sees_the_call_it_got_rejected_for () =
                   }
                 ; { Actions.tool = "keeper_broadcast"
                   ; input = "{}"
-                  ; outcome = Actions.Failed_call {|"message": MISSING|}
+                  ; outcome = Actions.Failed_call (Some {|"message": MISSING|})
                   }
                 ]
             }

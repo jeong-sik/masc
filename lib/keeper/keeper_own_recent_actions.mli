@@ -8,8 +8,9 @@
 
 type outcome =
   | Ok_call
-  | Failed_call of string
-      (** Bounded head of the failure text the tool returned. *)
+  | Failed_call of string option
+      (** Bounded head of the failure text, [None] when the tool refused
+          without describing why. *)
 
 type call =
   { tool : string

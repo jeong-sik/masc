@@ -1,6 +1,6 @@
 type outcome =
   | Ok_call
-  | Failed_call of string
+  | Failed_call of string option
 
 type call =
   { tool : string
@@ -45,12 +45,13 @@ let turn_id_field json =
   | _ -> None
 ;;
 
+(* A refusal the tool did not describe stays [None]. Substituting an empty
+   string here would render as a refusal with no reason, indistinguishable from
+   one the tool declined to explain. *)
 let outcome_of_row json =
   match Json_util.assoc_member_opt "success" json with
   | Some (`Bool true) -> Ok_call
-  | _ ->
-    Failed_call
-      (clip failure_max_chars (Option.value ~default:"" (string_field "output" json)))
+  | _ -> Failed_call (Option.map (clip failure_max_chars) (string_field "output" json))
 ;;
 
 let call_of_row json =

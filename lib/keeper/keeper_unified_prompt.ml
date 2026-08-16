@@ -88,7 +88,9 @@ let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : st
       match call.outcome with
       | Keeper_own_recent_actions.Ok_call ->
         Printf.sprintf "- [turn %d] %s %s -> ok" turn.turn_id call.tool call.input
-      | Keeper_own_recent_actions.Failed_call detail ->
+      | Keeper_own_recent_actions.Failed_call None ->
+        Printf.sprintf "- [turn %d] %s %s -> REJECTED" turn.turn_id call.tool call.input
+      | Keeper_own_recent_actions.Failed_call (Some detail) ->
         Printf.sprintf
           "- [turn %d] %s %s -> REJECTED: %s"
           turn.turn_id

@@ -120,19 +120,25 @@ let update_block index f state =
   { state with blocks = Blocks.add index (f block) state.blocks }
 ;;
 
-let usage_from_message_start current (wire : Types.api_usage) =
-  { current with
-    input_tokens = wire.input_tokens
+let usage_from_message_start (wire : Types.api_usage) =
+  { input_tokens = wire.input_tokens
+  ; output_tokens = wire.output_tokens
   ; cache_creation = wire.cache_creation_input_tokens
   ; cache_read = wire.cache_read_input_tokens
   }
 ;;
 
-let add_usage current (wire : Types.api_usage) =
-  { input_tokens = current.input_tokens + wire.input_tokens
-  ; output_tokens = current.output_tokens + wire.output_tokens
-  ; cache_creation = current.cache_creation + wire.cache_creation_input_tokens
-  ; cache_read = current.cache_read + wire.cache_read_input_tokens
+(* Delta counters are wire-cumulative running totals (#28903): a reported
+   field replaces the seeded value, an unreported field keeps it. Nothing is
+   ever added — addition double-counts whenever the final delta repeats a
+   counter the start event already carried. *)
+let overlay_delta_usage current (delta : Types.delta_usage) =
+  { input_tokens = Option.value delta.input_tokens ~default:current.input_tokens
+  ; output_tokens = Option.value delta.output_tokens ~default:current.output_tokens
+  ; cache_creation =
+      Option.value delta.cache_creation_input_tokens ~default:current.cache_creation
+  ; cache_read =
+      Option.value delta.cache_read_input_tokens ~default:current.cache_read
   }
 ;;
 
@@ -147,7 +153,7 @@ let transition_open state = function
     let usage =
       match usage with
       | None -> state.usage
-      | Some wire -> usage_from_message_start state.usage wire
+      | Some wire -> usage_from_message_start wire
     in
     { state with id; model; usage }
   | Types.ContentBlockStart { index; content_type; tool_id; tool_name } ->
@@ -201,7 +207,7 @@ let transition_open state = function
     let usage =
       match usage with
       | None -> state.usage
-      | Some wire -> add_usage state.usage wire
+      | Some delta -> overlay_delta_usage state.usage delta
     in
     { state with completion; usage }
   | Types.SSEError { message; error_type; raw }

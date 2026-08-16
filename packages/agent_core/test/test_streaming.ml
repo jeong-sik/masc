@@ -232,7 +232,7 @@ let test_parse_message_delta_end_turn () =
      | Some EndTurn -> ()
      | _ -> Alcotest.fail "expected EndTurn stop_reason");
     (match usage with
-     | Some u -> Alcotest.(check int) "output_tokens" 57 u.output_tokens
+     | Some u -> Alcotest.(check (option int)) "output_tokens" (Some 57) u.output_tokens
      | None -> Alcotest.fail "expected Some usage")
   | Some _ -> Alcotest.fail "unexpected event type"
   | None -> Alcotest.fail "parse returned None"
@@ -315,8 +315,11 @@ let test_message_delta_with_cache_usage () =
      | _ -> Alcotest.fail "expected end_turn");
     (match usage with
      | Some u ->
-       Alcotest.(check int) "output" 150 u.output_tokens;
-       Alcotest.(check int) "cache_write zero" 0 u.cache_creation_input_tokens
+       Alcotest.(check (option int)) "output" (Some 150) u.output_tokens;
+       Alcotest.(check (option int))
+         "cache_write reported zero"
+         (Some 0)
+         u.cache_creation_input_tokens
      | None -> Alcotest.fail "expected usage in delta")
   | Some _ -> Alcotest.fail "unexpected event type"
   | None -> Alcotest.fail "parse returned None"
@@ -638,8 +641,12 @@ let test_synthetic_usage_propagation () =
    | MessageStart { usage = Some u; _ } -> Alcotest.(check int) "input" 100 u.input_tokens
    | _ -> Alcotest.fail "expected MessageStart with usage");
   match List.nth events 4 with
-  | MessageDelta { usage = Some u; _ } -> Alcotest.(check int) "output" 50 u.output_tokens
-  | _ -> Alcotest.fail "expected MessageDelta with usage"
+  | MessageDelta { usage = None; _ } ->
+    (* The synthetic replay carries the complete usage on the start event
+       only; repeating it on the delta would double-count in any
+       accumulator that folds both. *)
+    ()
+  | _ -> Alcotest.fail "expected MessageDelta without usage"
 ;;
 
 (* ------------------------------------------------------------------ *)

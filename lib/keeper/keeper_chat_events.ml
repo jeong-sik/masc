@@ -58,7 +58,7 @@ type keeper_chat_event =
       }
   | Agent_core_stream_message_delta of
       { stop_reason : Agent_core.Types.stop_reason option
-      ; usage : Agent_core.Types.api_usage option
+      ; usage : Agent_core.Types.delta_usage option
       }
   | Agent_core_stream_message_stop
   | Agent_core_stream_ping
@@ -130,6 +130,17 @@ let api_usage_to_json (usage : Agent_core.Types.api_usage) =
      ]
      @ json_opt "cost_usd"
          (Option.map (fun value -> `Float value) usage.cost_usd))
+
+(* Cumulative mid-stream counters: only the fields the delta actually
+   reported appear, so a reader can tell "not reported" from 0. *)
+let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
+  `Assoc
+    (json_opt "input_tokens" (Option.map (fun v -> `Int v) usage.input_tokens)
+    @ json_opt "output_tokens" (Option.map (fun v -> `Int v) usage.output_tokens)
+    @ json_opt "cache_creation_input_tokens"
+        (Option.map (fun v -> `Int v) usage.cache_creation_input_tokens)
+    @ json_opt "cache_read_input_tokens"
+        (Option.map (fun v -> `Int v) usage.cache_read_input_tokens))
 
 let stream_protocol_error_kind_to_string = function
   | Tool_start_duplicate_index -> "tool_start_duplicate_index"

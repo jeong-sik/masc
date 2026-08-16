@@ -1300,6 +1300,18 @@ let stop_reason_to_metric_label = function
 ;;
 
 (** API usage from a single response *)
+(* delta_usage is declared before api_usage on purpose: the two records
+   share field labels, and OCaml resolves an unqualified label to the most
+   recently defined record — the codebase's pervasive unannotated
+   [u.input_tokens] accesses must keep meaning api_usage. *)
+type delta_usage =
+  { input_tokens : int option
+  ; output_tokens : int option
+  ; cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int option
+  }
+[@@deriving show, yojson]
+
 type api_usage =
   { input_tokens : int
   ; output_tokens : int
@@ -1308,6 +1320,14 @@ type api_usage =
   ; cost_usd : float option
   }
 [@@deriving show, yojson]
+
+let delta_usage_of_api_usage (u : api_usage) : delta_usage =
+  { input_tokens = Some u.input_tokens
+  ; output_tokens = Some u.output_tokens
+  ; cache_creation_input_tokens = Some u.cache_creation_input_tokens
+  ; cache_read_input_tokens = Some u.cache_read_input_tokens
+  }
+;;
 
 (** Provider-reported inference timing from a single API call.
     llama-server populates all fields; cloud providers return [None]. *)
@@ -1527,7 +1547,7 @@ type sse_event =
   | ContentBlockStop of { index : int }
   | MessageDelta of
       { stop_reason : stop_reason option
-      ; usage : api_usage option
+      ; usage : delta_usage option
       }
   | MessageStop
   | Ping

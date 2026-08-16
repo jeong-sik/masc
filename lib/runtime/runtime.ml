@@ -339,8 +339,20 @@ let validate_lanes ~(config_path : string)
             ~runtime_count:(List.length runtimes) id))
 ;;
 
+(* [runtime].default is required, so every lane can end somewhere. Without this
+   a lane walk stops at its last declared candidate and the turn dies there —
+   failover would exist only where an operator remembered to type a second
+   candidate. Appended rather than substituted: declared order is the
+   operator's, this only says where the walk terminates. *)
+let with_terminal_default ~default_runtime_id candidates =
+  if List.exists (String.equal default_runtime_id) candidates
+  then candidates
+  else candidates @ [ default_runtime_id ]
+;;
+
 let lanes_of_decls ~(config_path : string)
-    ~(dropped_bindings : (string * drop_reason) list) (runtimes : t list)
+    ~(dropped_bindings : (string * drop_reason) list) ~(default_runtime_id : string)
+    (runtimes : t list)
     (lane_decls : Runtime_schema.lane_decl list)
   : (Runtime_lane.t list, string) result
   =
@@ -350,7 +362,8 @@ let lanes_of_decls ~(config_path : string)
        (fun ({ Runtime_schema.id; strategy; candidate_ids } : Runtime_schema.lane_decl) ->
           match strategy with
           | Runtime_schema.Ordered ->
-            Runtime_lane.make ~id ~strategy:Runtime_lane.Ordered candidate_ids)
+            Runtime_lane.make ~id ~strategy:Runtime_lane.Ordered
+              (with_terminal_default ~default_runtime_id candidate_ids))
        lane_decls)
 ;;
 
@@ -1113,7 +1126,8 @@ let materialize_config
      name a lane (#25394); candidate resolution is enforced by [validate_lanes]
      inside [lanes_of_decls]. *)
   let* lanes =
-    lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
+    lanes_of_decls ~config_path ~dropped_bindings ~default_runtime_id:rt.id runtimes
+      cfg.lane_decls
   in
   (* One list in the order the errors surface: the route, then media_failover. *)
   let* () =
@@ -1400,16 +1414,26 @@ let max_context_of_runtime (rt : t) : int =
          rt.id)
 ;;
 
-(* Resolve a keeper assignment to either a lane or a single runtime. Lanes are
-   preferred so a lane id can shadow a runtime id (lanes are explicit operator
-   routing constructs). [Missing] means the assignment does not name a known
-   lane or runtime. *)
+(* Resolve a keeper assignment to a lane. Declared lanes are preferred so a lane
+   id can shadow a runtime id (lanes are explicit operator routing constructs).
+   An assignment naming a bare runtime gets a lane of its own rather than a
+   bare dispatch target: the lane id is what keys sticky preference and quota
+   demotion, so without one those mechanisms are simply off for that keeper.
+   [Missing] means the assignment does not name a known lane or runtime. *)
 let resolve_assignment (assigned_id : string) =
   match get_lane_by_id assigned_id with
   | Some lane -> `Lane lane
   | None ->
     (match get_runtime_by_id assigned_id with
-     | Some runtime -> `Single_runtime runtime
+     | Some runtime ->
+       let candidates =
+         match get_default_runtime () with
+         | Some default ->
+           with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
+         | None -> [ runtime.id ]
+       in
+       `Lane
+         (Runtime_lane.make ~id:runtime.id ~strategy:Runtime_lane.Ordered candidates)
      | None -> `Missing)
 ;;
 

@@ -1,9 +1,23 @@
 open Masc
 
+let test_resolve_commit_prefers_embedded () =
+  let probe_called = ref false in
+  let commit =
+    Build_identity.resolve_commit
+      ~embedded:(Some " feed0123 ")
+      ~env_value:(Some "abc12345")
+      ~probe:(fun () ->
+        probe_called := true;
+        Some "deadbeef")
+  in
+  Alcotest.(check (option string)) "embedded wins" (Some "feed0123") commit;
+  Alcotest.(check bool) "probe not called" false !probe_called
+
 let test_resolve_commit_prefers_env () =
   let probe_called = ref false in
   let commit =
     Build_identity.resolve_commit
+      ~embedded:None
       ~env_value:(Some " abc12345 ")
       ~probe:(fun () ->
         probe_called := true;
@@ -15,14 +29,34 @@ let test_resolve_commit_prefers_env () =
 let test_resolve_commit_uses_probe_when_env_missing () =
   let commit =
     Build_identity.resolve_commit
+      ~embedded:None
       ~env_value:None
       ~probe:(fun () -> Some "deadbeef")
   in
   Alcotest.(check (option string)) "probe used" (Some "deadbeef") commit
 
+let test_resolve_commit_details_prefers_embedded_binary () =
+  let details =
+    Build_identity.resolve_commit_details
+      ~embedded:(Some " feed0123 ")
+      ~env_value:(Some "abc12345")
+      ~probe:(fun () -> Some "deadbeef")
+  in
+  Alcotest.(check (option string)) "binary commit is embedded"
+    (Some "feed0123") details.binary_commit;
+  Alcotest.(check (option string)) "binary source is embedded"
+    (Some "embedded") details.binary_commit_source;
+  Alcotest.(check (option string)) "compat commit uses embedded"
+    (Some "feed0123") details.commit;
+  Alcotest.(check (option string)) "commit source is embedded"
+    (Some "embedded") details.commit_source;
+  Alcotest.(check (option string)) "repo head still surfaced"
+    (Some "deadbeef") details.repo_head_commit
+
 let test_resolve_commit_details_splits_env_and_repo_head () =
   let details =
     Build_identity.resolve_commit_details
+      ~embedded:None
       ~env_value:(Some " abc12345 ")
       ~probe:(fun () -> Some "deadbeef")
   in
@@ -42,6 +76,7 @@ let test_resolve_commit_details_splits_env_and_repo_head () =
 let test_resolve_commit_details_marks_repo_head_fallback () =
   let details =
     Build_identity.resolve_commit_details
+      ~embedded:None
       ~env_value:None
       ~probe:(fun () -> Some "deadbeef")
   in
@@ -201,8 +236,12 @@ let () =
     [
       ( "identity",
         [
-          Alcotest.test_case "resolve commit prefers env" `Quick
+          Alcotest.test_case "resolve commit prefers embedded" `Quick
+            test_resolve_commit_prefers_embedded;
+          Alcotest.test_case "resolve commit prefers env over probe" `Quick
             test_resolve_commit_prefers_env;
+          Alcotest.test_case "resolve commit details prefers embedded binary"
+            `Quick test_resolve_commit_details_prefers_embedded_binary;
           Alcotest.test_case "resolve commit falls back to probe" `Quick
             test_resolve_commit_uses_probe_when_env_missing;
           Alcotest.test_case "resolve commit details splits env and repo head"

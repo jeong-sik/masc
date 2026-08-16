@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.22.0)
+(version 0.23.0)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -89,7 +89,8 @@
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
   ; [ctypes] + [ctypes-foreign] removed: zero callers in lib/ bin/ test/
-  ; since webrtc_bindings.ml was removed (per lib/dune:252 comment).
+  ; since webrtc_bindings.ml was removed (see the "ctypes/ctypes-foreign
+  ; removed" comment in lib/dune).
   ; Confirmed by `rg '\bctypes\b' lib/ bin/ test/` = empty.  Audited
   ; continuous-loop iter #17 (2026-05-15).  Re-add if native FFI work
   ; resumes.

@@ -104,6 +104,10 @@ preserve-thinking = true       # 이전 턴 reasoning_content 재주입 (KV 연�
 streaming = true
 
 [llama_cpp.<model-row-id>]
+# prefill 동안 prompt_progress SSE 청크를 요청한다 (#28791). 콜드/딥 prefill이
+# first-event/idle 데드라인에 생존신호를 먹여, 타임아웃이 본래 역할(죽은 서버
+# 감지)로 돌아간다. 미지원 서버는 필드를 무시한다.
+return-progress = true
 ```
 
 exact-output(JSON) 레인에 같은 서버를 쓸 때는 **별도의 모델 행**을 만들어 `thinking-support = false`로 둔다. reasoning이 출력 예산을 소진해 JSON이 잘리는 결함(2026-08-10 librarian 사례)은 thinking off로만 막는다.
@@ -126,6 +130,7 @@ curl -s -X POST localhost:8935/api/v1/runtime/config/raw ...
 1. `GET /api/v1/runtime/resolved`에 `llama_cpp.<model-row-id>`가 나타나는가.
 2. 첫 keeper 턴 로그에 `cache_n=… prompt_n=…`이 찍히는가 (턴 2부터 cache_n > 0).
 3. `timings.cache_n`이 0에 고정이면 프리픽스가 매턴 깨지고 있다는 뜻이다 — 요청 캡처로 어느 위치에서 바이트가 달라지는지 비교한다.
+4. 콜드 prefill이 `stream_idle_timeout_sec`(fleet 전역)보다 길면 first-event 타임아웃으로 취소된다 — 취소돼도 prefill은 슬롯 KV에 적립되어 재시도가 이어받지만(2026-08-16 실측: 12K→22K→32K 적립 후 4번째 완주), `return-progress = true`가 근본 해법이다.
 
 ## 4. 알려진 함정
 

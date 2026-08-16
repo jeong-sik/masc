@@ -42,9 +42,9 @@ let test_workspace_projection_includes_messages_and_mentions () =
   with_workspace
   @@ fun config ->
   ignore (Workspace.bind_session config ~agent_name:"sangsu" ~capabilities:[] ());
-  ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"hello @sangsu");
+  ignore (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:"hello @sangsu");
   ignore
-    (Workspace.broadcast
+    (Workspace.broadcast ~audience:Workspace_broadcast.System_record
        config
        ~from_agent:"sangsu"
        ~msg_type:"status"
@@ -82,8 +82,8 @@ let test_workspace_projection_includes_messages_and_mentions () =
 let test_mentions_without_me_returns_all_mentions () =
   with_workspace
   @@ fun config ->
-  ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"hello @rama");
-  ignore (Workspace.broadcast config ~from_agent:"operator" ~content:"plain broadcast");
+  ignore (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:"hello @rama");
+  ignore (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:"plain broadcast");
   let json = Dashboard_workspace.json ~config ~limit:10 () in
   Alcotest.(check int) "all mentions" 1 (List.length (list_field "mentions_inbox" json))
 ;;

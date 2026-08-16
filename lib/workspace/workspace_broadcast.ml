@@ -34,6 +34,17 @@ type mention_delivery =
   | Deferred of mention_delivery_deferred
   | Rejected of mention_delivery_rejected
 
+(* Whether a committed message is conversation the fleet should see in its
+   Keeper windows, or a record of something the system did. The producer
+   declares it and nothing derives it from the text. A producer that declares
+   nothing is a record, so a new call site cannot silently fan a machine
+   announcement out to every Keeper's transcript — and the task FSM's
+   per-transition announcements, 17 of the 18 retained messages, stay out of
+   conversation windows they would only crowd. *)
+type audience =
+  | Fleet_conversation
+  | System_record
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -43,6 +54,7 @@ type broadcast_delivery =
   ; mention : string option
   ; msg_type : string
   ; mention_delivery : mention_delivery
+  ; audience : audience
   }
 
 type mention_outbox_quarantine_reason =
@@ -220,7 +232,7 @@ let set_on_broadcast_mention handler =
 
 let write_json_commit = Atomic.make write_json_commit_result
 
-let delivery_of_message (message : Masc_domain.message) =
+let delivery_of_message ~audience (message : Masc_domain.message) =
   { request_id = message.request_id
   ; seq = message.seq
   ; rendered =
@@ -231,21 +243,28 @@ let delivery_of_message (message : Masc_domain.message) =
   ; msg_type = message.msg_type
   ; mention_delivery =
       (match message.mention with None -> Passive | Some _ -> Pending)
+    (* The persisted row carries no audience: the declaration belongs to the
+       live call, and the projection commits at first delivery. Startup
+       reconciliation exists for the mention obligation, so a replay defaults
+       to [System_record] rather than re-projecting. *)
+  ; audience
   }
 
+(* Every committed message reaches the handler, not only the ones carrying a
+   mention. Delivery is more than the named wake: an unmentioned broadcast is
+   still conversation the fleet sits in, and the handler is the only place
+   that sees a committed message. The installed handler decides what an
+   absent mention means and the default answers [Passive], so short-circuiting
+   here only hid the message from whoever is installed. *)
 let deliver_delivery delivery =
-  match delivery.mention with
-  | None -> Passive
-  | Some _ ->
-    (try (Atomic.get on_broadcast_mention) delivery
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Misc.warn
-         "on_broadcast_mention callback failed request_id=%s: %s"
-         delivery.request_id
-         (Printexc.to_string exn);
-       Deferred Handler_failed)
+  try (Atomic.get on_broadcast_mention) delivery with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.warn
+      "on_broadcast_mention callback failed request_id=%s: %s"
+      delivery.request_id
+      (Printexc.to_string exn);
+    Deferred Handler_failed
 
 let message_file config (message : Masc_domain.message) =
   Filename.concat (messages_dir config)
@@ -364,14 +383,17 @@ let persist_delivery_status config message mention_delivery =
         message.request_id detail;
       Deferred Workspace_status_unavailable)
 
-let deliver_committed_mention config message =
-  delivery_of_message message
+let deliver_committed_mention ~audience config message =
+  delivery_of_message ~audience message
   |> deliver_delivery
   |> persist_delivery_status config message
 
 let reconcile_persisted_mention config message =
   match message.Masc_domain.mention_delivery with
-  | Mention_pending -> Some (deliver_committed_mention config message)
+  (* A replayed row cannot recover the live declaration, so reconciliation
+     redelivers the mention obligation only. *)
+  | Mention_pending ->
+    Some (deliver_committed_mention ~audience:System_record config message)
   | Mention_passive | Mention_accepted | Mention_rejected ->
     delete_outbox_marker config message.request_id
     |> Result.iter_error (fun detail ->
@@ -748,8 +770,8 @@ let reconcile_pending_mentions config =
   Cross_context_mutex.with_lock mention_delivery_mutex (fun () ->
     reconcile_pending_mentions_unlocked config)
 
-let broadcast_with_mention ?trace_context ~msg_type config ~from_agent ~content
-    ~pre_extract_mention ~deferred_by_predecessor =
+let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
+    ~content ~pre_extract_mention ~deferred_by_predecessor =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
     let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
@@ -839,6 +861,7 @@ let broadcast_with_mention ?trace_context ~msg_type config ~from_agent ~content
     ; msg_type = safe_msg_type
     ; mention_delivery =
         (match mention with None -> Passive | Some _ -> Pending)
+    ; audience
     }
   in
   let outbox_result =
@@ -893,13 +916,14 @@ let broadcast_with_mention ?trace_context ~msg_type config ~from_agent ~content
        ~mention ();
      let mention_delivery =
        match deferred_by_predecessor with
-       | None -> deliver_committed_mention config msg
+       | None -> deliver_committed_mention ~audience config msg
        | Some reason -> Deferred reason
      in
      observe safe_msg_type;
      Ok { delivery with mention_delivery })
 
-let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~content =
+let broadcast ?trace_context ?(msg_type = "broadcast") ~audience config
+      ~from_agent ~content =
   (* Preserve original content and extract mention tokens before any
      fleet-wide invariant rewrite. Explicit mentions share the recovery lock,
      so sequence assignment, commit, intake materialization, and wake request
@@ -910,6 +934,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") config ~from_agent ~conte
     broadcast_with_mention
       ?trace_context
       ~msg_type
+      ~audience
       config
       ~from_agent
       ~content

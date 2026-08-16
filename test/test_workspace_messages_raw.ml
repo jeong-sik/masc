@@ -22,9 +22,9 @@ let with_test_env f =
 
 let test_get_messages_raw_limit_and_order () =
   with_test_env (fun config ->
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 1" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 2" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 3" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 1" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 2" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 3" in
     let msgs = Workspace.get_messages_raw config ~since_seq:0 ~limit:2 in
     let contents = List.map (fun (msg : Masc_domain.message) -> msg.content) msgs in
     Alcotest.(check int) "limit respected" 2 (List.length msgs);
@@ -34,9 +34,9 @@ let test_get_messages_raw_limit_and_order () =
 
 let test_get_messages_raw_since_seq_stops_early () =
   with_test_env (fun config ->
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 1" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 2" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Message 3" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 1" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 2" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Message 3" in
     let baseline = Workspace.get_messages_raw config ~since_seq:0 ~limit:10 in
     let cutoff_seq =
       match baseline with
@@ -53,7 +53,7 @@ let test_get_messages_raw_large_history_keeps_newest_window () =
   with_test_env (fun config ->
     for i = 1 to 20 do
       let _ =
-        Workspace.broadcast config ~from_agent:"claude"
+        Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude"
           ~content:(Printf.sprintf "Message %d" i)
       in
       ()
@@ -99,8 +99,8 @@ let test_repeated_mention_delivers_each_canonical_event () =
         wakes := delivery.mention :: !wakes;
         Workspace_broadcast.Accepted);
     let content = "@gemini review the canonical event" in
-    ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
-    ignore (Workspace.broadcast config ~from_agent:"claude" ~content);
+    ignore (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content);
+    ignore (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content);
     let persisted =
       Workspace.get_all_messages_raw config ~since_seq:0
       |> List.filter (fun (message : Masc_domain.message) ->
@@ -202,7 +202,7 @@ let test_failed_authoritative_write_suppresses_fanout () =
           incr mentions;
           Workspace_broadcast.Accepted);
         (match
-           Workspace.broadcast
+           Workspace.broadcast ~audience:Workspace_broadcast.System_record
              config
              ~from_agent:"claude"
              ~content:"passive message must not fan out"
@@ -247,7 +247,7 @@ let test_durable_outbox_defers_failed_message_commit () =
       (fun () ->
          let delivery =
            with_failed_message_commit (fun () ->
-             Workspace.broadcast config ~from_agent:"claude"
+             Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude"
                ~content:"@gemini recover me"
              |> Result.get_ok)
          in
@@ -283,7 +283,7 @@ let test_malformed_outbox_is_quarantined_before_successor_delivery () =
     let malformed_path = Filename.concat outbox_dir "malformed.json" in
     let successor =
       with_failed_message_commit (fun () ->
-        Workspace.broadcast config ~from_agent:"claude"
+        Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude"
           ~content:"@gemini follows quarantined row"
         |> Result.get_ok)
     in
@@ -368,6 +368,37 @@ let test_startup_schema_preflight_rejects_unpurged_message () =
     | Error rejections ->
       Alcotest.failf "expected one schema rejection, got %d" (List.length rejections))
 
+(* The delivery handler is the only place that sees a committed message. The
+   dispatcher used to answer [Passive] for an unmentioned broadcast without
+   calling the handler at all, so anything the handler does for the fleet —
+   projecting the message into every Keeper's window — was wired to a call
+   that never happened. *)
+let test_unmentioned_broadcast_reaches_the_delivery_handler () =
+  with_test_env (fun config ->
+    let seen = ref [] in
+    let previous =
+      Workspace_broadcast.For_testing.replace_on_broadcast_mention
+        (fun (delivery : Workspace_broadcast.broadcast_delivery) ->
+           seen := delivery.content :: !seen;
+           Workspace_broadcast.Passive)
+    in
+    Fun.protect
+      ~finally:(fun () -> Workspace_broadcast.set_on_broadcast_mention previous)
+      (fun () ->
+        match
+          Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude"
+            ~content:"fleet announcement with no mention"
+        with
+        | Error _ -> Alcotest.fail "broadcast was not persisted"
+        | Ok delivery ->
+          Alcotest.(check bool)
+            "an unmentioned broadcast stays a passive mention delivery" true
+            (delivery.mention_delivery = Workspace_broadcast.Passive);
+          Alcotest.(check (list string))
+            "the handler saw the committed message"
+            [ "fleet announcement with no mention" ]
+            !seen))
+
 let () =
   Alcotest.run "Workspace raw message regression" [
     ("messages_raw", [
@@ -387,5 +418,7 @@ let () =
         test_malformed_outbox_is_quarantined_before_successor_delivery;
       Alcotest.test_case "startup rejects unpurged message schema" `Quick
         test_startup_schema_preflight_rejects_unpurged_message;
+      Alcotest.test_case "unmentioned broadcast reaches the delivery handler" `Quick
+        test_unmentioned_broadcast_reaches_the_delivery_handler;
     ]);
   ]

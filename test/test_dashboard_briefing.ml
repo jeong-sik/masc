@@ -93,10 +93,10 @@ let seed_workspace config session_id =
   ignore (Lib.Workspace.bind_session config ~agent_name:"llama-local-delta"
             ~capabilities:[ "worker"; "local64"; "observer" ] ());
   ignore
-    (Lib.Workspace.broadcast config ~from_agent:"mission-local64-smoke"
+    (Lib.Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"mission-local64-smoke"
        ~content:"@llama-local-alpha recover failed worker coverage");
   ignore
-    (Lib.Workspace.broadcast config ~from_agent:"llama-local-alpha"
+    (Lib.Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"llama-local-alpha"
        ~content:"Spawned worker recovered partial role coverage and runtime visibility.");
 
   (* Team sessions are retired; mission fixtures now exercise workspace-level

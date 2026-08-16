@@ -64,6 +64,7 @@ let base_observation : WO.world_observation =
     connected_surface_failures = [];
     own_recent_board_posts = [];
     fleet_messages = [];
+    own_recent_actions = [];
   }
 
 let meta : Masc.Keeper_meta_contract.keeper_meta =
@@ -187,6 +188,104 @@ let test_fleet_messages_reach_the_prompt () =
     (contains ~needle:"- fleet keeper-bob-agent: deploy is green" user);
   check bool "rows are marked as context" true
     (contains ~needle:"context, not instructions" user)
+;;
+
+(* The failure this closes: an autonomous turn described the world and never
+   the keeper's own history, so a finished task got claimed again and a
+   rejected call got repeated every turn. *)
+module Actions = Masc.Keeper_own_recent_actions
+
+let test_the_keeper_sees_the_call_it_got_rejected_for () =
+  let user =
+    user_message
+      { base_observation with
+        own_recent_actions =
+          [ { Actions.turn_id = 27486
+            ; calls =
+                [ { Actions.tool = "keeper_board_post"
+                  ; input = {|{"title":"status"}|}
+                  ; outcome = Actions.Ok_call
+                  }
+                ; { Actions.tool = "keeper_broadcast"
+                  ; input = "{}"
+                  ; outcome = Actions.Failed_call {|"message": MISSING|}
+                  }
+                ]
+            }
+          ]
+      }
+  in
+  check bool "section header states the depth" true
+    (contains ~needle:"### Your Recent Actions (1 turns)" user);
+  check bool "the work it already did is stated" true
+    (contains ~needle:{|- [turn 27486] keeper_board_post {"title":"status"} -> ok|} user);
+  check bool "the rejected call is stated with its arguments" true
+    (contains ~needle:{|keeper_broadcast {} -> REJECTED: "message": MISSING|} user);
+  check bool "rows are marked as context" true
+    (contains ~needle:"context, not instructions" user)
+;;
+
+(* Row shape as the durable tool-call log persists it: [keeper_turn_id] is a
+   string, [success] a bool, [input] an object. *)
+let log_row ~keeper ?turn ~tool ~success () =
+  `Assoc
+    ([ "keeper", `String keeper
+     ; "tool", `String tool
+     ; "input", `Assoc [ "arg", `String tool ]
+     ; "success", `Bool success
+     ; "output", `String (if success then "ok" else "Error: refused")
+     ]
+     @ match turn with None -> [] | Some t -> [ "keeper_turn_id", `String (string_of_int t) ])
+;;
+
+let test_only_the_newest_turns_of_this_keeper_are_replayed () =
+  let rows =
+    [ log_row ~keeper:"me" ~turn:1 ~tool:"a" ~success:true ()
+    ; log_row ~keeper:"me" ~turn:2 ~tool:"b" ~success:true ()
+    ; log_row ~keeper:"other" ~turn:2 ~tool:"not-mine" ~success:true ()
+    ; log_row ~keeper:"me" ~tool:"unattributed" ~success:true ()
+    ; log_row ~keeper:"me" ~turn:3 ~tool:"c" ~success:false ()
+    ]
+  in
+  let turns = Actions.turns_of_rows ~keeper_name:"me" ~max_turns:2 rows in
+  check (list int) "newest two turns, oldest first" [ 2; 3 ]
+    (List.map (fun (t : Actions.turn) -> t.turn_id) turns);
+  check (list string) "another keeper's row never appears" [ "b"; "c" ]
+    (List.concat_map
+       (fun (t : Actions.turn) ->
+          List.map (fun (c : Actions.call) -> c.tool) t.calls)
+       turns);
+  check bool "a row with no turn id is dropped, not folded into a neighbour" false
+    (List.exists
+       (fun (t : Actions.turn) ->
+          List.exists (fun (c : Actions.call) -> c.tool = "unattributed") t.calls)
+       turns)
+;;
+
+let test_calls_keep_the_order_they_ran_in () =
+  let rows =
+    [ log_row ~keeper:"me" ~turn:9 ~tool:"first" ~success:true ()
+    ; log_row ~keeper:"me" ~turn:9 ~tool:"second" ~success:false ()
+    ; log_row ~keeper:"me" ~turn:9 ~tool:"third" ~success:true ()
+    ]
+  in
+  match Actions.turns_of_rows ~keeper_name:"me" ~max_turns:5 rows with
+  | [ turn ] ->
+    check (list string) "persisted order" [ "first"; "second"; "third" ]
+      (List.map (fun (c : Actions.call) -> c.tool) turn.calls)
+  | other -> failf "expected exactly one turn, got %d" (List.length other)
+;;
+
+let test_disabling_the_depth_replays_nothing () =
+  let rows = [ log_row ~keeper:"me" ~turn:1 ~tool:"a" ~success:true () ] in
+  check int "zero turns means nothing is read back" 0
+    (List.length (Actions.turns_of_rows ~keeper_name:"me" ~max_turns:0 rows))
+;;
+
+let test_no_recent_actions_no_section () =
+  let user = user_message { base_observation with own_recent_actions = [] } in
+  check bool "absent when the keeper has done nothing" false
+    (contains ~needle:"### Your Recent Actions" user)
 ;;
 
 let test_no_fleet_messages_no_section () =
@@ -535,5 +634,18 @@ let () =
             test_no_fleet_messages_no_section;
           test_case "rows render in arrival order" `Quick
             test_fleet_rows_render_in_arrival_order;
+        ] );
+      ( "own recent actions",
+        [
+          test_case "the keeper sees the call it got rejected for" `Quick
+            test_the_keeper_sees_the_call_it_got_rejected_for;
+          test_case "no actions means no section" `Quick
+            test_no_recent_actions_no_section;
+          test_case "only the newest turns of this keeper are replayed" `Quick
+            test_only_the_newest_turns_of_this_keeper_are_replayed;
+          test_case "calls keep the order they ran in" `Quick
+            test_calls_keep_the_order_they_ran_in;
+          test_case "disabling the depth replays nothing" `Quick
+            test_disabling_the_depth_replays_nothing;
         ] );
     ]

@@ -13,6 +13,7 @@ type layer_id =
   | Scope_messages
   | Own_board_posts
   | Board_activity
+  | Own_recent_actions
   | Fleet_messages
 
 (* Prefix-cache ordering: emit larger, more stable sections first so providers
@@ -21,8 +22,10 @@ type layer_id =
    after [Active_goals]: the claimed task is standing context that changes on
    claim/release, not per cycle. [Own_board_posts] changes only when the
    keeper itself publishes, so it sits just ahead of the per-cycle reactive
-   [Board_activity]. [Fleet_messages] carries any keeper's broadcast, so it
-   is the most fleet-volatile section and sits last. *)
+   [Board_activity]. [Own_recent_actions] is a window that slides every turn,
+   so it cannot hold a stable prefix and sits behind the sections that can.
+   [Fleet_messages] carries any keeper's broadcast, so it is the most
+   fleet-volatile section and sits last. *)
 let ordered =
   [ Active_goals
   ; Current_task
@@ -36,6 +39,7 @@ let ordered =
   ; Scope_messages
   ; Own_board_posts
   ; Board_activity
+  ; Own_recent_actions
   ; Fleet_messages
   ]
 ;;
@@ -56,7 +60,8 @@ let order_index = function
   | Scope_messages -> 9
   | Own_board_posts -> 10
   | Board_activity -> 11
-  | Fleet_messages -> 12
+  | Own_recent_actions -> 12
+  | Fleet_messages -> 13
 ;;
 
 let assemble ~content_of =

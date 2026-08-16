@@ -51,6 +51,7 @@ let sample_evidence : Keeper_canary_evidence.run_evidence =
   ; deterministic_signal = sample_score
   ; judgment = None
   ; injections = []
+  ; serving = None
   ; notes = []
   }
 
@@ -89,6 +90,7 @@ let test_top_level_keys_are_present () =
     ; "deterministic_signal"
     ; "judgment"
     ; "injections"
+    ; "serving"
     ; "notes"
     ]
   in

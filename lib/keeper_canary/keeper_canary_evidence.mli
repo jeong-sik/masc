@@ -105,6 +105,11 @@ type run_evidence = {
       (** [None] renders as JSON null — no judge ran for this invocation. *)
   injections : injection list;
       (** Empty when the run injected nothing; order follows execution. *)
+  serving : Keeper_canary_serving.check option;
+      (** [None] renders as JSON null — no [--expect-runtime] was given, so
+          the run makes no claim about who served its turns. [runtime]
+          above stays a caller-supplied label; this field is the verified
+          counterpart (#28913). *)
   notes : string list;
 }
 

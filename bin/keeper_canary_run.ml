@@ -31,7 +31,7 @@
        [--turn-timeout SECONDS] [--wall-clock-target SECONDS] \
        [--inject-restart-after N] [--inject-failover-after N \
        --failover-down-cmd CMD [--failover-up-cmd CMD]] \
-       [--judge-runtime ID] [--out PATH] *)
+       [--judge-runtime ID] [--expect-runtime ID] [--out PATH] *)
 
 let default_facts = 9
 let default_turn_interval_s = 0.0
@@ -42,7 +42,8 @@ let usage =
    [--turn-interval SECONDS] [--turn-timeout SECONDS] \
    [--wall-clock-target SECONDS] [--inject-restart-after N] \
    [--inject-failover-after N --failover-down-cmd CMD [--failover-up-cmd CMD]] \
-   [--judge-runtime ID] [--out PATH] [--allow-reused-keeper]"
+   [--judge-runtime ID] [--expect-runtime ID] [--out PATH] \
+   [--allow-reused-keeper]"
 
 type args = {
   keeper : string;
@@ -60,6 +61,7 @@ type args = {
   failover_down_cmd : string option;
   failover_up_cmd : string option;
   judge_runtime : string option;
+  expect_runtime : string option;
   out : string option;
   allow_reused_keeper : bool;
 }
@@ -80,6 +82,7 @@ let parse_args argv =
   let failover_down_cmd = ref None in
   let failover_up_cmd = ref None in
   let judge_runtime = ref None in
+  let expect_runtime = ref None in
   let out = ref None in
   let allow_reused_keeper = ref false in
   let rec parse = function
@@ -157,6 +160,10 @@ let parse_args argv =
       judge_runtime := Some v;
       parse rest
     | [ "--judge-runtime" ] -> Error "missing value for --judge-runtime"
+    | "--expect-runtime" :: v :: rest ->
+      expect_runtime := Some v;
+      parse rest
+    | [ "--expect-runtime" ] -> Error "missing value for --expect-runtime"
     | "--out" :: v :: rest ->
       out := Some v;
       parse rest
@@ -187,6 +194,12 @@ let parse_args argv =
        then Error "--inject-failover-after requires --failover-down-cmd"
        else if !failover_down_cmd <> None && !inject_failover_after = None
        then Error "--failover-down-cmd requires --inject-failover-after"
+       else if !expect_runtime <> None && !allow_reused_keeper
+       then
+         Error
+           "--expect-runtime and --allow-reused-keeper are mutually \
+            exclusive: the serving check matches harness turn indices \
+            against keeper_turn_id, which only line up on a fresh keeper"
        else
        Ok
          { keeper
@@ -204,6 +217,7 @@ let parse_args argv =
          ; failover_down_cmd = !failover_down_cmd
          ; failover_up_cmd = !failover_up_cmd
          ; judge_runtime = !judge_runtime
+         ; expect_runtime = !expect_runtime
          ; out = !out
          ; allow_reused_keeper = !allow_reused_keeper
          })
@@ -549,6 +563,28 @@ let start_failover ~down_cmd ~after_turn : (pending_failover, string) result =
     ; pf_down_cmd = down_cmd
     }
 
+(* One fetch shape for both consumers of the runtime-manifest attempts:
+   the failover verdict and the serving check (#28913). *)
+let fetch_manifest_attempts ~host ~port ~keeper_name :
+  (Keeper_canary_failover.attempt list, string) result
+  =
+  let ( let* ) = Result.bind in
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/runtime-trace?limit=500" keeper_name
+  in
+  let* status, body = Keeper_canary_http.admin_get ~host ~port ~path () in
+  let* () =
+    if status >= 200 && status < 300
+    then Ok ()
+    else Error (Printf.sprintf "runtime-trace returned HTTP %d" status)
+  in
+  let* json =
+    match Yojson.Safe.from_string body with
+    | j -> Ok j
+    | exception Yojson.Json_error msg -> Error ("runtime-trace: invalid JSON: " ^ msg)
+  in
+  Keeper_canary_failover.parse_manifest_rows json
+
 let finish_failover ~host ~port ~keeper_name ~up_cmd (pending : pending_failover) :
   (Keeper_canary_evidence.injection, string) result * string list
   =
@@ -566,21 +602,7 @@ let finish_failover ~host ~port ~keeper_name ~up_cmd (pending : pending_failover
   in
   let result =
     let ( let* ) = Result.bind in
-    let path =
-      Printf.sprintf "/api/v1/keepers/%s/runtime-trace?limit=500" keeper_name
-    in
-    let* status, body = Keeper_canary_http.admin_get ~host ~port ~path () in
-    let* () =
-      if status >= 200 && status < 300
-      then Ok ()
-      else Error (Printf.sprintf "runtime-trace returned HTTP %d" status)
-    in
-    let* json =
-      match Yojson.Safe.from_string body with
-      | j -> Ok j
-      | exception Yojson.Json_error msg -> Error ("runtime-trace: invalid JSON: " ^ msg)
-    in
-    let* attempts = Keeper_canary_failover.parse_manifest_rows json in
+    let* attempts = fetch_manifest_attempts ~host ~port ~keeper_name in
     let mode, windowed =
       Keeper_canary_failover.classify
         ~window_start:pending.pf_window_start
@@ -928,6 +950,41 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
          | Ok verdict -> (Some verdict, [])
          | Error detail -> (None, [ Printf.sprintf "judge failed: %s" detail ]))
     in
+    let serving, serving_notes =
+      match args.expect_runtime with
+      | None -> (None, [])
+      | Some expected_runtime ->
+        (match fetch_manifest_attempts ~host ~port ~keeper_name:args.keeper with
+         | Error detail ->
+           (* Attribution unreadable means the serving claim is unproven:
+              serving stays null and the exit path treats that as a failed
+              check rather than a silent pass. *)
+           (None, [ Printf.sprintf "serving: attribution read failed: %s" detail ])
+         | Ok attempts ->
+           (* [turns] already includes the recall turn: all_drafts ends
+              with it and every draft is correlated into a turn row. *)
+           let window_start =
+             match turns with
+             | first :: _ -> first.Keeper_canary_evidence.sent_at
+             | [] -> recall_draft.sent_at
+           in
+           let turn_ids =
+             List.map (fun (t : Keeper_canary_evidence.turn_evidence) -> t.index) turns
+           in
+           let c =
+             Keeper_canary_serving.check
+               ~expected_runtime
+               ~window_start
+               ~turn_ids
+               ~attempts
+           in
+           Printf.eprintf
+             "[keeper_canary_run] serving check expected=%s mismatched=%d unattributed=%d\n%!"
+             expected_runtime
+             (List.length c.Keeper_canary_serving.mismatched)
+             (List.length c.Keeper_canary_serving.unattributed);
+           (Some c, []))
+    in
     Ok
       { Keeper_canary_evidence.captured_at = iso8601_now ()
       ; harness_git_commit = git_commit_opt ()
@@ -950,9 +1007,10 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
       ; deterministic_signal
       ; judgment
       ; injections = List.rev !injections
+      ; serving
       ; notes =
           transcript_notes @ capped_note @ correlation_notes @ failover_notes
-          @ judge_notes
+          @ judge_notes @ serving_notes
       })
 
 (* Sized for the judge's small JSON verdict (at most nine per_fact rows and
@@ -1129,10 +1187,43 @@ let () =
           are the remaining suspects). Explicit exit is the sibling-harness
           convention regardless (keeper_capability_probe_cli.ml does the
           same); stdout is flushed by exit's at_exit hooks. *)
-       (match args.judge_runtime, evidence.Keeper_canary_evidence.judgment with
-        | Some _, None ->
-          (* The judge was requested but produced no judgment — the receipt
-             above still landed (with the failure note), and the exit code
-             tells automation the judging leg failed. *)
-          exit 1
-        | _ -> exit 0))
+       let serving_failed =
+         match args.expect_runtime, evidence.Keeper_canary_evidence.serving with
+         | None, _ -> false
+         | Some _, None ->
+           (* Requested but unreadable: the claim is unproven, which for
+              automation is the same as disproven. The note in the
+              evidence carries the read error. *)
+           true
+         | Some _, Some c ->
+           if Keeper_canary_serving.all_as_expected c
+           then false
+           else (
+             List.iter
+               (fun (turn, rid) ->
+                 Printf.eprintf
+                   "[keeper_canary_run] serving MISMATCH turn=%d served_by=%s\n"
+                   turn
+                   rid)
+               c.Keeper_canary_serving.mismatched;
+             List.iter
+               (fun turn ->
+                 Printf.eprintf
+                   "[keeper_canary_run] serving UNATTRIBUTED turn=%d\n"
+                   turn)
+               c.Keeper_canary_serving.unattributed;
+             true)
+       in
+       if serving_failed
+       then
+         (* Distinct from the judge-leg failure (1): the receipt landed but
+            it does not measure the runtime it was pointed at. *)
+         exit 3
+       else (
+         match args.judge_runtime, evidence.Keeper_canary_evidence.judgment with
+         | Some _, None ->
+           (* The judge was requested but produced no judgment — the receipt
+              above still landed (with the failure note), and the exit code
+              tells automation the judging leg failed. *)
+           exit 1
+         | _ -> exit 0))

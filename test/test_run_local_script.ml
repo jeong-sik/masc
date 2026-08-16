@@ -127,7 +127,6 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_CONFIG_DIR=%s\n' "${MASC_CONFIG_DIR:-}"
   printf 'MASC_GRPC_ENABLED=%s\n' "${MASC_GRPC_ENABLED:-}"
   printf 'MASC_WS_ENABLED=%s\n' "${MASC_WS_ENABLED:-}"
-  printf 'MASC_WEBRTC_ENABLED=%s\n' "${MASC_WEBRTC_ENABLED:-}"
   printf 'ARGS=%s\n' "$*"
 } >"$capture"
 exit 0
@@ -179,8 +178,6 @@ let test_bootstraps_local_config_and_sets_http_only_env () =
         (String_util.contains_substring captured "MASC_GRPC_ENABLED=0");
       check bool "ws disabled by default" true
         (String_util.contains_substring captured "MASC_WS_ENABLED=0");
-      check bool "webrtc disabled by default" true
-        (String_util.contains_substring captured "MASC_WEBRTC_ENABLED=0");
       check bool "port passed through" true
         (String_util.contains_substring captured "ARGS=--host=127.0.0.1 --port=9955"))
 

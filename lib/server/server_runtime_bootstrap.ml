@@ -383,13 +383,6 @@ let () =
   ignore (Dashboard.force_link, Operator_tool.force_link);
   Transport_read_model.register_grpc_service_name Masc_grpc_service.service_name;
   Transport_read_model.register_grpc_health_service_name Masc_grpc_server.health_service_name;
-  Transport_read_model.register_webrtc_status (fun () ->
-    { ice_server_urls = Server_webrtc_transport.configured_ice_server_urls ()
-    ; pending_offers = Server_webrtc_transport.pending_offer_count ()
-    ; active_peers = Server_webrtc_transport.active_peer_count ()
-    ; live_connections = Server_webrtc_transport.live_webrtc_count ()
-    ; connected_channels = Server_webrtc_transport.connected_channel_count ()
-    });
   Dashboard_snapshot.register_dashboard_tools_http_json Server_dashboard_http_runtime_info.dashboard_tools_http_json;
   Dashboard_snapshot.register_namespace_truth_snapshot Server_dashboard_http_namespace_truth.namespace_truth_snapshot_from_caches;
   if Option.is_none (Sys.getenv_opt "OCAMLRUNPARAM") then begin
@@ -1437,7 +1430,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       publish_server_state state;
       (* Global readiness is the transport-neutral owner capability, not a
          quorum over optional transports. Mark it before starting fallible
-         Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
+         Discord/gRPC/WS/dashboard auxiliaries so one transport cannot
          turn an already-published HTTP owner into a process-wide fatal
          pre-readiness failure. Each auxiliary owns its typed health state. *)
       (match mark_owner_state_ready () with
@@ -1493,7 +1486,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
               Log.Server.warn "gRPC keeper client init failed: %s"
                 (Printexc.to_string exn))
-       | Http | Ws | Webrtc | Local -> ());
+       | Http | Ws | Local -> ());
       let dispatch_ws_inbound_message ws_session_id body_str =
           let jsonrpc_id_opt body =
             match Yojson.Safe.from_string body with
@@ -1589,40 +1582,9 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       in
       Server_mcp_transport_ws.set_inbound_message_handler
         dispatch_ws_inbound_message;
+      (* WebSocket rides the HTTP listener's same-origin /ws upgrade
+         (enabled by default, opt-out via MASC_WS_ENABLED=0). *)
       Transport_metrics.set_ws_same_origin_runtime_ready true;
-      (* Standalone WebSocket transport (enabled by default, opt-out via MASC_WS_ENABLED=0) *)
-      Server_ws_standalone.start ~sw ~env
-        ~on_message:Server_mcp_transport_ws.dispatch_inbound_message;
-      (* WebRTC DataChannel transport (enabled by default, opt-out via MASC_WEBRTC_ENABLED=0) *)
-      if Server_webrtc_transport.is_enabled () then (
-        Log.Server.info "WebRTC DataChannel transport enabled";
-        Server_webrtc_transport.set_message_handler
-          (fun peer_id body_str ->
-            Eio.Fiber.fork ~sw (fun () ->
-              try
-                let response_json =
-                  Mcp_eio.handle_request ~clock ~sw
-                    ~mcp_session_id:peer_id state body_str
-                in
-                let response_str = Yojson.Safe.to_string response_json in
-                if response_str <> "null" then begin
-                  match
-                    Server_webrtc_transport.send_to_peer peer_id response_str
-                  with
-                  | Ok _bytes -> ()
-                  | Error e ->
-                    Log.Server.warn
-                      "WebRTC send_to_peer dropped response for peer=%s: %s"
-                      peer_id e
-                end
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Server.warn "WebRTC dispatch error %s: %s"
-                  peer_id (Printexc.to_string exn)));
-        Server_webrtc_transport.set_connection_starter
-          (fun peer_id ->
-            Server_webrtc_transport.start_webrtc_connection ~sw ~env peer_id));
       (* Register transport providers for unified bridge *)
       Transport_bridge.register_provider (module struct
         let name = "sse"
@@ -1633,7 +1595,7 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Transport_bridge.register_provider (module struct
         let name = "ws"
         let protocol = Transport.Ws
-        let is_enabled () = Server_ws_standalone.is_enabled ()
+        let is_enabled () = Transport_metrics.ws_enabled ()
         let session_count () = Server_mcp_transport_ws.session_count ()
       end);
       Transport_bridge.register_provider (module struct
@@ -1641,12 +1603,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
         let protocol = Transport.Grpc
         let is_enabled () = Masc_grpc_server.is_enabled ()
         let session_count () = 0  (* gRPC uses per-call, no persistent sessions *)
-      end);
-      Transport_bridge.register_provider (module struct
-        let name = "webrtc"
-        let protocol = Transport.Webrtc
-        let is_enabled () = Server_webrtc_transport.is_enabled ()
-        let session_count () = Server_webrtc_transport.live_webrtc_count ()
       end);
       Transport_bridge.seal ();
       (* Cold-start warm-cache stagger is handled by warm_delay_s in each

@@ -94,7 +94,7 @@ function HiddenDiagnosticsLinks() {
   const links = [
     {
       label: 'Transport diagnostics',
-      detail: 'SSE/gRPC/WebSocket/WebRTC connection freshness.',
+      detail: 'SSE/gRPC/WebSocket connection freshness.',
       section: 'transport-health',
     },
     {

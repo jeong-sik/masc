@@ -287,7 +287,6 @@ env \
   MASC_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
-  MASC_WEBRTC_ENABLED=0 \
   MASC_KEEPER_BOOTSTRAP_ENABLED=false \
   "$BINARY" --base-path "$base_path" --port "$PORT" >"$server_log" 2>&1 &
 SERVER_PID=$!

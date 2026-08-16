@@ -9,7 +9,7 @@
     encoding land. PR-3+ wire the publish calls from the SSE eviction
     and lifecycle sites in {!Server_mcp_transport_http_sse}. *)
 
-type transport = SSE | WS | GRPC | WebRTC
+type transport = SSE | WS | GRPC
 
 type evict_reason =
   | Cap_exceeded

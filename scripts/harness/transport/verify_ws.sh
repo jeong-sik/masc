@@ -15,17 +15,31 @@ require_server
 
 echo "--- WebSocket Transport E2E ---"
 
-ws_discovery="$(curl -fsS "${MASC_HTTP_BASE_URL}/ws" 2>&1 || true)"
-read -r ws_enabled ws_port ws_url <<EOF
+# The HTTP listener accepts requests before the WebSocket MCP dispatcher is
+# installed, and discovery withholds ws_url until then (see
+# set_ws_same_origin_runtime_ready). Wait for the advertised URL rather than
+# probing into that window.
+ws_enabled=""
+ws_url=""
+for _ in $(seq 1 40); do
+  ws_discovery="$(curl -fsS "${MASC_HTTP_BASE_URL}/ws" 2>&1 || true)"
+  read -r ws_enabled ws_url <<EOF
 $(WS_DISCOVERY="$ws_discovery" python3 - <<'PY'
 import json, os
-payload = json.loads(os.environ["WS_DISCOVERY"])
-print(str(payload.get("enabled", False)).lower(), payload.get("ws_port", ""), payload.get("ws_url", ""))
+try:
+    payload = json.loads(os.environ["WS_DISCOVERY"])
+except Exception:
+    print("false", "")
+else:
+    print(str(payload.get("enabled", False)).lower(), payload.get("ws_url") or "")
 PY
 )
 EOF
+  [[ "$ws_enabled" = "true" && -n "$ws_url" ]] && break
+  sleep 0.25
+done
 
-if [[ "$ws_enabled" = "true" && -n "$ws_port" && -n "$ws_url" ]]; then
+if [[ "$ws_enabled" = "true" && -n "$ws_url" ]]; then
   pass "WebSocket: /ws returns discovery JSON"
 else
   fail "WebSocket: /ws discovery" "unexpected response: ${ws_discovery:0:200}"
@@ -36,7 +50,7 @@ fi
 ws_output="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws.XXXXXX")"
 ws_handshake="$(mktemp "${TMPDIR:-/tmp}/masc-transport-ws-handshake.XXXXXX")"
 ws_auth_token="$(transport_auth_token)"
-MASC_WS_HOST="127.0.0.1" MASC_WS_PORT="$ws_port" WS_OUTPUT="$ws_output" \
+MASC_WS_URL="$ws_url" WS_OUTPUT="$ws_output" \
 WS_EXPECT="ws-e2e-test-event" WS_HANDSHAKE="$ws_handshake" \
 WS_AUTH_TOKEN="$ws_auth_token" python3 - <<'PY' &
 import base64
@@ -44,9 +58,14 @@ import json
 import os
 import socket
 import sys
+import urllib.parse
 
-host = os.environ["MASC_WS_HOST"]
-port = int(os.environ["MASC_WS_PORT"])
+# WebSocket is a same-origin upgrade on the HTTP listener, so the target
+# comes from the discovery ws_url rather than a dedicated port.
+_ws = urllib.parse.urlsplit(os.environ["MASC_WS_URL"])
+host = _ws.hostname or "127.0.0.1"
+port = _ws.port or (443 if _ws.scheme == "wss" else 80)
+path = _ws.path or "/ws"
 output_path = os.environ["WS_OUTPUT"]
 expected = os.environ["WS_EXPECT"]
 handshake_path = os.environ["WS_HANDSHAKE"]
@@ -55,8 +74,9 @@ auth_token = os.environ.get("WS_AUTH_TOKEN", "")
 sock = socket.create_connection((host, port), timeout=5)
 key = base64.b64encode(os.urandom(16)).decode()
 request = (
-    f"GET / HTTP/1.1\r\n"
+    f"GET {path} HTTP/1.1\r\n"
     f"Host: {host}:{port}\r\n"
+    f"Origin: http://{host}:{port}\r\n"
     "Upgrade: websocket\r\n"
     "Connection: Upgrade\r\n"
     f"Sec-WebSocket-Key: {key}\r\n"
@@ -183,10 +203,10 @@ while [[ "$(date +%s)" -lt "$ws_handshake_deadline" ]]; do
 done
 
 if [[ -s "$ws_handshake" ]]; then
-  pass "WebSocket handshake on :${ws_port}: 101 Switching Protocols"
+  pass "WebSocket handshake at ${ws_url}: 101 Switching Protocols"
 else
   wait "$ws_client_pid" || true
-  fail "WebSocket handshake on :${ws_port}" "client did not complete upgrade"
+  fail "WebSocket handshake at ${ws_url}" "client did not complete upgrade"
   rm -f "$ws_output" "$ws_handshake"
   summary
   exit 1

@@ -547,8 +547,7 @@ load_base_path_env_local() {
         MASC_BASE_PATH \
         MASC_SIDECAR_ROOT \
         MASC_CONFIG_DIR \
-        MASC_WS_ENABLED \
-        MASC_WEBRTC_ENABLED
+        MASC_WS_ENABLED
     do
         preserve_env_override "$env_name"
     done
@@ -562,8 +561,7 @@ load_base_path_env_local() {
         MASC_BASE_PATH \
         MASC_SIDECAR_ROOT \
         MASC_CONFIG_DIR \
-        MASC_WS_ENABLED \
-        MASC_WEBRTC_ENABLED
+        MASC_WS_ENABLED
     do
         restore_env_override "$env_name"
     done
@@ -610,8 +608,7 @@ for env_name in \
     MASC_BASE_PATH \
     MASC_SIDECAR_ROOT \
     MASC_CONFIG_DIR \
-    MASC_WS_ENABLED \
-    MASC_WEBRTC_ENABLED
+    MASC_WS_ENABLED
 do
     preserve_env_override "$env_name"
 done
@@ -633,8 +630,7 @@ for env_name in \
     MASC_BASE_PATH \
     MASC_SIDECAR_ROOT \
     MASC_CONFIG_DIR \
-    MASC_WS_ENABLED \
-    MASC_WEBRTC_ENABLED
+    MASC_WS_ENABLED
 do
     restore_env_override "$env_name"
 done
@@ -703,9 +699,6 @@ if [ -z "${MASC_WS_ENABLED+x}" ]; then
     export MASC_WS_ENABLED=1
 fi
 
-if [ -z "${MASC_WEBRTC_ENABLED+x}" ]; then
-    export MASC_WEBRTC_ENABLED=1
-fi
 
 # Shared local runtime should keep the streamable-HTTP MCP entry aligned
 # with the bearer token minted during server bootstrap. Set to 0 to opt out.

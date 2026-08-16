@@ -37,7 +37,6 @@ type protocol =
   | Grpc
   | Sse
   | Ws
-  | Webrtc
 
 let protocol_to_string = function
   | JsonRpc -> "json-rpc"
@@ -45,7 +44,6 @@ let protocol_to_string = function
   | Grpc -> "grpc"
   | Sse -> "sse"
   | Ws -> "ws"
-  | Webrtc -> "webrtc"
 
 let protocol_of_string = function
   | "json-rpc" | "jsonrpc" -> Some JsonRpc
@@ -53,7 +51,6 @@ let protocol_of_string = function
   | "grpc" -> Some Grpc
   | "sse" -> Some Sse
   | "ws" | "websocket" -> Some Ws
-  | "webrtc" -> Some Webrtc
   | _ -> None
 
 (** Standard JSON-RPC 2.0 error codes *)
@@ -185,7 +182,6 @@ module Rest = struct
       #8615/#8670/#8682 SSOT parsers. *)
   let auth_mode_of_operation_opt = function
     | "masc_websocket_discovery" -> Some Public
-    | "webrtc_offer" | "webrtc_answer" -> Some Same_origin_or_bearer
     | "masc_broadcast"
     | "masc_operator_action"
     | "masc_operator_confirm" -> Some Bearer_required
@@ -220,8 +216,6 @@ module Rest = struct
       ("masc_operator_action", [ (POST, "/api/v1/operator/action") ]);
       ("masc_operator_confirm", [ (POST, "/api/v1/operator/confirm") ]);
       ("masc_websocket_discovery", [ (GET, "/ws") ]);
-      ("webrtc_offer", [ (POST, "/webrtc/offer") ]);
-      ("webrtc_answer", [ (POST, "/webrtc/answer") ]);
       ("masc_broadcast", [ (POST, "/api/v1/broadcast") ]);
       ("masc_agent_card", [ (GET, "/.well-known/agent.json") ]);
     ]
@@ -332,8 +326,6 @@ module Rest = struct
         [
           "masc_transport_status";
           "masc_websocket_discovery";
-          "webrtc_offer";
-          "webrtc_answer";
         ] );
       ( "tasks",
         [

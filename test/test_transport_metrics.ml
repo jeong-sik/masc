@@ -223,22 +223,12 @@ let test_ws_dashboard_hello_latency () =
 let test_ws_enabled_blank_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some "") (fun () ->
     check bool "transport metrics treats blank as enabled" true
-      (TM.ws_enabled ());
-    check bool "runtime server treats blank as enabled" true
-      (Server_ws_standalone.is_enabled ()))
+      (TM.ws_enabled ()))
 
 let test_ws_enabled_normalized_env_matches_runtime () =
   with_env "MASC_WS_ENABLED" (Some " FALSE ") (fun () ->
     check bool "transport metrics normalizes false env" false
-      (TM.ws_enabled ());
-    check bool "runtime server normalizes false env" false
-      (Server_ws_standalone.is_enabled ()))
-
-let test_ws_runtime_listening_cache () =
-  TM.set_ws_runtime_listening true;
-  check bool "ws listening uses runtime cache" true (TM.ws_listening ());
-  TM.set_ws_runtime_listening false;
-  check bool "ws listening resets" false (TM.ws_listening ())
+      (TM.ws_enabled ()))
 
 let test_http_listener_state_json () =
   let accepts_before =
@@ -361,7 +351,6 @@ let test_transport_health_json () =
   let streamable_json = json |> U.member "streamable_http" in
   let grpc_json = json |> U.member "grpc" in
   let ws_json = json |> U.member "websocket" in
-  let webrtc_json = json |> U.member "webrtc" in
   let http2_json = json |> U.member "http2" in
   let summary_json = json |> U.member "summary" in
   let agent_health_json = json |> U.member "agent_health" in
@@ -371,7 +360,6 @@ let test_transport_health_json () =
     ; "sse"
     ; "grpc"
     ; "websocket"
-    ; "webrtc"
     ; "streamable_http"
     ; "http2"
     ; "agent_health"
@@ -421,7 +409,6 @@ let test_transport_health_json () =
     [ "configured"
     ; "listening"
     ; "mode"
-    ; "port"
     ; "sessions"
     ; "relay_source"
     ; "delivery"
@@ -437,18 +424,6 @@ let test_transport_health_json () =
     ; "client_buffered_bytes_count"
     ]
     (ws_json |> U.member "delivery");
-  check_assoc_keys
-    "WebRTC exact keys"
-    [ "configured"
-    ; "signaling_available"
-    ; "signaling_mode"
-    ; "pending_offers"
-    ; "active_peers"
-    ; "live_connections"
-    ; "connected_channels"
-    ; "ice_server_count"
-    ]
-    webrtc_json;
   check_assoc_keys
     "streamable HTTP exact keys"
     [ "endpoint"
@@ -493,14 +468,6 @@ let test_transport_health_json () =
     (match ws_json |> U.member "listening" with `Bool _ -> true | _ -> false);
   check bool "websocket section exists" true
     (match ws_json with `Assoc _ -> true | _ -> false);
-  check bool "webrtc section exists" true
-    (match webrtc_json with `Assoc _ -> true | _ -> false);
-  check bool "webrtc configured field exists" true
-    (match webrtc_json |> U.member "configured" with `Bool _ -> true | _ -> false);
-  check bool "webrtc signaling_available field exists" true
-    (match webrtc_json |> U.member "signaling_available" with `Bool _ -> true | _ -> false);
-  check bool "webrtc signaling_mode field exists" true
-    (match webrtc_json |> U.member "signaling_mode" with `String _ -> true | _ -> false);
   check string "http2 reports the startup mode" "h1_only"
     (http2_json |> U.member "listener_mode" |> U.to_string);
   check bool "h1-only is not multiplex ready" false
@@ -549,39 +516,17 @@ let test_grpc_listen_status_lifecycle () =
     (Atomic.get TM.grpc_listen_status);
   check bool "grpc listening returns false" false (TM.grpc_listening ())
 
-let test_ws_listen_status_lifecycle () =
-  check string "ws status after init" "not_started"
-    (Atomic.get TM.ws_listen_status);
-  TM.set_ws_listen_status "listening";
-  TM.set_ws_runtime_listening true;
-  check string "ws status after listening" "listening"
-    (Atomic.get TM.ws_listen_status);
-  check bool "ws listening returns true" true (TM.ws_listening ());
-  TM.set_ws_listen_status "stopped";
-  TM.set_ws_runtime_listening false;
-  check string "ws status after stopped" "stopped"
-    (Atomic.get TM.ws_listen_status);
-  check bool "ws listening returns false" false (TM.ws_listening ())
-
 let test_listen_status_bind_failed () =
   TM.set_grpc_listen_status "bind_failed";
   TM.set_grpc_runtime_listening false;
-  TM.set_ws_listen_status "bind_failed";
-  TM.set_ws_runtime_listening false;
   check bool "grpc not listening on bind_failed" false (TM.grpc_listening ());
-  check bool "ws not listening on bind_failed" false (TM.ws_listening ());
   check string "grpc status is bind_failed" "bind_failed"
-    (Atomic.get TM.grpc_listen_status);
-  check string "ws status is bind_failed" "bind_failed"
-    (Atomic.get TM.ws_listen_status)
+    (Atomic.get TM.grpc_listen_status)
 
 let test_listen_status_disabled () =
   TM.set_grpc_listen_status "disabled";
-  TM.set_ws_listen_status "disabled";
   check string "grpc status disabled" "disabled"
-    (Atomic.get TM.grpc_listen_status);
-  check string "ws status disabled" "disabled"
-    (Atomic.get TM.ws_listen_status)
+    (Atomic.get TM.grpc_listen_status)
 
 (* ============================================================
    Test Runner
@@ -616,8 +561,6 @@ let () =
         test_ws_enabled_blank_env_matches_runtime;
       test_case "normalized env matches runtime" `Quick
         test_ws_enabled_normalized_env_matches_runtime;
-      test_case "runtime listening cache" `Quick
-        test_ws_runtime_listening_cache;
     ]);
     ("http_listener", [
       test_case "primary listener state json" `Quick
@@ -633,8 +576,6 @@ let () =
     ("listen_status", [
       test_case "grpc listen_status lifecycle" `Quick
         test_grpc_listen_status_lifecycle;
-      test_case "ws listen_status lifecycle" `Quick
-        test_ws_listen_status_lifecycle;
       test_case "listen_status bind_failed" `Quick
         test_listen_status_bind_failed;
       test_case "listen_status disabled" `Quick

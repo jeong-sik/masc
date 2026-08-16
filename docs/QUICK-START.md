@@ -82,7 +82,7 @@ flowchart TD
     I --> I1["server_state 생성"]
     I --> I2["runtime params 복구"]
     I --> I3["background maintenance 시작"]
-    I --> I4["gRPC / WS / WebRTC 시작"]
+    I --> I4["gRPC / WS 시작"]
     I --> I5["dashboard refresh loops 시작"]
     I --> I6["keeper autoboot + keepalive 시작"]
     I --> I7["lazy startup tasks 시작"]

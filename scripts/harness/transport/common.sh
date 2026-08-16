@@ -95,7 +95,6 @@ ensure_server() {
   export MASC_GRPC_PORT
   export MASC_WS_ENABLED="${MASC_WS_ENABLED:-1}"
   export MASC_WS_PORT
-  export MASC_WEBRTC_ENABLED="${MASC_WEBRTC_ENABLED:-1}"
   export MASC_HOST="${MASC_HOST:-127.0.0.1}"
   export MASC_HTTP_PORT
 

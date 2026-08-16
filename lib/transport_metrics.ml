@@ -8,22 +8,6 @@
     - masc_grpc_* for gRPC transport
     - masc_agent_heartbeat_* for agent liveness *)
 
-let webrtc_is_enabled_ref = Atomic.make (fun () -> false)
-let webrtc_pending_count_ref = Atomic.make (fun () -> 0)
-let webrtc_peers_count_ref = Atomic.make (fun () -> 0)
-let webrtc_live_count_ref = Atomic.make (fun () -> 0)
-let webrtc_channels_count_ref = Atomic.make (fun () -> 0)
-let webrtc_ice_servers_urls_ref = Atomic.make (fun () -> [])
-
-let register_webrtc_metrics ~is_enabled ~pending_count ~peers_count ~live_count ~channels_count ~ice_servers_urls =
-  Atomic.set webrtc_is_enabled_ref is_enabled;
-  Atomic.set webrtc_pending_count_ref pending_count;
-  Atomic.set webrtc_peers_count_ref peers_count;
-  Atomic.set webrtc_live_count_ref live_count;
-  Atomic.set webrtc_channels_count_ref channels_count;
-  Atomic.set webrtc_ice_servers_urls_ref ice_servers_urls
-;;
-
 (** {1 SSE Metrics} *)
 
 type sse_session_kind =
@@ -379,7 +363,6 @@ let http_listener_json ?now () =
 (** {1 Environment-derived Transport Config} *)
 
 let grpc_runtime_listening : bool Atomic.t = Atomic.make false
-let ws_runtime_listening : bool Atomic.t = Atomic.make false
 let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
 
 (** Explanatory status for why a transport is or is not listening.
@@ -387,14 +370,11 @@ let ws_same_origin_runtime_ready : bool Atomic.t = Atomic.make false
     ["bind_failed"], ["stopped"]. *)
 let grpc_listen_status : string Atomic.t = Atomic.make "not_started"
 
-let ws_listen_status : string Atomic.t = Atomic.make "not_started"
 let set_grpc_runtime_listening listening = Atomic.set grpc_runtime_listening listening
-let set_ws_runtime_listening listening = Atomic.set ws_runtime_listening listening
 let set_ws_same_origin_runtime_ready ready =
   Atomic.set ws_same_origin_runtime_ready ready
 
 let set_grpc_listen_status status = Atomic.set grpc_listen_status status
-let set_ws_listen_status status = Atomic.set ws_listen_status status
 let grpc_enabled () = Env_config.Transport.grpc_enabled ()
 let grpc_port () = Env_config.Transport.grpc_port
 let grpc_listening () = grpc_enabled () && Atomic.get grpc_runtime_listening
@@ -417,10 +397,8 @@ let http_listener_mode () =
   Env_config.Transport.effective_h2_mode ()
 ;;
 
-let primary_path ~webrtc_channels ~grpc_subscribers ~ws_sessions ~sse_sessions =
-  if webrtc_channels > 0
-  then "webrtc_datachannel"
-  else if grpc_subscribers > 0
+let primary_path ~grpc_subscribers ~ws_sessions ~sse_sessions =
+  if grpc_subscribers > 0
   then "grpc_subscribe"
   else if ws_sessions > 0
   then "websocket"
@@ -439,8 +417,6 @@ let queue_pressure ~sse_queue_max ~relay_queue_depth ~relay_retry_total ~relay_d
 ;;
 
 let ws_enabled () = Env_config.Transport.ws_enabled ()
-let ws_port () = Env_config.Transport.ws_port
-let ws_listening () = ws_enabled () && Atomic.get ws_runtime_listening
 let ws_same_origin_ready () =
   ws_enabled () && Atomic.get ws_same_origin_runtime_ready
 
@@ -531,12 +507,7 @@ let transport_health_json () =
   let grpc_configured = grpc_enabled () in
   let grpc_live = grpc_listening () in
   let ws_configured = ws_enabled () in
-  let ws_live = ws_listening () in
-  let webrtc_configured = (Atomic.get webrtc_is_enabled_ref) () in
-  let webrtc_pending = (Atomic.get webrtc_pending_count_ref) () in
-  let webrtc_peers = (Atomic.get webrtc_peers_count_ref) () in
-  let webrtc_live = (Atomic.get webrtc_live_count_ref) () in
-  let webrtc_channels = (Atomic.get webrtc_channels_count_ref) () in
+  let ws_live = ws_same_origin_ready () in
   let listener_mode = http_listener_mode () in
   let listener_mode_label =
     Env_config.Transport.h2_mode_to_string listener_mode
@@ -549,7 +520,6 @@ let transport_health_json () =
   let grpc_subscribers_i = int_of_float grpc_subscribers in
   let primary_path =
     primary_path
-      ~webrtc_channels
       ~grpc_subscribers:grpc_subscribers_i
       ~ws_sessions
       ~sse_sessions:sse_total
@@ -604,8 +574,9 @@ let transport_health_json () =
       , `Assoc
           [ "configured", `Bool ws_configured
           ; "listening", `Bool ws_live
-          ; "mode", `String "standalone"
-          ; "port", `Int (ws_port ())
+          ; (* Sessions ride the HTTP listener's same-origin /ws upgrade,
+               so there is no WebSocket-specific port to report. *)
+            "mode", `String "same_origin"
           ; "sessions", `Int ws_sessions
           ; "relay_source", `String "sse_external_subscriber"
           ; ( "delivery"
@@ -631,18 +602,6 @@ let transport_health_json () =
                       (int_of_float
                          (v Otel_metric_store.metric_ws_client_buffered_bytes_count ())) )
                 ] )
-          ] )
-    ; ( "webrtc"
-      , `Assoc
-          [ "configured", `Bool webrtc_configured
-          ; "signaling_available", `Bool webrtc_configured
-          ; "signaling_mode", `String "shared_http"
-          ; "pending_offers", `Int webrtc_pending
-          ; "active_peers", `Int webrtc_peers
-          ; "live_connections", `Int webrtc_live
-          ; "connected_channels", `Int webrtc_channels
-          ; ( "ice_server_count"
-            , `Int (List.length ((Atomic.get webrtc_ice_servers_urls_ref) ())) )
           ] )
     ; ( "streamable_http"
       , `Assoc

@@ -4,7 +4,6 @@ last_verified: 2026-04-25
 code_refs:
   - lib/sse.ml
   - lib/server/server_mcp_transport_ws.ml
-  - lib/server/server_ws_standalone.ml
   - lib/server/masc_grpc_service.ml
 ---
 
@@ -311,7 +310,7 @@ Extend `subscribe_external` to accept an optional
 subscribers whose filter returns false.
 
 Rejected: changes the shared `Sse` API for a WS-specific concern.
-Bleeds into `grpc`, `webrtc`, and any future subscriber.
+Bleeds into `grpc` and any future subscriber.
 
 ### 9.2 Make the parse cache produce (slice × payload) pairs consumed by the fanout
 

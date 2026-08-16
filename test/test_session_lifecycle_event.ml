@@ -36,13 +36,6 @@ let samples : E.t list =
         last_event_id = Some "evt-1234" ;
         replayed = 7 ;
       };
-    Resume
-      {
-        transport = WebRTC ;
-        session_id = "s5" ;
-        last_event_id = None ;
-        replayed = 0 ;
-      };
     Evict { transport = SSE ; session_id = "s6" ; reason = Cap_exceeded };
     Evict { transport = WS ; session_id = "s7" ; reason = Idle_timeout };
     Evict
@@ -81,7 +74,7 @@ let test_transport_round_trip () =
       | Some t' when t' = t -> ()
       | Some _ -> Alcotest.failf "transport drift: %s" s
       | None -> Alcotest.failf "transport_of_string None for %s" s)
-    [ E.SSE; WS; GRPC; WebRTC ]
+    [ E.SSE; WS; GRPC ]
 
 let test_evict_reason_round_trip () =
   List.iter

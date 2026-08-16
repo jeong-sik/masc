@@ -127,7 +127,6 @@ depends: [
   "ocaml-options-vanilla" {= "1"}
   "ocaml-protoc-plugin" {= "6.2.0"}
   "ocaml-syntax-shims" {= "1.0.0"}
-  "ocaml-webrtc" {= "0.2.6"}
   "ocaml_intrinsics_kernel" {= "v0.17.1"}
   "ocamlbuild" {= "0.16.1"}
   "ocamlfind" {= "1.9.8"}
@@ -231,10 +230,6 @@ pin-depends: [
   [
     "mcp_protocol.1.3.0"
     "git+https://github.com/jeong-sik/mcp-protocol-sdk.git#v1.3.0"
-  ]
-  [
-    "ocaml-webrtc.0.2.6"
-    "git+https://github.com/jeong-sik/ocaml-webrtc.git#1b7993605b293f45169369d488f970ba15132a9f"
   ]
   [
   "ws-direct-core.0.1.0"

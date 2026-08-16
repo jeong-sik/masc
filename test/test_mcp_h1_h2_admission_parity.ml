@@ -647,7 +647,7 @@ let test_h1_h2_read_gate_wiring_parity () =
   assert_contains "H2 status mirrors H1 with_public_read"
     ~needle:"| `GET, \"/api/v1/status\" ->\n          with_h2_public_read h2_reqd" h2;
   (* [with_server_state] performs no authorization; no read route may reach it
-     directly. The arms that still call it (webrtc, MCP) authorize inside. *)
+     directly. The arms that still call it (MCP) authorize inside. *)
   assert_not_contains "H2 /graphql no longer reads state without authorizing"
     ~needle:"with_h2_read_auth h2_reqd (fun _state ->\n            with_server_state" h2
 

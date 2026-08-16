@@ -93,7 +93,6 @@ EXTERNAL_MODULE_PREFIXES = frozenset(
         "Sys",
         "Unix",
         "Uri",
-        "Webrtc",
         "Yojson",
     }
 )

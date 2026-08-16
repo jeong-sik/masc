@@ -1093,7 +1093,6 @@
   test_tool_hooks
   test_sse_external_sub
   test_ws_transport
-  test_webrtc_signaling
   test_transport_integration
   test_tool_metrics
   test_tool_metrics_persist
@@ -1234,7 +1233,6 @@
   test_tool_hooks
   test_sse_external_sub
   test_ws_transport
-  test_webrtc_signaling
   test_transport_integration
   test_tool_metrics
   test_tool_metrics_persist
@@ -2101,7 +2099,6 @@
 
 (include stanzas/test_hitl_summary_worker.inc)
 
-(include stanzas/test_ws_standalone_lifecycle.inc)
 
 (test
  (name test_graphql_api_coverage)

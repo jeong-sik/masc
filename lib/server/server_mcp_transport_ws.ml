@@ -1061,18 +1061,14 @@ let start_upgrade_heartbeat ?sw ?clock session_id session =
 (** Build the MCP-over-WebSocket session handler for a freshly upgraded
     [wsd].  Single source of truth for the MCP WebSocket session
     protocol — session registration, SSE broadcast subscription,
-    liveness heartbeat, and frame opcode handling — shared by the
-    same-origin HTTP-upgrade path
-    ([Server_routes_http_routes_frontend]) and the standalone listener
-    ([Server_ws_standalone]).  The two paths differ only in how the
-    socket is attached (Gluten upgrade vs. raw listener), not in the
-    session protocol.  RFC-0281 S3.2.
+    liveness heartbeat, and frame opcode handling.  Reached through the
+    same-origin HTTP upgrade in [Server_routes_http_routes_frontend].
+    RFC-0281 S3.2.
 
     [on_connection_close] and [on_eof] are observability hooks invoked
     before {!cleanup_session}.  The defaults close the close-frame
-    payload and ignore the eof error; the standalone path injects its
-    close-code diagnostic + eof summary.  Cleanup runs regardless of
-    the hook. *)
+    payload and ignore the eof error.  Cleanup runs regardless of the
+    hook. *)
 let mcp_websocket_handler
     ?sw
     ?clock

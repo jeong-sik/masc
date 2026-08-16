@@ -17,7 +17,7 @@ Contract
     Every ``| `METHOD, "/path" ->`` arm whose body calls [with_server_state]
     must either
       (a) authorize itself -- the body names an authorize_*_request call, as
-          POST /webrtc/* does, or
+          POST /mcp does, or
       (b) run the MCP admission gate via [verify_mcp_auth].
     Anything else must use [with_h2_public_read], [with_h2_read_auth], or
     [with_h2_token_permission_auth], which mirror the H1 wrappers.

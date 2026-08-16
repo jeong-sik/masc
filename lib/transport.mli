@@ -29,7 +29,6 @@ type protocol =
   | Grpc
   | Sse
   | Ws
-  | Webrtc
 
 val protocol_to_string : protocol -> string
 val protocol_of_string : string -> protocol option

@@ -8,8 +8,7 @@
 | --- | --- | --- | --- |
 | 현황판, wallboard, read-mostly viewer | `observer SSE` (`GET /mcp?sse_kind=observer`) | 브라우저 친화적이고 단방향 freshness에 충분함 | `SSE observer`, `queue max`, `broadcast avg` |
 | agent heartbeat, subscribe, fast fanout | `gRPC` (`:8936`) | 양방향 스트림, backlog replay, typed contract | `gRPC subscribers`, `active streams` |
-| browser/operator duplex bridge | `WebSocket` (`/ws`, standalone port `8937`) **Experimental** | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
-| peer-to-peer fast lane, edge a2a | `WebRTC` (`/webrtc/offer`, `/webrtc/answer`) **Experimental** | signaling 후 DataChannel로 직접 통신 | `connected channels`, `active peers` |
+| browser/operator duplex bridge | `WebSocket` (`/ws` same-origin upgrade) **Experimental** | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
 | stateless scripting, queue trigger, worker bootstrap | `Streamable HTTP` (`POST /mcp`) | curl/harness에서 가장 단순하고 canonical | `primary path`, `recent messages`, `active ops` |
 | 브라우저 다중 탭 / 다중 stream | `HTTP/2 h2c` (`MASC_USE_H2=1` 또는 `auto`) | SSE multiplexing으로 브라우저 connection limit 회피 | `HTTP listener_mode`, `multiplex_ready` |
 
@@ -22,7 +21,7 @@
 
 - live SSE observer/agent stream 수
 - gRPC subscriber/heartbeat 상태
-- WebSocket/WebRTC 활성도
+- WebSocket 활성도
 - queue/backpressure hot session
 - 현재 cluster / workspace / managed unit / active operation
 - transport별 practical path 추천
@@ -112,36 +111,11 @@ grpcurl -plaintext 127.0.0.1:8936 grpc.health.v1.Health/Check
 curl -sS http://127.0.0.1:8935/ws
 ```
 
-응답에 standalone WS port와 URL이 들어간다. duplex UI나 browser bridge는 이 경로를 우선 본다.
-
-### 6. WebRTC signaling
-
-offer:
-
-```bash
-curl -sS http://127.0.0.1:8935/webrtc/offer \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "agent_name":"agent-a",
-    "ice_candidates":["127.0.0.1:5000"],
-    "dtls_fingerprint":"demo"
-  }'
-```
-
-answer:
-
-```bash
-curl -sS http://127.0.0.1:8935/webrtc/answer \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "offer_id":"<offer_id>",
-    "agent_name":"agent-b"
-  }'
-```
+응답에 same-origin 업그레이드 URL이 들어간다. duplex UI나 browser bridge는 이 경로를 우선 본다.
 
 ## Operating Notes
 
 - queue pressure가 `watch` 이상이면 먼저 SSE `hot_sessions`를 본다.
 - `gRPC subscribers`가 높고 `broadcast avg`도 같이 오르면 fanout source는 SSE bridge일 가능성이 크다.
 - multi-node / distributed mode에서는 transport 자체보다 `cluster`, `managed_units`, `active_operations`, `stale_units`를 같이 봐야 한다.
-- canonical public control path는 여전히 `POST /mcp`다. WS/gRPC/WebRTC는 특정 latency/duplex/p2p 문제가 있을 때 올린다.
+- canonical public control path는 여전히 `POST /mcp`다. WS/gRPC는 특정 latency/duplex 문제가 있을 때 올린다.

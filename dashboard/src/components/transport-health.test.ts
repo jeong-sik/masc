@@ -19,14 +19,12 @@ import {
   transportTone,
   grpcTone,
   websocketTone,
-  webrtcActive,
-  webrtcTone,
   http2Tone,
   staleTone,
   agentPoolTone,
   transportTruthLine,
   transportEyebrow,
-  webrtcEyebrow,
+  sameOriginEyebrow,
   type StatusTone,
 } from './transport-health'
 import {
@@ -78,8 +76,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     websocket: {
       configured: true,
       listening: true,
-      mode: 'standalone',
-      port: 8936,
+      mode: 'same_origin',
       sessions: 0,
       relay_source: 'sse_external_subscriber',
       delivery: {
@@ -90,16 +87,6 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
         client_buffered_bytes_sum: 0,
         client_buffered_bytes_count: 0,
       },
-    },
-    webrtc: {
-      configured: true,
-      signaling_available: true,
-      signaling_mode: 'shared_http',
-      pending_offers: 0,
-      active_peers: 0,
-      live_connections: 0,
-      connected_channels: 0,
-      ice_server_count: 2,
     },
     streamable_http: {
       endpoint: '/mcp',
@@ -180,41 +167,6 @@ describe('TransportHealthPanel', () => {
     vi.clearAllMocks()
     vi.doUnmock('../api/transport-health')
     vi.doUnmock('../sse')
-  })
-
-  it('renders WebRTC signaling truth without pretending there is a separate listener', async () => {
-    const fetchTransportHealth = vi.fn<() => Promise<unknown>>().mockResolvedValue(
-      sampleResponse({
-        webrtc: {
-          configured: true,
-          signaling_available: false,
-          signaling_mode: 'shared_http',
-          pending_offers: 0,
-          active_peers: 0,
-          live_connections: 0,
-          connected_channels: 0,
-          ice_server_count: 2,
-        },
-      }),
-    )
-
-    const { TransportHealthPanel } = await loadComponentWithApi({
-      fetchTransportHealth,
-      lastEvent: signal(null),
-    })
-
-    render(html`<${TransportHealthPanel} />`, container)
-    await flushUi()
-
-    expect(container.querySelector('.v2-monitoring-surface')).not.toBeNull()
-    expect(fetchTransportHealth).toHaveBeenCalled()
-    expect(container.textContent).toContain('WebRTC')
-    expect(container.textContent).toContain('시그널링')
-    expect(container.textContent).toContain('shared_http')
-    expect(container.innerHTML).toContain('시그널링 중단')
-    expect(container.innerHTML).not.toContain('2 ICE')
-    expect(container.textContent).toContain('프레즌스 스트림')
-    expect(container.textContent).toContain('/events/presence')
   })
 
   it('renders live-vs-cache truth line when projection diagnostics exist', async () => {
@@ -729,6 +681,16 @@ describe('transportEyebrow', () => {
   })
 })
 
+describe('sameOriginEyebrow', () => {
+  it.each([
+    [false, true, '비활성'],
+    [true, true, '/ws 활성'],
+    [true, false, '/ws 중단'],
+  ] as const)('sameOriginEyebrow(%s,%s) → %s', (configured, listening, expected) => {
+    expect(sameOriginEyebrow(configured, listening)).toBe(expected)
+  })
+})
+
 function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData {
   const snapshot = Effect.runSync(decodeTransportHealthData(sampleResponse()))
   if (!isTransportHealthReady(snapshot)) {
@@ -779,29 +741,6 @@ describe('websocketTone', () => {
   })
   it('is warn when listening but no sessions', () => {
     expect(websocketTone(makeData())).toBe('warn')
-  })
-})
-
-describe('webrtcActive', () => {
-  it('returns false when all counts are zero', () => {
-    expect(webrtcActive(makeData())).toBe(false)
-  })
-  it('returns true when any count is positive', () => {
-    expect(webrtcActive(makeData({ webrtc: { ...makeData().webrtc, connected_channels: 1 } }))).toBe(true)
-    expect(webrtcActive(makeData({ webrtc: { ...makeData().webrtc, live_connections: 1 } }))).toBe(true)
-    expect(webrtcActive(makeData({ webrtc: { ...makeData().webrtc, active_peers: 1 } }))).toBe(true)
-  })
-})
-
-describe('webrtcTone', () => {
-  it('is ok when signaling is available and active', () => {
-    expect(webrtcTone(makeData({ webrtc: { ...makeData().webrtc, connected_channels: 1 } }))).toBe('ok')
-  })
-  it('is bad when signaling is unavailable', () => {
-    expect(webrtcTone(makeData({ webrtc: { ...makeData().webrtc, signaling_available: false } }))).toBe('bad')
-  })
-  it('is warn when signaling available but inactive', () => {
-    expect(webrtcTone(makeData())).toBe('warn')
   })
 })
 
@@ -866,14 +805,3 @@ describe('transportTruthLine', () => {
   })
 })
 
-describe('webrtcEyebrow', () => {
-  it('returns 비활성 when not configured', () => {
-    expect(webrtcEyebrow(makeData({ webrtc: { ...makeData().webrtc, configured: false } }))).toBe('비활성')
-  })
-  it('returns signaling ready when available', () => {
-    expect(webrtcEyebrow(makeData())).toBe('2 ICE · 시그널링 준비')
-  })
-  it('returns signaling down when unavailable', () => {
-    expect(webrtcEyebrow(makeData({ webrtc: { ...makeData().webrtc, signaling_available: false } }))).toBe('시그널링 중단')
-  })
-})

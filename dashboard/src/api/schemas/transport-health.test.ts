@@ -46,8 +46,7 @@ const currentWire = {
   websocket: {
     configured: false,
     listening: false,
-    mode: 'standalone',
-    port: 8937,
+    mode: 'same_origin',
     sessions: 0,
     relay_source: 'sse_external_subscriber',
     delivery: {
@@ -58,16 +57,6 @@ const currentWire = {
       client_buffered_bytes_sum: 0,
       client_buffered_bytes_count: 0,
     },
-  },
-  webrtc: {
-    configured: false,
-    signaling_available: false,
-    signaling_mode: 'shared_http',
-    pending_offers: 0,
-    active_peers: 0,
-    live_connections: 0,
-    connected_channels: 0,
-    ice_server_count: 0,
   },
   streamable_http: {
     endpoint: '/mcp',
@@ -116,8 +105,7 @@ describe('decodeTransportHealthData', () => {
     expect(result.summary.primary_path).toBe('streamable_http')
     expect(result.sse.hot_sessions).toEqual([])
     expect(result.grpc.port).toBe(8936)
-    expect(result.websocket.mode).toBe('standalone')
-    expect(result.webrtc.signaling_mode).toBe('shared_http')
+    expect(result.websocket.mode).toBe('same_origin')
     expect(result.http2.listener_mode).toBe('auto')
     expect(result.projection_diagnostics.source).toBe('cached_surface')
   })
@@ -205,13 +193,6 @@ describe('decodeTransportHealthData', () => {
       {
         ...currentWire,
         websocket: { ...currentWire.websocket, mode: 'relay' },
-      },
-    ],
-    [
-      'webrtc signaling mode',
-      {
-        ...currentWire,
-        webrtc: { ...currentWire.webrtc, signaling_mode: 'auto' },
       },
     ],
     [

@@ -3,11 +3,10 @@
     Verifies cross-layer event flow without starting a full HTTP server:
     1. SSE broadcast → gRPC Subscribe stream (via external subscriber)
     2. SSE broadcast → WebSocket sessions (via external subscriber)
-    3. WebRTC signaling full offer/answer/cleanup lifecycle
+    3. Dead external subscribers are dropped on the next broadcast
     4. Transport enum consistency across modules *)
 
 module T = Masc_grpc_types
-module Wrtc = Server_webrtc_transport
 
 (* ============================================================
    1. gRPC Subscribe ← SSE Broadcast Integration
@@ -170,51 +169,7 @@ let test_ws_derives_dashboard_event_from_real_broadcast () =
               (parsed.broadcast_ts = ev.Masc.Sse.ext_emitted_at))
 
 (* ============================================================
-   3. WebRTC Signaling Full Flow
-   ============================================================ *)
-
-let test_webrtc_full_signaling_flow () =
-  Eio_main.run (fun _env ->
-    (* Agent A creates an offer *)
-    let offer_body =
-      {|{"agent_name":"agent-a","ice_candidates":["candidate:1 udp 2130706431 192.168.1.1 54321 typ host"],"dtls_fingerprint":"sha-256:AA:BB:CC"}|}
-    in
-    let offer_result = Wrtc.handle_offer_request offer_body in
-    Alcotest.(check bool) "offer ok" true (Result.is_ok offer_result);
-    let offer_json = Yojson.Safe.from_string (Result.get_ok offer_result) in
-    let offer_id = Yojson.Safe.Util.(member "offer_id" offer_json |> to_string) in
-    (* Verify offer is pending *)
-    Alcotest.(check bool) "offer pending"
-      true (Wrtc.pending_offer_count () > 0);
-    (* Agent B retrieves the offer *)
-    let offer = Wrtc.get_offer offer_id in
-    Alcotest.(check bool) "offer found" true (Option.is_some offer);
-    let o = Option.get offer in
-    Alcotest.(check string) "from agent-a" "agent-a" o.from_agent;
-    Alcotest.(check int) "1 ICE candidate" 1 (List.length o.ice_candidates);
-    (* Agent B accepts the offer *)
-    let answer_body = Printf.sprintf
-      {|{"offer_id":"%s","agent_name":"agent-b"}|} offer_id in
-    let answer_result = Wrtc.handle_answer_request answer_body in
-    Alcotest.(check bool) "answer ok" true (Result.is_ok answer_result);
-    let answer_json = Yojson.Safe.from_string (Result.get_ok answer_result) in
-    let peer_id = Yojson.Safe.Util.(member "peer_id" answer_json |> to_string) in
-    let remote = Yojson.Safe.Util.(member "remote_agent" answer_json |> to_string) in
-    Alcotest.(check string) "remote is agent-a" "agent-a" remote;
-    (* Offer should be consumed *)
-    Alcotest.(check bool) "offer consumed"
-      true (Option.is_none (Wrtc.get_offer offer_id));
-    (* Peer should be active *)
-    Alcotest.(check bool) "peer active"
-      true (Wrtc.active_peer_count () > 0);
-    (* Mark connected and cleanup *)
-    Wrtc.mark_connected peer_id;
-    Wrtc.remove_peer peer_id;
-    Alcotest.(check int) "no active peers after cleanup"
-      0 (Wrtc.active_peer_count ()))
-
-(* ============================================================
-   4. Dead Subscriber Auto-Cleanup (is_alive)
+   3. Dead External Subscriber Removal
    ============================================================ *)
 
 let test_dead_subscriber_auto_removed () =
@@ -269,12 +224,12 @@ let test_grpc_stream_closed_triggers_cleanup () =
     Alcotest.(check int) "still 1 after close" 1 (Grpc_eio.Stream.length stream))
 
 (* ============================================================
-   5. Transport Enum Consistency
+   4. Transport Enum Consistency
    ============================================================ *)
 
 let test_all_protocol_variants_roundtrip () =
   let module Tr = Masc.Transport in
-  let all = [Tr.JsonRpc; Tr.Rest; Tr.Grpc; Tr.Sse; Tr.Ws; Tr.Webrtc] in
+  let all = [Tr.JsonRpc; Tr.Rest; Tr.Grpc; Tr.Sse; Tr.Ws] in
   List.iter (fun p ->
     let s = Tr.protocol_to_string p in
     match Tr.protocol_of_string s with
@@ -287,7 +242,7 @@ let test_all_protocol_variants_roundtrip () =
 
 let test_agent_transport_all_variants () =
   let module At = Masc_grpc_transport in
-  let all = [At.Http; At.Grpc; At.Ws; At.Webrtc; At.Local] in
+  let all = [At.Http; At.Grpc; At.Ws; At.Local] in
   List.iter (fun t ->
     let s = At.to_string t in
     Alcotest.(check bool) (Printf.sprintf "%s non-empty" s)
@@ -310,11 +265,6 @@ let () =
       Alcotest.test_case "parse handles real broadcast wire format" `Quick
         test_ws_derives_dashboard_event_from_real_broadcast;
     ]);
-    ("webrtc_signaling",
-      if Sys.getenv_opt "MASC_TEST_WEBRTC" = Some "1" then [
-        Alcotest.test_case "full offer/answer/cleanup flow" `Quick
-          test_webrtc_full_signaling_flow;
-      ] else []);
     ("auto_cleanup", [
       Alcotest.test_case "dead subscriber auto-removed" `Quick
         test_dead_subscriber_auto_removed;

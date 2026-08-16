@@ -41,7 +41,6 @@
   grpc-direct-core
   h2
   h2-eio
-  ocaml-webrtc
   eio
   eio_main
   eio.unix

@@ -47,7 +47,6 @@ interface DashboardWsDiscovery {
   enabled?: boolean
   listening?: boolean
   reachable?: boolean
-  listen_status?: string | null
   ws_url?: string | null
   unavailable_reason?: string | null
   same_origin_upgrade_enabled?: boolean
@@ -227,20 +226,8 @@ function discoveryUnavailableReason(data: DashboardWsDiscovery): string {
   const serverReason = nonBlankString(data.unavailable_reason)
   if (serverReason) return serverReason
   if (data.enabled !== true) return 'disabled'
-  if (data.listening !== true) {
-    const listenStatus = nonBlankString(data.listen_status)
-    return listenStatus ? `not listening (${listenStatus})` : 'not listening'
-  }
-  if (!nonBlankString(data.ws_url)) {
-    const sameOriginWsUrl = nonBlankString(data.same_origin_ws_url)
-    if (sameOriginWsUrl && data.same_origin_upgrade_enabled !== true) {
-      return 'standalone websocket URL unavailable; same-origin upgrade disabled'
-    }
-    if (data.same_origin_upgrade_enabled === true) {
-      return 'same-origin websocket URL unavailable'
-    }
-    return 'websocket URL unavailable'
-  }
+  if (data.listening !== true) return 'not listening'
+  if (!nonBlankString(data.ws_url)) return 'websocket URL unavailable'
   return 'unavailable'
 }
 

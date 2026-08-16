@@ -34,13 +34,6 @@ let ipaddr_is_unspecified = function
   | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
 ;;
 
-let ipaddr_is_loopback = function
-  | Ipaddr.V4 addr ->
-    let octets = Ipaddr.V4.to_octets addr in
-    String.length octets = 4 && Char.code octets.[0] = 127
-  | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
-;;
-
 let is_unspecified_host host =
   match Ipaddr.of_string (String.trim host) with
   | Ok ip -> ipaddr_is_unspecified ip
@@ -56,16 +49,6 @@ let is_canonical_loopback_alias host =
       | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0
       | Ok (Ipaddr.V4 _) -> false
       | Error _ -> false)
-;;
-
-let is_loopback_host host =
-  let normalized = String.trim host |> String.lowercase_ascii in
-  if String.equal normalized "localhost"
-  then true
-  else
-    match Ipaddr.of_string normalized with
-    | Ok ip -> ipaddr_is_loopback ip
-    | Error _ -> false
 ;;
 
 let normalize_advertised_host host =
@@ -171,47 +154,25 @@ let get_ws_session_count () =
       M.session_count ()
   | None -> 0
 
+(* WebSocket is served only as a same-origin upgrade on the HTTP
+   listener, so readiness is exactly [ws_enabled ()]:
+   [set_ws_same_origin_runtime_ready true] runs unconditionally in
+   [Server_runtime_bootstrap] before any transport starts. There is no
+   separate host/port for a client to discover — the socket is the one
+   it already reached us on. *)
 let websocket_discovery_json (ctx : http_context) =
   let enabled = Transport_metrics.ws_enabled () in
-  let port = Env_config.Transport.ws_port in
-  let standalone_listening = Transport_metrics.ws_listening () in
-  let standalone_bind_host = Masc_network_defaults.masc_http_default_host in
-  let request_host_can_reach_standalone = is_loopback_host ctx.host in
-  let standalone_reachable =
-    request_host_can_reach_standalone
-    && (standalone_listening || tcp_port_reachable port)
-  in
-  let standalone_ws_url = Printf.sprintf "ws://%s:%d/" standalone_bind_host port in
-  let same_origin_upgrade_enabled = Transport_metrics.ws_same_origin_ready () in
+  let ready = Transport_metrics.ws_same_origin_ready () in
   let same_origin_ws_url = websocket_url_from_base_url ctx.base_url in
-  let listening = standalone_listening || same_origin_upgrade_enabled in
-  let reachable = standalone_reachable || same_origin_upgrade_enabled in
-  let discovered_ws_url =
-    if same_origin_upgrade_enabled then `String same_origin_ws_url
-    else if request_host_can_reach_standalone then `String standalone_ws_url
-    else `Null
-  in
-  let primary_mode =
-    if same_origin_upgrade_enabled then "same_origin" else "standalone"
-  in
-  let primary_upgrade_path =
-    if same_origin_upgrade_enabled then "/ws" else "/"
-  in
   let base_fields =
     [ "enabled", `Bool enabled ]
     @ maybe_configured_fields ~include_configured:ctx.include_configured enabled
-    @ [ "listening", `Bool listening
-      ; "reachable", `Bool reachable
-      ; "listen_status", `String (Atomic.get Transport_metrics.ws_listen_status)
-      ; "mode", `String primary_mode
+    @ [ "listening", `Bool ready
+      ; "reachable", `Bool ready
+      ; "mode", `String "same_origin"
       ; "discovery_path", `String "/ws"
-      ; "upgrade_path", `String primary_upgrade_path
-      ; "standalone_listening", `Bool standalone_listening
-      ; "standalone_bind_host", `String standalone_bind_host
+      ; "upgrade_path", `String "/ws"
       ; "request_host", `String ctx.host
-      ; "request_host_can_reach_standalone", `Bool request_host_can_reach_standalone
-      ; "same_origin_listening", `Bool same_origin_upgrade_enabled
-      ; "same_origin_reachable", `Bool same_origin_upgrade_enabled
       ; "session_count", `Int (get_ws_session_count ())
       ]
   in
@@ -219,52 +180,27 @@ let websocket_discovery_json (ctx : http_context) =
     if enabled
     then
       base_fields
-      @ [ "ws_port", `Int port
-        ; "ws_url", discovered_ws_url
-        ; "standalone_ws_port", `Int port
-        ; "standalone_ws_url", `String standalone_ws_url
-        ; "same_origin_upgrade_enabled", `Bool same_origin_upgrade_enabled
+      @ [ (* Withheld until the inbound dispatcher is installed: a client
+             that connects before then gets an upgrade with no handler. *)
+          "ws_url", (if ready then `String same_origin_ws_url else `Null)
+        ; "same_origin_upgrade_enabled", `Bool ready
         ; "same_origin_upgrade_path", `String "/ws"
         ; "same_origin_ws_url", `String same_origin_ws_url
         ]
-      @
-      (if discovered_ws_url <> `Null
-       then []
-       else if request_host_can_reach_standalone
-       then []
-       else [ "unavailable_reason", `String "standalone_ws_loopback_only" ])
     else base_fields
   in
   `Assoc fields
 ;;
 
-type webrtc_status =
-  { ice_server_urls : string list
-  ; pending_offers : int
-  ; active_peers : int
-  ; live_connections : int
-  ; connected_channels : int
-  }
-
-let default_webrtc_status () =
-  { ice_server_urls = []
-  ; pending_offers = 0
-  ; active_peers = 0
-  ; live_connections = 0
-  ; connected_channels = 0
-  }
-
 type runtime_registrations =
   { grpc_service_name : string
   ; grpc_health_service_name : string
-  ; webrtc_status : unit -> webrtc_status
   }
 
 let runtime_registrations =
   Atomic.make
     { grpc_service_name = "MascGrpcService"
     ; grpc_health_service_name = "grpc.health.v1.Health"
-    ; webrtc_status = default_webrtc_status
     }
 
 let register_grpc_service_name name =
@@ -274,10 +210,6 @@ let register_grpc_service_name name =
 let register_grpc_health_service_name name =
   Atomic_util.update runtime_registrations (fun current ->
     { current with grpc_health_service_name = name })
-
-let register_webrtc_status fn =
-  Atomic_util.update runtime_registrations (fun current ->
-    { current with webrtc_status = fn })
 
 let enabled_protocols_json () =
   let protocols =
@@ -300,8 +232,6 @@ let transport_status_json (ctx : http_context) =
   let streamable_auth_policy_present =
     Env_config.Transport.http_auth_strict_env_enabled ()
   in
-  let webrtc_enabled = Env_config.Transport.webrtc_enabled () in
-  let w_status = registrations.webrtc_status () in
   `Assoc
     [ "streamable_http_default", `Bool true
     ; "legacy_endpoints_deprecated", `Bool true
@@ -333,32 +263,6 @@ let transport_status_json (ctx : http_context) =
            then [ "url", `String (Printf.sprintf "grpc://%s:%d" ctx.host grpc_port) ]
            else []) )
     ; "websocket", websocket_discovery_json ctx
-    ; ( "webrtc"
-      , `Assoc
-          ([ "enabled", `Bool webrtc_enabled ]
-           @ maybe_configured_fields
-               ~include_configured:ctx.include_configured
-               webrtc_enabled
-           @ [ "signaling_available", `Bool webrtc_enabled
-             ; "signaling_mode", `String "shared_http"
-             ; "signaling_path", `String "/webrtc"
-             ; "offer_path", `String "/webrtc/offer"
-             ; "answer_path", `String "/webrtc/answer"
-             ; ( "ice_server_urls"
-               , `List
-                   (List.map
-                      (fun url -> `String url)
-                      w_status.ice_server_urls) )
-             ; "pending_offers", `Int w_status.pending_offers
-             ; "active_peers", `Int w_status.active_peers
-             ; "live_connections", `Int w_status.live_connections
-             ; ( "connected_channels"
-               , `Int w_status.connected_channels )
-             ]
-           @
-           if webrtc_enabled
-           then [ "signaling_url", `String (ctx.base_url ^ "/webrtc") ]
-           else []) )
     ; "total_sessions", `Int (Transport_bridge.total_session_count ())
     ; "enabled_protocols", enabled_protocols_json ()
     ]

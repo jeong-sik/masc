@@ -95,6 +95,7 @@ type config = Runtime_agent_context.config = {
   system_prompt : string;
   tools : Agent_core.Tool.t list;
   stream_idle_timeout_s : float option;
+  first_event_timeout_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
   temperature : float option;
@@ -261,9 +262,11 @@ module For_testing : sig
   val stop_reason_of_cooperative_yield :
     turns_used:int -> cooperative_yield_reason -> stop_reason
 
-  (** Fail closed when an idle deadline is configured but no clock resolves. *)
+  (** Fail closed when a streaming deadline (inter-line idle or first-event,
+      RFC-OAS-037) is configured but no clock resolves. *)
   val decide_clock_for_idle :
     stream_idle_timeout_s:float option ->
+    first_event_timeout_s:float option ->
     process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
     ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
     (float Eio.Time.clock_ty Eio.Resource.t option, Agent_core.Error.t) result

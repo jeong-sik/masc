@@ -92,6 +92,11 @@ type operation_executor =
 type operation_runner =
   { ready : keeper_name:string -> bool
   ; execute : operation_executor
+  ; on_execution_settled :
+      keeper_name:string ->
+      claimed_operation_id:Chat_operation.Operation_id.t option ->
+      execution:operation_execution ->
+      unit
   }
 
 type 'a autonomous_response =
@@ -607,6 +612,16 @@ let start
                   }
             in
             Atomic.set t.child_cancel None;
+            (try
+               runner.on_execution_settled
+                 ~keeper_name:t.keeper_name
+                 ~claimed_operation_id:!claimed_operation_id
+                 ~execution
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Log.Keeper.error "operation settle hook raised for %s: %s"
+                 t.keeper_name (Printexc.to_string exn));
             ignore
               (request
                  t

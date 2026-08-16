@@ -104,6 +104,7 @@ type config =
   system_prompt : string;
   tools : Agent_core.Tool.t list;
   stream_idle_timeout_s : float option;
+  first_event_timeout_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
   temperature : float option;
@@ -301,6 +302,7 @@ let runtime_observation_for_completed_config ~total_duration_ms config =
    sources so the failure path is testable without an Eio runtime. *)
 let decide_clock_for_idle
     ~(stream_idle_timeout_s : float option)
+    ~(first_event_timeout_s : float option)
     ~(process_clock : (float Eio.Time.clock_ty Eio.Resource.t, string) result)
     ~(ctx_clock : float Eio.Time.clock_ty Eio.Resource.t option)
   : (float Eio.Time.clock_ty Eio.Resource.t option, Agent_core.Error.t) result =
@@ -308,8 +310,8 @@ let decide_clock_for_idle
   | Ok c, _ -> Ok (Some c)
   | Error _, (Some _ as c) -> Ok c
   | Error e, None ->
-    (match stream_idle_timeout_s with
-     | Some idle ->
+    (match stream_idle_timeout_s, first_event_timeout_s with
+     | Some idle, _ ->
        Error
          (Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig
@@ -322,12 +324,32 @@ let decide_clock_for_idle
                      idle
                      e
                }))
-     | None -> Ok None)
+     | None, Some first_event ->
+       (* The first-event (TTFT/prefill) bound has the same clock dependency
+          as the idle bound (RFC-OAS-037): AGENT_CORE arms it only when a
+          clock is present, so a missing clock would silently disarm it. *)
+       Error
+         (Agent_core.Error.Config
+            (Agent_core.Error.InvalidConfig
+               { field = "first_event_timeout_s"
+               ; detail =
+                   Printf.sprintf
+                     "runtime_agent: first_event_timeout_s configured (%.1fs) \
+                      but no clock resolvable (%s); refusing to run with a \
+                      silently disarmed first-event timeout"
+                     first_event
+                     e
+               }))
+     | None, None -> Ok None)
 ;;
 
-let resolve_clock_for_idle ~(stream_idle_timeout_s : float option) =
+let resolve_clock_for_idle
+    ~(stream_idle_timeout_s : float option)
+    ~(first_event_timeout_s : float option)
+  =
   decide_clock_for_idle
     ~stream_idle_timeout_s
+    ~first_event_timeout_s
     ~process_clock:(Process_eio.get_clock ())
     ~ctx_clock:(Eio_context.get_clock_opt ())
 ;;
@@ -849,7 +871,11 @@ let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Agent_core.Agent.t, Agent_core.Error.t) result =
-  match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
+  match
+    resolve_clock_for_idle
+      ~stream_idle_timeout_s:config.stream_idle_timeout_s
+      ~first_event_timeout_s:config.first_event_timeout_s
+  with
   | Error _ as e -> e
   | Ok clock ->
     (match
@@ -935,7 +961,11 @@ let resume_from_checkpoint
     ~(config : config)
     ~(checkpoint : Agent_core.Checkpoint.t)
   : (Agent_core.Agent.t, Agent_core.Error.t) result =
-  match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
+  match
+    resolve_clock_for_idle
+      ~stream_idle_timeout_s:config.stream_idle_timeout_s
+      ~first_event_timeout_s:config.first_event_timeout_s
+  with
   | Error _ as e -> e
   | Ok clock ->
     (match

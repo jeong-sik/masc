@@ -1172,6 +1172,11 @@ let run_named
             ; initial_messages
             ; model_input_projection
             ; stream_idle_timeout_s
+            ; first_event_timeout_s =
+                (* Keeper policy knob, injected from the resolved layer like
+                   [provider_call_deadline_sec] below instead of threading
+                   one more optional through run_named (RFC-OAS-037). *)
+                Keeper_runtime_resolved.first_event_timeout_sec ()
             ; body_timeout_s
             ; provider_call_deadline_sec =
                 Keeper_runtime_resolved.provider_call_deadline_sec ()

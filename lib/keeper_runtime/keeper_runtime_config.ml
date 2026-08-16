@@ -507,6 +507,12 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
           | None ->
             display_float
               Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec)
+       | "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC" ->
+         (match Env_config_keeper.KeeperKeepalive.first_event_timeout_sec () with
+          | Some value -> display_float value
+          | None ->
+            display_float
+              Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec)
        | "MASC_KEEPER_PROVIDER_CALL_DEADLINE_SEC" ->
          display_float_option
            Env_config_keeper.KeeperKeepalive.provider_call_deadline_sec_override

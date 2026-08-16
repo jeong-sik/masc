@@ -147,18 +147,44 @@ type enum_field_repair =
   ; repaired_value : string
   }
 
-(* Issue #28844: persisted enumerated fields whose non-canonical value has a
-   canonical default — the value the create path writes for a keeper that
-   never exercised the corresponding machinery, so resetting to it is
-   lossless.  A field belongs here only when its corruption has exactly one
-   sane fallback; anything else keeps failing loud. *)
+(* Issue #28844: repair target for one non-canonical enumerated value.
+   [None] means already canonical (no repair).  [Some repaired] is the
+   canonical spelling of the recognized value when the field's [of_string]
+   accepts [raw] — both parsers trim and lowercase, so a case/whitespace
+   misspelling keeps the operator's intent.  Only a value the parser does
+   not recognize at all falls back to the field's canonical default (the
+   value the create path writes for a keeper that never exercised the
+   corresponding machinery), which is the lossless reset. *)
+let proactive_outcome_repair_value raw =
+  match canonical_proactive_outcome_opt raw with
+  | Some _ -> None
+  | None ->
+    (* [proactive_cycle_outcome_of_string] is total: unrecognized garbage
+       lands on [Proactive_unknown], so a recognized misspelling is exactly
+       a parse to any other variant.  A misspelled ["unknown"] is
+       indistinguishable from garbage through the total parser and resets
+       with it. *)
+    (match proactive_cycle_outcome_of_string raw with
+     | Proactive_unknown ->
+       Some (proactive_cycle_outcome_to_string Proactive_never_started)
+     | outcome -> Some (proactive_cycle_outcome_to_string outcome))
+;;
+
+let multimodal_policy_repair_value raw =
+  match canonical_multimodal_policy_opt raw with
+  | Some _ -> None
+  | None ->
+    (match multimodal_policy_of_string raw with
+     | Some policy -> Some (multimodal_policy_to_string policy)
+     | None -> Some (multimodal_policy_to_string default_multimodal_policy))
+;;
+
+(* Persisted enumerated fields repairable in place.  A field belongs here
+   only when an unrecognized value has exactly one sane fallback; anything
+   else keeps failing loud. *)
 let repairable_enum_fields =
-  [ ( "last_proactive_outcome"
-    , (fun raw -> Option.is_some (canonical_proactive_outcome_opt raw))
-    , proactive_cycle_outcome_to_string Proactive_never_started )
-  ; ( "multimodal_policy"
-    , (fun raw -> Option.is_some (canonical_multimodal_policy_opt raw))
-    , multimodal_policy_to_string default_multimodal_policy )
+  [ "last_proactive_outcome", proactive_outcome_repair_value
+  ; "multimodal_policy", multimodal_policy_repair_value
   ]
 ;;
 
@@ -167,11 +193,13 @@ let repair_non_canonical_enum_fields json =
   | `Assoc fields ->
     let repairs =
       List.filter_map
-        (fun (field, is_canonical, canonical_default) ->
+        (fun (field, repair_value) ->
            match List.assoc_opt field fields with
-           | Some (`String raw) when not (is_canonical raw) ->
-             Some
-               { field; previous_value = raw; repaired_value = canonical_default }
+           | Some (`String raw) ->
+             (match repair_value raw with
+              | Some repaired_value ->
+                Some { field; previous_value = raw; repaired_value }
+              | None -> None)
            | Some _ | None -> None)
         repairable_enum_fields
     in

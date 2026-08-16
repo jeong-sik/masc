@@ -250,6 +250,56 @@ let test_non_enumerated_corruption_fails_loud () =
   check string "corrupt file is not rewritten" before (Masc_test_deps.read_file path)
 ;;
 
+let test_recognized_misspelling_repairs_to_canonical_spelling () =
+  with_temp_workspace @@ fun config ->
+  let name = "meta-spelling-canary" in
+  write_keeper_toml config name;
+  (* Both of_string parsers trim and lowercase, so these are recognized
+     values with a spelling defect — the operator intent is unambiguous and
+     repair must keep it, not reset to the field default. *)
+  let path =
+    write_corrupted_meta config name ~field:"multimodal_policy" ~value:(`String "DELEGATE")
+  in
+  let corrupted =
+    Yojson.Safe.from_string (Masc_test_deps.read_file path)
+    |> replace_field "last_proactive_outcome" (`String "SILENT")
+  in
+  write_file path (Yojson.Safe.pretty_to_string corrupted);
+  (match Keeper_meta_store.read_meta config name with
+   | Ok (Some meta) ->
+     check
+       string
+       "multimodal_policy keeps recognized intent"
+       "delegate"
+       (Keeper_types_profile.multimodal_policy_to_string
+          meta.Keeper_meta_contract.multimodal_policy);
+     check
+       string
+       "last_proactive_outcome keeps recognized intent"
+       "silent"
+       (Keeper_meta_contract.proactive_cycle_outcome_to_string
+          meta.runtime.proactive_rt.last_outcome)
+   | Ok None -> fail "read_meta lost the keeper"
+   | Error detail -> failf "recognized misspelling was rejected: %s" detail);
+  (match Yojson.Safe.from_string (Masc_test_deps.read_file path) with
+   | `Assoc fields ->
+     check
+       string
+       "persisted policy is the canonical spelling"
+       "delegate"
+       (match List.assoc "multimodal_policy" fields with
+        | `String value -> value
+        | other -> Yojson.Safe.to_string other);
+     check
+       string
+       "persisted outcome is the canonical spelling"
+       "silent"
+       (match List.assoc "last_proactive_outcome" fields with
+        | `String value -> value
+        | other -> Yojson.Safe.to_string other)
+   | _ -> fail "repaired meta file is not a JSON object")
+;;
+
 let () =
   run
     "keeper_meta_invalid_recovery"
@@ -258,6 +308,10 @@ let () =
             "non-canonical enumerated field is auto-repaired and keeper rejoins keepalive"
             `Quick
             test_auto_repair_unbricks_keepalive
+        ; test_case
+            "recognized misspelling repairs to its canonical spelling"
+            `Quick
+            test_recognized_misspelling_repairs_to_canonical_spelling
         ; test_case
             "scan WARN is emitted on state transitions only"
             `Quick

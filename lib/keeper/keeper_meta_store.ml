@@ -45,10 +45,17 @@ let persist_snapshot ?ownership_root path meta =
     change in failure reason, or recovery — tracked as the last reported
     failure detail per (site, path).  The state is process-local on purpose:
     a restarted process reporting a still-bad file once is correct, and no
-    wall-clock interval is involved. *)
+    wall-clock interval is involved.
+
+    Growth bound: one entry per (site, path) that currently fails, plus stale
+    entries for keepers removed from config while failing — those linger for
+    the process lifetime.  Both populations are bounded by the configured
+    keeper count, so the table stays O(failing keepers). *)
 module Problem_report_state = struct
   type site =
     | Meta_read
+    | Meta_read_changed
+    | Meta_repair
     | Keepalive_scan
     | Persistent_scan
 
@@ -128,47 +135,67 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
        | Ok meta ->
          if Problem_report_state.note_recovered ~site:Meta_read ~path
          then Log.Keeper.info "keeper meta parse recovered for %s" path;
+         Problem_report_state.clear ~site:Meta_repair ~path;
          Ok (Some meta)
        | Error e ->
          (* Issue #28844: a non-canonical enumerated field used to brick every
             reader until something external rewrote the file.  When the
             corruption is confined to fields with a canonical default, repair
-            in place through the normal serializer and proceed. *)
+            in place through the normal serializer and proceed.  A live
+            writer that keeps re-corrupting the file with the same content
+            re-triggers the (idempotent) repair write each cycle, but the
+            WARN is deduped on the repair detail via [Meta_repair], so the
+            log storm does not return; the residual cost is one atomic
+            rewrite of a small file per scan against an active corrupter. *)
          (match repair_non_canonical_enum_fields json with
           | Some (repaired_json, repairs) ->
+            let repair_detail =
+              repairs
+              |> List.map
+                   (fun (repair : enum_field_repair) ->
+                      Printf.sprintf
+                        "%s %S -> %S"
+                        repair.field
+                        repair.previous_value
+                        repair.repaired_value)
+              |> String.concat ", "
+            in
             (match meta_of_json repaired_json with
              | Ok repaired_meta ->
                (match
                   persist_snapshot ?ownership_root path repaired_meta
                 with
                 | Ok () ->
-                  Log.Keeper.warn
-                    "keeper meta auto-repaired %s: %s"
-                    path
-                    (repairs
-                     |> List.map
-                          (fun (repair : enum_field_repair) ->
-                             Printf.sprintf
-                               "%s %S -> %S"
-                               repair.field
-                               repair.previous_value
-                               repair.repaired_value)
-                     |> String.concat ", ");
+                  if Problem_report_state.should_report
+                       ~site:Meta_repair
+                       ~path
+                       ~detail:repair_detail
+                  then
+                    Log.Keeper.warn
+                      "keeper meta auto-repaired %s: %s"
+                      path
+                      repair_detail;
                   Ok (Some repaired_meta)
                 | Error write_detail ->
                   fail_parse
                     (Printf.sprintf
                        "%s; auto-repair of %s failed to persist: %s"
                        e
-                       (repairs
-                        |> List.map
-                             (fun (repair : enum_field_repair) -> repair.field)
-                        |> String.concat ", ")
+                       repair_detail
                        write_detail))
-             | Error _ ->
+             | Error redecode_detail ->
                (* Resetting the enumerated fields did not make the file
-                  decodable; the original failure stands. *)
-               fail_parse e)
+                  decodable; the original failure stands, with the new
+                  decode error attached when it differs. *)
+               fail_parse
+                 (if String.equal redecode_detail e
+                  then e
+                  else
+                    Printf.sprintf
+                      "%s; auto-repair of %s did not decode: %s"
+                      e
+                      repair_detail
+                      redecode_detail))
           | None -> fail_parse e)))
 ;;
 
@@ -471,28 +498,42 @@ let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contra
   let read_candidate candidate =
     let path = keeper_meta_path config candidate in
     if not (Fs_compat.file_exists path)
-    then None
+    then (
+      Problem_report_state.clear ~site:Meta_read_changed ~path;
+      None)
     else (
       match Fs_compat.file_mtime path with
       | Some mtime when mtime > last_mtime ->
         (match
            read_meta_file_path ~ownership_root:config.Workspace.base_path path
          with
-         | Ok (Some meta) -> Some (meta, mtime)
-         | Ok None -> None
+         | Ok (Some meta) ->
+           Problem_report_state.clear ~site:Meta_read_changed ~path;
+           Some (meta, mtime)
+         | Ok None ->
+           Problem_report_state.clear ~site:Meta_read_changed ~path;
+           None
          | Error msg ->
            (* Issue #8377: was [_ -> None] which silently treated a
               read/parse failure as "no change". Now logs so an
-              operator can correlate stale UI with bad meta JSON. *)
+              operator can correlate stale UI with bad meta JSON.
+              Issue #28844: the mtime gate alone does not bound the WARN
+              when a live writer keeps touching a still-broken file, so the
+              WARN is deduped on the failure detail like the other sites. *)
            Otel_metric_store.inc_counter
              Keeper_metrics.(to_string MetaReadFailures)
              ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
              ();
-           Log.Keeper.warn
-             "read_meta_if_changed: parse failed for %s (mtime=%.0f): %s"
-             path
-             mtime
-             msg;
+           if Problem_report_state.should_report
+                ~site:Meta_read_changed
+                ~path
+                ~detail:msg
+           then
+             Log.Keeper.warn
+               "read_meta_if_changed: parse failed for %s (mtime=%.0f): %s"
+               path
+               mtime
+               msg;
            None)
       | _ -> None)
   in

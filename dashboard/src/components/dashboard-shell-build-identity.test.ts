@@ -50,9 +50,9 @@ describe('BuildIdentityBadge executable identity', () => {
       build: {
         release_version: '0.22.0',
         commit: '0123456789abcdef',
-        commit_source: 'env:MASC_BUILD_GIT_COMMIT',
+        commit_source: 'embedded',
         binary_commit: '0123456789abcdef',
-        binary_commit_source: 'env:MASC_BUILD_GIT_COMMIT',
+        binary_commit_source: 'embedded',
         repo_head_commit: 'fedcba9876543210',
         repo_head_commit_source: 'runtime_repo_head',
         started_at: '2026-08-14T02:07:29Z',

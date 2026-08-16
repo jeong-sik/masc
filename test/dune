@@ -2470,6 +2470,8 @@
 
 (include stanzas/test_keeper_meta_current_schema.inc)
 
+(include stanzas/test_keeper_meta_invalid_recovery.inc)
+
 (include stanzas/test_keeper_compact_recovery_tool_surface.inc)
 
 (test

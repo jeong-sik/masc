@@ -113,19 +113,85 @@ let parse_trace_history fields =
   | Some trace_id -> invalidf "trace_history contains invalid trace id %S" trace_id
 ;;
 
+let canonical_multimodal_policy_opt raw =
+  match multimodal_policy_of_string raw with
+  | Some policy when String.equal raw (multimodal_policy_to_string policy) ->
+    Some policy
+  | Some _ | None -> None
+;;
+
 let parse_multimodal_policy fields =
   let* raw = string_field fields "multimodal_policy" in
-  match multimodal_policy_of_string raw with
-  | Some policy when String.equal raw (multimodal_policy_to_string policy) -> Ok policy
-  | Some _ | None -> invalidf "multimodal_policy has non-canonical value %S" raw
+  match canonical_multimodal_policy_opt raw with
+  | Some policy -> Ok policy
+  | None -> invalidf "multimodal_policy has non-canonical value %S" raw
+;;
+
+let canonical_proactive_outcome_opt raw =
+  let outcome = proactive_cycle_outcome_of_string raw in
+  if String.equal raw (proactive_cycle_outcome_to_string outcome)
+  then Some outcome
+  else None
 ;;
 
 let parse_proactive_outcome fields =
   let* raw = string_field fields "last_proactive_outcome" in
-  let outcome = proactive_cycle_outcome_of_string raw in
-  if String.equal raw (proactive_cycle_outcome_to_string outcome)
-  then Ok outcome
-  else invalidf "last_proactive_outcome has non-canonical value %S" raw
+  match canonical_proactive_outcome_opt raw with
+  | Some outcome -> Ok outcome
+  | None -> invalidf "last_proactive_outcome has non-canonical value %S" raw
+;;
+
+type enum_field_repair =
+  { field : string
+  ; previous_value : string
+  ; repaired_value : string
+  }
+
+(* Issue #28844: persisted enumerated fields whose non-canonical value has a
+   canonical default — the value the create path writes for a keeper that
+   never exercised the corresponding machinery, so resetting to it is
+   lossless.  A field belongs here only when its corruption has exactly one
+   sane fallback; anything else keeps failing loud. *)
+let repairable_enum_fields =
+  [ ( "last_proactive_outcome"
+    , (fun raw -> Option.is_some (canonical_proactive_outcome_opt raw))
+    , proactive_cycle_outcome_to_string Proactive_never_started )
+  ; ( "multimodal_policy"
+    , (fun raw -> Option.is_some (canonical_multimodal_policy_opt raw))
+    , multimodal_policy_to_string default_multimodal_policy )
+  ]
+;;
+
+let repair_non_canonical_enum_fields json =
+  match json with
+  | `Assoc fields ->
+    let repairs =
+      List.filter_map
+        (fun (field, is_canonical, canonical_default) ->
+           match List.assoc_opt field fields with
+           | Some (`String raw) when not (is_canonical raw) ->
+             Some
+               { field; previous_value = raw; repaired_value = canonical_default }
+           | Some _ | None -> None)
+        repairable_enum_fields
+    in
+    (match repairs with
+     | [] -> None
+     | repairs ->
+       let repaired_fields =
+         List.map
+           (fun (key, value) ->
+              match
+                List.find_opt
+                  (fun repair -> String.equal repair.field key)
+                  repairs
+              with
+              | Some repair -> key, `String repair.repaired_value
+              | None -> key, value)
+           fields
+       in
+       Some (`Assoc repaired_fields, repairs))
+  | _ -> None
 ;;
 
 let parse_last_blocker fields =

@@ -23,7 +23,7 @@ digraph keeper_fsm {
   // 5 sub-FSM nodes (RFC-0002 + RFC-0003).
   KSM [label="KSM\nKeeper State Machine\nlib/keeper_state/keeper_state_machine.ml"];
   KTC [label="KTC\nTurn Cycle\nlib/keeper/keeper_unified_turn.ml"];
-  KDP [label="KDP\nDecision Pipeline\n(routing surface in keeper_runtime_routing.ml)"];
+  KDP [label="KDP\nDecision Pipeline"];
   KCL [label="KCL\nRuntime Loop\nlib/keeper/keeper_post_turn.ml"];
   KMC [label="KMC\nMemory / Compaction\nlib/keeper/keeper_compact_policy.ml"];
 

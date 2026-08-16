@@ -16,15 +16,16 @@ code_refs:
 - `workspace_resilience.ml` — 시간 파싱과 관찰 헬퍼
 - `rate_limit.ml` — 요청 제한
 - `cancellation.ml` — 취소 처리
-- `lib/keeper/keeper_supervisor.ml` — keeper 단위 감독
-- `lib/dashboard/dashboard_feature_health.ml`, `dashboard_harness_health.ml` — 표면별 health 판정
-- `lib/fs_compat/capability_recovery_*.ml`, `publication_recovery_*.ml` — 파일 표면 복구
+- `lib/keeper/keeper_supervisor.ml` — keeper 단위 감독. `.mli`가 스스로 AGENT_CORE `Agent.run` 생명주기는 감독하지 않는다고 한정한다
+- `lib/dashboard/dashboard_feature_health.ml` — `Feature_flag_registry.all_flags` 의 플래그별 health
+- `lib/dashboard/dashboard_harness_health.ml` — harness health 판정을 기록하는 원장 (판정은 다른 곳에서 온다)
+- `lib/fs_compat/capability_recovery_*.ml`, `publication_recovery_*.ml` — 기동 시 파일 표면 정합 복구. `mcp_server.ml` 까지 배선됨
+- `lib/shutdown.ml`, `lib/shutdown_hooks.ml` — 단계가 정의된 graceful shutdown. `bin/main_eio.ml:664` 가 SIGINT/SIGTERM 에 물려 있다
+- `lib/server/proactive_refresh.ml` — circuit breaker 를 가진 refresh 루프. `lib/dashboard/dashboard_cache.ml:109,664` 에 timeout circuit
+- `lib/session.ml` `restore_from_disk` — 재시작 시 세션 복구. `lib/server/server_runtime_bootstrap.ml:570` 에서 호출
 
 ### 없는 것
-- 프로세스 전체를 덮는 Supervision Tree (감독은 keeper 단위에 머문다)
-- Graceful Shutdown
-- Circuit Breaker
-- State Persistence (재시작 복구)
+- 프로세스 전체를 덮는 Supervision Tree. `lib/subsystem_health.ml` 이 전역 alive/dead 레지스트리를 갖지만 `server_bootstrap_loops.ml:963` 은 죽음을 표시할 뿐 재시작하지 않는다
 
 ---
 

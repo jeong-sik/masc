@@ -222,8 +222,8 @@ Before adding a new `*_to_yojson` function or metric emitter that touches
 provider/model identity, answer three questions: who reads this surface,
 is there a `redacted_*` companion, and do sibling fields agree.
 
-The two internal carve-out sites (boot log, audit log) have no regression
-test. A new internal serializer should come with one.
+A new internal serializer should come with a test that pins the
+un-redacted shape.
 
 ## Reporting Issues
 

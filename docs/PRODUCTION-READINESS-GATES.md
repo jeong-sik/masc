@@ -106,13 +106,12 @@ performance data as green.
 
 `agent_core` is a source subtree in this workspace, not an independently
 released package. Dune owns dependency resolution; the gate owns the package
-shape and the request payloads MASC actually sends.
+shape that Dune's library graph does not describe.
 
 Commands:
 
 ```bash
 bash scripts/check-agent-core-boundary.sh
-python3 scripts/audit-agent-core-payload.py
 ```
 
 Threshold:

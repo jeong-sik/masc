@@ -153,6 +153,34 @@ let test_parse_rejects_blank_rationale () =
   let entries = List.map (fun c -> (c, true)) (categories facts3) in
   expect_error "blank rationale" (reply_json ~rationale:"   " entries) "rationale is empty"
 
+let test_parse_rejects_extra_top_level_key () =
+  let entries = List.map (fun c -> (c, true)) (categories facts3) in
+  let with_extra =
+    match Yojson.Safe.from_string (reply_json entries) with
+    | `Assoc kvs -> Yojson.Safe.to_string (`Assoc (kvs @ [ ("verdict", `String "PASS") ]))
+    | _ -> assert false
+  in
+  expect_error "extra top-level key" with_extra "unexpected key verdict"
+
+let test_parse_rejects_extra_entry_key () =
+  let broken =
+    `Assoc
+      [ ( "per_fact"
+        , `List
+            (List.map
+               (fun c ->
+                 `Assoc
+                   [ ("category", `String c)
+                   ; ("recalled", `Bool true)
+                   ; ("confidence", `Float 0.9)
+                   ])
+               (categories facts3)) )
+      ; ("rationale", `String "r")
+      ]
+    |> Yojson.Safe.to_string
+  in
+  expect_error "extra entry key" broken "unexpected key confidence"
+
 let test_parse_rejects_non_json () =
   expect_error "prose reply" "The assistant recalled everything correctly." "invalid JSON"
 
@@ -212,6 +240,9 @@ let () =
         ; Alcotest.test_case "non-bool recalled" `Quick test_parse_rejects_non_bool_recalled
         ; Alcotest.test_case "missing rationale" `Quick test_parse_rejects_missing_rationale
         ; Alcotest.test_case "blank rationale" `Quick test_parse_rejects_blank_rationale
+        ; Alcotest.test_case "extra top-level key" `Quick
+            test_parse_rejects_extra_top_level_key
+        ; Alcotest.test_case "extra entry key" `Quick test_parse_rejects_extra_entry_key
         ; Alcotest.test_case "non-json" `Quick test_parse_rejects_non_json
         ; Alcotest.test_case "non-object" `Quick test_parse_rejects_non_object
         ] )

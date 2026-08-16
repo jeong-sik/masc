@@ -65,9 +65,22 @@ let strip_fences (s : string) : string =
 
 let ( let* ) = Result.bind
 
+(* The key sets are closed on both levels — the category set below is
+   already exact-match, and an object contract that rejects unknown
+   categories but shrugs at unknown keys would let a self-contradicting
+   reply (say, a stray "verdict" field disagreeing with per_fact) pass
+   unnoticed. Parse, don't validate: unknown keys are a parse error. *)
+let reject_unknown_keys ~context ~allowed kvs =
+  match List.find_opt (fun (k, _) -> not (List.mem k allowed)) kvs with
+  | Some (k, _) -> Error (Printf.sprintf "%s: unexpected key %s" context k)
+  | None -> Ok ()
+
 let parse_per_fact_entry (j : Yojson.Safe.t) : (per_fact, string) result =
   match j with
   | `Assoc kvs ->
+    let* () =
+      reject_unknown_keys ~context:"per_fact entry" ~allowed:[ "category"; "recalled" ] kvs
+    in
     let* category =
       match List.assoc_opt "category" kvs with
       | Some (`String s) -> Ok s
@@ -101,6 +114,9 @@ let parse_reply ~(judge_runtime : string) ~(facts : Keeper_canary_facts.fact lis
     match json with
     | `Assoc kvs -> Ok kvs
     | _ -> Error "judge reply is not a JSON object"
+  in
+  let* () =
+    reject_unknown_keys ~context:"judge reply" ~allowed:[ "per_fact"; "rationale" ] kvs
   in
   let* raw_entries =
     match List.assoc_opt "per_fact" kvs with

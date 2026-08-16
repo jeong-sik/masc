@@ -633,7 +633,6 @@ let run_named
     | None ->
       (match Runtime.resolve_assignment runtime_id with
        | `Missing -> None, []
-       | `Single_runtime runtime -> None, [ runtime.Runtime.id ]
        | `Lane lane ->
          let lane_id = Runtime_lane.id lane in
          ( Some lane_id

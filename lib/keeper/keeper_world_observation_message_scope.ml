@@ -425,21 +425,3 @@ let collect_message_scope_and_fleet
   let fleet = fleet_messages_of_messages ~limit:fleet_limit ~targets messages in
   pending, fleet
 ;;
-
-(* The direct-keeper-message observation empties the reactive lanes — the
-   message that woke the keeper is the trigger, not a pending obligation — but
-   standing context still applies, so the fleet layer is collected on its own. *)
-let collect_fleet_messages
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-      ~(limit : int)
-  : fleet_message list
-  =
-  if limit <= 0
-  then []
-  else (
-    let messages =
-      Keeper_chat_store.load_all ~base_dir:config.base_path ~keeper_name:meta.name
-    in
-    fleet_messages_of_messages ~limit ~targets:(message_feed_targets meta) messages)
-;;

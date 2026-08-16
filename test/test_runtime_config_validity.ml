@@ -1820,18 +1820,9 @@ let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
 
 let test_keeper_dispatch_runtime_graph_enumeration () =
   let lanes =
-    [ Runtime_lane.make
-        ~id:"default-a"
-        ~strategy:Runtime_lane.Ordered
-        [ "lane-a"; "lane-b" ]
-    ; Runtime_lane.make
-        ~id:"dormant-lane"
-        ~strategy:Runtime_lane.Ordered
-        [ "lane-c"; "lane-b" ]
-    ; Runtime_lane.make
-        ~id:"cross-e"
-        ~strategy:Runtime_lane.Ordered
-        [ "cross-a"; "lane-b" ]
+    [ Runtime_lane.make ~id:"default-a" [ "lane-a"; "lane-b" ]
+    ; Runtime_lane.make ~id:"dormant-lane" [ "lane-c"; "lane-b" ]
+    ; Runtime_lane.make ~id:"cross-e" [ "cross-a"; "lane-b" ]
     ]
   in
   let actual =

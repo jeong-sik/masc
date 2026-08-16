@@ -359,11 +359,8 @@ let lanes_of_decls ~(config_path : string)
   let* () = validate_lanes ~config_path ~dropped_bindings runtimes lane_decls in
   Ok
     (List.map
-       (fun ({ Runtime_schema.id; strategy; candidate_ids } : Runtime_schema.lane_decl) ->
-          match strategy with
-          | Runtime_schema.Ordered ->
-            Runtime_lane.make ~id ~strategy:Runtime_lane.Ordered
-              (with_terminal_default ~default_runtime_id candidate_ids))
+       (fun ({ Runtime_schema.id; candidate_ids } : Runtime_schema.lane_decl) ->
+          Runtime_lane.make ~id (with_terminal_default ~default_runtime_id candidate_ids))
        lane_decls)
 ;;
 
@@ -977,7 +974,6 @@ let degrade_loaded_for_missing_catalog
          | _ ->
            ( Runtime_lane.make
                ~id:(Runtime_lane.id lane)
-               ~strategy:(Runtime_lane.strategy lane)
                kept_candidates
              :: kept
            , dropped_candidates
@@ -1432,8 +1428,7 @@ let resolve_assignment (assigned_id : string) =
            with_terminal_default ~default_runtime_id:default.id [ runtime.id ]
          | None -> [ runtime.id ]
        in
-       `Lane
-         (Runtime_lane.make ~id:runtime.id ~strategy:Runtime_lane.Ordered candidates)
+       `Lane (Runtime_lane.make ~id:runtime.id candidates)
      | None -> `Missing)
 ;;
 

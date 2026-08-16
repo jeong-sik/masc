@@ -109,7 +109,6 @@ let runtime_toml_with_lane =
 default = "primary.test_model"
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.test_model", "fallback.test_model" ]
 
 [providers.primary]
@@ -145,7 +144,6 @@ let runtime_toml_quota_lane_with_shared_credential shared_credential =
 default = "shared_a.test_model"
 
 [runtime.lanes.quota_lane]
-strategy = "ordered"
 candidates = [ "shared_a.test_model", "shared_b.test_model", "other.test_model" ]
 
 [providers.shared_a]
@@ -222,7 +220,6 @@ let runtime_toml_checkpoint_lane =
 default = "codex.codex"
 
 [runtime.lanes.checkpoint_lane]
-strategy = "ordered"
 candidates = [ "codex.codex", "primary.test_model" ]
 
 [providers.codex]
@@ -259,7 +256,6 @@ let runtime_toml_thinking_lane =
 default = "thinking.reasoning_big"
 
 [runtime.lanes.mixed]
-strategy = "ordered"
 candidates = [ "thinking.reasoning_big", "plain.non_reasoning" ]
 
 [providers.thinking]
@@ -318,7 +314,6 @@ default = "primary.text_model"
 media_failover = [ "outsidevision.vision_model" ]
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.text_model", "lanevision.vision_model" ]
 
 [providers.primary]
@@ -371,7 +366,6 @@ let runtime_toml_unknown_lane_candidate =
 default = "primary.test_model"
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.test_model", "missing.test_model" ]
 
 [providers.primary]
@@ -396,7 +390,6 @@ let runtime_toml_lane_shadows_runtime =
 default = "primary.test_model"
 
 [runtime.lanes."primary.test_model"]
-strategy = "ordered"
 candidates = [ "fallback.test_model" ]
 
 [providers.primary]
@@ -574,7 +567,6 @@ let runtime_toml_assignment_to_lane =
 default = "primary.test_model"
 
 [runtime.lanes.resilient]
-strategy = "ordered"
 candidates = [ "primary.test_model", "fallback.test_model" ]
 
 [runtime.assignments]

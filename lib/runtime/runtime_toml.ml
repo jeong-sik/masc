@@ -1407,22 +1407,13 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
 ;;
 
 (* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
-   table with [strategy] (only "ordered" supported) and [candidates] (array of
-   runtime ids). Candidate ids are resolved against materialized runtimes at
-   load time, not here, so the parser returns declarations only. *)
+   table with [candidates] (array of runtime ids). Candidate ids are resolved
+   against materialized runtimes at load time, not here, so the parser returns
+   declarations only. *)
 let parse_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.lane_decl, parse_error list) result
   =
   let path = Printf.sprintf "runtime.lanes.%s" id in
-  let strategy_result =
-    match Otoml.find_opt tbl Otoml.get_string [ "strategy" ] with
-    | None | Some "ordered" -> Ok Runtime_schema.Ordered
-    | Some other ->
-      Error
-        (error
-           (path ^ ".strategy")
-           (Printf.sprintf "unsupported lane strategy %S" other))
-  in
   let candidate_ids_result =
     match Otoml.find_opt tbl Fun.id [ "candidates" ] with
     | None -> Error (error (path ^ ".candidates") "lane candidates is required")
@@ -1436,12 +1427,12 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
                  "lane candidates must be an array of string runtime ids; got %s"
                  msg)))
   in
-  match strategy_result, candidate_ids_result with
-  | Error e, _ | _, Error e -> Error e
-  | Ok strategy, Ok candidate_ids ->
+  match candidate_ids_result with
+  | Error e -> Error e
+  | Ok candidate_ids ->
     if candidate_ids = []
     then Error (error path "lane must have at least one candidate")
-    else Ok { Runtime_schema.id; strategy; candidate_ids }
+    else Ok { Runtime_schema.id; candidate_ids }
 ;;
 
 let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =

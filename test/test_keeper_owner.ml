@@ -735,6 +735,10 @@ let test_stopping_cancels_and_joins_active_child () =
   let child_started, resolve_child_started = Eio.Promise.create () in
   let child_released, resolve_child_released = Eio.Promise.create () in
   let never, _resolve_never = Eio.Promise.create () in
+  let settled = ref None in
+  let record_settled ~keeper_name ~claimed_operation_id ~execution =
+    settled := Some (keeper_name, claimed_operation_id, execution)
+  in
   let operation_executor ~sw:child_sw ~keeper_name:_ ~claim =
     match claim () with
     | Error error -> fail (Owner.error_to_string error)
@@ -749,6 +753,7 @@ let test_stopping_cancels_and_joins_active_child () =
   let owner =
     owner_ok
       (start_owner_with_executor
+         ~on_execution_settled:record_settled
          ~sw
          ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_executor:(Some operation_executor)
@@ -768,16 +773,38 @@ let test_stopping_cancels_and_joins_active_child () =
   ignore (owner_ok (Owner.begin_stopping owner));
   Eio.Promise.await child_released;
   let operation = Option.get (owner_ok (Owner.exact_operation owner operation_id)) in
-  match operation.state with
-  | Chat_operation.Failed { failure = { kind; _ }; _ } ->
-    check string
-      "stopped active child is terminal"
+  (match operation.state with
+   | Chat_operation.Failed { failure = { kind; _ }; _ } ->
+     check string
+       "stopped active child is terminal"
+       "Turn_cancelled"
+       (Chat_operation.failure_kind_to_string kind)
+   | state ->
+     fail
+       ("stopping returned before terminal persistence: "
+        ^ Chat_operation.state_to_string state));
+  match !settled with
+  | Some (settled_keeper, Some claimed_id, Owner.Operation_failed { kind; detail; _ })
+    ->
+    check string "settle hook keeper" "stopping-active-child" settled_keeper;
+    check
+      string
+      "settle hook operation id"
+      (Chat_operation.Operation_id.to_string operation_id)
+      (Chat_operation.Operation_id.to_string claimed_id);
+    check
+      string
+      "settle hook failure kind"
       "Turn_cancelled"
-      (Chat_operation.failure_kind_to_string kind)
-  | state ->
-    fail
-      ("stopping returned before terminal persistence: "
-       ^ Chat_operation.state_to_string state)
+      (Chat_operation.failure_kind_to_string kind);
+    check
+      string
+      "settle hook detail"
+      "Keeper owner stopped the active turn"
+      detail
+  | Some (_, None, _) -> fail "settle hook fired without a claimed operation id"
+  | Some (_, _, Owner.Operation_succeeded _) -> fail "cancelled turn settled as success"
+  | None -> fail "settle hook did not fire before stop completed"
 ;;
 
 let test_stopping_cancels_and_joins_autonomous_child () =
@@ -863,7 +890,12 @@ let test_turn_slot_release_signals_availability () =
          ~operation_store_path:path
          ~now:(fun () -> 42.0)
          ~operation_runner:
-           (Some Owner.{ ready = (fun ~keeper_name:_ -> true); execute })
+           (Some
+              Owner.
+                { ready = (fun ~keeper_name:_ -> true)
+                ; execute
+                ; on_execution_settled = noop_execution_settled
+                })
          ~on_turn_slot_released:(Some (fun () -> incr released))
          ~keeper_name:"slot-release"
          ~initial_meta:(Some (make_meta "slot-release")))
@@ -1472,7 +1504,12 @@ let test_startup_queued_waits_for_runner_readiness () =
               ~operation_store_path:path
               ~now:(fun () -> 20.0)
               ~operation_runner:
-                (Some Owner.{ ready = (fun ~keeper_name:_ -> !ready); execute })
+                (Some
+                   Owner.
+                     { ready = (fun ~keeper_name:_ -> !ready)
+                     ; execute
+                     ; on_execution_settled = noop_execution_settled
+                     })
               ~on_turn_slot_released:None
               ~keeper_name:"ready-after-registration"
               ~initial_meta:(Some (make_meta "ready-after-registration")))

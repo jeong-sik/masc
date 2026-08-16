@@ -368,10 +368,68 @@ let write_attempt_record ~base_path ~id record =
   atomic_write_file ~path (Yojson.Safe.to_string (attempt_record_json record) ^ "\n")
 ;;
 
-let observed_state_of_status_json = function
+(* Does the pid the sidecar wrote still exist? Signal 0 performs the
+   permission and existence checks without delivering anything; EPERM means
+   the process is there and owned by somebody else, which is still alive. *)
+let pid_is_running pid =
+  pid > 0
+  &&
+  match Unix.kill pid 0 with
+  | () -> true
+  | exception Unix.Unix_error (Unix.EPERM, _, _) -> true
+  | exception Unix.Unix_error (_, _, _) -> false
+;;
+
+(* Total field access: a malformed record parses to something that is not an
+   object, and asking it for a member raises. *)
+let status_field key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+;;
+
+let heartbeat_is_fresh ~now ~stale_after_sec status =
+  match status_field "updated_at" status with
+  | Some (`String updated_at) ->
+    (match Types_core.parse_iso8601_opt updated_at with
+     | Some stamped -> now -. stamped <= float_of_int stale_after_sec
+     | None -> false)
+  | Some _ | None -> false
+;;
+
+(* Whether a sidecar process is actually running. [available] next door only
+   says a status file was found, and a file is not a process: [run.sh stop]
+   sends SIGTERM and nothing — not the script, not the bot's StatusStore,
+   which has no delete path — ever removes the file. Reading presence as
+   liveness made the first stop permanent, because every later start
+   reconciled to "already_available" against the leftovers.
+
+   The stamp alone cannot replace it. A sidecar's shutdown path
+   (Bot.stop_status_heartbeat) writes one final record, and that record says
+   [connected: true] with the current time, so a just-stopped sidecar leaves
+   behind the freshest possible claim of liveness. The dashboard's restart is
+   stop → 800ms → start, which lands inside that window every time.
+
+   The pid in the record is the part that stops being true when the process
+   dies. Both are checked: the pid alone would be fooled by pid reuse, and the
+   stamp alone would be fooled by the shutdown write and by a bot whose
+   heartbeat thread died under a live process. Neither answer is a guess — a
+   record that cannot produce a readable stamp and a running pid does not
+   establish that a process is there, and restarting is the recoverable
+   direction. *)
+let observed_state_of_status_json ?(now = Unix.gettimeofday ()) ~id json =
+  match json with
   | `Assoc fields ->
+    let stale_after_sec = status_stale_sec id in
+    let status = Option.value (List.assoc_opt "status" fields) ~default:`Null in
+    let pid =
+      match status_field "pid" status with
+      | Some (`Int pid) -> pid
+      | Some _ | None -> 0
+    in
     (match List.assoc_opt "available" fields with
-     | Some (`Bool true) -> Observed_available
+     | Some (`Bool true)
+       when heartbeat_is_fresh ~now ~stale_after_sec status && pid_is_running pid ->
+       Observed_available
      | _ -> Observed_unavailable)
   | _ -> Observed_unavailable
 ;;
@@ -488,7 +546,7 @@ let attempt_fields = function
 ;;
 
 let lifecycle_json ~base_path id status_json =
-  let observed_state = observed_state_of_status_json status_json in
+  let observed_state = observed_state_of_status_json ~id status_json in
   let previous_attempt, attempt_error_fields =
     match read_attempt_record_result ~base_path id with
     | Ok previous_attempt -> previous_attempt, []
@@ -954,7 +1012,7 @@ let handle_start state request reqd =
              session and redirects stdio to [/dev/null], so the sidecar
              survives backend restart without retaining server FDs. *)
              let status_json = read_status_json ~base_path id in
-             let observed_state = observed_state_of_status_json status_json in
+             let observed_state = observed_state_of_status_json ~id status_json in
              let reconcile_result =
                reconcile_desired_once
                  ~current_generation:desired.generation

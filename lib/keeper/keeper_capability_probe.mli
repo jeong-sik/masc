@@ -114,6 +114,12 @@ type invocation =
 
 val invocation_to_string : invocation -> string
 
+val detail_of_http_error : Llm_provider.Http_client.http_error -> string
+(** Render a provider error for [Provider_rejected.detail]. Exhaustive over
+    the closed error type; an [Unknown_provider_failure] keeps its raw
+    exception reason so an operator can tell a seeding bug from a quota
+    rejection without rerunning under a debugger. *)
+
 (** Why a probe could not be attempted at all. *)
 type invocation_error =
   | Not_on_surface of verdict

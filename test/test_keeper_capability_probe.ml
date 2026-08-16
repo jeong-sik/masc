@@ -392,6 +392,37 @@ let test_probe_and_turn_agree_on_the_seed () =
    surface exists only once the per-turn MCP bridge is up. Answering from the
    descriptor table instead would report advertisement as consumption, which is
    the exact mistake F1 of the 2026-08-12 audit was. *)
+(* detail_of_http_error must keep the Unknown_provider_failure reason: it
+   carries the raw exception (the 2026-08-16 probe read five cloud
+   providers as rejected because No_default_generator was rendered as a
+   bare "unclassified transport exception"). *)
+let test_detail_keeps_unknown_failure_reason () =
+  let detail =
+    Probe.detail_of_http_error
+      (Llm_provider.Http_client.ProviderFailure
+         { kind =
+             Llm_provider.Http_client.Unknown_provider_failure
+               { reason = Some "Mirage_crypto_rng.No_default_generator" }
+         ; message = "unclassified transport exception"
+         })
+  in
+  Alcotest.(check string)
+    "reason survives"
+    "provider failure: unclassified transport exception \
+     (Mirage_crypto_rng.No_default_generator)"
+    detail;
+  let bare =
+    Probe.detail_of_http_error
+      (Llm_provider.Http_client.ProviderFailure
+         { kind = Llm_provider.Http_client.Unknown_provider_failure { reason = None }
+         ; message = "unclassified transport exception"
+         })
+  in
+  Alcotest.(check string)
+    "reasonless failure stays bare"
+    "provider failure: unclassified transport exception"
+    bare
+
 let test_official_client_probe_refuses_antigravity () =
   let base = Filename.temp_file "probe-agy" ".d" in
   Sys.remove base;
@@ -574,6 +605,10 @@ let () =
         ; test_case "absent seed leaves the binding alone" `Quick test_undeclared_seed_leaves_the_binding_alone
         ; test_case "probe and turn agree on every declaration combination" `Quick
             test_probe_and_turn_agree_on_the_seed
+        ] )
+    ; ( "provider error rendering"
+      , [ test_case "unknown-failure reason survives into detail" `Quick
+            test_detail_keeps_unknown_failure_reason
         ] )
     ; ( "probe_official_client_invocation (offline)"
       , [ test_case "antigravity is refused with its reason" `Quick

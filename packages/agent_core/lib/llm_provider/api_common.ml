@@ -618,7 +618,31 @@ let https_init_error_to_string = function
    results are equivalent and the last write wins. *)
 let tls_client_config_cache : Tls.Config.client option Atomic.t = Atomic.make None
 
+(* The TLS handshake draws from Mirage_crypto_rng's process-global default
+   generator, which some entrypoint must install. Leaving that to each
+   binary's main() made it forgettable: a CLI that skipped it had every
+   HTTPS request die in ~10ms as No_default_generator, swallowed downstream
+   into "unclassified transport exception" (keeper_capability_probe_cli,
+   2026-08-16 — five cloud providers read as rejected while local http
+   runtimes passed). Installing it at this gate, the single entrypoint
+   every HTTPS path crosses, removes the class. [use_default] is
+   idempotent, so a concurrent duplicate install is harmless. *)
+let ensure_rng_default () =
+  match Mirage_crypto_rng.default_generator () with
+  | _ -> ()
+  | exception Mirage_crypto_rng.No_default_generator ->
+    Mirage_crypto_rng_unix.use_default ()
+;;
+
+let%test "the https gate leaves the RNG default installed" =
+  ensure_rng_default ();
+  match Mirage_crypto_rng.default_generator () with
+  | _ -> true
+  | exception Mirage_crypto_rng.No_default_generator -> false
+;;
+
 let tls_client_config () : (Tls.Config.client, https_init_error) result =
+  ensure_rng_default ();
   match Atomic.get tls_client_config_cache with
   | Some config -> Ok config
   | None ->

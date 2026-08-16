@@ -256,6 +256,45 @@ let gate_replay_repair_stage_of_string = function
   | _ -> None
 ;;
 
+type fenced_attempt_cause =
+  | Attempt_timed_out
+  | Attempt_failed
+
+let fenced_attempt_cause_to_string = function
+  | Attempt_timed_out -> "attempt_timed_out"
+  | Attempt_failed -> "attempt_failed"
+;;
+
+let fenced_attempt_cause_of_string = function
+  | "attempt_timed_out" -> Some Attempt_timed_out
+  | "attempt_failed" -> Some Attempt_failed
+  | _ -> None
+;;
+
+let fenced_attempt_cause_of_core_error : Agent_core.Error.t -> fenced_attempt_cause
+  = function
+  | Agent_core.Error.Api (Agent_core.Retry.Timeout _)
+  | Agent_core.Error.Provider (Llm_provider.Error.Timeout _)
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ })
+  | Agent_core.Error.Provider
+      (Llm_provider.Error.NetworkError
+         { kind = Llm_provider.Http_client.Timeout; _ }) -> Attempt_timed_out
+  (* Every remaining top-level constructor is named rather than swept by a
+     wildcard: a new agent-core error family must be classified here on
+     purpose, not inherit "the runtime answered" by default. *)
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Api _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> Attempt_failed
+;;
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -315,6 +354,7 @@ type masc_internal_error =
   | Provider_attempt_effect_fenced of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
+      cause : fenced_attempt_cause;
       diagnostic : string;
     }
   | Receipt_persistence_failed of {
@@ -515,12 +555,13 @@ let masc_internal_error_to_json = function
         ("diagnostic", `String diagnostic);
       ]
   | Provider_attempt_effect_fenced
-      { runtime_id; effect_disposition; diagnostic } ->
+      { runtime_id; effect_disposition; cause; diagnostic } ->
     `Assoc
       [ "kind", `String provider_attempt_effect_fenced_kind
       ; "runtime_id", `String runtime_id
       ; ( "effect_disposition"
         , `String (Keeper_provider_attempt_effect_core.to_string effect_disposition) )
+      ; "cause", `String (fenced_attempt_cause_to_string cause)
       ; "diagnostic", `String diagnostic
       ]
   | Receipt_persistence_failed { detail } ->
@@ -935,19 +976,24 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String kind)
         when String.equal kind provider_attempt_effect_fenced_kind
              && exact_fields
-                  [ "kind"; "runtime_id"; "effect_disposition"; "diagnostic" ]
+                  [ "kind"; "runtime_id"; "effect_disposition"; "cause"; "diagnostic" ]
                   fields ->
         (match
            string_opt_of_assoc "runtime_id" json,
            string_opt_of_assoc "effect_disposition" json,
+           string_opt_of_assoc "cause" json,
            string_opt_of_assoc "diagnostic" json
          with
-         | Some runtime_id, Some effect_disposition, Some diagnostic ->
-           Option.map
-             (fun effect_disposition ->
-                Provider_attempt_effect_fenced
-                  { runtime_id; effect_disposition; diagnostic })
-             (Keeper_provider_attempt_effect_core.of_string effect_disposition)
+         | Some runtime_id, Some effect_disposition, Some cause, Some diagnostic ->
+           (match
+              Keeper_provider_attempt_effect_core.of_string effect_disposition,
+              fenced_attempt_cause_of_string cause
+            with
+            | Some effect_disposition, Some cause ->
+              Some
+                (Provider_attempt_effect_fenced
+                   { runtime_id; effect_disposition; cause; diagnostic })
+            | _ -> None)
          | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with

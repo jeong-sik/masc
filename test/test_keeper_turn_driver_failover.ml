@@ -1274,6 +1274,7 @@ let check_effect_disposition_blocks_same_turn_retry label effect_disposition =
              { runtime_id = "primary.test_model"
              ; effect_disposition = observed
              ; diagnostic
+             ; _
              }) ->
         Alcotest.(check bool)
           (label ^ " keeps the exact effect disposition")

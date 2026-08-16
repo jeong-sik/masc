@@ -34,6 +34,7 @@ include
       Keeper_internal_error.transcript_quarantine_reason
      and type gate_replay_repair_stage =
       Keeper_internal_error.gate_replay_repair_stage
+     and type fenced_attempt_cause = Keeper_internal_error.fenced_attempt_cause
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Turn pipeline records} *)

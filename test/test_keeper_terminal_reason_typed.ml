@@ -319,6 +319,7 @@ let () =
     Keeper_internal_error.Provider_attempt_effect_fenced
       { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
       ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+      ; cause = Keeper_internal_error.Attempt_failed
       ; diagnostic = "provider response did not prove whether the tool effect settled"
       }
   in
@@ -331,6 +332,42 @@ let () =
     "provider-attempt fence codec round-trips the typed evidence"
     (Keeper_internal_error.parse_masc_internal_error_json fenced_json
      = Some fenced_error);
+  (* A fence replaces the attempt's own error, so the record is the only place
+     left that can say the runtime stopped responding rather than answered with
+     a failure. Both directions of the wire must keep that. *)
+  let timed_out_error =
+    Keeper_internal_error.Provider_attempt_effect_fenced
+      { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
+      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+      ; cause = Keeper_internal_error.Attempt_timed_out
+      ; diagnostic = "Timeout: Antigravity turn timed out after 600.000s"
+      }
+  in
+  let timed_out_json =
+    Keeper_internal_error.masc_internal_error_to_json timed_out_error
+  in
+  check
+    "a timed-out fence is distinguishable on the wire from a failed one"
+    (Json_util.get_string timed_out_json "cause"
+     = Some
+         (Keeper_internal_error.fenced_attempt_cause_to_string
+            Keeper_internal_error.Attempt_timed_out)
+     && Json_util.get_string fenced_json "cause"
+        <> Json_util.get_string timed_out_json "cause");
+  check
+    "a timed-out fence round-trips its cause"
+    (Keeper_internal_error.parse_masc_internal_error_json timed_out_json
+     = Some timed_out_error);
+  check
+    "a provider timeout classifies as a non-answering attempt"
+    (Keeper_internal_error.fenced_attempt_cause_of_core_error
+       (Agent_core.Error.Provider
+          (Llm_provider.Error.Timeout
+             { provider = "antigravity"
+             ; timeout_phase = Some Llm_provider.Http_client.Wall_clock
+             ; detail = "turn timed out after 600.000s"
+             }))
+     = Keeper_internal_error.Attempt_timed_out);
   let fenced_wire = Keeper_internal_error.provider_attempt_effect_fenced_kind in
   let producer_wire =
     fenced_error

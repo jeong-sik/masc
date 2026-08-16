@@ -107,6 +107,26 @@ type gate_replay_repair_stage =
   | Replay_stale_grant_retirement
   | Replay_invalid_resolution_state
 
+type fenced_attempt_cause =
+  | Attempt_timed_out
+  (** The runtime stopped producing output. No failure response arrived, so
+          the attempt's outcome is unknown to the provider as well as to us. *)
+  | Attempt_failed
+  (** The runtime answered and the answer was a failure. *)
+(** Why a fenced attempt ended, kept as the one distinction a later turn's
+    runtime ordering can act on: a runtime that stops responding is a
+    different kind of candidate from one that rejects requests. Deliberately
+    coarser than the attempt's own error — every finer typed fact stays in
+    that error at the point of fencing, and the display rendering of it stays
+    in [diagnostic]. *)
+
+val fenced_attempt_cause_to_string : fenced_attempt_cause -> string
+val fenced_attempt_cause_of_string : string -> fenced_attempt_cause option
+
+val fenced_attempt_cause_of_core_error : Agent_core.Error.t -> fenced_attempt_cause
+(** Matches the typed timeout constructors only — no message inspection.
+    Everything else is [Attempt_failed]. *)
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -161,11 +181,17 @@ type masc_internal_error =
   | Provider_attempt_effect_fenced of {
       runtime_id : string;
       effect_disposition : Keeper_provider_attempt_effect_core.t;
+      cause : fenced_attempt_cause;
       diagnostic : string;
     }
       (** A provider attempt failed after an effect was attempted or after the
           runtime lost complete effect observation. The exact source must be
-          terminalized as failed, never replayed automatically. *)
+          terminalized as failed, never replayed automatically.
+
+          Wrapping replaces the attempt's own typed error, so [cause] carries
+          forward the distinction a later turn can still act on. [diagnostic]
+          is the display rendering of the replaced error and is never
+          matched. *)
   | Receipt_persistence_failed of { detail : string }
   | Gate_replay_repair_required of {
       approval_id : string;

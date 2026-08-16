@@ -352,6 +352,7 @@ let attempt_runtime_candidates
                (Provider_attempt_effect_fenced
                   { runtime_id = attempt_runtime_id
                   ; effect_disposition
+                  ; cause = fenced_attempt_cause_of_core_error error
                   ; diagnostic = Agent_core.Error.to_string error
                   })
          in

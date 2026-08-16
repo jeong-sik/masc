@@ -80,6 +80,7 @@ let test_effect_fenced_failure_terminalizes_exact_source () =
          { runtime_id = "effect-owner"
          ; effect_disposition =
              Masc.Keeper_provider_attempt_effect.Observation_unavailable
+         ; cause = Masc.Keeper_turn_driver.Attempt_failed
          ; diagnostic = "provider failed after dispatch"
          })
   in

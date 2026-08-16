@@ -85,8 +85,13 @@ let value_of_category ~seed = function
        "today" so the same run id reproduces the same value regardless of
        when it runs. Month, day, and time are independent labels, not
        draws from one stream, so none depends on another's derivation
-       order. The minute-resolution time is what pushes the value out of
-       the ~336-date pool that could recur across rounds on one keeper. *)
+       order. Minute resolution lifts the pool from ~336 dates to ~484k
+       combinations (~19 bits) — collision *resistance* across rounds on
+       one keeper, not a uniqueness guarantee like the 48-bit hex-suffix
+       categories; ~50 accumulated rounds still carry roughly a 0.2%
+       birthday collision chance on this field alone. The fresh-transcript
+       gate in bin/keeper_canary_run.ml is what actually removes the
+       reused-round scenario. *)
     let month = 1 + int_in_range ~seed ~label:"deadline:month" ~modulus:12 in
     let day = 1 + int_in_range ~seed ~label:"deadline:day" ~modulus:28 in
     let hour = int_in_range ~seed ~label:"deadline:hour" ~modulus:24 in

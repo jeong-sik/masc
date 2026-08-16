@@ -242,11 +242,10 @@ let test_acc_message_delta_with_usage () =
   let acc = Streaming.create_stream_acc () in
   let usage =
     Some
-      { input_tokens = 0
-      ; output_tokens = 200
-      ; cache_creation_input_tokens = 30
-      ; cache_read_input_tokens = 15
-      ; cost_usd = None
+      { Types.input_tokens = Some 0
+      ; output_tokens = Some 200
+      ; cache_creation_input_tokens = Some 30
+      ; cache_read_input_tokens = Some 15
       }
   in
   Streaming.accumulate_event acc (MessageDelta { stop_reason = Some EndTurn; usage });
@@ -263,18 +262,18 @@ let test_acc_message_delta_with_zero_cache () =
   let acc = Streaming.create_stream_acc () in
   let usage =
     Some
-      { input_tokens = 0
-      ; output_tokens = 100
-      ; cache_creation_input_tokens = 0
-      ; cache_read_input_tokens = 0
-      ; cost_usd = None
+      { Types.input_tokens = Some 0
+      ; output_tokens = Some 100
+      ; cache_creation_input_tokens = Some 0
+      ; cache_read_input_tokens = Some 0
       }
   in
   Streaming.accumulate_event acc (MessageDelta { stop_reason = Some EndTurn; usage });
   let resp = finalize_ok acc in
   match resp.usage with
   | Some u ->
-    (* Zero cache values should not overwrite prior values *)
+    (* Reported counters are cumulative and authoritative — a reported 0
+       lands as 0 (here onto an empty seed). *)
     check_int "output" 100 u.output_tokens;
     check_int "cache_creation stays 0" 0 u.cache_creation_input_tokens;
     check_int "cache_read stays 0" 0 u.cache_read_input_tokens
@@ -594,11 +593,10 @@ let test_full_anthropic_sequence () =
         { stop_reason = Some EndTurn
         ; usage =
             Some
-              { input_tokens = 0
-              ; output_tokens = 30
-              ; cache_creation_input_tokens = 0
-              ; cache_read_input_tokens = 0
-              ; cost_usd = None
+              { Types.input_tokens = None
+              ; output_tokens = Some 30
+              ; cache_creation_input_tokens = None
+              ; cache_read_input_tokens = None
               }
         }
     ; MessageStop
@@ -656,11 +654,10 @@ let test_full_tool_use_sequence () =
         { stop_reason = Some StopToolUse
         ; usage =
             Some
-              { input_tokens = 0
-              ; output_tokens = 45
-              ; cache_creation_input_tokens = 0
-              ; cache_read_input_tokens = 0
-              ; cost_usd = None
+              { Types.input_tokens = None
+              ; output_tokens = Some 45
+              ; cache_creation_input_tokens = None
+              ; cache_read_input_tokens = None
               }
         }
     ; MessageStop
@@ -774,27 +771,29 @@ let test_acc_message_delta_cache_update_nonzero () =
              ; cost_usd = None
              }
        });
-  (* MessageDelta with nonzero cache values should update *)
+  (* A final delta repeating the cache counters carries cumulative totals:
+     they replace the start snapshot instead of adding onto it — the
+     addition fold double-counted exactly this wire shape (#28903). The
+     unreported input keeps the start value. *)
   Streaming.accumulate_event
     acc
     (MessageDelta
        { stop_reason = Some EndTurn
        ; usage =
            Some
-             { input_tokens = 0
-             ; output_tokens = 100
-             ; cache_creation_input_tokens = 20
-             ; cache_read_input_tokens = 15
-             ; cost_usd = None
+             { Types.input_tokens = None
+             ; output_tokens = Some 100
+             ; cache_creation_input_tokens = Some 20
+             ; cache_read_input_tokens = Some 15
              }
        });
   let resp = finalize_ok acc in
   match resp.usage with
   | Some u ->
-    check_int "input" 50 u.input_tokens;
+    check_int "input kept from start" 50 u.input_tokens;
     check_int "output" 100 u.output_tokens;
-    check_int "cache_creation added" 30 u.cache_creation_input_tokens;
-    check_int "cache_read added" 20 u.cache_read_input_tokens
+    check_int "cache_creation replaced, not added" 20 u.cache_creation_input_tokens;
+    check_int "cache_read replaced, not added" 15 u.cache_read_input_tokens
   | None -> Alcotest.fail "expected usage"
 ;;
 

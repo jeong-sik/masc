@@ -133,7 +133,7 @@ let project ~timestamp ~redact_text ~redact_json state event =
                 (fun reason ->
                    `String (Agent_core.Types.stop_reason_to_string reason))
                 stop_reason)
-           @ json_opt "usage" (Option.map api_usage_to_json usage))
+           @ json_opt "usage" (Option.map delta_usage_to_json usage))
       in
       state, Some (custom ~timestamp ~redact_json state Stream_message_delta value)
   | Agent_core_stream_message_stop ->

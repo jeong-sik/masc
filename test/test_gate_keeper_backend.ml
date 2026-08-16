@@ -1416,7 +1416,10 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
       [
         MessageStart
           { id = "msg-agent_core-1"; model = "gpt-5.5"; usage = Some usage_start };
-        MessageDelta { stop_reason = Some EndTurn; usage = Some usage_delta };
+        MessageDelta
+          { stop_reason = Some EndTurn
+          ; usage = Some (Agent_core.Types.delta_usage_of_api_usage usage_delta)
+          };
         MessageStop;
         Ping;
       ]
@@ -1437,9 +1440,10 @@ let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
         start_usage.cache_creation_input_tokens;
       check string "stop reason" "end_turn"
         (Agent_core.Types.stop_reason_to_string stop_reason);
-      check int "delta output tokens" 2 delta_usage.output_tokens;
-      check int "delta total tokens" 12
-        (Agent_core.Types.total_tokens delta_usage)
+      check (option int) "delta output tokens" (Some 2) delta_usage.output_tokens;
+      check (option int) "delta input tokens" (Some 10) delta_usage.input_tokens;
+      check (option int) "delta cache read tokens" (Some 4)
+        delta_usage.cache_read_input_tokens
   | _ -> fail "expected AGENT_CORE message lifecycle metadata events"
 
 let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =

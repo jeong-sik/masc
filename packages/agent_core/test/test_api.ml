@@ -653,7 +653,7 @@ let test_parse_sse_message_delta () =
      | Some Types.EndTurn -> ()
      | _ -> fail "expected EndTurn");
     (match usage with
-     | Some u -> check int "output" 42 u.Types.output_tokens
+     | Some u -> check (option int) "output" (Some 42) u.Types.output_tokens
      | None -> fail "expected usage")
   | _ -> fail "expected MessageDelta"
 ;;

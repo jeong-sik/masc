@@ -51,12 +51,13 @@ let parse_sse_event event_type data_str =
                |> to_int_option
                |> Option.value ~default:0
              in
-             (* output_tokens stays 0: the start event owns input+cache and
-                the final message_delta owns output in the accumulator. *)
+             (* The start snapshot seeds every counter; a later cumulative
+                message_delta replaces the ones it reports (#28903). *)
              Some
                (Backend_anthropic.usage_of_wire_counts
                   ~input_tokens
-                  ~output_tokens:0
+                  ~output_tokens:
+                    (Cli_common_json.member_int "output_tokens" u)
                   ~cache_creation_input_tokens
                   ~cache_read_input_tokens))
          in
@@ -127,31 +128,38 @@ let parse_sse_event event_type data_str =
            if u = `Null
            then None
            else (
+             (* message_delta usage is wire-cumulative (official streaming
+                contract): every reported field is the message's running
+                total, so each is carried as present-or-absent for the
+                accumulator to replace, never add (#28903). The wire's
+                input_tokens is exclusive; when the delta reports it, the
+                same report carries the cache components it accounts
+                against, so the inclusive normalization uses those
+                (an unreported cache field in that report reads as 0, the
+                api_usage convention). *)
              let output_tokens = u |> member "output_tokens" |> to_int in
              let cache_creation_input_tokens =
-               u
-               |> member "cache_creation_input_tokens"
-               |> to_int_option
-               |> Option.value ~default:0
+               u |> member "cache_creation_input_tokens" |> to_int_option
              in
              let cache_read_input_tokens =
-               u
-               |> member "cache_read_input_tokens"
-               |> to_int_option
-               |> Option.value ~default:0
+               u |> member "cache_read_input_tokens" |> to_int_option
              in
-             (* Not built through [Backend_anthropic.usage_of_wire_counts]:
-                message_delta usage is wire-cumulative, and the accumulator
-                adds delta fields onto the start event's already-inclusive
-                totals — folding cache components into input here would count
-                them twice. input_tokens stays pinned to 0 for the same
-                reason. The add-vs-cumulative mismatch itself is #28903. *)
+             let input_tokens =
+               u
+               |> member "input_tokens"
+               |> to_int_option
+               |> Option.map (fun exclusive_input ->
+                 (* DET-OK: absent wire field is 0 by api_usage convention *)
+                 exclusive_input
+                 + Option.value cache_creation_input_tokens ~default:0
+                 (* DET-OK: absent wire field is 0 by api_usage convention *)
+                 + Option.value cache_read_input_tokens ~default:0)
+             in
              Some
-               { input_tokens = 0
-               ; output_tokens
+               { Types.input_tokens
+               ; output_tokens = Some output_tokens
                ; cache_creation_input_tokens
                ; cache_read_input_tokens
-               ; cost_usd = None
                })
          in
          Some (MessageDelta { stop_reason; usage })
@@ -285,8 +293,10 @@ let emit_synthetic_events (response : api_response) on_event =
         | RedactedThinking _ | ToolResult _ -> ());
        on_event (ContentBlockStop { index }))
     response.content;
-  on_event
-    (MessageDelta { stop_reason = Some response.stop_reason; usage = response.usage });
+  (* The start event already carried the complete usage; repeating it here
+     would make any replace-or-add accumulator double-count. The synthetic
+     delta only settles the stop reason. *)
+  on_event (MessageDelta { stop_reason = Some response.stop_reason; usage = None });
   on_event MessageStop
 ;;
 
@@ -1260,7 +1270,11 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
           downstream per-message block-index consumer collides on the next
           message's reused index. *)
        List.iter emit (openai_open_block_stops state);
-       emit (MessageDelta { stop_reason = Some stop_reason; usage = chunk.chunk_usage })
+       emit
+         (MessageDelta
+            { stop_reason = Some stop_reason
+            ; usage = Option.map Types.delta_usage_of_api_usage chunk.chunk_usage
+            })
      | None ->
        (* With stream_options.include_usage the provider sends token totals in a
           separate final chunk that has no finish_reason and an empty choices
@@ -1269,7 +1283,12 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
           already forwards usage when a stop arrives in the same chunk, so the two
           paths are mutually exclusive and usage is never emitted twice. *)
        (match chunk.chunk_usage with
-        | Some _ -> emit (MessageDelta { stop_reason = None; usage = chunk.chunk_usage })
+        | Some usage ->
+          emit
+            (MessageDelta
+               { stop_reason = None
+               ; usage = Some (Types.delta_usage_of_api_usage usage)
+               })
         | None -> ()));
     Ok (List.rev !events, !telemetry_event)
 ;;
@@ -1768,7 +1787,10 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
         emit
           (MessageDelta
              { stop_reason = responses_stop_reason_of_response response
-             ; usage = responses_usage_of_response response
+             ; usage =
+                 Option.map
+                   Types.delta_usage_of_api_usage
+                   (responses_usage_of_response response)
              });
         emit MessageStop
       in
@@ -2853,9 +2875,17 @@ let gemini_chunk_to_events_impl (state : openai_stream_state) (chunk : gemini_ch
          ~has_tool_use:(Hashtbl.length state.tool_block_indices > 0)
          reason
      in
-     emit (MessageDelta { stop_reason = Some stop_reason; usage = chunk.gem_usage })
+     emit
+       (MessageDelta
+          { stop_reason = Some stop_reason
+          ; usage = Option.map Types.delta_usage_of_api_usage chunk.gem_usage
+          })
    | Some (Gemini_prompt_block_reason _) ->
-     emit (MessageDelta { stop_reason = Some Refusal; usage = chunk.gem_usage })
+     emit
+       (MessageDelta
+          { stop_reason = Some Refusal
+          ; usage = Option.map Types.delta_usage_of_api_usage chunk.gem_usage
+          })
    | None -> ());
   List.rev !events, !telemetry_event
 ;;
@@ -3209,7 +3239,11 @@ let ollama_chunk_to_events (state : openai_stream_state) (chunk : ollama_chunk)
              (Stop_reason_wire.wire_finish_of_string reason)
              ~has_tool_blocks:(chunk.oll_tool_calls <> []))
     in
-    emit (MessageDelta { stop_reason; usage = chunk.oll_usage }));
+    emit
+      (MessageDelta
+         { stop_reason
+         ; usage = Option.map Types.delta_usage_of_api_usage chunk.oll_usage
+         }));
   List.rev !events, !telemetry_event
 ;;
 
@@ -3404,7 +3438,7 @@ let%test "ollama_chunk_to_events: done with stop_reason emits MessageDelta" =
   let events, _tel = ollama_chunk_to_events state chunk in
   match events with
   | [ MessageDelta { stop_reason = Some EndTurn; usage = Some u } ] ->
-    u.input_tokens = 10 && u.output_tokens = 20
+    u.input_tokens = Some 10 && u.output_tokens = Some 20
   | unexpected_events ->
     let (_ : sse_event list) = unexpected_events in
     false

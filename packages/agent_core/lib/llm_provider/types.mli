@@ -438,6 +438,22 @@ val stop_reason_to_string : stop_reason -> string
     {!stop_reason_to_string} except [Unknown _] collapses to ["unknown"]. *)
 val stop_reason_to_metric_label : stop_reason -> string
 
+(** Usage counts carried by a mid-stream event ([MessageDelta]). The wire
+    contract is cumulative — a reported value is the latest running total
+    for the whole message, never an increment — so accumulators replace the
+    fields a delta reports and keep the rest ([None] means the event did not
+    report that counter). Field semantics match {!api_usage}: [input_tokens]
+    is the inclusive prompt total, normalized by the producing parser.
+    Declared before {!api_usage} so the shared field labels keep resolving
+    unqualified to [api_usage] (the later definition wins). *)
+type delta_usage =
+  { input_tokens : int option
+  ; output_tokens : int option
+  ; cache_creation_input_tokens : int option
+  ; cache_read_input_tokens : int option
+  }
+[@@deriving show, yojson]
+
 (** API usage from a single provider response. Accumulated multi-call usage
     belongs in agent-level usage stats.
 
@@ -459,6 +475,10 @@ type api_usage =
   ; cost_usd : float option
   }
 [@@deriving show, yojson]
+
+(** All-fields-present projection for producers whose terminal usage report
+    is a complete {!api_usage} (OpenAI-format final usage chunk). *)
+val delta_usage_of_api_usage : api_usage -> delta_usage
 
 type inference_timings =
   { prompt_n : int option
@@ -661,7 +681,7 @@ type sse_event =
   | ContentBlockStop of { index : int }
   | MessageDelta of
       { stop_reason : stop_reason option
-      ; usage : api_usage option
+      ; usage : delta_usage option
       }
   | MessageStop
   | Ping

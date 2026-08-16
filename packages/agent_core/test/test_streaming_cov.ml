@@ -213,7 +213,10 @@ let test_accumulate_message_delta () =
   in
   Streaming.accumulate_event
     acc
-    (Types.MessageDelta { stop_reason = Some Types.EndTurn; usage = Some usage });
+    (Types.MessageDelta
+       { stop_reason = Some Types.EndTurn
+       ; usage = Some (Types.delta_usage_of_api_usage usage)
+       });
   let response = finalize_ok acc in
   match response.usage with
   | Some usage ->
@@ -330,12 +333,13 @@ let test_finalize_with_usage () =
     (Types.MessageDelta
        { stop_reason = Some Types.EndTurn
        ; usage =
+           (* Classic wire shape: the final delta reports only the cumulative
+              output counter, so the start event's input survives the overlay. *)
            Some
-             { input_tokens = 0
-             ; output_tokens = 50
-             ; cache_creation_input_tokens = 0
-             ; cache_read_input_tokens = 0
-             ; cost_usd = None
+             { Types.input_tokens = None
+             ; output_tokens = Some 50
+             ; cache_creation_input_tokens = None
+             ; cache_read_input_tokens = None
              }
        });
   let resp = finalize_ok acc in

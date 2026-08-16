@@ -206,6 +206,34 @@ let test_limit_keeps_the_newest_in_arrival_order () =
     (fleet_contents (fleet ~limit:2 messages))
 ;;
 
+(* The partition itself, which the per-case tests above do not check: one
+   message list, and every classifiable row lands in exactly one of the two
+   sections. This is what [lane_of] makes structural — the lanes take its
+   [Some], the fleet layer its [None]. *)
+let test_rows_partition_across_lanes_and_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~id:"m1" ~ts:(Some 10.0) ~surface:agent_surface
+        ~speaker:external_ "@alice take this"
+    ; msg ~role:Store.Role.User ~id:"m2" ~ts:(Some 11.0) ~surface:agent_surface
+        ~speaker:owner "status?"
+    ; msg ~role:Store.Role.User ~id:"m3" ~ts:(Some 12.0) ~surface:agent_surface
+        ~speaker:external_ "fleet note"
+    ]
+  in
+  let pending =
+    MS.pending_messages_of_messages ~targets messages
+    |> List.map (fun (m : MS.pending_message) -> m.content)
+  in
+  let fleet = fleet_contents (fleet ~limit:10 messages) in
+  check (list string) "lanes take the addressed rows"
+    [ "@alice take this"; "status?" ] pending;
+  check (list string) "fleet takes what no lane claimed" [ "fleet note" ] fleet;
+  check (list string) "no row is in both"
+    [] (List.filter (fun c -> List.mem c fleet) pending);
+  check int "every row is placed exactly once"
+    (List.length messages) (List.length pending + List.length fleet)
+;;
+
 let test_owner_unmentioned_line_is_scope () =
   let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner "can you check the deploy" ] in
   check (list string) "operator without @ -> scope" [ "can you check the deploy" ]
@@ -467,6 +495,8 @@ let () =
         ; test_case "zero_limit_disables" `Quick test_zero_limit_disables_the_layer
         ; test_case "limit_keeps_newest_in_order" `Quick
             test_limit_keeps_the_newest_in_arrival_order
+        ; test_case "rows_partition_across_lanes_and_fleet" `Quick
+            test_rows_partition_across_lanes_and_fleet
         ] )
     ]
 ;;

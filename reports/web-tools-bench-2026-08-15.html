@@ -278,13 +278,35 @@ hit@1 <strong>5/6</strong>, 옛 유일 경로(SearXNG)는 부분 회복 상태�
 수정은 PR #28818 — 턴 시작 시 ready resolution을 큐 소비 없이 투영 + grant 미소비 승인만
 post-tool boundary에서 소스 런을 선점.</p>
 
+<h2>재실측 — #28818·#28826 병합 후 (8/16 05:39–06:16Z, :8949)</h2>
+
+<p>위 "다음 반복"에 예고했던 두 항목을 신 바이너리 재기동(scratch 05:39:05Z, 프로덕션 05:55:53Z) 후 실측했다.</p>
+
+<table>
+<tr><th>항목</th><th>판정</th><th>근거</th></tr>
+<tr><td>#28818 배달 (유예→판정→배달, 재기동 없이)</td><td><strong>PASS ×3</strong></td>
+<td>reject 3건 모두 판정과 <strong>같은 초</strong>에 <code>hitl resolution projected from pending queue</code> 발화
+(05:45:26 / 05:56:10 / ≈06:13), 큐 배달 05:49:54·06:01:16. approve 경로는 프로덕션 04:25:41Z(appr_2361efbf)에서 실증.
+§부산물의 20분+ 기아와 대조 — 기아 0초.</td></tr>
+<tr><td>acceptance 3 (keeper 레인 blob 재적재)</td><td><strong>첫 라이브 PASS</strong></td>
+<td>06:12:22Z <code>keeper_artifact_read(sha256=31d6b2b0…, max_bytes=400)</code> →
+<code>outcome=ok out_len=613</code>, tool_error 증가 없음. #28820의 저장소 분리 FAIL이 #28826(put_durable 단일화)로 닫힘.</td></tr>
+<tr><td>acceptance 1 (신 레인 라이브 오프로드)</td><td>미측정 (게이트 차단)</td>
+<td>auto-judge가 web_search 유예를 3회 reject — 3차는 활성 task 앵커(task-001, reject 시점 in_progress)를 갖췄음에도,
+사유에 검증 가능한 허위 포렌식("empty-string hash" ≠ 실제 string:64 입력) 포함 → #28842.
+3회에서 재시도 중단. 대체 근거: CI <code>test_tool_misc_web_fetch</code>(같은 store fetch + sha 핀) +
+구 레인 라이브 PASS + 프로덕션 유기 트래픽 후속 관측(신 바이너리 이후 첫 오프로드 대기, 구 레인 마지막 04:33:12Z).</td></tr>
+</table>
+
+<p class="note">부산물 이슈 2건: 발신 주체(운영자 대리 vs keeper 자율 vs auto-judge)의 UI 구분 부재(#28841),
+auto-judge 사유의 허위 포렌식·계측 task 구조적 승인 불가(#28842).</p>
+
 <h2>다음 반복</h2>
 <ul>
 <li><strong>Iteration 6</strong> (선택): BRAVE_SEARCH_API_KEY 투입 시 grounded 경로 —
 <code>bench-web-quality.py</code>가 같은 쿼리셋으로 자동 A/B.</li>
-<li><strong>#28820 수정 후 재실측</strong>: 본문 저장 단일화가 병합되면 acceptance 3을
-같은 자극으로 다시 밟아 keeper 레인 PASS를 확인.</li>
-<li><strong>PR #28818 병합 후</strong>: 유예→승인→즉시 배달(재기동 없이)을 격리 인스턴스에서 재확인.</li>
+<li><strong>acceptance 1 신 레인 유기 관측</strong>: 프로덕션(:8935, base=<code>~/me/.masc</code>) 첫 web-fetch 오프로드가
+<code>tool_blobs/</code> blob + <code>full_text_sha256</code> 마커로 남는지 확인.</li>
 <li>품질은 <code>python3 scripts/bench-web-quality.py -o docs/evidence/web-quality-&lt;date&gt;-rN.json</code>,
 가용성·토큰은 <code>bench-web-tools.py</code> — 실행 후 이 문서에 섹션 추가.</li>
 </ul>

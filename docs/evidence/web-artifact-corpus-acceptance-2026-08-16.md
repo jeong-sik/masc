@@ -48,3 +48,35 @@ masc_broadcast '{"agent_name":"claude","message":"@rtprobe WebSearch 도구를 �
 rg 'gate replay approval|hitl resolution delivered' <base>/.masc/logs/system_log_2026-08-16.jsonl
 cat <base>/.masc/artifacts/web-fetch/index.jsonl
 ```
+
+## 4. 재실측 — #28818·#28826 병합 후 (05:39–06:16Z, :8949 scratch)
+
+환경: scratch 인스턴스가 05:39:05Z에 신 바이너리(#28818+#28826 포함)로 재기동. 프로덕션(:8935)도 05:55:53Z에 신 바이너리로 재기동 (`--base-path=/Users/dancer/me`).
+
+### #28818 야생 실증 3건 — 배달 기아 0초
+
+| 시각(Z) | approval | decision | projection | 큐 배달 |
+|---|---|---|---|---|
+| 05:45:26 | appr_5fed3255 | reject | **같은 초** (`hitl resolution projected from pending queue`) | 05:49:54 |
+| 05:56:10 | appr_eec08643 | reject | 같은 초 | 06:01:16 |
+| ≈06:13 | appr_11fef7f1 | reject | 같은 턴 (proj 카운트 3→4) | — |
+
+approve 경로는 프로덕션 04:25:41Z(appr_2361efbf, memory_write)에서 이미 실증 — 두 decision 모두 재기동 없이 배달된다. §3의 기아(재기동으로만 복구)와 대조.
+
+### acceptance 3 — keeper 레인 첫 라이브 PASS
+
+06:12:22Z, 활성 task-001 앵커 하에 `keeper_artifact_read(sha256=31d6b2b0…, offset=0, max_bytes=400)`:
+
+```
+tool_call tool=keeper_artifact_read input_shape=[max_bytes=int,offset=int,sha256=string:64] outcome=ok out_len=613
+```
+
+tool_error 누적 2건(§2, #28820 결함 증거)에서 증가 없음. §2의 FAIL(저장소 분리)이 #28826(put_durable 단일화)로 닫혔음을 keeper 레인에서 확인.
+
+### acceptance 1 (신 레인) — 라이브 미측정, 게이트 차단 기록
+
+auto-judge가 web_search 유예를 3회 reject (05:45:26 / 05:56:10 / ≈06:13). 3차는 judge가 요구한 활성 task 앵커(task-001, add 06:10:50 → claim/start 06:11, reject 시점에 in_progress; rtprobe 자율 release는 06:15:00)를 갖춘 상태였다. 3차 사유에는 검증 가능한 허위 포렌식("empty-string hash" — 실제 입력은 string:64, 빈 문자열 sha `e3b0c442…`와 불일치)이 포함 → #28842. 3회 시점에서 재시도 중단(게이트 판정 존중).
+
+신 레인 저장 경로의 대체 근거: (a) CI `test_tool_misc_web_fetch` — `put_durable` 후 reader와 같은 `Tool_blob_store.fetch`로 sha 동일성 핀, (b) 구 레인 라이브 PASS(§1, 메커니즘 동일·백엔드만 상이), (c) 프로덕션 유기 트래픽 후속 관측 — 신 바이너리 기동(05:55:53Z) 이후 첫 오프로드가 `tool_blobs/` blob + `full_text_sha256` 마커로 남는지 확인 (구 레인 마지막 오프로드는 04:33:12Z).
+
+부산물: 발신 주체(운영자 대리 발신 vs keeper 자율 발화 vs auto-judge)가 UI에서 구분되지 않는 문제를 #28841로 분리.

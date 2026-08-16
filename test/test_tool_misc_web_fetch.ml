@@ -120,8 +120,9 @@ let with_base_path_env path f =
 
 (* Feature contract: past maxChars the text becomes a deterministic
    head/tail window around a [TRUNCATED ...] marker, and the complete
-   extraction is offloaded content-addressed under
-   <base>/.masc/artifacts/web-fetch/ with its path in full_text_path. *)
+   extraction is offloaded content-addressed into the Tool_blob_store —
+   the store keeper_artifact_read resolves (#28820) — with its sha256 in
+   full_text_sha256 and one fact row in the corpus index. *)
 let test_truncation_offloads_full_text () =
   let tmp_base =
     Filename.concat (Filename.get_temp_dir_name ())
@@ -160,20 +161,29 @@ let test_truncation_offloads_full_text () =
             (String_util.contains_substring text "[TRUNCATED total_chars=");
           check bool "no outline for heading-free text" false
             (String_util.contains_substring text "[OUTLINE");
-          let path = json |> member "full_text_path" |> to_string in
-          check bool "marker names the path" true
-            (String_util.contains_substring text ("full_text=" ^ path));
-          check bool "path under base" true
-            (String_util.contains_substring path
-               (Filename.concat tmp_base ".masc"));
-          let stored = In_channel.with_open_bin path In_channel.input_all in
-          check bool "offloaded file holds the full extraction" true
+          let sha256 = json |> member "full_text_sha256" |> to_string in
+          check bool "marker names the content address" true
+            (String_util.contains_substring text ("full_text_sha256=" ^ sha256));
+          (* The blob must resolve in the exact store keeper_artifact_read
+             reads (#28820): fetch it back through Tool_blob_store. *)
+          let store = Tool_blob_store.create ~base_path:tmp_base in
+          let stored =
+            match Tool_blob_store.fetch store ~sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "offloaded blob is absent from the store"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+          in
+          check bool "offloaded blob holds the full extraction" true
             (String_util.contains_substring stored (line 200));
-          check int "offloaded file is complete" 400
+          check int "offloaded blob is complete" 400
             (List.length (String.split_on_char '\n' stored));
           (* RFC-0383: the same round trip appended one fact row to the
              corpus index, and the row agrees with the artifact. *)
-          let index_path = Filename.concat (Filename.dirname path) "index.jsonl" in
+          let index_path =
+            List.fold_left Filename.concat tmp_base
+              [ ".masc"; "artifacts"; "web-fetch"; "index.jsonl" ]
+          in
           let last_row =
             In_channel.with_open_bin index_path In_channel.input_all
             |> String.split_on_char '\n'
@@ -183,8 +193,7 @@ let test_truncation_offloads_full_text () =
           let row = Yojson.Safe.from_string last_row in
           check string "index schema" "masc.web_artifact.v1"
             (row |> member "schema" |> to_string);
-          check string "index sha256 matches the artifact name"
-            (Filename.basename path |> Filename.remove_extension)
+          check string "index sha256 matches the blob address" sha256
             (row |> member "sha256" |> to_string);
           check string "index source_url" "https://example.com/long"
             (row |> member "source_url" |> to_string);
@@ -243,7 +252,7 @@ let test_truncation_preserves_utf8_boundaries () =
 
 (* Feature contract: when the truncated extraction carries markdown
    headings, the marker is followed by an [OUTLINE ...] byte-offset map
-   addressing the offloaded file — reading the artifact at a listed
+   addressing the offloaded blob — reading the artifact at a listed
    offset lands exactly on that heading line. Fenced-code [#] lines stay
    out of the count, and collection caps at 32 rows while the header
    still reports the full heading total. *)
@@ -294,8 +303,15 @@ let test_truncation_outline_maps_headings () =
           let row = Printf.sprintf "\n%d ## section 10" expected_offset in
           check bool "outline row carries the constructed offset" true
             (String_util.contains_substring text row);
-          let path = json |> member "full_text_path" |> to_string in
-          let stored = In_channel.with_open_bin path In_channel.input_all in
+          let sha256 = json |> member "full_text_sha256" |> to_string in
+          let store = Tool_blob_store.create ~base_path:tmp_base in
+          let stored =
+            match Tool_blob_store.fetch store ~sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "offloaded blob is absent from the store"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+          in
           let heading = "## section 10" in
           check string "offset addresses that heading in the artifact" heading
             (String.sub stored expected_offset (String.length heading))))

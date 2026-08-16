@@ -6,9 +6,8 @@
  (wrapped false))
 
 ; Embed the git commit the binary was built from (RFC-0382 follow-up,
-; "binary unknown" root fix). The launcher-supplied MASC_BUILD_GIT_COMMIT
-; env only ever worked in CI; a copied binary (e.g. the launchd deploy at
-; <base>/bin) could never testify to its own origin. (universe) re-runs
+; "binary unknown" root fix): a copied binary (e.g. the launchd deploy at
+; <base>/bin) must testify to its own origin. (universe) re-runs
 ; the probe every build; downstream recompiles only when the hash changes.
 ; Sandboxing is disabled so git can ascend to the checkout being built —
 ; in a worktree that is the worktree HEAD, which is the truth we want.

@@ -311,4 +311,38 @@
   masc.agent_core
   masc.agent_core.llm_provider))
 
+;; E6 continuity evidence harness (task-11, M1 PR1): drives an existing
+;; keeper's live chat surface over HTTP (unlike fusion_run.ml, which calls
+;; Fusion directly and bypasses the server), injects seeded nonce facts one
+;; per turn, asks for recall, and correlates each turn against the durable
+;; on-disk transcript's delivery_key/turn_ref rather than trusting the HTTP
+;; response alone. Makes live HTTP calls against a running server (NOT a
+;; test — CI determinism rules forbid network calls in test/).
+
+(executable
+ (name keeper_canary_run)
+ (modules keeper_canary_run keeper_canary_http)
+ (public_name masc-keeper-canary-run)
+ (package masc)
+ (libraries
+  masc
+  masc.keeper_canary
+  masc.crypto_rng
+  masc.config
+  masc.config_dir_resolver
+  masc.masc_random_id
+  masc.http_client
+  masc.keeper_chat_delivery_identity
+  masc_types
+  masc_core
+  unix
+  yojson
+  digestif
+  eio
+  eio_main
+  time_compat
+  masc_eio_context
+  masc_process
+  fs_compat))
+
 ; Executable for MASC MCP

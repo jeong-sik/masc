@@ -546,12 +546,6 @@ let telemetry_enabled () =
 (** Whether malformed env parses are escalated to a hard [Config_error]
     (fail-fast boot) instead of a warn + default. Controlled by
     [MASC_PARSE_WARN]. Default: false (warn + use default). *)
-(** {1 Build Identity} *)
-
-(** Git commit hash override for build identity. *)
-let build_git_commit_opt () =
-  raw_value_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
-
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"

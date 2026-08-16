@@ -1744,8 +1744,7 @@ jobs:
             esac
           done < <(awk 'NR > 1 { print $1 }' "$RUNNER_TEMP/masc-runtime-otool.txt")
           chmod +x scripts/release-binary-smoke.sh
-          MASC_BUILD_GIT_COMMIT="$EXPECTED_SOURCE_SHA" \
-            scripts/release-binary-smoke.sh "$binary"
+          scripts/release-binary-smoke.sh "$binary"
 
           identity_root="$(mktemp -d "$RUNNER_TEMP/masc-build-identity.XXXXXX")"
           identity_log="$identity_root/server.log"
@@ -1762,7 +1761,6 @@ jobs:
           trap cleanup_identity_probe EXIT
           mkdir -p "$identity_root/.masc/config"
           cp config/runtime.toml "$identity_root/.masc/config/runtime.toml"
-          MASC_BUILD_GIT_COMMIT="$EXPECTED_SOURCE_SHA" \
           MASC_BASE_PATH="$identity_root" \
           MASC_BASE_PATH_INPUT="$identity_root" \
           MASC_KEEPER_AUTONOMOUS_ENABLED=false \
@@ -1849,9 +1847,6 @@ jobs:
               target_arch: $target_arch,
               binary_format: $binary_format,
               binary_sha256: $binary_sha256,
-              required_launch_env: {
-                MASC_BUILD_GIT_COMMIT: $source_sha
-              },
               linked_dylibs: $linked_dylibs,
               supported_homebrew_prefixes: [
                 "/opt/homebrew/opt/gmp/",
@@ -1873,7 +1868,6 @@ jobs:
              .target_arch == "arm64" and
              .binary_format == "mach-o" and
              .binary_sha256 == $binary_sha256 and
-             .required_launch_env.MASC_BUILD_GIT_COMMIT == $source_sha and
              (.linked_dylibs | type == "array" and length > 0)' \
             "$runtime_dir/manifest.json" >/dev/null
 

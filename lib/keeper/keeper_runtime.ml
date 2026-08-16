@@ -136,7 +136,11 @@ type autoboot_exclusion = {
 }
 
 let autoboot_exclusion_reason config name =
-  match read_meta_file_path (keeper_meta_path config name) with
+  match
+    read_meta_file_path
+      ~ownership_root:config.Workspace.base_path
+      (keeper_meta_path config name)
+  with
   | Ok (Some meta) ->
     if meta.paused then Some Paused
     else

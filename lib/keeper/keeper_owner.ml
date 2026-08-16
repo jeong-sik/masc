@@ -598,6 +598,17 @@ let start
                   ; detail = "Keeper owner stopped the active turn"
                   ; outcome_ref = None
                   }
+              | exn when Keeper_registry_types.is_operator_interrupt exn ->
+                (* Typed operator cancellation (#28810): the interrupt route
+                   fails the turn switch with this exception. The guard
+                   covers every delivery shape — bare, [Cancelled]-wrapped,
+                   and [Finally_raised]/[Multiple] combinations
+                   (#28868 review). None of them is an internal error. *)
+                Operation_failed
+                  { kind = Chat_operation.Turn_cancelled
+                  ; detail = Keeper_registry_types.operator_interrupt_detail
+                  ; outcome_ref = None
+                  }
               | Eio.Cancel.Cancelled cause ->
                 Operation_failed
                   { kind = Chat_operation.Turn_cancelled

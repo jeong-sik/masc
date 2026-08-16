@@ -270,7 +270,12 @@ let test_dedup_never_merges_distinct_origins () =
            ()
        in
        Alcotest.(check string) "same origin deduplicates" first same;
-       let another_turn =
+       (* The turn that asked is provenance, not origin: a next-turn retry
+          of the same call folds onto the approval already pending (#28866).
+          Before this change turn 2 here minted a second approval, and on
+          2026-08-16 that shape produced three approvals and three replays
+          of one identical web_search into the same context. *)
+       let retried_next_turn =
          submit_with_context
            ~turn_id:2
            ~goal_ids:[ "goal-a" ]
@@ -280,6 +285,10 @@ let test_dedup_never_merges_distinct_origins () =
            ~input
            ()
        in
+       Alcotest.(check string)
+         "next-turn retry folds onto the pending approval"
+         first
+         retried_next_turn;
        let another_channel =
          submit_with_context
            ~turn_id:1
@@ -304,9 +313,108 @@ let test_dedup_never_merges_distinct_origins () =
          (fun id ->
             Alcotest.(check bool) "distinct origin has its own request" true
               (not (String.equal first id)))
-         [ another_turn; another_channel; another_goal_context ];
+         [ another_channel; another_goal_context ];
        List.iter (reject_and_cleanup ~base_path)
-         [ first; another_turn; another_channel; another_goal_context ])
+         [ first; another_channel; another_goal_context ])
+;;
+
+(* The measured 2026-08-16 incident, end to end: the retry lands after the
+   approval resolved but before its grant was consumed. The resubmission must
+   fold onto that unconsumed grant; once the grant is consumed the same call
+   is a new effect and opens a fresh approval; a rejected approval never
+   absorbs a retry. *)
+let test_retry_folds_onto_unconsumed_grant_until_consumed () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-grant-fold" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let input = `Assoc [ "target", `String "same-network-read" ] in
+       let first =
+         submit_submission_with_context
+           ~turn_id:11
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       (match
+          AQ.resolve_with_policy
+            ~base_path
+            ~id:first.approval_id
+            ~decision:Rule_types.Decision.Approve
+            ()
+        with
+        | Ok _ -> ()
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error));
+       let retried =
+         submit_submission_with_context
+           ~turn_id:12
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check string)
+         "retry after approval reuses the approved id"
+         first.approval_id
+         retried.approval_id;
+       (match retried.disposition with
+        | AQ.Folded_onto_unconsumed_grant -> ()
+        | AQ.Pending_created _ ->
+          Alcotest.fail "retry opened a second approval over an unconsumed grant"
+        | AQ.Pending_deduplicated ->
+          Alcotest.fail "resolved approval was still reported as pending");
+       (match
+          AQ.consume_approved_resolution
+            ~base_path
+            ~id:first.approval_id
+            ~keeper_name
+            ~tool_name:"external-effect"
+            ~input
+        with
+        | Ok (AQ.Consumption_committed _) -> ()
+        | Ok (AQ.Consumption_already_committed | AQ.Consumption_not_matching) ->
+          Alcotest.fail "grant consumption did not commit"
+        | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
+       let after_consumption =
+         submit_submission_with_context
+           ~turn_id:13
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check bool)
+         "the same call after consumption is a new effect"
+         true
+         (not (String.equal first.approval_id after_consumption.approval_id));
+       (match after_consumption.disposition with
+        | AQ.Pending_created _ -> ()
+        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+          Alcotest.fail "consumed grant absorbed a new effect request");
+       reject_and_cleanup ~base_path after_consumption.approval_id;
+       let after_rejection =
+         submit_submission_with_context
+           ~turn_id:14
+           ~base_path
+           ~keeper_name
+           ~input
+           ()
+       in
+       Alcotest.(check bool)
+         "a rejected approval never absorbs a retry"
+         true
+         (not
+            (String.equal after_consumption.approval_id after_rejection.approval_id));
+       (match after_rejection.disposition with
+        | AQ.Pending_created _ -> ()
+        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
+          Alcotest.fail "rejected delivery absorbed a retry");
+       reject_and_cleanup ~base_path after_rejection.approval_id)
 ;;
 
 let check_update label expected = function
@@ -650,7 +758,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
         | AQ.Pending_created { write_result = Ok (); _ } -> ()
         | AQ.Pending_created { write_result = Error _; _ } ->
           Alcotest.fail "new pending request did not persist its audit"
-        | AQ.Pending_deduplicated ->
+        | AQ.Pending_deduplicated | AQ.Folded_onto_unconsumed_grant ->
           Alcotest.fail "new pending request was reported as deduplicated");
        let reordered =
          `Assoc
@@ -671,6 +779,8 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
        Alcotest.(check string) "same exact request" first same;
        (match same_submission.disposition with
         | AQ.Pending_deduplicated -> ()
+        | AQ.Folded_onto_unconsumed_grant ->
+          Alcotest.fail "pending duplicate matched a delivery, not the pending entry"
         | AQ.Pending_created _ ->
           Alcotest.fail "exact duplicate reported a second pending commit");
        Alcotest.(check int)
@@ -4230,6 +4340,10 @@ let () =
             "dedup keeps distinct origins"
             `Quick
             test_dedup_never_merges_distinct_origins
+        ; Alcotest.test_case
+            "retry folds onto unconsumed grant until consumed"
+            `Quick
+            test_retry_folds_onto_unconsumed_grant_until_consumed
         ; Alcotest.test_case
             "resolution wakes only origin"
             `Quick

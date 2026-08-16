@@ -32,10 +32,10 @@ let input_capacity_error ~binding ~message ~constraint_ ~reason =
     (Error.Api (Llm_provider.Retry.InputCapacity { message; constraint_; reason }))
 ;;
 
-let measurement_error ~binding ~constraint_ = function
+let measurement_error ~binding ~constraint_ ~provider = function
   | Llm_provider.Count_tokens_sync.Input_count_failed
       (Llm_provider.Input_token_count.Transport http_error) ->
-    Provider_failure_attribution.of_http_error ~binding http_error
+    Provider_failure_attribution.of_http_error ~binding ~provider http_error
   | Llm_provider.Count_tokens_sync.Input_count_failed
       (Llm_provider.Input_token_count.Unsupported { protocol; model_id }) ->
     (match constraint_ with
@@ -196,6 +196,11 @@ let dispatch_sync
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
   let* () = admit_provider_attempt before_provider_attempt binding in
+  (* Provider label for mapped transport errors: without it every timeout
+     reads "Provider 'unknown'" (#28852). *)
+  let provider =
+    Llm_provider.Provider_config.capability_provider_label provider_config
+  in
   let now_unix_s = int_of_float (Unix.gettimeofday ()) in
   let prepared =
     Llm_provider.Complete.prepare_request
@@ -217,7 +222,7 @@ let dispatch_sync
   let result =
     match
       Llm_provider.Complete.admit_request_body ~stream:false prepared
-      |> Result.map_error (Provider_failure_attribution.of_http_error ~binding)
+      |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
     | Error error -> Error error
     | Ok serialized ->
@@ -233,7 +238,7 @@ let dispatch_sync
            ?body_timeout_s:agent.options.body_timeout_s
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
            ()
-         |> Result.map_error (Provider_failure_attribution.of_http_error ~binding)
+         |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
        | Ok () ->
          (match Llm_provider.Complete.resolve_context_limit prepared with
           | Error error -> Error (fit_error ~binding error)
@@ -251,6 +256,7 @@ let dispatch_sync
                  (measurement_error
                     ~binding
                     ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
+                    ~provider
                     error)
              | Ok measured ->
                (match
@@ -271,7 +277,7 @@ let dispatch_sync
                     ?request_wire_observer:agent.pre_dispatch_serialization_observer
                     ()
                   |> Result.map_error
-                       (Provider_failure_attribution.of_http_error ~binding)))))
+                       (Provider_failure_attribution.of_http_error ~binding ~provider)))))
   in
   finish_call ?on_provider_failure result
 ;;
@@ -297,6 +303,11 @@ let dispatch_stream
     |> Result.map_error (binding_identity_error ?on_provider_failure)
   in
   let* () = admit_provider_attempt before_provider_attempt binding in
+  (* Provider label for mapped transport errors: without it every timeout
+     reads "Provider 'unknown'" (#28852). *)
+  let provider =
+    Llm_provider.Provider_config.capability_provider_label provider_config
+  in
   let now_unix_s = int_of_float (Unix.gettimeofday ()) in
   let prepared =
     Llm_provider.Complete.prepare_request
@@ -318,7 +329,7 @@ let dispatch_stream
   let result =
     match
       Llm_provider.Complete.admit_request_body ~stream:true prepared
-      |> Result.map_error (Provider_failure_attribution.of_http_error ~binding)
+      |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
     | Error error -> Error error
     | Ok serialized ->
@@ -335,7 +346,7 @@ let dispatch_stream
            ?on_telemetry
            ?request_wire_observer:agent.pre_dispatch_serialization_observer
            ()
-         |> Result.map_error (Provider_failure_attribution.of_http_error ~binding)
+         |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
        | Ok () ->
          (match Llm_provider.Complete.resolve_context_limit prepared with
           | Error error -> Error (fit_error ~binding error)
@@ -353,6 +364,7 @@ let dispatch_stream
                  (measurement_error
                     ~binding
                     ~constraint_:(Llm_provider.Complete.serving_constraint prepared)
+                    ~provider
                     error)
              | Ok measured ->
                (match
@@ -374,7 +386,7 @@ let dispatch_stream
                     ?request_wire_observer:agent.pre_dispatch_serialization_observer
                     ()
                   |> Result.map_error
-                       (Provider_failure_attribution.of_http_error ~binding)))))
+                       (Provider_failure_attribution.of_http_error ~binding ~provider)))))
   in
   finish_call ?on_provider_failure result
 ;;

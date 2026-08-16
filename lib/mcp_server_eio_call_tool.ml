@@ -551,6 +551,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ~failure_class:Tool_result.Runtime_failure
         ~tool_name:name ~start_time
         (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+    | exn when Keeper_registry_types.is_operator_interrupt exn ->
+      (* #28810: operator-requested turn interrupt is a typed cancellation,
+         not a crash. The guard covers every Eio delivery shape
+         (#28868 review). *)
+      Log.Mcp.info "tools/call interrupted by operator: %s" name;
+      Tool_result.error
+        ~failure_class:Tool_result.Operator_cancelled
+        ~tool_name:name
+        ~start_time
+        Keeper_registry_types.operator_interrupt_detail
     | exn ->
       (* Never let a tool exception crash the MCP server. *)
       let err = Printexc.to_string exn in

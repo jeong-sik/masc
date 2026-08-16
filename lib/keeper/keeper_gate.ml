@@ -335,6 +335,15 @@ let decision_to_yojson = function
       ([ "decision", `String "deferred"
        ; "approval_id", `String approval_id
        ; "reason", `String (deferred_reason_to_string reason)
+       (* RFC-0356 host replay, stated where the model reads it: without
+          this line the payload reads as a plain block and the model
+          resubmits the same call while the approval is in flight —
+          measured as three duplicate approvals in #28866. *)
+       ; ( "on_approve"
+         , `String
+             "The host replays this exact call and delivers its output to \
+              you automatically. Do not resubmit it; a resubmission folds \
+              onto this same approval." )
        ; "audit_receipts", audit_receipts_to_yojson audit_receipts
        ]
        @ detail)
@@ -1470,7 +1479,8 @@ let defer request reason =
     let audit_receipts =
       match submission.disposition with
       | Keeper_approval_queue.Pending_created receipt -> [ receipt ]
-      | Keeper_approval_queue.Pending_deduplicated -> []
+      | Keeper_approval_queue.Pending_deduplicated
+      | Keeper_approval_queue.Folded_onto_unconsumed_grant -> []
     in
     let reason =
       match reason with

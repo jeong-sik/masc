@@ -46,11 +46,7 @@ val timing_of : float list -> timing
     no turn to time, not an error. Even-length lists average the two
     middle values for the median. *)
 
-type injection_kind = Restart
-(** PR-C adds [Failover]; the axis is a closed variant, not a string. *)
-
-type injection = {
-  injection_kind : injection_kind;
+type restart_injection = {
   after_turn : int;  (** The 1-indexed turn this injection ran after. *)
   started_at : string;  (** ISO8601, client-observed. *)
   duration_s : float;
@@ -61,7 +57,27 @@ type injection = {
   generation_after : int;
 }
 
-val injection_is_continuation : injection -> bool
+type failover_injection = {
+  after_turn : int;
+  started_at : string;
+  duration_s : float;  (** Wall-clock seconds the down command took. *)
+  down_cmd : string;
+  up_cmd : string option;
+  window_start : string;
+      (** Manifest rows at or after this instant were classified. *)
+  mode : Keeper_canary_failover.mode;
+  attempts : Keeper_canary_failover.attempt list;
+      (** The exact rows the mode verdict was computed from. *)
+}
+
+type injection =
+  | Restart of restart_injection
+  | Failover of failover_injection
+      (** Closed axis — a new injection kind is a new constructor, and the
+          serializer's exhaustive match forces every reader decision at
+          compile time. *)
+
+val restart_is_continuation : restart_injection -> bool
 (** True when trace identity survived the injection — same trace_id and
     same generation is the signal the 08-14 drain-restart canary
     established for "continuation restart, not a reset". *)

@@ -708,6 +708,14 @@ let execute_keeper_stream_tool_streaming
         ( Masc_domain.masc_error_to_string
             (Masc_domain.System Masc_domain.System_error.NotInitialized)
         , Tool_result.Failed Tool_result.Runtime_failure )
+    | exn when Keeper_registry_types.is_operator_interrupt exn ->
+        (* #28810: operator-requested turn interrupt is a typed cancellation,
+           not a crash. The guard covers every Eio delivery shape — bare,
+           [Finally_raised], [Multiple] — while genuinely cancelled fibers
+           re-raise above (#28868 review). *)
+        Log.Mcp.info "tools/call interrupted by operator (stream)";
+        ( Keeper_registry_types.operator_interrupt_detail
+        , Tool_result.Failed Tool_result.Operator_cancelled )
     | exn ->
         let err = Printexc.to_string exn in
         Log.Mcp.error "tools/call crashed (stream): %s" err;
@@ -764,7 +772,10 @@ let execute_keeper_stream_tool_streaming
         ~disposition
         ~duration_ms
         ();
-      `Ran (success, body)
+      (* Carry the full disposition, not a collapsed bool: the queued-outcome
+         consumer needs the failure class to keep an operator interrupt from
+         being written as a crash (#28868 review P0). *)
+      `Ran (disposition, body)
 
 type canonical_reply_payload_error =
   | Malformed_reply_json of { parser_detail : string }
@@ -1423,7 +1434,7 @@ let process_single_turn ~user_row_origin ~submission
               Error (Printexc.to_string exn))
         in
         match dispatch_result with
-        | Ok (`Ran (true, body)) ->
+        | Ok (`Ran ((Tool_result.Completed () | Tool_result.Deferred ()), body)) ->
           (match canonical_reply_payload_of_body ~redact_text body with
            | Error error ->
              let detail = canonical_reply_payload_error_to_string error in
@@ -1622,11 +1633,23 @@ let process_single_turn ~user_row_origin ~submission
                              ~tool_name:"masc_keeper_msg"
                              ~start_time
                              body)))))
-        | Ok (`Ran (false, err)) ->
+        | Ok (`Ran (Tool_result.Failed dispatch_failure_class, err)) ->
             let persisted = persist_failure_reply err in
             let queued_outcome =
               match persisted with
-              | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
+              | Ok () ->
+                (* #28810 / #28868 review P0: the dispatch classifies an
+                   operator interrupt as [Operator_cancelled]; every other
+                   failure class stays a crash-shaped [Turn_failed]. *)
+                let kind =
+                  match dispatch_failure_class with
+                  | Tool_result.Operator_cancelled -> Turn_cancelled
+                  | Tool_result.Transient_error
+                  | Tool_result.Policy_rejection
+                  | Tool_result.Runtime_failure
+                  | Tool_result.Workflow_rejection -> Turn_failed
+                in
+                Some (Failed { kind; detail = err })
               | Error persist_error ->
                 Some
                   (Failed
@@ -1638,7 +1661,7 @@ let process_single_turn ~user_row_origin ~submission
               (Stream_terminal
                  { status = Stream_error; body = err; queued_outcome });
             Tool_result.error
-              ~failure_class:Tool_result.Runtime_failure
+              ~failure_class:dispatch_failure_class
               ~tool_name:"masc_keeper_msg"
               ~start_time
               err
@@ -1685,6 +1708,19 @@ let process_single_turn ~user_row_origin ~submission
            (match Eio.Switch.run (fun request_sw -> run_turn request_sw) with
             | _ -> publish_inline_completion ()
             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn when Keeper_registry_types.is_operator_interrupt exn ->
+              (* Typed operator cancellation (#28810): the interrupt fails
+                 the turn switch and the [Switch.run] boundary re-raises it
+                 here — bare or combined ([Multiple]/[Finally_raised],
+                 #28868 review). A cancelled turn, not a crash. *)
+              let detail = Keeper_registry_types.operator_interrupt_detail in
+              push_worker_event
+                (Stream_terminal
+                   { status = Stream_error
+                   ; body = detail
+                   ; queued_outcome = Some (Failed { kind = Turn_cancelled; detail })
+                   });
+              publish_inline_completion ()
             | exception exn ->
               let detail = Printexc.to_string exn in
               push_worker_event

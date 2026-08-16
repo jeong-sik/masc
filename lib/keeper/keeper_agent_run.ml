@@ -1364,9 +1364,13 @@ let run_turn
           ());
        receipt_result)
 with
-| Eio.Cancel.Cancelled Keeper_registry.Operator_interrupt as ce ->
+| exn when Keeper_registry_types.is_operator_interrupt exn ->
+  (* Every delivery shape — bare at the [Switch.run] boundary,
+     [Cancelled]-wrapped inside the switch, [Finally_raised]/[Multiple]
+     combinations — records the same failure reason and re-raises
+     unchanged (#28810, #28868 review). *)
   Keeper_registry.set_failure_reason
     ~base_path:config.base_path meta.name (Some Keeper_registry.Operator_interrupt);
-  raise ce
+  raise exn
 | Eio.Cancel.Cancelled _ as ce ->
   raise ce

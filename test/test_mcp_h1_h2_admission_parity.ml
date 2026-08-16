@@ -265,11 +265,14 @@ let test_shared_protocol_and_delete_matrix () =
     ~finally:(fun () -> Transport.forget_mcp_session session_id)
     (fun () ->
       Transport.remember_protocol_version session_id "2025-11-25";
+      let continuity ~session_id request =
+        Result.map_error Transport.protocol_version_rejection_message
+          (Transport.validate_protocol_version_continuity ~session_id request)
+      in
       assert_result_ok "missing protocol header preserves continuity"
-        (Transport.validate_protocol_version_continuity ~session_id
-           (request "/mcp"));
+        (continuity ~session_id (request "/mcp"));
       assert_result_error "mismatched protocol header is rejected"
-        (Transport.validate_protocol_version_continuity ~session_id
+        (continuity ~session_id
            (request
               ~headers:[ ("mcp-protocol-version", "2025-03-26") ]
               "/mcp")));

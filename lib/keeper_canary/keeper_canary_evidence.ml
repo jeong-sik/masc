@@ -28,13 +28,7 @@
 
 let schema_version = "masc.keeper_canary_run.v1"
 
-type injection_kind = Restart
-
-let injection_kind_to_string = function
-  | Restart -> "restart"
-
-type injection = {
-  injection_kind : injection_kind;
+type restart_injection = {
   after_turn : int;
   started_at : string;
   duration_s : float;
@@ -44,24 +38,54 @@ type injection = {
   generation_after : int;
 }
 
-let injection_is_continuation (i : injection) =
+type failover_injection = {
+  after_turn : int;
+  started_at : string;
+  duration_s : float;
+  down_cmd : string;
+  up_cmd : string option;
+  window_start : string;
+  mode : Keeper_canary_failover.mode;
+  attempts : Keeper_canary_failover.attempt list;
+}
+
+type injection =
+  | Restart of restart_injection
+  | Failover of failover_injection
+
+let restart_is_continuation (i : restart_injection) =
   String.equal i.trace_id_before i.trace_id_after
   && i.generation_before = i.generation_after
 
-let injection_to_yojson (i : injection) : Yojson.Safe.t =
-  `Assoc
-    [ ("kind", `String (injection_kind_to_string i.injection_kind))
-    ; ("after_turn", `Int i.after_turn)
-    ; ("started_at", `String i.started_at)
-    ; ("duration_s", `Float i.duration_s)
-    ; ("trace_id_before", `String i.trace_id_before)
-    ; ("trace_id_after", `String i.trace_id_after)
-    ; ("generation_before", `Int i.generation_before)
-    ; ("generation_after", `Int i.generation_after)
-      (* Derived projection of the two identity pairs above, written out so
-         a reader never re-implements the comparison. *)
-    ; ("continuation", `Bool (injection_is_continuation i))
-    ]
+let injection_to_yojson (injection : injection) : Yojson.Safe.t =
+  match injection with
+  | Restart i ->
+    `Assoc
+      [ ("kind", `String "restart")
+      ; ("after_turn", `Int i.after_turn)
+      ; ("started_at", `String i.started_at)
+      ; ("duration_s", `Float i.duration_s)
+      ; ("trace_id_before", `String i.trace_id_before)
+      ; ("trace_id_after", `String i.trace_id_after)
+      ; ("generation_before", `Int i.generation_before)
+      ; ("generation_after", `Int i.generation_after)
+        (* Derived projection of the two identity pairs above, written out
+           so a reader never re-implements the comparison. *)
+      ; ("continuation", `Bool (restart_is_continuation i))
+      ]
+  | Failover i ->
+    `Assoc
+      [ ("kind", `String "failover")
+      ; ("after_turn", `Int i.after_turn)
+      ; ("started_at", `String i.started_at)
+      ; ("duration_s", `Float i.duration_s)
+      ; ("down_cmd", `String i.down_cmd)
+      ; ("up_cmd", match i.up_cmd with Some c -> `String c | None -> `Null)
+      ; ("window_start", `String i.window_start)
+      ; ("mode", `String (Keeper_canary_failover.mode_to_string i.mode))
+      ; ( "attempts"
+        , `List (List.map Keeper_canary_failover.attempt_to_yojson i.attempts) )
+      ]
 
 type turn_evidence = {
   index : int;

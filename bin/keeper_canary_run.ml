@@ -29,7 +29,9 @@
        --keeper NAME --run-id ID [--runtime LABEL] [--base PATH] \
        [--host HOST] [--port N] [--facts N] [--turn-interval SECONDS] \
        [--turn-timeout SECONDS] [--wall-clock-target SECONDS] \
-       [--inject-restart-after N] [--judge-runtime ID] [--out PATH] *)
+       [--inject-restart-after N] [--inject-failover-after N \
+       --failover-down-cmd CMD [--failover-up-cmd CMD]] \
+       [--judge-runtime ID] [--out PATH] *)
 
 let default_facts = 9
 let default_turn_interval_s = 0.0
@@ -39,6 +41,7 @@ let usage =
    [--base PATH] [--host HOST] [--port N] [--facts N] \
    [--turn-interval SECONDS] [--turn-timeout SECONDS] \
    [--wall-clock-target SECONDS] [--inject-restart-after N] \
+   [--inject-failover-after N --failover-down-cmd CMD [--failover-up-cmd CMD]] \
    [--judge-runtime ID] [--out PATH]"
 
 type args = {
@@ -53,6 +56,9 @@ type args = {
   turn_timeout_s : float option;
   wall_clock_target_s : float option;
   inject_restart_after : int option;
+  inject_failover_after : int option;
+  failover_down_cmd : string option;
+  failover_up_cmd : string option;
   judge_runtime : string option;
   out : string option;
 }
@@ -69,6 +75,9 @@ let parse_args argv =
   let turn_timeout_s = ref None in
   let wall_clock_target_s = ref None in
   let inject_restart_after = ref None in
+  let inject_failover_after = ref None in
+  let failover_down_cmd = ref None in
+  let failover_up_cmd = ref None in
   let judge_runtime = ref None in
   let out = ref None in
   let rec parse = function
@@ -128,6 +137,20 @@ let parse_args argv =
        | Some n -> Error (Printf.sprintf "--inject-restart-after must be >= 1, got %d" n)
        | None -> Error ("--inject-restart-after must be an integer, got " ^ v))
     | [ "--inject-restart-after" ] -> Error "missing value for --inject-restart-after"
+    | "--inject-failover-after" :: v :: rest ->
+      (match int_of_string_opt v with
+       | Some n when n >= 1 -> inject_failover_after := Some n; parse rest
+       | Some n -> Error (Printf.sprintf "--inject-failover-after must be >= 1, got %d" n)
+       | None -> Error ("--inject-failover-after must be an integer, got " ^ v))
+    | [ "--inject-failover-after" ] -> Error "missing value for --inject-failover-after"
+    | "--failover-down-cmd" :: v :: rest ->
+      failover_down_cmd := Some v;
+      parse rest
+    | [ "--failover-down-cmd" ] -> Error "missing value for --failover-down-cmd"
+    | "--failover-up-cmd" :: v :: rest ->
+      failover_up_cmd := Some v;
+      parse rest
+    | [ "--failover-up-cmd" ] -> Error "missing value for --failover-up-cmd"
     | "--judge-runtime" :: v :: rest ->
       judge_runtime := Some v;
       parse rest
@@ -150,6 +173,15 @@ let parse_args argv =
          Error
            "--wall-clock-target and --turn-interval are mutually exclusive: \
             the target derives the interval"
+       else if !inject_restart_after <> None && !inject_failover_after <> None
+       then
+         Error
+           "--inject-restart-after and --inject-failover-after are mutually \
+            exclusive: one injection per run keeps the evidence attributable"
+       else if !inject_failover_after <> None && !failover_down_cmd = None
+       then Error "--inject-failover-after requires --failover-down-cmd"
+       else if !failover_down_cmd <> None && !inject_failover_after = None
+       then Error "--failover-down-cmd requires --inject-failover-after"
        else
        Ok
          { keeper
@@ -163,6 +195,9 @@ let parse_args argv =
          ; turn_timeout_s = !turn_timeout_s
          ; wall_clock_target_s = !wall_clock_target_s
          ; inject_restart_after = !inject_restart_after
+         ; inject_failover_after = !inject_failover_after
+         ; failover_down_cmd = !failover_down_cmd
+         ; failover_up_cmd = !failover_up_cmd
          ; judge_runtime = !judge_runtime
          ; out = !out
          })
@@ -321,7 +356,14 @@ let lifecycle_post ~host ~port ~keeper_name ~action ~body () :
    the resume directive 409 while it is still in flight (observed live
    2026-08-16: directive answered "Resume_owner requires a paused registry
    lane, actual phase=running" two HTTP round-trips after a 200 shutdown).
-   Poll the gate projection until the keeper leaves active before booting. *)
+
+   This poll is only a cheap pre-check, not a drain-completion guarantee:
+   the gate projection's surface status leaves "active" the moment the
+   registry phase leaves Running (Draining already reads as non-active —
+   adversarial review, 2026-08-16), and the gate row exposes no registry
+   phase to poll on. The 409 -> resume -> boot fallback below is the
+   actual correctness mechanism when the drain is still in flight; a
+   keeper with in-flight work will simply take that path every time. *)
 let wait_until_stopped ~host ~port ~keeper_name :
   (unit, string) result
   =
@@ -439,9 +481,8 @@ let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
   let* trace_id_after, generation_after =
     trajectory_identity ~host ~port ~keeper_name
   in
-  let injection =
-    { Keeper_canary_evidence.injection_kind = Keeper_canary_evidence.Restart
-    ; after_turn
+  let restart =
+    { Keeper_canary_evidence.after_turn
     ; started_at
     ; duration_s = Unix.gettimeofday () -. started
     ; trace_id_before
@@ -452,11 +493,110 @@ let inject_restart ~host ~port ~keeper_name ~run_id ~after_turn :
   in
   Printf.eprintf
     "[keeper_canary_run] restart done in %.1fs continuation=%b (trace=%s gen=%d)\n%!"
-    injection.duration_s
-    (Keeper_canary_evidence.injection_is_continuation injection)
+    restart.duration_s
+    (Keeper_canary_evidence.restart_is_continuation restart)
     trace_id_after
     generation_after;
-  Ok injection
+  Ok (Keeper_canary_evidence.Restart restart)
+
+(* --inject-failover-after: the harness owns no knowledge of how to
+   break a runtime, so the operator supplies the two commands (take the
+   lane's head candidate down, bring it back). The verdict never comes
+   from the commands' exit codes — it is read back from the keeper's own
+   runtime-manifest rows, the durable per-candidate attribution the turn
+   driver writes (see Keeper_canary_failover). *)
+let run_shell_command cmd : (unit, string) result =
+  match
+    With_process.with_process_args_in
+      "/bin/sh"
+      [| "/bin/sh"; "-c"; cmd |]
+      With_process.drain_lines
+  with
+  | _, Unix.WEXITED 0 -> Ok ()
+  | _, Unix.WEXITED code -> Error (Printf.sprintf "%S exited %d" cmd code)
+  | _, Unix.WSIGNALED signal -> Error (Printf.sprintf "%S killed by signal %d" cmd signal)
+  | _, Unix.WSTOPPED signal -> Error (Printf.sprintf "%S stopped by signal %d" cmd signal)
+  | exception e -> Error (Printf.sprintf "%S failed to spawn: %s" cmd (Printexc.to_string e))
+
+type pending_failover = {
+  pf_after_turn : int;
+  pf_started_at : string;
+  pf_duration_s : float;
+  pf_window_start : string;
+  pf_down_cmd : string;
+}
+
+let start_failover ~down_cmd ~after_turn : (pending_failover, string) result =
+  let ( let* ) = Result.bind in
+  let window_start = iso8601_now () in
+  let started = Unix.gettimeofday () in
+  Printf.eprintf
+    "[keeper_canary_run] inject failover after turn %d: %s\n%!"
+    after_turn
+    down_cmd;
+  let* () = run_shell_command down_cmd in
+  Ok
+    { pf_after_turn = after_turn
+    ; pf_started_at = window_start
+    ; pf_duration_s = Unix.gettimeofday () -. started
+    ; pf_window_start = window_start
+    ; pf_down_cmd = down_cmd
+    }
+
+let finish_failover ~host ~port ~keeper_name ~up_cmd (pending : pending_failover) :
+  (Keeper_canary_evidence.injection, string) result * string list
+  =
+  let up_notes =
+    match up_cmd with
+    | None -> [ "failover: no --failover-up-cmd given; the head candidate stays down" ]
+    | Some cmd ->
+      (match run_shell_command cmd with
+       | Ok () -> []
+       | Error detail ->
+         (* The run itself already measured what it needed; a failed
+            restore is the operator's cleanup problem, surfaced loudly
+            in the evidence rather than aborting the receipt. *)
+         [ Printf.sprintf "failover: up command failed: %s" detail ])
+  in
+  let result =
+    let ( let* ) = Result.bind in
+    let path =
+      Printf.sprintf "/api/v1/keepers/%s/runtime-trace?limit=500" keeper_name
+    in
+    let* status, body = Keeper_canary_http.admin_get ~host ~port ~path () in
+    let* () =
+      if status >= 200 && status < 300
+      then Ok ()
+      else Error (Printf.sprintf "runtime-trace returned HTTP %d" status)
+    in
+    let* json =
+      match Yojson.Safe.from_string body with
+      | j -> Ok j
+      | exception Yojson.Json_error msg -> Error ("runtime-trace: invalid JSON: " ^ msg)
+    in
+    let* attempts = Keeper_canary_failover.parse_manifest_rows json in
+    let mode, windowed =
+      Keeper_canary_failover.classify
+        ~window_start:pending.pf_window_start
+        ~attempts
+    in
+    Printf.eprintf
+      "[keeper_canary_run] failover verdict mode=%s attempts=%d\n%!"
+      (Keeper_canary_failover.mode_to_string mode)
+      (List.length windowed);
+    Ok
+      (Keeper_canary_evidence.Failover
+         { after_turn = pending.pf_after_turn
+         ; started_at = pending.pf_started_at
+         ; duration_s = pending.pf_duration_s
+         ; down_cmd = pending.pf_down_cmd
+         ; up_cmd
+         ; window_start = pending.pf_window_start
+         ; mode
+         ; attempts = windowed
+         })
+  in
+  result, up_notes
 
 (* A restart mid-run only measures continuity if the keeper cannot slip
    unattended turns into the transcript while the harness is not looking:
@@ -601,38 +741,63 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
        turn) is Keeper_canary_facts.plan's job, not inline bookkeeping here
        — see that module for the (unit-tested) construction. *)
     let plan = Keeper_canary_facts.plan ~facts in
-    let* () =
-      match args.inject_restart_after with
+    let bounds_check ~flag = function
       | None -> Ok ()
       | Some n ->
         if n >= List.length plan
         then
           Error
             (Printf.sprintf
-               "--inject-restart-after %d is at or past the recall turn (plan \
-                has %d turns); the restart must land between turns"
+               "%s %d is at or past the recall turn (plan has %d turns); the \
+                injection must land between turns"
+               flag
                n
                (List.length plan))
-        else require_proactive_disabled ~host ~port ~keeper_name:args.keeper
+        else Ok ()
+    in
+    let* () = bounds_check ~flag:"--inject-restart-after" args.inject_restart_after in
+    let* () = bounds_check ~flag:"--inject-failover-after" args.inject_failover_after in
+    let* () =
+      match args.inject_restart_after with
+      | None -> Ok ()
+      | Some _ -> require_proactive_disabled ~host ~port ~keeper_name:args.keeper
     in
     let injections = ref [] in
+    let pending_failover = ref None in
     let inject_between ~completed_index =
-      match args.inject_restart_after with
-      | Some n when n = completed_index ->
-        (match
-           inject_restart
-             ~host
-             ~port
-             ~keeper_name:args.keeper
-             ~run_id:args.run_id
-             ~after_turn:n
-         with
-         | Ok injection ->
-           injections := injection :: !injections;
-           Ok ()
-         | Error detail ->
-           Error (Printf.sprintf "restart injection after turn %d failed: %s" n detail))
-      | Some _ | None -> Ok ()
+      let restart () =
+        match args.inject_restart_after with
+        | Some n when n = completed_index ->
+          (match
+             inject_restart
+               ~host
+               ~port
+               ~keeper_name:args.keeper
+               ~run_id:args.run_id
+               ~after_turn:n
+           with
+           | Ok injection ->
+             injections := injection :: !injections;
+             Ok ()
+           | Error detail ->
+             Error (Printf.sprintf "restart injection after turn %d failed: %s" n detail))
+        | Some _ | None -> Ok ()
+      in
+      let failover () =
+        match args.inject_failover_after, args.failover_down_cmd with
+        | Some n, Some down_cmd when n = completed_index ->
+          (match start_failover ~down_cmd ~after_turn:n with
+           | Ok pending ->
+             pending_failover := Some pending;
+             Ok ()
+           | Error detail ->
+             Error
+               (Printf.sprintf "failover injection after turn %d failed: %s" n detail))
+        | _ -> Ok ()
+      in
+      let ( let* ) = Result.bind in
+      let* () = restart () in
+      failover ()
     in
     let rec send_all acc = function
       | [] -> Ok (List.rev acc)
@@ -681,6 +846,28 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
     (* A requested judge that fails does not erase the run's receipt: the
        evidence still lands with [judgment = None] plus an explicit note,
        and main exits non-zero so automation sees the judging failed. *)
+    let failover_notes =
+      match !pending_failover with
+      | None -> []
+      | Some pending ->
+        let result, up_notes =
+          finish_failover
+            ~host
+            ~port
+            ~keeper_name:args.keeper
+            ~up_cmd:args.failover_up_cmd
+            pending
+        in
+        (match result with
+         | Ok injection ->
+           injections := injection :: !injections;
+           up_notes
+         | Error detail ->
+           (* The attribution read failing does not erase the run: the note
+              records it and the missing Failover entry in [injections] is
+              the loud signal. *)
+           (Printf.sprintf "failover: attribution read failed: %s" detail) :: up_notes)
+    in
     let judgment, judge_notes =
       match judge with
       | None -> (None, [])
@@ -711,7 +898,7 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
       ; deterministic_signal
       ; judgment
       ; injections = List.rev !injections
-      ; notes = capped_note @ correlation_notes @ judge_notes
+      ; notes = capped_note @ correlation_notes @ failover_notes @ judge_notes
       })
 
 (* Sized for the judge's small JSON verdict (at most nine per_fact rows and

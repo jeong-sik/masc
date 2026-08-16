@@ -415,20 +415,23 @@ let heartbeat_is_fresh ~now ~stale_after_sec status =
    heartbeat thread died under a live process. Neither answer is a guess — a
    record that cannot produce a readable stamp and a running pid does not
    establish that a process is there, and restarting is the recoverable
-   direction. *)
-let observed_state_of_status_json ?(now = Unix.gettimeofday ()) ~id json =
+   direction.
+
+   [now] is passed in rather than read here: the callers below already stand
+   at the filesystem boundary, and keeping the clock out of the decision makes
+   this a function of the record alone. *)
+let observed_state_of_status_json ~now ~id json =
   match json with
   | `Assoc fields ->
-    let stale_after_sec = status_stale_sec id in
-    let status = Option.value (List.assoc_opt "status" fields) ~default:`Null in
-    let pid =
+    let pid_of status =
       match status_field "pid" status with
       | Some (`Int pid) -> pid
       | Some _ | None -> 0
     in
-    (match List.assoc_opt "available" fields with
-     | Some (`Bool true)
-       when heartbeat_is_fresh ~now ~stale_after_sec status && pid_is_running pid ->
+    (match List.assoc_opt "available" fields, List.assoc_opt "status" fields with
+     | Some (`Bool true), Some status
+       when heartbeat_is_fresh ~now ~stale_after_sec:(status_stale_sec id) status
+            && pid_is_running (pid_of status) ->
        Observed_available
      | _ -> Observed_unavailable)
   | _ -> Observed_unavailable
@@ -546,7 +549,13 @@ let attempt_fields = function
 ;;
 
 let lifecycle_json ~base_path id status_json =
-  let observed_state = observed_state_of_status_json ~id status_json in
+  (* Heartbeat age can only be measured against wall-clock now, and this
+     function already reads the filesystem, so the clock belongs here rather
+     than inside the decision. *)
+  let observed_state =
+    (* DET-OK: boundary read; the decision takes [now] as an argument. *)
+    observed_state_of_status_json ~now:(Unix.gettimeofday ()) ~id status_json
+  in
   let previous_attempt, attempt_error_fields =
     match read_attempt_record_result ~base_path id with
     | Ok previous_attempt -> previous_attempt, []
@@ -1012,7 +1021,10 @@ let handle_start state request reqd =
              session and redirects stdio to [/dev/null], so the sidecar
              survives backend restart without retaining server FDs. *)
              let status_json = read_status_json ~base_path id in
-             let observed_state = observed_state_of_status_json ~id status_json in
+             let observed_state =
+               (* DET-OK: request boundary, same reading as [lifecycle_json]. *)
+               observed_state_of_status_json ~now:(Unix.gettimeofday ()) ~id status_json
+             in
              let reconcile_result =
                reconcile_desired_once
                  ~current_generation:desired.generation

@@ -7,6 +7,10 @@ type tool_failure_class =
           Covers caller-input/argument validation, not only auth/boundary. *)
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
+  | Operator_cancelled
+      (** An operator interrupted the work (#28810). Not retryable by the
+          system — resending is the operator's own decision — and not an
+          internal error: consumers must not classify it as a crash. *)
 [@@deriving yojson, show]
 
 type failure_effect_disposition =
@@ -32,6 +36,7 @@ let tool_failure_class_to_string = function
   | Policy_rejection -> "policy_rejection"
   | Runtime_failure -> "runtime_failure"
   | Workflow_rejection -> "workflow_rejection"
+  | Operator_cancelled -> "operator_cancelled"
 ;;
 
 let tool_failure_class_of_string = function
@@ -39,16 +44,19 @@ let tool_failure_class_of_string = function
   | "policy_rejection" -> Some Policy_rejection
   | "runtime_failure" -> Some Runtime_failure
   | "workflow_rejection" -> Some Workflow_rejection
+  | "operator_cancelled" -> Some Operator_cancelled
   | _ -> None
 ;;
 
 let is_retryable = function
   | Transient_error -> true
-  | Policy_rejection | Runtime_failure | Workflow_rejection -> false
+  | Policy_rejection | Runtime_failure | Workflow_rejection | Operator_cancelled ->
+    false
 ;;
 
 let log_level_of_failure_class = function
-  | Workflow_rejection | Policy_rejection | Transient_error -> Log.Warn
+  | Workflow_rejection | Policy_rejection | Transient_error | Operator_cancelled ->
+    Log.Warn
   | Runtime_failure -> Log.Error
 ;;
 

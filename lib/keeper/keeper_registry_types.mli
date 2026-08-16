@@ -54,8 +54,23 @@ type failure_reason =
 
 exception Operator_interrupt
 (** Raised by [interrupt_current_turn] to cancel the live turn switch.
-    The turn runtime may catch this via [Eio.Cancel.Cancelled] and record
-    [failure_reason.Operator_interrupt] for observability. *)
+    Fibers inside the turn switch observe it as
+    [Eio.Cancel.Cancelled Operator_interrupt]; the [Eio.Switch.run] boundary
+    re-raises it BARE. Classification ladders must handle both forms
+    (#28810: the bare form used to fall into generic internal-error arms). *)
+
+val operator_interrupt_detail : string
+(** Human-facing detail for [Operator_interrupt] terminals. One shared string
+    so ledger rows, queued outcomes, and tool responses classify as one
+    incident class. *)
+
+val is_operator_interrupt : exn -> bool
+(** Whether [exn] reduces to {!Operator_interrupt} through every wrapper
+    shape Eio can deliver: bare, [Eio.Cancel.Cancelled],
+    [Fun.Finally_raised], and [Eio.Exn.Multiple] (only when every member
+    reduces). Classification ladders must use this rather than matching the
+    constructor directly (#28868 review: constructor-only arms missed the
+    combined shapes). *)
 
 val failure_reason_to_string : failure_reason -> string
 

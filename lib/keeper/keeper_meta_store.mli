@@ -6,9 +6,22 @@
 
 (** Read a keeper meta JSON file at [path]. Returns [Ok None] when
     the file does not exist. Unknown top-level keys are rejected with a
-    reset-required error; the persisted file is never rewritten. *)
+    reset-required error.
+
+    Issue #28844: a non-canonical value in an enumerated field with a
+    canonical default (e.g. [last_proactive_outcome]) is auto-repaired in
+    place through the normal serializer and the read proceeds; all other
+    corruption keeps failing loud and the file is left untouched.
+    [ownership_root] scopes the durable directory-chain fsync of the repair
+    write when the caller knows the workspace root.
+
+    The parse-failure WARN is emitted on state transitions (new failure,
+    changed failure reason, recovery) per (site, path), not on every
+    repeated read of the same broken file. *)
 val read_meta_file_path :
-  string -> (Keeper_meta_contract.keeper_meta option, string) result
+  ?ownership_root:string ->
+  string ->
+  (Keeper_meta_contract.keeper_meta option, string) result
 
 (** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
 (** List keeper names with persisted JSON in [.masc/keepers/].
@@ -48,7 +61,8 @@ val effective_autoboot_enabled :
 
 (** Names of keepers eligible for the keepalive fiber set —
     autoboot enabled, not paused. Logs and excludes on read failure
-    (issue #8377). *)
+    (issue #8377); the WARN fires on failure-state transitions only
+    (issue #28844). *)
 val keepalive_keeper_names : Workspace.config -> string list
 
 (** Names of keepers expected to persist across sessions. Mirrors

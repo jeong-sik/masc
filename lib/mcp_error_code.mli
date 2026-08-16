@@ -27,6 +27,20 @@ type t =
                               client SHOULD resume via Last-Event-ID. *)
   | Session_evicted       (** -32006 — session lifecycle terminated by server
                               policy (oldest-eviction at cap, idle timeout). *)
+  | Unsupported_protocol_version
+        (** -32022 — the request declared a protocol version this server does
+            not implement.
+
+            The code and the accompanying [data] shape are fixed by MCP
+            revision 2026-07-28 (Versioning and Compatibility, Protocol
+            Version Negotiation), which states the server MUST answer an
+            unsupported version with this error listing the versions it does
+            support. Build the body with
+            {!unsupported_protocol_version_body} rather than
+            {!jsonrpc_error_body} so the mandated [data.supported] and
+            [data.requested] fields are present: a 4xx whose body carries no
+            recognized modern error is what the same revision tells clients
+            to read as a legacy (initialize-handshake) server. *)
   | Quiet of { reason : string ; recovered : bool }
         (** -32099 — last-resort silent-skip annotation.
 
@@ -88,6 +102,24 @@ val jsonrpc_error_body : t -> message:string -> string
 (** [jsonrpc_error_body t ~message] returns a complete JSON-RPC 2.0 error
     response string with [id:null].  Replaces scattered [Printf.sprintf]
     templates that baked raw integer literals into JSON bodies. *)
+
+val unsupported_protocol_version_body :
+  requested:string -> supported:string list -> string
+(** [unsupported_protocol_version_body ~requested ~supported] returns the
+    complete JSON-RPC 2.0 error response mandated by MCP revision 2026-07-28
+    for a version the server does not implement: code [-32022], message
+    ["Unsupported protocol version"], and a [data] object carrying
+    [supported] (the versions this server accepts) and [requested] (the
+    version the client asked for).
+
+    [id] is null because the rejection happens at the transport header, before
+    the JSON-RPC body — and therefore the request id — has been read. That is
+    the JSON-RPC 2.0 §5 condition for a null id, and matches
+    {!allows_null_request_id} for this code.
+
+    [supported] is passed in rather than read here: this module sits below the
+    transport that owns the version list, and inverting that would point the
+    error vocabulary at the transport. *)
 
 val pp : Format.formatter -> t -> unit
 (** Pretty-printer for test failures and operator diagnostics. *)

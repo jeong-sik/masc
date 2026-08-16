@@ -239,6 +239,76 @@ let test_core_error_of_http_error_classifies () =
   ()
 ;;
 
+let string_contains ~needle haystack =
+  let nl = String.length needle
+  and hl = String.length haystack in
+  let rec go i = i + nl <= hl && (String.sub haystack i nl = needle || go (i + 1)) in
+  nl = 0 || go 0
+;;
+
+let test_core_error_of_http_error_labels_provider () =
+  (* #28852: a first-token timeout must name its provider; without the label
+     every provider timeout in the fleet read "Provider 'unknown'". *)
+  let timeout_error =
+    Llm_provider.Http_client.TimeoutError
+      { message = "first_event_timeout_s deadline exceeded while awaiting_first_event"
+      ; phase = Llm_provider.Http_client.First_token
+      }
+  in
+  (match
+     Provider_failure_attribution.core_error_of_http_error
+       ~provider:"local_llama_server"
+       timeout_error
+   with
+   | Error.Provider provider_error ->
+     let rendered = Llm_provider.Error.to_string provider_error in
+     if not (string_contains ~needle:"Provider 'local_llama_server' timeout" rendered)
+     then Alcotest.failf "provider label missing from: %s" rendered
+   | _ -> Alcotest.fail "expected a Provider error for the timeout");
+  match Provider_failure_attribution.core_error_of_http_error timeout_error with
+  | Error.Provider provider_error ->
+    let rendered = Llm_provider.Error.to_string provider_error in
+    if not (string_contains ~needle:"Provider 'unknown' timeout" rendered)
+    then Alcotest.failf "unlabelled error must keep the typed unknown: %s" rendered
+  | _ -> Alcotest.fail "expected a Provider error for the timeout"
+;;
+
+let test_core_error_label_populates_affected_provider () =
+  (* Beyond the rendered string, the label feeds the structured
+     [affected] field on capacity errors ([affected_provider] returns []
+     for 'unknown'). Dashboards echo this field; retry/ownership logic
+    ignores it — pin the improvement so it cannot silently regress. *)
+  let capacity_error =
+    Llm_provider.Http_client.ProviderFailure
+      { kind =
+          Llm_provider.Http_client.Capacity_exhausted
+            { scope = Llm_provider.Http_client.Failure_scope_unknown
+            ; retry_after = None
+            ; model = None
+            }
+      ; message = "capacity exhausted"
+      }
+  in
+  (match
+     Provider_failure_attribution.core_error_of_http_error
+       ~provider:"ollama_cloud"
+       capacity_error
+   with
+   | Error.Provider (Llm_provider.Error.CapacityExhausted { affected; _ }) ->
+     Alcotest.(check (list string))
+       "labelled capacity error names the provider"
+       [ "ollama_cloud" ]
+       affected
+   | _ -> Alcotest.fail "expected CapacityExhausted for the capacity failure");
+  match Provider_failure_attribution.core_error_of_http_error capacity_error with
+  | Error.Provider (Llm_provider.Error.CapacityExhausted { affected; _ }) ->
+    Alcotest.(check (list string))
+      "unlabelled capacity error keeps affected empty"
+      []
+      affected
+  | _ -> Alcotest.fail "expected CapacityExhausted for the capacity failure"
+;;
+
 let test_core_error_preserves_streaming_timeout_phase () =
   Eio_main.run
   @@ fun env ->
@@ -311,6 +381,14 @@ let () =
             "core_error_of_http_error compiles"
             `Quick
             test_core_error_of_http_error_classifies
+        ; Alcotest.test_case
+            "core_error_of_http_error labels the provider"
+            `Quick
+            test_core_error_of_http_error_labels_provider
+        ; Alcotest.test_case
+            "label populates affected provider on capacity errors"
+            `Quick
+            test_core_error_label_populates_affected_provider
         ; Alcotest.test_case
             "core_error preserves streaming timeout phase"
             `Quick

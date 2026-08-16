@@ -396,6 +396,12 @@ let decision_public_allowlist =
     ; "operator_action_required"; "trace_id"; "generation"; "turn_count"
     ; "sha256"; "kind"; "detail"; "backtrace_present"; "completion_error"
     ; "failure_dispatch"; "failure_dispatch_error"
+    (* Runtime attempt attribution (#28871): the lane walk stores the
+       attempted candidate in decision.runtime_id/idx (error_kind on
+       failures) while the row's top-level runtime_id is the lane id.
+       Dropping these here made intra-lane failover unreadable on every
+       API consumer. *)
+    ; "idx"; "runtime_id"; "error_kind"
     ])
 
 let compaction_evidence_public_allowlist =

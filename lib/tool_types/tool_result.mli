@@ -19,6 +19,10 @@ type tool_failure_class =
   | Policy_rejection (** Auth/permission/boundary — permanent *)
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
+  | Operator_cancelled
+      (** An operator interrupted the work (#28810). Not retryable by the
+          system — resending is the operator's own decision — and not an
+          internal error: consumers must not classify it as a crash. *)
 
 type failure_effect_disposition =
   | Proven_pre_effect

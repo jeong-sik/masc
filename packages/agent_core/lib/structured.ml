@@ -82,9 +82,13 @@ let extract_text_json ~(schema : _ schema) (response : api_response)
   parse_schema_text_json schema json
 ;;
 
-let core_error_of_http_error =
+(* [provider] is required here on purpose: the optional label on the shared
+   mapper is exactly how the pipeline sites almost shipped without one
+   (#28886 review) — sibling callers must not be able to forget it. *)
+let core_error_of_http_error ~provider =
   Http_error_agent_core.of_http_error
     ~accept_rejected:(Config_invalid_config { field = "response_format" })
+    ~provider
 ;;
 
 let provider_config_for_schema ~provider_config ~config ~(schema : _ schema) =
@@ -111,9 +115,12 @@ let extract ~sw ~net ~provider_config ~config ~(schema : 'a schema) prompt
     ]
   in
   let* provider_cfg = provider_config_for_schema ~provider_config ~config ~schema in
+  let provider =
+    Llm_provider.Provider_config.capability_provider_label provider_cfg
+  in
   let* response =
     Llm_provider.Complete.complete ~sw ~net ~config:provider_cfg ~messages ~tools:[] ()
-    |> Result.map_error core_error_of_http_error
+    |> Result.map_error (core_error_of_http_error ~provider)
   in
   extract_text_json ~schema response
 ;;
@@ -201,6 +208,9 @@ let extract_stream
     ]
   in
   let* provider_cfg = provider_config_for_schema ~provider_config ~config ~schema in
+  let provider =
+    Llm_provider.Provider_config.capability_provider_label provider_cfg
+  in
   let* response =
     Llm_provider.Complete.complete_stream
       ~sw
@@ -211,7 +221,7 @@ let extract_stream
       ~tools:[]
       ~on_event
       ()
-    |> Result.map_error core_error_of_http_error
+    |> Result.map_error (core_error_of_http_error ~provider)
   in
   let* value = extract_text_json ~schema response in
   Ok (value, response)

@@ -63,6 +63,8 @@ L5 Budget  매턴 조립 예산: keeper + dynamic + Select 결과 + 최근 창(�
 | assistant/user text | 의미 콘텐츠 — L1/L2가 memory로 추출, 최근 창 밖에서는 조립에서 제외 | |
 | wake marker 등 무정보 자극 | **비영속** — §5 | analyst ×359 |
 
+tool_result 의 사이클 스코프에는 최후예외가 하나 있다 (#28845): tail-window cut 이 `Newest_atom_exceeds_available` 로 거부될 때 — 최신 원자가 분할 불가능한 채로 히스토리 예산 전체보다 클 때 — 조립은 경계를 최신 원자 너머로 옮겨 딱 한 번 재시도한다. 이번 턴이 막 생산한 결과도 마커로 강등되어 나간다. 턴을 실패시키는 것보다 주소로 남기는 쪽이 낫다는 판단이며, 그 외의 경로에서는 현재 턴 제외가 그대로 유지된다.
+
 Provider별 replay 정책이 `Preserve_always`로 선언된 모델(예: mimo 계열)은 공식 문서 재검증 후 turn-스코프 정책으로 교정한다(OAS capability 데이터 정정, 별도 검증 진행 중). 문서가 실제로 cross-turn replay를 요구하면 예외로 존중한다.
 
 ## 5. Persistence 정책 — 무정보 턴은 영구 transcript를 만들지 않는다 (#25462)

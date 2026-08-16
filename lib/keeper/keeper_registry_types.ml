@@ -14,6 +14,30 @@ include Keeper_registry_types_failure
 
 exception Operator_interrupt
 
+(* One string for every [Operator_interrupt] terminal (ledger rows, queued
+   outcomes, tool responses) so the incident class stays greppable as one
+   thing. The classification itself is typed on the exception; this is only
+   the human-facing detail. *)
+let operator_interrupt_detail = "operator interrupted the turn"
+
+(* Recursive classifier for every shape Eio can deliver the interrupt in:
+   bare at the [Switch.run] boundary, [Cancelled]-wrapped inside the switch,
+   [Fun.Finally_raised] when a cancellable finalizer trips a cancellation
+   point, and [Eio.Exn.Multiple] when the switch combines the interrupt with
+   what cancelled fibers raised. A [Multiple] counts only when every member
+   reduces to the interrupt — a real co-occurring error must keep its crash
+   classification. Mirrors [Shutdown.is_benign_termination] (#28868 review:
+   constructor-only arms missed the combined shapes). *)
+let rec is_operator_interrupt = function
+  | Operator_interrupt -> true
+  | Eio.Cancel.Cancelled inner -> is_operator_interrupt inner
+  | Stdlib.Fun.Finally_raised inner -> is_operator_interrupt inner
+  | Eio.Exn.Multiple [] -> false
+  | Eio.Exn.Multiple members ->
+    List.for_all (fun (member, _bt) -> is_operator_interrupt member) members
+  | _ -> false
+;;
+
 (* Turn_phase FSM types, witnesses, transitions, and resolver extracted to
    [Keeper_registry_types_turn_phase] (500-line decomp). *)
 include Keeper_registry_types_turn_phase

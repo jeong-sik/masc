@@ -360,14 +360,6 @@ async def check_gate_reachable() -> Check:
 # --- filesystem --------------------------------------------------------------
 
 
-def _resolve_state_path(raw: str) -> Path:
-    p = Path(raw).expanduser()
-    if p.is_absolute():
-        return p
-    base = os.getenv("MASC_BASE_PATH", "").strip()
-    return Path(base).expanduser() / p if base else Path.cwd() / p
-
-
 async def check_binding_paths_writable() -> Check:
     cfg = _config_or_none()
     if cfg is None:
@@ -377,10 +369,10 @@ async def check_binding_paths_writable() -> Check:
             message="config 로드 실패로 건너뜀",
         )
     candidates = [
-        ("binding store", _resolve_state_path(cfg.binding_store_path)),
-        ("binding audit", _resolve_state_path(cfg.binding_audit_path)),
-        ("status", _resolve_state_path(cfg.status_path)),
-        ("cursor", _resolve_state_path(cfg.cursor_path)),
+        ("binding store", Path(cfg.binding_store_path)),
+        ("binding audit", Path(cfg.binding_audit_path)),
+        ("status", Path(cfg.status_path)),
+        ("cursor", Path(cfg.cursor_path)),
     ]
     unwritable: list[str] = []
     auto_fix_targets: list[Path] = []

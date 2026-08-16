@@ -709,15 +709,17 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
              ; stop_reason = EndTurn
              ; content = [ Text turn.text ]
              ; usage =
+                 (* The CLI frame carries Anthropic exclusive counts; the
+                    shared constructor produces the canonical inclusive
+                    api_usage. *)
                  Option.map
-                   (fun (usage : Runtime_claude_code.turn_usage) :
-                        Agent_core.Types.api_usage ->
-                      { input_tokens = usage.input_tokens
-                      ; output_tokens = usage.output_tokens
-                      ; cache_creation_input_tokens = 0
-                      ; cache_read_input_tokens = 0
-                      ; cost_usd = None
-                      })
+                   (fun (usage : Runtime_claude_code.turn_usage) ->
+                      Agent_core.Llm_provider.Backend_anthropic.usage_of_wire_counts
+                        ~input_tokens:usage.input_tokens
+                        ~output_tokens:usage.output_tokens
+                        ~cache_creation_input_tokens:
+                          usage.cache_creation_input_tokens
+                        ~cache_read_input_tokens:usage.cache_read_input_tokens)
                    turn.usage
              ; telemetry =
                  Some

@@ -15,6 +15,7 @@
 | ollama / ollama_cloud | `prompt_eval_count` | (없음) | 캐시 미보고 — backend가 캐시 필드 0 고정. 로컬 KV 재사용 시 `prompt_eval_count`는 처리분만 세는 것으로 알려져 있으나 캐시 필드가 없어 구분 불가 (G2 계열 한계) | backend_ollama.ml:366-367 |
 | llama-server (OpenAI-compat) | `usage.prompt_tokens` | usage에는 없음 (`timings.cache_n` 별도) | **포함형** (prompt 전체) — 캐시 관측은 timings 축(G5/PR-2) | RFC-0382 §3.1 |
 | Kimi (Anthropic-compat) | Anthropic 형식 동일 | 동일 | Anthropic 형식으로 파싱되므로 정규화가 동일 적용. Kimi 자체 문서로는 **확인 필요** — compat 표면이 의미론까지 미러링한다고 가정 | backend_anthropic 경유 (count-tokens 주석) |
+| Claude Code CLI (result frame) | `usage.input_tokens` | `cache_creation_input_tokens`, `cache_read_input_tokens` | **배제형** — CLI가 Anthropic Messages usage를 그대로 미러. 초판 감사가 masc lib/ 스윕을 누락해 keeper 매핑이 배제형을 직대입하던 것을 adversarial review가 적발(P1-1) → `Runtime_claude_code` 파서가 cache 필드를 실어 나르고 keeper 매핑이 `usage_of_wire_counts` 경유로 수정 | 테스트 픽스처의 실프레임 형태 + 리뷰 코멘트 |
 
 ## agent_core 코드 판정 (수정 전 → 후)
 
@@ -34,6 +35,19 @@ Anthropic 형식 + 캐시 활성(system/tools cache_control) 조합에서:
 
 1. **비용 과소**: regular input이 `max 0 (exclusive − creation − read)`로 클램프 — 캐시가 클수록 정규 입력 과금이 0으로 소멸.
 2. **점유율 과소**: `keeper_context_observation_projection`의 ratio 분자(RFC-0233 "provider-reported prompt total")가 배제형 값 — 캐시된 프리픽스가 클수록 창 점유가 실제보다 작게 보고.
+
+## Durable 표면의 구의미론 데이터 (adversarial review P1-2 판정)
+
+의미 변경 시점(배포 경계) 이전에 기록된 값을 들고 있는 durable 표면 4곳의 처분:
+
+| 표면 | 처분 | 근거 |
+|---|---|---|
+| `cache.ml` 응답 캐시 | **schema "2" 하드컷** (이 PR) | 유일하게 구 값이 *canonical 자리로 재유입*되는 코덱 — 버전 가드가 은퇴 |
+| turn_record (RFC-0233 점유율 원천) | 조치 불요 | 점유율 소비자는 `keeper_context_observation_projection.ml`의 trace_id 가드가 현재 턴 record만 통과시킴 — 배포(=재시작) 이후 구 record는 구조적으로 소비 불가. `last_turn_usage` 표시 표면은 첫 턴에 세척되는 1턴 잔상 |
+| checkpoint `usage_stats.total_*` 누적치 | 문서화(아래 epoch 주석) | 이 총합은 PR 이전부터 provider 혼합 의미론(배제형 Anthropic + 포함형 나머지)의 합이라 "순수한 v1 의미"가 애초에 없음. 전 소비자(codec 왕복, durable_event carry, tool_agent_timeline rollup, dashboard JSON ×3)가 관측 표면이고 게이트 0건. checkpoint 폐기는 transcript(durable truth) 파괴라 비례성 위반 |
+| `execution_provider_response_snapshot` 실행 저널 | 조치 불요 | 소비자는 `execution_event.ml` 단일 — 기록 시점 사실의 evidence 저널이며, 재해석/재작성은 ledger 원칙 위반 |
+
+**Epoch 주석**: checkpoint 누적 total_* 값은 2026-08-17 배포 경계 이전 기여분이 배제형 Anthropic 값(및 원래부터 포함형인 타 provider 값)의 혼합이다. 경계 이후 기여분은 전부 포함형. 이 총합에서 캐시 비중 등을 역산할 때는 경계 이전 구간을 신뢰하지 말 것.
 
 ## 잔여 결함 (이 PR 범위 밖, #28903으로 추적)
 

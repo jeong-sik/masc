@@ -66,6 +66,8 @@ type rate_limit =
 type turn_usage =
   { input_tokens : int
   ; output_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
   }
 
 type turn_result =
@@ -721,11 +723,24 @@ let parse_result ~expected_session_id ~rate_limit ~tool_effect_attempted
           | Some (`Int value) when value >= 0 -> Some value
           | _ -> None
         in
-        (* Only the two counts this reads are carried. A cache-read field would
-           need a value when the block omits it, and defaulting a count nobody
-           reported to zero states something the stream did not say. *)
+        (* The CLI mirrors Anthropic Messages usage: input_tokens is the
+           exclusive count (tokens after the last cache breakpoint) and the
+           cache components arrive as their own fields. Both are carried so
+           the keeper can build the canonical inclusive api_usage
+           (Backend_anthropic.usage_of_wire_counts); an absent cache field
+           reads as 0, the same convention every Anthropic-format parse in
+           agent_core uses. Presence of a usage block still requires both
+           base counts. *)
         (match int_field "input_tokens", int_field "output_tokens" with
-         | Some input_tokens, Some output_tokens -> Some { input_tokens; output_tokens }
+         | Some input_tokens, Some output_tokens ->
+           Some
+             { input_tokens
+             ; output_tokens
+             ; cache_creation_input_tokens =
+                 Option.value (int_field "cache_creation_input_tokens") ~default:0
+             ; cache_read_input_tokens =
+                 Option.value (int_field "cache_read_input_tokens") ~default:0
+             }
          | Some _, None | None, Some _ | None, None -> None)
       | Some _ -> None
     in

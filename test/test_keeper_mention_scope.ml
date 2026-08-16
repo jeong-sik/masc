@@ -116,6 +116,96 @@ let speaker_with authority : Store.speaker option =
 let owner = speaker_with Store.Owner
 let external_ = speaker_with Store.External
 
+(* Fleet layer: keeper broadcasts projected into this keeper's transcript.
+   The two reactive lanes admit only rows addressed to this keeper, so without
+   this layer a projected broadcast reaches the dashboard and never the prompt.
+   These cases pin the layer's boundary against both lanes. *)
+
+let agent_surface = Some Masc.Surface_ref.Agent
+let fleet_contents fms = List.map (fun (f : MS.fleet_message) -> f.fleet_content) fms
+let fleet ~limit messages = MS.fleet_messages_of_messages ~limit ~targets messages
+
+let test_projected_broadcast_reaches_the_layer () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface
+        ~speaker:external_ "deploy is green"
+    ]
+  in
+  check (list string) "unaddressed keeper speech is fleet context"
+    [ "deploy is green" ]
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_addressed_row_is_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface
+        ~speaker:external_ "@alice take this"
+    ]
+  in
+  check (list string) "a row addressed to me belongs to the mention lane only" []
+    (fleet_contents (fleet ~limit:10 messages));
+  check (list string) "and it is still a pending mention" [ "@alice take this" ]
+    (contents (MS.pending_mentions_of_messages ~targets messages))
+;;
+
+let test_owner_row_is_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface ~speaker:owner
+        "status?"
+    ]
+  in
+  check (list string) "an Owner line belongs to the scope lane only" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_connector_row_is_not_fleet () =
+  let discord =
+    Some
+      (Masc.Surface_ref.Discord
+         { guild_id = None
+         ; channel_id = "c1"
+         ; parent_channel_id = None
+         ; thread_id = None
+         })
+  in
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:discord ~speaker:external_
+        "channel chatter"
+    ]
+  in
+  check (list string) "connector chatter is not fleet speech" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_own_assistant_line_is_not_fleet () =
+  let messages =
+    [ msg ~role:Store.Role.Assistant ~ts:(Some 10.0) ~surface:agent_surface "I said this" ]
+  in
+  check (list string) "the keeper's own output is not inbound fleet speech" []
+    (fleet_contents (fleet ~limit:10 messages))
+;;
+
+let test_zero_limit_disables_the_layer () =
+  let messages =
+    [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~surface:agent_surface
+        ~speaker:external_ "deploy is green"
+    ]
+  in
+  check (list string) "limit 0 turns the section off" []
+    (fleet_contents (fleet ~limit:0 messages))
+;;
+
+let test_limit_keeps_the_newest_in_arrival_order () =
+  let row n =
+    msg ~role:Store.Role.User ~id:(Printf.sprintf "row-%d" n)
+      ~ts:(Some (float_of_int n)) ~surface:agent_surface ~speaker:external_
+      (Printf.sprintf "note %d" n)
+  in
+  let messages = List.map row [ 1; 2; 3; 4; 5 ] in
+  check (list string) "newest two, still oldest-first" [ "note 4"; "note 5" ]
+    (fleet_contents (fleet ~limit:2 messages))
+;;
+
 let test_owner_unmentioned_line_is_scope () =
   let messages = [ msg ~role:Store.Role.User ~ts:(Some 10.0) ~speaker:owner "can you check the deploy" ] in
   check (list string) "operator without @ -> scope" [ "can you check the deploy" ]
@@ -366,6 +456,17 @@ let () =
             test_ack_clears_only_injected_prefix
         ; test_case "all_rows_source_order_no_cap" `Quick
             test_all_pending_rows_preserve_source_order_without_cap
+        ] )
+    ; ( "fleet_messages"
+      , [ test_case "projected_broadcast_reaches_layer" `Quick
+            test_projected_broadcast_reaches_the_layer
+        ; test_case "addressed_row_not_fleet" `Quick test_addressed_row_is_not_fleet
+        ; test_case "owner_row_not_fleet" `Quick test_owner_row_is_not_fleet
+        ; test_case "connector_row_not_fleet" `Quick test_connector_row_is_not_fleet
+        ; test_case "own_assistant_not_fleet" `Quick test_own_assistant_line_is_not_fleet
+        ; test_case "zero_limit_disables" `Quick test_zero_limit_disables_the_layer
+        ; test_case "limit_keeps_newest_in_order" `Quick
+            test_limit_keeps_the_newest_in_arrival_order
         ] )
     ]
 ;;

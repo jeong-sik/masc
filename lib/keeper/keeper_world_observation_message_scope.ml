@@ -45,6 +45,13 @@ type pending_message =
   ; kind : pending_kind
   }
 
+(* A keeper broadcast projected into this keeper's transcript. Carries no
+   message id: the layer has no watermark, so nothing keys off row identity. *)
+type fleet_message =
+  { fleet_speaker : string
+  ; fleet_content : string
+  }
+
 let kind_equal left right =
   match left, right with
   | Mention, Mention | Scope, Scope -> true
@@ -294,6 +301,13 @@ let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
   | None -> false
 ;;
 
+(* A row is addressed to this keeper when it mentions one of the keeper's ids
+   or the Owner wrote it. Both reactive lanes are built from this predicate and
+   the fleet layer excludes it, so the two cannot render the same row twice. *)
+let is_lane_addressed ~target_ids (m : Keeper_chat_store.chat_message) : bool =
+  Keeper_lane_mentions.ids_match ~target_ids m.mentions || is_owner_authored m
+;;
+
 let pending_messages_of_messages
       ?ack_id
       ~(targets : string list)
@@ -348,15 +362,84 @@ let pending_mentions_of_messages
   |> pairs_of_kind Mention
 ;;
 
-let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
-  : pending_message list
+(* Fleet messages: keeper broadcasts projected into this keeper's transcript.
+   [Surface_ref.Agent] is the typed marker the projection writes, so the filter
+   reads a variant rather than inspecting content.
+
+   Unlike the two reactive lanes this layer carries no watermark. A projected
+   broadcast is context, not an outstanding obligation, and the lane
+   acknowledgement only advances on autonomous turns — a keeper with
+   [proactive_enabled = false] would accumulate rows forever. Newest [limit]
+   rows, rendered in arrival order. *)
+let fleet_messages_of_messages
+      ~(limit : int)
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  : fleet_message list
+  =
+  if limit <= 0
+  then []
+  else (
+    let target_ids = Keeper_lane_mentions.target_ids_of targets in
+    messages
+    |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
+      match m.role, m.surface with
+      | Keeper_chat_store.Role.User, Some Surface_ref.Agent ->
+        not (is_lane_addressed ~target_ids m)
+      | ( Keeper_chat_store.Role.User
+        , Some
+            ( Surface_ref.Dashboard _
+            | Surface_ref.Discord _
+            | Surface_ref.Slack _
+            | Surface_ref.Webhook _
+            | Surface_ref.Gate _ ) )
+      | Keeper_chat_store.Role.User, None
+      | Keeper_chat_store.Role.Assistant, _
+      | Keeper_chat_store.Role.Tool, _ -> false)
+    |> List.rev
+    |> List.take limit
+    |> List.rev
+    |> List.map (fun (m : Keeper_chat_store.chat_message) ->
+      { fleet_speaker = speaker_display m; fleet_content = m.content }))
+;;
+
+(* Both layers read the same transcript, which reaches 1.8 MB in production.
+   Loading once and deriving both keeps the per-turn read count at one and
+   makes the disjointness visible: the same rows feed both filters. *)
+let collect_message_scope_and_fleet
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(fleet_limit : int)
+  : pending_message list * fleet_message list
   =
   let messages =
     Keeper_chat_store.load_all ~base_dir:config.base_path ~keeper_name:meta.name
   in
   let targets = message_feed_targets meta in
-  pending_messages_of_messages
-    ?ack_id:meta.runtime.message_scope_ack_id
-    ~targets
-    messages
+  let pending =
+    pending_messages_of_messages
+      ?ack_id:meta.runtime.message_scope_ack_id
+      ~targets
+      messages
+  in
+  let fleet = fleet_messages_of_messages ~limit:fleet_limit ~targets messages in
+  pending, fleet
+;;
+
+(* The direct-keeper-message observation empties the reactive lanes — the
+   message that woke the keeper is the trigger, not a pending obligation — but
+   standing context still applies, so the fleet layer is collected on its own. *)
+let collect_fleet_messages
+      ~(config : Workspace.config)
+      ~(meta : keeper_meta)
+      ~(limit : int)
+  : fleet_message list
+  =
+  if limit <= 0
+  then []
+  else (
+    let messages =
+      Keeper_chat_store.load_all ~base_dir:config.base_path ~keeper_name:meta.name
+    in
+    fleet_messages_of_messages ~limit ~targets:(message_feed_targets meta) messages)
 ;;

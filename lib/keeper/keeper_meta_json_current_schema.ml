@@ -19,6 +19,7 @@ type field =
   | Name
   | Agent_name
   | Instructions
+  | Autonomous_instructions
   | Trace_id
   | Multimodal_policy
   | Trace_history
@@ -73,6 +74,7 @@ let all_fields =
   ; Name
   ; Agent_name
   ; Instructions
+  ; Autonomous_instructions
   ; Trace_id
   ; Multimodal_policy
   ; Trace_history
@@ -128,6 +130,7 @@ let field_name = function
   | Name -> "name"
   | Agent_name -> "agent_name"
   | Instructions -> "instructions"
+  | Autonomous_instructions -> "autonomous_instructions"
   | Trace_id -> "trace_id"
   | Multimodal_policy -> "multimodal_policy"
   | Trace_history -> "trace_history"

@@ -62,6 +62,10 @@ type try_provider_ctx =
   ; initial_messages : Agent_core.Types.message list
   ; model_input_projection : Agent_core.Agent.model_input_projection option
   ; stream_idle_timeout_s : float option
+  ; first_event_timeout_s : float option
+    (* Bound on the silent wait for the FIRST streaming provider event
+       (TTFT/prefill), distinct from [stream_idle_timeout_s] which arms only
+       after that event (RFC-OAS-037). *)
   ; body_timeout_s : float option
   ; (* #27349, axis changed by #28417: the ceiling for THIS provider call
        attempt. Distinct from [stream_idle_timeout_s] (streaming inter-line
@@ -728,6 +732,7 @@ let run_try_provider
     Ok
       { base_config with
         stream_idle_timeout_s = ctx.stream_idle_timeout_s
+          ; first_event_timeout_s = ctx.first_event_timeout_s
           ; body_timeout_s = ctx.body_timeout_s
           ; temperature
           ; hooks = ctx.hooks

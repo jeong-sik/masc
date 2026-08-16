@@ -1920,6 +1920,7 @@ let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
   match
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:(Some 120.0)
+      ~first_event_timeout_s:None
       ~process_clock:(Error "process runtime not initialised")
       ~ctx_clock:None
   with
@@ -1940,10 +1941,11 @@ let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
   | Ok _ -> fail "expected typed error when idle is configured but no clock resolves"
 
 let test_clock_failfast_opt_out_when_no_idle_no_clock () =
-  (* Legitimate opt-out: no idle deadline + no clock stays None, no raise. *)
+  (* Legitimate opt-out: no streaming deadline + no clock stays None, no raise. *)
   let clock =
     Runtime_agent.For_testing.decide_clock_for_idle
       ~stream_idle_timeout_s:None
+      ~first_event_timeout_s:None
       ~process_clock:(Error "no runtime")
       ~ctx_clock:None
   in
@@ -1951,6 +1953,51 @@ let test_clock_failfast_opt_out_when_no_idle_no_clock () =
     (match clock with
      | Ok None -> true
      | Ok (Some _) | Error _ -> false)
+
+(* RFC-OAS-037: the first-event (TTFT/prefill) bound has the same clock
+   dependency as the idle bound — configured without a resolvable clock it
+   must fail loudly, naming its own knob. *)
+let test_clock_failfast_returns_typed_error_when_first_event_set_without_clock () =
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:None
+      ~first_event_timeout_s:(Some 600.0)
+      ~process_clock:(Error "process runtime not initialised")
+      ~ctx_clock:None
+  with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+    check string "field" "first_event_timeout_s" field;
+    check
+      bool
+      "message identifies the configured first-event deadline with no clock"
+      true
+      (String.starts_with
+         ~prefix:"runtime_agent: first_event_timeout_s configured"
+         detail)
+  | Error err ->
+    fail
+      (Printf.sprintf
+         "expected InvalidConfig first_event_timeout_s, got %s"
+         (Agent_core.Error.to_string err))
+  | Ok _ ->
+    fail "expected typed error when first-event is configured but no clock resolves"
+
+let test_clock_failfast_names_idle_when_both_deadlines_set () =
+  (* Both knobs configured: the error names the idle knob (its arm is
+     checked first); the point pinned here is that SOME typed error fires,
+     not a silent disarm. *)
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:(Some 120.0)
+      ~first_event_timeout_s:(Some 600.0)
+      ~process_clock:(Error "no runtime")
+      ~ctx_clock:None
+  with
+  | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ })) ->
+    check string "field" "stream_idle_timeout_s" field
+  | Error err ->
+    fail (Printf.sprintf "expected InvalidConfig, got %s" (Agent_core.Error.to_string err))
+  | Ok _ -> fail "expected typed error when both deadlines set without clock"
 
 (* ── Runtime.decide_capability_gate (AGENT_CORE catalog binding gate) ── *)
 
@@ -2189,5 +2236,13 @@ let () =
             "clock fail-fast opt-out when no idle no clock"
             `Quick
             test_clock_failfast_opt_out_when_no_idle_no_clock
+        ; test_case
+            "clock fail-fast raises when first-event set without clock (RFC-OAS-037)"
+            `Quick
+            test_clock_failfast_returns_typed_error_when_first_event_set_without_clock
+        ; test_case
+            "clock fail-fast names idle when both deadlines set"
+            `Quick
+            test_clock_failfast_names_idle_when_both_deadlines_set
         ] )
     ]

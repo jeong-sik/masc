@@ -11,6 +11,7 @@ type 'a field = {
 
 type t = {
   stream_idle_timeout_sec : float option field;
+  first_event_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
   provider_call_deadline_sec : float option field;
 }
@@ -78,6 +79,20 @@ let stream_idle_failsafe_floor_sec =
   Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec
 ;;
 
+(* Fail-safe bound for the silent first-event (TTFT/prefill) wait (seconds).
+   When neither [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC] nor runtime.toml
+   [turn.first_event_timeout_sec] is set, AGENT_CORE's first-event resolver
+   falls back to [body_timeout_s] (unset on streaming keeper paths) and then
+   to the inter-line idle value — a bound an order of magnitude below real
+   silent prefill (measured: 152s mimo 1M-context turn 2026-07-20; ~200-525s
+   local MLX 20.7K-token keeper prompts 2026-08-16, 9/9 canary failures at
+   the 120s idle cut). Same magnitude as the RFC-0345 idle floor: a single
+   universal liveness ceiling, NOT a per-provider tuned default
+   (RFC-OAS-037 §3). An explicit env/toml value overrides it verbatim. *)
+let first_event_failsafe_floor_sec =
+  Env_config_keeper.KeeperKeepalive.first_event_failsafe_floor_sec
+;;
+
 let freeze_from_current () =
   let stream_idle_timeout_sec =
     match Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec () with
@@ -97,6 +112,25 @@ let freeze_from_current () =
         source = Failsafe_floor;
       }
   in
+  let first_event_timeout_sec =
+    match Env_config_keeper.KeeperKeepalive.first_event_timeout_sec () with
+    | Some seconds ->
+      (* Explicit env or runtime.toml value: honoured verbatim, no floor. *)
+      {
+        value = Some seconds;
+        source = source_of_env_name "MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC";
+      }
+    | None ->
+      (* Unset: substitute the silent-prefill liveness ceiling so the
+         first-event wait is never governed by the much shorter inter-line
+         idle knob (RFC-OAS-037; see [first_event_failsafe_floor_sec]).
+         Sourced as [Failsafe_floor] so telemetry and the boot log
+         distinguish it from an operator-supplied value. *)
+      {
+        value = Some first_event_failsafe_floor_sec;
+        source = Failsafe_floor;
+      }
+  in
   let body_timeout_override_sec =
     {
       value = body_timeout_override_sec_live ();
@@ -111,6 +145,7 @@ let freeze_from_current () =
   in
   {
     stream_idle_timeout_sec;
+    first_event_timeout_sec;
     body_timeout_override_sec;
     provider_call_deadline_sec;
   }
@@ -145,12 +180,16 @@ let to_yojson (runtime : t) =
   `Assoc
     [
       ("stream_idle_timeout_sec", field_to_yojson option_float_to_yojson runtime.stream_idle_timeout_sec);
+      ("first_event_timeout_sec", field_to_yojson option_float_to_yojson runtime.first_event_timeout_sec);
       ("body_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.body_timeout_override_sec);
       ("provider_call_deadline_sec", field_to_yojson option_float_to_yojson runtime.provider_call_deadline_sec);
     ]
 
 let stream_idle_timeout_sec () =
   (current ()).stream_idle_timeout_sec.value
+
+let first_event_timeout_sec () =
+  (current ()).first_event_timeout_sec.value
 
 let body_timeout_override_sec () =
   (current ()).body_timeout_override_sec.value

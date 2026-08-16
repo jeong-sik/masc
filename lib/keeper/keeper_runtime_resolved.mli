@@ -8,17 +8,18 @@
     late env drift cannot change keeper execution behaviour.
 
     [stream_idle_timeout_sec] additionally substitutes a fail-safe liveness floor
-    ({!stream_idle_failsafe_floor_sec}) when unset (RFC-0345, #25128); an explicit
-    value still overrides. *)
+    ({!stream_idle_failsafe_floor_sec}) when unset (RFC-0345, #25128), and
+    [first_event_timeout_sec] substitutes {!first_event_failsafe_floor_sec}
+    (RFC-OAS-037); an explicit value still overrides either. *)
 
 type source =
   | Env
   | Toml
   | Default
   | Failsafe_floor
-      (** The compiled default was [None] (unset) and the RFC-0345 fail-safe
-          liveness floor was substituted. Applies to [stream_idle_timeout_sec]
-          only. *)
+      (** The compiled default was [None] (unset) and a fail-safe liveness
+          floor was substituted. Applies to [stream_idle_timeout_sec]
+          (RFC-0345) and [first_event_timeout_sec] (RFC-OAS-037). *)
 
 type 'a field = {
   value : 'a;
@@ -27,6 +28,7 @@ type 'a field = {
 
 type t = {
   stream_idle_timeout_sec : float option field;
+  first_event_timeout_sec : float option field;
   body_timeout_override_sec : float option field;
   provider_call_deadline_sec : float option field;
 }
@@ -59,6 +61,28 @@ val stream_idle_timeout_sec : unit -> float option
 
     SSOT: {!Env_config_keeper.KeeperKeepalive.stream_idle_timeout_sec} (raw
     parse; [None] when unset) + {!stream_idle_failsafe_floor_sec} (floor). *)
+
+val first_event_failsafe_floor_sec : float
+(** Fail-safe bound for the silent first-event (TTFT/prefill) wait, in seconds
+    (600.0 = 10 min). Substituted for [first_event_timeout_sec] when no
+    explicit value is configured, so the first-event wait is never governed by
+    the much shorter inter-line idle knob through AGENT_CORE's fallback chain
+    (RFC-OAS-037; measured silent prefill: 152s mimo 1M-context, ~200-525s
+    local MLX 20.7K-token keeper prompts). A universal liveness ceiling, not a
+    per-provider tuned default; an explicit env/toml value overrides it. *)
+
+val first_event_timeout_sec : unit -> float option
+(** Streaming-provider first-event (TTFT/prefill) timeout, in seconds. Bounds
+    only the wait for the FIRST provider event; [stream_idle_timeout_sec] arms
+    the inter-line gaps after it (RFC-OAS-037). Always [Some] at runtime: an
+    explicit [MASC_KEEPER_FIRST_EVENT_TIMEOUT_SEC] (or runtime.toml
+    [turn.first_event_timeout_sec]) is honoured verbatim; when unset,
+    {!first_event_failsafe_floor_sec} is substituted. The [float option]
+    return type mirrors the transport wiring; the resolver never yields
+    [None].
+
+    SSOT: {!Env_config_keeper.KeeperKeepalive.first_event_timeout_sec} (raw
+    parse; [None] when unset) + {!first_event_failsafe_floor_sec} (floor). *)
 
 (** Non-streaming HTTP body-consumption deadline override.
     [None] (env unset) skips [Builder.with_body_timeout]. [Some s] is

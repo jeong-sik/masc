@@ -45,6 +45,9 @@ val key_name : string
 val key_generation : string
 val key_active : string
 val key_tool_call_count : string
+val key_cache_read_tokens : string
+val key_cache_n : string
+val key_prompt_n : string
 
 (** Callback name labels used as Otel_metric_store + log identifiers. *)
 val callback_label_after_turn_sse_broadcast : string

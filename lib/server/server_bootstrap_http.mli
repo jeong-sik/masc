@@ -4,7 +4,8 @@
     Three serve variants:
     - {!serve}: HTTP/1.1 only.
     - {!serve_h2}: HTTP/2 only (cleartext h2c).
-    - {!serve_auto}: ALPN negotiation between the two.
+    - {!serve_auto}: h2 preface peek ({!Http_protocol_detect}) picks
+      between the two on the same cleartext port. No TLS, no ALPN.
 
     Internal: \[Http\] alias to {!Http_server_eio} stays private —
     callers reach config / socket types via {!Http_server_eio}

@@ -350,10 +350,13 @@ let complete_stream_http
          [ContentBlockDelta]). *)
       let first_token_at_ref : float option ref = ref None in
       let first_event_at_ref : float option ref = ref None in
-      (* Ollama-specific side channel: prompt_eval_count / eval_count and
-     the four duration fields only appear on the [done:true] line, so
-     stream_acc (which only sees content/tool deltas) cannot capture
-     them. We trap them here and patch the finalised response below. *)
+      (* Wire-timings side channel. Ollama carries prompt_eval_count /
+     eval_count and the four duration fields only on the [done:true]
+     line; llama-server (OpenAI-compat SSE) carries a [timings] object
+     (including [cache_n], the KV-cache-reused prompt tokens) only on
+     the final chunk. stream_acc (which only sees content/tool deltas)
+     cannot capture either, so we trap them here and patch the
+     finalised response below. *)
       let provider = Provider_config.string_of_provider_kind config.kind in
       let model = config.model_id in
       let active_wire_format =
@@ -376,7 +379,7 @@ let complete_stream_http
         | None -> ()
       in
       let ollama_usage = ref None in
-      let ollama_timings = ref None in
+      let stream_timings = ref None in
       (* Agent Core contract — stream-lifetime accumulators for the
          [Streaming_summary] variant that fires once at finalize.
          Hoisted out of [body_logic] so exception paths (timeout,
@@ -671,7 +674,7 @@ let complete_stream_http
                                ([ Types.NDJSONError { message; error_type; raw } ], None)
                            | Streaming.Ollama_chunk chunk ->
                              (match chunk.oll_timings with
-                              | Some _ as t -> ollama_timings := t
+                              | Some _ as t -> stream_timings := t
                               | None -> ());
                              (match chunk.oll_usage with
                               | Some _ as u -> ollama_usage := u
@@ -709,9 +712,19 @@ let complete_stream_http
                                  event_type
                                  data
                              | Provider_http_codec.Openai_chat ->
-                               Streaming.parse_openai_sse_chunk ~streaming_reasoning data
-                               |> Streaming.openai_sse_parse_result_to_events
-                                    (get_state ())
+                               let parsed =
+                                 Streaming.parse_openai_sse_chunk
+                                   ~streaming_reasoning
+                                   data
+                               in
+                               (match parsed with
+                                | Streaming.Openai_chunk
+                                    { chunk_timings = Some _ as t; _ } ->
+                                  stream_timings := t
+                                | _ -> ());
+                               Streaming.openai_sse_parse_result_to_events
+                                 (get_state ())
+                                 parsed
                              | Provider_http_codec.Gemini_generate_content ->
                                (match Streaming.parse_gemini_sse_chunk data with
                                 | Streaming.Gemini_chunk chunk ->
@@ -746,9 +759,19 @@ let complete_stream_http
                                     ]
                                   , None ))
                              | Provider_http_codec.Glm_chat ->
-                               Backend_glm.parse_stream_chunk ~streaming_reasoning data
-                               |> Streaming.openai_sse_parse_result_to_events
-                                    (get_state ())
+                               let parsed =
+                                 Backend_glm.parse_stream_chunk
+                                   ~streaming_reasoning
+                                   data
+                               in
+                               (match parsed with
+                                | Streaming.Openai_chunk
+                                    { chunk_timings = Some _ as t; _ } ->
+                                  stream_timings := t
+                                | _ -> ());
+                               Streaming.openai_sse_parse_result_to_events
+                                 (get_state ())
+                                 parsed
                              | Provider_http_codec.Ollama_chat ->
                                [], None (* unreachable: handled above *)
                            in
@@ -875,8 +898,7 @@ let complete_stream_http
       | Ok (Ok resp) ->
         let latency_ms = latency_ms_int latency_counter in
         (* Ollama injection: usage from the done chunk wins over the
-         zeroed accumulator, and timings populate the otherwise-None
-         telemetry slot before patch_telemetry layers in latency. *)
+         zeroed accumulator. *)
         let resp =
           match config.kind with
           | Provider_config.Ollama ->
@@ -885,17 +907,25 @@ let complete_stream_http
               | Some _ as u -> u
               | None -> resp.usage
             in
-            let telemetry =
-              match resp.telemetry, !ollama_timings with
-              | _, None -> resp.telemetry
-              | Some t, (Some _ as timings) -> Some { t with timings }
-              | None, (Some _ as timings) ->
-                Some { Types.default_inference_telemetry with timings }
-            in
-            { resp with usage; telemetry }
+            { resp with usage }
           | Anthropic | Kimi | OpenAI_compat | Gemini | Glm | DashScope -> resp
         in
-        (match !ollama_timings with
+        (* Wire timings (Ollama done line, llama-server final SSE chunk)
+         populate the otherwise-None telemetry slot before patch_telemetry
+         layers in latency. Provider-independent: whichever branch trapped
+         a timings payload above wins. *)
+        let resp =
+          match !stream_timings with
+          | None -> resp
+          | Some _ as timings ->
+            let telemetry =
+              match resp.telemetry with
+              | Some t -> Some { t with timings }
+              | None -> Some { Types.default_inference_telemetry with timings }
+            in
+            { resp with telemetry }
+        in
+        (match !stream_timings with
          | Some
              { Types.prompt_n = Some prompt_eval_tokens
              ; prompt_ms = Some prompt_eval_ms
@@ -911,7 +941,7 @@ let complete_stream_http
              (Telemetry_event.Prefill_complete
                 { provider; model; prompt_eval_tokens; prompt_eval_ms; cache_hit })
          | Some _ | None -> ());
-        let prefill_ms = Option.bind !ollama_timings (fun t -> t.prompt_ms) in
+        let prefill_ms = Option.bind !stream_timings (fun t -> t.prompt_ms) in
         Ok (patch_telemetry resp ~config ~ttfrc_ms:!ttfrc_ref ~prefill_ms latency_ms)
       | Ok (Error (Http_client.TimeoutError _ as err)) ->
         publish_summary ~terminal:(Telemetry_event.Terminal_error "timeout_error") ();

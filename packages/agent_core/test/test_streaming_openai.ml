@@ -38,7 +38,70 @@ let test_parse_finish_reason () =
   match S.parse_openai_sse_chunk data with
   | S.Openai_chunk chunk ->
     Alcotest.(check (option string)) "finish" (Some "stop") chunk.finish_reason;
-    Alcotest.(check (option string)) "no content" None chunk.delta_content
+    Alcotest.(check (option string)) "no content" None chunk.delta_content;
+    Alcotest.(check bool) "no timings" true (chunk.chunk_timings = None)
+  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+    -> Alcotest.fail "expected OpenAI chunk"
+;;
+
+(* Verbatim final chunk captured from llama-server b10180 (11b068d06) on
+   2026-08-16: the [timings] object rides the finish_reason chunk without
+   any opt-in, and [cache_n] is the KV-cache-reused prompt-token count. *)
+let test_parse_final_chunk_llama_server_timings () =
+  let data =
+    {|{"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"created":1786817415,"id":"chatcmpl-csKoSC2O1Q4NOnFgmxNXcgXu8YZWWITo","model":"qwen3.8-27b","system_fingerprint":"b10180-11b068d06","object":"chat.completion.chunk","timings":{"cache_n":0,"prompt_n":14,"prompt_ms":572.696,"prompt_per_token_ms":40.90685714285714,"prompt_per_second":24.445779261597774,"predicted_n":2,"predicted_ms":122.729,"predicted_per_token_ms":61.3645,"predicted_per_second":16.296066944243005}}|}
+  in
+  match S.parse_openai_sse_chunk data with
+  | S.Openai_chunk chunk ->
+    Alcotest.(check (option string)) "finish" (Some "stop") chunk.finish_reason;
+    (match chunk.chunk_timings with
+     | None -> Alcotest.fail "expected chunk_timings"
+     | Some t ->
+       Alcotest.(check (option int)) "cache_n" (Some 0) t.cache_n;
+       Alcotest.(check (option int)) "prompt_n" (Some 14) t.prompt_n;
+       Alcotest.(check (option int)) "predicted_n" (Some 2) t.predicted_n;
+       (match t.prompt_ms with
+        | Some ms -> Alcotest.(check bool) "prompt_ms" true (abs_float (ms -. 572.696) < 0.001)
+        | None -> Alcotest.fail "expected prompt_ms"))
+  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+    -> Alcotest.fail "expected OpenAI chunk"
+;;
+
+(* Verbatim prompt_progress chunk shape from llama-server b10180 (matches
+   upstream server-task.cpp to_json_oaicompat_chat is_progress branch): a
+   choice whose delta carries only role with content:null, no finish_reason,
+   and the progress payload on an unknown top-level key. The parser must
+   treat it as an ordinary empty chunk — zero events, so it feeds the SSE
+   idle/first-event deadlines (RFC-0382 §7) without fabricating a message
+   start or polluting first-token metrics. *)
+let test_parse_prompt_progress_chunk_yields_no_events () =
+  let data =
+    {|{"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1786821448,"id":"chatcmpl-Fdm6BTycfa2vhBZkSBkKeuDjyviIE2Ve","model":"qwen3.8-27b","system_fingerprint":"b10180-11b068d06","object":"chat.completion.chunk","prompt_progress":{"total":15,"cache":0,"processed":11,"time_ms":7}}|}
+  in
+  let parsed = S.parse_openai_sse_chunk data in
+  (match parsed with
+   | S.Openai_chunk chunk ->
+     Alcotest.(check (option string)) "no content delta" None chunk.delta_content;
+     Alcotest.(check (option string)) "no reasoning delta" None chunk.delta_reasoning;
+     Alcotest.(check int) "no tool_calls" 0 (List.length chunk.delta_tool_calls);
+     Alcotest.(check (option string)) "no finish" None chunk.finish_reason;
+     Alcotest.(check bool) "no timings" true (chunk.chunk_timings = None)
+   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
+     -> Alcotest.fail "expected OpenAI chunk");
+  let state = S.create_openai_stream_state ~provider:"openai" ~model:"m" () in
+  let events, _telemetry = S.openai_sse_parse_result_to_events state parsed in
+  Alcotest.(check int) "zero events" 0 (List.length events)
+;;
+
+let test_parse_final_chunk_timings_cache_hit () =
+  let data =
+    {|{"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"id":"c-9","model":"qwen3.8-27b","object":"chat.completion.chunk","timings":{"cache_n":1741,"prompt_n":26,"prompt_ms":709.5,"predicted_n":512,"predicted_ms":54893.4,"predicted_per_second":9.3}}|}
+  in
+  match S.parse_openai_sse_chunk data with
+  | S.Openai_chunk { chunk_timings = Some t; _ } ->
+    Alcotest.(check (option int)) "cache_n" (Some 1741) t.cache_n;
+    Alcotest.(check (option int)) "prompt_n" (Some 26) t.prompt_n
+  | S.Openai_chunk { chunk_timings = None; _ } -> Alcotest.fail "expected timings"
   | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
     -> Alcotest.fail "expected OpenAI chunk"
 ;;
@@ -122,6 +185,7 @@ let test_events_text_first_chunk () =
     ; delta_tool_calls = []
     ; finish_reason = None
     ; chunk_usage = None
+    ; chunk_timings = None
     }
   in
   let events, _tel = S.openai_chunk_to_events state chunk in
@@ -150,6 +214,7 @@ let test_events_text_subsequent () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   (* Second chunk: no ContentBlockStart *)
@@ -164,6 +229,7 @@ let test_events_text_subsequent () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "1 event" 1 (List.length events);
@@ -192,6 +258,7 @@ let test_events_tool_call () =
       ; delta_tool_calls = [ tc ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "2 events" 2 (List.length events);
@@ -226,6 +293,7 @@ let idless_openai_tool_start () =
           ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   match events with
@@ -253,6 +321,7 @@ let test_events_idless_tool_identity_matches_final_response () =
       ; delta_tool_calls = []
       ; finish_reason = Some "tool_calls"
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   List.iter (Acc.accumulate_event acc) terminal;
@@ -289,6 +358,7 @@ let test_events_parallel_idless_tool_ids_are_distinct () =
       ; delta_tool_calls = [ call 0; call 1 ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   let ids =
@@ -323,6 +393,7 @@ let test_events_late_provider_tool_id_fails_closed () =
           ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   match events with
@@ -348,6 +419,7 @@ let test_events_finish_reason () =
       ; delta_reasoning_details = None
       ; finish_reason = Some "stop"
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "1 event" 1 (List.length events);
@@ -369,6 +441,7 @@ let test_events_tool_calls_finish () =
       ; delta_reasoning_details = None
       ; finish_reason = Some "tool_calls"
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   match List.hd events with
@@ -402,6 +475,7 @@ let test_events_finish_closes_open_tool_block () =
       ; delta_tool_calls = [ tc ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   let events, _tel =
@@ -415,6 +489,7 @@ let test_events_finish_closes_open_tool_block () =
       ; delta_tool_calls = []
       ; finish_reason = Some "tool_calls"
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "stop + message_delta" 2 (List.length events);
@@ -444,6 +519,7 @@ let test_events_length_finish () =
       ; delta_reasoning_details = None
       ; finish_reason = Some "length"
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   match List.hd events with
@@ -464,6 +540,7 @@ let test_events_empty_content_ignored () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "0 events" 0 (List.length events)
@@ -630,6 +707,7 @@ let test_events_reasoning_then_text () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "2 events (start+delta)" 2 (List.length r_events);
@@ -652,6 +730,7 @@ let test_events_reasoning_then_text () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "2 events (start+delta)" 2 (List.length t_events);
@@ -681,6 +760,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "2 events (start+delta)" 2 (List.length r1);
@@ -705,6 +785,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "1 event (delta only)" 1 (List.length r2);
@@ -725,6 +806,7 @@ let test_events_reasoning_delta_index_multi_chunk () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   match List.nth t_events 1 with
@@ -756,6 +838,7 @@ let test_events_tool_first_then_text () =
       ; delta_tool_calls = [ tc ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "2 tool events" 2 (List.length tool_events);
@@ -780,6 +863,7 @@ let test_events_tool_first_then_text () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "2 text events" 2 (List.length text_events);
@@ -805,6 +889,7 @@ let test_events_tool_first_then_text () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   Alcotest.(check int) "1 event (delta only)" 1 (List.length text2_events);
@@ -844,6 +929,7 @@ let test_events_multi_tool_then_text () =
       ; delta_tool_calls = [ tc0; tc1 ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   (* Text must get index 2 *)
@@ -858,6 +944,7 @@ let test_events_multi_tool_then_text () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   (match List.nth text_events 0 with
@@ -885,6 +972,7 @@ let test_events_thinking_tool_text () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   (* Tool call: gets index 1 *)
@@ -906,6 +994,7 @@ let test_events_thinking_tool_text () =
       ; delta_tool_calls = [ tc ]
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   (* Text: must get index 2 *)
@@ -920,6 +1009,7 @@ let test_events_thinking_tool_text () =
       ; delta_tool_calls = []
       ; finish_reason = None
       ; chunk_usage = None
+      ; chunk_timings = None
       }
   in
   (match List.nth text_events 0 with
@@ -1574,6 +1664,18 @@ let () =
       , [ test_case "text chunk" `Quick test_parse_text_chunk
         ; test_case "[DONE] sentinel" `Quick test_parse_done_sentinel
         ; test_case "finish_reason" `Quick test_parse_finish_reason
+        ; test_case
+            "final chunk llama-server timings"
+            `Quick
+            test_parse_final_chunk_llama_server_timings
+        ; test_case
+            "final chunk timings cache hit"
+            `Quick
+            test_parse_final_chunk_timings_cache_hit
+        ; test_case
+            "prompt_progress chunk yields no events"
+            `Quick
+            test_parse_prompt_progress_chunk_yields_no_events
         ; test_case "tool_call start" `Quick test_parse_tool_call_start
         ; test_case "tool_call args" `Quick test_parse_tool_call_args
         ; test_case "usage" `Quick test_parse_usage

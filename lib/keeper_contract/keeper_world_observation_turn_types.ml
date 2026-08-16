@@ -49,6 +49,12 @@ type event_queue_trigger =
           reactive input: it is not Board activity (no post exists), not
           scheduled work, and not a completion-authority decision. *)
   | Manual_compaction_stimulus
+  | Workspace_message_stimulus
+      (** A committed workspace message named this Keeper and was delivered as
+          a durable queue entry. The transcript scan reports the same message
+          as [Mention_pending] when it can still see it; the queue entry is
+          what survives a restart, an ack watermark past the row, and a busy
+          cycle, so the drain reports it in its own right. *)
 
 type turn_reason =
   | Mention_pending
@@ -60,6 +66,7 @@ type turn_reason =
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
   | Manual_compaction_pending
+  | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -91,6 +98,7 @@ let turn_reason_to_string = function
     "completion_authority_rejection_pending"
   | Task_cancellation_pending -> "task_cancellation_pending"
   | Manual_compaction_pending -> "manual_compaction_pending"
+  | Workspace_message_pending -> "workspace_message_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
   | Task_backlog _ -> "task_backlog"
@@ -106,6 +114,7 @@ let turn_reason_of_event_queue_trigger = function
     Completion_authority_rejection_pending
   | Task_cancellation_stimulus -> Task_cancellation_pending
   | Manual_compaction_stimulus -> Manual_compaction_pending
+  | Workspace_message_stimulus -> Workspace_message_pending
 ;;
 
 let skip_reason_to_string = function

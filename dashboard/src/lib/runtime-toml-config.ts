@@ -46,6 +46,9 @@ export interface RuntimeTomlBinding {
   // when the binding omits them (most bindings do).
   priceInput: number | null
   priceOutput: number | null
+  // llama-server prefill-liveness opt-in (runtime.toml `return-progress`,
+  // RFC-0382 §7); null when the binding omits it.
+  returnProgress: boolean | null
 }
 
 export interface RuntimeTomlEnvironment {
@@ -350,6 +353,10 @@ function bindingFromDocument(
     numCtx: asNumber(values['num-ctx']),
     priceInput: asNumber(values['price-input']),
     priceOutput: asNumber(values['price-output']),
+    returnProgress:
+      values['return-progress'] === undefined
+        ? null
+        : asBoolean(values['return-progress']),
   }
 }
 

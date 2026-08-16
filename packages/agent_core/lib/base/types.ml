@@ -98,7 +98,10 @@ type agent_config =
   ; tool_choice : tool_choice option
   ; disable_parallel_tool_use : bool
     (* Anthropic: tool_choice.disable_parallel_tool_use, Openai: parallel_tool_calls=false *)
-  ; cache_system_prompt : bool (* Wrap system prompt with cache_control ephemeral *)
+  ; cache_system_prompt : bool
+    (* Anthropic prompt caching opt-in: cache_control on the system prompt,
+       the last tool, and a top-level automatic breakpoint that advances
+       with the conversation so message history is read from cache. *)
   ; cache_extended_ttl : bool (* true=1h TTL (2x write cost), false=5min default *)
   ; initial_messages : message list
     (* Seed conversation with prior history on first run *)

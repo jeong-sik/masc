@@ -78,6 +78,11 @@ type openai_chunk =
   ; delta_tool_calls : openai_tool_call_delta list
   ; finish_reason : string option
   ; chunk_usage : api_usage option
+  ; chunk_timings : inference_timings option
+    (** Top-level [timings] object llama-server attaches to the final SSE
+        chunk (the one carrying [finish_reason]) without opt-in. Includes
+        [cache_n], the prompt tokens reused from the slot KV cache. Cloud
+        OpenAI-compatible providers do not send it. *)
   }
 
 (** Closed classification of one OpenAI-compatible SSE data payload. Parsing

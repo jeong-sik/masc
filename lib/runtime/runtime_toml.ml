@@ -1157,6 +1157,9 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let price_output_result = typed_find "a float" path tbl "price-output" Otoml.get_float in
   let keep_alive_result = typed_find "a string" path tbl "keep-alive" Otoml.get_string in
   let num_ctx_result = typed_find "an integer" path tbl "num-ctx" Otoml.get_integer in
+  let return_progress_result =
+    typed_find "a boolean" path tbl "return-progress" Otoml.get_boolean
+  in
   let ( let* ) = Result.bind in
   let* enabled_opt = enabled_result in
   let enabled = match enabled_opt with Some value -> value | None -> true in
@@ -1173,6 +1176,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let* price_output = price_output_result in
   let* keep_alive = keep_alive_result in
   let* num_ctx = num_ctx_result in
+  let* return_progress = return_progress_result in
   Ok
     { Runtime_schema.provider_id
     ; model_id
@@ -1185,6 +1189,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; price_output
     ; keep_alive
     ; num_ctx
+    ; return_progress
     }
 ;;
 

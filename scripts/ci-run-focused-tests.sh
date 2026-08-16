@@ -296,6 +296,7 @@ normal_targets=(
   @test/runtest-test_tool_type_label
   @test/runtest-test_telemetry_eio_pbt
   @test/runtest-test_process_eio_coverage
+  @test/runtest-test_pool
   @test/runtest-test_keeper_secret_redaction
   @test/runtest-test_keeper_sandbox_docker_route
   @test/runtest-test_dashboard_dev_token_host_gate

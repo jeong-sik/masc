@@ -66,7 +66,8 @@ let pending_board_event_of_stimulus ~meta_after_triage stim =
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _ ->
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _ ->
     Keeper_world_observation.pending_board_event_of_stimulus
       ~meta:meta_after_triage
       stim
@@ -220,6 +221,11 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
      the 96%-of-turns scheduled channel and the cancellation reads as noise. *)
   | Keeper_event_queue.Task_cancelled _ ->
     Some Keeper_world_observation.Task_cancellation_stimulus
+  (* Dedicated turn_reason: the transcript scan reports the same message as
+     [Mention_pending] only while the row is still ahead of the ack watermark.
+     The queue entry is the durable delivery, so the turn names it as such. *)
+  | Keeper_event_queue.Workspace_message _ ->
+    Some Keeper_world_observation.Workspace_message_stimulus
 ;;
 
 let consume_single_heartbeat_stimulus
@@ -347,6 +353,17 @@ let consume_single_heartbeat_stimulus
         (Keeper_event_queue.hitl_resolution_decision_to_string r.decision)
         meta_after_triage.name;
       Stimulus_consumed []
+    | Keeper_event_queue.Workspace_message message ->
+      (* The transcript row committed at the delivery boundary carries the
+         content and the message lane reads it, so there is no observation to
+         fabricate here — injecting one would put the same message in front of
+         the keeper twice. *)
+      Log.Keeper.info
+        "turn entry: keeper message delivered request_id=%s from=%s (keeper=%s)"
+        message.wmsg_request_id
+        message.wmsg_from
+        meta_after_triage.name;
+      Stimulus_consumed []
   in
   match intake_result with
   | Stimulus_retry_later _ -> intake_result
@@ -384,7 +401,8 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _ ->
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _ ->
     true
 ;;
 
@@ -461,7 +479,10 @@ let reconcile_spent_selection
   | Completion_authority_rejected _
   (* A committed cancellation cannot be undone or settled elsewhere, so the
      selection is always still worth a turn. *)
-  | Task_cancelled _ ->
+  | Task_cancelled _
+  (* A committed workspace message cannot be withdrawn, so the selection stays
+     worth a turn. *)
+  | Workspace_message _ ->
     Ok Selection_actionable
 ;;
 
@@ -515,7 +536,8 @@ let heartbeat_event_intake
       | Keeper_event_queue.Goal_assigned _
       | Keeper_event_queue.Goal_reconciliation_ready _
       | Keeper_event_queue.Completion_authority_rejected _
-      | Keeper_event_queue.Task_cancelled _ ->
+      | Keeper_event_queue.Task_cancelled _
+      | Keeper_event_queue.Workspace_message _ ->
         false
     in
     match select_pending_matching manual_compaction_ready with
@@ -585,7 +607,8 @@ let heartbeat_event_intake
     | Keeper_event_queue.Goal_assigned _
     | Keeper_event_queue.Goal_reconciliation_ready _
     | Keeper_event_queue.Completion_authority_rejected _
-    | Keeper_event_queue.Task_cancelled _ ->
+    | Keeper_event_queue.Task_cancelled _
+    | Keeper_event_queue.Workspace_message _ ->
       None
   in
   (* RFC-0377 P1-1: preload every batch member's recorded attention item in

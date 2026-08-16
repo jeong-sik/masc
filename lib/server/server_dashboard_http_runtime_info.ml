@@ -1609,6 +1609,7 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; "keep_alive", Json_util.string_opt_to_json cfg.keep_alive
     ; "internal_model_rotation_count", Json_util.int_opt_to_json cfg.internal_model_rotation_count
     ; "num_ctx", Json_util.int_opt_to_json cfg.num_ctx
+    ; "return_progress", `Bool cfg.return_progress
     ; "seed", Json_util.int_opt_to_json cfg.seed
     ; "has_previous_response_id", `Bool (Option.is_some cfg.previous_response_id)
     ; "connect_timeout_s", Json_util.float_opt_to_json cfg.connect_timeout_s
@@ -1719,6 +1720,7 @@ let runtime_declared_spec_json (rt : Runtime.t) =
           ; "price_output", Json_util.float_opt_to_json rt.binding.price_output
           ; "keep_alive", Json_util.string_opt_to_json rt.binding.keep_alive
           ; "num_ctx", Json_util.int_opt_to_json rt.binding.num_ctx
+          ; "return_progress", Json_util.bool_opt_to_json rt.binding.return_progress
           ] )
     ]
 ;;

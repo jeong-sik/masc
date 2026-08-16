@@ -996,9 +996,12 @@ let _periodicId: ReturnType<typeof setInterval> | null = null
 export function startPeriodicRefresh(): void {
   if (_periodicId) return
   _periodicId = setInterval(() => {
-    if (!dashboardWsReady.value) {
-      invalidateDashboardCache()
-    }
+    // Fallback only. While the WS is delivering, every route surface this
+    // would refetch is already hydrated by push, so firing anyway just
+    // duplicates the traffic. Previously only invalidateDashboardCache()
+    // was gated and the two refresh calls ran unconditionally.
+    if (dashboardWsReady.value) return
+    invalidateDashboardCache()
     requestNamespaceTruth()
     void refreshActiveRoute().catch(err =>
       console.warn('[periodic] route refresh failed', err instanceof Error ? err.message : err),

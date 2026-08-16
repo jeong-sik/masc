@@ -75,6 +75,7 @@ let runpod_binding =
   ; price_output = None
   ; keep_alive = None
   ; num_ctx = None
+  ; return_progress = None
   }
 
 let runtime_toml_with_credentials ?(provider_extra = "") ?(model_extra = "") credentials =

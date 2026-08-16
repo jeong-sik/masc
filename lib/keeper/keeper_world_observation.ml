@@ -167,6 +167,7 @@ type event_queue_trigger =
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
   | Manual_compaction_stimulus
+  | Workspace_message_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -178,6 +179,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
   | Manual_compaction_pending
+  | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -812,11 +814,14 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Manual_compaction_requested ->
+  | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone
-       from the queue. *)
+       from the queue. [Workspace_message] carries a pointer to a transcript row
+       the message lane already reads, so injecting a board event here would
+       show the operator the same message twice. *)
     Ok None
 ;;
 
@@ -1351,6 +1356,7 @@ let keeper_cycle_decision
                  | Hitl_resolved_pending
                  | Task_cancellation_pending
                  | Manual_compaction_pending
+                 | Workspace_message_pending
                  | Scheduled_autonomous_turn
                  | Scheduled_automation_due
                  | Task_backlog _

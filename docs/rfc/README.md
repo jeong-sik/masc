@@ -231,6 +231,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0381 | 웹 검색은 폴백이 있는 척한다 — provider 계약 정정과 토큰 예산 도입 | Draft | - |
 | 0382 | 런타임별 KV/prompt cache 재사용과 reasoning 연속성 | Draft | - |
 | 0383 | 웹 아티팩트는 쌓이기만 한다 — 오프로드 파일을 재질의 가능한 코퍼스로 | Draft | - |
+| 0384 | In-process Telegram connector (long polling) | Proposed | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |

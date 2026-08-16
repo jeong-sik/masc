@@ -12,6 +12,61 @@ let keeper_reply_chunk_hard_wrap_chars = 180
    blocks (backpressure) when the consumer lags. *)
 let worker_events_buffer_size = 512
 
+(* Wire-terminal accounting for keeper chat operations (#28811). The Dashboard
+   projection publishes AG-UI events while the turn runs inside the child
+   switch; a cancelled turn kills the projection fiber before it can emit
+   RUN_ERROR, so the stream used to close with no terminal receipt. Track
+   which operations have a live wire audience and whether a terminal made it
+   out; the Owner settle hook synthesizes the missing terminal from the
+   execution verdict after the child switch has unwound.
+
+   The stream counts as OPEN from sink registration, not from the first
+   projected event: a turn that fails after claim but before the projection
+   ever runs (missing input, payload parse failure) projects nothing, yet the
+   attached client is already waiting on a terminal (#28849 review). When the
+   last sink unregisters the record is dropped — with no audience there is
+   nothing to close, and the durable operation state stays the authority. *)
+type operation_wire_stream = Wire_started | Wire_terminal_sent
+
+let operation_wire_streams : (string, operation_wire_stream) Hashtbl.t =
+  Hashtbl.create 32
+
+let operation_wire_streams_mu = Stdlib.Mutex.create ()
+
+let ag_ui_terminal_event (event : Ag_ui.event) =
+  match event.Ag_ui.event_type with
+  | Ag_ui.Run_finished | Ag_ui.Run_error -> true
+  | Run_started | Step_started | Step_finished | Text_message_start
+  | Text_message_content | Text_message_end | Tool_call_start
+  | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+  | Custom -> false
+
+let note_operation_wire_opened ~operation_id =
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    if not (Hashtbl.mem operation_wire_streams operation_id)
+    then Hashtbl.replace operation_wire_streams operation_id Wire_started)
+
+let note_operation_wire_event ~operation_id event =
+  let terminal = ag_ui_terminal_event event in
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    match Hashtbl.find_opt operation_wire_streams operation_id, terminal with
+    | Some Wire_terminal_sent, _ -> ()
+    | _, true ->
+      Hashtbl.replace operation_wire_streams operation_id Wire_terminal_sent
+    | None, false ->
+      Hashtbl.replace operation_wire_streams operation_id Wire_started
+    | Some Wire_started, false -> ())
+
+let drop_operation_wire_stream ~operation_id =
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    Hashtbl.remove operation_wire_streams operation_id)
+
+let take_operation_wire_stream ~operation_id =
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    let state = Hashtbl.find_opt operation_wire_streams operation_id in
+    Hashtbl.remove operation_wire_streams operation_id;
+    state)
+
 type operation_live_sink = Ag_ui.event -> unit
 
 let operation_live_sinks :
@@ -30,7 +85,12 @@ let register_operation_live_sink ~operation_id sink =
       | None -> []
       | Some sinks -> sinks
     in
-    Hashtbl.replace operation_live_sinks operation_id ((sink_id, sink) :: current));
+    Hashtbl.replace operation_live_sinks operation_id ((sink_id, sink) :: current);
+    (* An attached sink IS the open wire stream (#28849 review): mark it under
+       the sinks lock so registration and the last-sink drop below cannot
+       interleave into an attached-client/no-record state. Lock order is
+       always sinks_mu -> streams_mu; the streams lock never takes sinks_mu. *)
+    note_operation_wire_opened ~operation_id);
   fun () ->
     Stdlib.Mutex.protect operation_live_sinks_mu (fun () ->
       match Hashtbl.find_opt operation_live_sinks operation_id with
@@ -38,7 +98,11 @@ let register_operation_live_sink ~operation_id sink =
       | Some sinks ->
         let remaining = List.filter (fun (id, _) -> id <> sink_id) sinks in
         if remaining = []
-        then Hashtbl.remove operation_live_sinks operation_id
+        then (
+          Hashtbl.remove operation_live_sinks operation_id;
+          (* Last sink gone -> no audience: drop the wire record so settle
+             stays silent instead of synthesizing into the void. *)
+          drop_operation_wire_stream ~operation_id)
         else Hashtbl.replace operation_live_sinks operation_id remaining)
 ;;
 
@@ -94,46 +158,6 @@ type keeper_chat_stream_request = {
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
 }
-
-(* Wire-terminal accounting for keeper chat operations. The Dashboard
-   projection publishes AG-UI events while the turn runs inside the child
-   switch; a cancelled turn kills the projection fiber before it can emit
-   RUN_ERROR, so the stream used to close with no terminal receipt (#28811).
-   Track which operations opened a live wire stream and whether a terminal
-   made it out; the Owner settle hook synthesizes the missing terminal from
-   the execution verdict after the child switch has unwound. *)
-type operation_wire_stream = Wire_started | Wire_terminal_sent
-
-let operation_wire_streams : (string, operation_wire_stream) Hashtbl.t =
-  Hashtbl.create 32
-
-let operation_wire_streams_mu = Stdlib.Mutex.create ()
-
-let ag_ui_terminal_event (event : Ag_ui.event) =
-  match event.Ag_ui.event_type with
-  | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-  | Run_started | Step_started | Step_finished | Text_message_start
-  | Text_message_content | Text_message_end | Tool_call_start
-  | Tool_call_args | Tool_call_end | State_snapshot | State_delta
-  | Custom -> false
-
-let note_operation_wire_event ~operation_id event =
-  let terminal = ag_ui_terminal_event event in
-  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
-    match Hashtbl.find_opt operation_wire_streams operation_id, terminal with
-    | Some Wire_terminal_sent, _ -> ()
-    | _, true ->
-      Hashtbl.replace operation_wire_streams operation_id Wire_terminal_sent
-    | None, false ->
-      Hashtbl.replace operation_wire_streams operation_id Wire_started
-    | Some Wire_started, false -> ())
-
-let take_operation_wire_stream ~operation_id =
-  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
-    let state = Hashtbl.find_opt operation_wire_streams operation_id in
-    Hashtbl.remove operation_wire_streams operation_id;
-    state)
-
 
 let keeper_chat_stream_error_json message =
   `Assoc
@@ -2136,6 +2160,20 @@ let synthesize_wire_terminal_on_settle ~keeper_name ~operation_id ~execution =
       "keeper chat operation %s succeeded without a wire terminal event"
       operation_id
 
+(* The production settle glue between the Owner hook and the wire registry.
+   Named (and exposed via For_testing) so a test executes exactly what the
+   runner wires: both identifiers become plain strings at this boundary, so
+   a swapped argument would typecheck (#28849 review). *)
+let on_operation_execution_settled ~keeper_name ~claimed_operation_id ~execution =
+  match claimed_operation_id with
+  | None -> ()
+  | Some operation_id ->
+    synthesize_wire_terminal_on_settle
+      ~keeper_name
+      ~operation_id:(Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
+      ~execution
+;;
+
 let operation_runner ~state ~clock : Keeper_owner.operation_runner =
   let base_path = (Mcp_server.workspace_config state).base_path in
   { ready =
@@ -2145,16 +2183,7 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
          | Some (_, _)
          | None -> false)
   ; execute = operation_executor ~state ~clock
-  ; on_execution_settled =
-      (fun ~keeper_name ~claimed_operation_id ~execution ->
-         match claimed_operation_id with
-         | None -> ()
-         | Some operation_id ->
-           synthesize_wire_terminal_on_settle
-             ~keeper_name
-             ~operation_id:
-               (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
-             ~execution)
+  ; on_execution_settled = on_operation_execution_settled
   }
 ;;
 
@@ -2354,5 +2383,6 @@ module For_testing = struct
   let note_operation_wire_event = note_operation_wire_event
   let take_operation_wire_stream = take_operation_wire_stream
   let synthesize_wire_terminal_on_settle = synthesize_wire_terminal_on_settle
+  let on_operation_execution_settled = on_operation_execution_settled
   let register_operation_live_sink = register_operation_live_sink
 end

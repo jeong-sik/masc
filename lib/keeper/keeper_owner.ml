@@ -612,6 +612,13 @@ let start
                   }
             in
             Atomic.set t.child_cancel None;
+            (* Hook-before-durable-settle gives observers a happens-before: a
+               durably Failed/Succeeded operation implies its wire synthesis
+               already ran (the stopping test relies on this ordering).
+               Cancellation of the owner switch inside the hook skips the
+               Child_finished commit below exactly as it always could during
+               [request]; [settle_running_after_restart] clears that window
+               on the next boot. *)
             (try
                runner.on_execution_settled
                  ~keeper_name:t.keeper_name

@@ -544,8 +544,12 @@ describe('ChatTranscript', () => {
     expect(bubble.getAttribute('data-chat-surface-kind')).toBe('agent')
     expect(bubble.textContent).toContain('keeper-code-reviewer-agent')
 
-    expect(bubble.textContent).toContain('Agent')
-    expect(bubble.textContent).not.toContain('Self')
+    // The badge is a span (ChatMetaChip renders an anchor only when url is a
+    // real link), so pin it by the chip attribute rather than bubble text:
+    // this fails when the badge disappears and cannot be perturbed by message
+    // content that happens to contain the same words.
+    const badge = bubble.querySelector('[title="surface=agent"]')
+    expect(badge?.getAttribute('data-chat-meta-chip')).toBe('Agent')
   })
 
   it('renders connector speaker and route context for gate history rows', () => {

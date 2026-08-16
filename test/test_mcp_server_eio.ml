@@ -1419,8 +1419,8 @@ let test_placeholder_tools_hidden_when_env_false () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   (* Save and override the env var *)
-  let prev = Unix.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" in
-  Unix.putenv ~key:"MASC_PLACEHOLDER_TOOLS_ENABLED" ~value:"false";
+  let prev = Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" in
+  Unix.putenv "MASC_PLACEHOLDER_TOOLS_ENABLED" "false";
   let base_path = temp_dir () in
   let state = Mcp_eio.For_testing.create_state ~base_path () in
   let tools = tools_list_all ~clock ~sw state in
@@ -1438,30 +1438,30 @@ let test_placeholder_tools_hidden_when_env_false () =
     (List.mem "masc_archive_save" names);
   (* Restore env *)
   (match prev with None -> Unix.unsetenv "MASC_PLACEHOLDER_TOOLS_ENABLED"
-   | Some v -> Unix.putenv ~key:"MASC_PLACEHOLDER_TOOLS_ENABLED" ~value:v);
+   | Some v -> Unix.putenv "MASC_PLACEHOLDER_TOOLS_ENABLED" v);
   cleanup_dir base_path
 
 (* Regression: task-271 — bool_of_raw_value must accept short-form "y"/"n"
    so that MASC_KEEPER_HISTORY_FRAGMENT_FILTER=n returns false. *)
 let test_bool_env_short_forms yn () =
-  let prev = Unix.getenv_opt "MASC_KEEPER_HISTORY_FRAGMENT_FILTER" in
-  Unix.putenv ~key:"MASC_KEEPER_HISTORY_FRAGMENT_FILTER" ~value:yn in
+  let prev = Sys.getenv_opt "MASC_KEEPER_HISTORY_FRAGMENT_FILTER" in
+  Unix.putenv "MASC_KEEPER_HISTORY_FRAGMENT_FILTER" yn;
   let result =
     Env_config_core.get_bool ~default:true "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
   in
   (match prev with None -> Unix.unsetenv "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-   | Some v -> Unix.putenv ~key:"MASC_KEEPER_HISTORY_FRAGMENT_FILTER" ~value:v);
+   | Some v -> Unix.putenv "MASC_KEEPER_HISTORY_FRAGMENT_FILTER" v);
   result
 
 let test_bool_env_accepts_n () =
-  Alcotest.(check bool) "\"n\" → false" false (test_bool_env_short_forms "n");
+  Alcotest.(check bool) "\"n\" → false" false (test_bool_env_short_forms "n" ());
   Alcotest.(check bool) "\"N\" → false (case insensitive)" false
-    (test_bool_env_short_forms "N")
+    (test_bool_env_short_forms "N" ())
 
 let test_bool_env_accepts_y () =
-  Alcotest.(check bool) "\"y\" → true" true (test_bool_env_short_forms "y");
+  Alcotest.(check bool) "\"y\" → true" true (test_bool_env_short_forms "y" ());
   Alcotest.(check bool) "\"Y\" → true (case insensitive)" true
-    (test_bool_env_short_forms "Y")
+    (test_bool_env_short_forms "Y" ())
 
 let test_handle_request_tools_list_include_hidden_metadata () =
   Eio_main.run @@ fun env ->

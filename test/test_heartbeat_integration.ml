@@ -1739,6 +1739,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; instructions_arg = Some "new operator intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions
+        ; autonomous_instructions_arg = None
+        ; autonomous_instructions_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =
@@ -1863,6 +1865,8 @@ let test_update_keeper_rejects_lane_swap_while_turn_in_flight () =
         ; instructions_arg = Some "rejected mid-turn intent"
         ; profile_defaults
         ; instructions_opt = profile_defaults.instructions
+        ; autonomous_instructions_arg = None
+        ; autonomous_instructions_opt = None
         }
       in
       let ctx : _ Keeper_types_profile.context =

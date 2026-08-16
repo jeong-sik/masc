@@ -507,8 +507,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
            | Ok () ->
                (match Server_mcp_transport_http.validate_protocol_version_continuity
                         ~session_id httpun_request with
-                | Error msg ->
-                    let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                | Error rejection ->
+                    let body =
+                      Server_mcp_transport_http
+                      .protocol_version_rejection_body rejection
+                    in
                     h2_respond_json h2_reqd body ~status:`Bad_request
                       ~extra_headers:(cors @ mcp_headers session_id protocol_version)
                 | Ok () ->
@@ -679,8 +682,11 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                     | Ok () ->
                         (match Server_mcp_transport_http.validate_protocol_version_continuity
                                  ~session_id httpun_request with
-                         | Error msg ->
-                             let body = json_rpc_error Mcp_error_code.Invalid_request msg in
+                         | Error rejection ->
+                             let body =
+                               Server_mcp_transport_http
+                               .protocol_version_rejection_body rejection
+                             in
                              h2_respond_json h2_reqd body ~status:`Bad_request
                                ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
                          | Ok () ->

@@ -78,8 +78,9 @@ let test_protocol_continuity_allows_missing_header () =
     (fun () ->
       match Session.validate_protocol_version_continuity ~session_id request with
       | Ok () -> ()
-      | Error msg ->
-          failf "expected missing protocol header to use session continuity, got %s" msg)
+      | Error rejection ->
+          failf "expected missing protocol header to use session continuity, got %s"
+            (Session.protocol_version_rejection_message rejection))
 
 let test_protocol_version_for_session_falls_back_to_negotiated_version () =
   Eio_main.run @@ fun env ->
@@ -110,10 +111,56 @@ let test_protocol_continuity_rejects_mismatch () =
     (fun () ->
       match Session.validate_protocol_version_continuity ~session_id request with
       | Ok () -> fail "expected mismatched protocol version to be rejected"
-      | Error msg ->
-          check bool "mentions mismatch" true
-            (String.length msg > 0
-            && String.contains msg ':'))
+      | Error (Session.Session_version_mismatch { expected; got; _ }) ->
+          check string "remembered version" "2025-11-25" expected;
+          check string "requested version" "2025-03-26" got
+      | Error (Session.Unsupported_version { requested }) ->
+          failf
+            "expected a session mismatch, got an unsupported-version \
+             rejection for %s"
+            requested)
+
+(* The rejection a modern client reads to decide this server is modern. The
+   assertion runs through the transport rather than the error module so the
+   supported list the body advertises stays the list the transport actually
+   validates against. *)
+let test_unsupported_protocol_version_rejection () =
+  let module Session = Server_mcp_transport_http in
+  let session_id = "compat-session-unsupported-version" in
+  let headers =
+    Httpun.Headers.of_list [("mcp-protocol-version", "1900-01-01")]
+  in
+  let request = Httpun.Request.create ~headers `POST "/mcp" in
+  match Session.validate_protocol_version_continuity ~session_id request with
+  | Ok () -> fail "expected an unsupported protocol version to be rejected"
+  | Error (Session.Session_version_mismatch _) ->
+      fail "an unknown session cannot produce a continuity mismatch"
+  | Error (Session.Unsupported_version { requested } as rejection) ->
+      check string "requested version is echoed" "1900-01-01" requested;
+      let body = Session.protocol_version_rejection_body rejection in
+      let advertised =
+        match Yojson.Safe.from_string body with
+        | `Assoc fields -> (
+            match List.assoc_opt "error" fields with
+            | Some (`Assoc err) -> (
+                (match List.assoc_opt "code" err with
+                | Some (`Int code) ->
+                    check int "wire code fixed by MCP 2026-07-28" (-32022) code
+                | _ -> fail "error.code missing from the body");
+                match List.assoc_opt "data" err with
+                | Some (`Assoc data) -> (
+                    match List.assoc_opt "supported" data with
+                    | Some (`List vs) ->
+                        List.filter_map
+                          (function `String s -> Some s | _ -> None)
+                          vs
+                    | _ -> fail "data.supported missing from the body")
+                | _ -> fail "error.data missing from the body")
+            | _ -> fail "error object missing from the body")
+        | _ -> fail "rejection body is not a JSON object"
+      in
+      check (list string) "body advertises exactly what the transport accepts"
+        Mcp_transport_protocol.supported_protocol_versions advertised
 
 let test_notification_json_only_rejected () =
   let module Transport = Server_mcp_transport_http in
@@ -316,6 +363,8 @@ let () =
         test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
         test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;
         test_case "mismatch still rejects" `Quick test_protocol_continuity_rejects_mismatch;
+        test_case "unsupported version answers -32022" `Quick
+          test_unsupported_protocol_version_rejection;
       ]);
       ("accept_contract", [
         test_case "notification json-only rejected" `Quick

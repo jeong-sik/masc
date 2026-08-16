@@ -674,6 +674,105 @@ let test_status_json_includes_lifecycle_shape () =
       (lifecycle |> member "operator_next_action" |> to_string))
 ;;
 
+(* A status file is not a process. [run.sh stop] only sends SIGTERM; nothing
+   removes the file, and the sidecar's own shutdown path writes one last
+   record saying [connected: true] stamped at the current time. If observed
+   liveness were file presence — or even file freshness — the first stop would
+   make the connector unrestartable, because every later start would reconcile
+   to "already_available" against a dead process's parting claim.
+
+   These fixtures use real pids so the rule is exercised through the same
+   [Unix.kill pid 0] the route runs: this process for a live one, and a child
+   that has already been reaped for a dead one. *)
+let with_status_path_env f =
+  with_env "MASC_SIDECAR_ROOT" None (fun () ->
+    with_env "DISCORD_STATUS_PATH" None (fun () ->
+      with_env "discord_status_path" None f))
+;;
+
+let reaped_pid () =
+  let pid = Unix.create_process "/bin/sh" [| "/bin/sh"; "-c"; "exit 0" |] Unix.stdin Unix.stdout Unix.stderr in
+  let rec reap () =
+    match Unix.waitpid [] pid with
+    | _ -> ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+  in
+  reap ();
+  pid
+;;
+
+let now_iso () = Masc_domain.iso8601_of_unix_seconds (Unix.time ())
+
+let observed_state_of_record ~updated_at ~pid =
+  with_status_path_env (fun () ->
+    with_temp_dir "sidecar-liveness" (fun base_path ->
+      write_file
+        (Routes.status_file ~base_path "discord")
+        (Printf.sprintf
+           {|{"connected":true,"pid":%d,"updated_at":"%s"}|}
+           pid
+           updated_at);
+      (match
+         Routes.write_desired_record
+           ~base_path
+           ~id:"discord"
+           ~updated_by:"test"
+           Routes.Desired_running
+       with
+       | Ok _ -> ()
+       | Error msg -> failf "desired write failed: %s" msg);
+      Routes.read_status_json ~base_path "discord"
+      |> Yojson.Safe.Util.member "sidecar_lifecycle"
+      |> Yojson.Safe.Util.member "observed_state"
+      |> Yojson.Safe.Util.to_string))
+;;
+
+let test_stopped_sidecar_parting_record_is_not_available () =
+  (* The live failure: the dashboard restarts with stop → 800ms → start, which
+     always lands inside the stale window of the shutdown write. Only the dead
+     pid distinguishes that record from a running bot. *)
+  check
+    string
+    "a fresh record from a stopped process does not block its restart"
+    "unavailable"
+    (observed_state_of_record ~updated_at:(now_iso ()) ~pid:(reaped_pid ()))
+;;
+
+let test_running_sidecar_is_observed_available () =
+  (* The other side of the same rule: a live sidecar must keep suppressing the
+     start. [run.sh start] has no already-running guard, so a wrong answer here
+     forks a second bot onto the same token. *)
+  check
+    string
+    "a heartbeating process with a live pid is running"
+    "available"
+    (observed_state_of_record ~updated_at:(now_iso ()) ~pid:(Unix.getpid ()))
+;;
+
+let test_stale_heartbeat_is_not_observed_available () =
+  (* Pid alive, heartbeat aged out: the process exists but has stopped
+     reporting, which is the state an operator restarts out of. Also what pid
+     reuse looks like from here. *)
+  check
+    string
+    "a live pid that stopped heartbeating is not a working sidecar"
+    "unavailable"
+    (observed_state_of_record
+       ~updated_at:"2020-01-01T00:00:00Z"
+       ~pid:(Unix.getpid ()))
+;;
+
+let test_unreadable_heartbeat_is_not_observed_available () =
+  (* No parseable stamp means the record establishes nothing about the
+     process. Restarting a bot that writes garbage is the recoverable
+     direction. *)
+  check
+    string
+    "a record with no readable heartbeat cannot claim liveness"
+    "unavailable"
+    (observed_state_of_record ~updated_at:"not-a-timestamp" ~pid:(Unix.getpid ()))
+;;
+
 let test_status_json_exposes_dashboard_provenance () =
   with_temp_dir "sidecar-status-provenance" (fun base_path ->
     let json = Routes.read_status_json ~base_path "discord" in
@@ -1193,6 +1292,22 @@ let () =
             "status JSON exposes dashboard provenance"
             `Quick
             test_status_json_exposes_dashboard_provenance
+        ; test_case
+            "stopped sidecar's parting record does not block restart"
+            `Quick
+            test_stopped_sidecar_parting_record_is_not_available
+        ; test_case
+            "running sidecar is observed available"
+            `Quick
+            test_running_sidecar_is_observed_available
+        ; test_case
+            "stale heartbeat is not observed available"
+            `Quick
+            test_stale_heartbeat_is_not_observed_available
+        ; test_case
+            "unreadable heartbeat is not observed available"
+            `Quick
+            test_unreadable_heartbeat_is_not_observed_available
         ] )
     ; ( "config_write_helpers"
       , [ test_case "escape: quotes + backslash" `Quick test_escape_quotes_and_backslash

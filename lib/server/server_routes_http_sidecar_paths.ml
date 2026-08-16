@@ -125,26 +125,47 @@ let legacy_status_rel id =
 type sidecar_status_config =
   { env_names : string list
   ; toml_keys : string list
+  ; stale_after_env_name : string
+      (** Age at which this sidecar's heartbeat stops counting as alive.
+          The same variable the connector registry reads to render
+          "stale" (lib/gate/channel_gate_*_state.ml) — an operator who
+          widens the window for a slow-heartbeating bot must widen it for
+          the restart decision too, or Start would fork a second process
+          onto the same token. *)
   }
 
 let sidecar_status_config = function
   | "discord" ->
     { env_names = [ "DISCORD_STATUS_PATH"; "discord_status_path" ]
     ; toml_keys = [ "discord_status_path"; "status_path" ]
+    ; stale_after_env_name = "MASC_DISCORD_STATUS_STALE_SEC"
     }
   | "imessage" ->
     { env_names = [ "IMESSAGE_STATUS_PATH"; "status_path" ]
     ; toml_keys = [ "status_path" ]
+    ; stale_after_env_name = "MASC_IMESSAGE_STATUS_STALE_SEC"
     }
   | "slack" ->
     { env_names = [ "SLACK_STATUS_PATH"; "MASC_SLACK_STATUS_PATH"; "status_path" ]
     ; toml_keys = [ "status_path" ]
+    ; stale_after_env_name = "MASC_SLACK_STATUS_STALE_SEC"
     }
   | "telegram" ->
     { env_names = [ "TELEGRAM_STATUS_PATH"; "MASC_TELEGRAM_STATUS_PATH"; "status_path" ]
     ; toml_keys = [ "status_path" ]
+    ; stale_after_env_name = "MASC_TELEGRAM_STATUS_STALE_SEC"
     }
   | id -> invalid_arg (Printf.sprintf "unknown sidecar id: %s" id)
+;;
+
+(** Fallback window when the connector's variable is unset, matching the
+    default the gate state modules apply to the same variable. *)
+let default_status_stale_sec = 30
+
+let status_stale_sec id =
+  Env_config_core.get_int
+    ~default:default_status_stale_sec
+    (sidecar_status_config id).stale_after_env_name
 ;;
 
 let read_file path = Fs_compat.load_file path

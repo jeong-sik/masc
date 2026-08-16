@@ -1,11 +1,16 @@
 (** Server Routes — sidecar HTTP API.
 
-    Implements [/api/sidecar/<id>/...] for the Discord / cron / connector
-    sidecars: status, start/stop, log tail, GET/PUT TOML config, schema
-    introspection, and the desired-state reconciler that drives the
-    sidecar restart loop.  Mostly path-resolution + filesystem helpers
-    plus a small declarative-state pair (desired_record / attempt_record)
-    persisted as JSON under [.masc/sidecars]. *)
+    Implements [/api/sidecar/<id>/...] for the connector sidecars that run
+    as their own process — imessage and telegram; Discord and Slack moved
+    in-process (RFC-0203 Phase 3, RFC-0317) and the dashboard hides these
+    controls for them.  Serves status, start/stop, log tail, GET/PUT TOML
+    config, and schema introspection.
+
+    The desired-state pair (desired_record / attempt_record, persisted as
+    JSON under [.masc/sidecars]) is reconciled once per start request, in
+    [handle_start].  Nothing reconciles on a timer: [add_routes] takes no
+    switch or clock, so a sidecar that dies on its own stays down until an
+    operator asks for it again. *)
 
 module Http = Http_server_eio
 (** Local alias for the Eio HTTP server module. *)
@@ -82,12 +87,20 @@ val legacy_status_rel : string -> string
 type sidecar_status_config = {
   env_names : string list;
   toml_keys : string list;
+  stale_after_env_name : string;
 }
-(** Names to consult when resolving a sidecar's "is enabled" flag. *)
+(** Where a sidecar's status file may be configured, and the variable
+    naming the age at which its heartbeat stops counting as alive. *)
 
 val sidecar_status_config : string -> sidecar_status_config
-(** Per-sidecar [sidecar_status_config] (Discord checks
-    [DISCORD_BOT_TOKEN] etc.). *)
+(** Per-sidecar status config; raises on an id outside {!known_ids}. *)
+
+val default_status_stale_sec : int
+
+val status_stale_sec : string -> int
+(** Heartbeat age limit for this sidecar, from its
+    [MASC_*_STATUS_STALE_SEC] variable — the same window the gate state
+    modules apply when rendering "stale". *)
 
 val read_file : string -> string
 (** Read whole file; returns empty string when the file is missing. *)

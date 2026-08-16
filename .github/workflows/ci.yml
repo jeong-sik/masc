@@ -23,20 +23,27 @@ permissions:
   pull-requests: read
 
 concurrency:
-  # Branch/PR runs verify the current branch state: a newer push supersedes
-  # the older run, so the older one cancels. Main is excluded from that rule:
-  # merges land minutes apart while a build takes 30-50, so cancelling
-  # in-progress main runs left main with no completed verdict at all (72% of
-  # main-push runs cancelled; on 2026-08-14 five consecutive heads were killed
-  # inside 40 minutes with zero completions). With cancel-in-progress off,
-  # GitHub still keeps at most one pending run per group — intermediate queued
-  # runs collapse into the newest — so main completes one verdict per build
-  # duration and is never more than one build behind, without a backlog.
-  # TLA+ Main Verification remains independently SHA-scoped and preserves the
-  # per-commit formal verification contract.
+  # Branch/PR runs verify the current branch state: a newer push supersedes the
+  # older run, so the older one cancels.
+  #
+  # Main pushes are keyed by commit instead, because a shared main group cannot
+  # produce verdicts at this merge rate. Build and Test budgets 73 minutes of
+  # focused groups under a 90-minute timeout, while merges land every 5.5
+  # minutes on average and arrive 9 seconds apart in bursts. One slot for that
+  # stream means a run needs 90 quiet minutes to finish, and there are none:
+  # turning cancel-in-progress off does not help, because a main run sits
+  # pending and is collapsed by the next merge before it dispatches a single
+  # job. Measured 2026-08-16: main's last completed verdict of any kind was
+  # 2026-08-13T14:07:47Z, and the 150 runs after it produced 148 cancellations
+  # and zero verdicts; across 05:45-07:36 that day, 20 runs dispatched 0 jobs
+  # between them. Keying on github.sha gives each commit its own group, so
+  # nothing collapses. This is the scoping TLA+ Main Verification already uses.
   group: >-
     ${{ github.workflow }}-${{ github.event_name }}-${{
-      github.event.pull_request.number || github.ref_name || github.run_id
+      github.event.pull_request.number
+      || (github.ref == 'refs/heads/main' && github.sha)
+      || github.ref_name
+      || github.run_id
     }}
   cancel-in-progress: ${{ (github.event_name == 'push' && github.ref != 'refs/heads/main') || (github.event_name == 'pull_request' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)) }}
 

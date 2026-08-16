@@ -4,6 +4,42 @@
 
 ## [0.23.0] - 2026-08-16
 
+- **Keeper broadcasts reach the other Keepers' prompts**: projecting a fleet
+  broadcast into every other Keeper's transcript got the row to the dashboard
+  and no further. The prompt's `Pending Messages` section renders only rows that
+  mention this Keeper or that the Owner authored, and nothing else read the
+  transcript into context. A `Fleet Messages` layer now carries the newest
+  `keeper.fleet.messages.max` projected rows (default 10, `0` disables) as
+  standing context. Selection reads the typed `Surface_ref.Agent` surface, and
+  the lane predicate is shared with the reactive lanes so no row can render in
+  both sections. No acknowledgement cursor: lane ack advances only on
+  autonomous turn success, so a Keeper with `proactive_enabled = false` would
+  otherwise accumulate rows forever. Measured on an isolated instance: the
+  probe string appeared once in the transcript and not at all in the rendered
+  prompt before, and once in both after, with the mention rendered once under
+  `Pending Messages` and the two broadcasts once under `Fleet Messages`.
+- **The direct-keeper-message path reads no transcript**: an earlier cut of the
+  fleet layer called the uncapped `Keeper_chat_store.load_all` there, on a path
+  that performs no transcript I/O otherwise, costing a full read and parse of a
+  1,829,467 byte / 2,915 row store per direct message in production. That path
+  empties the reactive lanes because the triggering message is the point; the
+  Keeper sees fleet context on its next observation turn, where the load
+  already happens.
+- **Approved Gate resolutions are delivered past queue-ordered stimuli**: a
+  turn suspended at an approval gate resumed on a redelivered workspace message
+  rather than the approval, so `hitl_resolution` was absent and the host replay
+  never fired.
+- **The agent surface badge no longer claims a row is the viewer's own**: it
+  read `Agent (Self)`, which held while that surface carried only the viewed
+  Keeper's traffic. Projected broadcasts share the surface, so the badge named
+  the wrong Keeper; the speaker chip beside it already identifies the author.
+- **`LspCall` rpc and the inline LSP dispatcher are removed** from the gRPC
+  surface.
+- **Build**: the commit-stamp rule moved to a `lib/build_commit` leaf, dead
+  dune descriptions were removed, and the health snapshot no longer archives
+  the purged `examples/` root — that pathspec made `git archive` exit 128 and
+  failed the required `CI Gate` on every PR.
+
 - **Workspace messages reach the linear event queue**: a workspace message
   that names a Keeper is committed as a typed
   `Keeper_event_queue.Workspace_message` entry in that Keeper's per-Keeper

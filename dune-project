@@ -88,15 +88,6 @@
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
-  ; [ctypes] + [ctypes-foreign] removed: zero callers in lib/ bin/ test/
-  ; since webrtc_bindings.ml was removed (see the "ctypes/ctypes-foreign
-  ; removed" comment in lib/dune).
-  ; Confirmed by `rg '\bctypes\b' lib/ bin/ test/` = empty.  Audited
-  ; continuous-loop iter #17 (2026-05-15).  Re-add if native FFI work
-  ; resumes.
-  ; [pbrt_services] removed: no caller in lib/ bin/ test/ since
-  ; continuous-loop iter #11 audit (2026-05-15).  Re-add if gRPC
-  ; service support resumes.
   (h2 (>= 0.13))
   (h2-eio (>= 0.13))
   (alcotest (and :with-test (>= 1.6)))
@@ -117,10 +108,6 @@
   ; dashboard/src/schemas/sse_event_generated.ts).  Build-time only;
   ; no runtime linkage.  CI invokes it via dashboard/scripts/gen-sse-types.sh.
   (atdts (and :build (>= 4.2.0)))
-  ; [neo4j_bolt_eio] removed: no caller in lib/ bin/ test/ since
-  ; continuous-loop iter #12 audit (2026-05-15).  Same shape as
-  ; pbrt_services (iter #11): declared but never imported.  Re-add
-  ; when Neo4j Bolt support resumes.
   ; OpenTelemetry observability + OTLP exporter.  MASC consumes the
   ; [opentelemetry.client] findlib library exposed by 0.13; newer package
   ; families use a different public library layout.

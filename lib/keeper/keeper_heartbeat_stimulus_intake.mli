@@ -117,6 +117,17 @@ val consume_single_heartbeat_stimulus
   -> Keeper_event_queue.stimulus
   -> stimulus_intake_result
 
+(** [ready_hitl_resolution_peek ~base_path ~keeper_name] returns the first
+    queued [Hitl_resolved] whose approval has left the pending map, without
+    consuming the queue entry (#28809). A turn woken by a different stimulus
+    projects this durable resolution as cycle context so the RFC-0356 host
+    replay is not starved behind the queue position; the untouched entry is
+    later retired by [reconcile_spent_selection] once its grant is spent. *)
+val ready_hitl_resolution_peek
+  :  base_path:string
+  -> keeper_name:string
+  -> Keeper_event_queue.hitl_resolution option
+
 type spent_selection_reconciliation =
   | Selection_actionable
   | Spent_grant_replay_acknowledged

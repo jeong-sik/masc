@@ -406,6 +406,40 @@ let stimulus_ready_for_intake ~base_path (stimulus : Keeper_event_queue.stimulus
     true
 ;;
 
+(* #28809: a ready [Hitl_resolved] may sit behind the stimulus that woke this
+   turn — typically a redelivered workspace message whose own earlier turn
+   deferred on that very approval. The resolution is durable truth in the
+   approval journal, not queue-ordered content, so a turn may project it as
+   cycle context without admitting it (RFC-0020 §3 Rule 4 counts admitted
+   stimuli; the queue entry is untouched here). After the projected replay
+   spends the grant, [reconcile_spent_selection] retires the still-queued
+   entry without costing a turn. *)
+let ready_hitl_resolution_peek ~base_path ~keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error _ -> None
+  | Ok pending ->
+    List.find_map
+      (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.payload with
+         | Keeper_event_queue.Hitl_resolved resolution ->
+           if stimulus_ready_for_intake ~base_path stimulus
+           then Some resolution
+           else None
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Manual_compaction_requested
+         | Keeper_event_queue.Goal_assigned _
+         | Keeper_event_queue.Goal_reconciliation_ready _
+         | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Workspace_message _ -> None)
+      (Keeper_event_queue.to_list pending)
+;;
+
 (* A selection can be ready to intake and still have nothing left for a turn to
    do, because the work it refers to settled elsewhere. Delivering one costs a
    full turn and leaves the entry at the queue head, so a turn that checkpoints

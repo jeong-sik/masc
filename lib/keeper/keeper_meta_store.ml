@@ -90,6 +90,15 @@ module Problem_report_state = struct
         Table.remove reported key;
         true)
   ;;
+
+  (** Drop any reported problem state for (site, path) without observing
+      whether one existed.  For outcomes whose recovery transition is not
+      logged — the file disappeared, or the scan site whose recovery the
+      [Meta_read] site already reports — the clear itself is the whole
+      operation. *)
+  let clear ~site ~path =
+    Stdlib.Mutex.protect mutex (fun () -> Table.remove reported (site, path))
+  ;;
 end
 
 let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta option, string) result =
@@ -109,7 +118,7 @@ let read_meta_file_path ?ownership_root path : (Keeper_meta_contract.keeper_meta
   in
   if not (Fs_compat.file_exists path)
   then (
-    ignore (Problem_report_state.note_recovered ~site:Meta_read ~path);
+    Problem_report_state.clear ~site:Meta_read ~path;
     Ok None)
   else (
     match Safe_ops.read_json_file_safe path with
@@ -331,13 +340,13 @@ let keepalive_keeper_names config =
     with
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled config name meta ->
-        ignore (Problem_report_state.note_recovered ~site:Keepalive_scan ~path);
+        Problem_report_state.clear ~site:Keepalive_scan ~path;
         Some meta.name
     | Ok (Some _) ->
-      ignore (Problem_report_state.note_recovered ~site:Keepalive_scan ~path);
+      Problem_report_state.clear ~site:Keepalive_scan ~path;
       None
     | Ok None ->
-      ignore (Problem_report_state.note_recovered ~site:Keepalive_scan ~path);
+      Problem_report_state.clear ~site:Keepalive_scan ~path;
       if declarative_autoboot_enabled_by_default config name then Some name
       else None
     | Error msg ->
@@ -376,13 +385,13 @@ let persistent_agent_names config =
     with
     | Ok (Some meta)
       when (not meta.paused) && effective_autoboot_enabled config name meta ->
-        ignore (Problem_report_state.note_recovered ~site:Persistent_scan ~path);
+        Problem_report_state.clear ~site:Persistent_scan ~path;
         Some meta.name
     | Ok (Some _) ->
-      ignore (Problem_report_state.note_recovered ~site:Persistent_scan ~path);
+      Problem_report_state.clear ~site:Persistent_scan ~path;
       None
     | Ok None ->
-      ignore (Problem_report_state.note_recovered ~site:Persistent_scan ~path);
+      Problem_report_state.clear ~site:Persistent_scan ~path;
       None
     | Error msg ->
       (* Issue #8377: same anti-pattern as keepalive_keeper_names:

@@ -438,6 +438,147 @@ let projection_reuses_candidate_measurements () =
     !raw_measurements
 ;;
 
+(* --- 7. Last resort: the newest atom does not fit (#28845) ------------- *)
+
+(* The sangsu incident shape: parallel WebSearch results joined the assistant
+   atom that called them, and that one atom (indivisible to the tail window)
+   outgrew the whole history budget. Ordinary demotion cannot help — its
+   boundary excludes the current turn (RFC-0351 §4) — so composition refused
+   the turn outright. The last-resort path retries the composition once with
+   the boundary moved past the newest atom, and the turn's own results leave
+   as externalized markers instead of the turn failing. *)
+module Try_provider = Masc.Keeper_turn_driver_try_provider
+
+let compose ~base_path ~capacity_bytes ~demote_before messages =
+  Try_provider.For_testing.plan_and_window_model_input
+    ~measure_message_bytes
+    ~capacity_bytes
+    ~reserved_bytes:0
+    ~base_path
+    ~demote_before
+    messages
+;;
+
+let bytes_of messages =
+  List.fold_left (fun acc m -> acc + measure_message_bytes m) 0 messages
+;;
+
+let newest_bodies = [ 24_000; 31_000; 47_000; 7_000 ]
+
+let oversized_newest_history () =
+  (* Earlier atoms carry tiny bodies, so nothing below the turn boundary is
+     demotable and every pending entry the composition produces belongs to the
+     newest atom. *)
+  let earlier = history_with_tool_bodies [ "tick"; "tock" ] in
+  let newest =
+    assistant "search batch"
+    :: List.mapi
+         (fun i size ->
+            tool_message
+              ~id:(Printf.sprintf "search-%d" i)
+              (String.make size (Char.chr (Char.code 'a' + i))))
+         newest_bodies
+  in
+  earlier, earlier @ newest, bytes_of newest
+;;
+
+let oversized_newest_atom_is_demoted_as_last_resort () =
+  let earlier, messages, newest_bytes = oversized_newest_history () in
+  (* [capacity] admits the newest atom only demoted: the raw history budget is
+     exactly the atom's own bytes, which the charged preamble pushes over. *)
+  let capacity_bytes = newest_bytes in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  let store = Tool_blob_store.create ~base_path:(Filename.temp_dir "demote" "") in
+  (match
+     Window.project_with_drop
+       ~measure_message_bytes
+       ~capacity_bytes
+       ~reserved_bytes:0
+       messages
+   with
+   | Error (Window.Newest_atom_exceeds_available _) -> ()
+   | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+   | Ok _ -> Alcotest.fail "fixture must not fit without the last resort");
+  match
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~capacity_bytes
+      ~demote_before
+      messages
+  with
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+  | Ok (planned, windowed, history_atom_count) ->
+    Alcotest.(check int)
+      "each of the newest atom's results is demoted"
+      (List.length newest_bodies)
+      (List.length planned.Demotion.pending);
+    Alcotest.(check int)
+      "the denominator is still the whole history"
+      3
+      history_atom_count;
+    let outcome =
+      Demotion.materialize ~store ~pending:planned.Demotion.pending windowed.Window.messages
+    in
+    Alcotest.(check int) "a healthy store reverts nothing" 0 outcome.Demotion.reverted;
+    let transmitted = markers outcome.Demotion.messages in
+    List.iteri
+      (fun i size ->
+         let body = String.make size (Char.chr (Char.code 'a' + i)) in
+         Alcotest.(check bool)
+           (Printf.sprintf "body %d left as a reference, not its bytes" i)
+           false
+           (List.exists (String.equal body) transmitted))
+      newest_bodies;
+    Alcotest.(check int)
+      "the references are readable blob markers"
+      (List.length newest_bodies)
+      (List.length (List.filter Tool_output.is_marker transmitted))
+;;
+
+(* The last resort is not a blank cheque: an oversized atom with nothing
+   demotable in it keeps the typed refusal, with the original measured
+   values. *)
+let oversized_atom_without_demotable_body_still_refuses () =
+  let newest = [ assistant (String.make 50_000 'x') ] in
+  let messages = history_with_tool_bodies [ "tick" ] @ newest in
+  let capacity_bytes = bytes_of newest in
+  match
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~capacity_bytes
+      ~demote_before:1
+      messages
+  with
+  | Ok _ -> Alcotest.fail "an atom with no tool results cannot be demoted"
+  | Error (Window.Newest_atom_exceeds_available { newest_atom_bytes; _ }) ->
+    Alcotest.(check int)
+      "the refusal carries the atom's real bytes"
+      capacity_bytes
+      newest_atom_bytes
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+;;
+
+(* Without a blob store there is nothing a marker could reference, so the
+   refusal stands exactly as it did before #28845. *)
+let last_resort_requires_a_blob_store () =
+  let earlier, messages, newest_bytes = oversized_newest_history () in
+  let demote_before =
+    Window.first_atom_at_or_after
+      messages
+      ~message_index:(List.length earlier)
+  in
+  match
+    compose ~base_path:"" ~capacity_bytes:newest_bytes ~demote_before messages
+  with
+  | Ok _ -> Alcotest.fail "demotion without a store would dangle its markers"
+  | Error (Window.Newest_atom_exceeds_available _) -> ()
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+;;
+
 let () =
   Alcotest.run
     "keeper_model_input_demotion"
@@ -488,5 +629,19 @@ let () =
             `Quick
             projection_reuses_candidate_measurements
          ] )
+    ; ( "last_resort"
+      , [ Alcotest.test_case
+            "oversized newest atom is demoted as a last resort"
+            `Quick
+            oversized_newest_atom_is_demoted_as_last_resort
+        ; Alcotest.test_case
+            "oversized atom without a demotable body still refuses"
+            `Quick
+            oversized_atom_without_demotable_body_still_refuses
+        ; Alcotest.test_case
+            "last resort requires a blob store"
+            `Quick
+            last_resort_requires_a_blob_store
+        ] )
     ]
 ;;

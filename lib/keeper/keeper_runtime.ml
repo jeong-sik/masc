@@ -324,7 +324,7 @@ let ensure_keeper_meta_with_cause config name =
     (* --- Keeper instructions --- *)
     let target_instructions = apply_default defaults.instructions meta.instructions in
     let target_autonomous_instructions =
-      apply_default defaults.autonomous_instructions meta.autonomous_instructions
+      apply_default_opt defaults.autonomous_instructions meta.autonomous_instructions
     in
 
     (* --- Policy --- *)

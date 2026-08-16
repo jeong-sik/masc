@@ -734,7 +734,10 @@ let execute_keeper_stream_tool_streaming
         ~error_msg:error_detail ();
       (match disposition with
        | Tool_result.Failed failure_class ->
-         Log.Keeper.emit Log.Error
+         (* SSOT: the failure class owns its log level (Runtime_failure ->
+            Error, the rest -> Warn). This site was the last Error hardcode;
+            the MCP twin already routes through the helper (#28878 review). *)
+         Log.Keeper.emit (Tool_result.log_level_of_failure_class failure_class)
            ~details:
              (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
                 ~agent_name ~duration_ms ~streaming:true ~error_body:body

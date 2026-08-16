@@ -105,20 +105,24 @@ let with_keeper_slot ~sem ~name f =
 
 let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
 
+(* Returns the persisted heartbeat timestamp JSON and, when the heartbeat
+   ledger could not be read, the typed unavailable reason.  The error is
+   surfaced separately from [last_heartbeat] so an unreadable ledger is not
+   relabeled as an absent/missing heartbeat by downstream consumers. *)
 let persisted_last_heartbeat_json config keeper_name =
   match
     Keeper_heartbeat_persisted_snapshot.latest
       ~config
       ~keeper_name
   with
-  | Ok (Some snapshot) -> `String snapshot.timestamp
-  | Ok None -> `Null
+  | Ok (Some snapshot) -> (`String snapshot.timestamp, None)
+  | Ok None -> (`Null, None)
   | Error error ->
     Log.Dashboard.warn
       "operator snapshot heartbeat read failed for keeper %s: %s"
       keeper_name
       error;
-    `Null
+    (`Null, Some error)
 ;;
 
 let keepers_json
@@ -210,7 +214,7 @@ let keepers_json
                   dt_meta := Time_compat.now () -. t0;
                   if lightweight && meta.paused
                   then (
-                    let last_heartbeat =
+                    let last_heartbeat, heartbeat_observation_error =
                       persisted_last_heartbeat_json config meta.name
                     in
                     let t_ph = Time_compat.now () in
@@ -258,6 +262,8 @@ let keepers_json
                              , `Float keeper_snapshot_interval_s )
                            ; "heartbeat_stale_after_s", `Float heartbeat_stale_after_s
                            ; "last_heartbeat", last_heartbeat
+                           ; ( "heartbeat_observation_error"
+                             , Json_util.string_opt_to_json heartbeat_observation_error )
                            ; "updated_at", `String meta.updated_at
                            ; "created_at", `String meta.created_at
                            ]

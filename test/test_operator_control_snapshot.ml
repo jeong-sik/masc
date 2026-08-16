@@ -583,6 +583,74 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
         heartbeat_timestamp
         (full_keeper |> member "last_heartbeat" |> to_string))
 
+(* PR #28216 regression: an unreadable heartbeat ledger must not be relabeled
+   as an absent/missing heartbeat.  Corrupt the metrics ledger with an invalid
+   month directory so [Keeper_heartbeat_persisted_snapshot.latest] fails, then
+   assert the operator row surfaces [heartbeat_observation_error] and keeps
+   [last_heartbeat] null instead of substituting a fallback. *)
+let test_lightweight_snapshot_surfaces_heartbeat_read_error () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "heartbeat-read-error" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive keeper_name;
+      Keeper_registry.For_testing.clear ();
+      Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      init_runtime_default_for_snapshot base_dir;
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ ("name", `String keeper_name)
+              ; ( "agent_name"
+                , `String (Keeper_identity.keeper_agent_name keeper_name) )
+              ; ("trace_id", `String "trace-heartbeat-read-error")
+              ])
+        with
+        | Ok meta -> { meta with paused = true }
+        | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
+      in
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail err);
+      (* Corrupt the heartbeat metrics ledger: an invalid month directory is a
+         layout violation, so the persisted-snapshot read returns an error. *)
+      let metrics_dir =
+        Keeper_types_support.keeper_metrics_dir config keeper_name
+      in
+      let rec mkdir_p path =
+        if not (Sys.file_exists path)
+        then (
+          mkdir_p (Filename.dirname path);
+          Unix.mkdir path 0o755)
+      in
+      mkdir_p (Filename.concat metrics_dir "2026-13");
+      Operator_control.invalidate_snapshot_cache ();
+      let snapshot =
+        Operator_control.snapshot_json ~view:"summary" ~include_messages:false
+          ~include_keepers:true ~include_summary_fields:false
+          ~lightweight_summary:true
+          (operator_ctx env sw config "operator")
+      in
+      let open Yojson.Safe.Util in
+      let keeper =
+        snapshot |> member "keepers" |> member "items" |> to_list
+        |> List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name)
+        |> Option.value ~default:`Null
+      in
+      Alcotest.(check bool) "keeper present" true (keeper <> `Null);
+      Alcotest.(check bool) "last_heartbeat is not relabeled" true
+        (keeper |> member "last_heartbeat" = `Null);
+      Alcotest.(check bool) "heartbeat observation error surfaced" true
+        (keeper |> member "heartbeat_observation_error" <> `Null))
+
 let test_diagnostic_uses_persisted_heartbeat_freshness () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1546,6 +1614,10 @@ let () =
             "diagnostic uses persisted heartbeat freshness"
             `Quick
             test_diagnostic_uses_persisted_heartbeat_freshness;
+          Alcotest.test_case
+            "lightweight snapshot surfaces heartbeat read error"
+            `Quick
+            test_lightweight_snapshot_surfaces_heartbeat_read_error;
         ] );
       ( "context metrics ledger"
       , [ Alcotest.test_case

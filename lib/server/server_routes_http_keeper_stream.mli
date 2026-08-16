@@ -245,9 +245,12 @@ type translated_keeper_stream_event =
 
 type operation_wire_stream = Wire_started | Wire_terminal_sent
 (** Wire-terminal accounting for one keeper chat operation: whether a live
-    AG-UI stream opened and whether a terminal event (RUN_FINISHED/RUN_ERROR)
-    made it out. Consumed by the Owner settle hook to synthesize the missing
-    terminal after a cancelled child switch unwinds (#28811). *)
+    AG-UI audience exists and whether a terminal event (RUN_FINISHED/
+    RUN_ERROR) made it out. The stream counts as open from sink registration
+    — not from the first projected event — so a turn that fails after claim
+    but before the projection runs still gets its synthesized terminal; the
+    record is dropped when the last sink unregisters. Consumed by the Owner
+    settle hook after the child switch unwinds (#28811). *)
 
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result
@@ -297,6 +300,11 @@ module For_testing : sig
   val synthesize_wire_terminal_on_settle :
     keeper_name:string ->
     operation_id:string ->
+    execution:Keeper_owner.operation_execution ->
+    unit
+  val on_operation_execution_settled :
+    keeper_name:string ->
+    claimed_operation_id:Keeper_owner.Chat_operation.Operation_id.t option ->
     execution:Keeper_owner.operation_execution ->
     unit
   val register_operation_live_sink :

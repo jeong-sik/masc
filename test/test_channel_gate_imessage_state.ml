@@ -88,6 +88,51 @@ let test_connector_json_keeps_redacted_guid () =
     check string "self-chat guid redacted" "any;-;[redacted]"
       (json |> U.member "self_chat_guid" |> U.to_string))
 
+(* The connector-specific fields ride on Config.extra_status_fields, so they
+   are the ones that would silently disappear if the shared functor stopped
+   carrying them into both views. *)
+let test_cursor_rowid_surfaces_in_both_views () =
+  with_temp_dir @@ fun dir ->
+  with_imessage_paths dir (fun () ->
+    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
+    check int "status json carries the cursor" 42
+      (IMessage_state.status_json () |> U.member "cursor_rowid" |> U.to_int);
+    check int "connector json carries the cursor" 42
+      (IMessage_state.connector_json () |> U.member "cursor_rowid" |> U.to_int))
+
+(* iMessage polls chat.db on a timer, so a status file that predates the field
+   must still report the interval the sidecar actually runs at, not 0. *)
+let test_poll_interval_defaults_to_the_imessage_rate () =
+  with_temp_dir @@ fun dir ->
+  with_imessage_paths dir (fun () ->
+    Yojson.Safe.to_file
+      (Filename.concat dir "status.json")
+      (`Assoc
+        [
+          ("updated_at", `String "2026-04-11T00:00:00Z"); ("connected", `Bool true);
+        ]);
+    check (float 0.001) "falls back to the polling rate" 2.0
+      (IMessage_state.status_json () |> U.member "poll_interval_sec" |> U.to_float))
+
+(* Only Discord has guilds. An empty guild_id on an iMessage audit entry would
+   be a field that means nothing, written to the audit log on every bind. *)
+let test_audit_entries_omit_guild_id () =
+  with_temp_dir @@ fun dir ->
+  with_imessage_paths dir (fun () ->
+    Yojson.Safe.to_file (Filename.concat dir "status.json") sample_status_json;
+    match
+      IMessage_state.bind ~channel_id:"any;-;user@example.com"
+        ~keeper_name:"claude" ~actor_name:"tester"
+    with
+    | Error message -> failf "bind failed: %s" message
+    | Ok _ ->
+      let audit =
+        IMessage_state.status_json () |> U.member "recent_audit" |> U.to_list
+      in
+      check int "one audit entry" 1 (List.length audit);
+      check bool "no guild_id on the entry" true
+        (List.for_all (fun entry -> U.member "guild_id" entry = `Null) audit))
+
 let test_malformed_binding_store_is_explicit () =
   with_temp_dir @@ fun dir ->
   with_imessage_paths dir (fun () ->
@@ -114,6 +159,12 @@ let () =
             test_status_json_redacts_self_chat_guid;
           test_case "connector json keeps redacted self-chat guid" `Quick
             test_connector_json_keeps_redacted_guid;
+          test_case "cursor rowid surfaces in both views" `Quick
+            test_cursor_rowid_surfaces_in_both_views;
+          test_case "poll interval defaults to the iMessage rate" `Quick
+            test_poll_interval_defaults_to_the_imessage_rate;
+          test_case "audit entries omit guild_id" `Quick
+            test_audit_entries_omit_guild_id;
           test_case "malformed binding store is explicit" `Quick
             test_malformed_binding_store_is_explicit;
         ] );

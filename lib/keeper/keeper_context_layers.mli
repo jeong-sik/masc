@@ -25,6 +25,7 @@ type layer_id =
   | Scope_messages
   | Own_board_posts
   | Board_activity
+  | Own_recent_actions
   | Fleet_messages
 
 val ordered : layer_id list

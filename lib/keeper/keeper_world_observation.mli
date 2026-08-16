@@ -190,6 +190,13 @@ type world_observation = {
       rows addressed to this keeper, so a projected broadcast would otherwise
       reach the dashboard and never the prompt. Disjoint from
       [pending_messages] by construction. *)
+
+  own_recent_actions : Keeper_own_recent_actions.turn list;
+  (** This keeper's own tool calls from its newest
+      [Keeper_config.keeper_own_recent_turns_max] turns, oldest turn first,
+      each turn's calls in the order they ran. An autonomous turn otherwise
+      carries no record of what this keeper already did, so a finished task
+      gets claimed again and a rejected call gets repeated. *)
 }
 
 val claimable_task_count : world_observation -> int

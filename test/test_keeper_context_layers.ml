@@ -23,6 +23,7 @@ let all_layers =
     L.Scope_messages;
     L.Own_board_posts;
     L.Board_activity;
+    L.Own_recent_actions;
     L.Fleet_messages;
   ]
 

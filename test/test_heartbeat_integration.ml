@@ -280,6 +280,7 @@ let base_observation : WO.world_observation =
   ; connected_surface_failures = []
   ; own_recent_board_posts = []
   ; fleet_messages = []
+  ; own_recent_actions = []
   }
 
 (* ══════════════════════════════════════════════════════════

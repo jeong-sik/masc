@@ -85,6 +85,12 @@ val keeper_board_own_recent_max : unit -> int
     the world observation carries per turn. Cursor-independent — no watermark. *)
 val keeper_fleet_messages_max : unit -> int
 
+val keeper_own_recent_turns_max : unit -> int
+(** Past turns of this keeper's own tool calls replayed into the world
+    observation. Autonomous turns carried no record of what the keeper had
+    already done, so it re-claimed finished tasks and repeated malformed
+    calls. *)
+
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int

@@ -80,6 +80,27 @@ let format_fleet_messages
       message.fleet_content)
   |> String.concat "\n"
 
+let format_own_recent_actions (turns : Keeper_own_recent_actions.turn list) : string =
+  turns
+  |> List.map (fun (turn : Keeper_own_recent_actions.turn) ->
+    turn.calls
+    |> List.map (fun (call : Keeper_own_recent_actions.call) ->
+      match call.outcome with
+      | Keeper_own_recent_actions.Ok_call ->
+        Printf.sprintf "- [turn %d] %s %s -> ok" turn.turn_id call.tool call.input
+      | Keeper_own_recent_actions.Failed_call None ->
+        Printf.sprintf "- [turn %d] %s %s -> REJECTED" turn.turn_id call.tool call.input
+      | Keeper_own_recent_actions.Failed_call (Some detail) ->
+        Printf.sprintf
+          "- [turn %d] %s %s -> REJECTED: %s"
+          turn.turn_id
+          call.tool
+          call.input
+          detail)
+    |> String.concat "\n")
+  |> String.concat "\n"
+;;
+
 (** Format active goals into a prompt section. *)
 let format_goals (goal_ids : string list) : string =
   String.concat "\n"
@@ -1271,6 +1292,24 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
        a fleet broadcast reaches the dashboard and never the prompt. Neutral
        rows, no advisory text; no watermark, so a keeper that never runs an
        autonomous turn accumulates nothing. *)
+    (* What this keeper already did. Without it an autonomous turn re-claims a
+       task it finished and repeats a call the tool just rejected, because the
+       briefing describes the world and never the keeper's own history. Both
+       outcomes are shown: the rejections are what the keeper must not repeat,
+       the successes are what it must not redo. *)
+    | Keeper_context_layers.Own_recent_actions ->
+      if observation.own_recent_actions <> [] then (
+        let ubuf = Buffer.create 1024 in
+        Buffer.add_string ubuf
+          (Printf.sprintf "### Your Recent Actions (%d turns)\n"
+             (List.length observation.own_recent_actions));
+        Buffer.add_string ubuf
+          "Tool calls you already made, oldest turn first — context, not instructions.\n";
+        Buffer.add_string ubuf
+          (format_own_recent_actions observation.own_recent_actions);
+        Buffer.add_string ubuf "\n\n";
+        Some (Buffer.contents ubuf))
+      else None
     | Keeper_context_layers.Fleet_messages ->
       if observation.fleet_messages <> [] then (
         let ubuf = Buffer.create 256 in

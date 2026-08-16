@@ -72,6 +72,19 @@ let keeper_fleet_messages_max_rp =
 let keeper_fleet_messages_max () : int =
   Runtime_params.get keeper_fleet_messages_max_rp
 
+(* How many of the keeper's own past turns are replayed as actions. The default
+   is the depth the product states a keeper must not lose ("10턴 전에 한 자신의
+   발화나 행동"), and it fits: measured on taskmaster 2026-08-16, a turn renders
+   at a median 1.6 KB, so ten turns add ~16 KB to a prompt that was assembling
+   5.8 KB against a 131 KB runtime cap. *)
+let keeper_own_recent_turns_max_rp =
+  _rp_int ~key:"keeper.own_actions.turns.max"
+    ~default:(fun () -> 10)
+    ~min_v:0 ~max_v:200
+    ~description:"Past turns of the keeper's own tool calls replayed into the world observation (0 = disable)" ()
+let keeper_own_recent_turns_max () : int =
+  Runtime_params.get keeper_own_recent_turns_max_rp
+
 let keeper_bootstrap_proactive_warmup_sec_rp =
   _rp_int ~key:"keeper.proactive.warmup_sec"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_BOOTSTRAP_PROACTIVE_WARMUP_SEC"

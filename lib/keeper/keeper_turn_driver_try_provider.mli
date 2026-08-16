@@ -208,6 +208,19 @@ module For_testing : sig
   val memoize_message_measurement :
     (Agent_core.Types.message -> int) -> Agent_core.Types.message -> int
 
+  val plan_and_window_model_input :
+    measure_message_bytes:(Agent_core.Types.message -> int) ->
+    capacity_bytes:int ->
+    reserved_bytes:int ->
+    base_path:string ->
+    demote_before:int ->
+    Agent_core.Types.message list ->
+    (Keeper_model_input_demotion.plan_result
+     * Runtime_model_input_tail_window.projection
+     * int,
+     Runtime_model_input_tail_window.budget_error)
+    result
+
   val offload_model_input_cpu : (unit -> 'a) -> 'a
 
   val context_overflow_shrink_max_attempts : int

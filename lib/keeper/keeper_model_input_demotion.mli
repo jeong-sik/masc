@@ -23,7 +23,8 @@
     transmitted list is rebuilt from durable state every turn, so demoting
     everything eagerly would re-store thousands of blobs per turn. Instead
     the unmodified history first chooses the authoritative window cut. {!plan}
-    substitutes a saturating placeholder only below that cut, the window cuts
+    substitutes a saturating placeholder below the caller's age boundary (the
+    keeper's assembly uses the current turn, see {!plan}), the window cuts
     again against the smaller messages, and {!materialize} stores only the
     messages that survived. The real marker is never larger than the
     placeholder, so a request that fit the plan still fits after
@@ -68,7 +69,11 @@ val plan
       cache, so callers pick one that moves at the rate the conversation
       itself does. The keeper's assembly uses the turn — results the current
       turn produced are what it is reasoning over, results from earlier turns
-      were already reported elsewhere — which moves once per turn.
+      were already reported elsewhere — which moves once per turn. One
+      exception: when the raw cut refuses because the newest atom alone
+      exceeds the budget, the assembly retries once with the boundary past
+      the newest atom, so the turn's own results leave as markers rather than
+      failing the turn (#28845).
     - the placeholder measures strictly smaller than the message does now.
       This replaces a size threshold: the encoded marker runs from about 125
       bytes to 1,154 depending on the preview's bytes, because

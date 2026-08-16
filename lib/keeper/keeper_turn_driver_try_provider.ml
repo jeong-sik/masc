@@ -488,6 +488,89 @@ let declared_request_reserve_bytes ~capacity_bytes ~system_prompt ~tools =
   + (capacity_bytes / unmeasured_request_reserve_divisor)
 ;;
 
+(* RFC-0363: the unmodified history chooses the authoritative cut first.
+   Demotion then rewrites the atoms older than the current turn — the
+   [demote_before] boundary the caller computes from [ctx.initial_messages]
+   (RFC-0351 §4) — and the window cuts again against the smaller messages.
+   Because that boundary moves once per turn, appending a message mid-turn
+   cannot rewrite the transmitted prefix. The [history_atom_count] result is
+   the atom count of that first cut — the only one taken against the whole
+   history; every later cut sees a list that has already been shortened — so
+   the reported share keeps that denominator.
+
+   #28845: with one exception. When the raw cut refuses with
+   [Newest_atom_exceeds_available], the newest atom is indivisible and larger
+   than the whole history budget, so no cut exists and there is no boundary to
+   anchor to. The composition is retried once with the demotion boundary moved
+   past the newest atom ([demote_before = atom_count]), lifting the RFC-0351
+   §4 current-turn exclusion for that attempt only: the turn's own tool
+   results are replaced by their externalized markers instead of failing the
+   turn. If the atom carries nothing demotable, or still does not fit once
+   demoted, the typed refusal stands — this is a single last-resort attempt,
+   not a retry loop. *)
+let plan_and_window_model_input
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      ~base_path
+      ~demote_before
+      messages
+  =
+  let raw_cut candidate =
+    Runtime_model_input_tail_window.project_with_drop
+      ~measure_message_bytes
+      ~capacity_bytes
+      ~reserved_bytes
+      candidate
+  in
+  let plan ~demote_before =
+    if String.equal base_path "" || demote_before = 0
+    then { Keeper_model_input_demotion.messages; pending = [] }
+    else
+      Keeper_model_input_demotion.plan
+        ~measure_message_bytes
+        ~demote_before
+        messages
+  in
+  let cut_planned (planned : Keeper_model_input_demotion.plan_result) history_atom_count =
+    match raw_cut planned.Keeper_model_input_demotion.messages with
+    | Error _ as error -> error
+    | Ok windowed -> Ok (planned, windowed, history_atom_count)
+  in
+  match raw_cut messages with
+  | Error
+      (Runtime_model_input_tail_window.Newest_atom_exceeds_available _ as
+       first_error) ->
+    (* #28845: no cut exists, so there is no raw-cut boundary to anchor
+       demotion to. Retry the composition once with the boundary moved past
+       the newest atom — lifting the RFC-0351 §4 current-turn exclusion for
+       this attempt only — so the turn's own results leave as externalized
+       markers instead of failing the turn. Nothing demotable, or still
+       oversized once demoted, keeps the typed refusal. *)
+    let _, atom_count = Runtime_model_input_tail_window.annotate messages in
+    let planned = plan ~demote_before:atom_count in
+    (match planned.Keeper_model_input_demotion.pending with
+     | [] -> Error first_error
+     | _ ->
+       (match cut_planned planned atom_count with
+        | Ok _ as ok -> ok
+        | Error
+            (Runtime_model_input_tail_window.Newest_atom_exceeds_available _) ->
+          (* The re-cut measured the placeholder-saturated atom, so its
+             [newest_atom_bytes] reports marker sizes and masks the true
+             magnitude. Re-raise the refusal measured against the real
+             bytes. *)
+          Error first_error
+        | Error _ as error -> error))
+  | Error error -> Error error
+  | Ok raw_projection ->
+    let planned = plan ~demote_before in
+    let history_atom_count = raw_projection.atom_count in
+    (match planned.Keeper_model_input_demotion.pending with
+     | [] -> Ok (planned, raw_projection, history_atom_count)
+     | _ -> cut_planned planned history_atom_count)
+;;
+
 (* The bounded transmission view runs here rather than in the caller because
    its budget is [ctx.model_input_capacity_bytes], which
    [Keeper_turn_driver.validate_provider_request_cap] resolves per runtime
@@ -579,57 +662,41 @@ let budgeted_model_input_projection
     in
     let planned_and_windowed =
       offload_model_input_cpu (fun () ->
-        let raw_cut candidate =
-          Runtime_model_input_tail_window.project_with_drop
+        (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
+           reasoning over right now is what this turn produced, and
+           [ctx.initial_messages] is exactly the history the turn was seeded
+           with — so everything past it is this turn's own work and stays
+           verbatim, and everything before it was already reported through a
+           receipt or a board post and becomes a readable address.
+
+           This is a boundary rather than a count of recent results. It also
+           keeps the property the previous boundary was chosen for: appending
+           a message cannot rewrite the retained prefix, because it moves
+           once per turn rather than once per message.
+
+           One exception, exercised only when no cut exists at all: when the
+           raw cut refuses with [Newest_atom_exceeds_available],
+           [plan_and_window_model_input] retries once with the boundary moved
+           past the newest atom, demoting this turn's own results into their
+           externalized markers rather than failing the turn (#28845). *)
+        let demote_before =
+          Runtime_model_input_tail_window.first_atom_at_or_after
+            messages
+            ~message_index:(List.length ctx.initial_messages)
+        in
+        match
+          plan_and_window_model_input
             ~measure_message_bytes
             ~capacity_bytes:ctx.model_input_capacity_bytes
             ~reserved_bytes
-            candidate
-        in
-        (* RFC-0363: the unmodified history chooses the authoritative cut first.
-           Demotion rewrites only atoms omitted by that cut, so appending a turn
-           cannot move the rewrite boundary unless the raw cut itself moves. *)
-        match raw_cut messages with
+            ~base_path:ctx.base_path
+            ~demote_before
+            messages
+        with
         | Error error ->
           Error (Runtime_model_input_tail_window.budget_error_to_string error)
-        | Ok raw_projection ->
-          (* RFC-0351 §4: a tool result is cycle-scoped. What the keeper is
-             reasoning over right now is what this turn produced, and
-             [ctx.initial_messages] is exactly the history the turn was seeded
-             with — so everything past it is this turn's own work and stays
-             verbatim, and everything before it was already reported through a
-             receipt or a board post and becomes a readable address.
-
-             This is a boundary rather than a count of recent results. It also
-             keeps the property the previous boundary was chosen for: appending
-             a message cannot rewrite the retained prefix, because it moves
-             once per turn rather than once per message. *)
-          let demote_before =
-            Runtime_model_input_tail_window.first_atom_at_or_after
-              messages
-              ~message_index:(List.length ctx.initial_messages)
-          in
-          let planned =
-            if String.equal ctx.base_path "" || demote_before = 0
-            then { Keeper_model_input_demotion.messages; pending = [] }
-            else
-              Keeper_model_input_demotion.plan
-                ~measure_message_bytes
-                ~demote_before
-                messages
-          in
-          (* The first cut is the only one taken against the whole history;
-             every later cut sees a list that has already been shortened. Carry
-             its atom count so the reported share keeps that denominator. *)
-          let history_atom_count = raw_projection.atom_count in
-          (match planned.Keeper_model_input_demotion.pending with
-           | [] -> Ok (planned, raw_projection, history_atom_count)
-           | _ ->
-             (match raw_cut planned.Keeper_model_input_demotion.messages with
-              | Error error ->
-                Error
-                  (Runtime_model_input_tail_window.budget_error_to_string error)
-              | Ok windowed -> Ok (planned, windowed, history_atom_count))))
+        | Ok (planned, windowed, history_atom_count) ->
+          Ok (planned, windowed, history_atom_count))
     in
     let windowed =
       match planned_and_windowed with
@@ -1092,6 +1159,7 @@ module For_testing = struct
   let apply_accept = apply_accept
   let observe_request_wire_error = observe_request_wire_error
   let memoize_message_measurement = memoize_message_measurement
+  let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu
   let context_overflow_shrink_max_attempts = context_overflow_shrink_max_attempts
   let context_overflow_shrink_divisor = context_overflow_shrink_divisor

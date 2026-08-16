@@ -21,7 +21,6 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
-DEFAULT_STATE_DIR: Final[str] = ".gate/runtime/imessage"
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/imessage/bindings.json"
 DEFAULT_BINDING_AUDIT_PATH: Final[str] = ".gate/runtime/imessage/binding_audit.jsonl"
 DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/imessage/status.json"
@@ -29,10 +28,23 @@ DEFAULT_CURSOR_PATH: Final[str] = ".gate/runtime/imessage/cursor.json"
 CHAT_DB_PATH: Final[str] = os.path.expanduser("~/Library/Messages/chat.db")
 
 
+def resolve_state_path(raw: str) -> Path:
+    """Anchor a runtime path to MASC_BASE_PATH.
+
+    run.sh exports MASC_BASE_PATH and then chdir's into the sidecar directory,
+    so a relative path left unresolved lands under sidecars/imessage-bot/
+    instead of the base path every reader looks at.
+    """
+    p = Path(raw).expanduser()
+    if p.is_absolute():
+        return p
+    raw_base = os.getenv("MASC_BASE_PATH", "").strip()
+    root = Path(raw_base).expanduser() if raw_base else Path.cwd()
+    return root / p
+
+
 def _runtime_toml_path() -> Path:
-    raw = os.getenv("MASC_BASE_PATH", "").strip()
-    root = Path(raw).expanduser() if raw else Path.cwd()
-    return root / ".gate/runtime/imessage/config.toml"
+    return resolve_state_path(".gate/runtime/imessage/config.toml")
 
 
 def _is_loopback_host(raw_host: str | None) -> bool:
@@ -112,13 +124,17 @@ class BotConfig(BaseSettings):
     keeper_cache_ttl_sec: int = Field(default=30)
 
     # State paths
-    state_dir: str = Field(default=DEFAULT_STATE_DIR)
     binding_store_path: str = Field(default=DEFAULT_BINDING_STORE_PATH)
     binding_audit_path: str = Field(default=DEFAULT_BINDING_AUDIT_PATH)
     status_path: str = Field(default=DEFAULT_STATUS_PATH)
     cursor_path: str = Field(default=DEFAULT_CURSOR_PATH)
     # chat.db
     chat_db_path: str = Field(default=CHAT_DB_PATH)
+
+    @field_validator("binding_store_path", "binding_audit_path", "status_path", "cursor_path")
+    @classmethod
+    def anchor_state_path(cls, v: str) -> str:
+        return str(resolve_state_path(v))
 
     @field_validator("gate_base_url")
     @classmethod

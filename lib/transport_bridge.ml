@@ -8,8 +8,6 @@ module type PROVIDER = sig
   val protocol : Transport.protocol
   val is_enabled : unit -> bool
   val session_count : unit -> int
-  val status_json : unit -> Yojson.Safe.t
-  val reap_stale : unit -> int
 end
 
 (* ── Registry ─────────────────────────────────────────── *)
@@ -45,8 +43,6 @@ let register_provider (p : (module PROVIDER)) =
     update ()
   end
 
-let providers () = Atomic.get registry
-
 let provider_by_name name =
   List.find_opt
     (fun m ->
@@ -61,29 +57,6 @@ let total_session_count () =
     (fun acc m ->
        let module M = (val m : PROVIDER) in
        if M.is_enabled () then acc + M.session_count () else acc)
-    0
-    (Atomic.get registry)
-
-let status_all_json () =
-  `Assoc
-    (List.map
-       (fun m ->
-          let module M = (val m : PROVIDER) in
-          ( M.name,
-            `Assoc
-              [
-                "enabled", `Bool (M.is_enabled ());
-                "protocol", `String (Transport.protocol_to_string M.protocol);
-                "sessions", `Int (M.session_count ());
-                "detail", M.status_json ();
-              ] ))
-       (Atomic.get registry))
-
-let reap_all_stale () =
-  List.fold_left
-    (fun acc m ->
-       let module M = (val m : PROVIDER) in
-       if M.is_enabled () then acc + M.reap_stale () else acc)
     0
     (Atomic.get registry)
 

@@ -48,6 +48,44 @@ let test_generate_caps_at_category_count () =
     (List.length Keeper_canary_facts.category_names)
     (List.length facts)
 
+(* First-occurrence scoring needs values that cannot be matched by
+   anything except this run's own recall: no duplicates within a run, no
+   value that is a substring of another (its first occurrence would be
+   inside the longer value's statement), and no collision with another
+   run's values (an old round on a reused keeper matched "Asia/Tokyo"
+   first on 2026-08-16 and flipped order_matches). Two fixed seeds stand
+   in for "another run" deterministically. *)
+let test_values_are_unique_within_and_across_runs () =
+  let values seed =
+    Keeper_canary_facts.generate ~seed ~count:9
+    |> List.map (fun (f : Keeper_canary_facts.fact) -> f.value)
+  in
+  let a = values "run-fixed-A" in
+  let b = values "run-fixed-B" in
+  Alcotest.(check int)
+    "within-run values are pairwise distinct"
+    9
+    (List.length (List.sort_uniq compare a));
+  List.iter
+    (fun v ->
+      let contained_elsewhere =
+        List.exists
+          (fun w -> (not (String.equal v w)) && Astring.String.is_infix ~affix:v w)
+          a
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "%S is not a substring of another value" v)
+        false
+        contained_elsewhere)
+    a;
+  List.iter
+    (fun v ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%S does not recur under another seed" v)
+        false
+        (List.mem v b))
+    a
+
 let test_statement_mentions_value () =
   let facts = Keeper_canary_facts.generate ~seed:"run-statement" ~count:9 in
   List.iter
@@ -185,6 +223,10 @@ let () =
             "statement mentions value"
             `Quick
             test_statement_mentions_value
+        ; Alcotest.test_case
+            "values are unique within and across runs"
+            `Quick
+            test_values_are_unique_within_and_across_runs
         ] )
     ; ( "plan"
       , [ Alcotest.test_case

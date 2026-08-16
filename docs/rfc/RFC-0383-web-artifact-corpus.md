@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0381"]
-implementation_prs: [28794]
+implementation_prs: [28794, 28826]
 ---
 
 # RFC-0383: 웹 아티팩트는 쌓이기만 한다
@@ -18,7 +18,10 @@ implementation_prs: [28794]
 RFC-0381이 만든 오프로드 경로는 검색·추출 전문을
 `<base>/.masc/artifacts/web-fetch/<sha256>.md`에 내용 주소로 저장한다. 첫 keeper 턴
 실측에서 검색 1회가 파일 3개(80KB)를 만들었고, keeper는
-`keeper_artifact_read(sha256, offset, max_bytes)`로 필요한 조각만 되읽었다.
+`keeper_artifact_read(sha256, offset, max_bytes)`로 필요한 조각만 되읽었다
+(→ §6 정정: 그때 되읽힌 것은 자동 blob화된 tool result였고, 이 경로의 파일
+자체는 keeper reader가 도달할 수 없는 저장소에 있었다. 본문 저장은 #28820에서
+`Tool_blob_store`로 단일화됐다).
 
 문제는 이 파일들이 **익명**이라는 것이다. sha256 파일명만 있고 — 어떤 URL에서 왔는지,
 언제 가져왔는지, 어떤 제목의 문서인지를 파일 시스템 어디에도 기록하지 않는다. 그 결과:
@@ -38,7 +41,7 @@ RFC-0381이 만든 오프로드 경로는 검색·추출 전문을
 | Ledger는 evidence authority | 인덱스는 **projection**이다. 진실은 아티팩트 파일 자체(내용 주소)이고, 인덱스 행은 "그 시각에 이렇게 저장했다"는 사실 기록. 인덱스가 유실·손상돼도 아티팩트 읽기는 그대로 동작한다 |
 | 행동을 유도·강제하는 장치 금지 | 신선도 필드(`fetched_at`)는 사실이다. 만료·TTL·재검증을 **강제하지 않는다** — 오래된 본문을 쓸지 다시 가져올지는 Keeper가 선택한다 |
 | Gate 0 | 어떤 경로에도 새 gate가 없다. 인덱스 append 실패는 오프로드 성공을 실패로 바꾸지 않는다(아래 §2.4) |
-| 도구 표면 최소 | **새 keeper 도구를 추가하지 않는다.** 인덱스는 JSONL 파일이고 keeper는 이미 Grep/Read를 가진다 — 파일 계약을 문서화하면 소비 표면은 이미 존재한다 |
+| 도구 표면 최소 | **새 keeper 도구를 추가하지 않는다.** 인덱스는 JSONL 파일이고 keeper는 이미 Grep/Read를 가진다 — 파일 계약을 문서화하면 소비 표면은 이미 존재한다 (→ §6 정정: keeper sandbox는 `.masc`를 파일 표면으로 주지 않아 이 전제는 agent/운영자 레인에서만 성립한다) |
 | 레거시 금지 | 인덱스 스키마는 v1 단일. reader/converter/migration 없음. 스키마가 바뀌면 hard cut |
 | SSOT | URL→내용 매핑의 진실은 웹이다. 인덱스는 "우리가 관측한 시점의 사실"만 기록하며, 같은 URL의 다른 시점 관측은 서로 다른 행(그리고 대개 다른 sha256)이다 |
 
@@ -56,7 +59,7 @@ RFC-0381이 만든 오프로드 경로는 검색·추출 전문을
 | 필드 | 의미 |
 |---|---|
 | `schema` | `masc.web_artifact.v1` 고정 |
-| `sha256` | 아티팩트 파일명과 동일한 내용 해시 — `keeper_artifact_read`의 첫 인자 |
+| `sha256` | 아티팩트의 내용 해시(= `Tool_blob_store` 주소, §6) — `keeper_artifact_read`의 첫 인자 |
 | `source_url` | 추출 원본의 최종 URL (리다이렉트 해소 후) |
 | `title` | 추출된 `<title>` (없으면 필드 자체 생략 — null 저장 금지) |
 | `bytes` | 오프로드된 전문 크기 |
@@ -120,4 +123,35 @@ dispatch 계층의 몫)이라는 기존 경계를 지킨다. 이것은 counter-a
    (Feature 테스트).
 2. 인덱스 파일을 지워도 fetch/read 경로의 동작이 변하지 않는다 (projection 증명).
 3. keeper가 Grep→`keeper_artifact_read` 2단으로 과거 본문에 도달한다 (턴 실측, RFC-0381
-   Iteration 5와 같은 방법).
+   Iteration 5와 같은 방법). (→ §6: 라이브 실측에서 keeper 레인은 두 단계 모두
+   실패했다 — 본문 읽기는 #28820 수정으로 열렸고, 발견 경로는 레인을 나눠 정정)
+
+## 6. 실측 정정 (2026-08-16, #28820)
+
+:8949 격리 인스턴스에서 acceptance를 keeper 레인으로 처음 끝까지 밟은 결과
+(근거: `docs/evidence/web-artifact-corpus-acceptance-2026-08-16.md`):
+
+- **acceptance 1은 라이브 PASS** — 절단 5건이 index 5행 + 본문 4파일을 만들었고,
+  서로 다른 URL 2개가 같은 내용 해시 한 파일로 dedup되는 것까지 관측했다.
+- **acceptance 3은 keeper 레인에서 양 단계 모두 불성립이었다.**
+  ① keeper sandbox는 `.masc`를 파일 표면으로 주지 않아 인덱스 `Grep`이 도달
+  불가(상대경로가 playground 기준으로 해석). ② 본문이
+  `artifacts/web-fetch/<sha>.md`에 있었는데 `keeper_artifact_read`는
+  `Tool_blob_store`(`tool_blobs/`)만 resolve한다. §0의 "되읽었다"는 관측은
+  web-fetch 파일이 아니라 같은 턴의 자동 blob화된 tool result를 읽은 것이었다.
+
+정정 내용:
+
+1. **본문 저장 단일화 (#28820)** — `offload_full_text`가 전문을
+   `Tool_blob_store.put_durable`로 저장한다. 마커는 경로 대신
+   `full_text_sha256=<sha>`를 싣고, 그 sha가 곧 `keeper_artifact_read`의 첫
+   인자다. `artifacts/web-fetch/`에는 `index.jsonl`만 남는다. 이전 위치의
+   `.md` 파일은 reader가 없던 표면이므로 hard cut(이관 코드 없음)하며, 남은
+   파일의 처분은 운영자 몫이다(#28759). 인덱스의 옛 행이 가리키는 sha가 blob
+   store에 없을 수 있음은 §2의 기존 계약("행이 가리키는 파일이 없을 수 있다")
+   그대로다.
+2. **소비 레인 구분** — 같은 턴/checkpoint 안의 재독은 마커 sha로 keeper
+   레인에서 성립한다. 인덱스를 뒤져 sha를 **발견**하는 교차 세션 경로는
+   agent/운영자 레인이다. keeper 레인의 교차 세션 발견 표면(도구 추가 여부
+   포함)은 #28820에서 별도 결정한다 — "새 도구 0" 원칙의 재검토가 필요한
+   지점이므로 이 RFC의 범위 밖으로 남긴다.

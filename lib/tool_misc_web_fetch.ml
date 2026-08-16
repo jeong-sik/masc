@@ -339,20 +339,34 @@ let offload_full_text ~source_url ~title ~fetched_at_unix text =
           base
           [ Common.masc_dirname; "artifacts"; "web-fetch" ]
       in
-      let digest = Digestif.SHA256.(digest_string text |> to_hex) in
-      let path = Filename.concat dir (digest ^ ".md") in
-      (* Filesystem failures become typed reasons in the marker; anything
-         else propagates to the tool dispatch boundary rather than being
-         flattened into a string here. *)
+      (* #28820: the full text lives in the content-addressed
+         [Tool_blob_store], so the sha carried by the marker and the index
+         is directly the input of [keeper_artifact_read] — a keeper-lane
+         reader exists for it. This directory keeps only the discovery
+         projection ([index.jsonl]). Filesystem failures become typed
+         reasons in the marker; anything else propagates to the tool
+         dispatch boundary rather than being flattened into a string
+         here. *)
       (try
-         Fs_compat.mkdir_p dir;
-         Fs_compat.save_file_atomic path text
-         |> Result.map (fun () ->
-                let index =
-                  web_artifact_index_append ~dir ~sha256:digest ~source_url
-                    ~title ~bytes:(String.length text) ~fetched_at_unix
-                in
-                path, index)
+         let store = Tool_blob_store.create ~base_path:base in
+         let artifact =
+           Tool_blob_store.put_durable store ~bytes:text ~mime:"text/markdown"
+         in
+         (* The blob is durable at this point, so an index-side directory or
+            append failure must surface as [index_unavailable], never as
+            [full_text_unavailable] — the marker would otherwise deny a blob
+            that exists. *)
+         let index =
+           try
+             Fs_compat.mkdir_p dir;
+             web_artifact_index_append ~dir
+               ~sha256:artifact.Tool_output.sha256 ~source_url ~title
+               ~bytes:(String.length text) ~fetched_at_unix
+           with
+           | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+           | Sys_error message -> Error message
+         in
+         Ok (artifact.Tool_output.sha256, index)
        with
        | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
        | Sys_error message -> Error message)
@@ -461,11 +475,11 @@ let truncate_text ~max_chars ~source_url ~title ~fetched_at_unix text =
     let offloaded = offload_full_text ~source_url ~title ~fetched_at_unix text in
     let marker =
       match offloaded with
-      | Ok (path, index) -> (
+      | Ok (sha256, index) -> (
           let base =
             Printf.sprintf
-              "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text=%s]"
-              total (String.length head) (String.length tail) path
+              "[TRUNCATED total_chars=%d kept_head=%d kept_tail=%d full_text_sha256=%s]"
+              total (String.length head) (String.length tail) sha256
           in
           (* RFC-0383: a failed index append never demotes a successful
              offload — the artifact is the truth and the index only a
@@ -491,7 +505,7 @@ let truncate_text ~max_chars ~source_url ~title ~fetched_at_unix text =
     in
     ( String.concat "\n\n" [ head; marker; tail ]
     , true
-    , match offloaded with Ok (path, _) -> Some path | Error _ -> None )
+    , match offloaded with Ok (sha256, _) -> Some sha256 | Error _ -> None )
 
 (** Response cache. Authorization and admission belong to the Keeper Gate; this
     leaf does not maintain a second, process-local request limiter. *)
@@ -700,7 +714,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
               let rendered, extraction_source =
                 render_payload ~extract_mode ~content_kind response.body
               in
-              let text, truncated, full_text_path =
+              let text, truncated, full_text_sha256 =
                 truncate_text ~max_chars ~source_url:response.final_url ~title
                   ~fetched_at_unix rendered
               in
@@ -713,7 +727,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
                 , description
                 , text
                 , truncated
-                , full_text_path ))
+                , full_text_sha256 ))
       | Some status -> Error (Http_status status)
       | None -> Error No_http_status)
 
@@ -782,7 +796,7 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                         , description
                         , text
                         , truncated
-                        , full_text_path ) ->
+                        , full_text_sha256 ) ->
                         let fields =
                           [
                             ("url", `String url);
@@ -798,8 +812,8 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                             ("truncated", `Bool truncated);
                           ]
                           @
-                          (match full_text_path with
-                          | Some path -> [ ("full_text_path", `String path) ]
+                          (match full_text_sha256 with
+                          | Some sha256 -> [ ("full_text_sha256", `String sha256) ]
                           | None -> [])
                           @
                           (match response.content_type with

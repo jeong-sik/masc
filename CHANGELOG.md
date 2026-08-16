@@ -20,8 +20,9 @@
   `Pending Messages` and the two broadcasts once under `Fleet Messages`.
 - **The direct-keeper-message path reads no transcript**: an earlier cut of the
   fleet layer called the uncapped `Keeper_chat_store.load_all` there, on a path
-  that performs no transcript I/O otherwise, costing a full read and parse of a
-  1,829,467 byte / 2,915 row store per direct message in production. That path
+  that performs no transcript I/O otherwise, costing a full read and parse of
+  the whole store per direct message — the largest in production was about
+  1.8 MB over roughly 2,900 rows, and it is append-only. That path
   empties the reactive lanes because the triggering message is the point; the
   Keeper sees fleet context on its next observation turn, where the load
   already happens.
@@ -38,7 +39,9 @@
 - **Build**: the commit-stamp rule moved to a `lib/build_commit` leaf, dead
   dune descriptions were removed, and the health snapshot no longer archives
   the purged `examples/` root — that pathspec made `git archive` exit 128 and
-  failed the required `CI Gate` on every PR.
+  failed the required `CI Gate` on every PR. The same change restored
+  `dune build @check`, which a test applying a `private` variant directly had
+  broken; both landed inside this window, so no release carried either.
 
 - **Workspace messages reach the linear event queue**: a workspace message
   that names a Keeper is committed as a typed

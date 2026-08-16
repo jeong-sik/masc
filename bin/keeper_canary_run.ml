@@ -423,4 +423,11 @@ let () =
          evidence.deterministic_signal.order_matches
          evidence.timing.min_s
          evidence.timing.median_s
-         evidence.timing.max_s)
+         evidence.timing.max_s;
+       (* Masc_eio_env.init parks pool/keepalive fibers on this switch, so
+          returning normally leaves Switch.run waiting on them and the
+          process never exits (first live success run hung >7min after the
+          evidence write, 2026-08-16). Explicit exit is the sibling-harness
+          convention (keeper_capability_probe_cli.ml does the same); stdout
+          is flushed by exit's at_exit hooks. *)
+       exit 0)

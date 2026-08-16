@@ -7,7 +7,7 @@ updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: []
+related: ["0042"]
 implementation_prs:
   - 15520  # G1 tool_help_registry tool_family
   - 15523  # G4 keeper_checkpoint_store ENOENT

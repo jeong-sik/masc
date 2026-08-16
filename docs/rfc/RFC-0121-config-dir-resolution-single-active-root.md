@@ -7,7 +7,7 @@ updated: 2026-05-18
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0077", "0088", "0098", "0103"]
+related: ["0042", "0077", "0088", "0098", "0103"]
 implementation_prs:
   - "16084"  # PR-1: Config_dir_resolver named accessors (SSOT prereq)
   - "16092"  # PR-5: scripts purge ME_ROOT/cwd silent fallback (merged)

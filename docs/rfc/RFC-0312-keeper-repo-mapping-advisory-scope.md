@@ -7,7 +7,7 @@ updated: 2026-08-11
 author: vincent + codex
 supersedes: []
 superseded_by: null
-related: []
+related: ["0104", "0305"]
 implementation_prs:
   - "#23359"
 ---

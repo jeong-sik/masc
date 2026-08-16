@@ -11,7 +11,7 @@ superseded_sections:
   - section: "§2"
     by: "0211"
     note: "Surface choice (keeper model field as the single surface) is superseded by runtime assignment contract (runtime.toml keeper-assignment SSOT). Part A routing mechanism stands."
-related: ["0206"]
+related: ["0001", "0206", "0211"]
 implementation_prs: []
 ---
 

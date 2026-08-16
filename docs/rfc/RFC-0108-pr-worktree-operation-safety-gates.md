@@ -7,7 +7,7 @@ updated: 2026-05-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: []
+related: ["0078"]
 implementation_prs: []
 ---
 

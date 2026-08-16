@@ -7,7 +7,7 @@ updated: 2026-06-02
 author: yousleepwhen
 supersedes: []
 superseded_by: null
-related: ["0070"]
+related: ["0070", "0104"]
 implementation_prs: []
 ---
 

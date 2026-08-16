@@ -7,7 +7,7 @@ updated: 2026-06-17
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0247"]
+related: ["0244", "0247"]
 implementation_prs: []
 ---
 
@@ -18,7 +18,7 @@ implementation_prs: []
 A valuation layer was built on the keeper Memory OS in three steps:
 
 - `confidence` became mutable (write-side EMA upsert).
-- Recall ranked by `score_fact` = confidence × access-recency ×
+- **RFC-0244** ranks recall by `score_fact` = confidence × access-recency ×
   truth-recency × stale-penalty × access-factor.
 - **RFC-0247** added decay / forgetting / promotion machinery on top.
 
@@ -115,8 +115,8 @@ decide between them; the implementing PR must pick one and say why.**
 ## §4 Phasing
 
 1. **This RFC** — correct the SSOT so parallel keepers stop rebuilding the score
-   layer. Mark RFC-0247's valuation sections as superseded by RFC-0251 (amend
-   its `superseded_by`/related on merge).
+   layer from RFC-0244/0247. Mark the valuation sections of those three as
+   superseded by RFC-0251 (amend their `superseded_by`/related on merge).
 2. **Recall de-scoring** — remove `score_fact` from recall; order by seed
    overlap; drop the `confidence=/score=` annotation. Read-side only.
 3. **Producer recording quality** — librarian prompt skips boilerplate /

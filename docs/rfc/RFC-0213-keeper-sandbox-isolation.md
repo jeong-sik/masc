@@ -6,7 +6,7 @@ created: 2026-06-03
 updated: 2026-06-03
 author: jeong-sik
 supersedes: []
-related: []
+related: ["0001", "0208"]
 implementation_prs: []
 ---
 

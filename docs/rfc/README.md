@@ -47,6 +47,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0004 | Keep OCaml and TypeScript wire contracts exact | Active | - |
 | 0009 | Runtime Trust Phase 2: Operator Recommendations + Opt-in Persist | Draft | - |
 | 0010 | ocamlformat config reconciliation | Implemented | - |
+| 0012 | Mid-Turn Progress Probe | Draft | - |
 | 0024 | Ollama Runtime Integration + KV Cache Optimization | Draft | - |
 | 0029 | Dashboard Fiber-Batched Aggregation | Active | - |
 | 0032 | Environment Knob Unification | Draft | - |

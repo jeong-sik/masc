@@ -5,7 +5,7 @@ status: Implemented
 created: 2026-06-22
 updated: 2026-07-10
 author: vincent
-supersedes: []
+supersedes: ["0275"]
 superseded_by: "KEEPER-STATE-OWNERSHIP"
 related: []
 implementation_prs: []

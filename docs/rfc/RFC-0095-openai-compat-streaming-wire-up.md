@@ -7,7 +7,7 @@ updated: 2026-05-22
 author: jeong-sik
 supersedes: []
 superseded_by: null
-related: []
+related: ["0033", "0058"]
 implementation_prs: [15722,15725]
 ---
 

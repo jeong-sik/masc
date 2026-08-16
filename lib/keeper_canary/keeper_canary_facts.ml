@@ -27,15 +27,18 @@ let category_names =
   ; "blocked_dependency"
   ; "fallback_runtime"
   ; "incident_number"
-  ; "reviewer_timezone"
+  ; "escalation_channel"
   ; "artifact_name"
   ; "rollback_switch"
   ]
 
-let reviewer_timezones =
-  [| "Asia/Seoul"; "America/New_York"; "Europe/London"; "Asia/Tokyo"
-   ; "Australia/Sydney"; "America/Los_Angeles"
-  |]
+(* No enum-valued categories: a value drawn from a small pool (the old
+   reviewer_timezones array) can also appear in a keeper transcript for
+   unrelated reasons — another run's round, or ordinary prose — and the
+   scorer attributes the first occurrence to this run's fact. Asia/Tokyo
+   did exactly that on a reused keeper (2026-08-16, wave-1 sweep): the
+   old round's list matched first and flipped order_matches to false.
+   Every category value carries digest entropy instead. *)
 
 (* No PRNG anywhere in this module: every value is read directly off a
    SHA-256 digest of [seed] and a [label] naming which draw it is
@@ -78,25 +81,23 @@ let value_of_category ~seed = function
   | "project_codename" -> "Codename-" ^ hex_suffix ~seed ~label:"project_codename"
   | "lead_reviewer" -> "Reviewer-" ^ hex_suffix ~seed ~label:"lead_reviewer"
   | "deadline" ->
-    (* A digest-derived near-future date, not tied to wall-clock "today"
-       so the same run id reproduces the same date regardless of when it
-       runs. Month and day are independent labels, not two draws from one
-       stream, so neither depends on the other's derivation order. *)
+    (* A digest-derived near-future timestamp, not tied to wall-clock
+       "today" so the same run id reproduces the same value regardless of
+       when it runs. Month, day, and time are independent labels, not
+       draws from one stream, so none depends on another's derivation
+       order. The minute-resolution time is what pushes the value out of
+       the ~336-date pool that could recur across rounds on one keeper. *)
     let month = 1 + int_in_range ~seed ~label:"deadline:month" ~modulus:12 in
     let day = 1 + int_in_range ~seed ~label:"deadline:day" ~modulus:28 in
-    Printf.sprintf "2026-%02d-%02d" month day
+    let hour = int_in_range ~seed ~label:"deadline:hour" ~modulus:24 in
+    let minute = int_in_range ~seed ~label:"deadline:minute" ~modulus:60 in
+    Printf.sprintf "2026-%02d-%02d %02d:%02d UTC" month day hour minute
   | "blocked_dependency" -> "dep-" ^ hex_suffix ~seed ~label:"blocked_dependency"
   | "fallback_runtime" -> "runtime-" ^ hex_suffix ~seed ~label:"fallback_runtime"
   | "incident_number" ->
-    string_of_int (1000 + int_in_range ~seed ~label:"incident_number" ~modulus:9000)
-  | "reviewer_timezone" ->
-    let index =
-      int_in_range
-        ~seed
-        ~label:"reviewer_timezone"
-        ~modulus:(Array.length reviewer_timezones)
-    in
-    reviewer_timezones.(index)
+    (* Nine digits: the old 1000..9999 pool recurred across rounds. *)
+    string_of_int (100_000_000 + int_in_range ~seed ~label:"incident_number" ~modulus:900_000_000)
+  | "escalation_channel" -> "#esc-" ^ hex_suffix ~seed ~label:"escalation_channel"
   | "artifact_name" -> "artifact-" ^ hex_suffix ~seed ~label:"artifact_name" ^ ".json"
   | "rollback_switch" -> "rollback-" ^ hex_suffix ~seed ~label:"rollback_switch"
   | other ->
@@ -111,8 +112,8 @@ let statement_of ~category ~value =
     Printf.sprintf "The blocked dependency is %s." value
   | "fallback_runtime" -> Printf.sprintf "The fallback runtime is %s." value
   | "incident_number" -> Printf.sprintf "The incident number is %s." value
-  | "reviewer_timezone" ->
-    Printf.sprintf "The reviewer timezone is %s." value
+  | "escalation_channel" ->
+    Printf.sprintf "The escalation channel is %s." value
   | "artifact_name" -> Printf.sprintf "The artifact name is %s." value
   | "rollback_switch" ->
     Printf.sprintf "The rollback switch is called %s." value

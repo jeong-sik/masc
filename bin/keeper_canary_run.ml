@@ -42,7 +42,7 @@ let usage =
    [--turn-interval SECONDS] [--turn-timeout SECONDS] \
    [--wall-clock-target SECONDS] [--inject-restart-after N] \
    [--inject-failover-after N --failover-down-cmd CMD [--failover-up-cmd CMD]] \
-   [--judge-runtime ID] [--out PATH]"
+   [--judge-runtime ID] [--out PATH] [--allow-reused-keeper]"
 
 type args = {
   keeper : string;
@@ -61,6 +61,7 @@ type args = {
   failover_up_cmd : string option;
   judge_runtime : string option;
   out : string option;
+  allow_reused_keeper : bool;
 }
 
 let parse_args argv =
@@ -80,6 +81,7 @@ let parse_args argv =
   let failover_up_cmd = ref None in
   let judge_runtime = ref None in
   let out = ref None in
+  let allow_reused_keeper = ref false in
   let rec parse = function
     | [] -> Ok ()
     | "--keeper" :: v :: rest ->
@@ -159,6 +161,9 @@ let parse_args argv =
       out := Some v;
       parse rest
     | [ "--out" ] -> Error "missing value for --out"
+    | "--allow-reused-keeper" :: rest ->
+      allow_reused_keeper := true;
+      parse rest
     | x :: _ -> Error ("unknown option: " ^ x)
   in
   match parse argv with
@@ -200,6 +205,7 @@ let parse_args argv =
          ; failover_up_cmd = !failover_up_cmd
          ; judge_runtime = !judge_runtime
          ; out = !out
+         ; allow_reused_keeper = !allow_reused_keeper
          })
 
 let iso8601_now () =
@@ -653,6 +659,45 @@ type judge_fn =
   recall_reply:string ->
   (Keeper_canary_judge.judgment, string) result
 
+(* First-occurrence recall scoring is only sound on a transcript that
+   cannot already contain this run's fact values or another round's list
+   for the scorer to match first. A reused keeper broke exactly that on
+   the 2026-08-16 wave-1 sweep (an old round's enum value matched before
+   this run's facts and flipped order_matches). Fail loud before turn 1;
+   --allow-reused-keeper turns the refusal into a recorded measurement
+   condition instead. *)
+let require_fresh_transcript ~host ~port ~keeper_name ~allow_reused :
+  (string list, string) result
+  =
+  let ( let* ) = Result.bind in
+  let path = Printf.sprintf "/api/v1/keepers/%s/chat/history" keeper_name in
+  let* status, body = Keeper_canary_http.admin_get ~host ~port ~path () in
+  if status < 200 || status >= 300
+  then Error (Printf.sprintf "chat/history returned HTTP %d" status)
+  else (
+    match Yojson.Safe.from_string body with
+    | exception Yojson.Json_error msg -> Error ("chat/history: invalid JSON: " ^ msg)
+    | `List [] -> Ok []
+    | `List rows ->
+      if allow_reused
+      then
+        Ok
+          [ Printf.sprintf
+              "reused keeper: transcript already held %d messages before turn 1 \
+               (--allow-reused-keeper); first-occurrence order scoring may be \
+               polluted by earlier rounds"
+              (List.length rows)
+          ]
+      else
+        Error
+          (Printf.sprintf
+             "keeper %s already has %d transcript messages; recall scoring needs \
+              a fresh keeper (pass --allow-reused-keeper to record the condition \
+              and proceed)"
+             keeper_name
+             (List.length rows))
+    | _ -> Error "chat/history: expected a JSON array")
+
 let resolve_base_path (args : args) : (string, string) result =
   let resolved =
     match args.base_path with
@@ -761,6 +806,13 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
       match args.inject_restart_after with
       | None -> Ok ()
       | Some _ -> require_proactive_disabled ~host ~port ~keeper_name:args.keeper
+    in
+    let* transcript_notes =
+      require_fresh_transcript
+        ~host
+        ~port
+        ~keeper_name:args.keeper
+        ~allow_reused:args.allow_reused_keeper
     in
     let injections = ref [] in
     let pending_failover = ref None in
@@ -898,7 +950,9 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
       ; deterministic_signal
       ; judgment
       ; injections = List.rev !injections
-      ; notes = capped_note @ correlation_notes @ failover_notes @ judge_notes
+      ; notes =
+          transcript_notes @ capped_note @ correlation_notes @ failover_notes
+          @ judge_notes
       })
 
 (* Sized for the judge's small JSON verdict (at most nine per_fact rows and

@@ -26,6 +26,8 @@ type parsed_args = {
   instructions_arg : string option;
   profile_defaults : keeper_profile_defaults;
   instructions_opt : string option;
+  autonomous_instructions_arg : string option;
+  autonomous_instructions_opt : string option;
 }
 
 let json_non_null_member_present key (json : Yojson.Safe.t) =
@@ -154,6 +156,9 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
     let sandbox_profile_opt = Safe_ops.json_string_opt "sandbox_profile" args in
     let network_mode_opt = Safe_ops.json_string_opt "network_mode" args in
     let instructions_arg = get_string_opt args "instructions" in
+    let autonomous_instructions_arg =
+      get_string_opt args "autonomous_instructions"
+    in
     match
       load_keeper_profile_defaults_result_for_base_path
         ~base_path:ctx.config.base_path
@@ -187,6 +192,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
+    let autonomous_instructions_opt =
+      match autonomous_instructions_arg with
+      | Some _ -> autonomous_instructions_arg
+      | None -> profile_defaults.autonomous_instructions
+    in
     match
       sandbox_profile_error, max_context_override_res, autonomous_wake_prompt_res
     with
@@ -212,6 +222,8 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) :
       instructions_arg;
       profile_defaults;
       instructions_opt;
+      autonomous_instructions_arg;
+      autonomous_instructions_opt;
     }
 
 (** Resolve mention targets with dedup and filtering. *)

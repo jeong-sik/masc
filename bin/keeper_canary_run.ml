@@ -28,7 +28,7 @@
      dune exec bin/keeper_canary_run.exe -- \
        --keeper NAME --run-id ID [--runtime LABEL] [--base PATH] \
        [--host HOST] [--port N] [--facts N] [--turn-interval SECONDS] \
-       [--turn-timeout SECONDS] [--out PATH] *)
+       [--turn-timeout SECONDS] [--judge-runtime ID] [--out PATH] *)
 
 let default_facts = 9
 let default_turn_interval_s = 0.0
@@ -36,7 +36,8 @@ let default_turn_interval_s = 0.0
 let usage =
   "usage: keeper_canary_run --keeper NAME --run-id ID [--runtime LABEL] \
    [--base PATH] [--host HOST] [--port N] [--facts N] \
-   [--turn-interval SECONDS] [--turn-timeout SECONDS] [--out PATH]"
+   [--turn-interval SECONDS] [--turn-timeout SECONDS] [--judge-runtime ID] \
+   [--out PATH]"
 
 type args = {
   keeper : string;
@@ -48,6 +49,7 @@ type args = {
   facts : int;
   turn_interval_s : float;
   turn_timeout_s : float option;
+  judge_runtime : string option;
   out : string option;
 }
 
@@ -61,6 +63,7 @@ let parse_args argv =
   let facts = ref default_facts in
   let turn_interval_s = ref default_turn_interval_s in
   let turn_timeout_s = ref None in
+  let judge_runtime = ref None in
   let out = ref None in
   let rec parse = function
     | [] -> Ok ()
@@ -107,6 +110,10 @@ let parse_args argv =
        | Some s -> Error (Printf.sprintf "--turn-timeout must be > 0, got %g" s)
        | None -> Error ("--turn-timeout must be a number, got " ^ v))
     | [ "--turn-timeout" ] -> Error "missing value for --turn-timeout"
+    | "--judge-runtime" :: v :: rest ->
+      judge_runtime := Some v;
+      parse rest
+    | [ "--judge-runtime" ] -> Error "missing value for --judge-runtime"
     | "--out" :: v :: rest ->
       out := Some v;
       parse rest
@@ -130,6 +137,7 @@ let parse_args argv =
          ; facts = !facts
          ; turn_interval_s = !turn_interval_s
          ; turn_timeout_s = !turn_timeout_s
+         ; judge_runtime = !judge_runtime
          ; out = !out
          })
 
@@ -246,9 +254,13 @@ let correlate_turn ~(messages : Masc.Keeper_chat_store.chat_message list)
          }
        , None ))
 
-let run (args : args) : (Keeper_canary_evidence.run_evidence, string) result =
-  let ( let* ) = Result.bind in
-  let base_path =
+type judge_fn =
+  facts:Keeper_canary_facts.fact list ->
+  recall_reply:string ->
+  (Keeper_canary_judge.judgment, string) result
+
+let resolve_base_path (args : args) : (string, string) result =
+  let resolved =
     match args.base_path with
     | Some p -> p
     | None ->
@@ -256,9 +268,15 @@ let run (args : args) : (Keeper_canary_evidence.run_evidence, string) result =
        | Some p -> p
        | None -> "")
   in
-  if base_path = ""
+  if resolved = ""
   then Error "no workspace base path: set MASC_BASE_PATH or pass --base PATH"
-  else (
+  else Ok resolved
+
+let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
+  (Keeper_canary_evidence.run_evidence, string) result
+  =
+  let ( let* ) = Result.bind in
+  (
     let host = Option.value args.host ~default:(Env_config_core.masc_host ()) in
     let port =
       Option.value args.port ~default:(Env_config_core.masc_http_port_int ())
@@ -357,6 +375,17 @@ let run (args : args) : (Keeper_canary_evidence.run_evidence, string) result =
     let deterministic_signal =
       Keeper_canary_facts.score ~facts ~reply:recall_draft.reply_text
     in
+    (* A requested judge that fails does not erase the run's receipt: the
+       evidence still lands with [judgment = None] plus an explicit note,
+       and main exits non-zero so automation sees the judging failed. *)
+    let judgment, judge_notes =
+      match judge with
+      | None -> (None, [])
+      | Some judge ->
+        (match judge ~facts ~recall_reply:recall_draft.reply_text with
+         | Ok verdict -> (Some verdict, [])
+         | Error detail -> (None, [ Printf.sprintf "judge failed: %s" detail ]))
+    in
     Ok
       { Keeper_canary_evidence.captured_at = iso8601_now ()
       ; harness_git_commit = git_commit_opt ()
@@ -376,8 +405,111 @@ let run (args : args) : (Keeper_canary_evidence.run_evidence, string) result =
           }
       ; timing
       ; deterministic_signal
-      ; notes = capped_note @ correlation_notes
+      ; judgment
+      ; notes = capped_note @ correlation_notes @ judge_notes
       })
+
+(* Sized for the judge's small JSON verdict (at most nine per_fact rows and
+   one rationale paragraph) — far above any observed need, far below a
+   runaway generation. *)
+let judge_max_tokens = 2048
+
+let describe_http_error : Llm_provider.Http_client.http_error -> string =
+  let preview_max = 200 in
+  function
+  | Llm_provider.Http_client.HttpError { code; body; _ } ->
+    let body =
+      if String.length body > preview_max then String.sub body 0 preview_max else body
+    in
+    Printf.sprintf "HTTP %d: %s" code body
+  | Llm_provider.Http_client.NetworkError { message; _ } -> "network error: " ^ message
+  | Llm_provider.Http_client.TimeoutError { message; _ } -> "timeout: " ^ message
+  | Llm_provider.Http_client.AcceptRejected { reason } -> "accept rejected: " ^ reason
+  | Llm_provider.Http_client.ProviderTerminal { message; _ } ->
+    "provider terminal: " ^ message
+  | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+    Llm_provider.Http_client.provider_failure_to_string ~kind ~message
+
+let assistant_text (resp : Agent_core.Types.api_response) : string =
+  resp.Agent_core.Types.content
+  |> List.filter_map (function
+    | Agent_core.Types.Text t -> Some t
+    | _ -> None)
+  |> String.concat ""
+
+(* The server installs the deployment capability overlay at boot and a CLI
+   does not; without it an Agent Core runtime present in runtime.toml still
+   resolves as "absent from the AGENT_CORE capability catalog".
+   keeper_capability_probe_cli.ml and fusion_run.ml carry the same call for
+   the same reason. *)
+let init_judge_runtime_catalog ~base_path =
+  let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
+  ignore
+    (Server_runtime_bootstrap.configure_agent_core_model_catalog_overlay
+       ~config_root:(Filename.dirname config_path)
+       ()
+     : string option);
+  match Runtime.init_default_strict ~config_path with
+  | Error msg ->
+    Printf.eprintf "keeper_canary_run: runtime init failed (%s): %s\n" config_path msg;
+    exit 1
+  | Ok () -> ()
+
+let make_judge ~sw ~net ~clock ~judge_runtime : judge_fn =
+ fun ~facts ~recall_reply ->
+  match Runtime.get_runtime_by_id judge_runtime with
+  | None -> Error (Printf.sprintf "unknown runtime: %s" judge_runtime)
+  | Some rt ->
+    (match rt.Runtime.execution with
+     | Runtime_execution.Codex_app_server _ | Runtime_execution.Antigravity_cli _
+     | Runtime_execution.Claude_code _ ->
+       Error
+         (Printf.sprintf
+            "%s is a %s lane; the judge subcall needs an Agent Core runtime"
+            judge_runtime
+            (Runtime_execution.label rt.Runtime.execution))
+     | Runtime_execution.Agent_core _ ->
+       (* [_for_turn], not the bare resolver: the bare one omits the
+          runtime's inference seed, and a judge measuring a request no
+          keeper turn would send measures itself (masc#28473 — same
+          reasoning as keeper_capability_probe.ml). *)
+       (match
+          Runtime_agent_core_runner.resolve_runtime_providers_for_turn
+            ~runtime_id:judge_runtime
+            ()
+        with
+        | Error detail -> Error ("provider resolution failed: " ^ detail)
+        | Ok [] -> Error (judge_runtime ^ " resolved no provider")
+        | Ok (config :: _) ->
+          let config =
+            Masc.Keeper_structured_output_schema.for_deterministic_subcall
+              ~max_tokens:(Some judge_max_tokens)
+              config
+          in
+          let message role text =
+            { Agent_core.Types.role
+            ; content = [ Agent_core.Types.Text text ]
+            ; name = None
+            ; tool_call_id = None
+            ; metadata = []
+            }
+          in
+          let messages =
+            [ message Agent_core.Types.System Keeper_canary_judge.system_prompt
+            ; message
+                Agent_core.Types.User
+                (Keeper_canary_judge.compose_prompt ~facts ~recall_reply)
+            ]
+          in
+          (match
+             Masc.Keeper_provider_subcall.complete ~sw ~net ~clock ~config ~messages ()
+           with
+           | Error e -> Error (describe_http_error e)
+           | Ok resp ->
+             let text = assistant_text resp in
+             if String.trim text = ""
+             then Error "judge reply carried no text content"
+             else Keeper_canary_judge.parse_reply ~judge_runtime ~facts text)))
 
 let () =
   match parse_args (match Array.to_list Sys.argv with _ :: tl -> tl | [] -> []) with
@@ -400,7 +532,26 @@ let () =
     Eio_context.set_env env;
     Eio_context.set_clock (Eio.Stdenv.clock env);
     Eio_context.set_switch sw;
-    (match run args with
+    let base_path =
+      match resolve_base_path args with
+      | Ok p -> p
+      | Error msg ->
+        Printf.eprintf "keeper_canary_run: %s\n%s\n" msg usage;
+        exit 2
+    in
+    let judge =
+      match args.judge_runtime with
+      | None -> None
+      | Some judge_runtime ->
+        init_judge_runtime_catalog ~base_path;
+        Some
+          (make_judge
+             ~sw
+             ~net:(Eio.Stdenv.net env)
+             ~clock:(Eio.Stdenv.clock env)
+             ~judge_runtime)
+    in
+    (match run ?judge ~base_path args with
      | Error msg ->
        Printf.eprintf "keeper_canary_run: %s\n" msg;
        exit 1
@@ -430,4 +581,10 @@ let () =
           evidence write, 2026-08-16). Explicit exit is the sibling-harness
           convention (keeper_capability_probe_cli.ml does the same); stdout
           is flushed by exit's at_exit hooks. *)
-       exit 0)
+       (match args.judge_runtime, evidence.Keeper_canary_evidence.judgment with
+        | Some _, None ->
+          (* The judge was requested but produced no judgment — the receipt
+             above still landed (with the failure note), and the exit code
+             tells automation the judging leg failed. *)
+          exit 1
+        | _ -> exit 0))

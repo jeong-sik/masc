@@ -100,6 +100,7 @@ type grant_consumption =
 type pending_submission_disposition =
   | Pending_created of Keeper_approval.Audit.receipt
   | Pending_deduplicated
+  | Folded_onto_unconsumed_grant
 
 type pending_submission =
   { approval_id : string
@@ -2901,13 +2902,19 @@ let resolve_entry
   audit_receipt
 ;;
 
+(* The effect request's identity. [turn_id] is deliberately absent: it names
+   the turn that asked, not the effect being asked for. Keeping it in this
+   comparison made every next-turn retry of the same call a fresh approval —
+   measured 2026-08-16: one identical web_search deferred in turns
+   28959/28960/28961 produced three approvals, three auto-judge approvals,
+   and three replays of the same 17,712-byte output into the same context
+   (#28866). The turn that asked is still recorded on the entry for audit. *)
 let pending_entry_matches
       (entry : pending_approval)
       ~base_path
       ~keeper_name
       ~tool_name
       ~input_hash
-      ~turn_id
       ~task_id
       ~goal_id
       ~goal_ids
@@ -2917,7 +2924,6 @@ let pending_entry_matches
   && String.equal entry.keeper_name keeper_name
   && String.equal entry.tool_name tool_name
   && String.equal entry.input_hash input_hash
-  && entry.turn_id = turn_id
   && entry.task_id = task_id
   && entry.goal_id = goal_id
   && entry.goal_ids = goal_ids
@@ -2932,7 +2938,6 @@ let find_pending_id_in_map
       ~keeper_name
       ~tool_name
       ~input_hash
-      ~turn_id
       ~task_id
       ~goal_id
       ~goal_ids
@@ -2950,13 +2955,56 @@ let find_pending_id_in_map
              ~keeper_name
              ~tool_name
              ~input_hash
-             ~turn_id
              ~task_id
              ~goal_id
              ~goal_ids
              ~continuation_channel
          then Some id
          else None)
+    map
+    None
+;;
+
+(* An approved resolution whose one-shot grant is still unconsumed is the
+   same effect request one step further along: the host owes the Keeper a
+   replay of exactly this call. A resubmission folds onto it instead of
+   opening a second approval — "an approval owns its effect" (RFC-0356)
+   implies its dual, an effect has one approval. Rejected and
+   grant-consumed deliveries never match: a retry after rejection is a new
+   approval cycle, and a retry after the effect ran is a new effect. *)
+let find_unconsumed_grant_id_in_deliveries
+      (map : persisted_delivery SMap.t)
+      ~base_path
+      ~keeper_name
+      ~tool_name
+      ~input_hash
+      ~task_id
+      ~goal_id
+      ~goal_ids
+      ~continuation_channel
+  =
+  SMap.fold
+    (fun id (delivery : persisted_delivery) acc ->
+       match acc with
+       | Some _ -> acc
+       | None ->
+         (match delivery.decision with
+          | Decision.Reject _ -> None
+          | Decision.Approve ->
+            if
+              (not delivery.grant_consumed)
+              && pending_entry_matches
+                   delivery.entry
+                   ~base_path
+                   ~keeper_name
+                   ~tool_name
+                   ~input_hash
+                   ~task_id
+                   ~goal_id
+                   ~goal_ids
+                   ~continuation_channel
+            then Some id
+            else None))
     map
     None
 ;;
@@ -3000,7 +3048,6 @@ let submit_pending
              ~keeper_name
              ~tool_name
              ~input_hash
-             ~turn_id
              ~task_id
              ~goal_id
              ~goal_ids
@@ -3008,6 +3055,20 @@ let submit_pending
          with
          | Some id -> Ok (`Deduplicated id)
          | None ->
+           (match
+              find_unconsumed_grant_id_in_deliveries
+                (Atomic.get deliveries)
+                ~base_path
+                ~keeper_name
+                ~tool_name
+                ~input_hash
+                ~task_id
+                ~goal_id
+                ~goal_ids
+                ~continuation_channel
+            with
+            | Some id -> Ok (`Folded_onto_unconsumed_grant id)
+            | None ->
            let id = generate_id () in
            if sequence = max_int
            then
@@ -3047,12 +3108,14 @@ let submit_pending
              Atomic.set
                next_sequences
                (SMap.add base_path following_sequence (Atomic.get next_sequences));
-             Ok (`Created entry))))
+             Ok (`Created entry)))))
   in
   match stored with
   | Error _ as error -> error
   | Ok (`Deduplicated approval_id) ->
     Ok { approval_id; disposition = Pending_deduplicated }
+  | Ok (`Folded_onto_unconsumed_grant approval_id) ->
+    Ok { approval_id; disposition = Folded_onto_unconsumed_grant }
   | Ok (`Created entry) ->
     let audit_receipt = record_pending entry in
     Ok

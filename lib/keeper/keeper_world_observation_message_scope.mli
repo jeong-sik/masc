@@ -116,8 +116,9 @@ val pending_scope_of_messages
 (** [fleet_messages_of_messages ~limit ~targets messages] returns the newest
     [limit] keeper broadcasts projected into this transcript, in arrival order.
     A row qualifies when it is a user line on the [Surface_ref.Agent] surface
-    that is neither addressed to [targets] nor Owner-authored, so this layer
-    and the two reactive lanes cannot render the same row. [limit <= 0] returns
+    that the lane classifier places in no reactive lane — the lanes take its
+    [Some], this layer takes its [None], so the same row cannot reach both.
+    [limit <= 0] returns
     the empty list. No watermark: unlike the lanes this is standing context,
     and lane acknowledgement only advances on autonomous turns. Pure. *)
 val fleet_messages_of_messages

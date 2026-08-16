@@ -301,11 +301,17 @@ let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
   | None -> false
 ;;
 
-(* A row is addressed to this keeper when it mentions one of the keeper's ids
-   or the Owner wrote it. Both reactive lanes are built from this predicate and
-   the fleet layer excludes it, so the two cannot render the same row twice. *)
-let is_lane_addressed ~target_ids (m : Keeper_chat_store.chat_message) : bool =
-  Keeper_lane_mentions.ids_match ~target_ids m.mentions || is_owner_authored m
+(* Which reactive lane a row belongs to, or [None] when it is addressed to
+   nobody here. Both the reactive lanes and the fleet layer read this one
+   function — the lanes on [Some], the fleet layer on [None] — so a row cannot
+   reach both. Splitting the classification would leave disjointness as a
+   property of two expressions staying complements, which nothing checks. *)
+let lane_of ~target_ids (m : Keeper_chat_store.chat_message) : pending_kind option =
+  if Keeper_lane_mentions.ids_match ~target_ids m.mentions
+  then Some Mention
+  else if is_owner_authored m
+  then Some Scope
+  else None
 ;;
 
 let pending_messages_of_messages
@@ -317,23 +323,13 @@ let pending_messages_of_messages
   let target_ids = Keeper_lane_mentions.target_ids_of targets in
   pending_user_lines ?ack_id messages
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
-    if Keeper_lane_mentions.ids_match ~target_ids m.mentions
-    then
-      Some
-        { message_id = m.id
-        ; speaker = speaker_display m
-        ; content = m.content
-        ; kind = Mention
-        }
-    else if is_owner_authored m
-    then
-      Some
-        { message_id = m.id
-        ; speaker = speaker_display m
-        ; content = m.content
-        ; kind = Scope
-        }
-    else None)
+    lane_of ~target_ids m
+    |> Option.map (fun kind ->
+      { message_id = m.id
+      ; speaker = speaker_display m
+      ; content = m.content
+      ; kind
+      }))
 ;;
 
 (* RFC-0230 P2 — scope messages: a keeper's lane is, in practice, an operator
@@ -385,7 +381,7 @@ let fleet_messages_of_messages
     |> List.filter (fun (m : Keeper_chat_store.chat_message) ->
       match m.role, m.surface with
       | Keeper_chat_store.Role.User, Some Surface_ref.Agent ->
-        not (is_lane_addressed ~target_ids m)
+        Option.is_none (lane_of ~target_ids m)
       | ( Keeper_chat_store.Role.User
         , Some
             ( Surface_ref.Dashboard _

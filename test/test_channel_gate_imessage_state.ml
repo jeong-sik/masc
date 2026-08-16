@@ -133,6 +133,41 @@ let test_audit_entries_omit_guild_id () =
       check bool "no guild_id on the entry" true
         (List.for_all (fun entry -> U.member "guild_id" entry = `Null) audit))
 
+(* Two OCaml readers go looking for this one file: the gate state below, and
+   Server_routes_http_sidecar_paths, which the dashboard's start/stop route
+   uses to decide whether the sidecar is running. They have to agree on which
+   env var relocates it, or an operator who sets one moves half the readers.
+   iMessage shared no name with the server until now; Telegram always did. *)
+let with_binding_paths dir f =
+  with_env "MASC_IMESSAGE_BINDING_STORE_PATH"
+    (Some (Filename.concat dir "bindings.json"))
+    (fun () ->
+      with_env "MASC_IMESSAGE_BINDING_AUDIT_PATH"
+        (Some (Filename.concat dir "audit.jsonl"))
+        f)
+
+let test_unprefixed_env_moves_both_readers () =
+  with_temp_dir @@ fun dir ->
+  with_binding_paths dir (fun () ->
+    let status_path = Filename.concat dir "relocated-status.json" in
+    with_env "MASC_IMESSAGE_STATUS_PATH" None (fun () ->
+      with_env "IMESSAGE_STATUS_PATH" (Some status_path) (fun () ->
+        Yojson.Safe.to_file status_path sample_status_json;
+        check string "gate state follows IMESSAGE_STATUS_PATH" status_path
+          (IMessage_state.status_json () |> U.member "status_path" |> U.to_string);
+        check string "the sidecar route resolves the same file" status_path
+          (Server_routes_http_sidecar_paths.status_file ~base_path:dir "imessage"))))
+
+let test_prefixed_env_still_moves_the_gate_state () =
+  with_temp_dir @@ fun dir ->
+  with_binding_paths dir (fun () ->
+    let status_path = Filename.concat dir "prefixed-status.json" in
+    with_env "IMESSAGE_STATUS_PATH" None (fun () ->
+      with_env "MASC_IMESSAGE_STATUS_PATH" (Some status_path) (fun () ->
+        Yojson.Safe.to_file status_path sample_status_json;
+        check string "MASC_-prefixed spelling keeps working" status_path
+          (IMessage_state.status_json () |> U.member "status_path" |> U.to_string))))
+
 let test_malformed_binding_store_is_explicit () =
   with_temp_dir @@ fun dir ->
   with_imessage_paths dir (fun () ->
@@ -165,6 +200,10 @@ let () =
             test_poll_interval_defaults_to_the_imessage_rate;
           test_case "audit entries omit guild_id" `Quick
             test_audit_entries_omit_guild_id;
+          test_case "unprefixed env moves both readers" `Quick
+            test_unprefixed_env_moves_both_readers;
+          test_case "prefixed env still moves the gate state" `Quick
+            test_prefixed_env_still_moves_the_gate_state;
           test_case "malformed binding store is explicit" `Quick
             test_malformed_binding_store_is_explicit;
         ] );

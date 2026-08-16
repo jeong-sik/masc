@@ -27,9 +27,17 @@ include
       let default_binding_audit_path =
         ".gate/runtime/imessage/binding_audit.jsonl"
 
-      let status_path_env_names = [ "MASC_IMESSAGE_STATUS_PATH" ]
-      let binding_store_path_env_names = [ "MASC_IMESSAGE_BINDING_STORE_PATH" ]
-      let binding_audit_path_env_names = [ "MASC_IMESSAGE_BINDING_AUDIT_PATH" ]
+      (* Both spellings, because Server_routes_http_sidecar_paths reads the
+         unprefixed one when it goes looking for the same file. Telegram
+         already accepts both. *)
+      let status_path_env_names =
+        [ "IMESSAGE_STATUS_PATH"; "MASC_IMESSAGE_STATUS_PATH" ]
+
+      let binding_store_path_env_names =
+        [ "IMESSAGE_BINDING_STORE_PATH"; "MASC_IMESSAGE_BINDING_STORE_PATH" ]
+
+      let binding_audit_path_env_names =
+        [ "IMESSAGE_BINDING_AUDIT_PATH"; "MASC_IMESSAGE_BINDING_AUDIT_PATH" ]
       let stale_after_env_name = "MASC_IMESSAGE_STATUS_STALE_SEC"
 
       (* iMessage has no guilds. *)

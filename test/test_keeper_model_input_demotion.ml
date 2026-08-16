@@ -579,6 +579,50 @@ let last_resort_requires_a_blob_store () =
   | Error error -> Alcotest.fail (Window.budget_error_to_string error)
 ;;
 
+(* Demotion can shrink an atom only down to its non-demotable residue. When
+   that residue alone exceeds the budget, the last resort still refuses — and
+   the refusal must carry the atom's true bytes, not the placeholder-saturated
+   measurement the re-cut saw. *)
+let still_oversized_after_demotion_reports_true_magnitude () =
+  let earlier = history_with_tool_bodies [ "tick" ] in
+  let residue = assistant (String.make 50_000 'x') in
+  let newest =
+    residue
+    :: [ tool_message ~id:"big-0" (String.make 4_000 'a')
+       ; tool_message ~id:"big-1" (String.make 4_000 'b')
+       ]
+  in
+  let messages = earlier @ newest in
+  let _, atom_count = Window.annotate messages in
+  (* [plan] is pure, so this probe is exactly the plan the last-resort arm
+     computes: it proves the composition took the demotion branch and still
+     refused, rather than refusing for want of anything demotable. *)
+  let probe =
+    Demotion.plan ~measure_message_bytes ~demote_before:atom_count messages
+  in
+  Alcotest.(check int)
+    "the atom carries demotable results, so the last resort planned demotions"
+    2
+    (List.length probe.Demotion.pending);
+  (* [capacity] admits neither the raw atom nor its demoted residue: even the
+     assistant text alone overruns the budget once the preamble is charged. *)
+  let capacity_bytes = bytes_of [ residue ] in
+  match
+    compose
+      ~base_path:(Filename.temp_dir "demote" "")
+      ~capacity_bytes
+      ~demote_before:1
+      messages
+  with
+  | Ok _ -> Alcotest.fail "the residue alone exceeds the budget"
+  | Error (Window.Newest_atom_exceeds_available { newest_atom_bytes; _ }) ->
+    Alcotest.(check int)
+      "the refusal carries the atom's true bytes, not the demoted measurement"
+      (bytes_of newest)
+      newest_atom_bytes
+  | Error error -> Alcotest.fail (Window.budget_error_to_string error)
+;;
+
 let () =
   Alcotest.run
     "keeper_model_input_demotion"
@@ -642,6 +686,10 @@ let () =
             "last resort requires a blob store"
             `Quick
             last_resort_requires_a_blob_store
+        ; Alcotest.test_case
+            "still oversized after demotion reports the true magnitude"
+            `Quick
+            still_oversized_after_demotion_reports_true_magnitude
         ] )
     ]
 ;;

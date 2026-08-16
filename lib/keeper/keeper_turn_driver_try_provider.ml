@@ -551,7 +551,17 @@ let plan_and_window_model_input
     let planned = plan ~demote_before:atom_count in
     (match planned.Keeper_model_input_demotion.pending with
      | [] -> Error first_error
-     | _ -> cut_planned planned atom_count)
+     | _ ->
+       (match cut_planned planned atom_count with
+        | Ok _ as ok -> ok
+        | Error
+            (Runtime_model_input_tail_window.Newest_atom_exceeds_available _) ->
+          (* The re-cut measured the placeholder-saturated atom, so its
+             [newest_atom_bytes] reports marker sizes and masks the true
+             magnitude. Re-raise the refusal measured against the real
+             bytes. *)
+          Error first_error
+        | Error _ as error -> error))
   | Error error -> Error error
   | Ok raw_projection ->
     let planned = plan ~demote_before in

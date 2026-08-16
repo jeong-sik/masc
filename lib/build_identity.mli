@@ -69,9 +69,12 @@ val repo_root : unit -> string option
     which may intentionally point at a different workspace such as [~/me]. *)
 
 val resolve_commit :
-  env_value:string option -> probe:(unit -> string option) -> string option
-(** Resolve commit hash from env var or probe function.
-    Exposed for testing. *)
+  embedded:string option ->
+  env_value:string option ->
+  probe:(unit -> string option) ->
+  string option
+(** Resolve commit hash: build-time embedded stamp first, then the
+    launcher env var, then the probe function. Exposed for testing. *)
 
 type commit_resolution = {
   commit : string option;
@@ -83,9 +86,15 @@ type commit_resolution = {
 }
 
 val resolve_commit_details :
-  env_value:string option -> probe:(unit -> string option) -> commit_resolution
-(** Resolve the compatibility [commit] plus the source-specific binary/env
-    and runtime repo-head fields.  Exposed for testing. *)
+  embedded:string option ->
+  env_value:string option ->
+  probe:(unit -> string option) ->
+  commit_resolution
+(** Resolve the compatibility [commit] plus the source-specific binary and
+    runtime repo-head fields. [binary_commit] prefers the build-time
+    embedded stamp (source ["embedded"]) over the launcher env var; the
+    repo-head probe never populates it because the source tree next to the
+    process moves independently of the binary. Exposed for testing. *)
 
 val pick_repo_candidates :
   exe_dir:string -> cwd:string -> string list

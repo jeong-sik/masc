@@ -279,9 +279,14 @@ function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
         ]),
       }
     case 'agent':
+      // Names the surface, not the author. The agent surface used to carry
+      // only the viewed keeper's own traffic, so '(Self)' held; keeper
+      // broadcasts are now projected into every other keeper's transcript
+      // with the same surface, and there '(Self)' names the wrong keeper.
+      // The speaker chip beside this badge already identifies the author.
       return {
         url: '#',
-        label: 'Agent (Self)',
+        label: 'Agent',
         icon: '🤖',
         title: 'surface=agent',
       }

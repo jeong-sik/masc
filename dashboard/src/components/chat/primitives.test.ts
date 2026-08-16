@@ -514,6 +514,40 @@ describe('ChatTranscript', () => {
     expect(surfaceLink?.getAttribute('title')).toContain('thread_id=thread-1')
   })
 
+  it('names the agent surface without claiming the row is the viewer own', () => {
+    // A keeper broadcast projected into another keeper's transcript carries the
+    // agent surface, so the badge must not assert authorship — the speaker
+    // label is what identifies who spoke.
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'projected-1',
+            role: 'user',
+            source: 'direct_user',
+            speakerName: 'keeper-code-reviewer-agent',
+            speakerAuthority: 'external',
+            text: 'fleet announcement',
+            rawText: 'fleet announcement',
+            surface: { kind: 'agent' },
+          }),
+        ]}
+        emptyText="empty"
+        variant="messenger"
+        showSourceBadge=${true}
+      />`,
+      container,
+    )
+
+    const bubble = container.querySelector('[data-chat-entry-id="projected-1"]') as HTMLElement
+    expect(bubble).not.toBeNull()
+    expect(bubble.getAttribute('data-chat-surface-kind')).toBe('agent')
+    expect(bubble.textContent).toContain('keeper-code-reviewer-agent')
+
+    expect(bubble.textContent).toContain('Agent')
+    expect(bubble.textContent).not.toContain('Self')
+  })
+
   it('renders connector speaker and route context for gate history rows', () => {
     render(
       html`<${ChatTranscript}

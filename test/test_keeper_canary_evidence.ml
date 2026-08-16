@@ -48,6 +48,7 @@ let sample_evidence : Keeper_canary_evidence.run_evidence =
       }
   ; timing = { min_s = 1.0; median_s = 1.25; max_s = 1.5 }
   ; deterministic_signal = sample_score
+  ; judgment = None
   ; notes = []
   }
 
@@ -100,11 +101,31 @@ let test_top_level_keys_are_present () =
       expected
   | _ -> Alcotest.fail "expected a JSON object"
 
-let test_judgment_is_null_in_this_schema_version () =
+let test_judgment_is_null_without_a_judge () =
   let json = Keeper_canary_evidence.to_yojson sample_evidence in
   match json |> member "judgment" with
   | `Null -> ()
-  | _ -> Alcotest.fail "expected judgment to be JSON null in schema v1"
+  | _ -> Alcotest.fail "expected judgment to be JSON null when no judge ran"
+
+let test_judgment_serializes_when_present () =
+  let judgment =
+    match
+      Keeper_canary_judge.parse_reply
+        ~judge_runtime:"rt.judge-test"
+        ~facts:[ sample_fact ]
+        {|{"per_fact": [{"category": "project_codename", "recalled": true}], "rationale": "value present"}|}
+    with
+    | Ok j -> j
+    | Error msg -> Alcotest.failf "fixture judgment failed to parse: %s" msg
+  in
+  let json =
+    Keeper_canary_evidence.to_yojson { sample_evidence with judgment = Some judgment }
+  in
+  match json |> member "judgment" with
+  | `Assoc kvs ->
+    Alcotest.(check bool) "judge_runtime present" true (List.mem_assoc "judge_runtime" kvs);
+    Alcotest.(check bool) "all_recalled present" true (List.mem_assoc "all_recalled" kvs)
+  | _ -> Alcotest.fail "expected judgment to serialize as an object when present"
 
 let test_run_id_round_trips () =
   let json = Keeper_canary_evidence.to_yojson sample_evidence in
@@ -178,9 +199,13 @@ let () =
             test_schema_field_matches_declared_version
         ; Alcotest.test_case "top-level keys are present" `Quick test_top_level_keys_are_present
         ; Alcotest.test_case
-            "judgment is null in this schema version"
+            "judgment is null without a judge"
             `Quick
-            test_judgment_is_null_in_this_schema_version
+            test_judgment_is_null_without_a_judge
+        ; Alcotest.test_case
+            "judgment serializes when present"
+            `Quick
+            test_judgment_serializes_when_present
         ; Alcotest.test_case "run_id round-trips" `Quick test_run_id_round_trips
         ; Alcotest.test_case
             "turns array has two entries with indices 1 and 2"

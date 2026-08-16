@@ -18,13 +18,13 @@
    already links masc.keeper_chat_delivery_identity and masc_types. This
    module only knows how to serialize the result.
 
-   [judgment] is always [`Null] in this schema version: whether the recall
-   reply demonstrates real continuity is an LLM-judge call (a different
+   [judgment] is [`Null] unless the caller ran an LLM judge: whether the
+   recall reply demonstrates real continuity is a judge call (a different
    provider family than the keeper under test, per the M1 spec), not this
    harness's own substring check — see [Keeper_canary_facts.score] for that
-   raw, non-authoritative signal instead. A follow-up PR fills [judgment]
-   from the judge's verdict without renaming or reshaping this field, so a
-   v1 reader written against this PR keeps working unchanged. *)
+   raw, non-authoritative signal instead. The field kept its name and
+   position from the judge-less v1 shape, so a v1 reader written before the
+   judge existed keeps working unchanged. *)
 
 let schema_version = "masc.keeper_canary_run.v1"
 
@@ -91,6 +91,7 @@ type run_evidence = {
   recall : recall_evidence;
   timing : timing;
   deterministic_signal : Keeper_canary_facts.score;
+  judgment : Keeper_canary_judge.judgment option;
   notes : string list;
 }
 
@@ -178,7 +179,10 @@ let to_yojson (e : run_evidence) =
           ; ("max_s", `Float e.timing.max_s)
           ] )
     ; ("deterministic_signal", score_to_yojson e.deterministic_signal)
-    ; ("judgment", `Null)
+    ; ( "judgment"
+      , match e.judgment with
+        | Some j -> Keeper_canary_judge.judgment_to_yojson j
+        | None -> `Null )
     ; ("notes", `List (List.map (fun n -> `String n) e.notes))
     ]
 

@@ -352,11 +352,19 @@ let offload_full_text ~source_url ~title ~fetched_at_unix text =
          let artifact =
            Tool_blob_store.put_durable store ~bytes:text ~mime:"text/markdown"
          in
-         Fs_compat.mkdir_p dir;
+         (* The blob is durable at this point, so an index-side directory or
+            append failure must surface as [index_unavailable], never as
+            [full_text_unavailable] — the marker would otherwise deny a blob
+            that exists. *)
          let index =
-           web_artifact_index_append ~dir
-             ~sha256:artifact.Tool_output.sha256 ~source_url ~title
-             ~bytes:(String.length text) ~fetched_at_unix
+           try
+             Fs_compat.mkdir_p dir;
+             web_artifact_index_append ~dir
+               ~sha256:artifact.Tool_output.sha256 ~source_url ~title
+               ~bytes:(String.length text) ~fetched_at_unix
+           with
+           | Unix.Unix_error (err, _, _) -> Error (Unix.error_message err)
+           | Sys_error message -> Error message
          in
          Ok (artifact.Tool_output.sha256, index)
        with

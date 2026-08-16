@@ -243,6 +243,12 @@ type translated_keeper_stream_event =
 }
 (** Result of translating one typed AGENT_CORE stream event into keeper chat events. *)
 
+type operation_wire_stream = Wire_started | Wire_terminal_sent
+(** Wire-terminal accounting for one keeper chat operation: whether a live
+    AG-UI stream opened and whether a terminal event (RUN_FINISHED/RUN_ERROR)
+    made it out. Consumed by the Owner settle hook to synthesize the missing
+    terminal after a cancelled child switch unwinds (#28811). *)
+
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result
   val has_connector_context : keeper_chat_stream_request -> bool
@@ -284,4 +290,15 @@ module For_testing : sig
     error_body:string ->
     failure_class:Tool_result.tool_failure_class ->
     Yojson.Safe.t
+
+  val note_operation_wire_event : operation_id:string -> Ag_ui.event -> unit
+  val take_operation_wire_stream :
+    operation_id:string -> operation_wire_stream option
+  val synthesize_wire_terminal_on_settle :
+    keeper_name:string ->
+    operation_id:string ->
+    execution:Keeper_owner.operation_execution ->
+    unit
+  val register_operation_live_sink :
+    operation_id:string -> (Ag_ui.event -> unit) -> unit -> unit
 end

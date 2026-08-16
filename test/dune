@@ -1601,6 +1601,7 @@
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
 
+(include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)
 

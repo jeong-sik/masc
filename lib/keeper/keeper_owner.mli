@@ -122,11 +122,24 @@ type operation_executor =
 type operation_runner =
   { ready : keeper_name:string -> bool
   ; execute : operation_executor
+  ; on_execution_settled :
+      keeper_name:string ->
+      claimed_operation_id:Chat_operation.Operation_id.t option ->
+      execution:operation_execution ->
+      unit
   }
 (** Typed admission for the durable operation drain. [ready] must be a
     non-yielding in-memory read. When it returns [false], the FIFO head remains
     Queued and no child is started. The producer that makes the dependency
-    ready must call {!wake_operation_drain}; the Owner never polls. *)
+    ready must call {!wake_operation_drain}; the Owner never polls.
+
+    [on_execution_settled] runs on the Owner fiber after the child switch has
+    fully unwound — every executor fiber has finished or been cancelled — and
+    before the durable settle is applied. A cancelled child cannot publish its
+    own terminal event, so this is the only point that both survives the
+    cancellation and still knows the execution verdict. Implementations
+    project the verdict to live consumers (wire-terminal synthesis); they must
+    not mutate durable state. Exceptions are contained by the Owner. *)
 
 type t
 

@@ -95,6 +95,46 @@ type keeper_chat_stream_request = {
   direct_message : Keeper_invocation_contract.direct_message;
 }
 
+(* Wire-terminal accounting for keeper chat operations. The Dashboard
+   projection publishes AG-UI events while the turn runs inside the child
+   switch; a cancelled turn kills the projection fiber before it can emit
+   RUN_ERROR, so the stream used to close with no terminal receipt (#28811).
+   Track which operations opened a live wire stream and whether a terminal
+   made it out; the Owner settle hook synthesizes the missing terminal from
+   the execution verdict after the child switch has unwound. *)
+type operation_wire_stream = Wire_started | Wire_terminal_sent
+
+let operation_wire_streams : (string, operation_wire_stream) Hashtbl.t =
+  Hashtbl.create 32
+
+let operation_wire_streams_mu = Stdlib.Mutex.create ()
+
+let ag_ui_terminal_event (event : Ag_ui.event) =
+  match event.Ag_ui.event_type with
+  | Ag_ui.Run_finished | Ag_ui.Run_error -> true
+  | Run_started | Step_started | Step_finished | Text_message_start
+  | Text_message_content | Text_message_end | Tool_call_start
+  | Tool_call_args | Tool_call_end | State_snapshot | State_delta
+  | Custom -> false
+
+let note_operation_wire_event ~operation_id event =
+  let terminal = ag_ui_terminal_event event in
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    match Hashtbl.find_opt operation_wire_streams operation_id, terminal with
+    | Some Wire_terminal_sent, _ -> ()
+    | _, true ->
+      Hashtbl.replace operation_wire_streams operation_id Wire_terminal_sent
+    | None, false ->
+      Hashtbl.replace operation_wire_streams operation_id Wire_started
+    | Some Wire_started, false -> ())
+
+let take_operation_wire_stream ~operation_id =
+  Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
+    let state = Hashtbl.find_opt operation_wire_streams operation_id in
+    Hashtbl.remove operation_wire_streams operation_id;
+    state)
+
+
 let keeper_chat_stream_error_json message =
   `Assoc
     [
@@ -1960,6 +2000,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                    in
                    Option.iter
                      (fun event ->
+                        note_operation_wire_event ~operation_id event;
                         Keeper_chat_broadcast.operation_event
                           ~keeper_name
                           ~operation_id
@@ -2071,6 +2112,30 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   | execution -> execution
 ;;
 
+let synthesize_wire_terminal_on_settle ~keeper_name ~operation_id ~execution =
+  match take_operation_wire_stream ~operation_id, execution with
+  | None, _ ->
+    (* No live wire stream ever opened for this operation (connector
+       channels, pre-execution failures): nothing to close. *)
+    ()
+  | Some Wire_terminal_sent, _ -> ()
+  | Some Wire_started, Keeper_owner.Operation_failed { kind; detail; _ } ->
+    let event =
+      Ag_ui.run_error
+        ~thread_id:("keeper:" ^ keeper_name)
+        ~run_id:("keeper-operation-run-" ^ operation_id)
+        ~message:detail
+        ~code:(Keeper_chat_operation.failure_kind_to_string kind)
+        ()
+    in
+    note_operation_wire_event ~operation_id event;
+    Keeper_chat_broadcast.operation_event ~keeper_name ~operation_id ~event;
+    publish_operation_live_event ~operation_id event
+  | Some Wire_started, Keeper_owner.Operation_succeeded _ ->
+    Log.Misc.warn
+      "keeper chat operation %s succeeded without a wire terminal event"
+      operation_id
+
 let operation_runner ~state ~clock : Keeper_owner.operation_runner =
   let base_path = (Mcp_server.workspace_config state).base_path in
   { ready =
@@ -2080,6 +2145,16 @@ let operation_runner ~state ~clock : Keeper_owner.operation_runner =
          | Some (_, _)
          | None -> false)
   ; execute = operation_executor ~state ~clock
+  ; on_execution_settled =
+      (fun ~keeper_name ~claimed_operation_id ~execution ->
+         match claimed_operation_id with
+         | None -> ()
+         | Some operation_id ->
+           synthesize_wire_terminal_on_settle
+             ~keeper_name
+             ~operation_id:
+               (Keeper_owner.Chat_operation.Operation_id.to_string operation_id)
+             ~execution)
   }
 ;;
 
@@ -2276,4 +2351,8 @@ module For_testing = struct
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
   let keeper_chat_stream_headers = keeper_chat_stream_headers
+  let note_operation_wire_event = note_operation_wire_event
+  let take_operation_wire_stream = take_operation_wire_stream
+  let synthesize_wire_terminal_on_settle = synthesize_wire_terminal_on_settle
+  let register_operation_live_sink = register_operation_live_sink
 end

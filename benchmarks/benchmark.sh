@@ -418,7 +418,7 @@ bench_read_path() {
 
 bench_workspace_collaboration() {
   collect_tool_samples "mcp_workspace_broadcast" "masc_broadcast" \
-    "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,message:"benchmark",format:"compact"}')" \
+    "$(jq -cn --arg agent "$MASC_AGENT" '{agent_name:$agent,content:"benchmark",format:"compact"}')" \
     "$ITERATIONS" "bound agent write path"
 }
 

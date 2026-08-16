@@ -229,7 +229,7 @@ r_heartbeat="$(call_tool 5022 "masc_heartbeat" '{}')"
 expect_ok "masc_heartbeat" "$r_heartbeat"
 
 next_step "masc_broadcast"
-r_broadcast="$(call_tool 5023 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "public tool sweep broadcast" '{agent_name:$agent_name,message:$message}')")"
+r_broadcast="$(call_tool 5023 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg content "public tool sweep broadcast" '{agent_name:$agent_name,content:$content}')")"
 expect_ok "masc_broadcast" "$r_broadcast"
 
 next_step "masc_messages"

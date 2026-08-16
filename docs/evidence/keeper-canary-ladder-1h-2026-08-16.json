@@ -1,0 +1,294 @@
+{
+  "schema": "masc.keeper_canary_run.v1",
+  "captured_at": "2026-08-16T12:35:46Z",
+  "harness": { "git_commit": "f27eb96fb1c52f4c1bbc46dfc1792398bdfe93d6" },
+  "run_id": "canary-ladder-1h-20260816-r1",
+  "keeper": {
+    "name": "canary-multiturn-20260813-210119",
+    "runtime": null,
+    "base_path": "/Users/dancer/me"
+  },
+  "transport": {
+    "endpoint": "http://127.0.0.1:8935/api/v1/keepers/chat/stream",
+    "turn_interval_s": 400.0,
+    "wall_clock_target_s": 3600.0
+  },
+  "facts_established": [
+    {
+      "category": "project_codename",
+      "statement": "The project codename is Codename-be94ef8b21e4.",
+      "value": "Codename-be94ef8b21e4"
+    },
+    {
+      "category": "lead_reviewer",
+      "statement": "The lead reviewer is Reviewer-b775b4d5becd.",
+      "value": "Reviewer-b775b4d5becd"
+    },
+    {
+      "category": "deadline",
+      "statement": "The deadline is 2026-04-18.",
+      "value": "2026-04-18"
+    },
+    {
+      "category": "blocked_dependency",
+      "statement": "The blocked dependency is dep-c1fb2fd43c9b.",
+      "value": "dep-c1fb2fd43c9b"
+    },
+    {
+      "category": "fallback_runtime",
+      "statement": "The fallback runtime is runtime-4113410284eb.",
+      "value": "runtime-4113410284eb"
+    },
+    {
+      "category": "incident_number",
+      "statement": "The incident number is 5359.",
+      "value": "5359"
+    },
+    {
+      "category": "reviewer_timezone",
+      "statement": "The reviewer timezone is Australia/Sydney.",
+      "value": "Australia/Sydney"
+    },
+    {
+      "category": "artifact_name",
+      "statement": "The artifact name is artifact-216f06aee876.json.",
+      "value": "artifact-216f06aee876.json"
+    },
+    {
+      "category": "rollback_switch",
+      "statement": "The rollback switch is called rollback-37a2b5de5aad.",
+      "value": "rollback-37a2b5de5aad"
+    }
+  ],
+  "turns": [
+    {
+      "index": 1,
+      "category": "project_codename",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-7a283c8f08858d15"
+      },
+      "turn_ref": "trace-1786622479851-00001#12",
+      "sent_at": "2026-08-16T11:35:01Z",
+      "round_trip_s": 4.321106910705566,
+      "reply_digest": "5b44f55b41d6eeab79a12a9cb79483eedcb9d3dc51da48ad4f4b6037f8430ecf"
+    },
+    {
+      "index": 2,
+      "category": "lead_reviewer",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-d426ec6451537475"
+      },
+      "turn_ref": "trace-1786622479851-00001#13",
+      "sent_at": "2026-08-16T11:41:49Z",
+      "round_trip_s": 1.7851288318634033,
+      "reply_digest": "120057c508768312316f394f2fa4131bf52ca66bb2d4a6d66062980980594549"
+    },
+    {
+      "index": 3,
+      "category": "deadline",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-bae357516094bd11"
+      },
+      "turn_ref": "trace-1786622479851-00001#14",
+      "sent_at": "2026-08-16T11:48:31Z",
+      "round_trip_s": 7.868294954299927,
+      "reply_digest": "8ced1c45327253ea14646d08e2afd3ddd4b5bd0cdf1791e2cedae31d229336aa"
+    },
+    {
+      "index": 4,
+      "category": "blocked_dependency",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-27f97349b9e40467"
+      },
+      "turn_ref": "trace-1786622479851-00001#15",
+      "sent_at": "2026-08-16T11:55:19Z",
+      "round_trip_s": 4.092794895172119,
+      "reply_digest": "1efe5550afb8518fac1315dfa838c1e0267d53b628f3919c9f7a48c4fd6d67fc"
+    },
+    {
+      "index": 5,
+      "category": "fallback_runtime",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-47bd2ba02d50f692"
+      },
+      "turn_ref": "trace-1786622479851-00001#16",
+      "sent_at": "2026-08-16T12:02:03Z",
+      "round_trip_s": 2.15563702583313,
+      "reply_digest": "2b8e48599606e84f878e60b2525ddef5ecc8af1f12201142d9603de3d8121c21"
+    },
+    {
+      "index": 6,
+      "category": "incident_number",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-23f10d69f7c40ccd"
+      },
+      "turn_ref": "trace-1786622479851-00001#17",
+      "sent_at": "2026-08-16T12:08:47Z",
+      "round_trip_s": 2.1040279865264893,
+      "reply_digest": "8e1534918f24c6b4ff1a6e752f945c97d3c0c379b4dce12823e6f53f46fa4976"
+    },
+    {
+      "index": 7,
+      "category": "reviewer_timezone",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-642322b2c99190f7"
+      },
+      "turn_ref": "trace-1786622479851-00001#18",
+      "sent_at": "2026-08-16T12:15:29Z",
+      "round_trip_s": 3.521354913711548,
+      "reply_digest": "8f6d5840bb5d265f3db88ad17cfbf3a4db4ac3949975d6ff60959ad5c9f773b8"
+    },
+    {
+      "index": 8,
+      "category": "artifact_name",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-41d1ad5acd9e5478"
+      },
+      "turn_ref": "trace-1786622479851-00001#19",
+      "sent_at": "2026-08-16T12:22:12Z",
+      "round_trip_s": 2.11934494972229,
+      "reply_digest": "81b8d38bcab09d965026efe94492012260d8f2cb4d8f066bdcd02e996f2d3003"
+    },
+    {
+      "index": 9,
+      "category": "rollback_switch",
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-efa06cab98cfd6ce"
+      },
+      "turn_ref": "trace-1786622479851-00001#20",
+      "sent_at": "2026-08-16T12:28:54Z",
+      "round_trip_s": 2.085616111755371,
+      "reply_digest": "9b6be9d631a2ff0a9129ec50dbda791a60a35ca6b581f59a9506659cd3642ba4"
+    },
+    {
+      "index": 10,
+      "category": null,
+      "delivery_key": {
+        "kind": "operation",
+        "operation_id": "canary-7ff8202c5166dde1"
+      },
+      "turn_ref": "trace-1786622479851-00001#21",
+      "sent_at": "2026-08-16T12:35:37Z",
+      "round_trip_s": 3.977186918258667,
+      "reply_digest": "091febec6c3384dc55db9c014282a0db9b9e2ea427053a7d3e739297441e07d0"
+    }
+  ],
+  "recall": {
+    "turn_index": 10,
+    "request_id": "canary-7ff8202c5166dde1",
+    "prompt": "Without looking anything up, please list every fact I told you to remember earlier in this conversation, in the order I gave them to you.",
+    "reply": "Here are the facts you told me to remember, in the order you gave them:\n\n1. The project codename is **Aster Ledger**.\n2. The prototype city is **Nacre Bay**.\n3. **Cobalt tokens** must be processed before **amber tokens**.\n4. If **sensor Delta-7** goes silent, pause the shipment but retain the queue.\n5. **Dr. Iona Vale** owns the recovery decision.\n6. Recovery is confirmed by **three consecutive violet pulses**.\n7. After confirmation, the retained queue moves to **Orchid Pier**.\n8. The final recovery notice goes to **channel Harbor-3**.\n9. Any amber token tagged **glasswing** is quarantined rather than shipped; cobalt still remains first.\n10. The project codename is **Codename-be94ef8b21e4** (contradicts fact 1).\n11. The lead reviewer is **Reviewer-b775b4d5becd**.\n12. The deadline is **2026-04-18**.\n13. The blocked dependency is **dep-c1fb2fd43c9b**.\n14. The fallback runtime is **runtime-4113410284eb**.\n15. The incident number is **5359**.\n16. The reviewer timezone is **Australia/Sydney**.\n17. The artifact name is **artifact-216f06aee876.json**.\n18. The rollback switch is called **rollback-37a2b5de5aad**.\n\nNote: facts 1 and 10 conflict (Aster Ledger vs. Codename-be94ef8b21e4) — that contradiction remains unresolved."
+  },
+  "timing": {
+    "min_s": 1.7851288318634033,
+    "median_s": 2.838495969772339,
+    "max_s": 7.868294954299927
+  },
+  "deterministic_signal": {
+    "facts_total": 9,
+    "facts_recalled": 9,
+    "order_matches": true,
+    "recalled_categories": [
+      "project_codename", "lead_reviewer", "deadline", "blocked_dependency",
+      "fallback_runtime", "incident_number", "reviewer_timezone",
+      "artifact_name", "rollback_switch"
+    ],
+    "missing_categories": [],
+    "per_fact": [
+      {
+        "category": "project_codename",
+        "value": "Codename-be94ef8b21e4",
+        "recalled": true,
+        "first_index": 676
+      },
+      {
+        "category": "lead_reviewer",
+        "value": "Reviewer-b775b4d5becd",
+        "recalled": true,
+        "first_index": 749
+      },
+      {
+        "category": "deadline",
+        "value": "2026-04-18",
+        "recalled": true,
+        "first_index": 796
+      },
+      {
+        "category": "blocked_dependency",
+        "value": "dep-c1fb2fd43c9b",
+        "recalled": true,
+        "first_index": 842
+      },
+      {
+        "category": "fallback_runtime",
+        "value": "runtime-4113410284eb",
+        "recalled": true,
+        "first_index": 892
+      },
+      {
+        "category": "incident_number",
+        "value": "5359",
+        "recalled": true,
+        "first_index": 945
+      },
+      {
+        "category": "reviewer_timezone",
+        "value": "Australia/Sydney",
+        "recalled": true,
+        "first_index": 984
+      },
+      {
+        "category": "artifact_name",
+        "value": "artifact-216f06aee876.json",
+        "recalled": true,
+        "first_index": 1031
+      },
+      {
+        "category": "rollback_switch",
+        "value": "rollback-37a2b5de5aad",
+        "recalled": true,
+        "first_index": 1097
+      }
+    ]
+  },
+  "judgment": {
+    "judge_runtime": "glm-coding.glm-5-turbo",
+    "per_fact": [
+      { "category": "project_codename", "recalled": true },
+      { "category": "lead_reviewer", "recalled": true },
+      { "category": "deadline", "recalled": true },
+      { "category": "blocked_dependency", "recalled": true },
+      { "category": "fallback_runtime", "recalled": true },
+      { "category": "incident_number", "recalled": true },
+      { "category": "reviewer_timezone", "recalled": true },
+      { "category": "artifact_name", "recalled": true },
+      { "category": "rollback_switch", "recalled": true }
+    ],
+    "recalled_count": 9,
+    "all_recalled": true,
+    "rationale": "Despite the assistant inventing unrelated facts and introducing a self-acknowledged contradiction with a fabricated 'Aster Ledger' name in item 1, item 10 explicitly restates the exact correct value 'Codename-be94ef8b21e4', and items 11 through 18 correctly list the remaining eight facts with their precise values, meaning every established fact is demonstrably present in the reply."
+  },
+  "injections": [
+    {
+      "kind": "restart",
+      "after_turn": 5,
+      "started_at": "2026-08-16T12:02:05Z",
+      "duration_s": 1.9513130187988281,
+      "trace_id_before": "trace-1786622479851-00001",
+      "trace_id_after": "trace-1786622479851-00001",
+      "generation_before": 1,
+      "generation_after": 1,
+      "continuation": true
+    }
+  ],
+  "notes": []
+}

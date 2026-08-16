@@ -122,7 +122,7 @@ let web_fetch_schema : tool_schema =
               ; ( "maxChars"
                 , `Assoc
                     [ "type", `String "integer"
-                    ; "description", `String "Maximum extracted content characters to return."
+                    ; "description", `String "Maximum extracted content characters to return. Longer pages come back as a head/tail window around a [TRUNCATED ...] marker whose full_text path holds the complete extraction."
                     ; "minimum", `Int 1
                     ; "maximum", `Int 100000
                     ; "default", `Int 50000

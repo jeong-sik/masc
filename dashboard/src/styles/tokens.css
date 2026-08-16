@@ -113,12 +113,8 @@
   --k-rama-border: rgb(138 106 160 / .35);
   --k-rama-ring:   0 0 0 1px rgb(138 106 160 / .45), 0 0 8px rgb(138 106 160 / .35);
 
-  /* RFC-0168: per-provider color palette + soft/border variants
-     were removed in the big-bang sweep. No production consumers
-     existed (the tokens were referenced only in their own
-     generator + tests). If a provider-distinct visual treatment is
-     needed in the future, derive it from runtime palette entries
-     (operator-supplied) rather than a hardcoded palette. */
+  /* A provider-distinct visual treatment derives from runtime palette
+     entries (operator-supplied), never from a hardcoded vendor roster. */
 
   /* Diff — muted overlay tints on top of bg */
   --diff-add:     rgb(107 158 107 / .08);

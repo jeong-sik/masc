@@ -9,10 +9,10 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.22.0
-> Latest changelog entry: v0.22.0 (2026-08-14)
+> Current package version: v0.23.0
+> Latest changelog entry: v0.23.0 (2026-08-16)
 > Latest published GitHub release: v0.21.1 (2026-07-20)
-> Updated: 2026-08-14
+> Updated: 2026-08-16
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope

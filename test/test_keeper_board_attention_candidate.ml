@@ -34,6 +34,17 @@ let ok label = function
   | Error detail -> Alcotest.failf "%s: %s" label detail
 ;;
 
+(* Every case in this file delivers against a candidate it just persisted, so
+   [Candidate_absent] here is a bug in the fixture, not the outcome under
+   test — see test_keeper_board_attention_worker.ml for the terminal-settlement
+   coverage of an actually-missing candidate. *)
+let delivered label = function
+  | Ok (A.Delivered candidate) -> candidate
+  | Ok A.Candidate_absent ->
+    Alcotest.failf "%s: candidate absent (fixture did not persist it)" label
+  | Error detail -> Alcotest.failf "%s: %s" label detail
+;;
+
 let signal ?(content = "Persisted Board evidence") ?(updated_at = 42.0) post_id :
   Masc.Board_dispatch.board_signal
   =
@@ -787,7 +798,7 @@ let test_not_relevant_delivery_is_idempotent () =
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "conflicting durable judgment was accepted");
   let consumed =
-    ok
+    delivered
       "apply judgment"
       (A.apply_judgment_and_deliver
          ~base_path
@@ -800,7 +811,7 @@ let test_not_relevant_delivery_is_idempotent () =
    | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
      Alcotest.fail "not-relevant judgment did not reach Consumed");
   let replayed =
-    ok
+    delivered
       "replay judgment"
       (A.apply_judgment_and_deliver
          ~base_path
@@ -824,7 +835,7 @@ let test_relevant_delivery_uses_exact_candidate_identity () =
   with_temp_base "board-attention-candidate-relevant" @@ fun base_path ->
   let persisted = record ~base_path (candidate (signal "post-relevant")) in
   let consumed =
-    ok
+    delivered
       "apply relevant judgment"
       (A.apply_judgment_and_deliver
          ~base_path

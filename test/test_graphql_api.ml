@@ -72,7 +72,7 @@ let test_messages_temporal_decay_fields () =
   let config = Workspace_utils.default_config base_path in
   let _ = Workspace.init config ~agent_name:None in
   let _ =
-    Workspace.broadcast config ~from_agent:"operator" ~content:"hello @sangsu"
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:"hello @sangsu"
   in
   let json =
     graphql_query config

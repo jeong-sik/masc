@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+## [0.23.0] - 2026-08-16
+
+- **Workspace messages reach the linear event queue**: a workspace message
+  that names a Keeper is committed as a typed
+  `Keeper_event_queue.Workspace_message` entry in that Keeper's per-Keeper
+  drain, ordered against every other stimulus and deduplicated by the
+  workspace request id. The same path now emits the `keeper_chat_appended`
+  SSE it was missing, so the conversation window updates without a reload.
+  Measured on an isolated instance: one addressed message produced zero queue
+  entries before and one `workspace-message:<request_id>` entry at urgency
+  `immediate` after.
+- **Keeper speech reaches every Keeper's conversation window**: a committed
+  `Fleet_conversation` message is projected into each registered Keeper's
+  transcript (author excluded), with no queue entry and no wake, so one
+  announcement cannot open a turn on every Keeper. Before this, 17 of the 18
+  retained workspace messages were unmentioned Keeper broadcasts that reached
+  nobody — the dispatcher answered `Passive` without calling the delivery
+  handler at all. The projected row's mentions are still derived from the
+  message text, so a second `@name` in one message reaches that Keeper as a
+  transcript mention without a queue entry (masc#28795).
+- `Workspace_broadcast.audience` is a **required** argument, so the compiler
+  makes all 14 library producers state their answer. Five are speech —
+  `masc_broadcast`, `keeper_broadcast`, the gRPC `Broadcast` RPC, the operator
+  dashboard route, the operator control action — and nine are records: task
+  claim, task create (2), task transition, session lifecycle (3) and workspace
+  init (2). Records reach no conversation window. It was optional at first,
+  and that silently classified `keeper_broadcast` — the only broadcast tool
+  live Keepers use, 55 of 55 calls in the reference traces — as a record, so
+  the projection was dead on the only path production exercises.
+- Measured cost of projecting one message across the reference fleet: 4.53 MB
+  of locked transcript across 39 registered Keepers, 22-95 ms per append
+  against a broadcast that otherwise takes 33 ms.
+
 ## [0.22.0] - 2026-08-14
 
 - **Breaking (keeper output contract, RFC-0376)**: an autonomous turn's final

@@ -6,7 +6,6 @@
   _build_codex_trpg
   ; Ad hoc refutation probes are operator scratch, never project source.
   refute_tmp
-  archive
   dashboard_bonsai))
 
 ; Warning 32 (unused value declaration) is set here, once, for the whole

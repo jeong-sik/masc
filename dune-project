@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.22.0)
+(version 0.23.0)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -87,9 +87,6 @@
   optint
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
-  ; [pbrt_services] removed: no caller in lib/ bin/ test/ since
-  ; continuous-loop iter #11 audit (2026-05-15).  Re-add if gRPC
-  ; service support resumes.
   (h2 (>= 0.13))
   (h2-eio (>= 0.13))
   (alcotest (and :with-test (>= 1.6)))
@@ -110,10 +107,6 @@
   ; dashboard/src/schemas/sse_event_generated.ts).  Build-time only;
   ; no runtime linkage.  CI invokes it via dashboard/scripts/gen-sse-types.sh.
   (atdts (and :build (>= 4.2.0)))
-  ; [neo4j_bolt_eio] removed: no caller in lib/ bin/ test/ since
-  ; continuous-loop iter #12 audit (2026-05-15).  Same shape as
-  ; pbrt_services (iter #11): declared but never imported.  Re-add
-  ; when Neo4j Bolt support resumes.
   ; OpenTelemetry observability + OTLP exporter.  MASC consumes the
   ; [opentelemetry.client] findlib library exposed by 0.13; newer package
   ; families use a different public library layout.

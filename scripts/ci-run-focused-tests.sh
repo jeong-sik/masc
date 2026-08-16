@@ -107,6 +107,9 @@ normal_targets=(
   @test/runtest-test_subsystem_health_state
   @test/runtest-test_trailing_slash_rules
   @test/runtest-test_verification_run_registry
+  @test/runtest-test_completion_authority_retry_policy
+  @test/runtest-test_keeper_canary_facts
+  @test/runtest-test_keeper_canary_evidence
   @test/runtest-test_slack_user_directory
   @test/runtest-test_cancel_safe
   @test/runtest-test_cancel_wall_bucket
@@ -271,6 +274,7 @@ normal_targets=(
   @test/runtest-test_dashboard_workspace
   @test/runtest-test_host_fd_pressure_poller
   @test/runtest-test_keeper_turn_driver_failover
+  @test/runtest-test_keeper_cycle_failed_runtime_attribution
   @test/runtest-test_keeper_turn_driver_accept
   @test/runtest-test_keeper_vision_tool
   @test/runtest-test_runtime_modality_reroute
@@ -294,6 +298,7 @@ normal_targets=(
   @test/runtest-test_tool_type_label
   @test/runtest-test_telemetry_eio_pbt
   @test/runtest-test_process_eio_coverage
+  @test/runtest-test_pool
   @test/runtest-test_keeper_secret_redaction
   @test/runtest-test_keeper_sandbox_docker_route
   @test/runtest-test_dashboard_dev_token_host_gate

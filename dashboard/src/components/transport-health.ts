@@ -336,17 +336,16 @@ export function TransportHealthPanel() {
       { cooldownMs: 0, debounceMs: 1200 },
     )
 
-    const interval = setInterval(() => {
-      void refreshTransportHealth()
-    }, 30_000)
-
+    // No periodic poll: the server recomputes this surface on a 30s
+    // Proactive_refresh and pushes `transport_health_snapshot`, which
+    // sse-store hydrates into this same resource. A client timer could
+    // only re-read the same 30s cache entry the push already delivered.
     const unsubscribe = lastEvent.subscribe((event) => {
       if (!event || !shouldRefreshFromEvent(event)) return
       sseRefreshScheduler.request()
     })
 
     return () => {
-      clearInterval(interval)
       unsubscribe()
       sseRefreshScheduler.dispose()
       transportHealthResource.cancel()

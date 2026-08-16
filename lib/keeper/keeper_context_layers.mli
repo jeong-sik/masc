@@ -25,6 +25,7 @@ type layer_id =
   | Scope_messages
   | Own_board_posts
   | Board_activity
+  | Fleet_messages
 
 val ordered : layer_id list
 (** The canonical render order: larger, more stable sections first so providers

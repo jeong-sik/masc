@@ -288,6 +288,6 @@ val inc_agent_stale : unit -> unit
     SSE / gRPC / WebSocket / agent-health metric values plus
     derived fields ([primary_path], [queue_pressure],
     [http_listener_mode]).  Reads metric values via
-    [Otel_metric_store.metric_value_or_zero] and performs no Workspace I/O. *)
+    [Otel_metric_store.required_metric_value] and performs no Workspace I/O. *)
 val transport_health_json : unit -> Yojson.Safe.t
 

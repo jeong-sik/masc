@@ -194,7 +194,8 @@ let is_manual_compaction_payload = function
   | Keeper_event_queue.Goal_assigned _
   | Keeper_event_queue.Goal_reconciliation_ready _
   | Keeper_event_queue.Completion_authority_rejected _
-  | Keeper_event_queue.Task_cancelled _ ->
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _ ->
     false
 ;;
 
@@ -256,23 +257,125 @@ let manual_compaction_yield_request ~wake ~base_path ~keeper_name =
     Ok request
 ;;
 
+(* #28809: an approved Gate resolution whose one-shot grant is still unspent
+   is not an ordinary queued successor — it is the durable continuation of an
+   already-deferred external effect, and the in-flight source may itself be
+   the checkpoint that effect belongs to. Waiting for the source terminal can
+   therefore starve the replay behind an arbitrarily long run. Deliverability
+   is decided by the injected predicate; the wake payloads need no
+   self-exclusion here because a resolution threaded into the current turn
+   has its grant consumed at tool-bundle build, before this boundary probe
+   can run, so it already fails the unspent check. *)
+let hitl_replay_preemption_request ~resolution_deliverable ~now pending =
+  let stimuli = Keeper_event_queue.to_list pending in
+  match
+    List.find_opt
+      (fun (stimulus : Keeper_event_queue.stimulus) ->
+         match stimulus.payload with
+         | Keeper_event_queue.Hitl_resolved resolution ->
+           resolution_deliverable resolution
+         | Keeper_event_queue.Board_signal _
+         | Keeper_event_queue.Board_attention _
+         | Keeper_event_queue.Bootstrap
+         | Keeper_event_queue.Fusion_completed _
+         | Keeper_event_queue.Schedule_due _
+         | Keeper_event_queue.Connector_attention _
+         | Keeper_event_queue.Manual_compaction_requested
+         | Keeper_event_queue.Goal_assigned _
+         | Keeper_event_queue.Goal_reconciliation_ready _
+         | Keeper_event_queue.Completion_authority_rejected _
+         | Keeper_event_queue.Task_cancelled _
+         | Keeper_event_queue.Workspace_message _ -> false)
+      stimuli
+  with
+  | None -> None
+  | Some selected ->
+    let summary = Keeper_agent_run.durable_stimulus_summary ~now pending in
+    Some
+      Keeper_agent_run.
+        { reason =
+            Durable_stimulus_waiting
+              { summary with
+                head = Some selected
+              ; head_age_sec = Float.max 0. (now -. selected.arrived_at)
+              }
+        }
+;;
+
+(* Deliverable means the approval has left the pending map (the decision is
+   durable) and its grant is still unspent. A rejected resolution carries no
+   grant to starve: it reaches the model through ordinary selection or the
+   turn-start projection, so it never preempts a run. *)
+let approved_resolution_deliverable
+      ~base_path
+      (resolution : Keeper_event_queue.hitl_resolution)
+  =
+  match resolution.decision with
+  | Keeper_event_queue.Hitl_rejected _ -> false
+  | Keeper_event_queue.Hitl_approved ->
+    (match
+       Keeper_approval_queue.get_pending_entry_for_workspace
+         ~base_path
+         ~id:resolution.approval_id
+     with
+     | Ok (Some _) | Error _ -> false
+     | Ok None ->
+       (match
+          Keeper_approval_queue.approved_resolution_state
+            ~base_path
+            ~id:resolution.approval_id
+        with
+        | Ok Keeper_approval_queue.Resolution_unconsumed -> true
+        | Ok Keeper_approval_queue.Resolution_consumed | Error _ -> false))
+;;
+
+let hitl_replay_yield_request ~base_path ~keeper_name =
+  match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
+  | Error _ as error -> error
+  | Ok pending ->
+    let request =
+      hitl_replay_preemption_request
+        ~resolution_deliverable:(approved_resolution_deliverable ~base_path)
+        ~now:(Time_compat.now ())
+        pending
+    in
+    Option.iter
+      (fun (request : Keeper_agent_run.autonomous_yield_request) ->
+         match request.reason with
+         | Keeper_agent_run.Operation_queued -> ()
+         | Keeper_agent_run.Durable_stimulus_waiting summary ->
+           Log.Keeper.info
+             ~keeper_name
+             "autonomous source turn yields to an approved Gate resolution: %s"
+             (Keeper_agent_run.durable_stimulus_summary_to_string summary))
+      request;
+    Ok request
+;;
+
 let autonomous_yield_request_for_wake ~wake ~base_path ~keeper_name =
   match wake with
   (* A nonempty [Woken] is the event queue input already selected for this
-     turn. It may yield for chat delivery. An explicit owner-lane manual
-     compaction is the sole successor allowed to preempt at a persisted
-     post-tool boundary; the selected source remains pending and resumes after
-     compaction. Other queued successors still wait for the source terminal. *)
+     turn. It may yield for chat delivery. Two successors may preempt at a
+     persisted post-tool boundary: an explicit owner-lane manual compaction,
+     and an approved Gate resolution whose grant is still unspent (#28809 —
+     the source may be the very checkpoint that resolution continues). The
+     selected source remains pending and resumes after the preemptor. Other
+     queued successors still wait for the source terminal. *)
   | Keeper_registry.Woken (_ :: _) ->
     fun () ->
       (match chat_yield_request ~base_path ~keeper_name with
        | Error _ as error -> error
        | Ok (Some _) as request -> request
        | Ok None ->
-         manual_compaction_yield_request
-           ~wake
-           ~base_path
-           ~keeper_name)
+         (match
+            manual_compaction_yield_request
+              ~wake
+              ~base_path
+              ~keeper_name
+          with
+          | Error _ as error -> error
+          | Ok (Some _) as request -> request
+          | Ok None -> hitl_replay_yield_request ~base_path ~keeper_name))
   | Keeper_registry.Proactive_tick | Keeper_registry.Woken [] ->
     fun () -> autonomous_yield_request ~base_path ~keeper_name
   (* Not reachable, same reason as in [manual_compaction_preemption_request]:
@@ -950,13 +1053,34 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
+                  (* masc#28762: [final_execution.runtime_id] names the
+                     deferred-lane assignment this cycle was budgeted under,
+                     not necessarily the concrete candidate
+                     [attempt_runtime_candidates] actually dispatched —
+                     [Runtime_lane_preference] sticky ordering can route a
+                     lane keyed by one runtime id to a different candidate
+                     first (observed 2026-08-15T11:49Z: the lane-entry
+                     runtime was consistently logged while a
+                     sticky-reordered sibling candidate actually dispatched,
+                     so this log named the untried lane key instead of the
+                     runtime that actually errored).
+                     [keeper_cycle_failed_runtime_attribution] reports the
+                     dispatched candidate's own id when a same-turn
+                     deferral hint is available. *)
+                  let runtime_attribution =
+                    keeper_cycle_failed_runtime_attribution
+                      ~deferred_runtime_lane:turn_state.deferred_runtime_lane
+                      ~execution_runtime_id:final_execution.runtime_id
+                  in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
-                    "%s: keeper cycle FAILED runtime=%s max_context=%d context_budget=%d \
+                    "%s: keeper cycle FAILED runtime=%s deferred_next_runtime=%s \
+                     max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%d \
                      latency=%dms%s error=%s"
                     meta.name
-                    final_execution.runtime_id
+                    runtime_attribution.reported_runtime_id
+                    runtime_attribution.deferred_next_runtime_id
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget

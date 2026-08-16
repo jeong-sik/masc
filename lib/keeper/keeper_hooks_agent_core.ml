@@ -317,10 +317,20 @@ let make_hooks
            carrying it here makes the log self-sufficient. [0] means the
            provider reported no window rather than a window of zero. *)
         let context_window = context_max_of_telemetry response.telemetry in
+        let fmt_int_opt = function
+          | Some v -> string_of_int v
+          | None -> "-"
+        in
+        let cache_n_log, prompt_n_log =
+          match response.telemetry with
+          | Some { timings = Some t; _ } ->
+            fmt_int_opt t.cache_n, fmt_int_opt t.prompt_n
+          | Some { timings = None; _ } | None -> "-", "-"
+        in
         Log.Keeper.info ~keeper_name:meta.name
-          "turn=%d total_turns=%d runtime_lane=%s tokens=%d context_window=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
+          "turn=%d total_turns=%d runtime_lane=%s tokens=%d context_window=%d wall_tok_s=%s prompt_tok_s=%s decode_tok_s=%s cache_n=%s prompt_n=%s latency_ms=%d thinking_present=%b thinking_blocks=%d thinking_chars=%d redacted_thinking_blocks=%d thinking_kind=%s"
           turn meta.runtime.usage.total_turns model total_tok context_window
-          wall_tok_s prompt_tok_s decode_tok_s latency_ms
+          wall_tok_s prompt_tok_s decode_tok_s cache_n_log prompt_n_log latency_ms
           thinking.thinking_present
           thinking.thinking_blocks
           thinking.thinking_chars
@@ -356,6 +366,18 @@ let make_hooks
              response.content
          | None -> ());
         (try
+           (* Cache observability rides the same per-turn event (RFC-0382):
+              [cache_read_tokens] is usage-reported (cloud providers),
+              [cache_n]/[prompt_n] are wire timings (llama-server, Ollama) —
+              KV-reused vs freshly prefilled prompt tokens. The two sources
+              have different semantics and are surfaced side by side, never
+              merged. *)
+           let timings_int_json field =
+             match response.telemetry with
+             | Some { timings = Some t; _ } ->
+               Option.fold ~none:`Null ~some:(fun n -> `Int n) (field t)
+             | Some { timings = None; _ } | None -> `Null
+           in
            Sse.broadcast
              (`Assoc
                [
@@ -368,6 +390,15 @@ let make_hooks
                  (key_output_tokens, `Int output_tok);
                  (key_cost_usd, cost_usd_for_sse);
                  (key_tool_calls_made, `Int !tool_call_count_ref);
+                 (key_cache_read_tokens,
+                  if usage_missing then `Null
+                  else `Int raw_cache_read_input_tokens);
+                 (key_cache_n,
+                  timings_int_json (fun (t : Agent_core.Types.inference_timings)
+                                     -> t.cache_n));
+                 (key_prompt_n,
+                  timings_int_json (fun (t : Agent_core.Types.inference_timings)
+                                     -> t.prompt_n));
                  (key_total_turns, `Int meta.runtime.usage.total_turns);
                  (key_ts_unix, `Float (Unix.gettimeofday ()));
                ])

@@ -23,6 +23,7 @@ let all_layers =
     L.Scope_messages;
     L.Own_board_posts;
     L.Board_activity;
+    L.Fleet_messages;
   ]
 
 let test_ordered_is_complete_permutation () =
@@ -66,9 +67,15 @@ let test_assemble_empty_when_all_absent () =
   check string "no layers -> empty body" "" (L.assemble ~content_of:(fun _ -> None))
 
 let test_assemble_all_present_follows_ordered () =
-  (* Each layer renders its own order index; the result must read 0..11. *)
+  (* Each layer renders its own order index; the result must read 0..n-1.
+     The expectation counts [all_layers], which is maintained by hand
+     independently of [L.ordered], so a layer missing from either list still
+     fails here — and adding a layer no longer means hand-editing a literal. *)
   let content_of id = Some (string_of_int (L.order_index id)) in
-  check string "every layer present -> indices in order" "01234567891011"
+  let expected =
+    List.init (List.length all_layers) string_of_int |> String.concat ""
+  in
+  check string "every layer present -> indices in order" expected
     (L.assemble ~content_of)
 let () =
   run "keeper_context_layers"

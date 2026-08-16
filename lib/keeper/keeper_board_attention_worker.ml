@@ -1641,17 +1641,42 @@ let settle_one_completed
     in
     match partition.Partition.state with
     | Partition.Completed { item; _ } ->
-      let* (_ : Candidate.candidate) =
+      let* delivery =
         Candidate.apply_judgment_and_deliver
           ~base_path
           ~keeper_name
           ~candidate_id:item.candidate_id
           ~judgment:item.judgment
       in
+      (* [Candidate_absent] means the candidate this item names is gone from
+         the live ledger for good (a retire moves the whole store aside as one
+         directory and leaves no tombstone to re-check later), so no delivery
+         can ever land for it. Settling the partition here without one is the
+         terminal outcome, not a fallback: the alternative is exactly what
+         this branch exists to stop — a settlement error that propagates and
+         leaves the same [Completed] item to be handed to this function again
+         next cycle, permanently, since the ledger it depends on cannot come
+         back (masc, board attention finalizer, 2026-08-16). Discarded rather
+         than [settles_without_admitting item]: no stimulus reached the
+         Keeper regardless of what the lost judgment's verdict was, so the
+         owner-turn batch must keep draining instead of stopping as if this
+         had been an admission. *)
+      let discarded_only =
+        match delivery with
+        | Candidate.Candidate_absent ->
+          Log.Keeper.error
+            "Board attention candidate permanently absent from the ledger; settling partition without delivery keeper=%s partition=%s candidate=%s"
+            keeper_name
+            partition.partition_id
+            item.candidate_id;
+          true
+        | Candidate.Delivered (_ : Candidate.candidate) ->
+          settles_without_admitting item
+      in
       let* settled =
         Partition.settle ~now:(Time_compat.now ()) ~base_path ~partition
       in
-      Ok (settled, settles_without_admitting item)
+      Ok (settled, discarded_only)
     | Partition.Ready
     | Partition.Running _
     | Partition.Settled _

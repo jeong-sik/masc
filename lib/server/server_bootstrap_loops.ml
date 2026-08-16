@@ -153,6 +153,12 @@ let board_sse_event_params event =
       ]
 ;;
 
+(* Origin label carried on the [keeper_chat_appended] SSE event. Derived from
+   the surface the row is written with rather than spelled out here:
+   [Surface_ref.lane_label] is the single derivation site for these labels, so
+   a writer that invents its own string drifts from the row it announces. *)
+let workspace_message_chat_source = Surface_ref.lane_label Surface_ref.Agent
+
 let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
@@ -230,7 +236,57 @@ let deliver_broadcast_mention
             |> List.filter_map Keeper_identity.Keeper_id.of_string
             |> List.sort_uniq Keeper_identity.Keeper_id.compare
           in
+          (* The transcript row is committed but the dashboard is not told, so
+             the conversation window shows the message only after a reload —
+             every other intake (Slack, Discord, fusion, dashboard) announces
+             its row. *)
+          let announce_chat_row () =
+            Keeper_chat_broadcast.chat_appended
+              ~keeper_name:target
+              ~source:workspace_message_chat_source
+              ~content:delivery.content
+              ()
+          in
+          (* The message becomes an entry in the target's linear drain, so it
+             is ordered against every other stimulus, deduplicated by the
+             workspace request identity, and readable in the operator queue
+             view. The durable commit precedes the wake hint, so a keeper woken
+             by the hint always finds the entry. *)
+          let commit_queue_entry () =
+            let message =
+              { Keeper_event_queue.wmsg_request_id = delivery.request_id
+              ; wmsg_from = delivery.from_agent
+              }
+            in
+            let stimulus =
+              { Keeper_event_queue.post_id =
+                  Keeper_event_queue.workspace_message_post_id message
+              ; urgency = Keeper_event_queue.Immediate
+              ; arrived_at = Unix.gettimeofday ()
+                (* NDT-OK: stimulus receipt time, used only for ordering/age *)
+              ; payload = Keeper_event_queue.Workspace_message message
+              }
+            in
+            match
+              Keeper_registry_event_queue.enqueue_stimulus_durable_result
+                ~base_path
+                target
+                stimulus
+            with
+            | Keeper_registry_event_queue.Stimulus_enqueued
+            | Keeper_registry_event_queue.Stimulus_already_present -> ()
+            | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string KeepaliveSignalFailures)
+                ~labels:
+                  [ "keeper", target; "phase", "workspace_message_delivery" ]
+                ();
+              Log.Keeper.error
+                "keeper message durable delivery failed keeper=%s request_id=%s: %s"
+                target delivery.request_id detail
+          in
           let request_wake () =
+            commit_queue_entry ();
             if is_running target
             then (
               wakeup target;
@@ -255,6 +311,7 @@ let deliver_broadcast_mention
                ()
            with
            | Ok (Keeper_chat_store.Appended _) ->
+             announce_chat_row ();
              request_wake ();
              Workspace_broadcast.Accepted
            | Ok (Keeper_chat_store.Already_present { row_id }) ->
@@ -293,11 +350,127 @@ let deliver_broadcast_mention
                target delivery.request_id delivery.seq message;
              Workspace_broadcast.Deferred Workspace_broadcast.Intake_store_unavailable)))
 
+(* A committed workspace message is conversation the whole fleet sits in, the
+   same way a bound connector channel is conversation the Keeper bound to it
+   sits in. Every registered Keeper other than the author gets the transcript
+   row, so a Keeper's window shows what the other Keepers said and not only
+   what the operator said to it.
+
+   The row is visibility, not a request: no mention is stamped, no queue entry
+   is committed and no Keeper is woken, so one announcement cannot open a turn
+   on every Keeper. Run this after {!deliver_broadcast_mention}: the named
+   target's row is written there with its mention ids, and
+   [append_user_message_once] keeps that first write, so the stamp survives
+   and this pass reports the target as already present. *)
+(* [Accepted] and [Already_accepted] mean the mention row is committed and
+   stamped; [Passive] means no mention row will ever be written. Every other
+   outcome leaves the mention path still owing that transcript a stamped row,
+   and the projection must not claim the key first. *)
+let mention_transcript_settled = function
+  | Workspace_broadcast.Passive
+  | Workspace_broadcast.Accepted
+  | Workspace_broadcast.Already_accepted -> true
+  | Workspace_broadcast.Pending
+  | Workspace_broadcast.Deferred _
+  | Workspace_broadcast.Rejected _ -> false
+
+let project_workspace_message_to_fleet
+      ~base_path
+      ~registered_keepers
+      (delivery : Workspace_broadcast.broadcast_delivery)
+  =
+  match delivery.audience with
+  | Workspace_broadcast.System_record ->
+    (* A lifecycle or task-FSM announcement belongs to the activity record, not
+       to anyone's conversation. Projecting it would also cost one full
+       transcript read-and-scan per registered Keeper on the commit path — on
+       the reference workspace 4.53 MB per message, for the 17 of 18 messages
+       nobody would want to read.
+
+       A replayed row also lands here: [delivery_of_message] cannot recover the
+       live declaration, so a restart between commit and delivery loses the
+       projection. Logged rather than silent, because there is no second
+       chance — the outbox marker is deleted once the mention settles. *)
+    Log.Keeper.debug
+      "fleet projection skipped for a system record request_id=%s from=%s"
+      delivery.request_id delivery.from_agent
+  | Workspace_broadcast.Fleet_conversation ->
+  match Keeper_chat_delivery_identity.Request_id.of_string delivery.request_id with
+  | Error detail ->
+    Log.Keeper.error
+      "fleet projection skipped; request identity invalid request_id=%s: %s"
+      delivery.request_id detail
+  | Ok request_id ->
+    let delivery_key =
+      Keeper_chat_delivery_identity.Workspace_message request_id
+    in
+    let speaker : Keeper_chat_store.speaker =
+      { speaker_id = Some delivery.from_agent
+      ; speaker_name = Some delivery.from_agent
+      ; speaker_authority = Keeper_chat_store.External
+      }
+    in
+    (* Exact comparison against the identities the registry holds, not a minted
+       [Keeper_id]. That mint does not round-trip a keeper whose name has three
+       or more hyphenated parts: measured with [adm-race-cf-000], the minted
+       comparison failed to recognise the author and it received its own speech
+       back as an external line. The registry entry already carries both the
+       keeper name and the agent name, so this costs no extra read. *)
+    let authored_by_recipient ~keeper_name ~agent_name =
+      let same candidate =
+        String.equal
+          (String.lowercase_ascii (String.trim candidate))
+          (String.lowercase_ascii (String.trim delivery.from_agent))
+      in
+      same keeper_name || same agent_name
+    in
+    (* Fanout width is not otherwise observable: the registry keeps an entry
+       until it is unregistered, so the recipient count drifts upward within a
+       server lifetime and each recipient costs one transcript transaction. *)
+    let recipients = ref 0 in
+    let appended = ref 0 in
+    let failed = ref 0 in
+    registered_keepers ()
+    |> List.iter (fun (keeper_name, agent_name) ->
+      if not (authored_by_recipient ~keeper_name ~agent_name)
+      then (
+        incr recipients;
+        match
+          Keeper_chat_store.append_user_message_once
+            ~base_dir:base_path
+            ~keeper_name
+            ~delivery_key
+            ~content:delivery.content
+            ~surface:Surface_ref.Agent
+            ~external_message_id:delivery.request_id
+            ~speaker
+            ()
+        with
+        | Ok (Keeper_chat_store.Appended _) ->
+          incr appended;
+          Keeper_chat_broadcast.chat_appended
+            ~keeper_name
+            ~source:workspace_message_chat_source
+            ~content:delivery.content
+            ()
+        | Ok (Keeper_chat_store.Already_present _) -> ()
+        | Error detail ->
+          incr failed;
+          Log.Keeper.error
+            "fleet projection failed keeper=%s request_id=%s: %s"
+            keeper_name delivery.request_id detail));
+    Log.Keeper.info
+      "fleet projection request_id=%s from=%s recipients=%d appended=%d failed=%d"
+      delivery.request_id delivery.from_agent !recipients !appended !failed
+;;
+
 module Projection_for_testing = struct
   let autoboot_proactive_warmup_sec = autoboot_proactive_warmup_sec
   let board_sse_event_params = board_sse_event_params
   let broadcast_mention_wakeup_action = broadcast_mention_wakeup_action
   let deliver_broadcast_mention = deliver_broadcast_mention
+  let project_workspace_message_to_fleet = project_workspace_message_to_fleet
+  let mention_transcript_settled = mention_transcript_settled
 end
 
 let fork_logged_fiber = Server_bootstrap_loops_fiber.fork_logged_fiber
@@ -1346,21 +1519,60 @@ let start_keeper_loops_owned
         "board: Activity_graph.emit kind=%s failed: %s"
         activity_kind
         (Printexc.to_string exn));
-  (* Wire broadcast -> keeper wakeup. Explicit mentions wake the target
-     keeper immediately; unmentioned broadcasts remain passive SSE/message
-     fanout so one broad announcement cannot create a fleet-wide turn storm.
-     Board signals have their own capped keeper wake path above. *)
+  (* Wire broadcast -> keeper delivery. An explicit mention commits a queue
+     entry and wakes the named keeper. Every registered keeper then gets the
+     same transcript row for its conversation window, with no mention stamp,
+     no queue entry and no wake, so one broad announcement cannot create a
+     fleet-wide turn storm. Board signals have their own capped wake path. *)
   let broadcast_mention_handler =
     fun (delivery : Workspace_broadcast.broadcast_delivery) ->
     let config = Mcp_server.workspace_config state in
     let base_path = config.base_path in
-    deliver_broadcast_mention
-      ~config
-      ~base_path
-      ~is_running:(fun target ->
-        Option.is_some (Keeper_registry.get ~base_path target))
-      ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
-      delivery
+    let mention_outcome =
+      deliver_broadcast_mention
+        ~config
+        ~base_path
+        ~is_running:(fun target ->
+          Option.is_some (Keeper_registry.get ~base_path target))
+        ~wakeup:(Keeper_keepalive.wakeup_keeper ~base_path)
+        delivery
+    in
+    (* The projection writes under the same delivery key the mention path uses,
+       and the chat store is first-write-wins on that key. If the mention
+       delivery returned without writing its row — the target's metadata was
+       unavailable, or its identity was ambiguous — an unstamped projection row
+       would claim the key, and the retry that follows could never stamp it:
+       the reloaded row carries only content-derived mentions, so a keeper
+       whose feed targets do not match the text reads as already answered, the
+       wake is skipped, and the message is recorded as delivered. Project only
+       once the mention path is done with that transcript. *)
+    (if not (mention_transcript_settled mention_outcome)
+     then
+       Log.Keeper.warn
+         "fleet projection deferred with the mention delivery request_id=%s outcome=%s"
+         delivery.request_id
+         (Workspace_broadcast.mention_delivery_kind mention_outcome)
+     else
+       (* The fanout must not be able to change what the mention delivery
+          reported. The dispatcher turns an escaping exception into
+          [Deferred Handler_failed], which would relabel an accepted mention
+          as an undelivered one. *)
+       (try
+       project_workspace_message_to_fleet
+         ~base_path
+         ~registered_keepers:(fun () ->
+           Keeper_registry.all ~base_path ()
+           |> List.map (fun (entry : Keeper_registry.registry_entry) ->
+             entry.name, entry.meta.Keeper_meta_contract.agent_name))
+         delivery
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+          Log.Keeper.warn
+            "fleet projection failed request_id=%s: %s"
+            delivery.request_id
+            (Printexc.to_string exn)));
+    mention_outcome
   in
   Workspace_broadcast.set_on_broadcast_mention broadcast_mention_handler;
   Atomic.set Workspace_hooks.on_workspace_message_mutation_fn

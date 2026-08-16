@@ -116,7 +116,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
            let agents = nickname :: List.filter ((<>) nickname) s.active_agents in
            { s with active_agents = agents }
          ) in
-         broadcast config ~from_agent:nickname
+         broadcast ~audience:System_record config ~from_agent:nickname
            ~msg_type:"session_rebound"
            ~content:(Printf.sprintf "%s rebound the namespace session" nickname)
          |> log_lifecycle_broadcast_result
@@ -186,7 +186,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
   ) in
 
   (* Broadcast session binding *)
-  broadcast config ~from_agent:nickname
+  broadcast ~audience:System_record config ~from_agent:nickname
     ~msg_type:"session_bound"
     ~content:(Printf.sprintf "%s bound the namespace session" nickname)
   |> log_lifecycle_broadcast_result
@@ -253,7 +253,7 @@ let end_session config ~agent_name =
       { s with active_agents = List.filter ((<>) actual_name) s.active_agents }
     ) in
 
-    broadcast config ~from_agent:"system"
+    broadcast ~audience:System_record config ~from_agent:"system"
       ~msg_type:"session_ended"
       ~content:(Printf.sprintf "%s ended the namespace session" actual_name)
     |> log_lifecycle_broadcast_result

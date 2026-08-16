@@ -467,7 +467,10 @@ let handle_keeper_task_tool_with_outcome
         (error_json "message is required. Good: message='Build complete, all tests pass.'.")
     else (
       match
+        (* A Keeper calling keeper_broadcast is speaking to the workspace,
+           so this reaches every Keeper's conversation window. *)
         Workspace.broadcast
+          ~audience:Workspace_broadcast.Fleet_conversation
           config
           ~from_agent:(keeper_agent_sender ~meta)
           ~content:message

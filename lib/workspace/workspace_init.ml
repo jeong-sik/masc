@@ -95,7 +95,7 @@ let pause config ~by ~reason =
   in
   (* Broadcast pause notification *)
   let _ =
-    broadcast
+    broadcast ~audience:System_record
       config
       ~from_agent:"system"
       ~content:(Printf.sprintf "⏸️ Workspace PAUSED by %s: %s" by reason)
@@ -115,7 +115,7 @@ let resume config ~by =
     in
     (* Broadcast resume notification *)
     let _ =
-      broadcast
+      broadcast ~audience:System_record
         config
         ~from_agent:"system"
         ~content:(Printf.sprintf "▶️ Workspace RESUMED by %s" by)

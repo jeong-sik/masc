@@ -291,15 +291,15 @@ jobs:
           # line 1206), so any code-bearing PR that does NOT set build=true
           # merges with a green "CI Gate" while the Build job (dune compile)
           # never ran. The prefix list below (bin/ lib/ test/ proto/ config/)
-          # missed build-graph dirs examples/ ppx/ ppx_tla/ test_lib/ tools/
+          # missed build-graph dirs ppx/ ppx_tla/ test_lib/ tools/
           # and the root dune file, so a PR touching only those compiled
           # nowhere yet reported success. Match any OCaml/dune source plus C
           # foreign stubs by suffix so new source dirs are covered without
           # editing this list, and keep explicit prefixes for Dune-declared
           # non-source deps (e.g. tools/tlc_test_gen/test/fixtures/*.tla).
-          # Over-triggering on dune-excluded dirs (archive/, dashboard_bonsai/
-          # per the root dune (dirs ...) stanza) is harmless: the Build job
-          # runs but dune build skips those dirs.
+          # Over-triggering on dune-excluded dirs (dashboard_bonsai/ per the
+          # root dune (dirs ...) stanza) is harmless: the Build job runs but
+          # dune build skips those dirs.
           # scripts/harness/ stays a prefix match (not suffix): the Build and
           # Test job executes scripts/harness/contract/run_all.sh, so any
           # harness file — including non-.sh/.json ones and future extensions —
@@ -1048,7 +1048,8 @@ jobs:
             @test/runtest-test_tool_board_coverage \
             @test/runtest-test_tool_task_coverage \
             @test/runtest-test_tool_workspace_coverage \
-            @test/runtest-test_tool_misc_coverage
+            @test/runtest-test_tool_misc_coverage \
+            @test/runtest-test_tool_misc_web_fetch
 
       - name: Run completion-authority lookup surface suite
         # The judge's lookup tools reach the filesystem and Git inside a
@@ -1091,6 +1092,7 @@ jobs:
             @test/runtest-test_keeper_contract_classifier_pure \
             @test/runtest-test_keeper_conditions_wire_parity \
             @test/runtest-test_keeper_fsm_guard_actions \
+            @test/runtest-test_keeper_hitl_replay_delivery \
             @test/runtest-test_keeper_invariant \
             @test/runtest-test_keeper_invocation_contract_hints \
             @test/runtest-test_keeper_path_ssot \
@@ -1741,8 +1743,7 @@ jobs:
             esac
           done < <(awk 'NR > 1 { print $1 }' "$RUNNER_TEMP/masc-runtime-otool.txt")
           chmod +x scripts/release-binary-smoke.sh
-          MASC_BUILD_GIT_COMMIT="$EXPECTED_SOURCE_SHA" \
-            scripts/release-binary-smoke.sh "$binary"
+          scripts/release-binary-smoke.sh "$binary"
 
           identity_root="$(mktemp -d "$RUNNER_TEMP/masc-build-identity.XXXXXX")"
           identity_log="$identity_root/server.log"
@@ -1759,7 +1760,6 @@ jobs:
           trap cleanup_identity_probe EXIT
           mkdir -p "$identity_root/.masc/config"
           cp config/runtime.toml "$identity_root/.masc/config/runtime.toml"
-          MASC_BUILD_GIT_COMMIT="$EXPECTED_SOURCE_SHA" \
           MASC_BASE_PATH="$identity_root" \
           MASC_BASE_PATH_INPUT="$identity_root" \
           MASC_KEEPER_AUTONOMOUS_ENABLED=false \
@@ -1846,9 +1846,6 @@ jobs:
               target_arch: $target_arch,
               binary_format: $binary_format,
               binary_sha256: $binary_sha256,
-              required_launch_env: {
-                MASC_BUILD_GIT_COMMIT: $source_sha
-              },
               linked_dylibs: $linked_dylibs,
               supported_homebrew_prefixes: [
                 "/opt/homebrew/opt/gmp/",
@@ -1870,7 +1867,6 @@ jobs:
              .target_arch == "arm64" and
              .binary_format == "mach-o" and
              .binary_sha256 == $binary_sha256 and
-             .required_launch_env.MASC_BUILD_GIT_COMMIT == $source_sha and
              (.linked_dylibs | type == "array" and length > 0)' \
             "$runtime_dir/manifest.json" >/dev/null
 

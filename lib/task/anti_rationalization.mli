@@ -48,6 +48,18 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
+  ; retryable : bool
+        (** Whether retrying this same review is expected to change the
+            outcome. [true] unless a typed evaluator error says otherwise:
+              only the [Error error] arm of [run_llm_reviewer_fn]'s result
+              carries an {!Agent_core.Error.t} to classify, so this is
+              [Agent_core.Error.is_retryable error] there and [true]
+              everywhere else (a produced verdict, a malformed tool call, or
+              a runtime/prompt resolution failure with no typed error to
+              consult). [false] means the same review_request will keep
+              failing the same way — a model-input-budget refusal on a
+              single-atom review being the case this exists for — and a
+              caller should not schedule another automatic attempt. *)
   }
 
 val review

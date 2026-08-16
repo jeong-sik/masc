@@ -874,7 +874,7 @@ let test_snapshot_has_expected_sections () =
       ignore (Workspace.init config ~agent_name:(Some "owner"));
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
       ignore (Workspace.add_task config ~title:"operator backlog" ~priority:2 ~description:"");
-      ignore (Workspace.broadcast config ~from_agent:"owner" ~content:"operator snapshot seed");
+      ignore (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"owner" ~content:"operator snapshot seed");
       let json = Operator_control.snapshot_json (operator_ctx env sw config "owner") in
       let root = Yojson.Safe.Util.member "workspace" json in
       Alcotest.(check bool) "root block present" true

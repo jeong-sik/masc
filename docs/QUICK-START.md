@@ -257,20 +257,14 @@ Keeper WebSearch/WebFetch backend 메모:
 - `masc_web_search` / `masc_web_fetch`는 Keeper-internal backend 이름이며 MCP `tools/list` public surface에는 노출되지 않는다.
 - `web_search` / `web_fetch` are not agent core-owned capabilities; Keeper agents should call the MASC-owned public aliases shown in their tool list (`WebSearch` / `WebFetch`).
 - `WebSearch { includeContent: true }`는 가져온 본문을 keeper가 바로 읽는 `content_text` 렌더링 하나로만 싣는다. `WebFetch`는 선택한 단일 URL을 더 깊게 읽을 때 쓴다.
+- `maxChars`를 넘는 본문은 head/tail 창 + `[TRUNCATED ... full_text_sha256=<sha>]` 마커로 절단되고, 전문은 content-addressed `Tool_blob_store`(`<base>/.masc/tool_blobs/`)에 저장된다 — `keeper_artifact_read`가 읽는 바로 그 저장소다 (#28820). 마크다운 헤딩이 있으면 마커 뒤 `[OUTLINE ...]` 블록이 헤딩별 바이트 오프셋을 주고, 마커의 sha와 그 오프셋이 곧 `keeper_artifact_read(sha256, offset, max_bytes)` 인자다.
+- 오프로드마다 `<base>/.masc/artifacts/web-fetch/index.jsonl`에 `masc.web_artifact.v1` 행(sha256, source_url, title, bytes, fetched_at)이 append된다 (RFC-0383). index는 projection이라 지워져도 다른 동작은 변하지 않는다. **레인 주의**: keeper는 컨텍스트/checkpoint의 마커 sha로 본문을 되읽는다. index를 `Grep`으로 뒤져 sha를 찾는 발견 경로는 임의 경로를 읽을 수 있는 agent/운영자 레인이다 — keeper sandbox는 `.masc`를 파일 표면으로 주지 않으므로 keeper 레인의 교차 세션 발견은 #28820에서 결정한다.
 - `[web_search].searxng_url` 또는 `MASC_SEARXNG_URL` 설정 시 self-hosted SearXNG가 최우선 provider로 작동한다.
 - 로컬 검색 품질이 필요하면 `scripts/searxng-local.sh start`로 Docker SearXNG를 올리고 active `runtime.toml`의 `[web_search].searxng_url = "http://localhost:8888"`만 설정한다. 별도 WebSearch MCP wrapper는 필요 없다.
 - `scripts/searxng-local.sh status|smoke|logs|stop`으로 로컬 provider를 점검한다. 기본 config는 `${MASC_BASE_PATH:-$HOME/me}/.local/share/masc-searxng/settings.yml`에 생성되며 MASC가 쓰는 JSON search format을 켠다.
-<<<<<<< HEAD
-- 기본 auto 모드는 자격이 설정된 provider만 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 시도한다.
+- 기본 auto 모드는 자격이 설정된 provider만 `searxng`, `brave`, `tavily`, `exa`, `bing_api`, `ollama` 순으로 시도한다.
 - 자격이 하나도 없으면 검색은 빈 결과가 아니라 설정 방법을 담은 실패로 끝난다.
 - `brave_llm_context`는 명시 설정 시에만 체인에 들어온다 (`BRAVE_SEARCH_API_KEY` 필요). URL+스니펫 행 대신 토큰 예산이 요청에 걸린 추출 청크(`context_text` + `sources`)를 반환한다.
-||||||| 80747590c9
-- 기본 auto 모드는 공식 provider key가 있으면 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 먼저 시도한다.
-- 공식 provider가 없거나 실패하면 `duckduckgo`, `bing_rss` 순으로 fallback 한다.
-=======
-- 기본 auto 모드는 자격이 설정된 provider만 `searxng`, `brave`, `tavily`, `exa`, `bing_api` 순으로 시도한다.
-- 자격이 하나도 없으면 검색은 빈 결과가 아니라 설정 방법을 담은 실패로 끝난다.
->>>>>>> origin/main
 - env:
   - `MASC_SEARXNG_URL` (self-hosted SearXNG instance URL)
   - `MASC_WEB_SEARCH_PROVIDER`

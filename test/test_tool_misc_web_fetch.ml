@@ -107,6 +107,272 @@ let test_invalid_redirect_is_workflow_rejection () =
       check bool "message" true
         (String_util.contains_substring (Tool_result.message result) "invalid redirect"))
 
+let with_base_path_env path f =
+  let key = "MASC_BASE_PATH" in
+  let original = Sys.getenv_opt key in
+  Unix.putenv key path;
+  Fun.protect
+    ~finally:(fun () ->
+      match original with
+      | Some value -> Unix.putenv key value
+      | None -> Unix.putenv key "")
+    f
+
+(* Feature contract: past maxChars the text becomes a deterministic
+   head/tail window around a [TRUNCATED ...] marker, and the complete
+   extraction is offloaded content-addressed into the Tool_blob_store —
+   the store keeper_artifact_read resolves (#28820) — with its sha256 in
+   full_text_sha256 and one fact row in the corpus index. *)
+let test_truncation_offloads_full_text () =
+  let tmp_base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-trunc-%d" (Unix.getpid ()))
+  in
+  Unix.mkdir tmp_base 0o755;
+  let line index = Printf.sprintf "line %04d of the long page" index in
+  let body =
+    String.concat "\n" (List.init 400 line)
+  in
+  with_base_path_env tmp_base (fun () ->
+      Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+          Ok
+            { Masc.Tool_misc_web_fetch.http_status = Some 200
+            ; final_url = "https://example.com/long"
+            ; redirect_count = 0
+            ; content_type = Some "text/plain"
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            })
+        (fun () ->
+          let json =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:2_000
+                 "https://example.com/long")
+          in
+          let open Yojson.Safe.Util in
+          check bool "truncated" true (json |> member "truncated" |> to_bool);
+          let text = json |> member "text" |> to_string in
+          check bool "head kept" true
+            (String_util.contains_substring text (line 0));
+          check bool "tail kept" true
+            (String_util.contains_substring text (line 399));
+          check bool "marker present" true
+            (String_util.contains_substring text "[TRUNCATED total_chars=");
+          check bool "no outline for heading-free text" false
+            (String_util.contains_substring text "[OUTLINE");
+          let sha256 = json |> member "full_text_sha256" |> to_string in
+          check bool "marker names the content address" true
+            (String_util.contains_substring text ("full_text_sha256=" ^ sha256));
+          (* The blob must resolve in the exact store keeper_artifact_read
+             reads (#28820): fetch it back through Tool_blob_store. *)
+          let store = Tool_blob_store.create ~base_path:tmp_base in
+          let stored =
+            match Tool_blob_store.fetch store ~sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "offloaded blob is absent from the store"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+          in
+          check bool "offloaded blob holds the full extraction" true
+            (String_util.contains_substring stored (line 200));
+          check int "offloaded blob is complete" 400
+            (List.length (String.split_on_char '\n' stored));
+          (* RFC-0383: the same round trip appended one fact row to the
+             corpus index, and the row agrees with the artifact. *)
+          let index_path =
+            List.fold_left Filename.concat tmp_base
+              [ ".masc"; "artifacts"; "web-fetch"; "index.jsonl" ]
+          in
+          let last_row =
+            In_channel.with_open_bin index_path In_channel.input_all
+            |> String.split_on_char '\n'
+            |> List.filter (fun row -> not (String.equal row ""))
+            |> List.rev |> List.hd
+          in
+          let row = Yojson.Safe.from_string last_row in
+          check string "index schema" "masc.web_artifact.v1"
+            (row |> member "schema" |> to_string);
+          check string "index sha256 matches the blob address" sha256
+            (row |> member "sha256" |> to_string);
+          check string "index source_url" "https://example.com/long"
+            (row |> member "source_url" |> to_string);
+          check int "index bytes" (String.length stored)
+            (row |> member "bytes" |> to_int);
+          check bool "plain text carries no title field" true
+            (row |> member "title" = `Null);
+          (* Projection proof: removing the index changes no behavior. *)
+          Sys.remove index_path;
+          let json_again =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:2_000
+                 "https://example.com/long")
+          in
+          check bool "fetch still truncates without the index" true
+            (json_again |> member "truncated" |> to_bool)))
+
+(* Feature contract: cut points that miss a newline snap to UTF-8
+   codepoint starts — a Korean page with no newlines truncates into a
+   window that is still valid UTF-8 end to end. *)
+let test_truncation_preserves_utf8_boundaries () =
+  let tmp_base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-utf8-%d" (Unix.getpid ()))
+  in
+  Unix.mkdir tmp_base 0o755;
+  let body =
+    String.concat " "
+      (List.init 300 (fun index -> Printf.sprintf "한글본문조각%04d" index))
+  in
+  with_base_path_env tmp_base (fun () ->
+      Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+          Ok
+            { Masc.Tool_misc_web_fetch.http_status = Some 200
+            ; final_url = "https://example.com/korean"
+            ; redirect_count = 0
+            ; content_type = Some "text/plain"
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            })
+        (fun () ->
+          let json =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:1_000
+                 "https://example.com/korean")
+          in
+          let open Yojson.Safe.Util in
+          check bool "truncated" true (json |> member "truncated" |> to_bool);
+          let text = json |> member "text" |> to_string in
+          check bool "window is valid utf8" true (String.is_valid_utf_8 text);
+          check bool "head kept" true
+            (String_util.contains_substring text "한글본문조각0000");
+          check bool "tail kept" true
+            (String_util.contains_substring text "한글본문조각0299")))
+
+(* Feature contract: when the truncated extraction carries markdown
+   headings, the marker is followed by an [OUTLINE ...] byte-offset map
+   addressing the offloaded blob — reading the artifact at a listed
+   offset lands exactly on that heading line. Fenced-code [#] lines stay
+   out of the count, and collection caps at 32 rows while the header
+   still reports the full heading total. *)
+let test_truncation_outline_maps_headings () =
+  let tmp_base =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-outline-%d" (Unix.getpid ()))
+  in
+  Unix.mkdir tmp_base 0o755;
+  let section index =
+    Printf.sprintf
+      "## section %02d\npadding %02d alpha filler text\npadding %02d beta filler text"
+      index index index
+  in
+  let preamble = [ "# Doc Title"; "```"; "# not a heading"; "```" ] in
+  let body =
+    String.concat "\n" (preamble @ List.init 40 (fun i -> section (i + 1)))
+  in
+  (* Offset of "## section 10" computed from construction, not by
+     parsing the outline back: the map row must agree with it. *)
+  let expected_offset =
+    String.length
+      (String.concat "\n" (preamble @ List.init 9 (fun i -> section (i + 1))))
+    + 1
+  in
+  with_base_path_env tmp_base (fun () ->
+      Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
+          Ok
+            { Masc.Tool_misc_web_fetch.http_status = Some 200
+            ; final_url = "https://example.com/sections"
+            ; redirect_count = 0
+            ; content_type = Some "text/plain"
+            ; downloaded_bytes = Some (String.length body)
+            ; body
+            })
+        (fun () ->
+          let json =
+            success_json
+              (handle ~extract_mode:"text" ~max_chars:1_000
+                 "https://example.com/sections")
+          in
+          let open Yojson.Safe.Util in
+          check bool "truncated" true (json |> member "truncated" |> to_bool);
+          let text = json |> member "text" |> to_string in
+          check bool "outline header counts headings, not fenced hashes" true
+            (String_util.contains_substring text "[OUTLINE headings=41 shown=32");
+          let row = Printf.sprintf "\n%d ## section 10" expected_offset in
+          check bool "outline row carries the constructed offset" true
+            (String_util.contains_substring text row);
+          let sha256 = json |> member "full_text_sha256" |> to_string in
+          let store = Tool_blob_store.create ~base_path:tmp_base in
+          let stored =
+            match Tool_blob_store.fetch store ~sha256 with
+            | Ok (Some bytes) -> bytes
+            | Ok None -> Alcotest.fail "offloaded blob is absent from the store"
+            | Error error ->
+              Alcotest.fail (Tool_blob_store.fetch_error_to_string error)
+          in
+          let heading = "## section 10" in
+          check string "offset addresses that heading in the artifact" heading
+            (String.sub stored expected_offset (String.length heading))))
+
+(* Feature contract: web content chooses the next fetch, so loopback,
+   private, link-local, unspecified, and localhost destinations are
+   rejected at the entry and at every redirect hop — as caller-input
+   violations, before any network round trip. *)
+let test_destination_boundary () =
+  let blocked_urls =
+    [ "http://127.0.0.1:8935/health"
+    ; "https://localhost:8888/search"
+    ; "http://sub.localhost/x"
+    ; "http://[::1]/"
+    ; "http://169.254.169.254/latest/meta-data/"
+    ; "http://10.1.2.3/internal"
+    ; "http://172.16.0.9/"
+    ; "http://192.168.0.10/router"
+    ; "http://0.0.0.0/"
+    ; "http://[fe80::1]/"
+    ; "http://[fd00::2]/"
+    ; "http://[::ffff:127.0.0.1]/"
+    ]
+  in
+  List.iter
+    (fun url ->
+      let result = handle url in
+      check bool (url ^ " rejected") false (Tool_result.is_success result);
+      check (option string) (url ^ " class") (Some "workflow_rejection")
+        (Tool_result.failure_class result
+        |> Option.map Tool_result.tool_failure_class_to_string);
+      check bool (url ^ " reason") true
+        (String_util.contains_substring (Tool_result.message result)
+           "url rejected:");
+      match Masc.Tool_misc_web_fetch.validate_redirect_target url with
+      | Ok () -> fail (url ^ " must be rejected as a redirect hop too")
+      | Error reason ->
+          check bool (url ^ " hop reason") true
+            (String_util.contains_substring reason "redirect target rejected:"))
+    blocked_urls;
+  (* A public destination still flows through to the fetch boundary. *)
+  Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+    (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+      check string "public url reaches fetch" "https://example.com/public" url;
+      Ok
+        { Masc.Tool_misc_web_fetch.http_status = Some 200
+        ; final_url = "https://example.com/public"
+        ; redirect_count = 0
+        ; content_type = Some "text/plain"
+        ; downloaded_bytes = Some 2
+        ; body = "ok"
+        })
+    (fun () ->
+      let json = success_json (handle "https://example.com/public") in
+      check string "public body extracted" "ok"
+        Yojson.Safe.Util.(json |> member "text" |> to_string));
+  check bool "public hop allowed" true
+    (Masc.Tool_misc_web_fetch.validate_redirect_target
+       "https://example.com/next"
+     = Ok ())
+
 let () =
   run "tool_misc_web_fetch"
     [
@@ -118,5 +384,12 @@ let () =
             test_plain_text_preserves_angle_brackets;
           test_case "invalid redirect class" `Quick
             test_invalid_redirect_is_workflow_rejection;
+          test_case "truncation offloads full text" `Quick
+            test_truncation_offloads_full_text;
+          test_case "truncation preserves utf8 boundaries" `Quick
+            test_truncation_preserves_utf8_boundaries;
+          test_case "truncation outline maps headings" `Quick
+            test_truncation_outline_maps_headings;
+          test_case "destination boundary" `Quick test_destination_boundary;
         ] );
     ]

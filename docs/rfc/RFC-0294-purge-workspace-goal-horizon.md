@@ -5,7 +5,7 @@ status: Implemented
 created: 2026-06-24
 updated: 2026-07-10
 author: jeong-sik
-supersedes: ["0288"]
+supersedes: []
 superseded_by: "KEEPER-STATE-OWNERSHIP"
 related: ["0067", "0315"]
 implementation_prs: []

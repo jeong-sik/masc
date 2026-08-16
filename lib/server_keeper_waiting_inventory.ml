@@ -33,6 +33,7 @@ type wake_producer =
   | Completion_authority
   | Keeper_task_cancellation
   | Keeper_compaction_request
+  | Keeper_workspace_message
   | Read_model_reader
 
 type waiting_row =
@@ -101,6 +102,7 @@ let wake_producer_to_string = function
   | Keeper_task_cancellation -> "keeper_task_cancellation"
   | Completion_authority -> "completion_authority"
   | Keeper_compaction_request -> "keeper_compaction_request"
+  | Keeper_workspace_message -> "keeper_workspace_message"
   | Read_model_reader -> "read_model_reader"
 ;;
 
@@ -118,6 +120,7 @@ let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_produ
   | Goal_reconciliation_ready _ -> Keeper_goal_reconciliation
   | Completion_authority_rejected _ -> Completion_authority
   | Task_cancelled _ -> Keeper_task_cancellation
+  | Workspace_message _ -> Keeper_workspace_message
 ;;
 
 let unix_iso_json = function

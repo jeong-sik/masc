@@ -7,7 +7,7 @@ updated: 2026-07-28
 author: vincent (drafted by Claude Opus 4.8)
 supersedes: []
 superseded_by: null
-related: ["0239", "0257", "0243", "0259", "0285"]
+related: ["0239", "0257", "0259", "0285"]
 implementation_prs: []
 ---
 
@@ -64,7 +64,7 @@ keeper durable 기억을 **Memory OS 단일 경로로 통합**하고 memory_bank
 타겟인 Memory OS retention(`cap_facts`)이 실제로 작동해야 의미가 있으므로, retention 실작동 보장을
 본 에픽 범위에 포함한다 (§3 Stage 3).
 
-비목표: Memory OS 스코어 모델 재설계(RFC-0243/0259/0285 소관)는 본 RFC 범위 밖. 본 RFC는 *두 시스템
+비목표: Memory OS 스코어 모델 재설계(RFC-0259/0285 소관)는 본 RFC 범위 밖. 본 RFC는 *두 시스템
 공존 제거*와 *retention 실작동*에 한정한다.
 
 > **2026-07-28 집행**: Stage 2~4를 단일 PR로 집행 완료 (branch

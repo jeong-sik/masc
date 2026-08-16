@@ -62,7 +62,6 @@ CI 필수 게이트. 외부 의존성 없이 재현 가능.
 | Contract Harness | `make test-contract` | Streamable HTTP and Golden Path contracts |
 
 Contract harness는 서버가 이미 떠 있다고 가정하지 않고 hermetic bootstrap 경로로 실행된다.
-`archive/trpg/scripts/` 아래의 game-view/TRPG 계약 스크립트는 현재 active contract suite가 아니라 archive/manual 검증으로 분류한다.
 
 **판정 기준**: main 브랜치가 green이면 core MCP/HTTP/keeper/operator 계약이 깨지지 않았다.
 

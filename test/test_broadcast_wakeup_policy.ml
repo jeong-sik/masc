@@ -34,6 +34,7 @@ let delivery ~target ~request_id ~seq ~content : Workspace_broadcast.broadcast_d
   ; mention = Some target
   ; msg_type = "broadcast"
   ; mention_delivery = Workspace_broadcast.Pending
+  ; audience = Workspace_broadcast.Fleet_conversation
   }
 ;;
 
@@ -257,6 +258,273 @@ let test_canonical_delivery_stamps_configured_feed_target () =
       (List.mem alias mentions)
 ;;
 
+let queued_workspace_messages ~base_path ~keeper_name =
+  match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
+  | Error detail -> failf "event queue load failed: %s" detail
+  | Ok queue ->
+    Keeper_event_queue.to_list queue
+    |> List.filter_map (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Workspace_message message ->
+        Some (stimulus.post_id, stimulus.urgency, message)
+      | Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Board_attention _
+      | Keeper_event_queue.Bootstrap
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Schedule_due _
+      | Keeper_event_queue.Connector_attention _
+      | Keeper_event_queue.Hitl_resolved _
+      | Keeper_event_queue.Manual_compaction_requested
+      | Keeper_event_queue.Goal_assigned _
+      | Keeper_event_queue.Goal_reconciliation_ready _
+      | Keeper_event_queue.Completion_authority_rejected _
+      | Keeper_event_queue.Task_cancelled _ -> None)
+;;
+
+(* A workspace message that names a Keeper has to reach the same linear drain
+   every other stimulus arrives on. Before this, the delivery boundary wrote a
+   transcript row and flipped a wake flag, so the message existed for the
+   transcript scan and for nothing else: it had no queue identity, no ordering
+   against other stimuli, and nothing for the operator queue view to show. *)
+let test_delivery_enqueues_linear_queue_entry () =
+  with_workspace @@ fun config ->
+  let target = "rondo" in
+  let request_id = "wmsg-1234567890abcdef" in
+  persist_meta config target;
+  let deliver () =
+    Broadcast_wakeup.deliver_broadcast_mention
+      ~config
+      ~base_path:config.base_path
+      ~is_running:(fun _ -> true)
+      ~wakeup:(fun _ -> ())
+      (delivery ~target ~request_id ~seq:6 ~content:"drain me")
+  in
+  ignore (deliver ());
+  (match queued_workspace_messages ~base_path:config.base_path ~keeper_name:target with
+   | [ (post_id, urgency, message) ] ->
+     check string "queue entry keys on the workspace request"
+       ("workspace-message:" ^ request_id) post_id;
+     check bool "an addressed message is immediate" true
+       (urgency = Keeper_event_queue.Immediate);
+     check string "queue entry names its sender" "external-agent"
+       message.Keeper_event_queue.wmsg_from
+   | entries ->
+     failf "expected one queued keeper message, got %d" (List.length entries));
+  (* Redelivery of the same committed message is the same durable event. *)
+  ignore (deliver ());
+  check int "redelivery does not duplicate the queue entry" 1
+    (List.length
+       (queued_workspace_messages ~base_path:config.base_path ~keeper_name:target))
+;;
+
+(* The wake is a hint; the delivery is durable. A Keeper that is not running
+   when the message commits still finds it in its queue on the next cycle. *)
+let test_stopped_keeper_keeps_queue_entry () =
+  with_workspace @@ fun config ->
+  let target = "stopped-drain-keeper" in
+  let request_id = "wmsg-fedcba0987654321" in
+  persist_meta config target;
+  ignore
+    (Broadcast_wakeup.deliver_broadcast_mention
+       ~config
+       ~base_path:config.base_path
+       ~is_running:(fun _ -> false)
+       ~wakeup:(fun _ -> fail "a stopped Keeper must not be woken")
+       (delivery ~target ~request_id ~seq:7 ~content:"queued while stopped"));
+  check int "stopped Keeper still holds the queue entry" 1
+    (List.length
+       (queued_workspace_messages ~base_path:config.base_path ~keeper_name:target))
+;;
+
+let fleet_delivery ~request_id ~from_agent ~content
+  : Workspace_broadcast.broadcast_delivery
+  =
+  { request_id
+  ; seq = 40
+  ; rendered = content
+  ; from_agent
+  ; content
+  ; mention = None
+  ; msg_type = "broadcast"
+  ; mention_delivery = Workspace_broadcast.Passive
+  ; audience = Workspace_broadcast.Fleet_conversation
+  }
+;;
+
+(* A Keeper broadcast reached no other Keeper's conversation window: without a
+   mention the delivery was passive SSE plus a workspace row, and the chat
+   scan's Scope lane admits only Owner-authored lines, so an External Keeper
+   line could not arrive that way either. On the reference workspace 17 of 18
+   retained messages were exactly this shape. *)
+let test_fleet_projection_reaches_other_keepers () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000001" in
+  List.iter (persist_meta config) [ "rondo"; "sangsu"; "taskmaster" ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu"; "taskmaster", Keeper_identity.keeper_agent_name "taskmaster" ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
+       ~content:"task-209 is mine, do not claim it");
+  let rows keeper_name =
+    count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id
+  in
+  check int "listener sees the broadcast" 1 (rows "sangsu");
+  check int "second listener sees the broadcast" 1 (rows "taskmaster");
+  (* The author already knows what it said; echoing it back would put the
+     Keeper's own speech in front of it as someone else's line. *)
+  check int "author does not receive its own broadcast" 0 (rows "rondo")
+;;
+
+(* Visibility, not a request: the fanout must not put an entry in anyone's
+   linear drain, or one status announcement opens a turn on every Keeper. *)
+let test_fleet_projection_adds_no_queue_entry () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000002" in
+  List.iter (persist_meta config) [ "rondo"; "sangsu" ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu" ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
+       ~content:"status ping");
+  check int "listener row is visibility only" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"sangsu" ~request_id);
+  check int "no queue entry for a fleet broadcast" 0
+    (List.length
+       (queued_workspace_messages ~base_path:config.base_path ~keeper_name:"sangsu"))
+;;
+
+(* The named target's row is written by the mention path with its mention ids.
+   The fanout runs afterwards over the same delivery key, so it must find that
+   row already present and leave the stamp — not overwrite it with an
+   unmentioned copy or append a second row. *)
+let test_fleet_projection_preserves_the_mention_row () =
+  with_workspace @@ fun config ->
+  let target = "sangsu" in
+  let request_id = "wmsg-00fleet0000000003" in
+  List.iter (persist_meta config) [ "rondo"; target ];
+  ignore
+    (Broadcast_wakeup.deliver_broadcast_mention
+       ~config
+       ~base_path:config.base_path
+       ~is_running:(fun _ -> true)
+       ~wakeup:(fun _ -> ())
+       (delivery ~target ~request_id ~seq:41 ~content:"@sangsu please review"));
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"
+       ; target, Keeper_identity.keeper_agent_name target
+       ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:"external-agent"
+       ~content:"@sangsu please review");
+  check int "target keeps exactly one row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:target ~request_id);
+  (* Without this the case passes with no fanout at all: both assertions above
+     read only the row the mention path already wrote. *)
+  check int "the bystander received the fanout row" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"rondo" ~request_id);
+  match delivery_message ~base_path:config.base_path ~keeper_name:target ~request_id with
+  | None -> fail "mention row disappeared after the fleet pass"
+  | Some message ->
+    check bool "mention stamp survived the fleet pass" true (message.mentions <> [])
+;;
+
+(* The task FSM announces every claim/start/release through the same
+   broadcast entry point. Those are a record of what the system did, not
+   conversation, and projecting them would cost one full transcript
+   read-and-scan per registered Keeper for 17 of every 18 messages. A
+   producer that declares no audience gets none of that. *)
+let test_system_record_is_not_projected () =
+  with_workspace @@ fun config ->
+  let request_id = "wmsg-00fleet0000000004" in
+  List.iter (persist_meta config) [ "rondo"; "sangsu" ];
+  let record =
+    { (fleet_delivery
+         ~request_id
+         ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
+         ~content:"Claimed task-209")
+      with Workspace_broadcast.audience = Workspace_broadcast.System_record
+    }
+  in
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () ->
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu" ])
+    record;
+  check int "a system record reaches no conversation window" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:"sangsu" ~request_id)
+;;
+
+(* The default is the record, so a producer added later cannot silently fan a
+   machine announcement out to every Keeper. *)
+let test_undeclared_broadcast_is_a_system_record () =
+  with_workspace @@ fun config ->
+  match
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Claimed task-1"
+  with
+  | Error _ -> fail "broadcast was not persisted"
+  | Ok delivery ->
+    check bool "an undeclared producer is a system record" true
+      (delivery.Workspace_broadcast.audience = Workspace_broadcast.System_record)
+;;
+
+(* Author exclusion has to compare the identities the registry holds. Minting a
+   [Keeper_id] does not round-trip a name of three or more hyphenated parts:
+   with the minted comparison this case fails on the second assertion —
+   `Expected: 0 / Received: 1` — because the author is not recognised and gets
+   its own speech back. Both names exist in the reference workspace. *)
+let test_hyphenated_names_do_not_collide_on_the_author () =
+  with_workspace @@ fun config ->
+  let author = "adm-race-cf-000" in
+  let listener = "adm-race-sf-000" in
+  let request_id = "wmsg-00fleet0000000005" in
+  List.iter (persist_meta config) [ author; listener ];
+  Broadcast_wakeup.project_workspace_message_to_fleet
+    ~base_path:config.base_path
+    ~registered_keepers:(fun () ->
+      [ author, Keeper_identity.keeper_agent_name author
+      ; listener, Keeper_identity.keeper_agent_name listener
+      ])
+    (fleet_delivery
+       ~request_id
+       ~from_agent:(Keeper_identity.keeper_agent_name author)
+       ~content:"a name-shaped collision must not eat this");
+  check int "the listener is not mistaken for the author" 1
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:listener ~request_id);
+  check int "the author still gets nothing back" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name:author ~request_id)
+;;
+
+(* The projection writes under the delivery key the mention path uses, and the
+   chat store is first-write-wins on it. An outcome that left the mention path
+   still owing a stamped row must hold the projection back, or the unstamped
+   copy claims the key and the retry can never stamp it. Exhaustive on the
+   closed sum so a new outcome has to state its answer. *)
+let test_projection_waits_for_the_mention_transcript () =
+  let settled = Broadcast_wakeup.mention_transcript_settled in
+  check bool "no mention: no row is owed" true
+    (settled Workspace_broadcast.Passive);
+  check bool "accepted: the stamped row is committed" true
+    (settled Workspace_broadcast.Accepted);
+  check bool "already accepted: the stamped row is committed" true
+    (settled Workspace_broadcast.Already_accepted);
+  check bool "pending: a stamped row is still owed" false
+    (settled Workspace_broadcast.Pending);
+  check bool "deferred: the retry still owes a stamped row" false
+    (settled
+       (Workspace_broadcast.Deferred Workspace_broadcast.Target_state_unavailable));
+  check bool "rejected: the transcript is not the projection's to claim" false
+    (settled (Workspace_broadcast.Rejected Workspace_broadcast.Invalid_target))
+;;
+
 let () =
   run
     "broadcast_wakeup_policy"
@@ -276,5 +544,26 @@ let () =
             test_configured_mention_alias_resolves_and_stamps_feed_target
         ; test_case "canonical delivery stamps configured feed target" `Quick
             test_canonical_delivery_stamps_configured_feed_target
+        ; test_case "delivery enqueues a linear queue entry" `Quick
+            test_delivery_enqueues_linear_queue_entry
+        ; test_case "stopped Keeper keeps the queue entry" `Quick
+            test_stopped_keeper_keeps_queue_entry
+        ] )
+    ; ( "fleet_projection"
+      , [
+          test_case "broadcast reaches other Keepers' windows" `Quick
+            test_fleet_projection_reaches_other_keepers
+        ; test_case "fleet projection adds no queue entry" `Quick
+            test_fleet_projection_adds_no_queue_entry
+        ; test_case "fleet projection preserves the mention row" `Quick
+            test_fleet_projection_preserves_the_mention_row
+        ; test_case "a system record is not projected" `Quick
+            test_system_record_is_not_projected
+        ; test_case "an undeclared broadcast is a system record" `Quick
+            test_undeclared_broadcast_is_a_system_record
+        ; test_case "hyphenated names do not collide on the author" `Quick
+            test_hyphenated_names_do_not_collide_on_the_author
+        ; test_case "projection waits for the mention transcript" `Quick
+            test_projection_waits_for_the_mention_transcript
         ] )
     ]

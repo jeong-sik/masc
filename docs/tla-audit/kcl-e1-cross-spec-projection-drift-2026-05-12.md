@@ -156,6 +156,5 @@ should check observer specs for stale projections, not just OCaml.
 - iter 28 KTC R-B-1.a (#14793 ✓ merged) — source of the staleness.
 - iter 19 KTC B-1 audit (`ktc-b1-turn-phase-spec-gap-2026-05-12.md`) — predecessor single-spec drift.
 - iter 30 KCAF D-1 (`kcaf-d1-attempt-fsm-coverage-2026-05-12.md`) — predecessor input-alphabet drift.
-- iter 36 KCAF D-2 (`kcaf-d2-exhausted-asymmetry-2026-05-12.md`) — terminal projection collapse.
 - iter 37 KCAF R-D-2.c (#14817) — honest-doc precedent for R-E-1.c.
 - Scripts/audit-tla-annotation-drift.sh:89-100 — explicit doc that per-spec consistency is out of scope (R-E-1.b would relax this).

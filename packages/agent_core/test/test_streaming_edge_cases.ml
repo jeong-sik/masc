@@ -29,6 +29,7 @@ let openai_chunk
   ; delta_tool_calls
   ; finish_reason
   ; chunk_usage
+  ; chunk_timings = None
   }
 ;;
 

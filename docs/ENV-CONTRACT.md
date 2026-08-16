@@ -149,23 +149,27 @@ Precedence:
 | `MASC_WEB_SEARCH_PROVIDER_ORDER` | built-in order | Overrides provider order for auto mode. |
 | `MASC_WEB_SEARCH_FALLBACKS` | built-in fallback order | Overrides fallback providers after the primary provider fails. |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | `15` | Per-provider request timeout. |
-<<<<<<< HEAD
 | `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `900.0` | In-process WebSearch cache TTL. |
 | `BRAVE_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `brave` and `brave_llm_context` providers. |
 | `TAVILY_API_KEY` | `(none)` | Env-only credential; presence admits the `tavily` provider. |
 | `EXA_API_KEY` | `(none)` | Env-only credential; presence admits the `exa` provider. |
 | `BING_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `bing_api` provider. |
 | `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
-||||||| 80747590c9
-| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `30.0` | In-process WebSearch cache TTL. |
-=======
-| `MASC_WEB_SEARCH_CACHE_TTL_SEC` | `900.0` | In-process WebSearch cache TTL. |
-| `BRAVE_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `brave` provider. |
-| `TAVILY_API_KEY` | `(none)` | Env-only credential; presence admits the `tavily` provider. |
-| `EXA_API_KEY` | `(none)` | Env-only credential; presence admits the `exa` provider. |
-| `BING_SEARCH_API_KEY` | `(none)` | Env-only credential; presence admits the `bing_api` provider. |
-| `AZURE_BING_SEARCH_API_KEY` | `(none)` | Azure-issued alias with the same admission as `BING_SEARCH_API_KEY`. |
->>>>>>> origin/main
+| `OLLAMA_API_KEY` | `(none)` | Env-only credential; presence admits the `ollama` provider. |
+
+Web artifact corpus (RFC-0383): every truncation offload stores the full
+extraction as a content-addressed blob in the `Tool_blob_store`
+(`<base>/.masc/tool_blobs/<sha[0..1]>/<sha256>`) — the exact store
+`keeper_artifact_read` resolves (#28820) — and appends one
+`masc.web_artifact.v1` fact row (`sha256`, `source_url`, optional `title`,
+`bytes`, `fetched_at`) to `<base>/.masc/artifacts/web-fetch/index.jsonl`.
+The index is a projection — deleting it changes no behavior. Lane note: a
+keeper re-reads a body with the sha carried by its `[TRUNCATED ...
+full_text_sha256=<sha>]` marker; discovering shas by `Grep`-ing the index is
+an agent/operator-lane path (keeper sandboxes do not expose `.masc` as a
+file surface — keeper-lane cross-session discovery is tracked in #28820).
+MASC never deletes blobs or index rows; retention is operator-managed
+(#28759).
 
 Equivalent `runtime.toml` keys:
 

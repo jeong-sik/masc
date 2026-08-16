@@ -151,6 +151,7 @@ type world_observation =
   ; connected_surfaces : Gate_surface.surface_presence list
   ; connected_surface_failures : Gate_surface.presence_failure list
   ; own_recent_board_posts : Board.post list
+  ; fleet_messages : Keeper_world_observation_message_scope.fleet_message list
   }
 
 type keeper_cycle_channel =
@@ -167,6 +168,7 @@ type event_queue_trigger =
   | Completion_authority_rejection_stimulus
   | Task_cancellation_stimulus
   | Manual_compaction_stimulus
+  | Workspace_message_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -178,6 +180,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Completion_authority_rejection_pending
   | Task_cancellation_pending
   | Manual_compaction_pending
+  | Workspace_message_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Task_backlog of
@@ -227,7 +230,7 @@ module Message_scope = Keeper_world_observation_message_scope
 let self_ids = Message_scope.self_ids
 let is_self_author = Message_scope.is_self_author
 
-let collect_message_scope = Message_scope.collect_message_scope
+let collect_message_scope_and_fleet = Message_scope.collect_message_scope_and_fleet
 let read_backlog_snapshot = Inputs.read_backlog_snapshot
 
 let claimable_task_count observation = List.length observation.claimable_tasks
@@ -812,11 +815,14 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _
-  | Keeper_event_queue.Manual_compaction_requested ->
+  | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Workspace_message _ ->
     (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone
-       from the queue. *)
+       from the queue. [Workspace_message] carries a pointer to a transcript row
+       the message lane already reads, so injecting a board event here would
+       show the operator the same message twice. *)
     Ok None
 ;;
 
@@ -1196,7 +1202,12 @@ let observe
       ~(meta : keeper_meta)
   : world_observation
   =
-  let pending_messages = collect_message_scope ~config ~meta in
+  let pending_messages, fleet_messages =
+    collect_message_scope_and_fleet
+      ~config
+      ~meta
+      ~fleet_limit:(Keeper_config.keeper_fleet_messages_max ())
+  in
   let backlog_snapshot = read_backlog_snapshot ~config ~meta in
   let unclaimed_task_count = backlog_snapshot.unclaimed_count in
   let claimable_tasks = backlog_snapshot.claimable_tasks in
@@ -1235,6 +1246,7 @@ let observe
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
   ; own_recent_board_posts = collect_own_recent_board_posts ~meta
+  ; fleet_messages
   }
 ;;
 
@@ -1268,6 +1280,13 @@ let observe_direct_keeper_msg ~(config : Workspace.config) ~(meta : keeper_meta)
   ; connected_surfaces = surface_presence.surfaces
   ; connected_surface_failures = surface_presence.failures
   ; own_recent_board_posts = collect_own_recent_board_posts ~meta
+    (* No fleet layer here. This path answers a direct keeper message and
+       empties the reactive lanes because the triggering message is the point,
+       and collecting fleet rows would mean a full transcript read
+       ([Keeper_chat_store.load_all], 1.8 MB in production) on a path that
+       performs no transcript I/O at all. The keeper sees fleet context on its
+       next [observe] turn, where the same load already happens. *)
+  ; fleet_messages = []
   }
 ;;
 
@@ -1351,6 +1370,7 @@ let keeper_cycle_decision
                  | Hitl_resolved_pending
                  | Task_cancellation_pending
                  | Manual_compaction_pending
+                 | Workspace_message_pending
                  | Scheduled_autonomous_turn
                  | Scheduled_automation_due
                  | Task_backlog _

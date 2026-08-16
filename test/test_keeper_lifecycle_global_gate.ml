@@ -111,6 +111,7 @@ let base_obs : WO.world_observation =
   ; connected_surfaces = []
   ; connected_surface_failures = []
   ; own_recent_board_posts = []
+  ; fleet_messages = []
   }
 ;;
 

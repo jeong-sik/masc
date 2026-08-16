@@ -10,8 +10,8 @@ code_refs:
 
 > Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
 > Status: Living draft
-> Last Updated: 2026-08-14
-> Snapshot baseline: `dune-project` version `0.22.0`
+> Last Updated: 2026-08-16
+> Snapshot baseline: `dune-project` version `0.23.0`
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 Goal, Task, Board, Schedule을 통해 작업하고 현재 실행 상태를 관찰·조정할 수 있게 한다. Keeper turn과 dashboard/operator visibility를 제공하며 MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다.
 
@@ -82,7 +82,6 @@ graph TB
 
 | Document | Description | Related Spec |
 |----------|-------------|--------------|
-| `docs/ADR-002-DASHBOARD-OPERATOR-CONTROL-SURFACE.md` | Dashboard operator control surface and review queue UX | `10-dashboard.md` |
 | `docs/design/checkpoint-truth-and-replay-rfc.md` | Checkpoint truth hierarchy, replay semantics, side-effect boundary | `13-agent-core-integration.md` |
 | `docs/KEEPER-STATE-OWNERSHIP.md` | Keeper lane, checkpoint, domain state, and receipt ownership | `05-keeper-agent.md`, `13-agent-core-integration.md` |
 
@@ -124,12 +123,6 @@ graph TB
 - Invariant: `INV-WORKSPACE-001`
 - 외부 문서: `docs/<document-name>.md`
 
-### Supersession
+### SSOT
 
-이 spec suite가 최종 진실 원본(SSOT)이다.
-
-| 이전 문서 | 상태 |
-|----------|------|
-| `docs/SPEC.md` | Historical snapshot. 이 suite로 대체. |
-| `docs/MERGED-ARCHITECTURE-SSOT.md` | Layer map과 canonical paths는 `01-system-overview.md`로 이관. |
-| `docs/GLOSSARY.md` | `00-glossary.md`로 통합. |
+이 spec suite가 최종 진실 원본이다.

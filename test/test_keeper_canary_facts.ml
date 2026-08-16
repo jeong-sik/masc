@@ -150,6 +150,20 @@ let test_score_empty_reply_recalls_nothing () =
   Alcotest.(check int) "facts_recalled" 0 score.facts_recalled;
   Alcotest.(check bool) "order_matches on empty recall" true score.order_matches
 
+let test_interval_for_wall_clock () =
+  Alcotest.(check (float 1e-9))
+    "9 gaps over 3600s"
+    400.0
+    (Keeper_canary_facts.interval_for_wall_clock ~gaps:9 ~target_s:3600.0);
+  Alcotest.(check (float 1e-9))
+    "zero gaps has no interval"
+    0.0
+    (Keeper_canary_facts.interval_for_wall_clock ~gaps:0 ~target_s:3600.0);
+  Alcotest.(check (float 1e-9))
+    "negative gaps has no interval"
+    0.0
+    (Keeper_canary_facts.interval_for_wall_clock ~gaps:(-1) ~target_s:3600.0)
+
 let () =
   Alcotest.run
     "keeper_canary_facts"
@@ -208,4 +222,6 @@ let () =
             `Quick
             test_score_empty_reply_recalls_nothing
         ] )
+    ; ( "ladder"
+      , [ Alcotest.test_case "interval for wall clock" `Quick test_interval_for_wall_clock ] )
     ]

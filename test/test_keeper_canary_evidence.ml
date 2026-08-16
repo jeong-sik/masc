@@ -38,6 +38,7 @@ let sample_evidence : Keeper_canary_evidence.run_evidence =
   ; base_path = "/tmp/masc-base"
   ; endpoint = "http://127.0.0.1:8935/api/v1/keepers/chat/stream"
   ; turn_interval_s = 0.0
+  ; wall_clock_target_s = None
   ; facts = [ sample_fact ]
   ; turns = [ sample_turn; sample_recall_turn ]
   ; recall =
@@ -100,6 +101,22 @@ let test_top_level_keys_are_present () =
            (List.mem key actual))
       expected
   | _ -> Alcotest.fail "expected a JSON object"
+
+let test_wall_clock_target_serializes_when_present () =
+  let json =
+    Keeper_canary_evidence.to_yojson
+      { sample_evidence with wall_clock_target_s = Some 3600.0 }
+  in
+  (match json |> member "transport" |> member "wall_clock_target_s" with
+   | `Float s -> Alcotest.(check (float 1e-9)) "target seconds" 3600.0 s
+   | _ -> Alcotest.fail "expected transport.wall_clock_target_s to serialize as a float");
+  match
+    Keeper_canary_evidence.to_yojson sample_evidence
+    |> member "transport"
+    |> member "wall_clock_target_s"
+  with
+  | `Null -> ()
+  | _ -> Alcotest.fail "expected transport.wall_clock_target_s to be null when unset"
 
 let test_judgment_is_null_without_a_judge () =
   let json = Keeper_canary_evidence.to_yojson sample_evidence in
@@ -198,6 +215,10 @@ let () =
             `Quick
             test_schema_field_matches_declared_version
         ; Alcotest.test_case "top-level keys are present" `Quick test_top_level_keys_are_present
+        ; Alcotest.test_case
+            "wall clock target serializes"
+            `Quick
+            test_wall_clock_target_serializes_when_present
         ; Alcotest.test_case
             "judgment is null without a judge"
             `Quick

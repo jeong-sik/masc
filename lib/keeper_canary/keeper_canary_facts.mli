@@ -63,3 +63,8 @@ val score : facts:fact list -> reply:string -> score
     plus an order check over the facts that were found. A raw deterministic
     signal, not the canary's pass/fail judgment — see
     {!Keeper_canary_evidence.run_evidence.judgment}. *)
+
+val interval_for_wall_clock : gaps:int -> target_s:float -> float
+(** Even spacing for a wall-clock target: [target_s /. gaps]. A plan of N
+    fact turns plus one recall has N gaps. [0.] when [gaps <= 0] — a plan
+    with nothing to space out has no interval, not an error. *)

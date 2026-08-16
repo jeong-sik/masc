@@ -28,7 +28,8 @@
      dune exec bin/keeper_canary_run.exe -- \
        --keeper NAME --run-id ID [--runtime LABEL] [--base PATH] \
        [--host HOST] [--port N] [--facts N] [--turn-interval SECONDS] \
-       [--turn-timeout SECONDS] [--judge-runtime ID] [--out PATH] *)
+       [--turn-timeout SECONDS] [--wall-clock-target SECONDS] \
+       [--judge-runtime ID] [--out PATH] *)
 
 let default_facts = 9
 let default_turn_interval_s = 0.0
@@ -36,8 +37,8 @@ let default_turn_interval_s = 0.0
 let usage =
   "usage: keeper_canary_run --keeper NAME --run-id ID [--runtime LABEL] \
    [--base PATH] [--host HOST] [--port N] [--facts N] \
-   [--turn-interval SECONDS] [--turn-timeout SECONDS] [--judge-runtime ID] \
-   [--out PATH]"
+   [--turn-interval SECONDS] [--turn-timeout SECONDS] \
+   [--wall-clock-target SECONDS] [--judge-runtime ID] [--out PATH]"
 
 type args = {
   keeper : string;
@@ -49,6 +50,7 @@ type args = {
   facts : int;
   turn_interval_s : float;
   turn_timeout_s : float option;
+  wall_clock_target_s : float option;
   judge_runtime : string option;
   out : string option;
 }
@@ -63,6 +65,7 @@ let parse_args argv =
   let facts = ref default_facts in
   let turn_interval_s = ref default_turn_interval_s in
   let turn_timeout_s = ref None in
+  let wall_clock_target_s = ref None in
   let judge_runtime = ref None in
   let out = ref None in
   let rec parse = function
@@ -110,6 +113,12 @@ let parse_args argv =
        | Some s -> Error (Printf.sprintf "--turn-timeout must be > 0, got %g" s)
        | None -> Error ("--turn-timeout must be a number, got " ^ v))
     | [ "--turn-timeout" ] -> Error "missing value for --turn-timeout"
+    | "--wall-clock-target" :: v :: rest ->
+      (match float_of_string_opt v with
+       | Some s when s > 0.0 -> wall_clock_target_s := Some s; parse rest
+       | Some s -> Error (Printf.sprintf "--wall-clock-target must be > 0, got %g" s)
+       | None -> Error ("--wall-clock-target must be a number, got " ^ v))
+    | [ "--wall-clock-target" ] -> Error "missing value for --wall-clock-target"
     | "--judge-runtime" :: v :: rest ->
       judge_runtime := Some v;
       parse rest
@@ -127,6 +136,12 @@ let parse_args argv =
      | None, _ -> Error "--keeper NAME is required"
      | _, None -> Error "--run-id ID is required"
      | Some keeper, Some run_id ->
+       if !wall_clock_target_s <> None && !turn_interval_s > 0.0
+       then
+         Error
+           "--wall-clock-target and --turn-interval are mutually exclusive: \
+            the target derives the interval"
+       else
        Ok
          { keeper
          ; run_id
@@ -137,6 +152,7 @@ let parse_args argv =
          ; facts = !facts
          ; turn_interval_s = !turn_interval_s
          ; turn_timeout_s = !turn_timeout_s
+         ; wall_clock_target_s = !wall_clock_target_s
          ; judge_runtime = !judge_runtime
          ; out = !out
          })
@@ -325,8 +341,23 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
         Printf.eprintf "[keeper_canary_run] %s FAILED: %s\n%!" turn_label detail;
         Error detail
     in
+    (* A wall-clock target spreads the whole plan evenly: N+1 turns have N
+       gaps, so interval = target / gaps. Mutual exclusion with
+       --turn-interval is enforced at parse time. *)
+    let effective_turn_interval_s =
+      match args.wall_clock_target_s with
+      | None -> args.turn_interval_s
+      | Some target_s ->
+        (* N fact turns + 1 recall = N gaps. *)
+        Keeper_canary_facts.interval_for_wall_clock
+          ~gaps:(List.length facts)
+          ~target_s
+    in
     let sleep_between_turns () =
-      if args.turn_interval_s > 0.0 then Unix.sleepf args.turn_interval_s
+      (* Eio sleep, not Unix.sleepf: a blocking sleep parks the whole Eio
+         domain, which is survivable at a few seconds but not at the
+         1h-to-24h gaps a wall-clock target produces. *)
+      Keeper_canary_http.sleep_s effective_turn_interval_s
     in
     (* The ordered turn sequence (N fact-injection turns, then one recall
        turn) is Keeper_canary_facts.plan's job, not inline bookkeeping here
@@ -394,7 +425,8 @@ let run ?(judge : judge_fn option) ~(base_path : string) (args : args) :
       ; runtime = args.runtime
       ; base_path
       ; endpoint = Keeper_canary_http.url_of ~host ~port ~path:"/api/v1/keepers/chat/stream"
-      ; turn_interval_s = args.turn_interval_s
+      ; turn_interval_s = effective_turn_interval_s
+      ; wall_clock_target_s = args.wall_clock_target_s
       ; facts
       ; turns
       ; recall =
@@ -575,12 +607,14 @@ let () =
          evidence.timing.min_s
          evidence.timing.median_s
          evidence.timing.max_s;
-       (* Masc_eio_env.init parks pool/keepalive fibers on this switch, so
-          returning normally leaves Switch.run waiting on them and the
-          process never exits (first live success run hung >7min after the
-          evidence write, 2026-08-16). Explicit exit is the sibling-harness
-          convention (keeper_capability_probe_cli.ml does the same); stdout
-          is flushed by exit's at_exit hooks. *)
+       (* Returning normally from the Switch.run body leaves the process
+          alive indefinitely — measured >7min after the evidence write on
+          the first live success run (2026-08-16). Exact owner of the
+          lingering fiber is unconfirmed (Masc_eio_env.init only captures
+          handles per its .mli; the HTTP connection pool or Process_eio.init
+          are the remaining suspects). Explicit exit is the sibling-harness
+          convention regardless (keeper_capability_probe_cli.ml does the
+          same); stdout is flushed by exit's at_exit hooks. *)
        (match args.judge_runtime, evidence.Keeper_canary_evidence.judgment with
         | Some _, None ->
           (* The judge was requested but produced no judgment — the receipt

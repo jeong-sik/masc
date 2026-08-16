@@ -86,6 +86,7 @@ type run_evidence = {
   base_path : string;
   endpoint : string;
   turn_interval_s : float;
+  wall_clock_target_s : float option;
   facts : Keeper_canary_facts.fact list;
   turns : turn_evidence list;
   recall : recall_evidence;
@@ -162,6 +163,10 @@ let to_yojson (e : run_evidence) =
       , `Assoc
           [ ("endpoint", `String e.endpoint)
           ; ("turn_interval_s", `Float e.turn_interval_s)
+          ; ( "wall_clock_target_s"
+            , match e.wall_clock_target_s with
+              | Some s -> `Float s
+              | None -> `Null )
           ] )
     ; ("facts_established", `List (List.map fact_to_yojson e.facts))
     ; ("turns", `List (List.map turn_to_yojson e.turns))

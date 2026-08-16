@@ -56,6 +56,10 @@ type run_evidence = {
   base_path : string;
   endpoint : string;
   turn_interval_s : float;
+      (** The effective per-gap interval the run used (derived from the
+          wall-clock target when one was given). *)
+  wall_clock_target_s : float option;
+      (** [None] renders as JSON null — no wall-clock target was set. *)
   facts : Keeper_canary_facts.fact list;
   turns : turn_evidence list;
   recall : recall_evidence;

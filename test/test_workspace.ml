@@ -232,7 +232,7 @@ let test_broadcast_message () =
 
   (* Broadcast *)
   let result =
-    Workspace.broadcast config ~from_agent:"claude" ~content:"Hello @gemini!"
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Hello @gemini!"
     |> Result.get_ok
   in
   Alcotest.(check bool) "broadcast success" true (String.contains result.rendered '[');
@@ -299,7 +299,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     |> List.fold_left (fun acc msg -> max acc msg.Masc_domain.seq) 0
   in
   let result =
-    Workspace.broadcast config ~from_agent:"taskmaster-jade-heron" ~content:stale_message
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"taskmaster-jade-heron" ~content:stale_message
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -340,7 +340,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     "Normal update: blocked by task-001 while I wait for review context."
   in
   let normal_result =
-    Workspace.broadcast config ~from_agent:"taskmaster-jade-heron" ~content:normal_update
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"taskmaster-jade-heron" ~content:normal_update
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -348,7 +348,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     false
     (str_contains normal_result.rendered "[cache_invalidated]");
   let operator_result =
-    Workspace.broadcast config ~from_agent:"operator" ~content:stale_message
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"operator" ~content:stale_message
     |> Result.get_ok
   in
   Alcotest.(check bool)
@@ -371,7 +371,7 @@ let test_event_log () =
 
   (* Broadcast should create event log *)
   let result =
-    Workspace.broadcast config ~from_agent:"claude" ~content:"Test event"
+    Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Test event"
     |> Result.get_ok
   in
 
@@ -585,7 +585,7 @@ let test_special_chars_in_message () =
     (* Test special characters, unicode, JSON-unsafe chars *)
     let msg = "Hello \"world\" with 'quotes' and\nnewlines\tand\t한글!" in
     let result =
-      Workspace.broadcast config ~from_agent:"claude" ~content:msg
+      Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:msg
       |> Result.get_ok
     in
     Alcotest.(check bool) "special chars handled" true (String.length result.rendered > 0)
@@ -702,7 +702,7 @@ let test_operations_preserve_state () =
     (* Do a bunch of operations *)
     let _ = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:["test"] () in
     let _ = Workspace.add_task config ~title:"X" ~priority:1 ~description:"" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"hello" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"hello" in
 
     (* Status should show all state *)
     let status = Workspace.status config in
@@ -1038,7 +1038,7 @@ let test_emoji_in_message () =
     (* Emoji characters should be preserved *)
     let msg = "🚀 Launching feature! 🎉" in
     let result =
-      Workspace.broadcast config ~from_agent:"claude" ~content:msg
+      Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:msg
       |> Result.get_ok
     in
     Alcotest.(check bool) "emoji preserved" true (str_contains result.rendered "🚀")
@@ -1064,7 +1064,7 @@ let test_reset_clears_all_state () =
   let config = workspace_config tmp_dir in
   let _ = Workspace.init config ~agent_name:(Some "claude") in
   let _ = Workspace.add_task config ~title:"Task" ~priority:1 ~description:"" in
-  let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Hello" in
+  let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Hello" in
 
   (* Reset *)
   let _ = Workspace.reset config in
@@ -1099,7 +1099,7 @@ let test_very_long_message () =
   with_test_env (fun config ->
     let long_msg = String.make 10000 'x' in
     let result =
-      Workspace.broadcast config ~from_agent:"claude" ~content:long_msg
+      Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:long_msg
       |> Result.get_ok
     in
     Alcotest.(check bool) "long message handled" true (String.length result.rendered > 0)
@@ -1110,7 +1110,7 @@ let test_message_with_json_chars () =
     (* JSON special characters should be escaped properly *)
     let msg = "{\"key\": \"value\", \"array\": [1,2,3]}" in
     let result =
-      Workspace.broadcast config ~from_agent:"claude" ~content:msg
+      Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:msg
       |> Result.get_ok
     in
     Alcotest.(check bool) "json chars handled" true (String.length result.rendered > 0)
@@ -1119,9 +1119,9 @@ let test_message_with_json_chars () =
 let test_message_sequence () =
   with_test_env (fun config ->
     (* Messages should have incrementing sequence numbers *)
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"First" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Second" in
-    let _ = Workspace.broadcast config ~from_agent:"claude" ~content:"Third" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"First" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Second" in
+    let _ = Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"claude" ~content:"Third" in
 
     let msgs = Workspace.get_messages config ~since_seq:0 ~limit:10 in
     Alcotest.(check bool) "has messages" true (str_contains msgs "First" || str_contains msgs "Third")
@@ -1172,7 +1172,7 @@ let test_xss_in_message () =
     ignore (Workspace.bind_session config ~agent_name:"tester" ~capabilities:[] ());
     let xss_payload = "<script>alert('xss')</script>" in
     let result =
-      Workspace.broadcast config ~from_agent:"tester" ~content:xss_payload
+      Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"tester" ~content:xss_payload
       |> Result.get_ok
     in
     (* Check that raw script tags are not in the result *)
@@ -1199,7 +1199,7 @@ let test_xss_in_message_type () =
     ignore (Workspace.bind_session config ~agent_name:"tester" ~capabilities:[] ());
     let xss_msg_type = "<script>alert('xss')</script>" in
     ignore
-      (Workspace.broadcast config ~from_agent:"tester" ~msg_type:xss_msg_type
+      (Workspace.broadcast ~audience:Workspace_broadcast.System_record config ~from_agent:"tester" ~msg_type:xss_msg_type
          ~content:"hello");
     let messages = Workspace.get_all_messages_raw config ~since_seq:0 in
     let msg_type =

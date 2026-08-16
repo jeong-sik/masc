@@ -202,7 +202,7 @@ let claim_task_r config ~agent_name ~task_id ()
            Workspace_task_classify.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task_id });
            let _ =
-             broadcast
+             broadcast ~audience:System_record
                config
                ~from_agent:agent_name
                ~content:(Printf.sprintf "Claimed %s" task_id)

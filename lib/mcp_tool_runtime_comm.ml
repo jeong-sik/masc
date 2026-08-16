@@ -48,7 +48,10 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   else
     let trace_context = Otel_trace_context.from_ambient () in
     let delivery =
-      Workspace.broadcast ?trace_context config
+      (* A Keeper calling masc_broadcast is speaking to the workspace, so
+         this reaches every Keeper's conversation window. *)
+      Workspace.broadcast ?trace_context
+        ~audience:Workspace_broadcast.Fleet_conversation config
         ~from_agent:agent_name ~content:message
     in
     match delivery with

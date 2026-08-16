@@ -28,6 +28,41 @@
 
 let schema_version = "masc.keeper_canary_run.v1"
 
+type injection_kind = Restart
+
+let injection_kind_to_string = function
+  | Restart -> "restart"
+
+type injection = {
+  injection_kind : injection_kind;
+  after_turn : int;
+  started_at : string;
+  duration_s : float;
+  trace_id_before : string;
+  trace_id_after : string;
+  generation_before : int;
+  generation_after : int;
+}
+
+let injection_is_continuation (i : injection) =
+  String.equal i.trace_id_before i.trace_id_after
+  && i.generation_before = i.generation_after
+
+let injection_to_yojson (i : injection) : Yojson.Safe.t =
+  `Assoc
+    [ ("kind", `String (injection_kind_to_string i.injection_kind))
+    ; ("after_turn", `Int i.after_turn)
+    ; ("started_at", `String i.started_at)
+    ; ("duration_s", `Float i.duration_s)
+    ; ("trace_id_before", `String i.trace_id_before)
+    ; ("trace_id_after", `String i.trace_id_after)
+    ; ("generation_before", `Int i.generation_before)
+    ; ("generation_after", `Int i.generation_after)
+      (* Derived projection of the two identity pairs above, written out so
+         a reader never re-implements the comparison. *)
+    ; ("continuation", `Bool (injection_is_continuation i))
+    ]
+
 type turn_evidence = {
   index : int;
   category : string option;
@@ -93,6 +128,7 @@ type run_evidence = {
   timing : timing;
   deterministic_signal : Keeper_canary_facts.score;
   judgment : Keeper_canary_judge.judgment option;
+  injections : injection list;
   notes : string list;
 }
 
@@ -188,6 +224,7 @@ let to_yojson (e : run_evidence) =
       , match e.judgment with
         | Some j -> Keeper_canary_judge.judgment_to_yojson j
         | None -> `Null )
+    ; ("injections", `List (List.map injection_to_yojson e.injections))
     ; ("notes", `List (List.map (fun n -> `String n) e.notes))
     ]
 

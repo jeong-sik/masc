@@ -46,6 +46,26 @@ val timing_of : float list -> timing
     no turn to time, not an error. Even-length lists average the two
     middle values for the median. *)
 
+type injection_kind = Restart
+(** PR-C adds [Failover]; the axis is a closed variant, not a string. *)
+
+type injection = {
+  injection_kind : injection_kind;
+  after_turn : int;  (** The 1-indexed turn this injection ran after. *)
+  started_at : string;  (** ISO8601, client-observed. *)
+  duration_s : float;
+      (** Wall-clock seconds the whole injection sequence took. *)
+  trace_id_before : string;
+  trace_id_after : string;
+  generation_before : int;
+  generation_after : int;
+}
+
+val injection_is_continuation : injection -> bool
+(** True when trace identity survived the injection — same trace_id and
+    same generation is the signal the 08-14 drain-restart canary
+    established for "continuation restart, not a reset". *)
+
 type run_evidence = {
   captured_at : string;
   harness_git_commit : string option;
@@ -67,6 +87,8 @@ type run_evidence = {
   deterministic_signal : Keeper_canary_facts.score;
   judgment : Keeper_canary_judge.judgment option;
       (** [None] renders as JSON null — no judge ran for this invocation. *)
+  injections : injection list;
+      (** Empty when the run injected nothing; order follows execution. *)
   notes : string list;
 }
 

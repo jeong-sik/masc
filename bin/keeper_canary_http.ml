@@ -83,6 +83,38 @@ let sleep_s seconds =
     | Some clock -> Eio.Time.sleep clock seconds
     | None -> Unix.sleepf seconds)
 
+(* Lifecycle/trajectory admin calls are small JSON exchanges, not
+   generation turns — 30s covers a drain that measured 5ms and leaves
+   room for a loaded server. *)
+let admin_timeout_sec = 30.0
+
+let admin_get ~host ~port ~path () : (int * string, string) result =
+  let url = url_of ~host ~port ~path in
+  match
+    Masc_http_client.get_sync
+      ?clock:(Eio_context.get_clock_opt ())
+      ~timeout_sec:admin_timeout_sec
+      ~url
+      ~headers:(auth_headers ())
+      ()
+  with
+  | Error detail -> Error (Printf.sprintf "GET %s failed: %s" url detail)
+  | Ok (status, body) -> Ok (status, body)
+
+let admin_post ~host ~port ~path ~body () : (int * string, string) result =
+  let url = url_of ~host ~port ~path in
+  match
+    Masc_http_client.post_sync
+      ?clock:(Eio_context.get_clock_opt ())
+      ~timeout_sec:admin_timeout_sec
+      ~url
+      ~headers:(json_headers ())
+      ~body
+      ()
+  with
+  | Error detail -> Error (Printf.sprintf "POST %s failed: %s" url detail)
+  | Ok (status, body) -> Ok (status, body)
+
 let send_turn ?(timeout_sec = default_timeout_sec) ~host ~port ~keeper_name
     ~request_id ~message () : (string, string) result
   =

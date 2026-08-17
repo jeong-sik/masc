@@ -29,6 +29,15 @@ type config =
 let default_timeout_s = 300.0
 let process_termination_grace_s = 2.0
 
+(* How long a CLI that already delivered its result event may take to
+   exit before we reap it. A healthy CLI exits well under a second after
+   the result; the #28912 shutdown hang ("Waiting for migrations to
+   complete", a child language server holding stdout open) never exits at
+   all, so anything past this window is the hang, not slow work — the
+   turn itself is already complete and none of this wait is on the
+   critical path of a healthy turn. *)
+let result_exit_grace_s = 5.0
+
 (* [None] installs no deadline. The vendor client owns when its own turn ends;
    a declared bound is the operator's optional liveness guard over a silent
    client, not a limit on how long legitimate work may take. *)
@@ -689,7 +698,12 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
       if not !process_settled then signal_spawned_process proc stdin_w);
     let state = ref initial_protocol_state in
     (try
-       while true do
+       (* The result event completes the protocol — nothing after it is
+          attribution or content (apply_event rejects post-result events).
+          EOF cannot be the completion contract: the CLI's own shutdown can
+          hang while a child process keeps stdout open (#28912), which
+          turned already-served turns into idle timeouts. *)
+       while Option.is_none !state.result do
          let timeout_s =
            timeout_s_for_phase config ~turn_admitted:(Option.is_some !state.init)
          in
@@ -727,7 +741,19 @@ let run_spawned ?home_dir ?on_spawned ~mgr ~clock ~cwd config ~conversation_mode
        abort_with_runtime_error
          (Protocol_error
             { stage = "stdout read"; detail = Printexc.to_string exn }));
-    let status = Eio.Process.await proc in
+    let status =
+      (* Bounded: after a completed protocol (or EOF) a healthy CLI exits
+         almost immediately; a CLI stuck in its shutdown gets reaped. The
+         repeated await after terminate is safe — Eio.Process.await is
+         idempotent over the cached exit status. *)
+      try
+        Eio.Time.with_timeout_exn clock result_exit_grace_s (fun () ->
+          Eio.Process.await proc)
+      with
+      | Eio.Time.Timeout ->
+        Eio.Cancel.protect (fun () -> terminate_spawned_process ~clock proc stdin_w);
+        Eio.Process.await proc
+    in
     process_settled := true;
     status, !state, String.trim !stderr_tail)
 ;;
@@ -771,13 +797,17 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
   let* status, state, stderr = run_result in
   let wall_duration_s = max 0.0 (Eio.Time.now clock -. started_at) in
   match status, state.init, state.result with
-  | `Exited 0, Some _, Some (Success, text, _, _, _)
+  (* A parsed Success result is the completion contract regardless of how
+     the process ended: the reply is already durable in the CLI's own
+     conversation store, and the exit status only describes the CLI's
+     shutdown (which can hang and get reaped, #28912). *)
+  | _, Some _, Some (Success, text, _, _, _)
     when not
            (Agent_core.Response_shape.has_deliverable_content
               (Agent_core.Response_shape.summarize_blocks
                  [ Agent_core.Types.Text text ])) ->
     Error (Turn_failed "successful result response has no deliverable content")
-  | `Exited 0, Some (conversation_id, model, permission_mode),
+  | _, Some (conversation_id, model, permission_mode),
     Some (Success, text, _, num_turns, usage) ->
     emit_stream_event on_stream_event (Turn_finished { text });
     Ok
@@ -798,11 +828,11 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?on_spawned ~mgr ~clock ~cwd
   | _, Some _, Some (Result_error, _, error, _, _) ->
     let detail = match error with Some detail -> detail | None -> "status=ERROR" in
     Error (Turn_failed detail)
+  | _, None, Some _ ->
+    Error (Protocol_error { stage = "process completion"; detail = "missing init event" })
   | `Exited 0, _, None ->
     Error (Protocol_error { stage = "process completion"; detail = "missing result event" })
-  | `Exited 0, None, Some _ ->
-    Error (Protocol_error { stage = "process completion"; detail = "missing init event" })
-  | (`Exited _ | `Signaled _), _, _ ->
+  | (`Exited _ | `Signaled _), _, None ->
     let exit = status_to_string status in
     Error (Process_exited (if stderr = "" then exit else exit ^ ": " ^ stderr))
 ;;

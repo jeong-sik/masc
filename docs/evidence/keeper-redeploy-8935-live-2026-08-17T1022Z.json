@@ -44,10 +44,10 @@
     ]
   },
   "startup": {
-    "command": "nohup ./scripts/start-loopback.sh --with-keeper-bootstrap -- --eio > ~/.masc/logs/masc-8935-20260817d.out.log",
+    "command": "nohup ./scripts/start-loopback.sh --with-keeper-bootstrap -- --eio > <base-path>/.masc/logs/masc-8935-20260817d.out.log",
     "pid": 91263,
     "defect_hit": "start-loopback.sh가 bash 3.2 + set -u에서 빈 passthrough 배열 확장으로 즉사 — '-- --eio'로 우회, 수리는 #28929",
-    "log": "/Users/dancer/me/.masc/logs/masc-8935-20260817d.out.log"
+    "log": "<base-path>/.masc/logs/masc-8935-20260817d.out.log"
   },
   "after": {
     "version": "0.23.0",

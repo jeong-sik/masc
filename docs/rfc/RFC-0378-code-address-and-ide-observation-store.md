@@ -1,14 +1,14 @@
 ---
 rfc: "0378"
 title: "Code fact 는 태어날 때 주소를 받는다 — typed address, code-fact 전용 store, anchor 계약 통일"
-status: Draft
+status: Implemented
 created: 2026-08-14
-updated: 2026-08-14
+updated: 2026-08-17
 author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["0343", "keeper-workspace-root-only", "0233"]
-implementation_prs: ["28649", "28664", "28671", "28676", "28682", "28684"]
+implementation_prs: ["28649", "28664", "28671", "28676", "28682", "28684", "28688", "28715"]
 ---
 
 # RFC-0378: Code fact 는 태어날 때 주소를 받는다

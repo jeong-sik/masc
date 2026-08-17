@@ -270,16 +270,12 @@ let runtime_observation_for_terminal_config ~total_duration_ms ?error
     (config : config) =
   let latency_ms = Some (int_of_float total_duration_ms) in
   let capture, _metrics =
-    Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+    Runtime_observation.runtime_metrics_for_candidates ()
   in
   Runtime_observation.record_attempt_terminal capture ~model_id:config.model_id
     ~latency_ms ~error;
   Runtime_observation.runtime_observation_with_metrics
     ~runtime_id:(runtime_id_of_config config)
-    ~strategy:"single_provider_runtime"
-    ~configured_labels:
-      [ Runtime_observation.model_label_of_config config.provider_cfg ]
-    ~candidate_count:1
     ~selected_model_raw:(Some config.model_id)
     ~capture
     ~attempt_details_source:

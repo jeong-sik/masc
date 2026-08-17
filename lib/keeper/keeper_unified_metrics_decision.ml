@@ -243,12 +243,7 @@ let append_decision_record
                     in
                     [
                       ("runtime_id", `String runtime_id);
-                      ("strategy", Json_util.string_opt_to_json co.strategy);
-                      ("primary_model", `Null);
                       ("selected_model", `Null);
-                      ("fallback_applied", `Bool co.fallback_applied);
-                      ("fallback_hops", match co.fallback_hops with Some n -> `Int n | None -> `Int 0);
-                      ("candidate_models", `List []);
                     ] @ streaming_fields
                 | None -> []
               in
@@ -338,7 +333,6 @@ let append_decision_record
                  outcomes into telemetry.outcome=error. *)
               `Assoc [
                 ("runtime_id", `String (runtime_id_of_meta meta));
-                ("candidate_models", `List []);
                 (* The terminal reason is the typed failure projection built at
                    the dispatch boundary. Persist its canonical code directly;
                    free-form provider/error prose is diagnostic data, never a

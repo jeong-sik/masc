@@ -368,8 +368,8 @@ describe('TransportHealthPanel', () => {
     expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
 
     vi.useFakeTimers()
-    lastEvent.value = { type: 'agent_bound' }
-    lastEvent.value = { type: 'agent_unbound' }
+    lastEvent.value = { type: 'broadcast' }
+    lastEvent.value = { type: 'keeper_handoff' }
     lastEvent.value = { type: 'task_claimed' }
     await vi.advanceTimersByTimeAsync(1_199)
     expect(fetchTransportHealth).toHaveBeenCalledTimes(1)
@@ -397,7 +397,7 @@ describe('TransportHealthPanel', () => {
     expect(container.querySelector('.v2-monitoring-surface')).not.toBeNull()
 
     vi.useFakeTimers()
-    lastEvent.value = { type: 'agent_bound' }
+    lastEvent.value = { type: 'broadcast' }
     await vi.advanceTimersByTimeAsync(1_200)
 
     const alertText = container.querySelector('[role="alert"]')?.textContent
@@ -547,17 +547,12 @@ describe('shouldRefreshFromEvent', () => {
     [{ type: 'keeper_heartbeat' }, false],
     [{ type: 'broadcast' }, true],
     [{ type: 'masc/broadcast' }, true],
-    [{ type: 'agent_bound' }, true],
-    [{ type: 'masc/agent_bound' }, true],
-    [{ type: 'agent_unbound' }, true],
-    [{ type: 'masc/agent_unbound' }, true],
     [{ type: 'task_claimed' }, true],
     [{ type: 'masc/task_started' }, true],
     [{ type: 'keeper_state_changed' }, true],
     [{ type: 'masc/keeper_offline' }, true],
     [{ type: 'decision_created' }, true],
     [{ type: 'runtime_param_changed' }, true],
-    [{ type: 'client_input_received' }, true],
     [{ type: 'unknown_type' }, false],
   ] as const)('shouldRefreshFromEvent(%o) → %s', (event, expected) => {
     expect(shouldRefreshFromEvent(event as SSEEvent)).toBe(expected)

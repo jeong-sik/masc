@@ -361,37 +361,6 @@ function ingestRuntimeProjection(
         }
       }
       return
-    case 'agent_core:masc:trust_updated':
-      pushAgentCoreAgentEvent({
-        type: 'trust_updated',
-        agent_name: asString(payload.agent_a) ?? '',
-        actor_kind: 'agent',
-        secondary_agent: asString(payload.agent_b),
-        trust_score: asNumber(payload.trust_score),
-        event_type: runtimeEventType(event),
-        event_id: asString(event.event_id),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: runtimeEventKey(event),
-        timestamp: asNumber(payload.timestamp) ?? eventUnixSeconds(event),
-      })
-      return
-    case 'agent_core:masc:reputation_changed':
-      pushAgentCoreAgentEvent({
-        type: 'reputation_changed',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        old_score: asNumber(payload.old_score),
-        new_score: asNumber(payload.new_score),
-        trend: asString(payload.trend),
-        event_type: runtimeEventType(event),
-        event_id: asString(event.event_id),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: runtimeEventKey(event),
-        timestamp: asNumber(payload.timestamp) ?? eventUnixSeconds(event),
-      })
-      return
     case 'agent_core:agent_started':
     case 'agent_core:agent_completed':
       if (opts?.includeLiveTrace) {

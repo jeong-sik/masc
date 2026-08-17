@@ -29,9 +29,6 @@ function metricPoint(overrides: Partial<KeeperMetricPoint>): KeeperMetricPoint {
     total_tokens: 200,
     wall_tokens_per_second: null,
     inference_telemetry: null,
-    fallback_applied: false,
-    fallback_hops: 0,
-    fallback_reason: null,
     ...overrides,
   }
 }

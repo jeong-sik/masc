@@ -44,6 +44,18 @@ val handle_tool_execute_with_outcome :
   Keeper_tool_execution.t
 
 module For_testing : sig
+  (* Test seam: when set, [handle_tool_execute_typed] routes its dispatch
+     through this override instead of the real shell dispatch, so tests can
+     drive each rejected-dispatch branch through the real production wiring
+     (stream start -> dispatch -> stream end) without spawning a process. *)
+  val dispatch_override :
+    (unit ->
+     ( Masc_exec.Exec_dispatch.dispatch_result
+     , Keeper_tooling.Execute_shell_ir.dispatch_error )
+     result)
+    option
+    ref
+
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
   val model_execute_location_fields :
     config:Workspace.config ->

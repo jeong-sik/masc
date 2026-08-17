@@ -271,7 +271,6 @@ describe('RuntimeSignals', () => {
       name: 'sangsu',
       status: 'active',
       metrics_window: {
-        fallback_rate: 0.15,
         top_tools: [
           { tool: 'masc_board_post', count: 7 },
           { tool: 'masc_status', count: 4 },
@@ -294,8 +293,8 @@ describe('RuntimeSignals', () => {
     const keeper: Keeper = {
       name: 'sangsu',
       status: 'active',
+      mention_reactive_turn_count: 3,
       metrics_window: {
-        fallback_rate: 0.12,
         intervention_share: 0.4,
       },
     }
@@ -303,14 +302,14 @@ describe('RuntimeSignals', () => {
     render(h(RuntimeSignals, { keeper }))
 
     // Before filtering: labels from multiple groups are visible.
-    expect(screen.getByText('런타임 폴백')).toBeInTheDocument()
+    expect(screen.getByText('멘션 반응')).toBeInTheDocument()
     expect(screen.getByText('개입 비중')).toBeInTheDocument()
 
-    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 개입)') as HTMLInputElement
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 개입)') as HTMLInputElement
     fireEvent.input(input, { target: { value: '개입' } })
 
     // Non-matching labels are gone, matching ones remain.
-    expect(screen.queryByText('런타임 폴백')).not.toBeInTheDocument()
+    expect(screen.queryByText('멘션 반응')).not.toBeInTheDocument()
     expect(screen.getByText('개입 비중')).toBeInTheDocument()
   })
 
@@ -319,13 +318,13 @@ describe('RuntimeSignals', () => {
       name: 'sangsu',
       status: 'active',
       metrics_window: {
-        fallback_rate: 0.12,
+        intervention_share: 0.12,
       },
     }
 
     render(h(RuntimeSignals, { keeper }))
 
-    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 폴백, 개입)') as HTMLInputElement
+    const input = screen.getByPlaceholderText('신호 지표 필터 (예: 개입)') as HTMLInputElement
     fireEvent.input(input, { target: { value: 'nonexistent-zzz' } })
 
     expect(screen.getByText(/필터 결과 없음/)).toBeInTheDocument()

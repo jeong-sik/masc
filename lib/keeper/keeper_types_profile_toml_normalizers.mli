@@ -54,6 +54,7 @@ type keeper_profile_defaults =
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   instructions : string option;
+  autonomous_instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;

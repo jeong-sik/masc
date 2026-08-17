@@ -852,12 +852,6 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
   // are authoritative in KpiGrid to avoid duplication.
   const groups: SignalGroup[] = [
     {
-      title: '폴백',
-      rows: [
-        { label: '런타임 폴백', value: formatPct1(mw?.fallback_rate) },
-      ],
-    },
-    {
       title: '자율 행동 & 반응',
       rows: [
         { label: '멘션 반응', value: fmtCount(keeper.mention_reactive_turn_count) },
@@ -900,7 +894,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
               <${TextInput}
                 type="search"
                 class="flex-1 min-w-0 !py-1.5 !px-2 !text-2xs"
-                placeholder="신호 지표 필터 (예: 폴백, 개입)"
+                placeholder="신호 지표 필터 (예: 개입)"
                 ariaLabel="런타임 신호 지표 필터"
                 value=${signalQuery}
                 onInput=${(event: Event) => {

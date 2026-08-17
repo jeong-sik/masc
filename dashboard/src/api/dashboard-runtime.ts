@@ -396,7 +396,6 @@ export interface DashboardRuntimeModelMetric {
   primary_coverage_stage?: string | null
   primary_coverage_reason?: string | null
   coverage_reason_counts?: Array<{ reason: string; count: number }> | null
-  fallback_count?: number | null
   success_count?: number | null
   error_count?: number | null
   total_cost_usd?: number | null
@@ -921,7 +920,6 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
           .map(item => ({ reason: asString(item.reason) ?? '', count: asNumber(item.count) ?? 0 }))
           .filter(item => item.reason.length > 0)
       : null,
-    fallback_count: asNumber(raw.fallback_count) ?? null,
     success_count: asNumber(raw.success_count) ?? null,
     error_count: asNumber(raw.error_count) ?? null,
     total_cost_usd: asNumber(raw.total_cost_usd) ?? null,

@@ -165,7 +165,6 @@ function latestRuntimeMetric(keeper: Keeper) {
       normalizeText(point.runtime_id)
       || normalizeText(point.runtime_outcome)
       || typeof point.runtime_attempt_count === 'number'
-      || point.fallback_applied
     ) {
       return point
     }
@@ -185,7 +184,7 @@ function keeperProviderLabel(keeper: Keeper): string | null {
   const latest = latestRuntimeMetric(keeper)
   const outcome = normalizeText(summary?.runtime_outcome) ?? normalizeText(latest?.runtime_outcome)
   const attempts = summary?.provider_attempt_count ?? latest?.runtime_attempt_count ?? null
-  const fallback = summary?.provider_fallback_applied ?? latest?.fallback_applied ?? null
+  const fallback = summary?.provider_fallback_applied ?? null
   const parts = [
     outcome,
     typeof attempts === 'number' ? `${attempts} attempts` : null,
@@ -195,14 +194,8 @@ function keeperProviderLabel(keeper: Keeper): string | null {
 }
 
 function keeperFallbackLabel(keeper: Keeper): string | null {
-  const latest = latestRuntimeMetric(keeper)
-  if (!latest || latest.fallback_applied !== true) return null
-  const reason = normalizeText(latest.fallback_reason)
-  const hops =
-    typeof latest.fallback_hops === 'number' && latest.fallback_hops > 0
-      ? `${latest.fallback_hops} hops`
-      : null
-  return ['fallback', reason, hops].filter((part): part is string => part != null).join(' · ')
+  const summary = keeper.trust?.execution_summary ?? null
+  return summary?.provider_fallback_applied === true ? 'fallback' : null
 }
 
 function keeperLastLatencyMs(keeper: Keeper): number {

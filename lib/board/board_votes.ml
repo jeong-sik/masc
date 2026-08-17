@@ -17,14 +17,13 @@ let vote_direction_of_string_opt raw =
   | _ -> None
 
 let vote_log_path () =
-  let base = board_base_path () in
-  Filename.concat
-    (Common.masc_dir_from_base_path ~base_path:base)
-    "board_votes.jsonl"
+  Filename.concat (Board_paths.board_masc_dir ()) "board_votes.jsonl"
 
 (* Append and snapshot writers persist the cast timestamp stored for the exact
-   [(target, voter)] vote identity. *)
-let append_vote_log ~target ~voter ~direction ~ts =
+   [(target, voter)] vote identity. Returns [Error (Io_error _)] instead of
+   swallowing the write failure, so a disk-full or permission error propagates
+   to the caller instead of leaving the in-memory vote as the only copy. *)
+let append_vote_log ~target ~voter ~direction ~ts : (unit, board_error) Result.t =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
@@ -35,7 +34,10 @@ let append_vote_log ~target ~voter ~direction ~ts =
       ("ts", `Float ts);
     ] in
     Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
-  with Sys_error msg -> Log.BoardLog.error "persist error (append_vote_log): %s" msg
+    Ok ()
+  with Sys_error msg ->
+    record_persist_error ~where:"append_vote_log" msg;
+    Error (Io_error (Printf.sprintf "append_vote_log: %s" msg))
 
 let vote_log_jsonl store =
   let buf = Buffer.create 4096 in
@@ -61,14 +63,25 @@ let vote_log_jsonl store =
     store.vote_log;
   Buffer.contents buf
 
-let save_vote_log_jsonl content =
+(* Full snapshot rewrite of the vote log, used by [flush_dirty] (compaction)
+   and [delete_post]/[delete_comment] (removing a target's votes). Returns
+   [Error (Io_error _)] instead of only logging, on the same contract as
+   [append_vote_log] — the previous unit-returning version logged via
+   [Log.BoardLog.error] directly, which meant this write's failures never
+   incremented [persist_errors], unlike every other persist path in this
+   file. *)
+let save_vote_log_jsonl content : (unit, board_error) Result.t =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
-    (match Fs_compat.save_file_atomic path content with
-     | Ok () -> ()
-     | Error msg -> Log.BoardLog.error "persist error (save_vote_log_jsonl): %s" msg)
-  with Sys_error msg -> Log.BoardLog.error "persist error (save_vote_log_jsonl): %s" msg
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> Ok ()
+    | Error msg ->
+      record_persist_error ~where:"save_vote_log_jsonl" msg;
+      Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
+  with Sys_error msg ->
+    record_persist_error ~where:"save_vote_log_jsonl" msg;
+    Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
 
 let persisted_vote_direction_of_string_opt = function
   | "up" -> Some Up
@@ -113,27 +126,19 @@ let persisted_vote_row_of_yojson = function
        | _ -> None)
   | _ -> None
 
-(* [vote_outcome] carries the information needed to run post-lock vote hooks.
-
-   [total_score] is the post's score after this vote, not the change this vote
-   made. It was called [delta] and read as a change by every caller name around
-   it; the file's other [delta] (karma_score_for_direction) really is a change,
-   so one word meant both. *)
-type vote_outcome = {
-  total_score : int;
-  vote_target : string;
-  vote_voter : string;
-  vote_direction : vote_direction;
-  vote_ts : float;
-}
-
-let record_vote_side_effect store outcome =
-  with_persist_lock store (fun () ->
-      append_vote_log
-        ~target:outcome.vote_target
-        ~voter:outcome.vote_voter
-        ~direction:outcome.vote_direction
-        ~ts:outcome.vote_ts)
+(* Durable append for one cast vote, outside [store.mutex] (it takes
+   [store.persist_mutex] itself via [with_persist_lock]). Write-ahead design
+   (PR #28934 review): this is called from [vote]/[vote_comment] {b before}
+   any [store.posts]/[store.comments]/[store.vote_log] mutation, specifically
+   so a racing [flush_dirty] can never snapshot-write a vote that turns out
+   to have failed its durable append — mutating first and appending second
+   (the original shape here, and still [add_comment_with_audience]'s shape
+   for comments — a known, separately-tracked class of the same race) leaves
+   a window where [flush_dirty] can pick up the not-yet-durable mutation
+   before the append either confirms or rolls it back. *)
+let record_vote_side_effect store ~target ~voter ~direction ~ts
+    : (unit, board_error) Result.t =
+  with_persist_lock store (fun () -> append_vote_log ~target ~voter ~direction ~ts)
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =
@@ -152,6 +157,12 @@ let current_vote_for_post store ~voter ~post_id
           in
           Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
+(* Write-ahead: validate under [with_lock] with no mutation, durably append
+   outside any lock, then commit under [with_lock] re-deciding the branch
+   from a fresh read (not the stale staged one) so a concurrent unrelated
+   post mutation is not clobbered and a same-key race is caught rather than
+   silently overwritten. If step 1 rejects or step 2's append fails, nothing
+   was ever mutated, so there is nothing to roll back. *)
 let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
@@ -160,63 +171,65 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Post_id.of_string post_id with
   | Error e -> Error e
   | Ok pid ->
-      let board_result : (vote_outcome, board_error) Result.t =
+      let post_key = Post_id.to_string pid in
+      let vote_key =
+        Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
+      in
+      let staged : (float, board_error) Result.t =
         with_lock store (fun () ->
-          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          match Hashtbl.find_opt store.posts post_key with
           | None -> Error (Post_not_found post_id)
-          | Some post ->
-              let vote_key =
-                Board_vote_key.post ~post_id:pid ~voter:agent |> Board_vote_key.to_string
-              in
-              let now = Time_compat.now () in
+          | Some _post ->
               match Hashtbl.find_opt store.vote_log vote_key with
               | Some (prev, _prev_ts) when (=) prev direction ->
                   Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
                     voter (vote_direction_to_string direction) post_id))
-              | Some (_opposite, _prev_ts) ->
-                  let flipped = match direction with
-                    | Up -> { post with votes_up = post.votes_up + 1;
-                                        votes_down = max 0 (post.votes_down - 1);
-                                        updated_at = now }
-                    | Down -> { post with votes_down = post.votes_down + 1;
-                                          votes_up = max 0 (post.votes_up - 1);
-                                          updated_at = now }
-                  in
-                  Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
-                  Hashtbl.replace store.vote_log vote_key (direction, now);
-                  mark_dirty_post store (Post_id.to_string pid);
-                  invalidate_post_caches store;
-                  Ok { total_score = flipped.votes_up - flipped.votes_down;
-                       vote_target = vote_key;
-                       vote_voter = voter;
-                       vote_direction = direction;
-                       vote_ts = now;
-                       }
-              | None ->
-                  let updated = match direction with
-                    | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
-                    | Down -> { post with votes_down = post.votes_down + 1; updated_at = now }
-                  in
-                  Hashtbl.replace store.posts (Post_id.to_string pid) updated;
-                  Hashtbl.replace store.vote_log vote_key (direction, now);
-                  mark_dirty_post store (Post_id.to_string pid);
-                  invalidate_post_caches store;
-                  Ok { total_score = updated.votes_up - updated.votes_down;
-                       vote_target = vote_key;
-                       vote_voter = voter;
-                       vote_direction = direction;
-                       vote_ts = now;
-                       })
+              | Some _ | None -> Ok (Time_compat.now ()))
       in
-      (* Side-effect hooks run outside the store lock. Selection observers
-         write their own state on unrelated paths and modify no board state,
-         so holding [store.mutex] across their I/O would be gratuitous
-         contention with every other reader/writer. *)
-      (match board_result with
-       | Ok ({ total_score; _ } as outcome) ->
-           record_vote_side_effect store outcome;
-           Ok total_score
-       | Error _ as e -> e)
+      (match staged with
+       | Error _ as e -> e
+       | Ok ts ->
+         (match record_vote_side_effect store ~target:vote_key ~voter ~direction ~ts with
+          | Error _ as e -> e
+          | Ok () ->
+              with_lock store (fun () ->
+                match Hashtbl.find_opt store.posts post_key with
+                | None -> Error (Post_not_found post_id)
+                | Some post ->
+                  match Hashtbl.find_opt store.vote_log vote_key with
+                  | Some (prev, _) when (=) prev direction ->
+                      (* Another call for this exact voter+target committed
+                         first while our append was in flight. Our append is
+                         now an orphan row on disk; the winner's own
+                         [mark_dirty_post] schedules a [flush_dirty] snapshot
+                         rewrite that overwrites it with the committed truth
+                         before a restart would ever replay it. *)
+                      Error (Already_voted (Printf.sprintf "%s already voted %s on %s"
+                        voter (vote_direction_to_string direction) post_id))
+                  | Some (_opposite, _prev_ts) ->
+                      let flipped = match direction with
+                        | Up -> { post with votes_up = post.votes_up + 1;
+                                            votes_down = max 0 (post.votes_down - 1);
+                                            updated_at = ts }
+                        | Down -> { post with votes_down = post.votes_down + 1;
+                                              votes_up = max 0 (post.votes_up - 1);
+                                              updated_at = ts }
+                      in
+                      Hashtbl.replace store.posts post_key flipped;
+                      Hashtbl.replace store.vote_log vote_key (direction, ts);
+                      mark_dirty_post store post_key;
+                      invalidate_post_caches store;
+                      Ok (flipped.votes_up - flipped.votes_down)
+                  | None ->
+                      let updated = match direction with
+                        | Up -> { post with votes_up = post.votes_up + 1; updated_at = ts }
+                        | Down -> { post with votes_down = post.votes_down + 1; updated_at = ts }
+                      in
+                      Hashtbl.replace store.posts post_key updated;
+                      Hashtbl.replace store.vote_log vote_key (direction, ts);
+                      mark_dirty_post store post_key;
+                      invalidate_post_caches store;
+                      Ok (updated.votes_up - updated.votes_down))))
 
 let current_vote_for_comment store ~voter ~comment_id
     : (vote_direction option, board_error) Result.t =
@@ -237,7 +250,7 @@ let current_vote_for_comment store ~voter ~comment_id
           in
           Ok (Option.map fst (Hashtbl.find_opt store.vote_log vote_key)))
 
-(** Vote on a comment *)
+(** Vote on a comment. Same write-ahead shape as {!vote}. *)
 let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
   | Error e -> Error e
@@ -246,57 +259,57 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
   match Comment_id.of_string comment_id with
   | Error e -> Error e
   | Ok cid ->
-      with_lock store (fun () ->
-        match Hashtbl.find_opt store.comments (Comment_id.to_string cid) with
-        | None -> Error (Comment_not_found comment_id)
-        | Some cmt ->
-            let vote_key =
-              Board_vote_key.comment ~comment_id:cid ~voter:agent
-              |> Board_vote_key.to_string
-            in
-            let now = Time_compat.now () in
-            match Hashtbl.find_opt store.vote_log vote_key with
-            | Some (prev, _prev_ts) when (=) prev direction ->
-                Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
-                  voter (vote_direction_to_string direction) comment_id))
-            | Some (_opposite, _prev_ts) ->
-                let flipped = match direction with
-                  | Up -> { cmt with votes_up = cmt.votes_up + 1;
-                                     votes_down = max 0 (cmt.votes_down - 1) }
-                  | Down -> { cmt with votes_down = cmt.votes_down + 1;
-                                       votes_up = max 0 (cmt.votes_up - 1) }
-                in
-                Hashtbl.replace store.comments (Comment_id.to_string cid) flipped;
-                Hashtbl.replace store.vote_log vote_key (direction, now);
-                mark_dirty_comment store (Comment_id.to_string cid);
-                invalidate_comment_caches store;
-                Ok {
-                  total_score = flipped.votes_up - flipped.votes_down;
-                  vote_target = vote_key;
-                  vote_voter = voter;
-                  vote_direction = direction;
-                  vote_ts = now;
-                }
-            | None ->
-                let updated = match direction with
-                  | Up -> { cmt with votes_up = cmt.votes_up + 1 }
-                  | Down -> { cmt with votes_down = cmt.votes_down + 1 }
-                in
-                Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
-                Hashtbl.replace store.vote_log vote_key (direction, now);
-                mark_dirty_comment store (Comment_id.to_string cid);
-                invalidate_comment_caches store;
-                Ok {
-                  total_score = updated.votes_up - updated.votes_down;
-                  vote_target = vote_key;
-                  vote_voter = voter;
-                  vote_direction = direction;
-                  vote_ts = now;
-                }
-      )
-      |> Result.map (fun outcome ->
-             record_vote_side_effect store outcome;
-             outcome.total_score)
+      let comment_key = Comment_id.to_string cid in
+      let vote_key =
+        Board_vote_key.comment ~comment_id:cid ~voter:agent |> Board_vote_key.to_string
+      in
+      let staged : (float, board_error) Result.t =
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.comments comment_key with
+          | None -> Error (Comment_not_found comment_id)
+          | Some _cmt ->
+              match Hashtbl.find_opt store.vote_log vote_key with
+              | Some (prev, _prev_ts) when (=) prev direction ->
+                  Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
+                    voter (vote_direction_to_string direction) comment_id))
+              | Some _ | None -> Ok (Time_compat.now ()))
+      in
+      (match staged with
+       | Error _ as e -> e
+       | Ok ts ->
+         (match record_vote_side_effect store ~target:vote_key ~voter ~direction ~ts with
+          | Error _ as e -> e
+          | Ok () ->
+              with_lock store (fun () ->
+                match Hashtbl.find_opt store.comments comment_key with
+                | None -> Error (Comment_not_found comment_id)
+                | Some cmt ->
+                  match Hashtbl.find_opt store.vote_log vote_key with
+                  | Some (prev, _) when (=) prev direction ->
+                      Error (Already_voted (Printf.sprintf "%s already voted %s on comment %s"
+                        voter (vote_direction_to_string direction) comment_id))
+                  | Some (_opposite, _prev_ts) ->
+                      let flipped = match direction with
+                        | Up -> { cmt with votes_up = cmt.votes_up + 1;
+                                           votes_down = max 0 (cmt.votes_down - 1) }
+                        | Down -> { cmt with votes_down = cmt.votes_down + 1;
+                                             votes_up = max 0 (cmt.votes_up - 1) }
+                      in
+                      Hashtbl.replace store.comments comment_key flipped;
+                      Hashtbl.replace store.vote_log vote_key (direction, ts);
+                      mark_dirty_comment store comment_key;
+                      invalidate_comment_caches store;
+                      Ok (flipped.votes_up - flipped.votes_down)
+                  | None ->
+                      let updated = match direction with
+                        | Up -> { cmt with votes_up = cmt.votes_up + 1 }
+                        | Down -> { cmt with votes_down = cmt.votes_down + 1 }
+                      in
+                      Hashtbl.replace store.comments comment_key updated;
+                      Hashtbl.replace store.vote_log vote_key (direction, ts);
+                      mark_dirty_comment store comment_key;
+                      invalidate_comment_caches store;
+                      Ok (updated.votes_up - updated.votes_down))))
 
 (** {1 Stats} *)
 
@@ -671,7 +684,13 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
            ~where:"rewrite_comments"
            ~path:(comments_path ())
            comments_jsonl;
-         save_vote_log_jsonl votes_jsonl;
+         (* Same log-and-continue contract as the [save_jsonl_snapshot] calls
+            around it — [delete_post] always reports [Ok ()] once the
+            in-memory deletion (the authoritative step) has happened; a
+            rewrite I/O failure here is logged + counted inside
+            [save_vote_log_jsonl] and self-heals on the next successful
+            flush/delete rewrite. *)
+         (match save_vote_log_jsonl votes_jsonl with Ok () | Error _ -> ());
          save_jsonl_snapshot
            ~where:"rewrite_reactions"
            ~path:(reactions_path ())
@@ -750,7 +769,8 @@ let delete_comment store ~comment_id : (unit, board_error) Result.t =
            ~where:"rewrite_comments"
            ~path:(comments_path ())
            comments_jsonl;
-         save_vote_log_jsonl votes_jsonl;
+         (* Same log-and-continue contract as [delete_post] above. *)
+         (match save_vote_log_jsonl votes_jsonl with Ok () | Error _ -> ());
          save_jsonl_snapshot
            ~where:"rewrite_reactions"
            ~path:(reactions_path ())
@@ -831,7 +851,14 @@ let flush_dirty store =
     Option.iter
       (save_jsonl_snapshot ~where:"flush_comments" ~path:(comments_path ()))
       comments_jsonl;
-    Option.iter save_vote_log_jsonl vote_log)
+    (* [flush_dirty] is a fire-and-forget [unit]-returning flusher call
+       (same contract as the two snapshot writers above); the failure is
+       still visible via [record_persist_error]'s log line + counter inside
+       [save_vote_log_jsonl] itself, it just is not propagated past this
+       call the way [vote]/[vote_comment] propagate a live append failure. *)
+    Option.iter
+      (fun content -> match save_vote_log_jsonl content with Ok () | Error _ -> ())
+      vote_log)
 
 
 (** {1 Karma & Flair - Reddit-style} *)

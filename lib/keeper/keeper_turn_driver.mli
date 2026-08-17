@@ -91,6 +91,13 @@ type named_run_result =
   ; selected_runtime_id : string
   ; selected_max_context : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; lane_attempt_index : int
+    (** Position of the winning candidate in this turn's lane walk
+        ([attempt_runtime_candidates]'s [idx], 0-based). 0 means the turn
+        settled on the first candidate; a later index means the lane
+        rotated past one or more failed candidates before landing here.
+        This is the truth source for the execution receipt's
+        [runtime_fallback_applied] / [runtime_outcome]. *)
   }
 
 val run_named :
@@ -232,6 +239,7 @@ module For_testing : sig
 
   val selected_runtime_result :
     Runtime.t ->
+    lane_attempt_index:int ->
     (Runtime_agent.run_result, Agent_core.Error.t) result ->
     (named_run_result, Agent_core.Error.t) result
 

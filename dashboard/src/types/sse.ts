@@ -3,13 +3,8 @@ import type { BoardActorIdentity, BoardPost } from './core'
 // --- SSE Events ---
 
 export type SSEEventType =
-  | 'agent_bound'
-  | 'masc/agent_bound'
-  | 'agent_unbound'
-  | 'masc/agent_unbound'
   | 'broadcast'
   | 'masc/broadcast'
-  | 'task_update'
   | 'board_post'
   | 'masc/board_post'
   | 'board_comment'
@@ -28,8 +23,6 @@ export type SSEEventType =
   | 'masc/keeper_handoff'
   | 'keeper_compaction'
   | 'masc/keeper_compaction'
-  | 'keeper_guardrail'
-  | 'masc/keeper_guardrail'
   | 'keeper_phase_changed'
   | 'keeper_composite_changed'
   | 'keeper_chat_appended'
@@ -41,15 +34,11 @@ export type SSEEventType =
   | 'keeper_tool_call'
   | 'masc/keeper_tool_call'
   | 'keeper_tool_call_evidence_committed'
-  | 'keeper_tool_skipped'
   | 'keeper_turn_complete'
   | 'masc/keeper_turn_complete'
   // RFC-0266 Phase 4: fusion run-status transitions pushed to the dashboard.
   | 'fusion_run_status'
   | 'internal_agent_runs_changed'
-  | 'client_input_approved'
-  | 'client_input_rejected'
-  | 'client_input_updated'
   | 'runtime_param_changed'
   | 'approval:pending'
   | 'approval:resolved'
@@ -62,8 +51,6 @@ export type SSEEventType =
   | 'masc/task_claimed'
   // Agent Core bridge events (relayed from Event_bus via agent_core_sse_bridge)
   | 'agent_core:masc:keeper:lifecycle'
-  | 'agent_core:masc:trust_updated'
-  | 'agent_core:masc:reputation_changed'
   | 'agent_core:agent_started'
   | 'agent_core:agent_completed'
   | 'agent_core:agent_failed'
@@ -74,7 +61,6 @@ export type SSEEventType =
   | 'agent_core:handoff_requested'
   | 'agent_core:handoff_completed'
   | 'agent_core:context_compacted'
-  | 'agent_core:task_state_changed'
   // Harness observability events (#3165)
   | 'agent_core:masc:harness:verdict_recorded'
   | 'agent_core:masc:harness:pre_compact'
@@ -288,10 +274,7 @@ export interface SSEAudioClip {
 // --- Journal ---
 
 export type JournalEventType =
-  | 'agent_bound'
-  | 'agent_unbound'
   | 'broadcast'
-  | 'task_update'
   | 'board_post'
   | 'board_comment'
   | 'board_delete'
@@ -299,13 +282,11 @@ export type JournalEventType =
   | 'keeper_heartbeat'
   | 'keeper_handoff'
   | 'keeper_compaction'
-  | 'keeper_guardrail'
   | 'keeper_phase_changed'
   | 'keeper_tool_call'
   | 'agent_core_tool'
   | 'agent_core_turn'
   | 'agent_core_context'
-  | 'agent_core_task'
   | 'agent_core_event'
   | 'unknown'
 

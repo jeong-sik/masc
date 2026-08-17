@@ -823,7 +823,6 @@ let test_model_observability_missing_runtime_id_is_unscoped () =
         [ ( "runtime"
           , `Assoc
               [ "attempts", `List [ `Assoc [ "status", `String "ok" ] ]
-              ; "selected_index", `Int 0
               ] )
         ])
   in
@@ -857,7 +856,6 @@ let test_model_observability_runtime_match_does_not_promote_model_hint () =
           , `Assoc
               [ "runtime_id", `String "runtime-test"
               ; "attempts", `List [ `Assoc [ "status", `String "ok" ] ]
-              ; "selected_index", `Int 0
               ] )
         ])
   in

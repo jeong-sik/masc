@@ -97,9 +97,6 @@ let attempt_summary_json ?selected_model latest_runtime =
       `Assoc
         [ ( "summary", `String summary )
         ; "attempts_observed", `Null
-        ; "selected_index", `Null
-        ; "fallback_hops", `Null
-        ; "fallback_applied", `Bool false
         ]
   | Some runtime ->
       let attempts_observed =
@@ -107,54 +104,18 @@ let attempt_summary_json ?selected_model latest_runtime =
         | Some (`List attempts) -> List.length attempts
         | _ -> 0
       in
-      let selected_index =
-        match Json_util.assoc_member_opt "selected_index" runtime with
-        | Some (`Int value) -> Some value
-        | Some (`Intlit value) -> int_of_string_opt value
-        | _ -> None
-      in
-      let fallback_hops =
-        match Json_util.assoc_member_opt "fallback_hops" runtime with
-        | Some (`Int value) -> Some value
-        | Some (`Intlit value) -> int_of_string_opt value
-        | _ -> None
-      in
-      let fallback_applied =
-        match Json_util.assoc_member_opt "fallback_applied" runtime with
-        | Some (`Bool value) -> value
-        | _ -> false
-      in
-      let selected_position = Option.map (fun idx -> idx + 1) selected_index in
       let summary =
-        match fallback_applied, fallback_hops, selected_position, selected_model with
-        | true, Some hops, Some pos, _ ->
-            Printf.sprintf
-              "%d attempt(s); fallback after %d hop(s); selected candidate index %d."
-              attempts_observed
-              hops
-              pos
-        | false, _, Some 1, _ ->
-            Printf.sprintf
-              "%d attempt(s); selected first healthy candidate."
-              attempts_observed
-        | false, _, Some pos, _ ->
-            Printf.sprintf
-              "%d attempt(s); selected candidate index %d without fallback."
-              attempts_observed
-              pos
-        | _, _, _, Some (_, source) ->
+        match selected_model with
+        | Some (_, source) ->
             Printf.sprintf
               "%d attempt(s); selected model observed from %s."
               attempts_observed
               source
-        | _ -> "Runtime observation is present but incomplete."
+        | None -> "Runtime observation is present but incomplete."
       in
       `Assoc
         [ "summary", `String summary
         ; "attempts_observed", `Int attempts_observed
-        ; "selected_index", Json_util.int_opt_to_json selected_index
-        ; "fallback_hops", Json_util.int_opt_to_json fallback_hops
-        ; "fallback_applied", `Bool fallback_applied
         ]
 
 type runtime_observation_scope =
@@ -216,7 +177,6 @@ let model_observability_json ~current_runtime_id ~runtime_blocker_fields
       , `Bool runtime_verified )
     ; ( "runtime_observation_scope"
       , `String (runtime_observation_scope_to_string runtime_observation_scope) )
-    ; "configured_labels", `List []
     ; "resolved_candidates", `List []
     ; ( "selected_model"
       , Json_util.string_opt_to_json (Option.map fst selected_model) )

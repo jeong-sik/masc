@@ -79,7 +79,12 @@ val checkpoint_persistence_error
 
 (** Map an optional runtime observation to a typed runtime outcome
     ([Runtime_passed_to_next_model] / [Runtime_completed] /
-    [Runtime_failed] / [Runtime_not_observed]). *)
+    [Runtime_failed] / [Runtime_not_observed]).
+    [lane_failover_applied] is the lane walk's truth (this turn settled on
+    a candidate at a lane index > 0) — it decides
+    [Runtime_passed_to_next_model], not any field on the observation
+    itself. *)
 val runtime_outcome_of_observation
-  :  Runtime_observation.runtime_observation option
+  :  lane_failover_applied:bool
+  -> Runtime_observation.runtime_observation option
   -> Keeper_execution_receipt.runtime_outcome

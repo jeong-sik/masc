@@ -155,7 +155,6 @@ let success_entry ~model ~ts ?identity_seed ?(input_tokens=100) ?(output_tokens=
       ("cache_read_tokens", `Int cache_read_tokens);
       ("cache_creation_tokens", `Int cache_creation_tokens);
       ("reasoning_tokens", `Int 0);
-      ("fallback_applied", `Bool false);
       ("cost_usd", `Float cost_usd);
     ] @ extra_telemetry_fields));
   ]
@@ -204,7 +203,6 @@ let error_entry ~runtime_id ~ts ?provider () =
         | Some v -> `String v
         | None -> `Null);
       ("runtime_id", `String runtime_id);
-      ("candidate_models", `List [`String "claude"; `String "model-b"]);
       ("error_category", `String "timeout");
       ("outcome", `String "error");
       ("usage_reported", `Bool false);
@@ -253,7 +251,6 @@ let success_entry_without_usage ~model ~ts ?provider
       ("outcome", `String "success");
       ("turn_count", `Int 1);
       ("agent_core_turn_ordinal", `Int agent_core_turn_ordinal);
-      ("fallback_applied", `Bool false);
     ] @ extra_fields @ diag_fields));
   ]
 
@@ -280,7 +277,6 @@ let success_entry_without_model ~runtime_id ~ts ?(tool_count = 1) () =
         ("telemetry_reported", `Bool false);
         ("coverage_stage", `String "agent_core");
         ("coverage_reason", `String "missing_usage_and_inference");
-        ("fallback_applied", `Bool false);
       ] );
   ]
 
@@ -307,7 +303,6 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
       `Assoc [
         ("runtime_id", `String runtime_id);
         ("selected_model", `Null);
-        ("candidate_models", `List []);
       ] );
     ( "telemetry",
       `Assoc ([
@@ -323,7 +318,6 @@ let sparse_provider_context_entry ~outcome ~runtime_id ~ts () =
             (if String.equal outcome "error"
              then "error_turn"
              else "missing_usage_and_inference") );
-        ("fallback_applied", `Bool false);
       ] @ identity_fields) );
   ]
 
@@ -356,7 +350,6 @@ let test_hw_decode_parser_reads_current_field () =
             ; "agent_core_turn_ordinal", `Int agent_core_turn_ordinal
             ; "usage_reported", `Bool false
             ; "telemetry_reported", `Bool true
-            ; "fallback_applied", `Bool false
             ; key, `Float 42.0
             ] )
       ]
@@ -531,9 +524,9 @@ let test_error_turns_counted () =
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
     check int "total_error_entries" 1 agg.total_error_entries;
-    (* Error attributed to first candidate "claude" *)
+    (* Error attributed to the dispatched runtime_id *)
     let error_model = List.find_opt (fun (s : M.model_stats) ->
-      s.model_id = "claude") agg.models in
+      s.model_id = "local_only (runtime)") agg.models in
     check bool "error model found" true (Option.is_some error_model);
     let em = Option.get error_model in
     check (option string) "error provider unresolved" None em.provider;
@@ -1226,7 +1219,6 @@ let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
       ("output_tokens", `Int 50);
       ("cache_read_tokens", `Int 0);
       ("reasoning_tokens", `Int 0);
-      ("fallback_applied", `Bool false);
       ("cost_usd", `Float 0.01);
     ] @ thinking_field));
   ]
@@ -1320,7 +1312,6 @@ let success_entry_with_cache ~model ~ts ?(input_tokens=100) ~cache_read () =
       ("output_tokens", `Int 50);
       ("cache_read_tokens", `Int cache_read);
       ("reasoning_tokens", `Int 0);
-      ("fallback_applied", `Bool false);
       ("cost_usd", `Float 0.01);
     ]);
   ]
@@ -1450,7 +1441,6 @@ let zero_model_stats (model_id : string) ~provider ~entry_count
     primary_coverage_stage = None;
     primary_coverage_reason = None;
     coverage_reason_counts = [];
-    fallback_count = 0;
     success_count = entry_count;
     error_count = 0;
     total_cost_usd = None;
@@ -1564,7 +1554,6 @@ let test_usage_signal_uses_tokens_not_cost () =
     ; cache_read_tokens = None
     ; cache_creation_tokens = None
     ; reasoning_tokens = None
-    ; fallback_applied = false
     ; cost_usd = Some 12.34
     ; tool_call_count = 0
     ; tools_used = []

@@ -145,7 +145,6 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
          ; primary_coverage_stage
          ; primary_coverage_reason
          ; coverage_reason_counts
-         ; fallback_count = count_if (fun e -> e.fallback_applied) entries
          ; success_count
          ; error_count
          ; total_cost_usd =

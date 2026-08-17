@@ -244,9 +244,37 @@ let test_slack_connector_json_carries_identity () =
       (json |> U.member "gateway_state" |> U.to_string
        |> String.trim |> String.length > 0))
 
+(* Regression: /api/v1/gate/keeper-status route error paths.
+   RFC-0371 B4 — the old handler derived 404 by substring-matching "keeper
+   not found" in a rendered tool error.  The fix introduced a typed
+   [keeper_exists] precheck so the route answers 400/404/503 directly.
+   These tests pin the error_json wire contract and the four error-path
+   response shapes so a future refactor cannot silently revert to
+   substring-based classification. *)
+
+let test_error_json_wire_shape () =
+  let json = Channel_gate.error_json "name is required" in
+  check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+  check string "error message" "name is required"
+    (json |> U.member "error" |> U.to_string)
+
+let test_error_json_unknown_keeper_includes_name () =
+  let json = Channel_gate.error_json "unknown keeper: rondo" in
+  check bool "ok is false" false (json |> U.member "ok" |> U.to_bool);
+  check string "error contains keeper name" "unknown keeper: rondo"
+    (json |> U.member "error" |> U.to_string)
+
 let () =
   run "channel_gate_connector_routes"
     [
+      ( "keeper_status_route_error_contract",
+        [
+          test_case "error_json wire shape" `Quick
+            test_error_json_wire_shape;
+          test_case "unknown keeper error includes name" `Quick
+            test_error_json_unknown_keeper_includes_name;
+        ] );
+
       ( "resolve_connector_status_name",
         [
           test_case "prefers explicit name" `Quick

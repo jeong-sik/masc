@@ -421,6 +421,7 @@ let prepare_agent_setup
     =
     ref None
   in
+  let receipt_lane_attempt_index_ref : int ref = ref 0 in
   let receipt_response_text_present_ref = ref false in
   let compute_tool_surface
         ~turn:_
@@ -459,6 +460,7 @@ let prepare_agent_setup
     ; receipt_model_used_ref
     ; receipt_stop_reason_ref
     ; receipt_runtime_observation_ref
+    ; receipt_lane_attempt_index_ref
     ; receipt_response_text_present_ref
     ; on_tool_result_ready
     ; tools

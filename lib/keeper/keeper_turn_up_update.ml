@@ -252,6 +252,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  (if String.trim old.instructions <> "" then old.instructions
                   else Option.value ~default:"" p.profile_defaults.instructions)
                p.instructions_opt);
+    autonomous_instructions = p.autonomous_instructions_opt;
     allowed_paths;
     sandbox_profile;
     network_mode;
@@ -368,6 +369,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  ~keeper_name:updated.name
                  (Keeper_owner_reducer.Update_profile
                     { instructions = updated.instructions
+                    ; autonomous_instructions = updated.autonomous_instructions
                     ; sandbox_profile = updated.sandbox_profile
                     ; sandbox_image = updated.sandbox_image
                     ; network_mode = updated.network_mode

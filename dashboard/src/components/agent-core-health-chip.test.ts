@@ -118,9 +118,9 @@ describe('AgentCoreHealthChip', () => {
   it('shows the server replay cap without offering another duplicate page', () => {
     hydrateAgentCoreRuntimeFromTelemetryEntries([{
       source: 'agent_core_event',
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: 'visible-capped-window',
-      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+      payload: { agent_name: 'a', detail: 'b', event: 'started' },
     }] as TelemetryEntry[])
     noteAgentCoreReplayWindow({
       loadedEvents: 1,

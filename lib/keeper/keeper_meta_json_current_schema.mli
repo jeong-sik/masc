@@ -9,6 +9,7 @@ type field =
   | Name
   | Agent_name
   | Instructions
+  | Autonomous_instructions
   | Trace_id
   | Multimodal_policy
   | Trace_history

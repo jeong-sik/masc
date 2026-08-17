@@ -532,8 +532,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         prefill_ms: asNumber(rawTel.prefill_ms) ?? null,
       } : null
       const runtimeObj = isRecord(item.runtime) ? item.runtime : null
-      const fallbackEvents = runtimeObj && Array.isArray(runtimeObj.fallback_events) ? runtimeObj.fallback_events : []
-      const firstFallback = fallbackEvents.length > 0 && isRecord(fallbackEvents[0]) ? fallbackEvents[0] : null
       return {
         ts,
         context_ratio: null,
@@ -556,10 +554,6 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         runtime_id: runtimeObj ? (asString(runtimeObj.runtime_id) ?? asString(runtimeObj.name) ?? null) : null,
         runtime_outcome: runtimeObj ? (asString(runtimeObj.outcome) ?? null) : null,
         runtime_attempt_count: runtimeObj ? (asNumber(runtimeObj.attempt_count) ?? null) : null,
-        runtime_strategy: runtimeObj && typeof runtimeObj.strategy === 'string' ? runtimeObj.strategy : null,
-        fallback_applied: runtimeObj ? runtimeObj.fallback_applied === true : false,
-        fallback_hops: runtimeObj ? (asNumber(runtimeObj.fallback_hops) ?? 0) : 0,
-        fallback_reason: firstFallback && typeof firstFallback.reason === 'string' ? firstFallback.reason : null,
       }
     })
     .filter((item): item is KeeperMetricPoint => item !== null)

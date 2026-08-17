@@ -48,9 +48,6 @@ describe('InferenceTelemetryPanel', () => {
           ttfrc_ms: null,
           prefill_ms: null,
         },
-        fallback_applied: false,
-        fallback_hops: 0,
-        fallback_reason: null,
       },
       {
         ts: 2,
@@ -87,9 +84,6 @@ describe('InferenceTelemetryPanel', () => {
           ttfrc_ms: null,
           prefill_ms: null,
         },
-        fallback_applied: false,
-        fallback_hops: 0,
-        fallback_reason: null,
       },
     ] satisfies KeeperMetricPoint[]
     const keeper = { metrics_series: metricsSeries } as Keeper
@@ -133,9 +127,6 @@ describe('InferenceTelemetryPanel', () => {
           ttfrc_ms: null,
           prefill_ms: null,
         },
-        fallback_applied: false,
-        fallback_hops: 0,
-        fallback_reason: null,
       },
       {
         ts: 2,
@@ -164,9 +155,6 @@ describe('InferenceTelemetryPanel', () => {
           ttfrc_ms: null,
           prefill_ms: null,
         },
-        fallback_applied: false,
-        fallback_hops: 0,
-        fallback_reason: null,
       },
     ] satisfies KeeperMetricPoint[]
     const keeper = { metrics_series: metricsSeries } as Keeper

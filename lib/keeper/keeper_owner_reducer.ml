@@ -73,6 +73,7 @@ type compaction_result =
 
 type profile_update =
   { instructions : string
+  ; autonomous_instructions : string option
   ; sandbox_profile : Keeper_types_profile.sandbox_profile
   ; sandbox_image : string option
   ; network_mode : Keeper_types_profile.network_mode
@@ -643,6 +644,7 @@ let apply_existing (state : state) meta command =
          state
          { meta with
            instructions = update.instructions
+         ; autonomous_instructions = update.autonomous_instructions
          ; sandbox_profile = update.sandbox_profile
          ; sandbox_image = update.sandbox_image
          ; network_mode = update.network_mode

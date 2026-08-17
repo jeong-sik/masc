@@ -101,7 +101,9 @@ normal_targets=(
   @test/runtest-test_keeper_rotation_eligibility_census
   @test/runtest-test_keeper_shutdown_ownerless_admission_release
   @test/runtest-test_keeper_create_admission_transaction
+  @test/runtest-test_keeper_task_create_typed_failure
   @test/runtest-test_keeper_toml_accessor_matrix
+  @test/runtest-test_keeper_tool_execute_stream_close
   @test/runtest-test_keeper_turn_dispatch_authority
   @test/runtest-test_runtime_quota_window
   @test/runtest-test_subsystem_health_state
@@ -313,6 +315,27 @@ normal_targets=(
   @test/runtest-test_dated_jsonl
   @test/runtest-test_audit_log
   @test/keeper_github_identity/runtest
+  # Declared in Dune, compiled every run, never executed before this batch
+  # (masc#28925 audit). Each target below was run individually against this
+  # worktree and confirmed green before being added here.
+  @test/runtest-test_keeper_memory_os_current
+  @test/runtest-test_keeper_msg_async_path_traversal
+  @test/runtest-test_keeper_msg_async_durable_active_inventory
+  @test/runtest-test_keeper_mutex_coverage
+  @test/runtest-test_board_karma_ledger
+  @test/runtest-test_board_vote_persistence
+  @test/runtest-test_keeper_event_queue
+  @test/runtest-test_keeper_event_queue_owner_lock
+  @test/runtest-test_keeper_event_queue_persist_poison
+  @test/runtest-test_keeper_event_queue_state_v2
+  @test/runtest-test_keeper_connector_attention_wake
+  @test/runtest-test_keeper_external_attention
+  @test/runtest-test_keeper_manual_compaction_preemption
+  @test/runtest-test_keeper_compaction_unit
+  @test/runtest-test_keeper_compaction_persist_gate
+  @test/runtest-test_keeper_overflow_recovery
+  @test/runtest-test_keeper_post_turn_wirein_order
+  @test/runtest-test_keeper_checkpoint_purge
 )
 
 board_attention_targets=(
@@ -321,6 +344,11 @@ board_attention_targets=(
 
 agent_core_targets=(
   @packages/agent_core/test/runtest
+  # Recursive alias: runs the ppx_inline_test suites embedded in
+  # packages/agent_core/lib{,/base,/protocol,/llm_provider}. These were in no
+  # CI manifest, so the exact_output_plan fingerprint pin rotted silently
+  # after #27945 (masc#28897).
+  @packages/agent_core/lib/runtest
   @test/runtest-test_keeper_hooks_agent_core_introspection
   @test/runtest-test_keeper_execution_join
   @test/runtest-test_hitl_summary_worker

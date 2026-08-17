@@ -55,7 +55,7 @@ Dashboard is a Preact+HTM SPA compiled with Vite. Common issues:
 
 **Always after dashboard changes:**
 ```bash
-cd dashboard && pnpm run build  # catches TypeScript errors
+cd dashboard && pnpm run typecheck  # catches TypeScript errors (tsc --noEmit)
 ```
 
 ## 4. Test Breakage From Refactoring (6 occurrences)
@@ -306,8 +306,10 @@ dune build --root .  # ✅ OCaml 빌드 성공
 # 1. OCaml 빌드
 dune build --root .
 
-# 2. Dashboard 빌드 (별도)
-cd dashboard && pnpm run build
+# 2. Dashboard 빌드 (별도) — raw `pnpm run build` 금지: vite emptyOutDir가
+#    assets/dashboard/.build-stamp를 지우고 wrapper만 stamp를 다시 쓴다.
+#    stamp가 없으면 /health dashboard_surface가 "missing"으로 고착된다.
+scripts/build-dashboard-if-needed.sh
 
 # 또는 자동 빌드 script 사용
 ./start-masc.sh --http  # pnpm 있으면 자동 빌드
@@ -316,13 +318,13 @@ cd dashboard && pnpm run build
 **CI에서:**
 ```bash
 scripts/build-dashboard-if-needed.sh
-# checks if dashboard/dist/ exists and is up-to-date
+# assets/dashboard/.build-stamp 기준으로 필요할 때만 재빌드하고 stamp를 갱신한다
 ```
 
 **Dashboard 변경 후 반드시:**
 ```bash
-cd dashboard && pnpm run build
-# TypeScript 컴파일 에러, type 불일치 등을 사전에 감지
+cd dashboard && pnpm run typecheck   # 타입 에러 사전 감지 (비파괴)
+../scripts/build-dashboard-if-needed.sh   # 실제 빌드는 wrapper로
 ```
 
 **Dev Server와 Production Build 차이 주의:**
@@ -333,8 +335,8 @@ cd dashboard && MASC_DASHBOARD_PROXY_TARGET="http://127.0.0.1:8935" pnpm run dev
 # Vite port를 5173이 아닌 값으로 바꾸면 서버 쪽 allowlist도 같이 맞춘다.
 MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc.sh
 
-# Production build (static assets in dist/)
-cd dashboard && pnpm run build
+# Production build (static assets: assets/dashboard/)
+scripts/build-dashboard-if-needed.sh
 ```
 
 ## 12. Health Snapshot Ratcheting
@@ -403,7 +405,7 @@ scripts/check-feature-flag-consistency.sh
 dune build --root .  # fails on missing modules
 
 # Dashboard routes
-cd dashboard && pnpm run build  # TypeScript type check
+cd dashboard && pnpm run typecheck  # TypeScript type check
 ```
 
 **Files requiring semantic validation:**

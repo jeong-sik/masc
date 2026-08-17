@@ -189,10 +189,6 @@ describe('buildFleetRows runtime labels', () => {
             runtime_id: 'primary',
             runtime_attempt_count: 2,
             runtime_outcome: 'passed_to_next_model',
-            runtime_strategy: 'round_robin',
-            fallback_applied: true,
-            fallback_hops: 1,
-            fallback_reason: 'turn_timeout',
           },
         ],
       },
@@ -211,7 +207,7 @@ describe('buildFleetRows runtime labels', () => {
       model: 'runtime',
       runtime_label: 'agent-core-keeper_unified -> primary',
       provider_label: 'passed_to_next_model · 2 attempts · fallback',
-      fallback_label: 'fallback · turn_timeout · 1 hops',
+      fallback_label: 'fallback',
     })
   })
 

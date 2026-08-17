@@ -168,7 +168,6 @@ let merge_exact_inference decision cost =
       value_or
         ~preferred:cost.reasoning_tokens
         ~fallback:decision.reasoning_tokens
-  ; fallback_applied = decision.fallback_applied
   ; cost_usd = value_or ~preferred:cost.cost_usd ~fallback:decision.cost_usd
   ; tool_call_count = decision.tool_call_count
   ; tools_used = decision.tools_used

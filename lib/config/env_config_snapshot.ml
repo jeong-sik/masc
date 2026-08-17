@@ -399,6 +399,8 @@ let tool_entries =
   [
     entry ~default:"512" "MASC_LIST_PAGE_SIZE"
       "Tool list page size (clamped 10-1024)";
+    entry ~default:"true" "MASC_PLACEHOLDER_TOOLS_ENABLED"
+      "Show placeholder (unimplemented) tools in tool catalog; set false/0/no to hide";
   ]
 
 let worker_entries =

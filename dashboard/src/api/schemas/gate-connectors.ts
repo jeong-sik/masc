@@ -72,7 +72,6 @@ const DEFAULT_STORAGE_PATHS = {
   status_path: '',
   binding_store_path: '',
   audit_path: '',
-  names_path: '',
 } as const
 
 const ConnectorStoragePathsSchema = fallback(
@@ -80,61 +79,11 @@ const ConnectorStoragePathsSchema = fallback(
     status_path: fallback(string(), ''),
     binding_store_path: fallback(string(), ''),
     audit_path: fallback(string(), ''),
-    names_path: fallback(string(), ''),
   }),
   { ...DEFAULT_STORAGE_PATHS },
 )
 
 export type ConnectorStoragePaths = InferOutput<typeof ConnectorStoragePathsSchema>
-
-// The prior `decodeStringMap` dropped entries whose value was not a
-// non-empty string. Valibot's `record(string, string())` would accept
-// any string (including '') and fail on non-string values; a transform
-// over an open record replicates the filter semantics.
-const filteredStringMap = () => ({
-  parse: (raw: unknown): Record<string, string> => {
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {}
-    const out: Record<string, string> = {}
-    for (const [key, value] of Object.entries(raw)) {
-      if (typeof value === 'string' && value.length > 0) {
-        out[key] = value
-      }
-    }
-    return out
-  },
-})
-
-const ConnectorNamesSchema = object({
-  guild_names: optional(unknown()),
-  channel_names: optional(unknown()),
-  channel_to_guild: optional(unknown()),
-  updated_at: fallback(string(), ''),
-})
-
-export interface ConnectorNames {
-  guild_names: Record<string, string>
-  channel_names: Record<string, string>
-  channel_to_guild: Record<string, string>
-  updated_at: string
-}
-
-function parseConnectorNames(raw: unknown): ConnectorNames {
-  const outer = safeParse(ConnectorNamesSchema, raw, { abortEarly: true })
-  const defaults: ConnectorNames = {
-    guild_names: {},
-    channel_names: {},
-    channel_to_guild: {},
-    updated_at: '',
-  }
-  if (!outer.success) return defaults
-  const filter = filteredStringMap().parse
-  return {
-    guild_names: filter(outer.output.guild_names),
-    channel_names: filter(outer.output.channel_names),
-    channel_to_guild: filter(outer.output.channel_to_guild),
-    updated_at: outer.output.updated_at,
-  }
-}
 
 const ConnectorRuntimeSummarySchema = object({
   available: fallback(boolean(), false),
@@ -196,7 +145,6 @@ export interface ConnectorSourceHealth {
   storage_paths: ConnectorSourceHealthState
   runtime_summary: ConnectorSourceHealthState
   binding_summary: ConnectorSourceHealthState
-  names: ConnectorSourceHealthState
   observed_channel: ConnectorSourceHealthState
 }
 
@@ -244,8 +192,6 @@ const GateConnectorInfoRawSchema = object({
   runtime_summary: optional(unknown()),
   binding_summary: optional(unknown()),
   observed_channel: optional(unknown()),
-  names_path: fallback(string(), ''),
-  names: optional(unknown()),
 })
 
 export interface GateConnectorInfo {
@@ -285,8 +231,6 @@ export interface GateConnectorInfo {
   binding_summary: ConnectorBindingSummary
   source_health: ConnectorSourceHealth
   observed_channel?: ChannelInfo | null
-  names_path: string
-  names: ConnectorNames
 }
 
 function parseConnectorsArray<TSchema extends typeof DiscordConfiguredBindingSchema
@@ -400,12 +344,9 @@ function parseGateConnectorInfo(raw: unknown): GateConnectorInfo | null {
       storage_paths: sourceHealthForObject(outer.output.storage_paths),
       runtime_summary: sourceHealthForObject(outer.output.runtime_summary),
       binding_summary: sourceHealthForObject(outer.output.binding_summary),
-      names: sourceHealthForObject(outer.output.names),
       observed_channel: sourceHealthForObservedChannel(outer.output.observed_channel),
     },
     observed_channel: parseObservedChannel(outer.output.observed_channel),
-    names_path: outer.output.names_path,
-    names: parseConnectorNames(outer.output.names),
   }
 }
 

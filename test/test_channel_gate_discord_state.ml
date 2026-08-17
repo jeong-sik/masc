@@ -1,7 +1,6 @@
 open Alcotest
 
 module Discord_state = Channel_gate_discord_state
-module Discord_names = Channel_gate_discord_names
 module U = Yojson.Safe.Util
 module Registry_test_connector_a = struct
   let connector_id = "registry-test-connector"
@@ -70,11 +69,9 @@ let with_discord_paths dir f =
   let status_path = Filename.concat dir "status.json" in
   let binding_path = Filename.concat dir "bindings.json" in
   let audit_path = Filename.concat dir "audit.jsonl" in
-  let names_path = Filename.concat dir "names.json" in
   with_env "MASC_DISCORD_STATUS_PATH" (Some status_path) (fun () ->
     with_env "MASC_DISCORD_BINDING_STORE_PATH" (Some binding_path) (fun () ->
-      with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) (fun () ->
-        with_env "MASC_DISCORD_NAMES_PATH" (Some names_path) f)))
+      with_env "MASC_DISCORD_BINDING_AUDIT_PATH" (Some audit_path) f))
 
 let test_bot_token_accessor_unset_and_whitespace () =
   (* The supported OCaml 5.4 test runtime has no [Unix.unsetenv]; the
@@ -290,87 +287,10 @@ let test_registry_register_replaces_and_all_snapshots () =
     check string "snapshot sees replacement" "Registry Test B" C.display_name
   | _ -> fail "unexpected registry snapshot"
 
-let test_name_map_round_trip () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    let nm : Discord_names.name_map =
-      {
-        guild_names = [ ("123", "sangsu-lab") ];
-        channel_names = [ ("456", "#general") ];
-        channel_to_guild = [ ("456", "123") ];
-        channel_to_parent = [ ("789", "456") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      }
-    in
-    Discord_names.save nm;
-    let loaded = Discord_names.read () in
-    check string "guild name round-trips" "sangsu-lab"
-      (List.assoc "123" loaded.guild_names);
-    check string "channel name round-trips" "#general"
-      (List.assoc "456" loaded.channel_names);
-    check string "channel_to_guild round-trips" "123"
-      (List.assoc "456" loaded.channel_to_guild);
-    check string "channel_to_parent round-trips" "456"
-      (List.assoc "789" loaded.channel_to_parent);
-    check string "updated_at round-trips" "2026-04-15T00:00:00Z"
-      loaded.updated_at)
-
-let test_read_name_map_missing_returns_empty () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    let loaded = Discord_names.read () in
-    check int "no guild names" 0 (List.length loaded.guild_names);
-    check int "no channel names" 0 (List.length loaded.channel_names);
-    check int "no channel_to_guild entries" 0
-      (List.length loaded.channel_to_guild);
-    check int "no channel_to_parent entries" 0
-      (List.length loaded.channel_to_parent);
-    check string "empty updated_at" "" loaded.updated_at)
-
-let test_resolve_guild_id_hits_and_misses () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("123", "sangsu-lab") ];
-        channel_names = [ ("456", "#general") ];
-        channel_to_guild = [ ("456", "123") ];
-        channel_to_parent = [ ("789", "456") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
-    check (option string) "hit returns guild id" (Some "123")
-      (Discord_names.resolve_guild_id_for_channel ~channel_id:"456");
-    check (option string) "miss returns None" None
-      (Discord_names.resolve_guild_id_for_channel ~channel_id:"999");
-    check (option string) "parent hit returns parent channel id" (Some "456")
-      (Discord_names.resolve_parent_channel_id_for_channel ~channel_id:"789");
-    check (option string) "parent miss returns None" None
-      (Discord_names.resolve_parent_channel_id_for_channel ~channel_id:"999");
-    check (option string) "empty channel_id returns None" None
-      (Discord_names.resolve_guild_id_for_channel ~channel_id:""))
-
-let test_bind_populates_guild_id_when_names_available () =
-  with_temp_dir @@ fun dir ->
-  with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("guild-1", "sangsu-lab") ];
-        channel_names = [ ("chan-1", "#general") ];
-        channel_to_guild = [ ("chan-1", "guild-1") ];
-        channel_to_parent = [];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
-    match
-      Discord_state.bind ~channel_id:"chan-1" ~keeper_name:"luna"
-        ~actor_name:"dashboard"
-    with
-    | Error err -> fail err
-    | Ok json ->
-        let audit = json |> U.member "recent_audit" |> U.to_list in
-        check string "audit guild_id resolved" "guild-1"
-          (List.hd audit |> U.member "guild_id" |> U.to_string))
-
-let test_bind_accepts_missing_names_with_empty_guild_id () =
+(* The audit wire shape keeps a constant-empty [guild_id] key for Discord
+   rows: dashboards read that shape, and the sidecar that once resolved
+   real guild ids is gone. *)
+let test_bind_audit_carries_constant_empty_guild_id () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
     match
@@ -380,20 +300,12 @@ let test_bind_accepts_missing_names_with_empty_guild_id () =
     | Error err -> fail err
     | Ok json ->
         let audit = json |> U.member "recent_audit" |> U.to_list in
-        check string "audit guild_id empty when names absent" ""
+        check string "audit guild_id stays empty" ""
           (List.hd audit |> U.member "guild_id" |> U.to_string))
 
 let test_resolve_keeper_for_thread_parent_binding () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("guild-1", "sangsu-lab") ];
-        channel_names = [ ("parent-1", "#personal-agents"); ("thread-1", "thread") ];
-        channel_to_guild = [ ("parent-1", "guild-1"); ("thread-1", "guild-1") ];
-        channel_to_parent = [ ("thread-1", "parent-1") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
     ignore
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
@@ -413,14 +325,6 @@ let test_resolve_keeper_for_thread_parent_binding () =
 let test_resolve_keeper_exact_binding_wins_over_parent () =
   with_temp_dir @@ fun dir ->
   with_discord_paths dir (fun () ->
-    Discord_names.save
-      {
-        guild_names = [ ("guild-1", "sangsu-lab") ];
-        channel_names = [ ("parent-1", "#personal-agents"); ("thread-1", "thread") ];
-        channel_to_guild = [ ("parent-1", "guild-1"); ("thread-1", "guild-1") ];
-        channel_to_parent = [ ("thread-1", "parent-1") ];
-        updated_at = "2026-04-15T00:00:00Z";
-      };
     ignore
       (Discord_state.bind ~channel_id:"parent-1" ~keeper_name:"luna"
          ~actor_name:"dashboard");
@@ -551,17 +455,10 @@ let () =
           test_case "registry register replaces and all snapshots" `Quick
             test_registry_register_replaces_and_all_snapshots;
         ] );
-      ( "name_map",
+      ( "audit_wire",
         [
-          test_case "round trip" `Quick test_name_map_round_trip;
-          test_case "missing file returns empty" `Quick
-            test_read_name_map_missing_returns_empty;
-          test_case "resolve hits and misses" `Quick
-            test_resolve_guild_id_hits_and_misses;
-          test_case "bind populates guild_id when names available" `Quick
-            test_bind_populates_guild_id_when_names_available;
-          test_case "bind accepts missing names with empty guild_id" `Quick
-            test_bind_accepts_missing_names_with_empty_guild_id;
+          test_case "bind audit carries constant-empty guild_id" `Quick
+            test_bind_audit_carries_constant_empty_guild_id;
           test_case "thread resolves through parent binding" `Quick
             test_resolve_keeper_for_thread_parent_binding;
           test_case "exact binding wins over parent" `Quick

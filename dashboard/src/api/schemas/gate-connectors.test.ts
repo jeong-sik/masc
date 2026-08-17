@@ -31,7 +31,6 @@ describe('parseGateConnectorsData', () => {
       storage_paths: 'fallback',
       runtime_summary: 'fallback',
       binding_summary: 'fallback',
-      names: 'fallback',
       observed_channel: 'missing',
     })
     expect(result.total).toBe(1)
@@ -181,7 +180,6 @@ describe('parseGateConnectorsData', () => {
       status_path: '',
       binding_store_path: '',
       audit_path: '',
-      names_path: '',
     })
   })
 
@@ -194,7 +192,6 @@ describe('parseGateConnectorsData', () => {
             status_path: '/status',
             binding_store_path: '/bindings',
             audit_path: '/audit',
-            names_path: '/names',
           },
         },
       ],
@@ -206,7 +203,6 @@ describe('parseGateConnectorsData', () => {
       status_path: '/status',
       binding_store_path: '/bindings',
       audit_path: '/audit',
-      names_path: '/names',
     })
     expect(result.connectors[0].source_health.storage_paths).toBe('present')
   })
@@ -320,38 +316,6 @@ describe('parseGateConnectorsData', () => {
     const result = parseGateConnectorsData(minimalOuter)
     expect(result.connectors[0].observed_channel).toBeNull()
     expect(result.connectors[0].source_health.observed_channel).toBe('missing')
-  })
-
-  it('filters names via filteredStringMap (drops empty strings and non-strings)', () => {
-    const result = parseGateConnectorsData({
-      connectors: [
-        {
-          ...minimalConnector,
-          names: {
-            guild_names: { g1: 'Guild One', g2: '', g3: null },
-            channel_names: { c1: 'Channel One', c2: 123 },
-            channel_to_guild: { c1: 'g1' },
-            updated_at: '2024-01-01',
-          },
-        },
-      ],
-      total: 1,
-      active_count: 1,
-      generated_at: '2024-01-01T00:00:00Z',
-    })
-    expect(result.connectors[0].names.guild_names).toEqual({ g1: 'Guild One' })
-    expect(result.connectors[0].names.channel_names).toEqual({ c1: 'Channel One' })
-    expect(result.connectors[0].names.channel_to_guild).toEqual({ c1: 'g1' })
-    expect(result.connectors[0].names.updated_at).toBe('2024-01-01')
-    expect(result.connectors[0].source_health.names).toBe('present')
-  })
-
-  it('returns default names when names field is missing', () => {
-    const result = parseGateConnectorsData(minimalOuter)
-    expect(result.connectors[0].names.guild_names).toEqual({})
-    expect(result.connectors[0].names.channel_names).toEqual({})
-    expect(result.connectors[0].names.channel_to_guild).toEqual({})
-    expect(result.connectors[0].names.updated_at).toBe('')
   })
 
   it('preserves total and active_count from input', () => {

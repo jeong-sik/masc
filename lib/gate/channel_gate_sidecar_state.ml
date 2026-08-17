@@ -266,7 +266,6 @@ module Make (Config : Config) = struct
         let event = Store.{
             timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
             action = "bind";
-            guild_id = None;
             channel_id;
             keeper_name;
             actor_id = actor_name;
@@ -299,7 +298,6 @@ module Make (Config : Config) = struct
           let event = Store.{
                 timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
                 action = "unbind";
-                guild_id = None;
                 channel_id;
                 keeper_name = previous.keeper_name;
                 actor_id = actor_name;

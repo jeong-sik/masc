@@ -13,7 +13,6 @@ import {
   fetchGateStatus,
   type BindingInfo,
   type ChannelInfo,
-  type ConnectorNames,
   type DiscordConfiguredBinding,
   type GateConnectorInfo,
   type GateConnectorsData,
@@ -300,16 +299,6 @@ function truncateMiddle(value: string, limit = 18): string {
   return `${trimmed.slice(0, head)}…${trimmed.slice(-tail)}`
 }
 
-function humanizeChannel(names: ConnectorNames | undefined, channelId: string): string {
-  if (!names) return ''
-  const channelName = names.channel_names[channelId]
-  const guildId = names.channel_to_guild[channelId]
-  const guildName = guildId ? names.guild_names[guildId] : undefined
-  if (!channelName && !guildName) return ''
-  if (channelName && guildName) return `${channelName} in "${guildName}"`
-  return channelName || `in "${guildName}"`
-}
-
 type LivenessState = 'ok' | 'warn' | 'down' | 'unknown'
 
 interface LivenessDot {
@@ -419,7 +408,6 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       status_path: '',
       binding_store_path: '',
       audit_path: '',
-      names_path: '',
     },
     runtime_summary: {
       available: false,
@@ -449,17 +437,9 @@ function placeholderConnector(connectorId: KnownConnectorId): GateConnectorInfo 
       storage_paths: 'fallback',
       runtime_summary: 'fallback',
       binding_summary: 'fallback',
-      names: 'fallback',
       observed_channel: 'missing',
     },
     observed_channel: null,
-    names_path: '',
-    names: {
-      guild_names: {},
-      channel_names: {},
-      channel_to_guild: {},
-      updated_at: '',
-    },
   }
 }
 
@@ -469,7 +449,6 @@ const CONNECTOR_SOURCE_HEALTH_ROWS: Array<{ key: ConnectorSourceHealthKey; label
   { key: 'storage_paths', label: 'storage paths' },
   { key: 'runtime_summary', label: 'runtime summary' },
   { key: 'binding_summary', label: 'binding summary' },
-  { key: 'names', label: 'names' },
   { key: 'observed_channel', label: 'observed channel' },
 ]
 
@@ -615,7 +594,6 @@ function ConnectorLivePanel({
   loading: boolean
 }) {
   const configuredBindings = connector?.configured_bindings ?? EMPTY_CONFIGURED_BINDINGS
-  const names = connector?.names
   const connectorName = connector?.display_name || 'Connector'
   const connectorId = connector?.connector_id ?? ''
   const ui = getConnectorUiState(connectorId)
@@ -635,13 +613,6 @@ function ConnectorLivePanel({
   } else if (connector?.gate_healthy === false) {
     gateHealthLabel = 'unhealthy'
   }
-
-  const sidecarLogPath = connector?.names_path
-    ? connector.names_path.replace(
-        /\/\.masc\/connectors\/[^/]+\/names\.json$/,
-        `/.masc/logs/${connectorId}-sidecar-YYYYMMDD.log`,
-      )
-    : ''
 
   // observedWorkspaces / bindingsByKeeper / knownNames / knownGroups form a
   // derivation chain over stable props (gate, connector, configuredBindings,
@@ -812,9 +783,6 @@ function ConnectorLivePanel({
             ? html`<${SidecarLogToggle} connectorId=${connectorId} />`
             : null}
           <${ConnectorConfigToggle} connectorId=${connectorId} />
-          ${sidecarLogPath && !isInProcessConnector(connectorId)
-            ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath} aria-hidden="true">↗</span>`
-            : null}
           <button
             type="button"
             class="cursor-pointer rounded-[var(--r-1)] border border-[var(--color-border-default)] px-1.5 text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
@@ -1142,15 +1110,11 @@ function ConnectorLivePanel({
                       : html`
                           <div class="mt-2 space-y-1">
                             ${group.bindings.map(binding => {
-                              const humanized = humanizeChannel(names, binding.channel_id)
                               return html`
                                 <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                                   <div class="min-w-0 text-[var(--color-fg-primary)]">
                                     <span class="mr-1 text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
-                                    ${humanized
-                                      ? html`<span>${humanized}</span>`
-                                      : html`<span class="text-[var(--color-fg-disabled)]" title="sidecar has not sent names yet">names pending</span>`}
-                                    <span class="ml-2 text-3xs text-[var(--color-fg-disabled)]">(${truncateMiddle(binding.channel_id, 14)})</span>
+                                    <span title=${binding.channel_id}>${truncateMiddle(binding.channel_id, 24)}</span>
                                   </div>
                                   ${bindingActionsEnabled
                                     ? html`
@@ -1188,25 +1152,19 @@ function ConnectorLivePanel({
                                     ariaLabel=${`${connectorName} channel id`}
                                     onInput=${(e: Event) => { patchConnectorUiState(connectorId, { channelDraft: (e.target as HTMLInputElement).value }) }}
                                   />
-                                  ${ui.channelDraft.trim() && humanizeChannel(names, ui.channelDraft.trim())
-                                    ? html`<div class="mt-1 text-3xs text-[var(--color-fg-disabled)]">resolves to ${humanizeChannel(names, ui.channelDraft.trim())}</div>`
-                                    : null}
                                   ${observedWorkspaces.length > 0
                                     ? html`
                                         <div class="mt-2 flex flex-wrap gap-1.5">
                                           ${observedWorkspaces.slice(0, 8).map(workspaceId => {
-                                            const humanized = humanizeChannel(names, workspaceId)
                                             return html`
                                               <${ActionButton}
                                                 variant="ghost"
                                                 size="sm"
                                                 class="!rounded-[var(--r-0)] !py-0.5"
                                                 title=${workspaceId}
-                                                ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(workspaceId, 22)}`}
+                                                ariaLabel=${`select ${truncateMiddle(workspaceId, 22)}`}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: workspaceId }) }}
-                                              >${humanized
-                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${truncateMiddle(workspaceId, 10)}</span>`
-                                                : truncateMiddle(workspaceId, 22)}<//>
+                                              >${truncateMiddle(workspaceId, 22)}<//>
                                             `
                                           })}
                                         </div>
@@ -1246,15 +1204,11 @@ function ConnectorLivePanel({
                   </div>
                   <div class="mt-2 space-y-1">
                     ${group.bindings.map(binding => {
-                      const humanized = humanizeChannel(names, binding.channel_id)
                       return html`
                         <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                           <div class="min-w-0 text-[var(--color-fg-primary)]">
                             <span class="mr-1 text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
-                            ${humanized
-                              ? html`<span>${humanized}</span>`
-                              : html`<${MutedSpan}>names pending</${MutedSpan}>`}
-                            <span class="ml-2 text-3xs text-[var(--color-fg-disabled)]">(${truncateMiddle(binding.channel_id, 14)})</span>
+                            <span title=${binding.channel_id}>${truncateMiddle(binding.channel_id, 24)}</span>
                           </div>
                           ${bindingActionsEnabled
                             ? html`
@@ -1282,9 +1236,6 @@ function ConnectorLivePanel({
             <div class="cn-runtime-paths mt-4 flex flex-wrap gap-3 text-3xs text-[var(--color-fg-disabled)]">
               ${connector.status_path
                 ? html`<span title=${connector.status_path}>runtime ${truncateMiddle(connector.status_path, 50)}</span>`
-                : null}
-              ${sidecarLogPath
-                ? html`<span title=${sidecarLogPath}>logs ${truncateMiddle(sidecarLogPath, 50)}</span>`
                 : null}
             </div>
           `
@@ -2295,7 +2246,7 @@ export function ConnectorStatusPanel() {
                 >
                   <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers)} />
                 <//>
-                <${ConnectorPathsStrip} connectors=${allConnectors} />
+                <${ConnectorPathsStrip} />
                 <${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />
               </div>
             </details>

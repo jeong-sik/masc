@@ -6,8 +6,6 @@ type binding = Store.binding = {
   keeper_name : string;
 }
 
-module Names = Channel_gate_discord_names
-
 let connector_id = "discord"
 let display_name = "Discord"
 let channel = "discord"
@@ -20,30 +18,40 @@ let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_DISCORD_STATUS_STALE_SEC"
 
+let configured_write_path env_name ~default =
+  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
+  | Some raw -> Env_config_core.resolve_against_base_path raw
+  | None -> Env_config_core.resolve_against_base_path default
+
 let status_path () =
-  Names.configured_write_path "MASC_DISCORD_STATUS_PATH"
+  configured_write_path "MASC_DISCORD_STATUS_PATH"
     ~default:default_status_path
 
 
 let binding_store_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
 let binding_store_read_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
     ~default:default_binding_store_path
 
 let binding_audit_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
 let binding_audit_read_path () =
-  Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
+  configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
+(* [Include_empty], not [Omit]: the audit wire shape has always carried a
+   [guild_id] key for Discord rows and the dashboard reads that shape. The
+   value has been empty since the sidecar that resolved guild ids was
+   removed, so the constant-empty field is now declared at the store level
+   instead of resolved per event. *)
 let binding_store =
   Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
-    ~binding_audit_read_path ~guild_id_field:Store.Include_event_value
+    ~binding_audit_read_path ~guild_id_field:Store.Include_empty
 
 let read_bindings_result () = Store.read_bindings_result binding_store
 let binding_json = Store.binding_json
@@ -169,8 +177,6 @@ let status_json ?(audit_limit = 10) () =
   let status_path = status_path () in
   let binding_store_path = binding_store_read_path () in
   let audit_path = binding_audit_read_path () in
-  let names_path = Names.names_read_path () in
-  let name_map = Names.read () in
   let configured_bindings_result = read_bindings_lookup_result () in
   let configured_bindings = Result.value ~default:[] configured_bindings_result in
   let binding_store_error =
@@ -232,8 +238,6 @@ let status_json ?(audit_limit = 10) () =
       ("status_path", `String status_path);
       ("binding_store_path", `String binding_store_path);
       ("audit_path", `String audit_path);
-      ("names_path", `String names_path);
-      ("names", Names.to_json name_map);
       ("updated_at", `String updated_at);
       ( "last_ready_at",
         (* The READY timestamp survives reconnect_pending/resuming dips,
@@ -344,7 +348,6 @@ let bind ~channel_id ~keeper_name ~actor_name =
         |> List.sort (fun (a : binding) (b : binding) ->
              String.compare a.channel_id b.channel_id)
       in
-      let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
       Ok
         ( updated_bindings
         , Store.{
@@ -352,7 +355,6 @@ let bind ~channel_id ~keeper_name ~actor_name =
                evidence only; mutation ordering comes from the durable lock. *)
             timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
             action = "bind";
-            guild_id;
             channel_id;
             keeper_name;
             actor_id = actor_name;
@@ -382,7 +384,6 @@ let unbind ~channel_id ~actor_name =
               not (String.equal binding.channel_id channel_id))
             original_bindings
         in
-        let guild_id = Names.resolve_guild_id_for_channel ~channel_id in
         Ok
           ( updated_bindings
           , Store.{
@@ -390,7 +391,6 @@ let unbind ~channel_id ~actor_name =
                  evidence only; mutation ordering comes from the durable lock. *)
               timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
               action = "unbind";
-              guild_id;
               channel_id;
               keeper_name = removed_binding.keeper_name;
               actor_id = actor_name;

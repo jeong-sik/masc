@@ -251,7 +251,6 @@ let bind ~channel_id ~keeper_name ~actor_name =
                    telemetry only. *)
                 Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
             ; action = "bind"
-            ; guild_id = None
             ; channel_id
             ; keeper_name
             ; actor_id = actor_name
@@ -287,7 +286,6 @@ let unbind ~channel_id ~actor_name =
                      telemetry only. *)
                   Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())
               ; action = "unbind"
-              ; guild_id = None
               ; channel_id
               ; keeper_name = removed.keeper_name
               ; actor_id = actor_name

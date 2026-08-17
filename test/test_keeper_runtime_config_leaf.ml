@@ -43,6 +43,7 @@ let test_resolve_overrides_keeps_env_precedence () =
 let retired_toml_keys =
   [ "autonomous.fairness_cooldown_sec"
   ; "heartbeat.board_wakeup_max"
+  ; "heartbeat.max_silence_sec"
   ; "turn.cli_subprocess_idle_sec"
   ; "turn.capacity_limit"
   ; "turn.max_output_tokens"

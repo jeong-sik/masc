@@ -230,15 +230,11 @@ interface SimpleRoute {
 // corresponding server emitter exists in lib/ are kept; dead keys were
 // removed after cross-referencing the OCaml sources under lib/.
 const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
-  // Agent lifecycle — emitted by lib/mcp_tool_runtime_workspace.ml
-  agent_bound:         { target: 'execution' },
-  agent_unbound:       { target: 'execution' },
   // Broadcasts — emitted by lib/mcp_tool_runtime_comm.ml
   broadcast:           { target: 'execution' },
   // Keeper lifecycle (also triggers operator refresh via handler)
   keeper_handoff:       { target: 'execution', force: true },
   keeper_compaction:    { target: 'execution', force: true },
-  keeper_guardrail:     { target: 'execution', force: true },
   keeper_phase_changed: { target: 'execution', force: true },
   // A turn-complete hook precedes the durable TurnRecord commit and does not
   // mutate the execution cache. The selected Keeper is refreshed through the
@@ -323,7 +319,6 @@ function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
 // lib/keeper_tools_agent_core_handler_telemetry.ml.
 const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
   'keeper_tool_call',
-  'keeper_tool_skipped',
   'keeper_turn_complete',
 ])
 
@@ -350,7 +345,7 @@ function scheduleIdeCursorRefresh(): void {
 // --- Named handlers for complex events ---
 
 const KEEPER_LIFECYCLE_EVENTS = new Set([
-  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete', 'keeper_guardrail',
+  'keeper_handoff', 'keeper_compaction', 'keeper_turn_complete',
   'keeper_phase_changed',
 ])
 

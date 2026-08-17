@@ -339,6 +339,26 @@ jobs:
             dashboard=true
           fi
 
+          # SSE wire surface -> Dashboard coupling (#28925 audit, defect (a)).
+          # A lib-only PR that changes an SSE payload shape used to skip the
+          # Dashboard job entirely, so dashboard/src/schemas/sse.ts (a closed
+          # event-type allowlist that silently drops unknown shapes) was never
+          # exercised against the new wire — exactly the PR shape this gate
+          # exists to catch. The list below is every file that constructs or
+          # broadcasts a dashboard-wire SSE payload, derived by census:
+          #   rg -ln 'Sse\.broadcast' lib bin           # direct hub callers
+          #   rg -ln 'Mcp_server\.sse_broadcast' lib    # indirect via callback
+          # plus the payload-shape owners lib/sse_event/ (atd SSOT),
+          # lib/sse.ml (envelope/framing + bridge hook wiring), and the
+          # payload-builder modules those callers delegate to
+          # (keeper_event_bridge_error_json, dashboard_agent_core_bridge,
+          # server_dashboard_http_core). Deliberately NOT lib/ wholesale:
+          # the Dashboard job costs ~15min and most lib churn cannot move
+          # the wire. Re-run the census above when adding a new emitter.
+          if has_match '^(bin/main_eio\.ml$|lib/sse\.mli?$|lib/sse_jsonrpc_filter\.mli?$|lib/sse_event/|lib/progress\.ml$|lib/mcp_server\.ml$|lib/mcp_server_eio_call_tool\.ml$|lib/mcp_server_eio_protocol\.ml$|lib/mcp_tool_runtime_comm\.ml$|lib/mcp_tool_runtime_board\.ml$|lib/runtime/dashboard_agent_core_bridge\.ml$|lib/fusion/fusion_sink\.ml$|lib/server/(masc_grpc_service|server_bootstrap_loops|server_dashboard_http_core|server_dashboard_http_execution_surfaces|server_dashboard_http_keeper_api|server_dashboard_http_namespace_truth|server_ide_http|server_mcp_transport_ws|server_routes_http_routes_activity|server_routes_http_routes_dashboard|server_runtime_bootstrap)\.ml$|lib/keeper/(keeper_approval_queue|keeper_chat_broadcast|keeper_compact_policy|keeper_event_bridge|keeper_event_bridge_error_json|keeper_gate|keeper_heartbeat_loop_in_turn_pulse|keeper_heartbeat_snapshot|keeper_hooks_agent_core|keeper_registry|keeper_registry_broadcast|keeper_tool_composition_surface|keeper_tools_agent_core_handler_telemetry|keeper_unified_metrics_broadcast|keeper_waiting_inventory_broadcast)\.ml$)'; then
+            dashboard=true
+          fi
+
           if has_match '^(bin/|lib/|test/|proto/|config/|\.ci/health-baseline\.json$|dune-project$|.*\.opam$|scripts/health_snapshot\.sh$|scripts/anti-fake-audit\.sh$|scripts/base-policy-audit\.sh$)'; then
             health=true
           fi
@@ -2175,7 +2195,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [pr-live-gate, changes]
-    # PR mode: stay path-scoped (dashboard=true only when dashboard/ changes).
+    # PR mode: stay path-scoped (dashboard=true when dashboard/ changes, or
+    # when a lib-side SSE wire-surface file changes — see the wire-surface
+    # census block in the `changes` job; #28925 audit defect (a)).
     # Non-PR events (push to main/develop, schedule, workflow_dispatch):
     # ignore path scope and always run, so a dashboard test regression
     # introduced by a non-dashboard-path change (e.g. a shared-type refactor,

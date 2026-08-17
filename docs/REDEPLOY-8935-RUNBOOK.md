@@ -48,6 +48,18 @@ ancestry 확증은 2026-08-16 운영 루프 2회차 사고(병합 파이프라�
 
 새 binary가 `Keeper_meta_json.current_field_names`에 필드를 추가했다면, 파서가 그 키를 필수로 요구하므로 기존 `<base>/.masc/keepers/*.json`이 전부 파싱 실패한다 (enum 자동 복구는 missing key를 못 고친다 — `lib/keeper/keeper_meta_store.ml`). 다운타임(6단계와 7단계 사이)에 store를 정합시킨다: 원본을 `<base>/.masc/_archive/`로 통째 보존한 뒤, 각 meta JSON에 새 키를 기본값(`null` 등 writer의 부재 표현)으로 주입한다.
 
+## 4.5 사전 조율 — 진행 중 작업 보호
+
+재기동은 **모든 keeper를 내린다**. autoboot이 꺼진 keeper(장기 canary 전부)는 재기동 후 자동 복귀하지 않는다 — durable demand recovery가 `retained ... reason=autoboot_disabled`로 보존만 한다. 2026-08-17 5회차 재기동이 진행 중이던 24h 사다리 run의 turn을 서버 다운에 노출시킨 사고가 근거다 (redeploy receipt의 incident 절).
+
+1. **broadcast 먼저**: 병렬 세션/keeper에게 재기동 예고를 보내고 이의를 기다린다 (MASC broadcast 또는 세션 간 메시지).
+2. **진행 중 장기 run 확인**: 실행 중 keeper 목록에서 autoboot 꺼진 canary를 찾는다.
+   ```bash
+   curl -s 'http://127.0.0.1:8935/health?full=1' | jq '[.keepers[]? | select(.running == true)] | map(.name)'
+   ```
+   사다리(1h+) run이 진행 중이면 그 종료 시각 이후로 재기동을 미룬다.
+3. **수동 boot 목록 캡처**: 정지 직전 실행 중이던 non-autoboot keeper 이름을 기록해 두고, 7단계 기동 후 각각 수동 boot으로 복귀시킨다.
+
 ## 5. graceful shutdown
 
 HTTP로 프로세스를 내리는 경로는 없다. 유효한 경로는 SIGTERM/SIGINT뿐이다 (`bin/main_eio.ml`: NOTIFY → HOOKS → BOARD flush → CANCEL, 기본 예산 최대 10초).
@@ -111,3 +123,4 @@ curl -s 'http://127.0.0.1:8935/health?full=1' \
 | ancestry 미확증 pull | 수리 커밋 없는 checkout 배포 (08-16 2회차 사고) |
 | meta 스키마 확장 후 store 미정합 | 전 keeper meta 파싱 실패 |
 | 포트 판정을 lsof exit code로 | 거짓 판정 — 출력 존재로 판정할 것 |
+| 사전 broadcast·장기 run 확인 생략 | 진행 중 사다리 run이 서버 다운에 노출, non-autoboot keeper 미복귀 (08-17 5회차 사고) |

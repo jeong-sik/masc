@@ -536,8 +536,8 @@ let handle_keeper_task_tool_with_outcome
                ~class_:Tool_result.Policy_rejection
                (validation_error_json message)
            | Ok contract ->
-              let result =
-                Workspace_task.add_task
+             (match
+                Workspace_task.add_task_with_result
                   ?contract
                   ?goal_id
                   config
@@ -549,17 +549,31 @@ let handle_keeper_task_tool_with_outcome
                        Without this the row has [created_by = None] and a keeper
                        is offered its own routing/report tasks back as work. *)
                   ~created_by:meta.name
-              in
-              Keeper_tool_execution.success
-                (Yojson.Safe.to_string
-                   (`Assoc
-                     [
-                       "ok", `Bool true;
-                       "result", `String result;
-                       "goal_id", Json_util.string_opt_to_json goal_id;
-                       ( "typed_outcome"
-                       , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
-                     ]))))
+              with
+              | Ok created ->
+                Keeper_tool_execution.success
+                  (Yojson.Safe.to_string
+                     (`Assoc
+                        [
+                          "ok", `Bool true;
+                          "result", `String created.summary;
+                          "goal_id", Json_util.string_opt_to_json created.goal_id;
+                          ( "typed_outcome"
+                          , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
+                        ]))
+              | Error err ->
+                (* RFC-0239 / audit D1 shape (Task_done, above): a task-creation
+                   failure (backlog write, goal-link write, predecessor
+                   validation) is not progress. Previously [Workspace_task.add_task]
+                   folded [Error err] into a string and this branch always
+                   returned [ok:true, typed_outcome:Progress] regardless — the
+                   keeper could not distinguish a durable write from a failed one. *)
+                let message = Workspace_task.add_task_error_to_string err in
+                Keeper_tool_execution.failure
+                  ~class_:Tool_result.Workflow_rejection
+                  (workflow_rejection_error_json
+                     ~typed_outcome:(Keeper_tool_outcome.Error { reason = message })
+                     message))))
     | Task_claim ->
     let auto_claim_eligible task =
       not

@@ -499,7 +499,14 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_sub_board_list"
   | "masc_board_sub_board_get"
   | "masc_board_sub_board_update"
-  | "masc_board_sub_board_delete" ->
+  | "masc_board_sub_board_delete"
+  (* masc_board_post_update runs through the same author-identity rewrite as
+     masc_board_post above; masc_board_cleanup is the admin retention pass.
+     Both were routable by [Board_tool.handle_tool] all along but had no arm
+     here, so the MCP endpoint misreported them as
+     "Unknown tool (registry inconsistency)". *)
+  | "masc_board_post_update"
+  | "masc_board_cleanup" ->
       Some (Board_tool.handle_tool name arguments)
 
   | _ -> None

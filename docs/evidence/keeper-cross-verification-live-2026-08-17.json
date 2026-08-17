@@ -1,0 +1,42 @@
+{
+ "schema": "masc.keeper.cross_verification.live.v1",
+ "measured_at": "2026-08-17T11:06:30Z",
+ "live_endpoint": "http://127.0.0.1:8935",
+ "server_commit": "1a8be94d61",
+ "owner_keeper": {
+  "name": "canary-10t-glmc-52-20260817",
+  "runtime": "glm-coding.glm-5.2"
+ },
+ "protocol": "Operator chat turn instructed the owner keeper to create a task and walk it to verification; the verdict half is fully system-issued (no operator or keeper involvement). Same operator-instructed disclosure as the other M5 receipts.",
+ "owner_chain": {
+  "request_id": "m5-live-cv-2",
+  "task_id": "task-348",
+  "transitions": [
+   "claim: todo->claimed",
+   "start: claimed->in_progress",
+   "submit_for_verification: in_progress->awaiting_verification"
+  ],
+  "all_by": "the owner keeper inside one turn"
+ },
+ "system_verdict": {
+  "source": "durable task record notes field (<base-path>/.masc/tasks/backlog.json, task-348)",
+  "verification_request": "vrf-706eac03e735f77f3f5ad86814b72118 (criteria_count 0)",
+  "submitted_evidence_items": 3,
+  "review": {
+   "evaluator_runtime": "cross_verifier_lane",
+   "gate": "structured_tool",
+   "verdict": "approve",
+   "authority_kind": "system_llm_agent",
+   "authority_actor": "system-llm-agent-f9c59985c5db81622002b607525fa400"
+  },
+  "latency": "created_at 11:04:42Z -> completed_at 11:05:42Z (60s), status now done"
+ },
+ "owner_not_blocked": "the owner keeper served further chat turns while the verdict was pending; no keeper-side approve exists at all — types_core.ml task_action is Claim/Start/Done/Cancel/Release/Submit_for_verification (no Approve variant), so a keeper cannot gate another keeper's completion",
+ "negative_probe": {
+  "verifier_keeper_attempt": "canary-10t-oc-dsv4f-20260817 was asked to approve and correctly refused: no approve action exists and the verdict authority is the system LLM — the refusal itself is live confirmation of the authority boundary",
+  "request_id": "m5-live-cv-verify-4"
+ },
+ "notes": [
+  "A kimi_coding stream turn hit one transient sse_parse_failed (provider chunk split mid-JSON) during this session and succeeded on retry — recorded separately, unrelated to the verification path."
+ ]
+}

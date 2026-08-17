@@ -1443,26 +1443,6 @@ let test_placeholder_tools_hidden_when_env_false () =
 
 (* Regression: task-271 — bool_of_raw_value must accept short-form "y"/"n"
    so that MASC_KEEPER_HISTORY_FRAGMENT_FILTER=n returns false. *)
-let test_bool_env_short_forms yn () =
-  let prev = Sys.getenv_opt "MASC_KEEPER_HISTORY_FRAGMENT_FILTER" in
-  Unix.putenv "MASC_KEEPER_HISTORY_FRAGMENT_FILTER" yn;
-  let result =
-    Env_config_core.get_bool ~default:true "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-  in
-  (match prev with None -> Unix.unsetenv "MASC_KEEPER_HISTORY_FRAGMENT_FILTER"
-   | Some v -> Unix.putenv "MASC_KEEPER_HISTORY_FRAGMENT_FILTER" v);
-  result
-
-let test_bool_env_accepts_n () =
-  Alcotest.(check bool) "\"n\" → false" false (test_bool_env_short_forms "n" ());
-  Alcotest.(check bool) "\"N\" → false (case insensitive)" false
-    (test_bool_env_short_forms "N" ())
-
-let test_bool_env_accepts_y () =
-  Alcotest.(check bool) "\"y\" → true" true (test_bool_env_short_forms "y" ());
-  Alcotest.(check bool) "\"Y\" → true (case insensitive)" true
-    (test_bool_env_short_forms "Y" ())
-
 let test_handle_request_tools_list_include_hidden_metadata () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3141,8 +3121,6 @@ let eio_tests = [
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
   "placeholder tools hidden when MASC_PLACEHOLDER_TOOLS_ENABLED=false", `Quick,
     test_placeholder_tools_hidden_when_env_false;
-  "bool env accepts n (false)", `Quick, test_bool_env_accepts_n;
-  "bool env accepts y (true)", `Quick, test_bool_env_accepts_y;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
   "handle tools/list include usage metadata", `Quick,

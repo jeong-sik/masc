@@ -1,0 +1,113 @@
+# :8935 재배포 Runbook
+
+`:8935`는 단일 운영 인스턴스이고 Cloudflare 터널(`masc.crying.pictures`, `masc-dev.crying.pictures`)이 직접 바라보는 대외 노출면이다 (`~/.cloudflared/config.yml`). `scripts/deploy.sh`는 별도 플레인(:8945, atomic lease handoff)용이며 이 문서의 대상이 아니다.
+
+## 0. 재배포 필요 판정
+
+```bash
+git -C <repo> ls-remote origin refs/heads/main
+curl -s http://127.0.0.1:8935/health | jq -r '.build.binary_commit, .build.binary_commit_source'
+```
+
+`binary_commit`은 빌드 타임에 임베드된다(`lib/build_commit/dune`의 `(universe)` rule → `lib/build_identity.ml`). `binary_commit_source`가 `embedded`이면 이 값이 곧 실행 중인 코드의 SHA다. 두 SHA가 같으면 재배포할 것이 없다.
+
+## 1. 기준선 스냅샷
+
+재기동 후 회귀 오판을 막기 위해 먼저 동결한다.
+
+```bash
+curl -s 'http://127.0.0.1:8935/health?full=1' > /tmp/health-before.json
+jq '{fibers:.keeper_fibers, fleet:.keeper_fleet_safety.status,
+     bootable:.keeper_fleet_safety.bootable_keeper_count,
+     blocker:.keeper_fleet_safety.blocker,
+     dash:.dashboard_surface.status}' /tmp/health-before.json
+```
+
+기존에 `degraded`였다면 재기동 후 `degraded`는 회귀가 아니다.
+
+## 2. main 동기화와 ancestry 확증
+
+```bash
+cd <repo> && git pull --rebase origin main
+git merge-base --is-ancestor <반드시-포함할-수리-SHA> HEAD && echo ANCESTOR_OK
+```
+
+ancestry 확증은 2026-08-16 운영 루프 2회차 사고(병합 파이프라인과 pull 경합으로 수리 커밋 미포함 checkout이 배포됨)의 재발 방지 단계다. 어떤 스크립트도 강제하지 않는 수동 단계이므로 생략하지 않는다.
+
+## 3. 빌드
+
+```bash
+./scripts/dune-local.sh build bin/main_eio.exe bin/deployment_preflight_helper.exe
+./scripts/build-dashboard-if-needed.sh
+```
+
+- 맨손 `dune build`는 금지 — wrapper가 `--root`를 고정하고 머신 전역 lock과 OCaml 버전 검증을 수행한다.
+- 대시보드는 raw `pnpm run build` 금지 — vite `emptyOutDir`가 `assets/dashboard/.build-stamp`를 지우고, stamp를 다시 쓰는 것은 wrapper뿐이다. stamp가 없으면 `/health`의 `dashboard_surface.status`가 `missing`으로 고착된다 (`lib/web_dashboard.ml`).
+
+## 4. keeper meta 스키마 정합 확인
+
+새 binary가 `Keeper_meta_json.current_field_names`에 필드를 추가했다면, 파서가 그 키를 필수로 요구하므로 기존 `<base>/.masc/keepers/*.json`이 전부 파싱 실패한다 (enum 자동 복구는 missing key를 못 고친다 — `lib/keeper/keeper_meta_store.ml`). 다운타임(6단계와 7단계 사이)에 store를 정합시킨다: 원본을 `<base>/.masc/_archive/`로 통째 보존한 뒤, 각 meta JSON에 새 키를 기본값(`null` 등 writer의 부재 표현)으로 주입한다.
+
+## 5. graceful shutdown
+
+HTTP로 프로세스를 내리는 경로는 없다. 유효한 경로는 SIGTERM/SIGINT뿐이다 (`bin/main_eio.ml`: NOTIFY → HOOKS → BOARD flush → CANCEL, 기본 예산 최대 10초).
+
+```bash
+kill -TERM $(lsof -ti tcp:8935 -sTCP:LISTEN)
+lsof -iTCP:8935 -sTCP:LISTEN   # 출력이 비면 내려간 것 — exit code로 판정하지 말 것
+```
+
+## 6. store preflight
+
+서버가 살아 있으면 writer lease 소유로 거부되므로 반드시 정지 후에 돌린다.
+
+```bash
+MASC_DEPLOYMENT_PREFLIGHT_HELPER=<repo>/_build/default/bin/deployment_preflight_helper.exe \
+  <repo>/scripts/check-runtime-deployment-preflight.sh --base-path <base>
+```
+
+성공 신호는 `[runtime-deployment-preflight] OK`. keeper 이벤트 큐/WAL 파싱, schedule ledger 계약, board attention candidate ledger `schema_version` 검사를 포함한다.
+
+## 7. 기동
+
+provider key가 로드된 interactive shell에서 실행한다. launchd 경로(`com.jeong-sik.masc-main`)는 `~/.zshenv`를 읽지 않아 provider 크리덴셜이 조용히 사라진다.
+
+```bash
+cd <repo>
+nohup ./scripts/start-loopback.sh --with-keeper-bootstrap \
+  > <base>/.masc/logs/masc-8935-$(date +%Y%m%d%H%M).out.log 2>&1 &
+```
+
+`--with-keeper-bootstrap`은 필수다 — `start-loopback.sh`는 상속된 `MASC_KEEPER_BOOTSTRAP_ENABLED`를 무시하고 기본 `false`로 덮으므로, 없이 올리면 autoboot keeper가 돌아오지 않는다.
+
+## 8. 검증
+
+```bash
+curl -s http://127.0.0.1:8935/health \
+  | jq '{v:.version, c:.build.binary_commit, src:.build.binary_commit_source,
+         dash:.dashboard_surface.status}'
+curl -s 'http://127.0.0.1:8935/health?full=1' \
+  | jq '{fibers:.keeper_fibers, fleet:.keeper_fleet_safety.status,
+         bootable:.keeper_fleet_safety.bootable_keeper_count}'
+```
+
+합격 기준:
+
+- `binary_commit` == 배포 의도 SHA, `binary_commit_source` == `embedded`
+- `dashboard_surface.status` == `ok`
+- `keeper_fibers`/`bootable_keeper_count`가 1단계 기준선으로 회복
+- 기동 로그에 keeper meta parse 실패가 없다 (`rg "meta parse" <로그>`)
+
+대시보드 TopBar는 같은 `/health` 필드를 읽는다. 브라우저 스크린샷은 보조 증거로 남긴다.
+
+## 함정 요약
+
+| 함정 | 결과 |
+|---|---|
+| `start-loopback.sh`에 `--with-keeper-bootstrap` 누락 | fleet이 빈 채로 기동 |
+| launchd로 재기동 | provider key 소실 (keeper.env는 2줄뿐) |
+| raw `pnpm run build` | `.build-stamp` 소실 → dashboard `missing` 고착 |
+| 맨손 `dune build` (worktree 안) | 상위 repo를 빌드하는 거짓 검증 |
+| ancestry 미확증 pull | 수리 커밋 없는 checkout 배포 (08-16 2회차 사고) |
+| meta 스키마 확장 후 store 미정합 | 전 keeper meta 파싱 실패 |
+| 포트 판정을 lsof exit code로 | 거짓 판정 — 출력 존재로 판정할 것 |

@@ -169,10 +169,13 @@ let operator_disposition (receipt : t)
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
     (* The typed runtime route treats provider-capacity failure as retryable and
-       continues with another eligible runtime.  This receipt is written for
-       the failed pre-dispatch attempt before that rotation is reflected in
-       [runtime_fallback_applied], so it must neither claim a completed
-       fallback nor page a human. *)
+       continues with another eligible runtime.  [runtime_fallback_applied] is
+       derived from the lane walk's winning candidate index, which only
+       advances on a candidate that actually wins the turn — this receipt is
+       for the failed pre-dispatch attempt itself, so [runtime_fallback_applied]
+       stays false here even though the lane goes on to try a later
+       candidate. It must neither claim a completed fallback nor page a
+       human. *)
     Disp_fail_open_next_runtime, Reason_capacity_backpressure
   | _ when preflight_config_failure ->
     Disp_fail_open_next_runtime, Reason_preflight_config_error

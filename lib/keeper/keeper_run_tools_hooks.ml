@@ -43,6 +43,7 @@ type agent_setup =
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
+  ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
   }
 
@@ -68,6 +69,7 @@ type ctx =
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
+  ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
   ; on_tool_result_ready : (tool_call_id:string -> unit) option
   ; tools : Agent_core.Tool.t list
@@ -232,6 +234,7 @@ let assemble_hooks
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
   let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
+  let receipt_lane_attempt_index_ref = ctx.receipt_lane_attempt_index_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
@@ -689,6 +692,7 @@ let assemble_hooks
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref
       ; receipt_runtime_observation_ref
+      ; receipt_lane_attempt_index_ref
       ; receipt_response_text_present_ref
       }
 ;;

@@ -107,7 +107,6 @@ type model_stats =
   ; primary_coverage_stage : string option
   ; primary_coverage_reason : string option
   ; coverage_reason_counts : coverage_reason_count list
-  ; fallback_count : int
   ; success_count : int
   ; error_count : int
   ; total_cost_usd : float option
@@ -168,7 +167,6 @@ type raw_entry =
   ; cache_read_tokens : int option
   ; cache_creation_tokens : int option
   ; reasoning_tokens : int option
-  ; fallback_applied : bool
   ; cost_usd : float option
   ; tool_call_count : int
   ; tools_used : string list
@@ -202,7 +200,7 @@ type parse_error =
   | Missing_telemetry_reported
   | Missing_success_model          (* no selected_model / model_used / runtime_id *)
   | Missing_success_inference_identity
-  | Missing_error_model_attribution (* no candidate_models / runtime_id on error turn *)
+  | Missing_error_model_attribution (* no runtime_id on error turn *)
   | Invalid_current_cost_row of Cost_ledger.decode_error
 
 let parse_error_label = function

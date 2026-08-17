@@ -1172,7 +1172,7 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
         ~runtime_id:"checkpoint_lane"
         ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
         ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-        ~run_attempt:(fun ~idx:_ ~runtime_id runtime ->
+        ~run_attempt:(fun ~idx ~runtime_id runtime ->
           if String.equal runtime_id primary.id
           then
             attempt_without_effect
@@ -1182,6 +1182,7 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
             attempt_without_effect
               (Driver.For_testing.selected_runtime_result
                  runtime
+                 ~lane_attempt_index:idx
                  (Ok (completed_run_result ())))
               None)
         [ primary; fallback ]
@@ -1200,10 +1201,47 @@ let test_cross_owner_fallback_returns_winning_runtime_authority () =
         "selected context window"
         (Runtime.max_context_of_runtime fallback)
         selected.selected_max_context;
+      Alcotest.(check int)
+        "fallback candidate wins at lane index 1 (primary at 0 failed first)"
+        1
+        selected.lane_attempt_index;
       (match selected.checkpoint_owner with
        | Runtime_execution.Masc_agent_core -> ()
        | Runtime_execution.Official_client ->
          Alcotest.fail "fallback checkpoint owner must be AGENT_CORE"))
+
+let test_first_candidate_success_keeps_lane_attempt_index_zero () =
+  with_runtime_config runtime_toml_checkpoint_lane (fun () ->
+    let primary = Runtime.get_runtime_by_id "codex.codex" in
+    let primary =
+      match primary with
+      | Some runtime -> runtime
+      | None -> Alcotest.fail "missing runtime codex.codex"
+    in
+    let result =
+      Driver.For_testing.attempt_runtime_candidates
+        ~runtime_id:"checkpoint_lane"
+        ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.id)
+        ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+        ~run_attempt:(fun ~idx ~runtime_id:_ runtime ->
+          attempt_without_effect
+            (Driver.For_testing.selected_runtime_result
+               runtime
+               ~lane_attempt_index:idx
+               (Ok (completed_run_result ())))
+            None)
+        [ primary ]
+    in
+    match result with
+    | Error error ->
+      Alcotest.failf
+        "expected first-candidate success, got %s"
+        (Agent_core.Error.to_string error)
+    | Ok selected ->
+      Alcotest.(check int)
+        "no rotation: lane_attempt_index stays 0"
+        0
+        selected.Driver.lane_attempt_index)
 
 let test_attempt_loop_retries_provider_wire_failure_same_turn () =
   let attempts = ref [] in
@@ -2244,6 +2282,10 @@ let () =
             "cross-owner fallback returns winning runtime authority"
             `Quick
             test_cross_owner_fallback_returns_winning_runtime_authority;
+          Alcotest.test_case
+            "first-candidate success keeps lane_attempt_index at 0"
+            `Quick
+            test_first_candidate_success_keeps_lane_attempt_index_zero;
           Alcotest.test_case
             "provider-wire failure rotates in the same turn"
             `Quick

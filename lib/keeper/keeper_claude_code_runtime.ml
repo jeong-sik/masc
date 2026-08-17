@@ -757,35 +757,16 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                     ("Claude Code session settlement failed: " ^ detail))
            in
            let capture, _metrics =
-             Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+             Runtime_observation.runtime_metrics_for_candidates ()
            in
            Runtime_observation.record_attempt_terminal
              capture
              ~model_id:turn.model
              ~latency_ms:(Some latency_ms)
              ~error:None;
-           let configured_labels =
-             [ "claude_code"
-             ; Printf.sprintf "dynamic_tool_calls=%d" turn.dynamic_tool_calls
-             ; Printf.sprintf "resumed=%b" turn.resumed
-             ; Printf.sprintf "turn_count=%d" turn_count
-             ; "auth_method=" ^ turn.subscription.auth_method
-             ; "subscription_type=" ^ turn.subscription.subscription_type
-             ]
-             @
-             match turn.rate_limit with
-             | None -> []
-             | Some rate_limit ->
-               [ "rate_limit_status="
-                 ^ Runtime_claude_code.rate_limit_status_to_string rate_limit.status
-               ]
-           in
            let runtime_observation =
              Runtime_observation.runtime_observation_with_metrics
                ~runtime_id
-               ~strategy:"official_client_runtime"
-               ~configured_labels
-               ~candidate_count:1
                ~selected_model_raw:(Some turn.model)
                ~capture
                ~attempt_details_source:"claude_code"

@@ -861,7 +861,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
            Error (internal_error ("Codex session settlement failed: " ^ detail))
        in
        let capture, _metrics =
-         Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+         Runtime_observation.runtime_metrics_for_candidates ()
        in
        Runtime_observation.record_attempt_terminal
          capture
@@ -871,14 +871,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
        let runtime_observation =
          Runtime_observation.runtime_observation_with_metrics
            ~runtime_id
-           ~strategy:"official_client_runtime"
-           ~configured_labels:
-             [ "codex_app_server"
-             ; Printf.sprintf "dynamic_tool_calls=%d" turn.dynamic_tool_calls
-             ; Printf.sprintf "resumed=%b" turn.resumed
-             ; Printf.sprintf "turn_count=%d" turn_count
-             ]
-           ~candidate_count:1
            ~selected_model_raw:(Some turn.model)
            ~capture
            ~attempt_details_source:"codex_app_server"

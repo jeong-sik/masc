@@ -325,8 +325,10 @@ let checkpoint_persistence_error ~keeper_name ~detail =
 ;;
 
 let runtime_outcome_of_observation
-    : _ -> Keeper_execution_receipt.runtime_outcome = function
-  | Some (obs : Runtime_observation.runtime_observation) when obs.fallback_applied ->
+    ~(lane_failover_applied : bool)
+    : Runtime_observation.runtime_observation option ->
+      Keeper_execution_receipt.runtime_outcome = function
+  | Some _ when lane_failover_applied ->
     Keeper_execution_receipt.Runtime_passed_to_next_model
   | Some obs
     when List.exists

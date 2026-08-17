@@ -59,6 +59,7 @@ let finalize
     ~receipt_turn_count_ref
     ~receipt_stop_reason_ref
     ~receipt_runtime_observation_ref
+    ~receipt_lane_attempt_index_ref
     ~receipt_response_text_present_ref
     () =
   (match turn_result with
@@ -109,6 +110,15 @@ let finalize
   let runtime_observation : Runtime_observation.runtime_observation option =
     !receipt_runtime_observation_ref
   in
+  (* Truth source for cross-runtime failover: the lane walk's winning
+     candidate index ([Keeper_turn_driver.named_run_result.lane_attempt_index]),
+     not a per-runtime observation field. A winning index > 0 means this
+     turn settled on a later lane candidate after one or more earlier
+     candidates failed. A turn whose lane never produced a winner (total
+     exhaustion) leaves this ref at its fresh-per-turn default of 0, so a
+     failed turn never claims a fallback it never observed. *)
+  let lane_attempt_index = !receipt_lane_attempt_index_ref in
+  let lane_failover_applied = lane_attempt_index > 0 in
   (* #20936: the before_turn_params hook snapshots the final injected
      extra_system_context (digest + byte size) into the accumulator each
      agent-core turn; the receipt reports the last agent-core turn's values. Agent Core
@@ -155,12 +165,11 @@ let finalize
         (match runtime_observation with
          | Some obs -> List.length obs.attempts
          | None -> 0)
-    ; runtime_fallback_applied =
-        (match runtime_observation with
-         | Some obs -> obs.fallback_applied
-         | None -> false)
+    ; runtime_fallback_applied = lane_failover_applied
     ; runtime_outcome =
-        Keeper_agent_error.runtime_outcome_of_observation runtime_observation
+        Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied
+          runtime_observation
     ; agent_core_internal_runtime_allowed =
         (match runtime_observation with
          | Some obs -> obs.agent_core_internal_runtime_allowed

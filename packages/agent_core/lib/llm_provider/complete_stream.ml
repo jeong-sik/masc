@@ -380,6 +380,18 @@ let complete_stream_http
       in
       let ollama_usage = ref None in
       let stream_timings = ref None in
+      (* kimi_coding (masc #28937) can split a single JSON object across
+         multiple SSE data events. Reassembly buffer: when a chunk fails to
+         parse as complete JSON and does not terminate in a structural close,
+         hold it here and prepend it to the next chunk. Bounded by
+         [max_event_bytes] (enforced by [read_sse]) so a genuinely malformed
+         stream cannot grow the buffer without bound. *)
+      let pending_openai_fragment = ref None in
+      let is_incomplete_json_fragment raw =
+        let s = String.trim raw in
+        let len = String.length s in
+        len > 0 && s.[0] = '{' && s.[len - 1] <> '}'
+      in
       (* Agent Core contract — stream-lifetime accumulators for the
          [Streaming_summary] variant that fires once at finalize.
          Hoisted out of [body_logic] so exception paths (timeout,
@@ -712,19 +724,36 @@ let complete_stream_http
                                  event_type
                                  data
                              | Provider_http_codec.Openai_chat ->
+                               (* kimi_coding (masc #28937) can split one JSON
+                                  object across several SSE data events. When a
+                                  chunk fails to parse and is an incomplete
+                                  fragment, hold it and prepend it to the next
+                                  chunk instead of failing the stream. *)
+                               let combined =
+                                 match !pending_openai_fragment with
+                                 | Some frag -> frag ^ data
+                                 | None -> data
+                               in
                                let parsed =
                                  Streaming.parse_openai_sse_chunk
                                    ~streaming_reasoning
-                                   data
+                                   combined
                                in
                                (match parsed with
                                 | Streaming.Openai_chunk
                                     { chunk_timings = Some _ as t; _ } ->
                                   stream_timings := t
                                 | _ -> ());
-                               Streaming.openai_sse_parse_result_to_events
-                                 (get_state ())
-                                 parsed
+                               (match parsed with
+                                | Streaming.Openai_parse_failed _
+                                  when is_incomplete_json_fragment combined ->
+                                  pending_openai_fragment := Some combined;
+                                  [], None
+                                | _ ->
+                                  pending_openai_fragment := None;
+                                  Streaming.openai_sse_parse_result_to_events
+                                    (get_state ())
+                                    parsed)
                              | Provider_http_codec.Gemini_generate_content ->
                                (match Streaming.parse_gemini_sse_chunk data with
                                 | Streaming.Gemini_chunk chunk ->

@@ -36,7 +36,7 @@
   }
  ],
  "server_tool_call_log": {
-  "file": "~/me/.masc/logs/start-masc-nohup-20260817c.log",
+  "file": "<base-path>/.masc/logs/start-masc-nohup-20260817c.log",
   "lines": [
    6326,
    6353,

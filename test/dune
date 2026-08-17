@@ -1937,6 +1937,8 @@
 
 (include stanzas/test_keeper_task_outcomes.inc)
 
+(include stanzas/test_keeper_task_create_typed_failure.inc)
+
 
 
 (include stanzas/test_keeper_turn_helpers_side_effect_metric.inc)

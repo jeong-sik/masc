@@ -88,6 +88,36 @@ let validation_error_json message =
        ])
 ;;
 
+(* [Workspace_task.add_task_error] mixes two different failure shapes:
+   caller-input workflow violations and file-IO/exception failures. They
+   route to different [Tool_result.tool_failure_class] values -- folding
+   both into [Workflow_rejection] would make
+   [Tool_result.log_level_of_failure_class] demote a durability incident to
+   WARN (only [Runtime_failure] logs ERROR) and would misroute the
+   terminal-effect buckets in [Keeper_runtime_failure_route]. Matched
+   exhaustively (no catch-all) so a future [add_task_error] variant forces a
+   classification decision here rather than defaulting into one bucket.
+
+   [keeper_task_create] never threads [predecessor_task_id] (RFC-0323 W2
+   scopes that arg to [masc_add_task]), so [Unknown_predecessor] /
+   [Predecessor_not_terminal] cannot be produced through this tool's live
+   args today. Exposed (like [validation_error_json] above) so the route
+   split can be tested directly against all six variants without depending
+   on that unreachable path. *)
+type task_create_failure_route =
+  | Task_create_workflow_rejection
+  | Task_create_runtime_failure
+
+let task_create_failure_route : Workspace_task.add_task_error -> task_create_failure_route
+  = function
+  | Workspace_task.Unknown_predecessor _
+  | Workspace_task.Predecessor_not_terminal _ -> Task_create_workflow_rejection
+  | Workspace_task.Backlog_read_failed _
+  | Workspace_task.Goal_link_write_failed _
+  | Workspace_task.Backlog_write_failed _
+  | Workspace_task.Unexpected_error _ -> Task_create_runtime_failure
+;;
+
 let validate_goal_id config goal_id =
   match Goal_store.get_goal config ~goal_id with
   | Some _ -> Ok goal_id
@@ -536,8 +566,8 @@ let handle_keeper_task_tool_with_outcome
                ~class_:Tool_result.Policy_rejection
                (validation_error_json message)
            | Ok contract ->
-              let result =
-                Workspace_task.add_task
+             (match
+                Workspace_task.add_task_with_result
                   ?contract
                   ?goal_id
                   config
@@ -549,17 +579,50 @@ let handle_keeper_task_tool_with_outcome
                        Without this the row has [created_by = None] and a keeper
                        is offered its own routing/report tasks back as work. *)
                   ~created_by:meta.name
-              in
-              Keeper_tool_execution.success
-                (Yojson.Safe.to_string
-                   (`Assoc
-                     [
-                       "ok", `Bool true;
-                       "result", `String result;
-                       "goal_id", Json_util.string_opt_to_json goal_id;
-                       ( "typed_outcome"
-                       , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
-                     ]))))
+              with
+              | Ok created ->
+                Keeper_tool_execution.success
+                  (Yojson.Safe.to_string
+                     (`Assoc
+                        [
+                          "ok", `Bool true;
+                          "result", `String created.summary;
+                          "goal_id", Json_util.string_opt_to_json created.goal_id;
+                          ( "typed_outcome"
+                          , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
+                        ]))
+              | Error err ->
+                (* RFC-0239 / audit D1 shape (Task_done, above): a task-creation
+                   failure is not progress, regardless of failure class.
+                   Previously [Workspace_task.add_task] folded [Error err] into
+                   a string and this branch always returned [ok:true,
+                   typed_outcome:Progress] regardless -- the keeper could not
+                   distinguish a durable write from a failed one. Class split
+                   is [task_create_failure_route] above. *)
+                let message = Workspace_task.add_task_error_to_string err in
+                let typed_outcome = Keeper_tool_outcome.Error { reason = message } in
+                (match task_create_failure_route err with
+                 | Task_create_workflow_rejection ->
+                   (* Same payload shape as the rejected-transition branches
+                      in [Task_done] below. *)
+                   Keeper_tool_execution.failure
+                     ~class_:Tool_result.Workflow_rejection
+                     (workflow_rejection_error_json ~typed_outcome message)
+                 | Task_create_runtime_failure ->
+                   (* Same failure class as the broadcast-persistence-failure
+                      branch above (this file, [Broadcast] case). *)
+                   Keeper_tool_execution.failure
+                     ~class_:Tool_result.Runtime_failure
+                     (error_json
+                        ~fields:
+                          [ "ok", `Bool false
+                          ; ( "failure_class"
+                            , `String
+                                (Tool_result.tool_failure_class_to_string
+                                   Tool_result.Runtime_failure) )
+                          ; "typed_outcome", Keeper_tool_outcome.to_json typed_outcome
+                          ]
+                        message)))))
     | Task_claim ->
     let auto_claim_eligible task =
       not

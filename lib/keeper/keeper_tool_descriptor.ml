@@ -1874,7 +1874,7 @@ let internal_descriptors : t list =
       "done"
       "keeper_task_done"
       (* The name says done; the handler issues submit_for_verification
-         (keeper_tool_task_runtime.ml:806). The description that says so now
+         (keeper_tool_task_runtime.ml:910). The description that says so now
          lives once, on the canonical schema this descriptor reads. *)
       ~readonly:false
   (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)

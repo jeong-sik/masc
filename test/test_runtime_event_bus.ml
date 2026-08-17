@@ -28,11 +28,11 @@ let run_eio f =
 let test_subscribe_forwards_purpose_to_agent_core_stats () =
   run_eio (fun ~sw:_ ~env:_ ->
     let bus = mk_bus () in
-    let h = I.subscribe ~purpose:"compact_audit" bus in
+    let h = I.subscribe ~purpose:"stats_probe" bus in
     let stats = Agent_core.Event_bus.stats bus in
     (match stats.subscriptions with
      | [ sub_stats ] ->
-       check (option string) "agent_core purpose" (Some "compact_audit") sub_stats.purpose;
+       check (option string) "agent_core purpose" (Some "stats_probe") sub_stats.purpose;
        check int "subscriber capacity" 3 sub_stats.capacity;
        check bool "subscriber overflow" true
          (sub_stats.overflow = Agent_core.Event_bus.Drop_oldest)

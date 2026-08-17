@@ -546,7 +546,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # / keeper_tool_plan.output_value never had one. All three .mli exports
 # were dropped (implementations kept where still used internally,
 # output_value's implementation removed as unused).
-DEAD_EXPORT_BASELINE = 545
+# 545 -> 541: tightened to the measured count. The four counts of slack
+# predate the Keeper_compact_audit purge (main already measured 541 against
+# the stale 545 baseline); the purge itself did not change the count.
+DEAD_EXPORT_BASELINE = 542
 
 
 def run_ratchet(count: int) -> int:

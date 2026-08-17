@@ -237,8 +237,19 @@ type chat_message = {
          reads as [None]; the row stays valid. *)
 }
 
+(* The GitHub CLI credential ([hosts.yml]) lives outside the generic keeper
+   secret projection roots (see [Keeper_github_identity]), so the plain
+   [snapshot] never captured it and a [gh] token could reach chat rows
+   unmasked (#28925 gap 2). The execute-output path already snapshots it
+   ([Keeper_tool_execute_runtime]); this brings the chat sink to parity. *)
 let redaction_for ~base_dir ~keeper_name =
-  Keeper_secret_redaction.snapshot ~base_path:base_dir ~keeper_name
+  Keeper_secret_redaction.snapshot_with_additional_secret_files
+    ~additional_secret_files:
+      (Keeper_github_identity.secret_files_of_base_path
+         ~base_path:base_dir
+         ~keeper_name)
+    ~base_path:base_dir
+    ~keeper_name
 
 let redact_attachment redaction att =
   { att with data = Keeper_secret_redaction.redact_text redaction att.data }

@@ -458,6 +458,53 @@ let test_append_turn_redacts_projected_secrets () =
       Alcotest.(check bool) "redaction marker present" true
         (String_util.contains_substring rendered "[REDACTED]"))
 
+(* #28925 gap 2: the GitHub CLI credential lives in
+   [.masc/keepers/<name>/github-cli/hosts.yml], outside the generic secret
+   projection roots, so the plain [snapshot] never captured it. The token
+   value here is deliberately NOT GitHub-prefix shaped so the structural
+   pattern layer cannot mask it — only the exact-value hosts.yml snapshot
+   can, which is exactly what this test pins. *)
+let test_append_turn_redacts_github_hosts_token () =
+  let base_dir = temp_base_path "keeper-chat-store-gh-hosts" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-gh-hosts" in
+      let gh_token = "hosts.yml-only.credential.42" in
+      let hosts_path =
+        match
+          Masc.Keeper_github_identity.secret_files_of_base_path
+            ~base_path:base_dir ~keeper_name
+        with
+        | [ path ] -> path
+        | paths ->
+          Alcotest.failf "expected one github secret file, got %d"
+            (List.length paths)
+      in
+      write_file hosts_path
+        (String.concat "\n"
+           [ "github.com:"
+           ; "    user: keeper-bot"
+           ; "    oauth_token: " ^ gh_token
+           ; "    git_protocol: https"
+           ; "" ]);
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"show me the gh credential"
+        ~user_attachments:[]
+        ~tool_calls:[]
+        ~assistant_content:("the token is " ^ gh_token)
+        ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "hosts.yml token not persisted" false
+        (String_util.contains_substring raw gh_token);
+      let messages = K.load ~base_dir ~keeper_name in
+      let rendered = Yojson.Safe.to_string (K.to_json_array messages) in
+      Alcotest.(check bool) "loaded view stays redacted" false
+        (String_util.contains_substring rendered gh_token);
+      Alcotest.(check bool) "redaction marker present" true
+        (String_util.contains_substring rendered "[REDACTED]"))
+
 let test_load_redacts_raw_persisted_secret_rows () =
   let base_dir = temp_base_path "keeper-chat-store-read-redact" in
   Fun.protect
@@ -2312,6 +2359,8 @@ let () =
             test_direct_owner_context_excludes_connector_turns;
           Alcotest.test_case "append_turn redacts projected secrets" `Quick
             test_append_turn_redacts_projected_secrets;
+          Alcotest.test_case "append_turn redacts github hosts.yml token"
+            `Quick test_append_turn_redacts_github_hosts_token;
           Alcotest.test_case "load redacts raw persisted secret rows" `Quick
             test_load_redacts_raw_persisted_secret_rows;
           Alcotest.test_case "window counts primaries only" `Quick

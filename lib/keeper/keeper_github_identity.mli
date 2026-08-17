@@ -22,6 +22,14 @@ type observation =
 
 val config_dir : config:Workspace.config -> keeper_name:string -> string
 val container_config_dir : container_masc_dir:string -> keeper_name:string -> string
+
+val secret_files_of_base_path : base_path:string -> keeper_name:string -> string list
+(** Paths of the GitHub CLI files that can hold credentials ([hosts.yml])
+    for callers that hold only [base_path] (default cluster). Intended as
+    [additional_secret_files] input for
+    {!Keeper_secret_redaction.snapshot_with_additional_secret_files};
+    missing files are ignored there, so the paths are safe to pass
+    unconditionally. *)
 val ensure_config_dir : config:Workspace.config -> keeper_name:string -> (string, string) result
 val overlay_config_env : config_dir:string -> string array -> string array
 val projected_config_dir : string array -> string option

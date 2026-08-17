@@ -640,6 +640,15 @@ module Ring = struct
       ~module_name
       ~message
       () =
+    (* Sink-level structural secret masking (#28925 gap 3). The ring is the
+       single record source for both the dashboard log API and the JSONL
+       file sink ([entry_to_json] reads the stored entry), so masking here
+       covers every recording path regardless of which emit wrapper was
+       used. Exact keeper-secret values cannot be masked at this layer —
+       masc_log is a leaf and never sees keeper secret roots; those are
+       masked upstream by [Keeper_secret_redaction]. *)
+    let message = Secret_patterns.redact_text message in
+    let details = Secret_patterns.redact_json_strings details in
     let seq = Atomic.fetch_and_add total 1 in
     let idx = seq mod capacity in
     let entry = {

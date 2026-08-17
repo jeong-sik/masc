@@ -23,6 +23,7 @@ type keeper_toml_field_kind =
 let keeper_toml_fields =
   [ "name", Field_string
   ; "instructions", Field_string
+  ; "autonomous_instructions", Field_string
   ; "autonomous_wake_prompt", Field_string
   ; "autoboot_enabled", Field_bool
   ; "mention_targets", Field_string_array
@@ -215,6 +216,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         id = None;
         manifest_path = None;
         instructions = str "instructions";
+        autonomous_instructions = str "autonomous_instructions";
         autoboot_enabled = bool_ "autoboot_enabled";
         mention_targets = strs "mention_targets";
         proactive_enabled = bool_ "proactive_enabled";
@@ -266,6 +268,8 @@ let merge_keeper_profile_defaults
     id = prefer overlay.id base.id;
     manifest_path = prefer overlay.manifest_path base.manifest_path;
     instructions = prefer overlay.instructions base.instructions;
+    autonomous_instructions =
+      prefer overlay.autonomous_instructions base.autonomous_instructions;
     autonomous_wake_prompt =
       prefer overlay.autonomous_wake_prompt base.autonomous_wake_prompt;
     autoboot_enabled = prefer overlay.autoboot_enabled base.autoboot_enabled;

@@ -1411,6 +1411,36 @@ let test_handle_request_tools_list_with_placeholder_flag () =
 
     cleanup_dir base_path)
 
+(* Regression: task-271 — MASC_PLACEHOLDER_TOOLS_ENABLED=false must hide
+   placeholder tools (RFC-0371 B7 removed the env read; restored here). *)
+let test_placeholder_tools_hidden_when_env_false () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  (* Save and override the env var *)
+  let prev = Sys.getenv_opt "MASC_PLACEHOLDER_TOOLS_ENABLED" in
+  Unix.putenv "MASC_PLACEHOLDER_TOOLS_ENABLED" "false";
+  let base_path = temp_dir () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
+  let tools = tools_list_all ~clock ~sw state in
+  let names =
+    tools
+    |> List.filter_map (function
+         | `Assoc fields -> List.assoc_opt "name" fields
+         | _ -> None)
+    |> List.filter_map (function `String s -> Some s | _ -> None)
+  in
+  (* With the env false, masc_archive_save (a placeholder) must be absent *)
+  Alcotest.(check bool)
+    "placeholder hidden when MASC_PLACEHOLDER_TOOLS_ENABLED=false"
+    false
+    (List.mem "masc_archive_save" names);
+  (* Restore env *)
+  (match prev with None -> Unix.unsetenv "MASC_PLACEHOLDER_TOOLS_ENABLED"
+   | Some v -> Unix.putenv "MASC_PLACEHOLDER_TOOLS_ENABLED" v);
+  cleanup_dir base_path
+
 let test_handle_request_tools_list_include_hidden_metadata () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3087,6 +3117,8 @@ let eio_tests = [
   "handle tools/list operator profile", `Quick,
     test_handle_request_tools_list_operator_profile;
   "handle tools/list with placeholder flag", `Quick, test_handle_request_tools_list_with_placeholder_flag;
+  "placeholder tools hidden when MASC_PLACEHOLDER_TOOLS_ENABLED=false", `Quick,
+    test_placeholder_tools_hidden_when_env_false;
   "handle tools/list include hidden metadata", `Quick,
     test_handle_request_tools_list_include_hidden_metadata;
   "handle tools/list include usage metadata", `Quick,

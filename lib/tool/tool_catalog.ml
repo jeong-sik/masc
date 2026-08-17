@@ -505,10 +505,13 @@ let is_visible ?(include_hidden = false) name =
   let meta = metadata name in
   match meta.visibility with
   | Hidden when include_hidden -> true
-  (* MASC_PLACEHOLDER_TOOLS_ENABLED left the tree (RFC-0371 B7): it was
-     read on every visibility check, nothing anywhere set it, and its
-     default made this arm unconditional in every deployment. *)
-  | Hidden when is_placeholder name -> true
+  (* MASC_PLACEHOLDER_TOOLS_ENABLED (compat): RFC-0371 B7 removed the
+     env read because no deployment set it, but operators relied on
+     `MASC_PLACEHOLDER_TOOLS_ENABLED=false` to hide placeholder tools.
+     Restored with [get_bool ~default:true] — setting it to false/0/no
+     hides placeholders; unset or true keeps the pre-B7 behavior. *)
+  | Hidden when is_placeholder name ->
+    Env_config_core.get_bool ~default:true "MASC_PLACEHOLDER_TOOLS_ENABLED"
   | Hidden -> false
   | Default -> implementation_allows_public_visibility meta.implementation_status
 

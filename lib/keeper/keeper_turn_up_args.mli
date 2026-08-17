@@ -30,6 +30,8 @@ type parsed_args =
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option
+  ; autonomous_instructions_arg : string option
+  ; autonomous_instructions_opt : string option
   }
 
 (** Project an [`Assoc] member at [key]; [None] for non-objects or

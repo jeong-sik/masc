@@ -151,8 +151,8 @@ let get_ratio ~default name =
 
 let bool_of_raw_value raw =
   match String.trim raw |> String.lowercase_ascii with
-  | "true" | "1" | "yes" | "y" | "on" -> Some true
-  | "false" | "0" | "no" | "n" | "off" -> Some false
+  | "true" | "1" | "yes" | "on" -> Some true
+  | "false" | "0" | "no" | "off" -> Some false
   | _ -> None
 
 let get_bool ~default name =

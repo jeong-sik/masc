@@ -289,6 +289,55 @@ let test_sk_modern_key_fully_redacted () =
   Alcotest.(check bool) "no partial sk- tail leak" true
     (not (String_util.contains_substring r "0123456789abcdef"))
 
+(* GitHub token prefixes per the official token-format table
+   (docs.github.com "About authentication to GitHub"): ghp_ classic PAT,
+   github_pat_ fine-grained PAT, gho_/ghu_/ghs_/ghr_ app-family tokens.
+   Token literals are concatenated so tooling does not mistake them for live
+   credentials; they are synthetic test values. *)
+let test_github_classic_tokens_redacted () =
+  List.iter
+    (fun prefix ->
+      let token = prefix ^ "16C7e42F292c6912E7710c838347Ae178B4a" in
+      let r = Observability_redact.redact_text ("pushed with " ^ token) in
+      Alcotest.(check bool) (prefix ^ " token body masked") true
+        (not (String_util.contains_substring r "16C7e42F292c6912"));
+      Alcotest.(check bool) (prefix ^ " marker present") true
+        (String_util.contains_substring r "[REDACTED]"))
+    [ "ghp_"; "gho_"; "ghu_"; "ghs_"; "ghr_" ]
+
+let test_github_fine_grained_token_redacted () =
+  let token =
+    "github_pat_" ^ "11ABCDEFG0abcdefghijkl_"
+    ^ "mnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456"
+  in
+  let r = Observability_redact.redact_text ("auth: " ^ token) in
+  Alcotest.(check bool) "fine-grained body masked" true
+    (not (String_util.contains_substring r "11ABCDEFG0abcdefghijkl"))
+
+(* Stateless installation tokens (ghs_APPID_JWT, staged rollout from
+   2026-04-27) embed a JWT: the body must swallow the '.' separators or the
+   payload and signature segments survive the mask. *)
+let test_github_stateless_installation_token_redacted () =
+  let token =
+    "ghs_" ^ "1234567_" ^ "eyJhbGciOiJSUzI1NiJ9" ^ "."
+    ^ "eyJpc3MiOiJnaXRodWIifQ" ^ "." ^ "c2lnbmF0dXJlLWJ5dGVz"
+  in
+  let r = Observability_redact.redact_text ("install token " ^ token) in
+  Alcotest.(check bool) "jwt payload masked" true
+    (not (String_util.contains_substring r "eyJpc3MiOiJnaXRodWIifQ"));
+  Alcotest.(check bool) "jwt signature masked" true
+    (not (String_util.contains_substring r "c2lnbmF0dXJlLWJ5dGVz"))
+
+let test_github_prefix_no_false_positive () =
+  (* Word-internal runs must not match ([Re.bow] anchor), mirroring the
+     sk-/task-id contract above. *)
+  let inputs = [ "github_pathway_notes"; "highslide_ghs"; "morphology" ] in
+  List.iter
+    (fun input ->
+      let r = Observability_redact.redact_text input in
+      Alcotest.(check string) (input ^ " preserved") input r)
+    inputs
+
 let () =
   Alcotest.run "observability_redact"
     [
@@ -322,6 +371,14 @@ let () =
             test_no_false_positive_on_keeper_identities;
           Alcotest.test_case "modern sk- key fully redacted" `Quick
             test_sk_modern_key_fully_redacted;
+          Alcotest.test_case "github classic tokens redacted" `Quick
+            test_github_classic_tokens_redacted;
+          Alcotest.test_case "github fine-grained token redacted" `Quick
+            test_github_fine_grained_token_redacted;
+          Alcotest.test_case "github stateless installation token redacted"
+            `Quick test_github_stateless_installation_token_redacted;
+          Alcotest.test_case "github prefixes no false positive" `Quick
+            test_github_prefix_no_false_positive;
         ] );
       ( "tool_observability",
         [

@@ -23,16 +23,33 @@ type observation =
   ; checked_at_unix : float
   }
 
+let config_dir_name = "github-cli"
+
 let config_dir ~config ~keeper_name =
   Filename.concat
     (Filename.concat (Workspace.keepers_runtime_dir config) keeper_name)
-    "github-cli"
+    config_dir_name
+;;
+
+(* Base-path variant for callers that hold only [base_path] (e.g. the chat
+   store's redaction snapshot). Default-cluster on purpose, matching
+   [Common.keepers_runtime_dir_of_base]: the chat store's secret projection
+   roots are already base-path scoped, so this keeps both snapshot sources
+   on the same cluster resolution. *)
+let config_dir_of_base_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    config_dir_name
+;;
+
+let secret_files_of_base_path ~base_path ~keeper_name =
+  [ Filename.concat (config_dir_of_base_path ~base_path ~keeper_name) "hosts.yml" ]
 ;;
 
 let container_config_dir ~container_masc_dir ~keeper_name =
   Filename.concat
     (Filename.concat (Filename.concat container_masc_dir "keepers") keeper_name)
-    "github-cli"
+    config_dir_name
 ;;
 
 let file_kind_to_string = function

@@ -135,6 +135,7 @@
   dated_jsonl
   masc_http_client
   masc_log
+  masc_secret_patterns
   masc_types
   masc_core
   masc_gate

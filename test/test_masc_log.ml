@@ -130,6 +130,51 @@ let test_entry_to_json_keeper_name_some_preserves () =
   in
   Alcotest.(check string) "keeper_name Some preserved" "my-keeper" keeper_name_val
 
+(* Local helper: this binary intentionally depends only on masc_log +
+   alcotest-adjacent modules, so no String_util import. *)
+let contains_substring haystack needle =
+  let h = String.length haystack and n = String.length needle in
+  let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+  n = 0 || go 0
+
+let newest_entry ~module_name =
+  match Log.Ring.recent ~limit:1 ~module_filter:module_name () with
+  | entry :: _ -> entry
+  | [] -> Alcotest.fail "no ring entry recorded"
+
+(* #28925 gap 3: the recording path (ring + JSONL file sink render the same
+   stored entry) must mask secret-shaped values at the sink, regardless of
+   which emit wrapper produced the record. Token literals are concatenated
+   synthetic values, not live credentials. *)
+let test_push_masks_github_token_in_message () =
+  let module_name = "TestLogRedactMsg" in
+  let token = "ghp_" ^ "16C7e42F292c6912E7710c838347Ae178B4a" in
+  Log.info ~ctx:module_name "deploy used %s" token;
+  let entry = newest_entry ~module_name in
+  Alcotest.(check bool) "token body absent from ring" false
+    (contains_substring entry.message "16C7e42F292c6912");
+  Alcotest.(check bool) "redaction marker present" true
+    (contains_substring entry.message "[REDACTED]")
+
+let test_push_masks_secrets_in_details () =
+  let module_name = "TestLogRedactDetails" in
+  let token = "github_pat_" ^ "11ABCDEFG0abcdefghijkl" in
+  Log.emit Log.Info ~module_name
+    ~details:
+      (`Assoc
+         [ ("note", `String ("auth via " ^ token))
+         ; ("api_key", `String "plain-value-that-must-not-persist")
+         ])
+    "details redaction probe";
+  let entry = newest_entry ~module_name in
+  let rendered = Yojson.Safe.to_string entry.details in
+  Alcotest.(check bool) "token absent from details leaf" false
+    (contains_substring rendered "11ABCDEFG0abcdefghijkl");
+  Alcotest.(check bool) "sensitive key value replaced" false
+    (contains_substring rendered "plain-value-that-must-not-persist");
+  Alcotest.(check bool) "marker present" true
+    (contains_substring rendered "[REDACTED]")
+
 let () =
   Alcotest.run "Masc_log" [
     ( "ring",
@@ -146,5 +191,9 @@ let () =
         Alcotest.test_case
           "entry_to_json: keeper_name=Some preserves value"
           `Quick test_entry_to_json_keeper_name_some_preserves;
+        Alcotest.test_case "push masks github token in message" `Quick
+          test_push_masks_github_token_in_message;
+        Alcotest.test_case "push masks secrets in details" `Quick
+          test_push_masks_secrets_in_details;
       ] );
   ]

@@ -96,6 +96,11 @@ let queue_depth () =
   n
 
 let write line =
+  (* Sink-level structural secret masking (#28925 gap 3). The console mirror
+     is redirected to a file in production (nohup > masc-server.log), so it
+     is a recording path too and must mask independently of the ring —
+     [Log] hands it the raw pre-[Ring.push] line. *)
+  let line = Secret_patterns.redact_text line in
   if not (Atomic.get enqueue_active)
   then current_writer () line
   else begin

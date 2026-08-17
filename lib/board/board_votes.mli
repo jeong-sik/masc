@@ -20,7 +20,8 @@
     - {b Vote-direction normaliser}: [all_vote_directions],
       [vote_direction_of_string_opt].
     - {b Vote log persistence}: [append_vote_log],
-      [save_vote_log_jsonl].
+      [save_vote_log_jsonl], [record_vote_side_effect],
+      [rollback_vote_post], [rollback_vote_comment].
     - {b Internal vote outcome}: the [vote_outcome] record
       carries the post-vote total score and post-lock vote log /
       feedback side effects.
@@ -60,11 +61,15 @@ val vote_direction_of_string_opt : string -> vote_direction option
 (** {1 Vote log path} *)
 
 val vote_log_path : unit -> string
-(** Path to the append-only vote log JSONL under
-    [<base>/.masc/board_votes.jsonl].  Each accepted row has exactly
-    [target], [voter], [direction], and positive finite [ts] fields; [target]
-    carries canonical typed target/voter identities and the derived [voter]
-    field must match it. *)
+(** Path to the append-only vote log JSONL under the cluster-aware board
+    directory resolved by {!Board_paths.board_masc_dir} — the same
+    resolver used by [persist_path] / [comments_path] / [reactions_path] /
+    [sub_boards_path], so on the default cluster this is
+    [<base>/.masc/board_votes.jsonl] and on a named cluster it is
+    [<base>/.masc/clusters/<cluster>/board_votes.jsonl].  Each accepted row
+    has exactly [target], [voter], [direction], and positive finite [ts]
+    fields; [target] carries canonical typed target/voter identities and the
+    derived [voter] field must match it. *)
 
 (** {1 Voting} *)
 
@@ -91,7 +96,9 @@ val vote :
     Vote flips swap up↔down without re-counting (and
     {b without} earning credits, to prevent down/up
     alternation abuse).  The vote log is appended outside the
-    state lock. *)
+    state lock; if that durable append fails, the in-memory vote is rolled
+    back and [Error (Io_error _)] is returned instead of a vote that only
+    ever existed in memory. *)
 
 val current_vote_for_comment :
   store ->
@@ -108,7 +115,7 @@ val vote_comment :
   direction:vote_direction ->
   (int, board_error) Result.t
 (** Same shape as {!vote} but targets a comment via its
-    [comment_id]. *)
+    [comment_id], including the durable-append rollback on failure. *)
 
 (** {1 Stats} *)
 

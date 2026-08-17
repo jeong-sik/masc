@@ -17,6 +17,23 @@ let fresh_test_base_path () =
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
+(* Replaces the board's [.masc] directory with a regular file so any
+   subsequent [Fs_compat.mkdir_p]/[append_file] under it raises [Sys_error]
+   (ENOTDIR). Same fixture as [test_board_dispatch.ml]'s
+   [block_board_masc_dir_with_file]; duplicated locally per this suite's
+   existing per-file fixture convention (see [fresh_test_base_path] above). *)
+let block_board_masc_dir_with_file () =
+  let base =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-vote-persist-blocked-%06x" (Random.bits ()))
+  in
+  Unix.putenv "MASC_BASE_PATH" base;
+  let masc_dir = Filename.dirname (Board.persist_path ()) in
+  Fs_compat.mkdir_p (Filename.dirname masc_dir);
+  Fs_compat.save_file masc_dir "not a directory";
+  base
+
 let with_eio f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -360,6 +377,97 @@ let test_missing_ledger_resets_persisted_vote_counts () =
     Alcotest.(check int) "missing ledger clears votes_up" 0 loaded.votes_up;
     Alcotest.(check int) "missing ledger clears votes_down" 0 loaded.votes_down
 
+let test_vote_persistence_failure_rolls_back_new_vote () =
+  let voter = "persist-fail-voter" in
+  let post =
+    create_post_exn ~author:"persist-fail-author"
+      ~content:"vote must not survive a failed append"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok _ -> Alcotest.fail "vote must not succeed when the durable append fails"
+   | Error (Board.Io_error _) -> ()
+   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok loaded ->
+     Alcotest.(check int) "rolled-back post keeps votes_up at 0" 0 loaded.votes_up;
+     Alcotest.(check int) "rolled-back post keeps votes_down at 0" 0 loaded.votes_down);
+  match Board_dispatch.current_vote_for_post ~voter ~post_id with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "rolled-back vote must not remain in the vote log"
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let test_vote_flip_persistence_failure_rolls_back_to_previous_direction () =
+  let voter = "persist-fail-flip-voter" in
+  let post =
+    create_post_exn ~author:"persist-fail-flip-author"
+      ~content:"flip must not survive a failed append"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Down with
+   | Ok _ -> Alcotest.fail "flip must not succeed when the durable append fails"
+   | Error (Board.Io_error _) -> ()
+   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok loaded ->
+     Alcotest.(check int) "rolled-back flip keeps votes_up at 1" 1 loaded.votes_up;
+     Alcotest.(check int) "rolled-back flip keeps votes_down at 0" 0 loaded.votes_down);
+  match Board_dispatch.current_vote_for_post ~voter ~post_id with
+  | Ok (Some Board.Up) -> ()
+  | Ok (Some Board.Down) -> Alcotest.fail "rolled-back flip must not persist the new direction"
+  | Ok None -> Alcotest.fail "rolled-back flip must restore the original vote"
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
+let test_vote_comment_persistence_failure_rolls_back () =
+  let voter = "persist-fail-comment-voter" in
+  let post =
+    create_post_exn ~author:"persist-fail-comment-author"
+      ~content:"comment vote must not survive a failed append"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    add_comment_exn ~post_id ~author:"persist-fail-commenter"
+      ~content:"comment under test"
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Up with
+   | Ok _ -> Alcotest.fail "comment vote must not succeed when the durable append fails"
+   | Error (Board.Io_error _) -> ()
+   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_comments ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok [ loaded ] ->
+     Alcotest.(check int) "rolled-back comment keeps votes_up at 0" 0 loaded.votes_up;
+     Alcotest.(check int) "rolled-back comment keeps votes_down at 0" 0 loaded.votes_down
+   | Ok comments -> Alcotest.failf "expected one comment, got %d" (List.length comments));
+  match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "rolled-back comment vote must not remain in the vote log"
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+
 let () =
   Alcotest.run "board_vote_persistence"
     [
@@ -377,5 +485,15 @@ let () =
             (with_eio test_restart_uses_last_vote_row_and_rebuilds_counts);
           Alcotest.test_case "missing ledger resets persisted counters" `Quick
             (with_eio test_missing_ledger_resets_persisted_vote_counts);
+        ] );
+      ( "durability",
+        [
+          Alcotest.test_case "new vote rolls back on persist failure" `Quick
+            (with_eio test_vote_persistence_failure_rolls_back_new_vote);
+          Alcotest.test_case "flip rolls back to previous direction on persist failure"
+            `Quick
+            (with_eio test_vote_flip_persistence_failure_rolls_back_to_previous_direction);
+          Alcotest.test_case "comment vote rolls back on persist failure" `Quick
+            (with_eio test_vote_comment_persistence_failure_rolls_back);
         ] );
     ]

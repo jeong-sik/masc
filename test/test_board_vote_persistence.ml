@@ -17,6 +17,23 @@ let fresh_test_base_path () =
   Unix.putenv "MASC_BASE_PATH" dir;
   dir
 
+(* Replaces the board's [.masc] directory with a regular file so any
+   subsequent [Fs_compat.mkdir_p]/[append_file] under it raises [Sys_error]
+   (ENOTDIR). Same fixture as [test_board_dispatch.ml]'s
+   [block_board_masc_dir_with_file]; duplicated locally per this suite's
+   existing per-file fixture convention (see [fresh_test_base_path] above). *)
+let block_board_masc_dir_with_file () =
+  let base =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-vote-persist-blocked-%06x" (Random.bits ()))
+  in
+  Unix.putenv "MASC_BASE_PATH" base;
+  let masc_dir = Filename.dirname (Board.persist_path ()) in
+  Fs_compat.mkdir_p (Filename.dirname masc_dir);
+  Fs_compat.save_file masc_dir "not a directory";
+  base
+
 let with_eio f () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -360,6 +377,141 @@ let test_missing_ledger_resets_persisted_vote_counts () =
     Alcotest.(check int) "missing ledger clears votes_up" 0 loaded.votes_up;
     Alcotest.(check int) "missing ledger clears votes_down" 0 loaded.votes_down
 
+let test_vote_persistence_failure_leaves_nothing_committed () =
+  let voter = "persist-fail-voter" in
+  let post =
+    create_post_exn ~author:"persist-fail-author"
+      ~content:"vote must not survive a failed append"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let working_base = Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"" in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok _ -> Alcotest.fail "vote must not succeed when the durable append fails"
+   | Error (Board.Io_error _) -> ()
+   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok loaded ->
+     Alcotest.(check int) "write-ahead: post keeps votes_up at 0" 0 loaded.votes_up;
+     Alcotest.(check int) "write-ahead: post keeps votes_down at 0" 0 loaded.votes_down);
+  (match Board_dispatch.current_vote_for_post ~voter ~post_id with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "a failed append must not leave a vote log entry"
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (* Nothing was committed, so the same vote is not blocked by Already_voted
+     once the append can actually succeed — the earlier failure left no
+     residual state to collide with. *)
+  Unix.putenv "MASC_BASE_PATH" working_base;
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok score -> Alcotest.(check int) "retry after unblock succeeds" 1 score
+   | Error e -> Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let target = "post:" ^ post_id ^ ":" ^ voter in
+  Alcotest.(check int)
+    "flush snapshot has exactly the retried vote, no ghost from the failed attempt"
+    1
+    (List.length (List.filter (fun (t, v, _) -> t = target && v = voter) rows))
+
+let test_vote_flip_persistence_failure_leaves_original_direction_committed () =
+  let voter = "persist-fail-flip-voter" in
+  let post =
+    create_post_exn ~author:"persist-fail-flip-author"
+      ~content:"flip must not survive a failed append"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Up with
+   | Ok _ -> ()
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  let working_base = Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"" in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Down with
+   | Ok _ -> Alcotest.fail "flip must not succeed when the durable append fails"
+   | Error (Board.Io_error _) -> ()
+   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok loaded ->
+     Alcotest.(check int) "write-ahead: flip never applied, votes_up stays 1" 1 loaded.votes_up;
+     Alcotest.(check int) "write-ahead: flip never applied, votes_down stays 0" 0 loaded.votes_down);
+  (match Board_dispatch.current_vote_for_post ~voter ~post_id with
+   | Ok (Some Board.Up) -> ()
+   | Ok (Some Board.Down) -> Alcotest.fail "a failed flip must not persist the new direction"
+   | Ok None -> Alcotest.fail "a failed flip must not erase the original vote"
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  (* The original "up" vote is still the only committed state, so retrying
+     the flip once the append can succeed is a normal flip, not a collision. *)
+  Unix.putenv "MASC_BASE_PATH" working_base;
+  (match Board_dispatch.vote ~voter ~post_id ~direction:Board.Down with
+   | Ok score -> Alcotest.(check int) "retried flip after unblock succeeds" (-1) score
+   | Error e -> Alcotest.fail ("retried flip must succeed, got " ^ Board.show_board_error e));
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let target = "post:" ^ post_id ^ ":" ^ voter in
+  Alcotest.(check int)
+    "flush snapshot has exactly one row for this voter, no ghost \"down\" from the failed flip"
+    1
+    (List.length (List.filter (fun (t, v, _) -> t = target && v = voter) rows))
+
+let test_vote_comment_persistence_failure_leaves_nothing_committed () =
+  let voter = "persist-fail-comment-voter" in
+  let post =
+    create_post_exn ~author:"persist-fail-comment-author"
+      ~content:"comment vote must not survive a failed append"
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment =
+    add_comment_exn ~post_id ~author:"persist-fail-commenter"
+      ~content:"comment under test"
+  in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let working_base = Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:"" in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Up with
+   | Ok _ -> Alcotest.fail "comment vote must not succeed when the durable append fails"
+   | Error (Board.Io_error _) -> ()
+   | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  (match Board_dispatch.get_comments ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok [ loaded ] ->
+     Alcotest.(check int) "write-ahead: comment keeps votes_up at 0" 0 loaded.votes_up;
+     Alcotest.(check int) "write-ahead: comment keeps votes_down at 0" 0 loaded.votes_down
+   | Ok comments -> Alcotest.failf "expected one comment, got %d" (List.length comments));
+  (match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+   | Ok None -> ()
+   | Ok (Some _) -> Alcotest.fail "a failed append must not leave a vote log entry"
+   | Error e -> Alcotest.fail (Board.show_board_error e));
+  Unix.putenv "MASC_BASE_PATH" working_base;
+  (match Board_dispatch.vote_comment ~voter ~comment_id ~direction:Board.Up with
+   | Ok score -> Alcotest.(check int) "retry after unblock succeeds" 1 score
+   | Error e -> Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
+  let rows = read_ts_rows (Board_votes.vote_log_path ()) in
+  let target = "comment:" ^ comment_id ^ ":" ^ voter in
+  Alcotest.(check int)
+    "flush snapshot has exactly the retried vote, no ghost from the failed attempt"
+    1
+    (List.length (List.filter (fun (t, v, _) -> t = target && v = voter) rows))
+
 let () =
   Alcotest.run "board_vote_persistence"
     [
@@ -377,5 +529,18 @@ let () =
             (with_eio test_restart_uses_last_vote_row_and_rebuilds_counts);
           Alcotest.test_case "missing ledger resets persisted counters" `Quick
             (with_eio test_missing_ledger_resets_persisted_vote_counts);
+        ] );
+      ( "durability",
+        [
+          Alcotest.test_case "new vote: failed append leaves nothing committed" `Quick
+            (with_eio test_vote_persistence_failure_leaves_nothing_committed);
+          Alcotest.test_case
+            "flip: failed append leaves the original direction committed"
+            `Quick
+            (with_eio test_vote_flip_persistence_failure_leaves_original_direction_committed);
+          Alcotest.test_case
+            "comment vote: failed append leaves nothing committed"
+            `Quick
+            (with_eio test_vote_comment_persistence_failure_leaves_nothing_committed);
         ] );
     ]

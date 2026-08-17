@@ -49,9 +49,17 @@ type rate_limit =
   ; overage_disabled_reason : string option
   }
 
+(** Usage counts from the CLI result frame. The CLI mirrors Anthropic
+    Messages semantics: [input_tokens] is the exclusive wire count (tokens
+    after the last cache breakpoint); absent cache fields read as 0. The
+    keeper mapping builds the canonical inclusive
+    {!Agent_core.Types.api_usage} from these via
+    [Backend_anthropic.usage_of_wire_counts]. *)
 type turn_usage =
   { input_tokens : int
   ; output_tokens : int
+  ; cache_creation_input_tokens : int
+  ; cache_read_input_tokens : int
   }
 
 type turn_result =

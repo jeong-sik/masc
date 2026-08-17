@@ -463,7 +463,7 @@ let publish_masc_broadcast ~port ~auth_token ~session_id =
               ; ( "arguments"
                 , `Assoc
                     [ "agent_name", `String "dashboard"
-                    ; "message", `String "sse-ag-ui-wire-encoding"
+                    ; "content", `String "sse-ag-ui-wire-encoding"
                     ] )
               ] )
         ])

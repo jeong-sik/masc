@@ -236,7 +236,18 @@ let test_accumulate_message_delta () =
   let acc = Streaming.create_stream_acc () in
   Streaming.accumulate_event
     acc
-    (MessageDelta { stop_reason = Some EndTurn; usage = Some (make_usage 0 75) });
+    (MessageDelta
+       { stop_reason = Some EndTurn
+       ; usage =
+           (* The classic wire shape: the final delta reports only the
+              cumulative output counter. *)
+           Some
+             { Types.input_tokens = None
+             ; output_tokens = Some 75
+             ; cache_creation_input_tokens = None
+             ; cache_read_input_tokens = None
+             }
+       });
   match Streaming.finalize_stream_acc acc with
   | Ok { stop_reason = EndTurn; usage = Some usage; _ } ->
     Alcotest.(check int) "output_tokens" 75 usage.output_tokens
@@ -262,11 +273,10 @@ let test_accumulate_message_delta_cache_update () =
        { stop_reason = Some EndTurn
        ; usage =
            Some
-             { input_tokens = 0
-             ; output_tokens = 50
-             ; cache_creation_input_tokens = 25
-             ; cache_read_input_tokens = 10
-             ; cost_usd = None
+             { Types.input_tokens = None
+             ; output_tokens = Some 50
+             ; cache_creation_input_tokens = Some 25
+             ; cache_read_input_tokens = Some 10
              }
        });
   match Streaming.finalize_stream_acc acc with
@@ -309,7 +319,16 @@ let test_finalize_text_response () =
     ; ContentBlockStart
         { index = 0; content_type = "text"; tool_id = None; tool_name = None }
     ; ContentBlockDelta { index = 0; delta = TextDelta "hello world" }
-    ; MessageDelta { stop_reason = Some EndTurn; usage = Some (make_usage 0 50) }
+    ; MessageDelta
+        { stop_reason = Some EndTurn
+        ; usage =
+            Some
+              { Types.input_tokens = None
+              ; output_tokens = Some 50
+              ; cache_creation_input_tokens = None
+              ; cache_read_input_tokens = None
+              }
+        }
     ];
   match Streaming.finalize_stream_acc acc with
   | Error err -> fail_unexpected_stream_error err

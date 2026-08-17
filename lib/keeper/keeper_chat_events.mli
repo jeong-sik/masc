@@ -72,7 +72,7 @@ type keeper_chat_event =
       }
   | Agent_core_stream_message_delta of
       { stop_reason : Agent_core.Types.stop_reason option
-      ; usage : Agent_core.Types.api_usage option
+      ; usage : Agent_core.Types.delta_usage option
       }
   | Agent_core_stream_message_stop
   | Agent_core_stream_ping
@@ -138,6 +138,10 @@ val publish : keeper_chat_event Eio.Stream.t -> keeper_chat_event -> unit
 val subscribe : keeper_chat_event Eio.Stream.t -> keeper_chat_event
 
 val api_usage_to_json : Agent_core.Types.api_usage -> Yojson.Safe.t
+
+(** JSON for cumulative mid-stream counters: only reported fields appear,
+    so "not reported" stays distinguishable from 0. *)
+val delta_usage_to_json : Agent_core.Types.delta_usage -> Yojson.Safe.t
 val stream_protocol_error_kind_to_string : stream_protocol_error_kind -> string
 val stream_protocol_error_summary : stream_protocol_error -> string
 val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t

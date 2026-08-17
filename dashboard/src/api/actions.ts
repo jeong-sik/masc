@@ -65,9 +65,9 @@ function parseBroadcastReceipt(receipt: unknown): BroadcastSendReceipt {
   }
 }
 
-export async function sendBroadcast(_actorHint: string, message: string): Promise<BroadcastSendReceipt> {
+export async function sendBroadcast(_actorHint: string, content: string): Promise<BroadcastSendReceipt> {
   try {
-    const text = await callMcpTool('masc_broadcast', { message })
+    const text = await callMcpTool('masc_broadcast', { content })
     return parseBroadcastReceipt(JSON.parse(text))
   } catch (error) {
     const structured = mcpStructuredContentFromError(error)

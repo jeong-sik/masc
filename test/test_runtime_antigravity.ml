@@ -61,6 +61,8 @@ let fixture_script
     ?(sleep_s = 0.0)
     ?line_delay_s
     ?after_first_line_delay_s
+    ?stdout_holder_s
+    ?exit_delay_s
     ?(exit_code = 0)
     lines
   =
@@ -107,6 +109,15 @@ let fixture_script
            after_first_line_delay_s;
        output_string output ("printf '%s\\n' " ^ shell_quote line ^ "\n"))
     lines;
+  (* The two #28912 shutdown shapes: a background child inheriting stdout
+     (so EOF never arrives even though the CLI exits), and the CLI itself
+     stalling before exit. *)
+  Option.iter
+    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f &\n" seconds))
+    stdout_holder_s;
+  Option.iter
+    (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
+    exit_delay_s;
   output_string output (Printf.sprintf "exit %d\n" exit_code);
   close_out output;
   Unix.chmod path 0o700;
@@ -114,7 +125,7 @@ let fixture_script
 ;;
 
 let with_fixture ?require_resume ?required_home ?sleep_s ?line_delay_s
-    ?after_first_line_delay_s ?exit_code lines f =
+    ?after_first_line_delay_s ?stdout_holder_s ?exit_delay_s ?exit_code lines f =
   let path =
     fixture_script
       ?require_resume
@@ -122,6 +133,8 @@ let with_fixture ?require_resume ?required_home ?sleep_s ?line_delay_s
       ?sleep_s
       ?line_delay_s
       ?after_first_line_delay_s
+      ?stdout_holder_s
+      ?exit_delay_s
       ?exit_code
       lines
   in
@@ -575,6 +588,29 @@ let test_live_start_and_resume () =
   | _ -> Alcotest.skip ()
 ;;
 
+(* #28912 first shape: the CLI exits after the result but a background
+   child inherited stdout, so EOF never arrives. Completion must come from
+   the parsed result event, not from EOF. *)
+let test_result_completes_even_when_stdout_stays_open () =
+  with_fixture ~stdout_holder_s:10.0 [ init (); result () ] (fun path ->
+    match run_fixture ~timeout_s:2.0 path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok turn ->
+      check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text)
+;;
+
+(* #28912 second shape: the CLI itself never exits after the result
+   ("Waiting for migrations to complete"). The bounded exit grace reaps it
+   and the already-served turn still succeeds even though the process ends
+   by signal. *)
+let test_result_completes_when_the_cli_hangs_in_shutdown () =
+  with_fixture ~exit_delay_s:15.0 [ init (); result () ] (fun path ->
+    match run_fixture ~timeout_s:2.0 path with
+    | Error error -> fail (Runtime_antigravity.error_to_string error)
+    | Ok turn ->
+      check string "reply" "MASC_ANTIGRAVITY_OK\n" turn.Runtime_antigravity.text)
+;;
+
 let () =
   run
     "runtime_antigravity"
@@ -642,6 +678,14 @@ let () =
             "progress resets stream idle timeout"
             `Quick
             test_progress_resets_stream_idle_timeout
+        ; test_case
+            "result completes despite an open stdout holder"
+            `Quick
+            test_result_completes_even_when_stdout_stays_open
+        ; test_case
+            "result completes despite a shutdown hang"
+            `Quick
+            test_result_completes_when_the_cli_hangs_in_shutdown
         ; test_case
             "stream idle timeout is typed"
             `Quick

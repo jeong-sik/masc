@@ -77,20 +77,20 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_broadcast"
     ; description =
         "Send a message visible to all agents in the MASC workspace. Use for status updates, \
-         announcements, warnings, or workspace."
+         announcements, or warnings."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
           ; ( "properties"
             , `Assoc
-                [ ( "message"
+                [ ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Message content to broadcast"
+                      ; "description", `String "Broadcast body text"
                       ; "minLength", `Int 1
                       ] )
                 ] )
-          ; "required", `List [ `String "message" ]
+          ; "required", `List [ `String "content" ]
           ]
     }
   ; { name = "keeper_task_claim"

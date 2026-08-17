@@ -333,6 +333,32 @@ function validateUsage(value: unknown): SafeParseResult<true> {
     : fail('ag_ui_event.value.usage.cost_usd', 'Expected finite cost_usd')
 }
 
+// KEEPER_STREAM_MESSAGE_DELTA usage carries cumulative counters and emits
+// only the ones the wire actually reported, so every field is optional and
+// there is no total_tokens or cost_usd. Requiring the full set here silently
+// dropped every classic (output-only) delta once the producer stopped
+// zero-filling unreported counters.
+function validateDeltaUsage(value: unknown): SafeParseResult<true> {
+  const result = exactCustomObject(value, 'usage', [
+    'input_tokens',
+    'output_tokens',
+    'cache_creation_input_tokens',
+    'cache_read_input_tokens',
+  ])
+  if (!result.success) return result
+  for (const field of [
+    'input_tokens',
+    'output_tokens',
+    'cache_creation_input_tokens',
+    'cache_read_input_tokens',
+  ]) {
+    if (result.data[field] === undefined) continue
+    const valid = requiredInteger(result.data, field)
+    if (!valid.success) return valid
+  }
+  return ok(true)
+}
+
 function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseResult<true> {
   if ([
     'KEEPER_CONNECTED',
@@ -396,7 +422,7 @@ function validateKeeperCustomPayload(name: string, payload: unknown): SafeParseR
     case 'KEEPER_STREAM_MESSAGE_DELTA': {
       const stopReason = optionalString(value, 'stop_reason')
       if (!stopReason.success) return stopReason
-      return value.usage === undefined ? ok(true) : validateUsage(value.usage)
+      return value.usage === undefined ? ok(true) : validateDeltaUsage(value.usage)
     }
     case 'KEEPER_CONTENT_BLOCK_START': {
       const index = requiredInteger(value, 'index')

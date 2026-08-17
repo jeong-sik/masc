@@ -1166,9 +1166,9 @@ let test_responses_stream_reasoning_tool_and_terminal () =
       "encrypted reasoning"
       "enc_reasoning_1"
       (Yojson.Safe.Util.member "encrypted_content" reasoning |> Yojson.Safe.Util.to_string);
-    Alcotest.(check int) "input tokens" 12 usage.input_tokens;
-    Alcotest.(check int) "output tokens" 8 usage.output_tokens;
-    Alcotest.(check int) "cache read" 2 usage.cache_read_input_tokens
+    Alcotest.(check (option int)) "input tokens" (Some 12) usage.input_tokens;
+    Alcotest.(check (option int)) "output tokens" (Some 8) usage.output_tokens;
+    Alcotest.(check (option int)) "cache read" (Some 2) usage.cache_read_input_tokens
   | _ -> Alcotest.fail "expected redacted reasoning carrier and terminal StopToolUse"
 ;;
 
@@ -1302,8 +1302,8 @@ let test_responses_stream_hidden_reasoning_before_tool () =
       "encrypted reasoning"
       "enc_hidden_1"
       (Yojson.Safe.Util.member "encrypted_content" reasoning |> Yojson.Safe.Util.to_string);
-    Alcotest.(check int) "input tokens" 12 usage.input_tokens;
-    Alcotest.(check int) "output tokens" 8 usage.output_tokens
+    Alcotest.(check (option int)) "input tokens" (Some 12) usage.input_tokens;
+    Alcotest.(check (option int)) "output tokens" (Some 8) usage.output_tokens
   | _ -> Alcotest.fail "expected hidden reasoning carrier before terminal"
 ;;
 

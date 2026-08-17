@@ -23,16 +23,16 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
   let state = ctx.state in
-  let message = arg_get_string ctx "message" "" in
-  let trimmed = String.trim message in
+  let content = arg_get_string ctx "content" "" in
+  let trimmed = String.trim content in
   if String.equal trimmed "" then
-    (* RFC-0189: caller-input violation (empty broadcast message).
-       The producer supplies [Workflow_rejection] explicitly; message text
+    (* RFC-0189: caller-input violation (empty broadcast content).
+       The producer supplies [Workflow_rejection] explicitly; body text
        never participates in classification. *)
     Some (Tool_result.error
             ~failure_class:Tool_result.Workflow_rejection
             ~tool_name ~start_time
-            "Broadcast message cannot be empty")
+            "Broadcast content cannot be empty")
   else
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
@@ -52,7 +52,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
          this reaches every Keeper's conversation window. *)
       Workspace.broadcast ?trace_context
         ~audience:Workspace_broadcast.Fleet_conversation config
-        ~from_agent:agent_name ~content:message
+        ~from_agent:agent_name ~content
     in
     match delivery with
     | Error error ->

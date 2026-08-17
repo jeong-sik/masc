@@ -130,7 +130,7 @@ fi
 
 # ── Step 6/10: broadcast ──
 echo "[6/10] masc_broadcast"
-r6="$(call_tool 1006 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg message "GP1 contract verification in progress" '{agent_name:$agent_name,message:$message}')")"
+r6="$(call_tool 1006 "masc_broadcast" "$(jq -cn --arg agent_name "$AGENT_NAME" --arg content "GP1 contract verification in progress" '{agent_name:$agent_name,content:$content}')")"
 if require_ok "$r6"; then
   step_pass
 else

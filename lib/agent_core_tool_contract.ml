@@ -65,14 +65,14 @@ let agent_core_bindings : agent_core_tool_binding list =
       canonical_operation = "masc_broadcast";
       description = "Broadcast a message to all active agents. Use when sharing status updates, workspace signals, or requesting help from any available agent.";
       input_schema =
-        object_schema ~required:[ "message" ]
+        object_schema ~required:[ "content" ]
           [
-            assoc_field "message" (string_prop "The message to broadcast");
+            assoc_field "content" (string_prop "Broadcast body text");
           ];
       arg_bindings =
         [
           ("agent_name", Agent_name);
-          ("message", Input_field "message");
+          ("content", Input_field "content");
         ];
     };
     { name = "masc_heartbeat";

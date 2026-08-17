@@ -26,11 +26,41 @@ let test_parse_usage_with_cache_tokens () =
   let resp = Agent_core.Llm_provider.Backend_anthropic.parse_response json in
   match resp.usage with
   | Some u ->
-    Alcotest.(check int) "input_tokens" 100 u.input_tokens;
+    (* Wire input 100 is exclusive of the cache components; the canonical
+       api_usage carries the inclusive prompt total 100+2000+1500. *)
+    Alcotest.(check int) "input_tokens" 3600 u.input_tokens;
     Alcotest.(check int) "output_tokens" 50 u.output_tokens;
     Alcotest.(check int) "cache_creation" 2000 u.cache_creation_input_tokens;
     Alcotest.(check int) "cache_read" 1500 u.cache_read_input_tokens
   | None -> Alcotest.fail "expected usage"
+;;
+
+let test_streaming_message_delta_cumulative_input () =
+  (* The server-tool wire shape: the final delta repeats the full usage as
+     cumulative totals, input still exclusive on the wire. The parser
+     normalizes input inclusively against the cache counts of the same
+     report and carries every field as present. *)
+  let data_str =
+    {|{
+    "type": "message_delta",
+    "delta": {"stop_reason": "end_turn"},
+    "usage": {
+      "input_tokens": 10682,
+      "output_tokens": 510,
+      "cache_creation_input_tokens": 200,
+      "cache_read_input_tokens": 50000
+    }
+  }|}
+  in
+  match
+    Agent_core.Llm_provider.Streaming.parse_sse_event (Some "message_delta") data_str
+  with
+  | Some (MessageDelta { usage = Some u; _ }) ->
+    Alcotest.(check (option int)) "input inclusive" (Some 60882) u.input_tokens;
+    Alcotest.(check (option int)) "output" (Some 510) u.output_tokens;
+    Alcotest.(check (option int)) "cache_creation" (Some 200) u.cache_creation_input_tokens;
+    Alcotest.(check (option int)) "cache_read" (Some 50000) u.cache_read_input_tokens
+  | _ -> Alcotest.fail "expected MessageDelta with usage"
 ;;
 
 let test_parse_usage_without_cache_tokens () =
@@ -180,9 +210,15 @@ let test_streaming_message_delta_with_cache () =
     Alcotest.(check bool) "has stop_reason" true (Option.is_some stop_reason);
     (match usage with
      | Some u ->
-       Alcotest.(check int) "output" 42 u.output_tokens;
-       Alcotest.(check int) "cache_creation" 1500 u.cache_creation_input_tokens;
-       Alcotest.(check int) "cache_read" 800 u.cache_read_input_tokens
+       (* Cumulative delta counters are per-field optional: reported ones
+          carry Some, the unreported input stays None (never a fabricated 0). *)
+       Alcotest.(check (option int)) "output" (Some 42) u.output_tokens;
+       Alcotest.(check (option int))
+         "cache_creation"
+         (Some 1500)
+         u.cache_creation_input_tokens;
+       Alcotest.(check (option int)) "cache_read" (Some 800) u.cache_read_input_tokens;
+       Alcotest.(check (option int)) "input not reported" None u.input_tokens
      | None -> Alcotest.fail "expected usage in message_delta")
   | _ -> Alcotest.fail "expected MessageDelta event"
 ;;
@@ -203,9 +239,12 @@ let test_streaming_message_delta_without_cache () =
   | Some (MessageDelta { usage; _ }) ->
     (match usage with
      | Some u ->
-       Alcotest.(check int) "output" 10 u.output_tokens;
-       Alcotest.(check int) "cache_creation defaults 0" 0 u.cache_creation_input_tokens;
-       Alcotest.(check int) "cache_read defaults 0" 0 u.cache_read_input_tokens
+       Alcotest.(check (option int)) "output" (Some 10) u.output_tokens;
+       Alcotest.(check (option int))
+         "cache_creation not reported"
+         None
+         u.cache_creation_input_tokens;
+       Alcotest.(check (option int)) "cache_read not reported" None u.cache_read_input_tokens
      | None -> Alcotest.fail "expected usage")
   | _ -> Alcotest.fail "expected MessageDelta event"
 ;;
@@ -244,6 +283,10 @@ let () =
             "message_delta without cache tokens"
             `Quick
             test_streaming_message_delta_without_cache
+        ; test_case
+            "message_delta cumulative input normalized"
+            `Quick
+            test_streaming_message_delta_cumulative_input
         ] )
     ]
 ;;

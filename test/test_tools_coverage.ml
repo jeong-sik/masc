@@ -207,7 +207,13 @@ let test_masc_broadcast_schema () =
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has message" true (List.mem_assoc "message" props)
+          Alcotest.(check bool) "has content" true (List.mem_assoc "content" props);
+          (* The body is named "content" on every surface that carries it —
+             board post, surface post, file write, and this tool's own result
+             payload. A stray "message" here is the fork that cost a keeper
+             turn on 2026-08-16, so its absence is asserted too. *)
+          Alcotest.(check bool) "no stray message field" false
+            (List.mem_assoc "message" props)
       | None -> Alcotest.fail "masc_broadcast missing properties"
 
 let test_masc_transition_schema () =

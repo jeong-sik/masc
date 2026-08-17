@@ -102,6 +102,7 @@ normal_targets=(
   @test/runtest-test_keeper_shutdown_ownerless_admission_release
   @test/runtest-test_keeper_create_admission_transaction
   @test/runtest-test_keeper_toml_accessor_matrix
+  @test/runtest-test_keeper_tool_execute_stream_close
   @test/runtest-test_keeper_turn_dispatch_authority
   @test/runtest-test_runtime_quota_window
   @test/runtest-test_subsystem_health_state

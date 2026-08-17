@@ -64,8 +64,12 @@ class RfcCollision:
         return f"RFC-{self.rfc_number}: claimed by {claimants}"
 
 
-def _run_gh(args: List[str]) -> Any:
-    """Run gh cli and return JSON output."""
+def _run_gh(args: List[str], *, allow_not_found: bool = False) -> Any:
+    """Run gh cli and return JSON output.
+
+    With ``allow_not_found`` an HTTP 404 returns ``None`` instead of exiting:
+    the caller owns the typed meaning of an unreachable object (e.g. a merge
+    commit orphaned when its stacked parent branch was auto-deleted)."""
     rendered_args = " ".join(args)
     for attempt in range(1, GH_RETRIES + 1):
         result = subprocess.run(
@@ -74,6 +78,8 @@ def _run_gh(args: List[str]) -> Any:
             text=True,
         )
         if result.returncode != 0:
+            if allow_not_found and "(HTTP 404)" in result.stderr:
+                return None
             if attempt < GH_RETRIES:
                 time.sleep(attempt)
                 continue
@@ -223,8 +229,19 @@ def merge_commit_already_in_base(
     # status == "ahead"   -> head is ahead of base (base is ancestor of head)
     # status == "identical" -> same
     resp = _run_gh(
-        [f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"]
+        [f"/repos/{owner}/{repo}/compare/{merge_commit_sha}...{pr_base_sha}"],
+        allow_not_found=True,
     )
+    if resp is None:
+        # The merge commit is unreachable — typical for a stacked child whose
+        # parent branch was auto-deleted after folding. Containment cannot be
+        # proven, so do not skip: let the overlap analysis run.
+        print(
+            f"axis compare 404 for {merge_commit_sha[:12]}...{pr_base_sha[:12]}: "
+            "unreachable merge commit, treating as not-contained",
+            file=sys.stderr,
+        )
+        return False
     status = resp.get("status", "")
     return status in ("ahead", "identical")
 

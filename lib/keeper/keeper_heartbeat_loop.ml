@@ -1122,13 +1122,7 @@ let run_heartbeat_loop
   in
   let timing_cursor = ref 0 in
   let timing_filled = ref 0 in
-  (* Phase 1: work-as-heartbeat freshness tracking.
-     Updated ONLY on Workspace.heartbeat success after turn. *)
-  let last_successful_heartbeat_ts = ref (Time_compat.now ()) in
   let work_as_hb () = Runtime_params.get Runtime_settings.keeper_work_as_hb_enabled in
-  let _max_silence () =
-    Runtime_params.get Runtime_settings.keeper_work_as_hb_max_silence_sec
-  in
   (* Persistent AGENT_CORE Context.t — created once per keeper lifecycle.
      AGENT_CORE Context.t is a mutable cross-turn state container for values
      written directly into the shared context. This preserves shared
@@ -1192,7 +1186,6 @@ let run_heartbeat_loop
             ~ctx
             ~meta_current
             ~consecutive_failures
-            ~last_successful_heartbeat_ts
         in
         if !consecutive_failures > 0
         then
@@ -1380,10 +1373,9 @@ let run_heartbeat_loop
                  (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
              (* Phase 1: work-as-heartbeat — renew point (b).
                 After turn, call Workspace.heartbeat to prove workspace I/O health.
-                On success: refresh freshness lease + reset consecutive_failures.
-                On failure: leave timestamp unchanged → presence sync resumes next cycle.
+                On success: reset consecutive_failures.
                 T6 audit: a crashed cycle proves nothing about health — do not
-                refresh the lease or reset consecutive_failures for it. *)
+                reset consecutive_failures for it. *)
              (match work_heartbeat_action with
               | Refresh_work_heartbeat ->
                refresh_work_as_heartbeat
@@ -1391,7 +1383,6 @@ let run_heartbeat_loop
                  ~meta_after_proactive
                  ~proactive_warmup_elapsed
                  ~work_as_hb
-                 ~last_successful_heartbeat_ts
                  ~consecutive_failures
               | Preserve_work_heartbeat ->
                Log.Keeper.info

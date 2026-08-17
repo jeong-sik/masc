@@ -247,16 +247,6 @@ let keeper_work_as_hb_enabled =
             min_value = None; max_value = None }
     ()
 
-let keeper_work_as_hb_max_silence_sec =
-  register_float
-    ~key:"keeper.work_as_hb_max_silence_sec"
-    ~default:(fun () -> Env_config_keeper.WorkAsHeartbeat.max_silence_sec)
-    ~min:10.0 ~max:600.0
-    ~meta:{ description = "Work-as-heartbeat 최대 침묵 시간(초)";
-            value_type = "float";
-            min_value = Some (`Float 10.0); max_value = Some (`Float 600.0) }
-    ()
-
 let keeper_stage_timing_ring_size =
   register_int
     ~key:"keeper.stage_timing_ring_size"
@@ -292,7 +282,6 @@ let surfaces =
       param_keys = [
         "keeper.snapshot_sec";
         "keeper.work_as_hb_enabled";
-        "keeper.work_as_hb_max_silence_sec";
         "keeper.stage_timing_ring_size";
       ];
     };

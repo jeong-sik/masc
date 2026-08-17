@@ -154,15 +154,6 @@ function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
 
-function formatTaskNarrative(agent: string, taskId?: string, status?: string): string {
-  const actor = actorLabel(agent)
-  const task = (taskId ?? '').trim()
-  const nextStatus = (status ?? '').trim()
-  if (task && nextStatus) return `${actor}가 태스크 ${task}를 ${nextStatus} 상태로 갱신했습니다.`
-  if (task) return `${actor}가 태스크 ${task}를 갱신했습니다.`
-  return `${actor}가 태스크 상태를 갱신했습니다.`
-}
-
 function formatBoardNarrative(label: '게시글' | '댓글', author: string, preview: string | undefined): string {
   return `${actorLabel(author)}가 ${label}을 남겼습니다${quotePreview(preview)}`
 }
@@ -287,16 +278,6 @@ function handleEvent(event: SSEEvent): void {
   }
 
   switch (type) {
-    case 'agent_bound':
-      addTypedJournalEntry(agent, 'Joined', 'system', 'agent_bound', {
-        narrativeText: `${actorLabel(agent)}가 프로젝트에 참여했습니다.`,
-      })
-      break
-    case 'agent_unbound':
-      addTypedJournalEntry(agent, 'Left', 'system', 'agent_unbound', {
-        narrativeText: `${actorLabel(agent)}가 프로젝트에서 나갔습니다.`,
-      })
-      break
     case 'broadcast':
       addTypedJournalEntry(
         agent,
@@ -307,19 +288,6 @@ function handleEvent(event: SSEEvent): void {
           severity: event.severity,
           source: event.source,
           narrativeText: `${actorLabel(agent)}가 공지/메시지를 보냈습니다${quotePreview(event.message ?? event.content)}`,
-        },
-      )
-      break
-    case 'task_update':
-      addTypedJournalEntry(
-        agent,
-        `Task: ${event.task_id ?? ''} -> ${event.status ?? ''}`,
-        'tasks',
-        'task_update',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText: formatTaskNarrative(agent, event.task_id, event.status),
         },
       )
       break
@@ -553,19 +521,6 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
-    case 'keeper_guardrail':
-      addTypedJournalEntry(
-        event.name ?? agent,
-        `Guardrail: ${event.reason ?? '(unknown reason)'}`,
-        'keepers',
-        'keeper_guardrail',
-        {
-          severity: event.severity ?? '(unknown severity)',
-          source: event.source,
-          narrativeText: `${actorLabel(event.name ?? agent)}가 guardrail에 의해 중단되었습니다: ${event.reason ?? '(unknown reason)'}`,
-        },
-      )
-      break
     case 'keeper_phase_changed':
       addTypedJournalEntry(
         event.name ?? agent,
@@ -640,75 +595,8 @@ function handleEvent(event: SSEEvent): void {
       }
       break
     }
-    case 'keeper_tool_skipped': {
-      const toolName = event.tool_name ?? '?'
-      const reasonCode = event.reason_code ?? 'unknown'
-      addTypedJournalEntry(
-        event.name ?? agent,
-        `Tool skipped: ${toolName} (${reasonCode})`,
-        'keepers',
-        'keeper_tool_call',
-        {
-          severity: 'warn',
-          source: event.source,
-          narrativeText: `${actorLabel(event.name ?? agent)}의 ${toolName} 도구가 차단되었습니다 (${reasonCode})`,
-        },
-      )
-      {
-        const keeperName = keeperTraceNameFromEvent(event, agent)
-        if (!keeperName) break
-        appendLiveToolCall(keeperName, {
-          toolName,
-          durationMs: 0,
-          success: false,
-          error: `skipped: ${reasonCode}`,
-          tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
-        })
-      }
-      break
-    }
     // Agent Core bridge events
     case 'agent_core:masc:keeper:lifecycle': {
-      break
-    }
-    case 'agent_core:masc:trust_updated': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentA = (p.agent_a as string) ?? ''
-      const agentB = (p.agent_b as string) ?? ''
-      const trustScore = typeof p.trust_score === 'number' ? p.trust_score : undefined
-      addTypedJournalEntry(
-        agentA,
-        `Trust ${agentB}${trustScore != null ? ` · ${trustScore.toFixed(2)}` : ''}`,
-        'agentCore',
-        'agent_core_event',
-        {
-          narrativeText:
-            `${actorLabel(agentA)}와 ${actorLabel(agentB)} 사이 trust score가 갱신되었습니다`
-            + (trustScore != null ? ` (${trustScore.toFixed(2)})` : ''),
-          ...envelopeFromEvent(event),
-        },
-      )
-      break
-    }
-    case 'agent_core:masc:reputation_changed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const agentName = (p.agent_name as string) ?? ''
-      const oldScore = typeof p.old_score === 'number' ? p.old_score : undefined
-      const newScore = typeof p.new_score === 'number' ? p.new_score : undefined
-      const trend = (p.trend as string) ?? undefined
-      addTypedJournalEntry(
-        agentName,
-        `Reputation${oldScore != null && newScore != null ? ` ${oldScore.toFixed(2)} → ${newScore.toFixed(2)}` : ''}${trend ? ` · ${trend}` : ''}`,
-        'agentCore',
-        'agent_core_event',
-        {
-          narrativeText:
-            `${actorLabel(agentName)} reputation이 갱신되었습니다`
-            + (oldScore != null && newScore != null ? ` (${oldScore.toFixed(2)} → ${newScore.toFixed(2)})` : '')
-            + (trend ? `, trend=${trend}` : ''),
-          ...envelopeFromEvent(event),
-        },
-      )
       break
     }
     case 'agent_core:agent_started': {
@@ -936,24 +824,6 @@ function handleEvent(event: SSEEvent): void {
           severity: event.severity,
           source: event.source,
           narrativeText: `${actorLabel(payload.agent_name)} Agent Core context compact (${payload.phase})`,
-        },
-      )
-      break
-    }
-    case 'agent_core:task_state_changed': {
-      const p = (event.payload ?? {}) as Record<string, unknown>
-      const taskId = asString(p.task_id) ?? event.task_id ?? 'unknown'
-      const fromState = asString(p.from_state)
-      const toState = asString(p.to_state)
-      addTypedJournalEntry(
-        taskId,
-        `Task ${taskId}${fromState || toState ? ` · ${fromState ?? '?'}→${toState ?? '?'}` : ''}`,
-        'agentCore',
-        'agent_core_task',
-        {
-          severity: event.severity,
-          source: event.source,
-          narrativeText: `Task 상태 변경 ${taskId}${fromState || toState ? ` (${fromState ?? '?'} → ${toState ?? '?'})` : ''}`,
         },
       )
       break

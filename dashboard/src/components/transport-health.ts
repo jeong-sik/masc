@@ -125,12 +125,9 @@ export function shouldRefreshFromEvent(event: SSEEvent): boolean {
   if (!type) return false
   if (type === 'keeper_heartbeat') return false
   if (type === 'broadcast' || type === 'masc/broadcast') return true
-  if (type === 'agent_bound' || type === 'masc/agent_bound') return true
-  if (type === 'agent_unbound' || type === 'masc/agent_unbound') return true
   if (type.startsWith('task_') || type.startsWith('masc/task_')) return true
   if (type.startsWith('keeper_') || type.startsWith('masc/keeper_')) return true
-  if (type.startsWith('decision_') || type === 'runtime_param_changed') return true
-  return type.startsWith('client_input_')
+  return type.startsWith('decision_') || type === 'runtime_param_changed'
 }
 
 /**

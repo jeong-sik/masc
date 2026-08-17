@@ -437,19 +437,6 @@ function sameAgentCoreAgentEvent(left: AgentCoreAgentEvent, right: AgentCoreAgen
         && left.phase === right.phase
         && left.detail === right.detail
       )
-    case 'trust_updated':
-      return (
-        right.type === 'trust_updated'
-        && left.secondary_agent === right.secondary_agent
-        && left.trust_score === right.trust_score
-      )
-    case 'reputation_changed':
-      return (
-        right.type === 'reputation_changed'
-        && left.old_score === right.old_score
-        && left.new_score === right.new_score
-        && left.trend === right.trend
-      )
   }
 }
 

@@ -315,6 +315,27 @@ normal_targets=(
   @test/runtest-test_dated_jsonl
   @test/runtest-test_audit_log
   @test/keeper_github_identity/runtest
+  # Declared in Dune, compiled every run, never executed before this batch
+  # (masc#28925 audit). Each target below was run individually against this
+  # worktree and confirmed green before being added here.
+  @test/runtest-test_keeper_memory_os_current
+  @test/runtest-test_keeper_msg_async_path_traversal
+  @test/runtest-test_keeper_msg_async_durable_active_inventory
+  @test/runtest-test_keeper_mutex_coverage
+  @test/runtest-test_board_karma_ledger
+  @test/runtest-test_board_vote_persistence
+  @test/runtest-test_keeper_event_queue
+  @test/runtest-test_keeper_event_queue_owner_lock
+  @test/runtest-test_keeper_event_queue_persist_poison
+  @test/runtest-test_keeper_event_queue_state_v2
+  @test/runtest-test_keeper_connector_attention_wake
+  @test/runtest-test_keeper_external_attention
+  @test/runtest-test_keeper_manual_compaction_preemption
+  @test/runtest-test_keeper_compaction_unit
+  @test/runtest-test_keeper_compaction_persist_gate
+  @test/runtest-test_keeper_overflow_recovery
+  @test/runtest-test_keeper_post_turn_wirein_order
+  @test/runtest-test_keeper_checkpoint_purge
 )
 
 board_attention_targets=(

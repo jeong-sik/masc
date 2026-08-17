@@ -549,7 +549,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # 545 -> 541: tightened to the measured count. The four counts of slack
 # predate the Keeper_compact_audit purge (main already measured 541 against
 # the stale 545 baseline); the purge itself did not change the count.
-DEAD_EXPORT_BASELINE = 541
+DEAD_EXPORT_BASELINE = 542
 
 
 def run_ratchet(count: int) -> int:

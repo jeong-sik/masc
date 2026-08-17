@@ -96,9 +96,14 @@ let public_mcp_surface_tools =
   ; (* Task workspace read-side: operators need the history of a task they
        did not submit themselves (e.g. one another Keeper claimed). *)
     "masc_task_history"
-  ; (* Fusion. Read-only status check for the fusion pipeline an operator
-       is coordinating multiple keepers through. *)
-    "masc_fusion_status"
+  (* [masc_fusion_status] deliberately stays off this surface: RFC-0266 §7
+     Phase 3 scopes it to the calling keeper's own fusion runs ("a run owned
+     by a different keeper is reported as not found" -- see
+     Keeper_tool_in_process_runtime.mli), and it has no external Tool_dispatch
+     tag registration, so an operator caller could only ever see an empty
+     result. Making it operator-visible would require a real scoping redesign
+     (target-keeper field + contract change), not a whitelist entry. See
+     masc#28963 / masc#28960. *)
   ]
   @ public_schedule_surface_tools
   @

@@ -1441,8 +1441,6 @@ let test_placeholder_tools_hidden_when_env_false () =
    | Some v -> Unix.putenv "MASC_PLACEHOLDER_TOOLS_ENABLED" v);
   cleanup_dir base_path
 
-(* Regression: task-271 — bool_of_raw_value must accept short-form "y"/"n"
-   so that MASC_KEEPER_HISTORY_FRAGMENT_FILTER=n returns false. *)
 let test_handle_request_tools_list_include_hidden_metadata () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

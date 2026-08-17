@@ -15,7 +15,7 @@
  },
  "turns_1_to_9": "all nine facts planted and echoed per the harness log (~2h40m interval); turn 5 followed by the planned restart injection — 'restart done in 0.1s continuation=true' (same trace, same generation)",
  "disruptions_crossed": [
-  "unplanned server restarts throughout the run — the reviewed server logs show at least seven full restarts in the 01:00-02:32 KST window plus 19:20 and 22:38 KST (third session, masc-08, operator); the keeper is non-autoboot, so each surviving turn depended on a manual boot, and turn 9 was delayed ~40m waiting for one",
+  "unplanned full server restarts crossed: three in the 01:00-02:32 KST window (Shutdown complete + reboot pairs at 01:00, 01:25, 01:58) plus 19:20 KST (masc-08 redeploy) and 22:38 KST (operator) — five in total; the keeper is non-autoboot, so each surviving turn depended on a manual boot (the 02:32 dashboard action is a keeper boot, not a server restart), and turn 9 was delayed ~40m waiting for one",
   "the 22:38 restart also rotated the auth token, killing the harness at the recall turn (#28958)"
  ],
  "recall_completion": {

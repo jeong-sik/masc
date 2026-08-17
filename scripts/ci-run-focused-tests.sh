@@ -321,6 +321,11 @@ board_attention_targets=(
 
 agent_core_targets=(
   @packages/agent_core/test/runtest
+  # Recursive alias: runs the ppx_inline_test suites embedded in
+  # packages/agent_core/lib{,/base,/protocol,/llm_provider}. These were in no
+  # CI manifest, so the exact_output_plan fingerprint pin rotted silently
+  # after #27945 (masc#28897).
+  @packages/agent_core/lib/runtest
   @test/runtest-test_keeper_hooks_agent_core_introspection
   @test/runtest-test_keeper_execution_join
   @test/runtest-test_hitl_summary_worker

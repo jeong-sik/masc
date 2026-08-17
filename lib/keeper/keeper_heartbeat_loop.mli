@@ -20,7 +20,6 @@ val sync_keeper_presence :
   ctx:'a context ->
   meta_current:keeper_meta ->
   consecutive_failures:int ref ->
-  last_successful_heartbeat_ts:float ref ->
   keeper_meta
 
 val collect_keepalive_board_events :
@@ -219,7 +218,6 @@ val refresh_work_as_heartbeat :
   meta_after_proactive:keeper_meta ->
   proactive_warmup_elapsed:bool ->
   work_as_hb:(unit -> bool) ->
-  last_successful_heartbeat_ts:float ref ->
   consecutive_failures:int ref ->
   unit
 

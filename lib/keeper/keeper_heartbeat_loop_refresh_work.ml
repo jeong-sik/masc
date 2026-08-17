@@ -28,7 +28,6 @@ let refresh_work_as_heartbeat
       ~(meta_after_proactive : keeper_meta)
       ~(proactive_warmup_elapsed : bool)
       ~(work_as_hb : unit -> bool)
-      ~(last_successful_heartbeat_ts : float ref)
       ~(consecutive_failures : int ref)
   : unit
   =
@@ -57,8 +56,5 @@ let refresh_work_as_heartbeat
           (Printexc.to_string exn);
         false
     in
-    if hb_ok
-    then (
-      last_successful_heartbeat_ts := Time_compat.now ();
-      consecutive_failures := 0))
+    if hb_ok then consecutive_failures := 0)
 ;;

@@ -11,8 +11,8 @@
 
     The keeper's work-as-heartbeat refresher treated any call that did not
     raise as proof that a session-bound workspace was writable, and a missing
-    agent file returns without raising. That is the value it stamps into
-    [last_successful_heartbeat_ts] and uses to reset [consecutive_failures].
+    agent file returns without raising. That is the evidence it uses to reset
+    [consecutive_failures].
 
     These cases pin the outcome an unwritten heartbeat now reports, and that
     the rendered message is unchanged. *)

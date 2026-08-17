@@ -30,7 +30,6 @@ describe('keeper SSE matching', () => {
   it('recognizes tool-call events across canonical and MASC alias wire types', () => {
     expect(isKeeperToolActivityEvent({ type: 'keeper_tool_call' } as SSEEvent)).toBe(true)
     expect(isKeeperToolActivityEvent({ type: 'masc/keeper_tool_call' } as SSEEvent)).toBe(true)
-    expect(isKeeperToolActivityEvent({ type: 'keeper_tool_skipped' } as SSEEvent)).toBe(true)
     expect(isKeeperToolActivityEvent({ type: 'keeper_turn_complete' } as SSEEvent)).toBe(false)
   })
 })

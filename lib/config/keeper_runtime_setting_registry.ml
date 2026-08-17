@@ -177,13 +177,16 @@ let all =
       "Keeper heartbeat cycle interval in seconds"
   ; setting
       ~range:(float_range ~min:0.0 ())
+      ~lifecycle:
+        (retired
+           "No runtime reader consumed this window; the freshness clock it was meant to bound had no reader either")
       ~env_name:"MASC_KEEPER_MAX_SILENCE_SEC"
       ~exposure:(Toml_and_env "heartbeat.max_silence_sec")
       ~value_kind:Float
-      ~default:"300.0"
-      ~consumers:[ "Env_config_keeper.WorkAsHeartbeat"; "Keeper_heartbeat_loop" ]
+      ~default:"(removed)"
+      ~consumers:[]
       ~category:"heartbeat"
-      "Maximum age of workspace presence proof"
+      "Removed workspace presence proof age overlay"
   ; setting
       ~range:(int_range ~min:15 ~max:3600 ())
       ~env_name:"MASC_KEEPER_SNAPSHOT_SEC"

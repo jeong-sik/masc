@@ -32,25 +32,7 @@ export interface AgentCoreKeeperLifecycleEvent extends AgentCoreAgentEventBase {
   detail?: string
 }
 
-interface AgentCoreTrustUpdatedEvent extends AgentCoreAgentEventBase {
-  type: 'trust_updated'
-  actor_kind: 'agent'
-  secondary_agent?: string
-  trust_score?: number
-}
-
-interface AgentCoreReputationChangedEvent extends AgentCoreAgentEventBase {
-  type: 'reputation_changed'
-  actor_kind: 'agent'
-  old_score?: number
-  new_score?: number
-  trend?: string
-}
-
-export type AgentCoreAgentEvent =
-  | AgentCoreKeeperLifecycleEvent
-  | AgentCoreTrustUpdatedEvent
-  | AgentCoreReputationChangedEvent
+export type AgentCoreAgentEvent = AgentCoreKeeperLifecycleEvent
 
 export interface AgentCoreHealthSummary {
   agentEventsCount: number

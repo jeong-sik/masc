@@ -467,8 +467,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_bool (Feature_flag_registry.get_bool row.env_name)
        | "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" ->
          display_int Env_config_keeper.KeeperKeepalive.interval_sec
-       | "MASC_KEEPER_MAX_SILENCE_SEC" ->
-         display_float Env_config_keeper.WorkAsHeartbeat.max_silence_sec
        | "MASC_KEEPER_SNAPSHOT_SEC" ->
          display_int Env_config_keeper.KeeperRuntime.snapshot_sec
        | "MASC_KEEPER_WORK_AS_HEARTBEAT" ->

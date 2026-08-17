@@ -1,5 +1,5 @@
 (** Test suite for Phase 1: Work-as-heartbeat config defaults,
-    freshness decision logic, and Phase 0 percentile function.
+    keepalive cycle actions, and Phase 0 percentile function.
 
     Note: env_config values are top-level let bindings, evaluated once at
     program start. Runtime putenv does NOT affect them. Tests verify defaults
@@ -18,19 +18,6 @@ let test_wah_enabled_default () =
   check bool "work-as-heartbeat enabled by default"
     true Cfg.WorkAsHeartbeat.enabled
 
-let test_wah_max_silence_default () =
-  (* MASC_KEEPER_MAX_SILENCE_SEC not set in test env → default 300.0 *)
-  let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  check (float 0.1) "default max silence 300s" 300.0 v
-
-let test_wah_max_silence_floor_logic () =
-  (* The floor clamp uses keepalive interval dynamically.
-     We verify: max_silence_sec >= keepalive_interval_sec always. *)
-  let v = Cfg.WorkAsHeartbeat.max_silence_sec in
-  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
-  check bool "max_silence >= keepalive interval"
-    true (v >= interval)
-
 let keeper_setting env_name =
   match
     List.find_opt
@@ -46,11 +33,7 @@ let test_keepalive_registry_defaults_match_runtime () =
   let interval = keeper_setting "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC" in
   check string "interval registry default matches runtime"
     (string_of_int Cfg.KeeperKeepalive.interval_sec)
-    interval.default_display;
-  let max_silence = keeper_setting "MASC_KEEPER_MAX_SILENCE_SEC" in
-  check (float 0.1) "max-silence registry default matches runtime"
-    Cfg.WorkAsHeartbeat.max_silence_sec
-    (float_of_string max_silence.default_display)
+    interval.default_display
 ;;
 
 (* ── KeeperKeepalive config defaults ───────────────────── *)
@@ -153,58 +136,10 @@ let test_timing_ring_size_range () =
 
 (* ── Config invariant properties ───────────────────────── *)
 
-let test_config_invariant_silence_ge_interval () =
-  let silence = Cfg.WorkAsHeartbeat.max_silence_sec in
-  let interval = Float.of_int Cfg.KeeperKeepalive.interval_sec in
-  check bool "max_silence >= interval (invariant)" true (silence >= interval)
-
 let test_config_invariant_sweep_independent () =
   let sweep = Cfg.KeeperSupervisor.sweep_interval_sec in
   check bool "sweep > 0" true (sweep > 0.0)
 
-
-(* ── Freshness decision pure logic ──────────────────────── *)
-
-let test_freshness_fresh () =
-  let now = 100.0 in
-  let last_hb = 50.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "50s ago < 120s window → fresh" true fresh
-
-let test_freshness_stale () =
-  let now = 200.0 in
-  let last_hb = 50.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "150s ago >= 120s window → stale" false fresh
-
-let test_freshness_exact_boundary () =
-  let now = 170.0 in
-  let last_hb = 50.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "exactly 120s → NOT fresh (< is strict)" false fresh
-
-let test_freshness_never_heartbeated () =
-  (* Initial last_hb = 0.0. At unix epoch + 200s:
-     200.0 - 0.0 = 200.0 >= 120.0 → stale.
-     This correctly forces initial presence sync. *)
-  let now = 200.0 in
-  let last_hb = 0.0 in
-  let max_silence = 120.0 in
-  let fresh = now -. last_hb < max_silence in
-  check bool "never heartbeated (0.0) → stale → forces presence sync"
-    false fresh
-
-let test_freshness_disabled_flag () =
-  (* When work_as_hb = false, presence_fresh is always false regardless of timestamp *)
-  let work_as_hb = false in
-  let now = 100.0 in
-  let last_hb = 99.0 in
-  let max_silence = 120.0 in
-  let fresh = work_as_hb && (now -. last_hb < max_silence) in
-  check bool "feature disabled → always stale" false fresh
 
 let test_completed_cycle_records_and_refreshes () =
   match
@@ -279,8 +214,6 @@ let () =
   run "work_as_heartbeat" [
     "config", [
       test_case "enabled default" `Quick test_wah_enabled_default;
-      test_case "max_silence default" `Quick test_wah_max_silence_default;
-      test_case "max_silence floor invariant" `Quick test_wah_max_silence_floor_logic;
       test_case "registry defaults match runtime" `Quick
         test_keepalive_registry_defaults_match_runtime;
     ];
@@ -307,13 +240,6 @@ let () =
       test_case "timing_ring default" `Quick test_timing_ring_size_default;
       test_case "timing_ring range" `Quick test_timing_ring_size_range;
     ];
-    "freshness_logic", [
-      test_case "within window → fresh" `Quick test_freshness_fresh;
-      test_case "beyond window → stale" `Quick test_freshness_stale;
-      test_case "exact boundary → stale (strict <)" `Quick test_freshness_exact_boundary;
-      test_case "never heartbeated → stale" `Quick test_freshness_never_heartbeated;
-      test_case "feature disabled → always stale" `Quick test_freshness_disabled_flag;
-    ];
     "cycle_action", [
       test_case
         "completed records and refreshes work-heartbeat"
@@ -329,7 +255,6 @@ let () =
         test_busy_cycle_defers_typed_block;
     ];
     "config_invariants", [
-      test_case "max_silence >= interval" `Quick test_config_invariant_silence_ge_interval;
       test_case "sweep interval positive" `Quick test_config_invariant_sweep_independent;
     ];
     "percentile", [

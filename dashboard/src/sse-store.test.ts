@@ -518,9 +518,8 @@ describe('setupServerPushReaction reconnect hydration', () => {
     const { sseStore } = await loadSseStore()
     route.value = { tab: 'monitoring', params: { section: 'agents' }, postId: null }
     sseStore.routeServerPushEvent({
-      type: 'masc/keeper_guardrail',
+      type: 'masc/keeper_compaction',
       name: 'qa-king',
-      reason: 'tool boundary',
     })
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()

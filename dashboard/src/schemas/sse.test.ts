@@ -18,8 +18,7 @@ describe('SSEEventTypeSchema', () => {
 
   it('accepts MASC wire aliases emitted by server-side SSE publishers', () => {
     expect(SSEEventTypeSchema.parse('masc/broadcast')).toBe('masc/broadcast')
-    expect(SSEEventTypeSchema.parse('masc/agent_bound')).toBe('masc/agent_bound')
-    expect(SSEEventTypeSchema.parse('masc/agent_unbound')).toBe('masc/agent_unbound')
+    expect(SSEEventTypeSchema.parse('masc/board_post')).toBe('masc/board_post')
   })
 
   it('accepts current and future agent-core-prefixed event types', () => {

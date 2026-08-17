@@ -23,7 +23,7 @@
    },
    {
     "step": "the composition catalog is absent on this live server",
-    "evidence": "lib/keeper/keeper_tool_composition_catalog.ml:96: path ~config_root = Filename.concat config_root 'tool-compositions.toml'. lib/keeper/keeper_run_tools_setup.ml:112-127: load_composition_catalog returns Ok None when the file is missing (Fs_compat.Exact_missing), and expected_model_tool_names with composition_catalog=None adds no compose/status/cancel tools to any keeper. Verified live: ls ~/me/.masc/config/ (the same directory that holds the live runtime.toml, 91KB, last modified 2026-08-17T11:37Z) has no tool-compositions.toml; a filesystem-wide search for the filename under ~/me/.masc found only inert fixture copies inside checked-out worktree scripts/fixtures/ trees (test data, not the live config_root)."
+    "evidence": "lib/keeper/keeper_tool_composition_catalog.ml:96: path ~config_root = Filename.concat config_root 'tool-compositions.toml'. lib/keeper/keeper_run_tools_setup.ml:112-127: load_composition_catalog returns Ok None when the file is missing (Fs_compat.Exact_missing), and expected_model_tool_names with composition_catalog=None adds no compose/status/cancel tools to any keeper. Verified live: ls <base-path>/.masc/config/ (the same directory that holds the live runtime.toml, 91KB, last modified 2026-08-17T11:37Z) has no tool-compositions.toml; a filesystem-wide search for the filename under <base-path>/.masc found only inert fixture copies inside checked-out worktree scripts/fixtures/ trees (test data, not the live config_root)."
    },
    {
     "step": "conclusion",

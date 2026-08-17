@@ -15,7 +15,7 @@
  },
  "turns_1_to_9": "all nine facts planted and echoed per the harness log (~2h40m interval); turn 5 followed by the planned restart injection — 'restart done in 0.1s continuation=true' (same trace, same generation)",
  "disruptions_crossed": [
-  "unplanned server redeploys at 01:58 and 02:29 KST (third session), 19:20 KST (masc-08), operator restart 22:38 KST — the keeper is non-autoboot, so each restart needed a manual boot; turn 9 was delayed ~40m waiting for one",
+  "unplanned server restarts throughout the run — the reviewed server logs show at least seven full restarts in the 01:00-02:32 KST window plus 19:20 and 22:38 KST (third session, masc-08, operator); the keeper is non-autoboot, so each surviving turn depended on a manual boot, and turn 9 was delayed ~40m waiting for one",
   "the 22:38 restart also rotated the auth token, killing the harness at the recall turn (#28958)"
  ],
  "recall_completion": {
@@ -32,5 +32,6 @@
   "The recall turn ran outside the harness (manual chat POST with the same prompt); everything else is harness-driven.",
   "The judge here is a keeper-turn judgment, not the harness's provider-subcall judge — same cross-family LLM principle, different plumbing.",
   "No serving-runtime attribution block (#28914 landed mid-run); the ollama routing is visible in the keeper's runtime-manifests store."
- ]
+ ],
+ "transcript_purity": "turn_refs run unbroken through one trace (trace-1786885427022-0000a#1..#10). One unrelated external message (a broadcast receipt from the M5 keeper, 17:44 KST, no assistant reply, no fact content) sits between plant turns 8 and 9; the turn9->recall stretch is clean."
 }

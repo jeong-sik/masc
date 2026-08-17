@@ -137,6 +137,13 @@ let surface_tools : Masc_domain.tool_schema list =
                         , `String
                             "Stable ids from keeper_surface_read participants to visibly mention. Slack requires U.../W... ids; Discord requires decimal user snowflakes. Display names such as @Vincent do not create API mentions." )
                       ] )
+                ; ( "thread_ts"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Slack thread timestamp (ts) of an existing message to reply inside that thread. Slack surface only; ignored for dashboard/discord. Omit to post a new top-level message." )
+                      ] )
                 ] )
           ; "required", `List [ `String "surface"; `String "content" ]
           ]

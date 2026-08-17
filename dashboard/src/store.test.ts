@@ -81,11 +81,11 @@ describe('agentCoreHealthSummary', () => {
 
   it('reflects agent event buffer length', () => {
     const evt = {
-      type: 'trust_updated',
-      actor_kind: 'agent',
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
       agent_name: 'alice',
       timestamp: 1,
-      trust_score: 0.5,
+      phase: 'Running',
     } satisfies AgentCoreAgentEvent
     pushAgentCoreAgentEvent(evt)
     pushAgentCoreAgentEvent({ ...evt, timestamp: 2 })
@@ -95,12 +95,12 @@ describe('agentCoreHealthSummary', () => {
 
   it('dedups identical consecutive agent events', () => {
     const evt = {
-      type: 'trust_updated',
-      actor_kind: 'agent',
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
       agent_name: 'alice',
       timestamp: 1,
       event_key: 'same-event',
-      trust_score: 0.5,
+      phase: 'Running',
     } satisfies AgentCoreAgentEvent
     pushAgentCoreAgentEvent(evt)
     pushAgentCoreAgentEvent(evt)
@@ -109,12 +109,12 @@ describe('agentCoreHealthSummary', () => {
 
   it('keeps distinct events that only share actor and timestamp', () => {
     pushAgentCoreAgentEvent({
-      type: 'trust_updated',
-      actor_kind: 'agent',
+      type: 'keeper_lifecycle',
+      actor_kind: 'keeper',
       agent_name: 'alice',
       timestamp: 1,
       event_key: 'action',
-      trust_score: 0.5,
+      phase: 'Paused',
     } satisfies AgentCoreAgentEvent)
     pushAgentCoreAgentEvent({
       type: 'keeper_lifecycle',

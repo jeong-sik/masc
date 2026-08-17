@@ -121,7 +121,6 @@ MASC는 단일 public library(`masc`)로 구성된다. `lib/` 아래 기능별 �
 | `main_eio` | `masc` | `bin/main_eio.ml` | HTTP 서버. 기본 진입점. httpun-eio(HTTP/1.1) 또는 h2-eio(HTTP/2). Dashboard 서빙, SSE, MCP JSON-RPC, gRPC, REST API. |
 | `main_stdio_eio` | `masc-stdio` | `bin/main_stdio_eio.ml` | Stdio 기반 MCP 서버. CLI-Tool-A `--mcp` 모드 연동. |
 | `masc_cost` | `masc-cost` | `bin/masc_cost.ml` | Token 사용량 집계, 비용 계산 CLI. |
-| `masc_compaction_audit` | `masc-compaction-audit` | `bin/masc_compaction_audit.ml` | Compaction audit CLI. `.masc/data/harness-compact/` JSONL 검사. |
 | `masc_tui` | `masc-tui` | `bin/masc_tui.ml` | Terminal UI. Keeper 목록, 상태, 연결 인터페이스. |
 
 낮부용 실행 파일 (`public_name` 없음, 빌드 산출물로 직접 실행):

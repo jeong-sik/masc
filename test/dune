@@ -1080,7 +1080,6 @@
   test_pulse
   test_transport_metrics
   test_adaptive_cache_ttl
-  test_keeper_compact_audit
   test_keeper_telemetry_consumer
   test_runtime_event_bus
   test_trajectory
@@ -1220,7 +1219,6 @@
   test_pulse
   test_transport_metrics
   test_adaptive_cache_ttl
-  test_keeper_compact_audit
   test_keeper_telemetry_consumer
   test_runtime_event_bus
   test_trajectory

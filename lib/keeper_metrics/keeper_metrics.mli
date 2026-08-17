@@ -53,7 +53,6 @@ type t =
   | ApprovalQueueFailures
   | ApprovalResolutionSignal
   | ProfileLoadFailures
-  | CompactAuditFailures
   | FsFailures
   | PersistencePreparationStageDuration
   | PersistencePreparationExamined

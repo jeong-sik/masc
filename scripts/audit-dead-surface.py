@@ -546,7 +546,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # / keeper_tool_plan.output_value never had one. All three .mli exports
 # were dropped (implementations kept where still used internally,
 # output_value's implementation removed as unused).
-DEAD_EXPORT_BASELINE = 545
+# 545 -> 541: the Keeper_compact_audit purge removed four dead exports with
+# the module family (compact audit store, retention outcome, failure site).
+DEAD_EXPORT_BASELINE = 541
 
 
 def run_ratchet(count: int) -> int:

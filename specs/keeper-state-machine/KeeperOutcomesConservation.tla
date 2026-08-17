@@ -8,7 +8,7 @@
 \*
 \* Each observed turn lands in exactly one outcome bucket.  The rollup
 \* endpoint (dashboard_http_keeper.ml outcomes block in the redesign
-\* plan) aggregates over keeper_transition_audit + keeper_compact_audit
+\* plan) aggregates over keeper_transition_audit
 \* records.  If any source double-counts a turn
 \* (e.g. a rollover fires both a success and a failure record) or any
 \* source under-counts,

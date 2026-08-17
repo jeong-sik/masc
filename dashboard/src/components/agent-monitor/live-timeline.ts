@@ -42,9 +42,9 @@ function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
     case 'tool':
       return et === 'keeper_tool_call' || et === 'agent_core_tool'
     case 'error':
-      return et === 'keeper_guardrail' || isErrorJournalEntry(entry)
+      return isErrorJournalEntry(entry)
     case 'lifecycle':
-      return et === 'agent_bound' || et === 'agent_unbound' || et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed' || et === 'agent_core_context' || et === 'agent_core_event' || et === 'agent_core_task'
+      return et === 'keeper_handoff' || et === 'keeper_compaction' || et === 'keeper_phase_changed' || et === 'agent_core_context' || et === 'agent_core_event'
     default:
       return true
   }
@@ -63,21 +63,13 @@ function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
     case 'agent_core_context':
       return 'neutral'
     case 'agent_core_event':
-    case 'agent_core_task':
-      return 'info'
-    case 'agent_bound':
-    case 'agent_unbound':
       return 'info'
     case 'keeper_handoff':
       return 'info'
     case 'keeper_compaction':
       return 'warn'
-    case 'keeper_guardrail':
-      return 'bad'
     case 'broadcast':
       return 'info'
-    case 'task_update':
-      return 'ok'
     case 'board_post':
     case 'board_comment':
       return 'info'
@@ -93,14 +85,9 @@ function eventKindLabel(eventType: JournalEventType | undefined): string {
     case 'agent_core_tool': return 'TOOL'
     case 'agent_core_context': return 'CTX'
     case 'agent_core_event': return 'Agent Core'
-    case 'agent_core_task': return 'TASK'
-    case 'agent_bound': return 'JOIN'
-    case 'agent_unbound': return 'LEFT'
     case 'keeper_handoff': return 'HAND'
     case 'keeper_compaction': return 'COMP'
-    case 'keeper_guardrail': return 'GUARD'
     case 'broadcast': return 'CAST'
-    case 'task_update': return 'TASK'
     case 'board_post': return 'POST'
     case 'board_comment': return 'CMNT'
     case 'unknown': return 'SYS'

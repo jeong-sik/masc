@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  defaultJournalSeverity,
-  isErrorJournalEntry,
   journalSeverity,
   normalizeJournalSeverity,
   normalizeJournalSource,
@@ -18,11 +16,6 @@ function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
 }
 
 describe('journal severity helpers', () => {
-  it('marks keeper guardrail entries as errors even without text matching', () => {
-    expect(defaultJournalSeverity('keeper_guardrail')).toBe('error')
-    expect(isErrorJournalEntry(makeEntry({ eventType: 'keeper_guardrail', text: 'stopped by guardrail' }))).toBe(true)
-  })
-
   it('prefers explicit severity when present', () => {
     expect(normalizeJournalSeverity('warning')).toBe('warn')
     expect(normalizeJournalSeverity('fatal')).toBe('error')

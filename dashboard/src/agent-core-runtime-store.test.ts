@@ -62,14 +62,14 @@ describe('agent-core-runtime-store', () => {
       },
       {
         source: 'agent_core_event',
-        type: 'agent_core:masc:trust_updated',
+        type: 'agent_core:masc:keeper:lifecycle',
         ts_unix: 100,
         correlation_id: 'corr-1',
         run_id: 'run-1',
         payload: {
-          agent_a: 'alpha',
-          agent_b: 'beta',
-          trust_score: 0.8,
+          agent_name: 'alpha',
+          detail: 'beta',
+          event: 'started',
           timestamp: 100,
         },
       },
@@ -117,15 +117,15 @@ describe('agent-core-runtime-store', () => {
 
   it('dedupes a live event already present in replayed telemetry', () => {
     const liveEvent = {
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: 'evt-live-replay',
       ts_unix: 123,
       correlation_id: 'corr-live',
       run_id: 'run-live',
       payload: {
-        agent_a: 'beta',
-        agent_b: 'gamma',
-        trust_score: 0.8,
+        agent_name: 'beta',
+        detail: 'gamma',
+        event: 'started',
         timestamp: 123,
       },
     }
@@ -299,15 +299,15 @@ describe('agent-core-runtime-store', () => {
 
   it('preserves identical strings from distinct event identities', () => {
     const event = (eventId: string) => ({
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: eventId,
       ts_unix: 600,
       correlation_id: 'corr-shared',
       run_id: 'run-shared',
       payload: {
-        agent_a: 'same-agent',
-        agent_b: 'same-peer',
-        trust_score: 0.5,
+        agent_name: 'same-agent',
+        detail: 'same-peer',
+        event: 'started',
         timestamp: 600,
       },
     })
@@ -320,13 +320,13 @@ describe('agent-core-runtime-store', () => {
 
   it('treats a repeated producer event id as the same occurrence across run drift', () => {
     const event = (runId: string) => ({
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: 'evt-process-local',
       run_id: runId,
       payload: {
-        agent_a: 'same-agent',
-        agent_b: 'same-peer',
-        trust_score: 0.5,
+        agent_name: 'same-agent',
+        detail: 'same-peer',
+        event: 'started',
       },
     })
 
@@ -337,14 +337,14 @@ describe('agent-core-runtime-store', () => {
 
   it('preserves envelopes that have no producer identity', () => {
     const event = {
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       ts_unix: 610,
       correlation_id: 'corr-unidentified',
       run_id: 'run-unidentified',
       payload: {
-        agent_a: 'unidentified-agent',
-        agent_b: 'unidentified-peer',
-        trust_score: 0.4,
+        agent_name: 'unidentified-agent',
+        detail: 'unidentified-peer',
+        event: 'started',
         timestamp: 610,
       },
     }
@@ -359,11 +359,11 @@ describe('agent-core-runtime-store', () => {
 
   it('preserves identical events with no producer identity', () => {
     const event = {
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       payload: {
-        agent_a: 'unidentified-agent',
-        agent_b: 'unidentified-peer',
-        trust_score: 0.4,
+        agent_name: 'unidentified-agent',
+        detail: 'unidentified-peer',
+        event: 'started',
       },
     }
 
@@ -374,13 +374,13 @@ describe('agent-core-runtime-store', () => {
 
   it('dedupes one stable run sequence across replay and live delivery', () => {
     const event = {
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       run_id: 'run-sequenced',
       seq: 7,
       payload: {
-        agent_a: 'sequenced-agent',
-        agent_b: 'sequenced-peer',
-        trust_score: 0.7,
+        agent_name: 'sequenced-agent',
+        detail: 'sequenced-peer',
+        event: 'started',
       },
     }
 
@@ -399,15 +399,15 @@ describe('agent-core-runtime-store', () => {
       entries: [
         {
           source: 'agent_core_event',
-          type: 'agent_core:masc:reputation_changed',
+          type: 'agent_core:masc:keeper:lifecycle',
           ts_unix: 555,
           correlation_id: 'corr-r',
           run_id: 'run-r',
           payload: {
             agent_name: 'gamma',
-            old_score: 0.4,
-            new_score: 0.8,
-            trend: 'up',
+            keeper_name: 'gamma',
+            event: 'phase_changed',
+            phase: 'running',
             timestamp: 555,
           },
         } as TelemetryEntry,
@@ -425,7 +425,7 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.replayLoadedEvents).toBe(1)
     expect(agentCoreHealthSummary.value.replayTotalMatchingEvents).toBe(1200)
     expect(agentCoreHealthSummary.value.replayTruncated).toBe(true)
-    expect(agentCoreAgentEvents.value[0]?.type).toBe('reputation_changed')
+    expect(agentCoreAgentEvents.value[0]?.type).toBe('keeper_lifecycle')
   })
 
   it('preserves a live event accepted while initial replay hydration is in flight', async () => {
@@ -436,14 +436,14 @@ describe('agent-core-runtime-store', () => {
 
     const replay = replayAgentCoreRuntimeTelemetry()
     expect(applyAgentCoreRuntimeEvent({
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: 'evt-live-during-replay',
       ts_unix: 556,
       run_id: 'run-live-during-replay',
       payload: {
-        agent_a: 'live-agent',
-        agent_b: 'live-peer',
-        trust_score: 0.8,
+        agent_name: 'live-agent',
+        detail: 'live-peer',
+        event: 'started',
         timestamp: 556,
       },
     })).toBe(true)
@@ -456,14 +456,14 @@ describe('agent-core-runtime-store', () => {
       has_more: false,
       entries: [{
         source: 'agent_core_event',
-        type: 'agent_core:masc:trust_updated',
+        type: 'agent_core:masc:keeper:lifecycle',
         event_id: 'evt-replayed-snapshot',
         ts_unix: 555,
         run_id: 'run-replayed-snapshot',
         payload: {
-          agent_a: 'replayed-agent',
-          agent_b: 'replayed-peer',
-          trust_score: 0.7,
+          agent_name: 'replayed-agent',
+          detail: 'replayed-peer',
+          event: 'started',
           timestamp: 555,
         },
       } as TelemetryEntry],
@@ -494,12 +494,12 @@ describe('agent-core-runtime-store', () => {
     const staleReplay = replayAgentCoreRuntimeTelemetry()
     const latestReplay = replayAgentCoreRuntimeTelemetry()
     expect(applyAgentCoreRuntimeEvent({
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: 'evt-live-after-stale-replay',
       payload: {
-        agent_a: 'latest-live-agent',
-        agent_b: 'latest-live-peer',
-        trust_score: 0.9,
+        agent_name: 'latest-live-agent',
+        detail: 'latest-live-peer',
+        event: 'started',
       },
     })).toBe(true)
 
@@ -540,14 +540,14 @@ describe('agent-core-runtime-store', () => {
       entries: [
         {
           source: 'agent_core_event',
-          type: 'agent_core:masc:trust_updated',
+          type: 'agent_core:masc:keeper:lifecycle',
           ts_unix: 555,
           correlation_id: 'corr-baseline',
           run_id: 'run-r',
           payload: {
-            agent_a: 'gamma',
-            agent_b: 'delta',
-            trust_score: 0.8,
+            agent_name: 'gamma',
+            detail: 'delta',
+            event: 'started',
             timestamp: 555,
           },
         } as TelemetryEntry,
@@ -559,14 +559,14 @@ describe('agent-core-runtime-store', () => {
     expect(agentCoreHealthSummary.value.totalEvents).toBe(1200)
 
     expect(applyAgentCoreRuntimeEvent({
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       ts_unix: 556,
       correlation_id: 'corr-live',
       run_id: 'run-live',
       payload: {
-        agent_a: 'delta',
-        agent_b: 'epsilon',
-        trust_score: 0.8,
+        agent_name: 'delta',
+        detail: 'epsilon',
+        event: 'started',
         timestamp: 556,
       },
     })).toBe(true)
@@ -578,12 +578,12 @@ describe('agent-core-runtime-store', () => {
   it('keeps live arrivals out of the replay-loaded page count', async () => {
     const entry = (seq: number): TelemetryEntry => ({
       source: 'agent_core_event',
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       ts_unix: 700 + seq,
       correlation_id: `corr-replay-${seq}`,
       run_id: 'run-replay-pages',
       seq,
-      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+      payload: { agent_name: 'a', detail: 'b', event: 'started' },
     }) as TelemetryEntry
 
     fetchTelemetryMock.mockResolvedValue({
@@ -597,11 +597,11 @@ describe('agent-core-runtime-store', () => {
     await replayAgentCoreRuntimeTelemetry()
 
     expect(applyAgentCoreRuntimeEvent({
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       ts_unix: 999,
       correlation_id: 'corr-live-between-pages',
       run_id: 'run-live-between-pages',
-      payload: { agent_a: 'live', agent_b: 'peer', trust_score: 0.6 },
+      payload: { agent_name: 'live', detail: 'peer', event: 'started' },
     })).toBe(true)
 
     fetchTelemetryMock.mockResolvedValue({
@@ -635,15 +635,15 @@ describe('agent-core-runtime-store', () => {
     const entry = (seq: number): TelemetryEntry =>
       ({
         source: 'agent_core_event',
-        type: 'agent_core:masc:trust_updated',
+        type: 'agent_core:masc:keeper:lifecycle',
         ts_unix: 500 + seq,
         correlation_id: `corr-${seq}`,
         run_id: 'run-page',
         seq,
         payload: {
-          agent_a: 'gamma',
-          agent_b: 'delta',
-          trust_score: 0.5,
+          agent_name: 'gamma',
+          detail: 'delta',
+          event: 'started',
           timestamp: 500 + seq,
         },
       }) as TelemetryEntry
@@ -726,10 +726,10 @@ describe('agent-core-runtime-store', () => {
   it('keeps the fetched cursor separate from the deduplicated displayed count', async () => {
     const duplicated = {
       source: 'agent_core_event',
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: 'evt-page-overlap',
       run_id: 'run-page-overlap',
-      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+      payload: { agent_name: 'a', detail: 'b', event: 'started' },
     } as TelemetryEntry
     fetchTelemetryMock.mockResolvedValue({
       generated_at: '2026-04-15T12:00:00Z',
@@ -774,10 +774,10 @@ describe('agent-core-runtime-store', () => {
   it('stops at the telemetry offset cap without replaying a clamped page', async () => {
     const entry = (seq: number): TelemetryEntry => ({
       source: 'agent_core_event',
-      type: 'agent_core:masc:trust_updated',
+      type: 'agent_core:masc:keeper:lifecycle',
       event_id: `evt-cap-${seq}`,
       run_id: 'run-cap',
-      payload: { agent_a: 'a', agent_b: 'b', trust_score: 0.5 },
+      payload: { agent_name: 'a', detail: 'b', event: 'started' },
     }) as TelemetryEntry
 
     hydrateAgentCoreRuntimeFromTelemetryEntries([entry(1)])

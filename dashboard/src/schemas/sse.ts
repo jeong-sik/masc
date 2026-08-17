@@ -31,15 +31,20 @@ export const SSE_APPROVAL_RESOLVED_EVENT = 'approval:resolved'
 export const SSE_APPROVAL_AUDIT_EVENT = 'approval:audit'
 export const SSE_APPROVAL_SUMMARY_UPDATED_EVENT = 'approval:summary_updated'
 
+// Dead entries are removed, not kept for compatibility: an allowlist row whose
+// OCaml producer no longer exists only hides real drops (#28925 audit, defect
+// (c)). Removed 2026-08-17 with their producers' removal receipts:
+//   agent_bound/agent_unbound (+masc/) — producer (agent_joined era) deleted in
+//     #2149; TS waiters were renamed onto the dead event in #19668.
+//   task_update — producer deleted in #3497 (dead-module purge).
+//   keeper_guardrail (+masc/) — SSE emit deleted in #1815 (legacy loop removal).
+//   keeper_tool_skipped — SSE emit deleted in #24332 (governance→Gate).
+//   client_input_approved/rejected/updated — TRPG game_view producer archived
+//     out of lib/ in #1668.
 const FIXED_SSE_EVENT_TYPES = new Set([
-  'agent_bound',
-  'masc/agent_bound',
-  'agent_unbound',
-  'masc/agent_unbound',
   'broadcast',
   'masc/broadcast',
   'workspace_message_delivery_changed',
-  'task_update',
   'board_post',
   'masc/board_post',
   'board_comment',
@@ -57,8 +62,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'masc/keeper_handoff',
   'keeper_compaction',
   'masc/keeper_compaction',
-  'keeper_guardrail',
-  'masc/keeper_guardrail',
   'keeper_phase_changed',
   'keeper_composite_changed',
   'keeper_chat_appended',
@@ -70,7 +73,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'keeper_tool_call',
   'masc/keeper_tool_call',
   'keeper_tool_call_evidence_committed',
-  'keeper_tool_skipped',
   'keeper_turn_complete',
   'masc/keeper_turn_complete',
   // RFC-0266 Phase 4: fusion run-status transitions (running -> completed/failed).
@@ -79,9 +81,6 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   // -> SIMPLE_ROUTES['fusion_run_status'] -> refreshFusionRuns) can dispatch it.
   'fusion_run_status',
   'internal_agent_runs_changed',
-  'client_input_approved',
-  'client_input_rejected',
-  'client_input_updated',
   'runtime_param_changed',
   SSE_APPROVAL_PENDING_EVENT,
   SSE_APPROVAL_RESOLVED_EVENT,

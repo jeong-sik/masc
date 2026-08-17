@@ -8,8 +8,6 @@ include Dashboard_http_keeper_metrics
 type metrics_acc =
   { ma_sample_points : int
   ; ma_handoff_count : int
-  ; ma_fallback_count : int
-  ; ma_fallback_observed_points : int
   ; ma_tool_call_count : int
   ; ma_turn_points : int
   ; ma_heartbeat_points : int
@@ -20,8 +18,6 @@ type metrics_acc =
 let init_acc =
   { ma_sample_points = 0
   ; ma_handoff_count = 0
-  ; ma_fallback_count = 0
-  ; ma_fallback_observed_points = 0
   ; ma_tool_call_count = 0
   ; ma_turn_points = 0
   ; ma_heartbeat_points = 0
@@ -138,12 +134,6 @@ let compute_metrics_window
                    | _ -> None
                  in
                  let runtime_obj = member "runtime" json in
-                 let fallback_applied =
-                   match runtime_obj with
-                   | `Assoc _ ->
-                       Safe_ops.json_bool_opt "fallback_applied" runtime_obj
-                   | _ -> None
-                 in
                  let acc =
                    { acc with
                      ma_sample_points = acc.ma_sample_points + 1
@@ -155,15 +145,6 @@ let compute_metrics_window
                    ; ma_handoff_count =
                        acc.ma_handoff_count
                        + if handoff_performed then 1 else 0
-                   ; ma_fallback_count =
-                       acc.ma_fallback_count
-                       +
-                       (match fallback_applied with
-                        | Some true -> 1
-                        | Some false | None -> 0)
-                   ; ma_fallback_observed_points =
-                       acc.ma_fallback_observed_points
-                       + if Option.is_some fallback_applied then 1 else 0
                    ; ma_tool_call_count =
                        acc.ma_tool_call_count + tool_call_count
                    ; ma_last_handoff =
@@ -350,12 +331,6 @@ let compute_metrics_window
       ; "window_turns", `Int acc.ma_turn_points
       ; "window_series_max_lines", `Int series_points
       ; "handoff_count", `Int acc.ma_handoff_count
-      ; "fallback_count", `Int acc.ma_fallback_count
-      ; ( "fallback_rate"
-        , Json_util.int_ratio_json
-            acc.ma_fallback_count
-            acc.ma_fallback_observed_points )
-      ; "fallback_observed_points", `Int acc.ma_fallback_observed_points
       ; ( "intervention_share"
         , Json_util.int_ratio_json acc.ma_proactive_points interaction_points )
       ; ( "intervention_per_turn"

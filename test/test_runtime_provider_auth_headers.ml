@@ -1419,6 +1419,17 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
   check string "runtime outcome" "failed"
     (Keeper_execution_receipt.runtime_outcome_to_string
        (Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied:false
+          (Some observation)));
+  (* The failed-attempt observation is unchanged, but a lane walk that
+     landed this attempt on a later candidate (lane_failover_applied)
+     always reports the turn as passed-to-next-model — that signal comes
+     from the lane walk, not from anything on the observation. *)
+  check string "runtime outcome reflects lane failover truth, not observation shape"
+    "passed_to_next_model"
+    (Keeper_execution_receipt.runtime_outcome_to_string
+       (Keeper_agent_error.runtime_outcome_of_observation
+          ~lane_failover_applied:true
           (Some observation)))
 
 let test_runtime_agent_context_preserves_max_tokens_intent () =

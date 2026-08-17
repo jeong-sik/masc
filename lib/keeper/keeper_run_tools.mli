@@ -70,6 +70,7 @@ type agent_setup =
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
+  ; receipt_lane_attempt_index_ref : int ref
   ; receipt_response_text_present_ref : bool ref
   }
 

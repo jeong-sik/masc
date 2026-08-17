@@ -172,8 +172,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       const point = series[index]
       if (!point) continue
       if (
-        point.fallback_applied
-        || point.runtime_outcome?.trim()
+        point.runtime_outcome?.trim()
         || point.runtime_id?.trim()
         || typeof point.runtime_attempt_count === 'number'
       ) return point
@@ -185,16 +184,9 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       ? providerAttempts
       : latestRuntimeMetric?.runtime_attempt_count ?? null
   const observedProviderFallback =
-    typeof providerFallback === 'boolean'
-      ? providerFallback
-      : latestRuntimeMetric?.fallback_applied ?? null
+    typeof providerFallback === 'boolean' ? providerFallback : null
   const observedRuntimeOutcome =
     runtimeOutcome || latestRuntimeMetric?.runtime_outcome?.trim() || null
-  const fallbackReason = latestRuntimeMetric?.fallback_reason?.trim() || null
-  const fallbackHops =
-    typeof latestRuntimeMetric?.fallback_hops === 'number'
-      ? latestRuntimeMetric.fallback_hops
-      : 0
   const trustLatestEvent = keeper.trust?.latest_causal_event ?? null
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -208,7 +200,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     || Boolean(observedRuntimeOutcome)
     || typeof observedProviderAttempts === 'number'
     || observedProviderFallback === true
-    || (latestRuntimeMetric?.fallback_applied === true && Boolean(fallbackReason || fallbackHops > 0))
   const hasExecutionEvidenceSignal =
     Boolean(stopCause)
     || Boolean(latestTerminalCode)
@@ -381,15 +372,6 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임</strong> · ${runtimeLabel}</span>`
           : null}
         ${renderRuntimeAttempt ? renderRuntimeAttemptObservation(runtimeAttempt) : null}
-        ${latestRuntimeMetric?.fallback_applied === true && (fallbackReason || fallbackHops > 0)
-          ? html`
-              <span class="text-[var(--color-status-warn)]">
-                <strong>폴백</strong>
-                ${fallbackReason ? ` · ${fallbackReason}` : ''}
-                ${fallbackHops > 0 ? ` · ${fallbackHops} hops` : ''}
-              </span>
-            `
-          : null}
         ${trustLatestEvent
           ? html`
               <span>

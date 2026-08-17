@@ -819,7 +819,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
               internal_error ("Antigravity session settlement failed: " ^ detail))
           in
           let capture, _metrics =
-            Runtime_observation.runtime_metrics_for_candidates ~candidate_count:1 ()
+            Runtime_observation.runtime_metrics_for_candidates ()
           in
           Runtime_observation.record_attempt_terminal
             capture
@@ -829,17 +829,6 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
           let runtime_observation =
             Runtime_observation.runtime_observation_with_metrics
               ~runtime_id
-              ~strategy:"official_client_runtime"
-              ~configured_labels:
-                [ "antigravity_cli"
-                ; "execution_mode=plan"
-                ; "sandbox=true"
-                ; "mcp_owner=masc"
-                ; Printf.sprintf "tool_steps=%d" turn.tool_steps
-                ; Printf.sprintf "tool_errors=%d" turn.tool_errors
-                ; Printf.sprintf "resumed=%b" turn.resumed
-                ]
-              ~candidate_count:1
               ~selected_model_raw:(Some turn.model)
               ~capture
               ~attempt_details_source:"antigravity_cli"

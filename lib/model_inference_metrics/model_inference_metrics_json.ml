@@ -93,7 +93,6 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
              (fun (c : coverage_reason_count) ->
                 `Assoc [ "reason", `String c.crc_reason; "count", `Int c.crc_count ])
              s.coverage_reason_counts) )
-    ; "fallback_count", `Int s.fallback_count
     ; "success_count", `Int s.success_count
     ; "error_count", `Int s.error_count
     ; "total_cost_usd", Json_util.float_opt_to_json s.total_cost_usd

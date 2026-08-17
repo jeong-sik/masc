@@ -63,19 +63,21 @@ type named_run_result =
   ; selected_runtime_id : string
   ; selected_max_context : int
   ; checkpoint_owner : Runtime_execution.checkpoint_owner
+  ; lane_attempt_index : int
   }
 
 type runtime_attempt_candidate =
   | Resolved_runtime of Runtime.t
   | Missing_runtime of string
 
-let selected_runtime_result (runtime : Runtime.t) result =
+let selected_runtime_result (runtime : Runtime.t) ~lane_attempt_index result =
   Result.map
     (fun run_result ->
        { run_result
        ; selected_runtime_id = runtime.id
        ; selected_max_context = Runtime.max_context_of_runtime runtime
        ; checkpoint_owner = Runtime_execution.checkpoint_owner runtime.execution
+       ; lane_attempt_index
        })
     result
 ;;
@@ -851,7 +853,7 @@ let run_named
       | Resolved_runtime _ -> true
       | Missing_runtime _ -> false)
     ~emit_runtime_manifest
-    ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id candidate ->
+    ~run_attempt:(fun ~idx ~runtime_id:attempt_runtime_id candidate ->
       match candidate with
       | Missing_runtime runtime_id ->
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -963,7 +965,7 @@ let run_named
              (fun observe -> Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime codex_result
+        ( selected_runtime_result runtime ~lane_attempt_index:idx codex_result
         , None
         , codex_attempt.effect_disposition )
       | Runtime_execution.Antigravity_cli config ->
@@ -1041,7 +1043,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime antigravity_result
+        ( selected_runtime_result runtime ~lane_attempt_index:idx antigravity_result
         , None
         , antigravity_attempt.effect_disposition )
       | Runtime_execution.Claude_code config ->
@@ -1122,7 +1124,7 @@ let run_named
                Option.iter observe run_result.Runtime_agent.runtime_observation)
              on_runtime_observation
          | Error _ -> ());
-        ( selected_runtime_result runtime claude_result
+        ( selected_runtime_result runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition )
       | Runtime_execution.Agent_core runtime_provider_config ->
@@ -1252,7 +1254,7 @@ let run_named
               ~replay_prefix_projection
               provider_result
           in
-          ( selected_runtime_result runtime outcomes.turn_result
+          ( selected_runtime_result runtime ~lane_attempt_index:idx outcomes.turn_result
           , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed )))
        )

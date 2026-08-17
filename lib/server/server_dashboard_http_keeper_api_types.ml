@@ -267,8 +267,7 @@ let runtime_trace_redacts_provider_model_key key =
   (not (runtime_trace_keeps_provider_attempt_provenance_key key))
   &&
   (string_contains_substring key "provider"
-   || string_contains_substring key "model"
-   || String.equal key "configured_labels")
+   || string_contains_substring key "model")
 
 let rec runtime_trace_public_json = function
   | `Assoc fields ->

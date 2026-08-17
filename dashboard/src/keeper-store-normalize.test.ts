@@ -642,16 +642,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
               selected_model: 'anthropic:claude-sonnet',
               attempt_count: 2,
               outcome: 'passed_to_next_model',
-              strategy: 'round_robin',
-              fallback_applied: true,
-              fallback_hops: 1,
-              fallback_events: [
-                {
-                  from_model_id: 'openai:gpt-5.4',
-                  to_model_id: 'anthropic:claude-sonnet',
-                  reason: 'stale_turn_timeout',
-                },
-              ],
             },
           },
         ],
@@ -672,10 +662,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
       runtime_id: 'primary',
       runtime_attempt_count: 2,
       runtime_outcome: 'passed_to_next_model',
-      runtime_strategy: 'round_robin',
-      fallback_applied: true,
-      fallback_hops: 1,
-      fallback_reason: 'stale_turn_timeout',
     })
   })
 

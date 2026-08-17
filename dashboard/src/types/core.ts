@@ -388,10 +388,6 @@ export interface KeeperMetricPoint {
   runtime_id?: string | null
   runtime_outcome?: string | null
   runtime_attempt_count?: number | null
-  runtime_strategy?: string | null
-  fallback_applied: boolean
-  fallback_hops: number
-  fallback_reason: string | null
 }
 
 export interface ProviderHealth {
@@ -1020,11 +1016,6 @@ export interface MetricsWindow {
 
   // -- Handoff --
   handoff_count?: number
-
-  // -- Runtime fallback --
-  fallback_count?: number
-  fallback_rate?: number
-  fallback_observed_points?: number
 
   // -- Intervention --
   intervention_share?: number

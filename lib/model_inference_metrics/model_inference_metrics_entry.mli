@@ -84,7 +84,6 @@ type model_stats =
   ; primary_coverage_stage : string option
   ; primary_coverage_reason : string option
   ; coverage_reason_counts : coverage_reason_count list
-  ; fallback_count : int
   ; success_count : int
   ; error_count : int
   ; total_cost_usd : float option
@@ -139,7 +138,6 @@ type raw_entry =
   ; cache_read_tokens : int option
   ; cache_creation_tokens : int option
   ; reasoning_tokens : int option
-  ; fallback_applied : bool
   ; cost_usd : float option
   ; tool_call_count : int
   ; tools_used : string list

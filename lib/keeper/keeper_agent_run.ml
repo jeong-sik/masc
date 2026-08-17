@@ -666,6 +666,9 @@ let run_turn
     let receipt_runtime_observation_ref =
       s.Keeper_run_tools.receipt_runtime_observation_ref
     in
+    let receipt_lane_attempt_index_ref =
+      s.Keeper_run_tools.receipt_lane_attempt_index_ref
+    in
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
@@ -934,6 +937,7 @@ let run_turn
                  let selected_runtime_id = selected_run.selected_runtime_id in
                  let selected_max_context = selected_run.selected_max_context in
                  let checkpoint_owner = selected_run.checkpoint_owner in
+                 let lane_attempt_index = selected_run.lane_attempt_index in
                  let post_turn_t0 = Time_compat.now () in
                  (* Section 4: Result processing — parse response, handle tool calls, validate contracts. *)
                 (* RFC-MASC-004: AfterTurn hooks flush incrementally during
@@ -951,6 +955,7 @@ let run_turn
                      (fun observation -> observation.selected_model);
                  receipt_stop_reason_ref := Some result.stop_reason;
                  receipt_runtime_observation_ref := result.runtime_observation;
+                 receipt_lane_attempt_index_ref := lane_attempt_index;
                  (* Thinking is now persisted per-turn inside the after_turn
                     hook (Keeper_hooks_agent_core), untruncated, for EVERY turn. The
                     old post-run single-shot capture here saved only the final
@@ -1143,6 +1148,7 @@ let run_turn
            ~receipt_turn_count_ref
            ~receipt_stop_reason_ref
            ~receipt_runtime_observation_ref
+           ~receipt_lane_attempt_index_ref
            ~receipt_response_text_present_ref
            ()
        in

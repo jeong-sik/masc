@@ -13,17 +13,9 @@
 
 type runtime_observation = {
   runtime_id : string;
-  strategy : string option;
-  configured_labels : string list;
-  candidate_models : string list;
-  primary_model : string option;
   selected_model : string option;
   selected_model_raw : string option;
-  selected_index : int option;
-  fallback_hops : int option;
-  fallback_applied : bool;
   attempts : runtime_attempt list;
-  fallback_events : runtime_fallback_event list;
   attempt_details_available : bool;
   attempt_details_source : string;
   agent_core_internal_runtime_allowed : bool;
@@ -40,14 +32,6 @@ and runtime_attempt = {
   error : string option;
 }
 
-and runtime_fallback_event = {
-  from_model_id : string;
-  from_model_label : string option;
-  to_model_id : string;
-  to_model_label : string option;
-  reason : string;
-}
-
 module StringMap = Set_util.StringMap
 
 (* RFC-0132 PR-2: runtime observation AGENT_CORE/dashboard surface = external boundary; redact via SSOT. *)
@@ -59,14 +43,9 @@ type runtime_counter = {
   successes : int;
   failures : int;
   rejected : int;
-  fallback_calls : int;
   total_attempts : int;
-  total_fallback_events : int;
   last_selected_model : string option;
-  last_selected_index : int option;
-  last_candidate_models : string list;
   last_attempts : runtime_attempt list;
-  last_fallback_events : runtime_fallback_event list;
   last_attempt_details_available : bool;
   last_attempt_details_source : string option;
   last_used_at : float;
@@ -83,14 +62,9 @@ let create_runtime_counter ~now () =
     successes = 0;
     failures = 0;
     rejected = 0;
-    fallback_calls = 0;
     total_attempts = 0;
-    total_fallback_events = 0;
     last_selected_model = None;
-    last_selected_index = None;
-    last_candidate_models = [];
     last_attempts = [];
-    last_fallback_events = [];
     last_attempt_details_available = false;
     last_attempt_details_source = None;
     last_used_at = now;
@@ -146,11 +120,9 @@ let model_label_of_config (cfg : Llm_provider.Provider_config.t) =
 (* Observation building                                              *)
 (* ================================================================ *)
 
-let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
-    ~(candidate_count : int)
+let runtime_observation_of_candidates ~runtime_id
     ~(selected_model_raw : string option)
     ?(attempts = [])
-    ?(fallback_events = [])
     ?(attempt_details_available = false)
     ?(attempt_details_source = "opaque_named_runtime")
     ?(agent_core_internal_runtime_allowed = false)
@@ -158,13 +130,6 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
     ?(streaming_inter_chunk_count = 0)
     ?(streaming_inter_chunk_avg_ms = None)
     () : runtime_observation =
-  let candidate_models =
-    List.init (max 0 candidate_count) (fun _ -> public_runtime_model_label)
-  in
-  let primary_model =
-    match candidate_models with first :: _ -> Some first | [] -> None
-  in
-  let selected_index = None in
   (* Thread the caller-supplied raw model attribution into both fields.
      Without this, success rows lose model attribution at construction
      time and downstream consumers (model_inference_metrics
@@ -173,25 +138,11 @@ let runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
      [public_runtime_model_label] happens at the redacted JSON emitter
      layer, not at observation construction. *)
   let selected_model = selected_model_raw in
-  let fallback_hops = Option.map (fun idx -> max 0 idx) selected_index in
-  let fallback_applied =
-    match fallback_hops with
-    | Some hops -> hops > 0
-    | None -> false
-  in
   {
     runtime_id;
-    strategy;
-    configured_labels = [];
-    candidate_models;
-    primary_model;
     selected_model;
     selected_model_raw;
-    selected_index;
-    fallback_hops;
-    fallback_applied;
     attempts;
-    fallback_events;
     attempt_details_available;
     attempt_details_source;
     agent_core_internal_runtime_allowed;
@@ -217,16 +168,14 @@ type streaming_metrics_capture = {
 type runtime_metrics_capture = {
   mutable next_attempt_index : int;
   mutable attempts_rev : runtime_attempt list;
-  mutable fallback_events_rev : runtime_fallback_event list;
   streaming : streaming_metrics_capture;
 }
 
 (* Non-redacted JSON encoders for the internal audit log
    (runtime_observation_to_json → record_runtime_audit). Sibling fields
-   in the same observation envelope (selected_model, primary_model,
-   candidate_models) are already emitted as real strings; the per-attempt
-   and per-fallback model_id were the only fields collapsed to the
-   [public_runtime] placeholder by #15040. Sibling parity restored.
+   in the same observation envelope (selected_model) are already emitted
+   as real strings; the per-attempt model_id was the only field collapsed
+   to the [public_runtime] placeholder by #15040. Sibling parity restored.
 
    The redacted variants for external boundaries (keeper metrics consumed
    by dashboard/AGENT_CORE) live in lib/keeper/keeper_unified_metrics.ml as
@@ -240,17 +189,6 @@ let runtime_attempt_to_json (attempt : runtime_attempt) : Yojson.Safe.t =
       ("model_label", Json_util.string_opt_to_json attempt.model_label);
       ("latency_ms", Json_util.int_opt_to_json attempt.latency_ms);
       ("error", Json_util.string_opt_to_json attempt.error);
-    ]
-
-let runtime_fallback_event_to_json (event : runtime_fallback_event) :
-    Yojson.Safe.t =
-  `Assoc
-    [
-      ("from_model_id", `String event.from_model_id);
-      ("from_model_label", Json_util.string_opt_to_json event.from_model_label);
-      ("to_model_id", `String event.to_model_id);
-      ("to_model_label", Json_util.string_opt_to_json event.to_model_label);
-      ("reason", `String event.reason);
     ]
 
 let update_first_attempt_if ~predicate ~update attempts_rev =
@@ -342,18 +280,6 @@ let ensure_terminal_attempt (capture : runtime_metrics_capture)
 
 let record_attempt_terminal = ensure_terminal_attempt
 
-let record_fallback_event (capture : runtime_metrics_capture)
-    ~from_model:_ ~to_model:_ ~(reason : string) =
-  capture.fallback_events_rev <-
-    {
-      from_model_id = public_runtime_model_label;
-      from_model_label = None;
-      to_model_id = public_runtime_model_label;
-      to_model_label = None;
-      reason;
-    }
-    :: capture.fallback_events_rev
-
 let empty_streaming_capture () : streaming_metrics_capture =
   { ttfrc_ms = None; inter_chunk_count = 0; inter_chunk_total_ms = 0.0 }
 
@@ -365,11 +291,10 @@ let streaming_metrics_of_capture (s : streaming_metrics_capture) =
   in
   (s.ttfrc_ms, s.inter_chunk_count, avg)
 
-let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
+let runtime_metrics_for_candidates () =
   let capture =
     { next_attempt_index = 0
     ; attempts_rev = []
-    ; fallback_events_rev = []
     ; streaming = empty_streaming_capture ()
     }
   in
@@ -403,8 +328,7 @@ let runtime_metrics_for_candidates ~candidate_count:(_ : int) () =
   in
   (capture, metrics)
 
-let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
-    ~(candidate_count : int)
+let runtime_observation_with_metrics ~runtime_id
     ~(selected_model_raw : string option) ~(capture : runtime_metrics_capture)
     ?(attempt_details_source = "agent_core_metrics_callbacks")
     ?(agent_core_internal_runtime_allowed = false)
@@ -412,10 +336,8 @@ let runtime_observation_with_metrics ~runtime_id ?strategy ~configured_labels
   let ttfrc, chunk_count, chunk_avg =
     streaming_metrics_of_capture capture.streaming
   in
-  runtime_observation_of_candidates ~runtime_id ?strategy ~configured_labels
-    ~candidate_count ~selected_model_raw
+  runtime_observation_of_candidates ~runtime_id ~selected_model_raw
     ~attempts:(List.rev capture.attempts_rev)
-    ~fallback_events:(List.rev capture.fallback_events_rev)
     ~attempt_details_available:true
     ~attempt_details_source
     ~agent_core_internal_runtime_allowed
@@ -435,22 +357,10 @@ let runtime_observation_to_json (obs : runtime_observation) : Yojson.Safe.t =
   `Assoc
     [
       ("runtime_id", `String runtime_id);
-      ("strategy", Json_util.string_opt_to_json obs.strategy);
-      ( "configured_labels",
-        `List (List.map (fun label -> `String label) obs.configured_labels) );
-      ( "candidate_models",
-        `List (List.map (fun label -> `String label) obs.candidate_models) );
-      ("primary_model", Json_util.string_opt_to_json obs.primary_model);
       ("selected_model", Json_util.string_opt_to_json obs.selected_model);
       ("selected_model_raw", Json_util.string_opt_to_json obs.selected_model_raw);
-      ("selected_index", Json_util.int_opt_to_json obs.selected_index);
-      ("fallback_hops", Json_util.int_opt_to_json obs.fallback_hops);
-      ("fallback_applied", `Bool obs.fallback_applied);
       ( "attempts",
         `List (List.map runtime_attempt_to_json obs.attempts) );
-      ( "fallback_events",
-        `List
-          (List.map runtime_fallback_event_to_json obs.fallback_events) );
       ("attempt_details_available", `Bool obs.attempt_details_available);
       ("attempt_details_source", `String obs.attempt_details_source);
       ("agent_core_internal_runtime_allowed", `Bool obs.agent_core_internal_runtime_allowed);
@@ -487,19 +397,6 @@ let runtime_outcome_to_string = function
   | `Failure -> "failure"
   | `Rejected -> "rejected"
 
-(* Promotes the most-recent fallback event reason as a top-level field for
-   first-class aggregation/alerting (issue #11081).  Last (not first) event
-   is chosen because for terminal Failure/Rejected outcomes the final event's
-   reason is the actual cause of exhaustion; the first event reflects only
-   the initial fallback trigger.  Empty list -> null. *)
-let top_level_reason_of_observation (observation : runtime_observation option) =
-  match observation with
-  | None -> `Null
-  | Some obs ->
-      (match List.rev obs.fallback_events with
-      | last :: _ -> `String last.reason
-      | [] -> `Null)
-
 let keeper_name_to_json keeper_name =
   match keeper_name with
   | Some name when String.trim name <> "" -> `String name
@@ -515,7 +412,6 @@ let runtime_audit_json ~now ~keeper_name ~runtime_id ~observation ~outcome =
       ("keeper_name", keeper_name_to_json keeper_name);
       ("runtime_id", `String runtime_id);
       ("outcome", `String (runtime_outcome_to_string outcome));
-      ("top_level_reason", top_level_reason_of_observation observation);
       ( "observation",
         match observation with
         | Some obs -> runtime_observation_to_json obs
@@ -613,16 +509,11 @@ let handle_record state ~now ~keeper_name ~runtime_id ~observation ~outcome =
     match observation with
     | Some obs ->
         let counter = { counter with
-          last_candidate_models = obs.candidate_models;
           last_selected_model = obs.selected_model;
-          last_selected_index = obs.selected_index;
           last_attempts = obs.attempts;
-          last_fallback_events = obs.fallback_events;
           last_attempt_details_available = obs.attempt_details_available;
           last_attempt_details_source = Some obs.attempt_details_source;
-          fallback_calls = if obs.fallback_applied then counter.fallback_calls + 1 else counter.fallback_calls;
           total_attempts = counter.total_attempts + List.length obs.attempts;
-          total_fallback_events = counter.total_fallback_events + List.length obs.fallback_events;
         } in
         let counter =
           match obs.selected_model with
@@ -683,18 +574,10 @@ let handle_get_metrics state p =
             ("successes", `Int c.successes);
             ("failures", `Int c.failures);
             ("rejected", `Int c.rejected);
-            ("fallback_calls", `Int c.fallback_calls);
             ("total_attempts", `Int c.total_attempts);
-            ("total_fallback_events", `Int c.total_fallback_events);
             ("last_selected_model", Json_util.string_opt_to_json c.last_selected_model);
-            ("last_selected_index", Json_util.int_opt_to_json c.last_selected_index);
-            ( "last_candidate_models",
-              `List (List.map (fun model -> `String model) c.last_candidate_models) );
             ( "last_attempts",
               `List (List.map runtime_attempt_to_json c.last_attempts) );
-            ( "last_fallback_events",
-              `List
-                (List.map runtime_fallback_event_to_json c.last_fallback_events) );
             ("last_attempt_details_available", `Bool c.last_attempt_details_available);
             ( "last_attempt_details_source",
               Json_util.string_opt_to_json c.last_attempt_details_source );

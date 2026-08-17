@@ -593,7 +593,6 @@ function modelMetricTone(metric: DashboardRuntimeModelMetric): string {
     if (rate < 0.85) return 'bad'
     if (rate < 0.95) return 'warn'
   }
-  if ((metric.fallback_count ?? 0) > 0) return 'warn'
   return 'ok'
 }
 
@@ -1054,7 +1053,7 @@ export function RuntimeMonitor() {
                   <div class="flex justify-between gap-3 items-start flex-wrap">
                     <div class="grid gap-1">
                       <strong class="text-sm text-[var(--color-fg-primary)]">${runtimeLabel}</strong>
-                      <span class="text-xs text-[var(--color-fg-muted)]">entries ${formatNumber(metric.entry_count)} · fallback ${formatNumber(metric.fallback_count)}</span>
+                      <span class="text-xs text-[var(--color-fg-muted)]">entries ${formatNumber(metric.entry_count)}</span>
                       ${metricCoverageText(metric)
                         ? html`<span class="text-2xs ${hasCoverageGap ? 'text-[var(--status-warn)]' : 'text-[var(--color-fg-muted)]'}">${metricCoverageText(metric)}</span>`
                         : null}

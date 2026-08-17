@@ -653,8 +653,15 @@ let%test "canonical fingerprint is sensitive to the frozen response codec" =
       ~admission_basis:(Measured_context_fit fit)
     |> fingerprint_to_string
   in
-  let v0_220_anthropic_fingerprint =
-    "d59eee4e9e01296bdea6b695c0e2d9ad1fcfd1ee5779777124a4379e4bc6d598"
+  (* Frozen over the [agent_core-exact-output-plan-v2] material domain. The
+     previous pin ([d59eee4e...], labeled v0.220) hashed the same material
+     under the [oas-exact-output-plan-v2] domain string; #27945 hard-cut the
+     oas name out of the fingerprint domain, which intentionally changed
+     every plan fingerprint. Any further mismatch here means the fingerprint
+     material drifted again — update this pin only for a deliberate,
+     commit-documented material change. *)
+  let agent_core_plan_v2_anthropic_fingerprint =
+    "a823aaf450989799c6af800e78fecb1fbc1a3a8f395315271776dd2225081b6f"
   in
   let anthropic_codec = Provider_http_codec.of_config config in
   let openai_codec =
@@ -665,5 +672,7 @@ let%test "canonical fingerprint is sensitive to the frozen response codec" =
       }
   in
   fingerprint anthropic_codec <> fingerprint openai_codec
-  && String.equal (fingerprint anthropic_codec) v0_220_anthropic_fingerprint
+  && String.equal
+       (fingerprint anthropic_codec)
+       agent_core_plan_v2_anthropic_fingerprint
 ;;

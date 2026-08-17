@@ -763,7 +763,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         created_at: toIsoTimestamp(row.created_at) ?? asString(row.created_at),
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.heartbeat_observation_error)
-          ? null
+          ? undefined
           : (asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen)),
         heartbeat_observation_error: asString(row.heartbeat_observation_error) ?? null,
         last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,

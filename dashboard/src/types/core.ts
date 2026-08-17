@@ -1186,6 +1186,9 @@ export interface Keeper {
   created_at?: string
   updated_at?: string
   last_heartbeat?: string
+  /** Non-null when the heartbeat ledger could not be read — the operator
+      surface shows the error instead of substituting a stale timestamp. */
+  heartbeat_observation_error?: string | null
   keeper_age_s?: number
   last_turn_ago_s?: number
   last_handoff_ago_s?: number

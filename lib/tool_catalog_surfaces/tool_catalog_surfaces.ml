@@ -66,16 +66,39 @@ let public_mcp_surface_tools =
        purpose: it wipes transcript messages, which is a different decision
        from asking a keeper to compact. *)
     "masc_keeper_compact"
+  ; (* [masc_keeper_msg] is the operator's front door for sending a keeper a
+       direct message: submit -> operation_id, then poll
+       [masc_keeper_delegate_status]. It already had a real handler
+       (Keeper_tool_surface.handle_keeper_msg) reachable only from the HTTP
+       copilot chat route and the board-context-inference caller; this adds
+       the MCP tools/call path so an operator can reach the same handler
+       without going through either adapter. *)
+    "masc_keeper_msg"
+  ; (* [masc_keeper_delegate_status] is the read-side counterpart operators
+       need to poll the operation_id that masc_keeper_msg / masc_keeper_delegate
+       return; it was already catalog-owned as a read_state_tool but missing
+       from this surface, so an operator could submit a turn but never observe
+       it settle. *)
+    "masc_keeper_delegate_status"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
-       operator/client counterpart to existing board comment/vote actions. *)
+       operator/client counterpart to existing board comment/vote actions.
+       [masc_board_search] is the read counterpart operators need to locate a
+       post before calling masc_board_post_get/comment/vote on it. *)
     "masc_board_post"
   ; "masc_board_list"
   ; "masc_board_post_get"
+  ; "masc_board_search"
   ; "masc_board_comment"
   ; "masc_board_vote"
   ; "masc_board_curation_read"
   ; "masc_board_curation_submit"
   ; "masc_board_reaction"
+  ; (* Task workspace read-side: operators need the history of a task they
+       did not submit themselves (e.g. one another Keeper claimed). *)
+    "masc_task_history"
+  ; (* Fusion. Read-only status check for the fusion pipeline an operator
+       is coordinating multiple keepers through. *)
+    "masc_fusion_status"
   ]
   @ public_schedule_surface_tools
   @

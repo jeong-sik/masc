@@ -660,6 +660,28 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
   | Ok result -> result
   | Error error -> tool_result_of_handler_error error
 ;;
+
+(* Raw-args boundary for masc_keeper_msg, mirroring [handle_keeper_delegate]'s
+   args decode so both dispatch tables (Keeper_tool_surface.dispatch and
+   Keeper_dispatch_ref.dispatch) can register it the same way. Target
+   resolution, preflight, and submission stay inside [handle_keeper_msg]. *)
+let handle_keeper_msg_from_args ~submitted_by ctx args : tool_result =
+  match
+    Keeper_invocation_contract.direct_message
+      ~keeper_name:(get_string args "name" "")
+      ~prompt:(get_string args "message" "")
+      ~direct_reply:true
+      ~channel:""
+      ~user_blocks:[]
+      ~attachments:[]
+      ()
+    |> Result.map_error Keeper_invocation_contract.request_error_to_string
+    |> message_error
+  with
+  | Ok message -> handle_keeper_msg ~submitted_by ctx message
+  | Error error -> tool_result_of_handler_error error
+;;
+
 let operation_reference_arg args =
   let invalid detail =
     Error

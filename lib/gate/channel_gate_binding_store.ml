@@ -6,12 +6,10 @@ type binding = {
 type guild_id_field =
   | Omit
   | Include_empty
-  | Include_event_value
 
 type audit_event = {
   timestamp : string;
   action : string;
-  guild_id : string option;
   channel_id : string;
   keeper_name : string;
   actor_id : string;
@@ -258,17 +256,10 @@ let save_bindings_result store (bindings : binding list) =
   | Unix.Unix_error (code, fn, arg) ->
     Error (unix_error_message path fn arg code)
 
-let guild_id_items store event =
+let guild_id_items store =
   match store.guild_id_field with
   | Omit -> []
   | Include_empty -> [ ("guild_id", `String "") ]
-  | Include_event_value ->
-      let guild_id =
-        match event.guild_id with
-        | Some value -> value
-        | None -> ""
-      in
-      [ ("guild_id", `String guild_id) ]
 
 let audit_event_json store event =
   `Assoc
@@ -276,7 +267,7 @@ let audit_event_json store event =
        ("timestamp", `String event.timestamp);
        ("action", `String event.action);
      ]
-    @ guild_id_items store event
+    @ guild_id_items store
     @ [
         ("channel_id", `String event.channel_id);
         ("keeper_name", `String event.keeper_name);

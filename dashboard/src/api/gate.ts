@@ -9,7 +9,6 @@ import {
 import {
   parseGateConnectorsData,
   type ConnectorBindingSummary,
-  type ConnectorNames,
   type ConnectorRuntimeSummary,
   type ConnectorStoragePaths,
   type DiscordAuditEntry,
@@ -22,7 +21,6 @@ export type { BindingInfo, ChannelInfo, GateEventInfo, GateStatusData }
 export { GateStatusSchemaDriftError } from './schemas/gate-status'
 export type {
   ConnectorBindingSummary,
-  ConnectorNames,
   ConnectorRuntimeSummary,
   ConnectorStoragePaths,
   DiscordAuditEntry,

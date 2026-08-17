@@ -9,12 +9,10 @@ type binding = {
 type guild_id_field =
   | Omit
   | Include_empty
-  | Include_event_value
 
 type audit_event = {
   timestamp : string;
   action : string;
-  guild_id : string option;
   channel_id : string;
   keeper_name : string;
   actor_id : string;

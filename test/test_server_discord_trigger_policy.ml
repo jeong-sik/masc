@@ -210,8 +210,6 @@ let test_durable_accept_precedes_delivery_handoff () =
   with_env "MASC_DISCORD_BINDING_AUDIT_PATH"
     (Filename.concat base_dir "audit.jsonl")
   @@ fun () ->
-  with_env "MASC_DISCORD_NAMES_PATH" (Filename.concat base_dir "names.json")
-  @@ fun () ->
   (match State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test" with
    | Error detail -> fail detail
    | Ok _ -> ());

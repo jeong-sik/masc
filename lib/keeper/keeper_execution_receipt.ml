@@ -96,6 +96,7 @@ type operator_disposition_reason =
   | Reason_phase_skipped
   | Reason_transcript_corruption
   | Reason_provider_attempt_effect_fenced
+  | Reason_tool_correction_lost
   | Reason_unmapped_runtime_state
 
 let operator_disposition_reason_to_string = function
@@ -114,6 +115,7 @@ let operator_disposition_reason_to_string = function
   | Reason_transcript_corruption -> "transcript_corruption"
   | Reason_provider_attempt_effect_fenced ->
     Keeper_internal_error.provider_attempt_effect_fenced_kind
+  | Reason_tool_correction_lost -> Keeper_internal_error.tool_correction_lost_kind
   | Reason_unmapped_runtime_state -> "unmapped_runtime_state"
 ;;
 
@@ -165,6 +167,11 @@ let operator_disposition (receipt : t)
        classify the canonical typed failure instead of incrementing the
        unmapped-state regression metric. *)
     Disp_unknown, Reason_provider_attempt_effect_fenced
+  | Keeper_terminal_reason.Tool_correction_lost _ ->
+    (* Identical disposition to the fence above; only the label differs so a
+       lost correction (masc#28885) is countable apart from an ordinary
+       fenced provider failure. *)
+    Disp_unknown, Reason_tool_correction_lost
   | Keeper_terminal_reason.Runtime_exhausted _ ->
     Disp_fail_open_next_runtime, Reason_runtime_exhausted
   | Keeper_terminal_reason.Capacity_backpressure _ ->
@@ -236,6 +243,7 @@ let operator_disposition (receipt : t)
        | Provider_runtime_failure _
        | Transcript_corruption _
        | Provider_attempt_effect_fenced _
+       | Tool_correction_lost _
        | Internal_error _
        | Unknown _ -> false)
     then Disp_pass, Reason_healthy

@@ -87,6 +87,7 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_contract_rejected _
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Receipt_persistence_failed _
       | Keeper_internal_error.Gate_replay_repair_required _ )
   | None ->
@@ -117,6 +118,7 @@ let execution_boundary_of_turn_failure ~transcript_corruption error =
       | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Provider_attempt_effect_fenced _
+      | Keeper_internal_error.Tool_correction_lost _
       | Keeper_internal_error.Receipt_persistence_failed _ )
   | None, None ->
     Keeper_runtime_failure_route.Agent_core_execution

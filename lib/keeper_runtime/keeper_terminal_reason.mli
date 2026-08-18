@@ -76,6 +76,13 @@ type t =
       attempt may have crossed an effect boundary, so same-turn replay is
       forbidden and the operator-facing receipt must retain an explicit alert
       rather than treating it as an unmapped internal state. *)
+  | Tool_correction_lost of string
+  (** Exact canonical wire
+      {!Keeper_internal_error.tool_correction_lost_kind}. The same fence, on a
+      turn that also recorded typed pre_tool_use rejections (masc#28885);
+      disposition matches {!Provider_attempt_effect_fenced}, only the label
+      differs so a lost correction is countable apart from ordinary fenced
+      provider failures. *)
   | Internal_error of string
   (** Exact wire ["internal_error"]. Payload is the original
           string, carried only for [to_wire] round-trip fidelity. *)

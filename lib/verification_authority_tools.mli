@@ -1,7 +1,11 @@
 (** Completion-authority access to one producer's typed read-only filesystem
     descriptors. A Keeper producer receives its metadata-bound Read and Grep;
     a Workspace producer without Keeper runtime metadata receives an
-    ownership-root-bound Read. Descriptor registry drift and unreadable
+    ownership-root-bound Read. Both receive the shared web-fetch tool so a
+    URL left in note evidence (a PR, a CI run) is inspectable by the judge
+    itself instead of standing as the producer's claim (masc#28989); its
+    boundary guards — http/https only, private-network and localhost targets
+    refused, validated redirects, bounded extraction — live in the tool. Descriptor registry drift and unreadable
     producer state reject surface construction. Every dispatched call is
     validated and translated by the same descriptor that was advertised.
     Mutating execution is absent: a verifier has no turn continuation that

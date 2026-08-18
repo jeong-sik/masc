@@ -93,7 +93,6 @@ describe('keeperDisplayStatus', () => {
         status: 'offline',
         generation: 2,
         turn_count: 10,
-        agent: { exists: true },
       })
       expect(keeperDisplayStatus(keeper)).toBe('stopped')
     })
@@ -460,10 +459,6 @@ describe('keeperWorkPreview', () => {
         }),
       ),
     ).toBe('Continuation checkpoint saved.')
-  })
-
-  it('falls through to current_task', () => {
-    expect(keeperWorkPreview(makeKeeper({ agent: { current_task: 'task-7' } }))).toBe('task-7')
   })
 
   it('returns null when no signal exists', () => {

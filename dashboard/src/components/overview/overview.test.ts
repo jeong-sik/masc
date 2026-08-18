@@ -416,7 +416,6 @@ describe('deriveFleetTickerEvents', () => {
           phase: 'Paused',
           pipeline_stage: 'paused',
           last_heartbeat: localIsoAt(4),
-          agent: { exists: true, status: 'busy' },
         }),
       ],
     })

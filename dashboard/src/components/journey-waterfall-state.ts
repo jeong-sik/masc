@@ -306,7 +306,6 @@ export function buildJourneyWaterfall(input: JourneyWaterfallInput): JourneyWate
 function keeperActivityAge(keeper: Keeper): number {
   return numberValue(keeper.last_turn_ago_s)
     ?? numberValue(keeper.last_activity_ago_s)
-    ?? numberValue(keeper.agent?.last_seen_ago_s)
     ?? Number.POSITIVE_INFINITY
 }
 

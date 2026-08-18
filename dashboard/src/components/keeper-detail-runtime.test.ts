@@ -212,43 +212,13 @@ describe('resolveKeeperObservedToolAudit', () => {
 })
 
 describe('resolveKeeperCurrentTaskLabel', () => {
-  it('shows the active task when one is bound', () => {
+  it('returns not_collected for online keepers (agent block removed)', () => {
     const keeper: Keeper = {
       name: 'config-provenance',
       status: 'busy',
-      agent: {
-        name: 'keeper-config-provenance-agent',
-        current_task: 'task-046',
-      },
     }
 
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('task-046')
-  })
-
-  it('shows unassigned when the runtime reported no bound task', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-      agent: {
-        name: 'keeper-sangsu-agent',
-        current_task: null,
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('unassigned')
-  })
-
-  it('treats an empty current task string as unassigned', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-      agent: {
-        name: 'keeper-sangsu-agent',
-        current_task: '   ',
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('unassigned')
+    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
   })
 
   it('returns unlinked when no keeper payload is available', () => {

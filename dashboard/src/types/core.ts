@@ -1240,18 +1240,6 @@ export interface Keeper {
   // a stuck/looping compaction shows its cause instead of appearing idle.
   last_compaction_decision?: string | null
   metrics_window?: MetricsWindow
-  agent?: {
-    name?: string
-    error?: string
-    agent_type?: string
-    status?: string
-    current_task?: string | null
-    session_bound_at?: string
-    last_seen?: string
-    last_seen_ago_s?: number
-    capabilities?: string[]
-    [key: string]: unknown
-  }
   // Metrics time-series (from backend metrics_series)
   metrics_series?: KeeperMetricPoint[]
   inventory?: string[]

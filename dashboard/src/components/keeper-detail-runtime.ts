@@ -79,11 +79,7 @@ export function resolveKeeperCurrentTaskLabel(
   const runtimeState = linkedRuntimeState(keeper)
   if (!keeper) return 'unlinked'
   if (runtimeState === 'offline') return 'offline'
-  if (!keeper.agent) return 'not_collected'
-  if (typeof keeper.agent.current_task === 'string' && keeper.agent.current_task.trim() !== '') {
-    return keeper.agent.current_task
-  }
-  return 'unassigned'
+  return 'not_collected'
 }
 
 // ── Shared row component ─────────────────────────────────

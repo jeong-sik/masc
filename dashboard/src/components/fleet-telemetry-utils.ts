@@ -404,7 +404,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           const toolQualityForKeeper = toolStats.get(keeper.name)
           const recentTools = keeperRecentTools(keeper)
           const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
-          const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+          const activity = keeperActivityDisplay(keeper)
           const runtimeBlockerSummary = normalizeKeeperBlockerText(
             firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker),
           )

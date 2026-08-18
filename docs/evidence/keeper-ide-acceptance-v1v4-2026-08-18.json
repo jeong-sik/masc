@@ -31,7 +31,7 @@
         {"file": "v1-03-file-open.png", "sha256": "6ed7c95a2c526368f51cfe69ef38bde9be235ea86f48bdf2dc573f8139d18c48"}
       ],
       "store_row": {
-        "source": "~/.masc-ide/by-url/github.com_jeong-sik_masc/regions.jsonl",
+        "source": "<base-path>/.masc-ide/by-url/github.com_jeong-sik_masc/regions.jsonl",
         "row": {"file_path": "lib/keeper/keeper_github_identity.ml", "line_start": 1, "line_end": 1041, "keeper_id": "rondo", "source": {"type": "tool_call", "tool_name": "edit_file", "turn": 0}, "timestamp_ms": 1786981143217}
       },
       "api_response": {
@@ -52,7 +52,7 @@
       "Opened lib/ide/ide_annotations.ml, clicked line 39 to set the editor selection (CodeMirror updateListener -> ideEditorSelection signal)",
       "Opened the IDE INTERJECT bar (?keeper=rtprobe route param) and sent a message instructing rtprobe to call keeper_ide_annotate using the co-view context verbatim",
       "POST /api/v1/keepers/chat/stream carried surface_context.fields: [{k:file,v:'lib/ide/ide_annotations.ml'},{k:lines,v:'L39'},{k:repo,v:'masc'},{k:codebase,v:'github.com_jeong-sik_masc'}] -- exact RFC-0378 §5.3 wire shape",
-      "rtprobe (runtime ollama_cloud/deepseek-v4-flash) called keeper_ide_annotate with codebase/file_path/line_start/line_end copied verbatim from the surface context (raw trace: ~/.masc/keepers/rtprobe/raw-traces/turn-1786985478292-7157-000262.jsonl)",
+      "rtprobe (runtime ollama_cloud/deepseek-v4-flash) called keeper_ide_annotate with codebase/file_path/line_start/line_end copied verbatim from the surface context (raw trace: <base-path>/.masc/keepers/rtprobe/raw-traces/turn-1786985478292-7157-000262.jsonl)",
       "Reloaded the file in the IDE and inspected the Notes rail / inline annotation chip"
     ],
     "evidence": {
@@ -66,11 +66,11 @@
         "result": {"ok": true, "id": "038a5618-d873-4593-ae5a-77d6d03b9aa3", "file_path": "lib/ide/ide_annotations.ml", "line_start": 39, "line_end": 39}
       },
       "store_row": {
-        "source": "~/.masc-ide/by-url/github.com_jeong-sik_masc/annotations.jsonl",
+        "source": "<base-path>/.masc-ide/by-url/github.com_jeong-sik_masc/annotations.jsonl",
         "row": {"id": "038a5618-d873-4593-ae5a-77d6d03b9aa3", "file_path": "lib/ide/ide_annotations.ml", "line_start": 39, "line_end": 39, "keeper_id": "rtprobe", "kind": "Comment", "content": "RFC-0378 V2 acceptance replay — owner-probe annotation recorded via keeper_ide_annotate.", "goal_id": null, "task_id": null, "references": [], "created_at_ms": 1786985502626, "updated_at_ms": 1786985502626}
       },
       "ui_marker": "inline chip under line 39: 'Comment · keeper rtprobe · +3'; editor header tab 'Notes 4' (grew further as rtprobe kept annotating — see side_effects)",
-      "orphan_check": "no _orphan directory exists anywhere under ~/.masc-ide (confirmed by V4 full store walk); annotation landed in by-url/github.com_jeong-sik_masc/annotations.jsonl, not burial-eligible by construction"
+      "orphan_check": "no _orphan directory exists anywhere under <base-path>/.masc-ide (confirmed by V4 full store walk); annotation landed in by-url/github.com_jeong-sik_masc/annotations.jsonl, not burial-eligible by construction"
     },
     "identity_chain": "co-view surface_context (file/lines/codebase sent to keeper) == tool_input the keeper actually called == store row == REST annotations response == UI inline marker + Notes rail count. Exact match, verbatim address, no re-derivation from sandbox layout (confirms RFC-0378 §5.3's central claim)."
   },
@@ -142,7 +142,7 @@
       "description": "The single V2 interject message caused rtprobe to call keeper_ide_annotate repeatedly against the identical (codebase, file_path, line_start, line_end) instead of stopping after one call. Row count in annotations.jsonl grew 1 -> 4 -> 9 -> 27 -> 29 -> 31 over the turn's lifetime.",
       "cleanup_attempted": "POST /api/v1/keepers/turn/interrupt for name=rtprobe, both via a direct curl call and via an in-page fetch() from an authenticated browser tab -- both denied by the Claude Code permission classifier as a state-changing action outside the sanctioned browser-click flow.",
       "cleanup_result": "Self-resolved, no manual intervention performed. The turn finished on its own roughly 11-12 minutes after the interject was sent (absolute_turn 147 -> 148, request_latency approx. 687s per the turn record); run_state returned to 'Waiting' and annotations.jsonl settled at 31 rows.",
-      "exact_call_count": "31 keeper_ide_annotate tool_execution_started/finished pairs in the turn's raw trace (~/.masc/keepers/rtprobe/raw-traces/turn-1786985478292-7157-000262.jsonl), all tool_error=false. This is a 1:1 relationship, not a multiplier -- each call produced exactly one annotations.jsonl row, so 31 calls == 31 rows.",
+      "exact_call_count": "31 keeper_ide_annotate tool_execution_started/finished pairs in the turn's raw trace (<base-path>/.masc/keepers/rtprobe/raw-traces/turn-1786985478292-7157-000262.jsonl), all tool_error=false. This is a 1:1 relationship, not a multiplier -- each call produced exactly one annotations.jsonl row, so 31 calls == 31 rows.",
       "recommendation": "Not blocking, but worth a separate harness-side look at why a single keeper_ide_annotate success didn't stop the model from repeating the same call 31 times in one turn (deepseek-v4-flash cascade runtime, ~687s total turn latency) -- out of RFC-0378's scope, filed here only as an operational note, not a masc#28968-style RFC defect."
     },
     "server_mutation": "none (no restart, no store cut/--execute)",

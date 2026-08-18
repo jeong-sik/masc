@@ -103,7 +103,7 @@
       "capabilities": ["Fusion", "Task", "Board"],
       "user_story": "Fusion이 비동기로 실행되는 동안 다른 Keeper들의 Task와 Board 진행이 완료된다.",
       "assertions": ["fusion_started", "peer_progress_during_fusion"],
-      "evidence": ["observations/fusion-status.json", "observations/timeline-researcher.json", "turns/parallel-*.json"]
+      "evidence": ["observations/tool-calls-researcher.json", "observations/timeline-researcher.json", "turns/parallel-*.json"]
     },
     {
       "id": "RW07",

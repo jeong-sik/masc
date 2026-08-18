@@ -144,6 +144,15 @@ let surface_tools : Masc_domain.tool_schema list =
                         , `String
                             "Slack thread timestamp (ts) of an existing message to reply inside that thread. Slack surface only; ignored for dashboard/discord. Omit to post a new top-level message." )
                       ] )
+                ; ( "blocks"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "object" ]
+                      ; "maxItems", `Int 50
+                      ; ( "description"
+                        , `String
+                            "Slack Block Kit blocks (chat.postMessage blocks parameter) for a structurally rich PR report: section/header/divider/context blocks, color banners, images. Slack surface only; ignored for dashboard/discord. Each block must be a JSON object carrying a non-empty string \"type\" member. When blocks is present it is sent alongside content (content remains the notification fallback text)." )
+                      ] )
                 ] )
           ; "required", `List [ `String "surface"; `String "content" ]
           ]

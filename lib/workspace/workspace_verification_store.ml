@@ -16,6 +16,30 @@ type evidence_read_failure =
   | Evidence_changed_during_read
   | Evidence_read_error of string
 
+type pull_request_locator =
+  { owner : string
+  ; repo : string
+  ; number : int
+  }
+
+type pull_request_snapshot =
+  { url : string
+  ; state : string
+  ; merged : bool
+  ; draft : bool
+  ; head_sha : string
+  ; title : string
+  ; diff : string
+  ; diff_bytes : int
+  ; diff_truncated : bool
+  }
+
+type pull_request_fetch_failure =
+  | Pull_request_inspector_uninstalled
+  | Pull_request_transport of string
+  | Pull_request_http_status of int
+  | Pull_request_payload_invalid of string
+
 type submitted_evidence_item =
   | Evidence_note of string
   | Evidence_artifact of
@@ -29,6 +53,33 @@ type submitted_evidence_item =
       { reference : string
       ; reason : evidence_read_failure
       }
+  | Evidence_pull_request of
+      { reference : string
+      ; snapshot : pull_request_snapshot
+      }
+  | Evidence_pull_request_unreadable of
+      { reference : string
+      ; reason : pull_request_fetch_failure
+      }
+
+(* The forge reader is installed by the composition root at startup; this
+   store stays free of transport dependencies (masc#28989). Stdlib mutex:
+   installation happens during bootstrap and reads are non-yielding. *)
+let pull_request_inspector :
+  (pull_request_locator ->
+   (pull_request_snapshot, pull_request_fetch_failure) result)
+    option
+    Atomic.t
+  =
+  Atomic.make None
+
+let install_pull_request_inspector inspector =
+  Atomic.set pull_request_inspector (Some inspector)
+
+let inspect_pull_request locator =
+  match Atomic.get pull_request_inspector with
+  | None -> Error Pull_request_inspector_uninstalled
+  | Some inspector -> inspector locator
 
 type evidence_access_failure =
   | Completion_authority_identity_missing
@@ -89,6 +140,52 @@ let evidence_read_failure_of_yojson = function
      | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
   | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 
+let pull_request_fetch_failure_code = function
+  | Pull_request_inspector_uninstalled -> "inspector_uninstalled"
+  | Pull_request_transport _ -> "transport"
+  | Pull_request_http_status _ -> "http_status"
+  | Pull_request_payload_invalid _ -> "payload_invalid"
+
+let pull_request_fetch_failure_to_yojson reason =
+  match reason with
+  | Pull_request_inspector_uninstalled ->
+    `Assoc [ "code", `String "inspector_uninstalled" ]
+  | Pull_request_transport detail ->
+    `Assoc [ "code", `String "transport"; "detail", `String detail ]
+  | Pull_request_http_status status ->
+    `Assoc [ "code", `String "http_status"; "status", `Int status ]
+  | Pull_request_payload_invalid detail ->
+    `Assoc [ "code", `String "payload_invalid"; "detail", `String detail ]
+
+let pull_request_fetch_failure_of_yojson = function
+  | `Assoc fields ->
+    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+     | [ "code", `String "inspector_uninstalled" ] ->
+       Ok Pull_request_inspector_uninstalled
+     | [ "code", `String "transport"; "detail", `String detail ] ->
+       Ok (Pull_request_transport detail)
+     | [ "code", `String "http_status"; "status", `Int status ] ->
+       Ok (Pull_request_http_status status)
+     | [ "code", `String "payload_invalid"; "detail", `String detail ] ->
+       Ok (Pull_request_payload_invalid detail)
+     | _ ->
+       Error "submitted evidence snapshot has an invalid pull-request reason")
+  | _ ->
+    Error "submitted evidence snapshot pull-request reason must be an object"
+
+let pull_request_snapshot_to_yojson (snapshot : pull_request_snapshot) =
+  `Assoc
+    [ "url", `String snapshot.url
+    ; "state", `String snapshot.state
+    ; "merged", `Bool snapshot.merged
+    ; "draft", `Bool snapshot.draft
+    ; "head_sha", `String snapshot.head_sha
+    ; "title", `String snapshot.title
+    ; "diff", `String snapshot.diff
+    ; "diff_bytes", `Int snapshot.diff_bytes
+    ; "diff_truncated", `Bool snapshot.diff_truncated
+    ]
+
 let submitted_evidence_item_to_yojson = function
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
@@ -110,6 +207,18 @@ let submitted_evidence_item_to_yojson = function
       [ "kind", `String "artifact_unreadable"
       ; "reference", `String reference
       ; "reason", evidence_read_failure_to_yojson reason
+      ]
+  | Evidence_pull_request { reference; snapshot } ->
+    `Assoc
+      [ "kind", `String "pull_request"
+      ; "reference", `String reference
+      ; "snapshot", pull_request_snapshot_to_yojson snapshot
+      ]
+  | Evidence_pull_request_unreadable { reference; reason } ->
+    `Assoc
+      [ "kind", `String "pull_request_unreadable"
+      ; "reference", `String reference
+      ; "reason", pull_request_fetch_failure_to_yojson reason
       ]
 
 let request_header_to_yojson request =
@@ -186,6 +295,22 @@ let submitted_evidence_item_metadata_to_yojson = function
       [ "kind", `String "artifact_unreadable"
       ; "reference", `String reference
       ; "reason", `String (evidence_read_failure_code reason)
+      ]
+  | Evidence_pull_request { reference; snapshot } ->
+    `Assoc
+      [ "kind", `String "pull_request"
+      ; "reference", `String reference
+      ; "state", `String snapshot.state
+      ; "merged", `Bool snapshot.merged
+      ; "head_sha", `String snapshot.head_sha
+      ; "diff_bytes", `Int snapshot.diff_bytes
+      ; "diff_truncated", `Bool snapshot.diff_truncated
+      ]
+  | Evidence_pull_request_unreadable { reference; reason } ->
+    `Assoc
+      [ "kind", `String "pull_request_unreadable"
+      ; "reference", `String reference
+      ; "reason", `String (pull_request_fetch_failure_code reason)
       ]
 ;;
 
@@ -294,6 +419,91 @@ let submitted_evidence_item_of_yojson = function
         | _, _, _ ->
           Error
             "submitted evidence unreadable item has unexpected fields")
+     | Some (`String "pull_request") ->
+       let open Result.Syntax in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence pull request"
+           ~allowed:[ "kind"; "reference"; "snapshot" ]
+           fields
+       in
+       let* reference = string_field "reference" in
+       let* snapshot_fields =
+         match List.assoc_opt "snapshot" fields with
+         | Some (`Assoc snapshot_fields) -> Ok snapshot_fields
+         | Some value ->
+           Error
+             (Printf.sprintf
+                "submitted evidence pull-request snapshot must be an object, got %s"
+                (Json_util.excerpt value))
+         | None ->
+           Error "submitted evidence snapshot is missing pull-request snapshot"
+       in
+       let snapshot_string key =
+         match List.assoc_opt key snapshot_fields with
+         | Some (`String value) -> Ok value
+         | _ ->
+           Error
+             (Printf.sprintf
+                "submitted evidence pull-request snapshot needs string %s"
+                key)
+       in
+       let snapshot_bool key =
+         match List.assoc_opt key snapshot_fields with
+         | Some (`Bool value) -> Ok value
+         | _ ->
+           Error
+             (Printf.sprintf
+                "submitted evidence pull-request snapshot needs bool %s"
+                key)
+       in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence pull request snapshot"
+           ~allowed:
+             [ "url"; "state"; "merged"; "draft"; "head_sha"; "title"
+             ; "diff"; "diff_bytes"; "diff_truncated" ]
+           snapshot_fields
+       in
+       let* url = snapshot_string "url" in
+       let* state = snapshot_string "state" in
+       let* merged = snapshot_bool "merged" in
+       let* draft = snapshot_bool "draft" in
+       let* head_sha = snapshot_string "head_sha" in
+       let* title = snapshot_string "title" in
+       let* diff = snapshot_string "diff" in
+       let* diff_bytes =
+         match List.assoc_opt "diff_bytes" snapshot_fields with
+         | Some (`Int value) when value >= 0 -> Ok value
+         | _ ->
+           Error
+             "submitted evidence pull-request snapshot needs non-negative diff_bytes"
+       in
+       let* diff_truncated = snapshot_bool "diff_truncated" in
+       Ok
+         (Evidence_pull_request
+            { reference
+            ; snapshot =
+                { url; state; merged; draft; head_sha; title
+                ; diff; diff_bytes; diff_truncated }
+            })
+     | Some (`String "pull_request_unreadable") ->
+       let open Result.Syntax in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence pull request unreadable"
+           ~allowed:[ "kind"; "reference"; "reason" ]
+           fields
+       in
+       let* reference = string_field "reference" in
+       let* reason_json =
+         match List.assoc_opt "reason" fields with
+         | Some reason -> Ok reason
+         | None ->
+           Error "submitted evidence snapshot is missing pull-request reason"
+       in
+       let* reason = pull_request_fetch_failure_of_yojson reason_json in
+       Ok (Evidence_pull_request_unreadable { reference; reason })
      | Some (`String kind) ->
        Error (Printf.sprintf "unknown submitted evidence snapshot kind %S" kind)
      | Some value ->
@@ -503,6 +713,7 @@ let read_regular_file_prefix ~ownership_root path =
 
 let artifact_reference_prefix = "artifact:"
 let note_reference_prefix = "note:"
+let pull_request_reference_prefix = "pull-request:"
 
 let strip_prefix ~prefix value =
   if String.starts_with ~prefix value
@@ -514,6 +725,36 @@ let strip_prefix ~prefix value =
          (String.length value - String.length prefix))
   else None
 
+let pull_request_url_prefix = "https://github.com/"
+
+(* Parse, don't validate: the reference admits exactly
+   [https://github.com/<owner>/<repo>/pull/<number>] and yields the typed
+   locator. Anything else is Unresolvable at submit, so a malformed URL can
+   never reach the forge reader. *)
+let parse_pull_request_url url =
+  match strip_prefix ~prefix:pull_request_url_prefix url with
+  | None -> None
+  | Some rest ->
+    let segment_ok segment =
+      not (String.equal segment "")
+      && String.for_all
+           (fun ch ->
+             match ch with
+             | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' -> true
+             | _ -> false)
+           segment
+    in
+    (match String.split_on_char '/' rest with
+     | [ owner; repo; "pull"; number ]
+       when segment_ok owner && segment_ok repo ->
+       (match int_of_string_opt number with
+        | Some n when n > 0 -> Some { owner; repo; number = n }
+        | Some _ | None -> None)
+     | _ -> None)
+
+let pull_request_locator_url { owner; repo; number } =
+  Printf.sprintf "%s%s/%s/pull/%d" pull_request_url_prefix owner repo number
+
 (* The shape this store can read, decided without touching the filesystem.
    [snapshot_submitted_evidence_item] below is the only producer of evidence
    snapshots and answers [Evidence_invalid_reference] for anything else, so the
@@ -523,6 +764,7 @@ let strip_prefix ~prefix value =
 type reference_form =
   | Artifact_reference of string
   | Note_reference of string
+  | Pull_request_reference of pull_request_locator
   | Unresolvable_reference
 
 let classify_evidence_reference reference =
@@ -532,7 +774,14 @@ let classify_evidence_reference reference =
     (match strip_prefix ~prefix:note_reference_prefix reference with
      | Some note when not (String.equal (String.trim note) "") ->
        Note_reference note
-     | Some _ | None -> Unresolvable_reference)
+     | Some _ -> Unresolvable_reference
+     | None ->
+       (match strip_prefix ~prefix:pull_request_reference_prefix reference with
+        | Some url ->
+          (match parse_pull_request_url (String.trim url) with
+           | Some locator -> Pull_request_reference locator
+           | None -> Unresolvable_reference)
+        | None -> Unresolvable_reference))
 ;;
 
 let artifact_reference_form =
@@ -540,7 +789,14 @@ let artifact_reference_form =
 ;;
 
 let note_reference_form = note_reference_prefix ^ "<text>"
-let resolvable_reference_forms = [ artifact_reference_form; note_reference_form ]
+
+let pull_request_reference_form =
+  pull_request_reference_prefix
+  ^ pull_request_url_prefix
+  ^ "<owner>/<repo>/pull/<number>"
+
+let resolvable_reference_forms =
+  [ artifact_reference_form; note_reference_form; pull_request_reference_form ]
 
 let valid_producer_relative_path path =
   Filename.is_relative path
@@ -579,6 +835,10 @@ let snapshot_submitted_evidence_item ~base_path ~worker reference =
       ~reference
       relative_path
   | Note_reference note -> Evidence_note note
+  | Pull_request_reference locator ->
+    (match inspect_pull_request locator with
+     | Ok snapshot -> Evidence_pull_request { reference; snapshot }
+     | Error reason -> Evidence_pull_request_unreadable { reference; reason })
   | Unresolvable_reference -> Evidence_invalid_reference
 
 let snapshot_submitted_evidence_json ~base_path ~worker references =
@@ -610,6 +870,20 @@ let submitted_evidence_identity_line (item : Yojson.Safe.t) =
          "%s (unreadable: %s)"
          reference
          (evidence_read_failure_code reason))
+  | Ok (Evidence_pull_request { reference; snapshot }) ->
+    Ok
+      (Printf.sprintf
+         "%s (%s%s, head %s)"
+         reference
+         snapshot.state
+         (if snapshot.merged then ", merged" else "")
+         snapshot.head_sha)
+  | Ok (Evidence_pull_request_unreadable { reference; reason }) ->
+    Ok
+      (Printf.sprintf
+         "%s (unreadable: %s)"
+         reference
+         (pull_request_fetch_failure_code reason))
 ;;
 
 let submitted_evidence_identity_lines (json : Yojson.Safe.t) =

@@ -224,6 +224,7 @@ normal_targets=(
   @test/runtest-test_mcp_session_task_lifecycle
   @test/runtest-test_mcp_server_eio
   @test/runtest-test_keeper_sandbox_docker_cwd_response
+  @test/runtest-test_workspace_pull_request_evidence
   @test/runtest-test_keeper_tool_execute_exit_result
   @test/runtest-test_goal_store
   @test/runtest-test_keeper_goal_phase_projection

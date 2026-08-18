@@ -456,6 +456,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Runtime_params.initialize ~base_path;
   Fs_compat.set_fs fs;
+  Github_pull_request_evidence.install ();
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   Eio_context.set_switch sw;
@@ -755,6 +756,7 @@ let initialize_owner_state_blocking
       (Owner_initialization_failed
          (Startup_path_guard_rejected path_diagnostics));
   Fs_compat.set_fs fs;
+  Github_pull_request_evidence.install ();
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
   let fusion_registry =
     Filename.concat masc_dir "fusion-runs.jsonl" |> Fusion_run_registry.replay

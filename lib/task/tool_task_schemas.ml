@@ -11,13 +11,17 @@ let handoff_context_description =
   "Typed handoff payload. 'summary' is REQUIRED (non-empty) for exit-class \
      actions (submit_for_verification / done / release / cancel). On \
      action='submit_for_verification', every 'evidence_refs' entry must use \
-     'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
-     'note:<text>' for narrative evidence. URLs, commits, and traces are not \
-     fetched by the system LLM lane; materialize their relevant contents as an \
-     artifact when they are required proof. Bare relative paths \
+     'artifact:<producer-root-relative-path>' for a bounded file snapshot, \
+     'note:<text>' for narrative evidence, or \
+     'pull-request:https://github.com/<owner>/<repo>/pull/<number>' for a \
+     GitHub PR — the system fetches the PR state, head sha, and a bounded \
+     diff itself, so the verifier inspects the forge directly. Other URLs, \
+     commits, and traces are not fetched; materialize their relevant contents \
+     as an artifact when they are required proof. Bare relative paths \
      and absolute host paths are persisted as typed invalid references. The \
-     list itself is optional. Example: {\"summary\": \"tests green, local proof saved\", \
-     \"evidence_refs\": [\"artifact:artifacts/proof.json\"]}."
+     list itself is optional. Example: {\"summary\": \"tests green, PR open\", \
+     \"evidence_refs\": [\"artifact:artifacts/proof.json\", \
+     \"pull-request:https://github.com/jeong-sik/masc/pull/28988\"]}."
 
 let schemas : Masc_domain.tool_schema list = [
   {
@@ -267,7 +271,7 @@ Tip: Look for status='todo' tasks to claim.";
             ("evidence_refs", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string"); ("minLength", `Int 1) ]);
-              ("description", `String "Typed verifier evidence. Use artifact:<producer-root-relative-path> for files or note:<text> for narrative, commit, trace, receipt, or URL evidence. Bare and absolute paths are invalid.");
+              ("description", `String "Typed verifier evidence. Use artifact:<producer-root-relative-path> for files, note:<text> for narrative/commit/trace/receipt evidence, or pull-request:https://github.com/<owner>/<repo>/pull/<number> for a GitHub PR the system fetches itself. Bare and absolute paths are invalid.");
             ]);
           ]);
           ("required", `List [`String "summary"]);

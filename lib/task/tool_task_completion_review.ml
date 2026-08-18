@@ -26,7 +26,8 @@ let unresolvable_evidence_ref value =
   with
   | Workspace_verification_store.Unresolvable_reference -> true
   | Workspace_verification_store.Artifact_reference _
-  | Workspace_verification_store.Note_reference _ -> false
+  | Workspace_verification_store.Note_reference _
+  | Workspace_verification_store.Pull_request_reference _ -> false
 ;;
 
 let resolvable_evidence_ref_forms =

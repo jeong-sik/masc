@@ -14,6 +14,34 @@ type evidence_read_failure =
   | Evidence_changed_during_read
   | Evidence_read_error of string
 
+type pull_request_locator =
+  { owner : string
+  ; repo : string
+  ; number : int
+  }
+
+type pull_request_snapshot =
+  { url : string
+  ; state : string
+  ; merged : bool
+  ; draft : bool
+  ; head_sha : string
+  ; title : string
+  ; diff : string
+  ; diff_bytes : int
+  ; diff_truncated : bool
+  }
+(** Facts this store fetched from the forge itself at the submit boundary —
+    independently inspected evidence, not the producer's narrative. [diff] is
+    bounded by the same cap as artifact content; [diff_bytes] reports the
+    fetched size before capping. *)
+
+type pull_request_fetch_failure =
+  | Pull_request_inspector_uninstalled
+  | Pull_request_transport of string
+  | Pull_request_http_status of int
+  | Pull_request_payload_invalid of string
+
 type submitted_evidence_item =
   | Evidence_note of string
   | Evidence_artifact of
@@ -27,6 +55,25 @@ type submitted_evidence_item =
       { reference : string
       ; reason : evidence_read_failure
       }
+  | Evidence_pull_request of
+      { reference : string
+      ; snapshot : pull_request_snapshot
+      }
+  | Evidence_pull_request_unreadable of
+      { reference : string
+      ; reason : pull_request_fetch_failure
+      }
+
+val install_pull_request_inspector :
+  (pull_request_locator ->
+   (pull_request_snapshot, pull_request_fetch_failure) result) ->
+  unit
+(** Install the forge reader once at process startup (the composition root
+    owns the HTTP client; this store stays free of transport dependencies).
+    Without an installed inspector a [pull-request:] reference snapshots as
+    [Evidence_pull_request_unreadable] with
+    [Pull_request_inspector_uninstalled] — typed absence, never a silent
+    pass (masc#28989). *)
 
 type evidence_access_failure =
   | Completion_authority_identity_missing
@@ -51,6 +98,12 @@ val request_header_of_yojson :
 
 val submitted_evidence_access_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
+
+val submitted_evidence_item_of_yojson :
+  Yojson.Safe.t -> (submitted_evidence_item, string) result
+(** Decode one persisted snapshot item. This module writes the snapshot and
+    owns the shape; exposed so tests and authority surfaces decode through
+    the same reader instead of re-deriving the JSON fields. *)
 
 val submitted_evidence_access_metadata_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
@@ -84,6 +137,7 @@ val read_regular_file_prefix :
 type reference_form =
   | Artifact_reference of string
   | Note_reference of string
+  | Pull_request_reference of pull_request_locator
   | Unresolvable_reference
 
 val classify_evidence_reference : string -> reference_form
@@ -98,6 +152,19 @@ val note_reference_form : string
     module matches on, so an error message naming it cannot drift from the
     classifier. The artifact form has no such caller: a message that has to
     name both uses {!resolvable_reference_forms}. *)
+
+val pull_request_reference_form : string
+(** The accepted form for forge evidence:
+    [pull-request:https://github.com/<owner>/<repo>/pull/<number>]. *)
+
+val pull_request_locator_url : pull_request_locator -> string
+(** The canonical web URL a locator names — the inverse of the reference
+    parser, so the fetcher and the snapshot spell the same URL. *)
+
+val verification_evidence_max_bytes : int
+(** One byte cap for every materialized evidence payload — artifact content
+    and pull-request diff alike — so no evidence form can smuggle a larger
+    snapshot than another. *)
 
 val resolvable_reference_forms : string list
 (** The accepted forms, spelled for an error message that has to tell a caller

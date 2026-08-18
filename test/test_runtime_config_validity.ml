@@ -3819,6 +3819,90 @@ let test_runtime_max_context_override_above_cap_is_clamped () =
                (Some 128000)
                execution.max_context_resolution.requested_override))
 
+(* #28765: the observed incident shape — a 1,048,576-window lane entry
+   point whose sticky-reordered sibling has a 203,000 window. The turn
+   budget must be the smallest candidate window, because the prompt is
+   shaped once and any candidate can serve it. *)
+let test_lane_budget_is_bound_by_smallest_candidate_window () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"lane-big\"\n\
+     provider_name = \"ollama_cloud\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 1048576\n\
+     \n\
+     [[models]]\n\
+     id_prefix = \"lane-small\"\n\
+     provider_name = \"ollama_cloud\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 203000\n"
+  in
+  let runtime_toml =
+    "[providers.ollama_cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://ollama.com/v1\"\n\
+     \n\
+     [models.bigwin]\n\
+     api-name = \"lane-big\"\n\
+     max-context = 1048576\n\
+     \n\
+     [models.smallwin]\n\
+     api-name = \"lane-small\"\n\
+     max-context = 203000\n\
+     \n\
+     [ollama_cloud.bigwin]\n\
+     [ollama_cloud.smallwin]\n\
+     \n\
+     [runtime.lanes.\"ollama_cloud.bigwin\"]\n\
+     strategy = \"ordered\"\n\
+     candidates = [\"ollama_cloud.bigwin\", \"ollama_cloud.smallwin\"]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama_cloud.bigwin\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default ~config_path:path with
+         | Error msg -> failf "lane fixture should load: %s" msg
+         | Ok () ->
+           let meta =
+             match
+               Masc_test_deps.meta_of_json_fixture
+                 (`Assoc
+                    [ "name", `String "lane-min-budget"
+                    ; "trace_id", `String "test-lane-min-budget"
+                    ])
+             with
+             | Ok meta -> meta
+             | Error detail -> failf "lane meta fixture failed: %s" detail
+           in
+           match
+             Keeper_unified_turn_pre_dispatch.build_runtime_execution
+               ~meta
+               ~runtime_id:"ollama_cloud.bigwin"
+           with
+           | Error error ->
+             failf
+               "lane execution should resolve: %s"
+               (Agent_core.Error.to_string error)
+           | Ok execution ->
+             check int
+               "turn budget is the smallest lane candidate window"
+               203000
+               execution.max_context;
+             check int
+               "stored resolution is the binding candidate's"
+               203000
+               execution.max_context_resolution.effective_budget;
+             check string
+               "execution keeps the entry-point runtime id"
+               "ollama_cloud.bigwin"
+               execution.runtime_id))
+
 let test_runtime_max_context_missing_both_sources_rejected_at_load () =
   let runtime_toml =
     "[providers.local]\n\
@@ -4256,6 +4340,9 @@ let () =
           test_case
             "max-context: override above the catalog cap is clamped"
             `Quick test_runtime_max_context_override_above_cap_is_clamped;
+          test_case
+            "max-context: lane budget is bound by the smallest candidate window"
+            `Quick test_lane_budget_is_bound_by_smallest_candidate_window;
           test_case
             "max-context: missing both sources is rejected at load"
             `Quick test_runtime_max_context_missing_both_sources_rejected_at_load;

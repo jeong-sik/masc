@@ -1211,6 +1211,7 @@ let cluster_policy ?(polling_read = false) ~readonly () =
 
 let cluster_descriptor_with_schema_source
       ?(polling_read = false)
+      ?ordinary_execution_mode
       ~capability_identity
       ~keeper_model_projection
       ~input_schema_source
@@ -1231,6 +1232,7 @@ let cluster_descriptor_with_schema_source
     ~name
     ~description
     ~input_schema
+    ?ordinary_execution_mode
     ~policy
     ~handler
     ()
@@ -1243,7 +1245,8 @@ let cluster_descriptor_with_schema_source
    in 57 — including every Goal tool and [masc_transition], whose canonical
    text is the only place [release] is named. Taking one field from the record
    and re-typing the other beside it is what allowed the drift. *)
-let cluster_descriptor ?(polling_read = false) ~capability_identity
+let cluster_descriptor ?(polling_read = false) ?ordinary_execution_mode
+      ~capability_identity
       ~keeper_model_projection ~id ~name
       ~handler ~readonly ()
   =
@@ -1254,6 +1257,7 @@ let cluster_descriptor ?(polling_read = false) ~capability_identity
   in
   cluster_descriptor_with_schema_source
     ~polling_read
+    ?ordinary_execution_mode
     ~capability_identity
     ~keeper_model_projection
     ~input_schema_source
@@ -1667,27 +1671,34 @@ let masc_board_descriptor board_name =
   let name = Tool_name.Board_name.to_string board_name in
   let operation_policy = Board_tool_registry.operation_policy board_name in
   let readonly = operation_policy.readonly in
+  (* Concurrent rows are the store-read operations: each resolves through
+     [Board_dispatch] into [Board_core] reads that snapshot under
+     [store.mutex] (an [Eio.Mutex]; board_core.mli "Locking + cache
+     invalidation"), or into the [Atomic]-held curation snapshot
+     ([Board_curation.latest_snapshot]). The [maybe_sweep] hook on reads
+     reserves timestamps under the same mutex and hands the work to the
+     flusher fiber. Write operations stay [Serial]. *)
   let ordinary_execution_mode =
     match board_name with
-    | Tool_name.Board_name.Board_stats -> Concurrent
+    | Tool_name.Board_name.Board_stats
+    | Board_curation_read
+    | Board_hearths
+    | Board_list
+    | Board_post_get
+    | Board_profile
+    | Board_search
+    | Board_sub_board_get
+    | Board_sub_board_list -> Concurrent
     | ( Board_cleanup
       | Board_comment
       | Board_comment_vote
-      | Board_curation_read
       | Board_curation_submit
       | Board_delete
-      | Board_hearths
-      | Board_list
       | Board_post
-      | Board_post_get
       | Board_post_update
-      | Board_profile
       | Board_reaction
-      | Board_search
       | Board_sub_board_create
       | Board_sub_board_delete
-      | Board_sub_board_get
-      | Board_sub_board_list
       | Board_sub_board_update
       | Board_vote ) -> Serial
   in
@@ -1762,8 +1773,9 @@ let voice_descriptor name ~readonly =
     ()
 ;;
 
-let task_descriptor ~capability_identity id name ~readonly =
+let task_descriptor ?ordinary_execution_mode ~capability_identity id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity
     ~keeper_model_projection:Internal_name
     ~id:("keeper.task." ^ id)
@@ -1780,8 +1792,9 @@ let task_descriptor ~capability_identity id name ~readonly =
    (Task.Tool / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
    schema-registry-backed. The handler routes by descriptor.internal_name
    through the existing typed dispatcher. *)
-let masc_task_descriptor id name ~readonly =
+let masc_task_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.task." ^ id)
@@ -1791,8 +1804,9 @@ let masc_task_descriptor id name ~readonly =
     ()
 ;;
 
-let masc_task_transport_descriptor id name ~readonly =
+let masc_task_transport_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:
       (Transport_alias { projected_by = "keeper_tasks_list" })
@@ -1803,8 +1817,9 @@ let masc_task_transport_descriptor id name ~readonly =
     ()
 ;;
 
-let masc_plan_descriptor id name ~readonly =
+let masc_plan_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.plan." ^ id)
@@ -1814,8 +1829,9 @@ let masc_plan_descriptor id name ~readonly =
     ()
 ;;
 
-let masc_run_descriptor name ~readonly =
+let masc_run_descriptor ?ordinary_execution_mode name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.run." ^ String.sub name (String.length "masc_run_")
@@ -1826,8 +1842,9 @@ let masc_run_descriptor name ~readonly =
     ()
 ;;
 
-let masc_agent_descriptor id name ~readonly =
+let masc_agent_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.agent." ^ id)
@@ -1839,11 +1856,13 @@ let masc_agent_descriptor id name ~readonly =
 
 let masc_workspace_descriptor
     ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
     id
     name
     ~readonly
   =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
     ~id:("masc.workspace." ^ id)
@@ -1855,8 +1874,9 @@ let masc_workspace_descriptor
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
    misc / control / agent_timeline / local_runtime). *)
-let masc_misc_descriptor id name ~readonly =
+let masc_misc_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.misc." ^ id)
@@ -1881,8 +1901,9 @@ let masc_control_descriptor operation =
     ()
 ;;
 
-let masc_agent_timeline_descriptor name description ~readonly =
+let masc_agent_timeline_descriptor ?ordinary_execution_mode name description ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:"masc.agent_timeline"
@@ -2031,6 +2052,9 @@ let internal_descriptors : t list =
           keeper_surface_read only for current conversation context. \
           No arguments."
        ~input_schema:empty_object_schema
+       (* Concurrent: pure projection over the boot-time descriptor
+          registry and registered schemas; no shared mutable state. *)
+       ~ordinary_execution_mode:Concurrent
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tools_list
        ()
@@ -2056,6 +2080,9 @@ let internal_descriptors : t list =
       ~name:Keeper_tool_runtime_schemas.artifact_read.name
       ~description:Keeper_tool_runtime_schemas.artifact_read.description
       ~input_schema:Keeper_tool_runtime_schemas.artifact_read.input_schema
+      (* Concurrent: content-addressed blob reads; the validated-file
+         cache in Tool_blob_store is an Atomic CAS over an immutable map. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_artifact_read
       ()
@@ -2091,6 +2118,9 @@ let internal_descriptors : t list =
       ~name:"keeper_library_search"
       ~description:"Search the keeper library catalog."
       ~input_schema:library_search_schema
+      (* Concurrent: directory listing + whole-file reads in
+         Tool_library; no shared mutable state on the search path. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_search
       ()
@@ -2100,6 +2130,7 @@ let internal_descriptors : t list =
       ~name:"keeper_library_read"
       ~description:"Read a library entry by id."
       ~input_schema:library_read_schema
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
       ()
@@ -2176,6 +2207,10 @@ let internal_descriptors : t list =
       ~description:Keeper_tool_runtime_schemas.fusion_status.description
       ~input_schema:Keeper_tool_runtime_schemas.fusion_status.input_schema
       (* [Internal_name] is the model exposure authority. *)
+      (* Concurrent: projects an [Atomic.get] snapshot of the fusion run
+         registry (Run_registry_core); mutation goes through its own
+         cross-context mutex on the write side. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_fusion_status
       ()
@@ -2213,12 +2248,17 @@ let internal_descriptors : t list =
       ~readonly:false
     (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
   ; (task_descriptor
+       (* Concurrent: backlog reads go through the mtime/size-keyed cache in
+          Workspace_backlog, whose lookups and refreshes run under a
+          Stdlib.Mutex with no suspension inside the critical section. *)
+       ~ordinary_execution_mode:Concurrent
        ~capability_identity:(Named_capability "masc_tasks")
        "list"
        "keeper_tasks_list"
        ~readonly:true
      |> with_composable_output (Json_output { schema = tasks_list_output_schema }))
   ; task_descriptor
+      ~ordinary_execution_mode:Concurrent
       ~capability_identity:Internal_name_identity
       "audit"
       "keeper_tasks_audit"
@@ -2251,9 +2291,11 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
        ~readonly:false
-  ; masc_task_descriptor "task_history" "masc_task_history"
+  ; masc_task_descriptor ~ordinary_execution_mode:Concurrent
+       "task_history" "masc_task_history"
        ~readonly:true
-  ; masc_task_transport_descriptor "tasks" "masc_tasks"
+  ; masc_task_transport_descriptor ~ordinary_execution_mode:Concurrent
+       "tasks" "masc_tasks"
        ~readonly:true
   ; masc_task_descriptor "transition" "masc_transition"
        ~readonly:false
@@ -2270,7 +2312,8 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_plan_descriptor "set_task" "masc_plan_set_task"
        ~readonly:false
-  ; masc_plan_descriptor "get_task" "masc_plan_get_task"
+  ; masc_plan_descriptor ~ordinary_execution_mode:Concurrent
+       "get_task" "masc_plan_get_task"
        ~readonly:true
   ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
        ~readonly:false
@@ -2281,7 +2324,8 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"
        ~readonly:false
-  ; (masc_run_descriptor "masc_run_list"
+  ; (masc_run_descriptor ~ordinary_execution_mode:Concurrent
+       "masc_run_list"
        ~readonly:true
      |> with_composable_output (Json_output { schema = run_list_output_schema }))
   ; masc_run_descriptor "masc_run_get"
@@ -2291,15 +2335,18 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
        masc_agent_update removed 2026-06-09 with the dead agent-status
        surface) ────────── *)
-  ; (masc_agent_descriptor "card" "masc_agent_card"
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+        "card" "masc_agent_card"
         ~readonly:true
      |> with_eval_tags [ "agent_profile_lookup" ]
      |> with_composable_output (Json_output { schema = agent_card_output_schema }))
-  ; (masc_agent_descriptor "fitness" "masc_agent_fitness"
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+       "fitness" "masc_agent_fitness"
        ~readonly:true
      |> with_composable_output
           (Json_output { schema = agent_fitness_output_schema }))
-  ; (masc_agent_descriptor "get_metrics" "masc_get_metrics"
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+       "get_metrics" "masc_get_metrics"
        ~readonly:true
      |> with_composable_output (Json_output { schema = get_metrics_output_schema }))
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
@@ -2332,7 +2379,8 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_workspace_descriptor "check" "masc_check"
        ~readonly:true
-  ; (masc_workspace_descriptor "goal_list" "masc_goal_list"
+  ; (masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
+       "goal_list" "masc_goal_list"
        ~readonly:true
      |> with_composable_output (Json_output { schema = goal_list_output_schema }))
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
@@ -2342,7 +2390,8 @@ let internal_descriptors : t list =
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
-  ; masc_misc_descriptor "config" "masc_config"
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "config" "masc_config"
        ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
@@ -2354,7 +2403,8 @@ let internal_descriptors : t list =
       ~handler:Tool_masc_misc_dispatch
       ~readonly:true
       ()
-  ; masc_misc_descriptor "tool_help" "masc_tool_help"
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "tool_help" "masc_tool_help"
        ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
       ~readonly:false
@@ -2366,7 +2416,8 @@ let internal_descriptors : t list =
   ; masc_control_descriptor Tool_schemas_misc.Pause
   ; masc_control_descriptor Tool_schemas_misc.Resume
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
-  ; (masc_agent_timeline_descriptor "masc_agent_timeline"
+  ; (masc_agent_timeline_descriptor ~ordinary_execution_mode:Concurrent
+       "masc_agent_timeline"
        "Read agent timeline events." ~readonly:true
      |> with_composable_output
           (Json_output { schema = agent_timeline_output_schema }))

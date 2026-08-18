@@ -1236,7 +1236,35 @@ let test_concurrent_execution_opt_ins_are_exact () =
   in
   Alcotest.(check (list string))
     "only explicitly audited handlers opt into concurrent batches"
-    [ "keeper_time_now"; "masc_board_stats" ]
+    [ "keeper_artifact_read"
+    ; "keeper_library_read"
+    ; "keeper_library_search"
+    ; "keeper_tasks_audit"
+    ; "keeper_tasks_list"
+    ; "keeper_time_now"
+    ; "keeper_tools_list"
+    ; "masc_agent_card"
+    ; "masc_agent_fitness"
+    ; "masc_agent_timeline"
+    ; "masc_board_curation_read"
+    ; "masc_board_hearths"
+    ; "masc_board_list"
+    ; "masc_board_post_get"
+    ; "masc_board_profile"
+    ; "masc_board_search"
+    ; "masc_board_stats"
+    ; "masc_board_sub_board_get"
+    ; "masc_board_sub_board_list"
+    ; "masc_config"
+    ; "masc_fusion_status"
+    ; "masc_get_metrics"
+    ; "masc_goal_list"
+    ; "masc_plan_get_task"
+    ; "masc_run_list"
+    ; "masc_task_history"
+    ; "masc_tasks"
+    ; "masc_tool_help"
+    ]
     concurrent_internal_names
 
 let test_readonly_policy_is_descriptor_input_aware () =

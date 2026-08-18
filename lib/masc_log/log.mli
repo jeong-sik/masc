@@ -134,6 +134,20 @@ module Ring : sig
   val capacity : int
   (** Maximum number of entries retained in the in-memory dashboard ring. *)
 
+  type bounds = {
+    start_seq : int;
+    total : int;
+    dropped_before : bool;
+  }
+  (** Live-window bounds: sequences in [[start_seq, total)] are
+      answerable from the ring; anything below [start_seq] has been
+      evicted ([dropped_before]) and lives only in the daily JSONL
+      sink. Rides on the dashboard logs response so "no results"
+      cannot be mistaken for "it never happened" when the cause
+      merely predates the window. *)
+
+  val bounds : unit -> bounds
+
   val source_of_string : string -> source
   (** Inverse of {!source_to_string}.  Raises {!Entry_decode_error} on
       unknown labels. *)

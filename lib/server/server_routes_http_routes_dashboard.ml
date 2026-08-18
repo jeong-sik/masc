@@ -1344,10 +1344,14 @@ let add_routes ~sw ~clock router =
              Log.Ring.recent ~limit ~min_level ~module_filter ?since_seq
                ?before_seq ?category_filter ?exclude_category ()
            in
+           (* Bounds read after the slice: seqs are monotonic, so the
+              window can only have grown — never claims more history
+              than the slice actually had available. *)
+           let ring_bounds = Log.Ring.bounds () in
            let json =
              dashboard_logs_json ~config:(Mcp_server.workspace_config state) ~limit
                ~level_filter ~applied_level ~min_level ~module_filter ~since_seq
-               ~before_seq ~category_filter ~exclude_category entries
+               ~before_seq ~category_filter ~exclude_category ~ring_bounds entries
            in
            Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)

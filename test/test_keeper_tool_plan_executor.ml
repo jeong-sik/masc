@@ -91,7 +91,7 @@ let test_schedule_and_parallel_dataflow () =
   (match batches with
    | [ Executor.Concurrent_batch [ producer ]
      ; Executor.Concurrent_batch [ left; right ]
-     ; Executor.Serial_batch final
+     ; Executor.Concurrent_batch [ final ]
      ] ->
      check int "producer batch index" 0 producer.schedule.batch_index;
      check int "parallel batch index" 1 left.schedule.batch_index;
@@ -101,7 +101,11 @@ let test_schedule_and_parallel_dataflow () =
      check bool
        "parallel execution mode"
        true
-       (left.schedule.execution_mode = Agent_core.Tool_contract.Concurrent)
+       (left.schedule.execution_mode = Agent_core.Tool_contract.Concurrent);
+     check bool
+       "final execution mode"
+       true
+       (final.schedule.execution_mode = Agent_core.Tool_contract.Concurrent)
    | _ -> fail "descriptor-aware schedule shape changed");
   let sibling_count = Atomic.make 0 in
   let observed = ref [] in

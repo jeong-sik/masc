@@ -187,6 +187,23 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
       let redacted_tools =
         List.map (redact_json_strings redaction) raw_tools
       in
+      (* The redacted schema array is stored once in the shared content-addressed
+         blob store and referenced from the row. The array is identical across
+         every request of the same tool surface (measured 2026-08-18 on a live
+         root: 2,702 rows carried 2 unique arrays of ~80KB each — 99.3% of all
+         capture bytes), so inlining it spent the day-file byte budget on
+         copies. [put_durable] is idempotent per content address, and blob
+         maintenance already lists wire-capture as a durable consumer, so the
+         blob lives exactly as long as a retained row references it. A blob
+         write failure raises out to [best_effort], which skips the whole
+         record: a marker is never emitted for bytes that were not persisted. *)
+      let tools_ref =
+        let blob_store = Tool_blob_store.create ~base_path in
+        Tool_blob_store.put_durable
+          blob_store
+          ~bytes:(Yojson.Safe.to_string (`List redacted_tools))
+          ~mime:"application/json"
+      in
       (* The replayed conversation is not copied into this record. It is
          already durable in the AGENT_CORE checkpoint and its [agent-core-snapshot-*]
          history, and [capture_request] fires once per agent-core turn, so
@@ -221,7 +238,7 @@ let capture_request ~base_path ~masc_root ~keeper_name ~turn_id ~agent_core_turn
               | None -> `Null )
           ; ("tool_count", `Int (List.length tools))
           ; ("tool_schema_bytes", `Int tool_schema_bytes)
-          ; ("tools", `List redacted_tools)
+          ; ("tools_ref", Tool_output.normalized_artifact_ref_to_json tools_ref)
           ; ("user_message", `String (redact redaction user_message))
           ; ("history_message_count", `Int (List.length history_messages))
           ; ("history_messages_digest", `String history_messages_digest)

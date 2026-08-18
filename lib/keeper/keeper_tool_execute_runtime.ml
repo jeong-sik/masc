@@ -772,32 +772,40 @@ let handle_tool_execute_typed
                     @ sandbox_extra_fields
                     @ dispatched_model_location_fields)
                in
+               (* A process that ran and exited nonzero (or died to a
+                  signal) is an observed tool result the model reads and
+                  reacts to — the payload carries ok:false, the exit
+                  status, and stderr. Routing it through the failure
+                  disposition marked the whole turn
+                  Terminal_effect_failed (sticky), so a keeper probing a
+                  missing path with `ls` died mid-mission — four turn
+                  deaths across the E0 campaign and the polisher pilot
+                  (masc#28983). Only infra failures — sandbox dispatch,
+                  secret projection, output/manifest persistence — keep
+                  the failure disposition. *)
                authorized
-                 (if succeeded
-                  then
-                    (match
-                       Tool_bridge.attach_artifact_manifest
-                         ~base_path:config.base_path
-                         (Tool_result.make_ok
-                            ~tool_name:"tool_execute"
-                            ~start_time:t0
-                            ~data:payload
-                            ())
-                     with
-                     | Ok result -> Keeper_tool_execution.of_tool_result result
-                     | Error _ ->
-                       Keeper_tool_execution.failure
-                         ~effect_disposition:Tool_result.Proven_post_effect
-                         (error_json
-                            ~fields:
-                              ([ "typed", `Bool true
-                               ; "code", `String "execute_result_manifest_failed"
-                               ; "status", status_json
-                               ; "execution_time_ms", `Int elapsed_ms
-                               ]
-                               @ dispatched_model_location_fields)
-                            "Execute completed, but its result manifest could not be persisted."))
-                  else Keeper_tool_execution.failure (Yojson.Safe.to_string payload)))
+                 (match
+                    Tool_bridge.attach_artifact_manifest
+                      ~base_path:config.base_path
+                      (Tool_result.make_ok
+                         ~tool_name:"tool_execute"
+                         ~start_time:t0
+                         ~data:payload
+                         ())
+                  with
+                  | Ok result -> Keeper_tool_execution.of_tool_result result
+                  | Error _ ->
+                    Keeper_tool_execution.failure
+                      ~effect_disposition:Tool_result.Proven_post_effect
+                      (error_json
+                         ~fields:
+                           ([ "typed", `Bool true
+                            ; "code", `String "execute_result_manifest_failed"
+                            ; "status", status_json
+                            ; "execution_time_ms", `Int elapsed_ms
+                            ]
+                            @ dispatched_model_location_fields)
+                         "Execute completed, but its result manifest could not be persisted.")))
         )))))
 
 let handle_tool_execute_with_outcome

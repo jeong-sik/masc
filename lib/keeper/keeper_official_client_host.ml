@@ -396,6 +396,17 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+(* One pre_tool_use rejection the model must be able to repair from
+   (masc#28885). The official-client CLI owns the live conversation, so
+   when it escalates the reject to a dead turn, this record is the only
+   surviving typed copy of the round-trip masc produced. *)
+type rejected_tool_call =
+  { call_id : string
+  ; tool_name : string
+  ; input : Yojson.Safe.t
+  ; detail : string
+  }
+
 let tool_hook_error_to_string = function
   | Agent_core.Agent_tools.Hook_execution_failed
       { hook_name; stage; tool_name; detail; _ } ->
@@ -603,7 +614,7 @@ let apply_context_injection ~runtime_label ~terminal_error ~context
 
 let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context ~tools
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
-    ~terminal_effect_state ~terminal_error ~raw_trace_run
+    ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
     ~next_dynamic_invocation_index ~repeated_call_state
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
@@ -656,7 +667,14 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
                  })
           in
           match pre_tool_use with
-          | Block detail -> { success = false; content = detail; abort_turn = None }
+          | Block detail ->
+            (* The corrective error result goes back to the CLI, and the
+               same round-trip is kept here so a CLI that kills the turn
+               instead of retrying cannot erase it (masc#28885). *)
+            pre_tool_rejects
+            := { call_id; tool_name = tool.schema.name; input; detail }
+               :: !pre_tool_rejects;
+            { success = false; content = detail; abort_turn = None }
           | HookFailed { stage; detail } ->
             let detail =
               Printf.sprintf
@@ -830,7 +848,8 @@ let dynamic_tool_of_agent_core ~runtime_label ~keeper_name ~turn_count ~context 
 ;;
 
 let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_bus
-    ~context_injector ~context ~terminal_effect_state ~terminal_error ~raw_trace_run =
+    ~context_injector ~context ~terminal_effect_state ~terminal_error
+    ~pre_tool_rejects ~raw_trace_run =
   match tools, context with
   | [], _ -> Ok []
   | _ :: _, None ->
@@ -854,8 +873,78 @@ let dynamic_tools ~runtime_label ~keeper_name ~turn_count ~tools ~hooks ~event_b
             ~context_injector
             ~terminal_effect_state
             ~terminal_error
+            ~pre_tool_rejects
             ~raw_trace_run
             ~next_dynamic_invocation_index
             ~repeated_call_state)
          tools)
+;;
+
+(* Append the reject round-trips of a dead turn to the canonical
+   checkpoint so the next turn's replay carries the corrective text
+   (masc#28885: 14,466 persisted messages held exactly one reject
+   round-trip — the one from a turn that survived; every escalated turn
+   lost its correction and the model resent the same broken call).
+   Message shape mirrors what a surviving turn persists byte-for-byte:
+   an assistant [ToolUse] block answered by a tool-role [ToolResult]
+   whose outcome is the deterministic validation failure. A missing
+   checkpoint means no replay exists to correct — skipped, not an
+   error. Rejects are recorded newest-first; the append restores call
+   order. *)
+let persist_pre_tool_rejects ~session_dir ~session_id rejects =
+  match rejects with
+  | [] -> Ok 0
+  | rejects ->
+    (match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+     | Error Keeper_checkpoint_store.Not_found -> Ok 0
+     | Error error ->
+       Error
+         (Printf.sprintf
+            "reject round-trip persistence could not load the checkpoint: %s"
+            (match error with
+             | Keeper_checkpoint_store.Not_found -> "not found"
+             | Keeper_checkpoint_store.Store_error detail
+             | Keeper_checkpoint_store.Parse_error detail
+             | Keeper_checkpoint_store.Io_error detail
+             | Keeper_checkpoint_store.Agent_core_error detail -> detail))
+     | Ok checkpoint ->
+       let roundtrip { call_id; tool_name; input; detail } =
+         [ { Agent_core.Types.role = Agent_core.Types.Assistant
+           ; content =
+               [ Agent_core.Types.ToolUse { id = call_id; name = tool_name; input } ]
+           ; name = None
+           ; tool_call_id = None
+           ; metadata = []
+           }
+         ; { Agent_core.Types.role = Agent_core.Types.Tool
+           ; content =
+               [ Agent_core.Types.ToolResult
+                   { tool_use_id = call_id
+                   ; content = detail
+                   ; outcome =
+                       Agent_core.Types.Tool_failed
+                         { failure_kind = Agent_core.Types.Validation_error
+                         ; error_class = Some Agent_core.Types.Deterministic
+                         }
+                   ; json = None
+                   ; content_blocks = None
+                   }
+               ]
+           ; name = None
+           ; tool_call_id = Some call_id
+           ; metadata = []
+           }
+         ]
+       in
+       let appended = List.concat_map roundtrip (List.rev rejects) in
+       let checkpoint =
+         { checkpoint with
+           Agent_core.Checkpoint.messages = checkpoint.messages @ appended
+         }
+       in
+       (match
+          Keeper_checkpoint_store.save_agent_core_classified ~session_dir checkpoint
+        with
+        | Ok _ -> Ok (List.length rejects)
+        | Error detail -> Error detail))
 ;;

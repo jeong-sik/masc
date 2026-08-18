@@ -814,6 +814,12 @@ let run_turn
                 ctx_work.checkpoint.Agent_core.Checkpoint.working_context
          in
          let last_persisted_checkpoint_ref = ref None in
+         (* masc#28885: typed pre_tool_use rejects recorded by the
+            official-client host during this turn. Flushed into the
+            replay checkpoint only when the turn dies, so the model can
+            repair the call next turn; a surviving turn already carries
+            the round-trip through its own history. *)
+         let pre_tool_rejects = ref [] in
          let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
                 (* AGENT_CORE's per-turn pipeline builds checkpoints with an empty
@@ -854,6 +860,7 @@ let run_turn
                       ~runtime_id:runtime_id_string
                       ~base_path:config.base_path
                       ~keeper_name:meta.name
+                      ~pre_tool_rejects
                       ~goal:user_message
                       ?goal_blocks:user_blocks
                       ~session_id:
@@ -932,7 +939,28 @@ let run_turn
          (match
                  call_run_named ?raw_trace ~initial_messages:history_messages ()
                with
-               | Error e -> Error e
+               | Error e ->
+                 (match
+                    Keeper_official_client_host.persist_pre_tool_rejects
+                      ~session_dir:session.session_dir
+                      ~session_id:
+                        (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                      !pre_tool_rejects
+                  with
+                  | Ok 0 -> ()
+                  | Ok persisted ->
+                    Log.Keeper.info
+                      "%s: persisted %d rejected tool round-trip(s) from the \
+                       failed turn into the replay checkpoint (masc#28885)"
+                      meta.name
+                      persisted
+                  | Error detail ->
+                    Log.Keeper.warn
+                      "%s: failed-turn reject round-trips could not be \
+                       persisted: %s"
+                      meta.name
+                      detail);
+                 Error e
                | Ok selected_run ->
                  let result = selected_run.Keeper_turn_driver.run_result in
                  let selected_runtime_id = selected_run.selected_runtime_id in

@@ -270,7 +270,8 @@ let recovery_failure_of_client_error = function
   | Runtime_claude_code.Stopped_by_host _ -> Session_store.Protocol_failed
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
+let run_without_lifecycle ~runtime_id ~keeper_name
+    ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
@@ -401,6 +402,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_effect_state
         ~terminal_error
+        ~pre_tool_rejects
         ~raw_trace_run:None
     in
     let dynamic_tools = host_dynamic_tools in
@@ -455,6 +457,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_effect_state
         ~terminal_error
+        ~pre_tool_rejects
         ~raw_trace_run
     in
     let dynamic_tools = host_dynamic_tools in
@@ -828,7 +831,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                   recovery_detail))))
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -877,6 +880,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
           run_without_lifecycle
             ~runtime_id
             ~keeper_name
+    ~pre_tool_rejects
             ~base_path
             ~goal
             ~goal_blocks

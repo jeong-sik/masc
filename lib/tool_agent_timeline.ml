@@ -315,7 +315,6 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("typed_outcome", typed_outcome);
                ];
          })
-  |> take_last limit
 
 (* Collect turn-completed events from Activity Graph *)
 let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
@@ -404,7 +403,6 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
                ] @ optional_fields);
          })
-  |> take_last limit
 
 (* Neutral projection of one keeper chat line for the timeline. The chat
    store (.masc/keeper_chat/<keeper>.jsonl) lives in the keeper subsystem,
@@ -463,7 +461,7 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
       if include_tasks then task_events config ~agent_name
       else []
     in
-    let msg_evts = message_events config ~agent_name ~limit:200 in
+    let msg_evts = message_events config ~agent_name ~limit:2000 in
     let tool_evts =
       if include_tool_calls then tool_call_events config ~agent_name ~limit:200
       else []

@@ -1,6 +1,6 @@
 # RFC-0283 — Fusion: judge-of-judges 위상 (flat/staged reducer)
 
-- Status: Draft
+- Status: Implemented
 - Author: Vincent (yousleepwhen) + Claude
 - Created: 2026-06-23
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) — §9(preset)를 개정. 위상 선택은 "Fusion as a Tool" 슬라이스 계열(refine/conditional)의 연장.

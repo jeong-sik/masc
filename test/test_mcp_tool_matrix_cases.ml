@@ -861,6 +861,11 @@ let web_search_guard_fragments =
     "search endpoint returned no http status";
     "search endpoint returned http";
     "search endpoint returned a non-rss payload";
+    (* A credential-less environment (CI runner) has an empty provider
+       chain; the tool answers with the operator-facing remedy instead
+       of a hit list. Referenced from the .mli so the expectation
+       cannot drift from the message the lib actually renders. *)
+    Masc.Tool_misc_web_search.no_provider_configured_message;
   ]
 
 let guard_fragments_for_name name =

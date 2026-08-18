@@ -307,6 +307,145 @@ let test_docker_playground_path_also_resolves () =
       (Agent_observation.Code_address.path address))
 ;;
 
+(* #28968 / RFC-0378 §5.1 — a write inside a git worktree checkout
+   must fold to the same Code_address as the main-tree write, with the
+   worktree directory carried as [checkout] projection metadata. *)
+
+let register_repo ~base_dir ~id ~local_path =
+  let repo =
+    { id
+    ; name = id
+    ; url = "https://github.com/owner/repo"
+    ; local_path
+    ; aliases = []
+    ; default_branch = "main"
+    ; keepers = []
+    ; status = Active
+    ; auto_sync = false
+    ; sync_interval = 0
+    ; created_at = Int64.zero
+    ; updated_at = Int64.zero
+    }
+  in
+  match Repo_store.save_all ~base_path:base_dir [ repo ] with
+  | Ok () -> ()
+  | Error msg -> failf "save_all: %s" msg
+;;
+
+let addressed_record_or_fail label = function
+  | Agent_observation.Addressed record -> record
+  | Agent_observation.Unaddressed _ as got ->
+    failf "%s: expected Addressed, got %s" label (attribution_to_string got)
+;;
+
+(* Mark [dir] as a git worktree checkout the way git does: a [.git]
+   marker file at the checkout root. *)
+let mark_worktree dir =
+  mkdir_p dir;
+  let oc = open_out (Filename.concat dir ".git") in
+  output_string oc "gitdir: elsewhere\n";
+  close_out oc
+;;
+
+let test_worktree_checkout_folds_to_main_tree_address () =
+  with_temp_base_dir (fun base_dir ->
+    let repo_root = Filename.concat base_dir "workspace/repo" in
+    mkdir_p repo_root;
+    touch (Filename.concat repo_root "lib/foo.ml");
+    let worktree_dir = Filename.concat repo_root ".worktrees/task-9" in
+    mark_worktree worktree_dir;
+    touch (Filename.concat worktree_dir "lib/foo.ml");
+    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
+    let main_record =
+      addressed_record_or_fail
+        "main tree"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:(Filename.concat repo_root "lib/foo.ml"))
+    in
+    let worktree_record =
+      addressed_record_or_fail
+        "worktree"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:(Filename.concat worktree_dir "lib/foo.ml"))
+    in
+    check
+      string
+      "worktree write folds to the main-tree path"
+      (Agent_observation.Code_address.path main_record.Agent_observation.address)
+      (Agent_observation.Code_address.path worktree_record.Agent_observation.address);
+    check
+      string
+      "same codebase slug"
+      (Agent_observation.Code_address.codebase main_record.Agent_observation.address)
+      (Agent_observation.Code_address.codebase worktree_record.Agent_observation.address);
+    check
+      (option string)
+      "worktree write carries its checkout directory"
+      (Some ".worktrees/task-9")
+      worktree_record.Agent_observation.checkout;
+    check
+      (option string)
+      "main-tree write carries no checkout"
+      None
+      main_record.Agent_observation.checkout)
+;;
+
+let test_multi_segment_worktree_dir_folds_via_git_marker () =
+  with_temp_base_dir (fun base_dir ->
+    let repo_root = Filename.concat base_dir "workspace/repo" in
+    mkdir_p repo_root;
+    let worktree_dir = Filename.concat repo_root ".worktrees/feature/pk-1" in
+    mark_worktree worktree_dir;
+    touch (Filename.concat worktree_dir "lib/foo.ml");
+    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
+    let record =
+      addressed_record_or_fail
+        "multi-segment worktree"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:(Filename.concat worktree_dir "lib/foo.ml"))
+    in
+    check
+      string
+      "branch-named worktree folds past every marked segment"
+      "lib/foo.ml"
+      (Agent_observation.Code_address.path record.Agent_observation.address);
+    check
+      (option string)
+      "checkout keeps the full worktree directory"
+      (Some ".worktrees/feature/pk-1")
+      record.Agent_observation.checkout)
+;;
+
+let test_unmarked_worktrees_dir_stays_literal () =
+  with_temp_base_dir (fun base_dir ->
+    let repo_root = Filename.concat base_dir "workspace/repo" in
+    mkdir_p repo_root;
+    (* A .worktrees/ subtree with no .git marker anywhere is not a
+       checkout — the literal address is the correct one. *)
+    touch (Filename.concat repo_root ".worktrees/notes/lib/foo.ml");
+    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
+    let record =
+      addressed_record_or_fail
+        "unmarked .worktrees"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:(Filename.concat repo_root ".worktrees/notes/lib/foo.ml"))
+    in
+    check
+      string
+      "no marker: literal path is kept"
+      ".worktrees/notes/lib/foo.ml"
+      (Agent_observation.Code_address.path record.Agent_observation.address);
+    check
+      (option string)
+      "no marker: no checkout claimed"
+      None
+      record.Agent_observation.checkout)
+;;
+
 let () =
   run
     "ide_canonical_url_join"
@@ -331,6 +470,18 @@ let () =
             "docker playground path resolves via repo_id (PR-6)"
             `Quick
             test_docker_playground_path_also_resolves
+        ; test_case
+            "worktree checkout folds to main-tree address (#28968)"
+            `Quick
+            test_worktree_checkout_folds_to_main_tree_address
+        ; test_case
+            "multi-segment worktree dir folds via git marker (#28968)"
+            `Quick
+            test_multi_segment_worktree_dir_folds_via_git_marker
+        ; test_case
+            "unmarked .worktrees dir keeps its literal address (#28968)"
+            `Quick
+            test_unmarked_worktrees_dir_stays_literal
         ] )
     ]
 ;;

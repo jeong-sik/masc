@@ -17,9 +17,13 @@ val resolve_write_attribution
     registered repository (sandbox playground parse or [local_path]
     prefix) whose [url] normalises via
     {!Agent_observation.canonical_url_of_remote}; the repo-relative
-    path is lexically dot-collapsed before minting. [Unaddressed]
-    carries the typed reason and the path exactly as the resolver saw
-    it. Total — never raises. *)
+    path is lexically dot-collapsed before minting. A path inside a
+    git worktree checkout ([.worktrees/<dir>/...], proven by the
+    checkout's own [.git] marker file) folds to the {e same} address
+    as the main-tree path, with the worktree directory carried as the
+    [checkout] projection metadata (#28968, RFC-0378 §5.1).
+    [Unaddressed] carries the typed reason and the path exactly as the
+    resolver saw it. Total — never raises. *)
 
 val handle_read_file_with_outcome :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

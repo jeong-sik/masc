@@ -591,6 +591,52 @@ let apply_patch ~old_string ~new_string ~replace_all text =
    [(repo_id, rel)] pair first and the repository URL is looked up by
    id. This makes the sandbox/working-tree join work without forcing
    the operator to register every playground clone path. *)
+(* RFC-0378 §5.1: a write inside a git worktree checkout
+   ([<repo>/.worktrees/<dir>/...], this workspace's own convention)
+   must fold to the same [Code_address] as the main-tree write, with
+   the worktree directory riding along as the [checkout] projection
+   metadata. The worktree directory is proven by git's own marker (a
+   [.git] file at the worktree root), never guessed from path shape
+   alone: branch-named worktree directories can span several segments
+   ([.worktrees/feature/PK-123]), so the shortest marked prefix wins.
+   A [.worktrees/...] path with no marker anywhere is not a checkout
+   and keeps its literal address (#28968). *)
+let split_worktree_checkout ~fs_root rel =
+  match String.split_on_char '/' rel with
+  | ".worktrees" :: rest ->
+    let rec probe taken = function
+      | [] | [ _ ] ->
+        (* Nothing left that could be a file inside the checkout. *)
+        None
+      | seg :: remaining ->
+        let taken = taken @ [ seg ] in
+        let dir = String.concat "/" (".worktrees" :: taken) in
+        if safe_file_exists (Filename.concat (Filename.concat fs_root dir) ".git")
+        then Some (dir, String.concat "/" remaining)
+        else probe taken remaining
+    in
+    probe [] rest
+  | _ -> None
+
+(* The parsers hand back [rel] as the literal remainder of [abs], so
+   chopping that suffix recovers the repository's filesystem root for
+   the worktree-marker probe. A non-literal remainder (never produced
+   today) skips folding rather than guessing. *)
+let fs_root_of_rel ~abs ~rel =
+  let suffix = "/" ^ rel in
+  if String.length abs > String.length suffix
+     && String.ends_with ~suffix abs
+  then Some (String.sub abs 0 (String.length abs - String.length suffix))
+  else None
+
+let rel_and_checkout ~abs ~rel =
+  match fs_root_of_rel ~abs ~rel with
+  | None -> rel, None
+  | Some fs_root ->
+    (match split_worktree_checkout ~fs_root rel with
+     | Some (checkout_dir, inner_rel) -> inner_rel, Some checkout_dir
+     | None -> rel, None)
+
 let resolve_write_attribution ~base_dir ~file_path =
   let abs =
     if Filename.is_relative file_path
@@ -626,11 +672,12 @@ let resolve_write_attribution ~base_dir ~file_path =
       | None ->
         unaddressed (Agent_observation.Unattributed.Unparseable_remote_url url)
       | Some slug ->
+        let rel, checkout = rel_and_checkout ~abs ~rel in
         (match normalize_rel rel with
          | None -> unaddressed Agent_observation.Unattributed.Unregistered_path
          | Some rel ->
            (match Agent_observation.Code_address.v ~codebase:slug ~path:rel with
-            | Ok address -> Agent_observation.Addressed { address; checkout = None }
+            | Ok address -> Agent_observation.Addressed { address; checkout }
             | Error invalid ->
               unaddressed (Agent_observation.Unattributed.Unmintable invalid)))
   in

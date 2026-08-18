@@ -42,7 +42,8 @@
     "masc_schedule_get",
     "keeper_compose_mission-snapshot",
     "keeper_compose_background-snapshot",
-    "keeper_composition_status"
+    "keeper_composition_status",
+    "tool_execute"
   ],
   "missions": [
     {
@@ -241,6 +242,26 @@
       "user_story": "Verification 화면이 격리된 5-Keeper fleet의 decision-log durable turn span을 1h, 2h, 4h, 24h tier별 pass, warn, fail 상태와 함께 실제 backend 응답 그대로 표시하며 이를 무중단 uptime으로 과장하지 않는다.",
       "assertions": ["persistence_tiers_dashboard_projection_observed"],
       "evidence": ["browser/keeper-persistence-proof.json", "browser/keeper-persistence-proof.png"]
+    },
+    {
+      "id": "RW20",
+      "phase": "delivery_proof",
+      "name": "poc_request_to_executed_artifact",
+      "actors": ["researcher", "builder-a", "reviewer"],
+      "capabilities": ["Keeper", "Board", "Sandbox", "Execute"],
+      "user_story": "게시된 PoC 요구가 구현으로 이어지고, 완성 주장은 파일 존재가 아니라 실제 실행 로그로 증명되며, 독립 리뷰가 그 실행 출력 토큰을 그대로 인용한다.",
+      "assertions": ["poc_execution_proof_observed", "poc_review_cites_execution"],
+      "evidence": ["observations/board-post.json", "observations/tool-calls-builder-a.json"]
+    },
+    {
+      "id": "RW21",
+      "phase": "adversarial_dialogue",
+      "name": "restate_then_rebut_debate",
+      "actors": ["builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Keeper", "Board"],
+      "user_story": "한 Keeper의 주장을 상대 Keeper가 board에서 직접 읽어 재진술로 이해를 증명한 뒤 반박하고, 제3 Keeper의 판정이 그 반박 토큰을 인용한다. 재진술·인용 토큰은 각 응답자의 prompt에 주어지지 않는다.",
+      "assertions": ["debate_restatement_faithful", "debate_verdict_cites_rebuttal"],
+      "evidence": ["observations/board-post.json", "turns/debate-rebut.json"]
     }
   ]
 }

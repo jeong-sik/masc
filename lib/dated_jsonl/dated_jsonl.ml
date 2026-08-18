@@ -897,54 +897,10 @@ let next_rotation_sequence ~month_path ~day_prefix =
        0
   |> ( + ) 1
 
-let append_rotating_unlocked t ~max_current_file_bytes json =
-  let mutex = Atomic.get t.mutex in
-  Eio.Mutex.use_ro mutex (fun () ->
-    let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
-    let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
-    let current_bytes = file_size dated.path in
-    let placement =
-      if
-        max_current_file_bytes <= 0
-        || current_bytes + row_bytes <= max_current_file_bytes
-      then Some Appended_to_current
-      else if current_bytes = 0
-      then
-        (* A single row larger than the cap: rotating an empty file out
-           would spin forever without ever accepting the row. The row
-           lands, the segment runs oversized once, and the next append
-           rotates it out. *)
-        Some Appended_to_current
-      else begin
-        let month_path = Filename.dirname dated.path in
-        let day_prefix = day_number_of_day_file_name dated.day_file in
-        let sequence = next_rotation_sequence ~month_path ~day_prefix in
-        if sequence > max_rotation_sequence
-        then None
-        else begin
-          let segment = rotated_segment_name ~day_prefix ~sequence in
-          (* Same pre-rename step as [prepare_for_directory_removal]:
-             drop any cached writer for the old identity before the
-             rename so the next append opens the fresh file. *)
-          Fs_compat.invalidate_cached_writer dated.path;
-          Sys.rename dated.path (Filename.concat month_path segment);
-          Some (Appended_after_rotation { segment })
-        end
-      end
-    in
-    match placement with
-    | None ->
-      Skipped_rotation_exhausted { sequence_limit = max_rotation_sequence }
-    | Some outcome ->
-      Jsonl_writer.append_jsonl ~path:dated.path json;
-      run_post_append_pruning_unlocked t ~dated;
-      outcome)
-
-let append_rotating t ~max_current_file_bytes json =
-  let outcome = ref Skipped_by_append_guard in
-  (Atomic.get append_guard) (fun () ->
-    outcome := append_rotating_unlocked t ~max_current_file_bytes json);
-  !outcome
+(* [append_rotating] lives after the file-count cache below: rotation
+   must drop the current file's cache entry, and a fresh file that
+   happens to regrow to the cached byte boundary would otherwise return
+   the rotated-out file's count. *)
 
 let set_append_guard guard = Atomic.set append_guard guard
 
@@ -1353,6 +1309,60 @@ let count_entries = count_entries_incremental
 let reset_count_cache_for_testing () =
   Stdlib.Mutex.protect file_count_cache_mu (fun () -> Hashtbl.reset file_count_cache)
 ;;
+
+let append_rotating_unlocked t ~max_current_file_bytes json =
+  let mutex = Atomic.get t.mutex in
+  Eio.Mutex.use_ro mutex (fun () ->
+    let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+    let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
+    let current_bytes = file_size dated.path in
+    let placement =
+      if
+        max_current_file_bytes <= 0
+        || current_bytes + row_bytes <= max_current_file_bytes
+      then Some Appended_to_current
+      else if current_bytes = 0
+      then
+        (* A single row larger than the cap: rotating an empty file out
+           would spin forever without ever accepting the row. The row
+           lands, the segment runs oversized once, and the next append
+           rotates it out. *)
+        Some Appended_to_current
+      else begin
+        let month_path = Filename.dirname dated.path in
+        let day_prefix = day_number_of_day_file_name dated.day_file in
+        let sequence = next_rotation_sequence ~month_path ~day_prefix in
+        if sequence > max_rotation_sequence
+        then None
+        else begin
+          let segment = rotated_segment_name ~day_prefix ~sequence in
+          (* Same pre-rename steps as [prepare_for_directory_removal]:
+             drop the cached writer for the old identity, and drop the
+             file-count entry — a fresh file that regrows to exactly
+             the cached byte boundary would otherwise serve the
+             rotated-out file's count. *)
+          Fs_compat.invalidate_cached_writer dated.path;
+          Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+            Hashtbl.remove file_count_cache dated.path);
+          Sys.rename dated.path (Filename.concat month_path segment);
+          Some (Appended_after_rotation { segment })
+        end
+      end
+    in
+    match placement with
+    | None ->
+      Skipped_rotation_exhausted { sequence_limit = max_rotation_sequence }
+    | Some outcome ->
+      Jsonl_writer.append_jsonl ~path:dated.path json;
+      run_post_append_pruning_unlocked t ~dated;
+      outcome)
+
+let append_rotating t ~max_current_file_bytes json =
+  let outcome = ref Skipped_by_append_guard in
+  (Atomic.get append_guard) (fun () ->
+    outcome := append_rotating_unlocked t ~max_current_file_bytes json);
+  !outcome
+
 let read_range t ~since ~until =
   let collected = ref [] in
   iter_range t ~since ~until (fun json -> collected := json :: !collected);

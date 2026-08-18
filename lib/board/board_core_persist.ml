@@ -377,21 +377,31 @@ let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)
 ;;
-let rewrite_comments store =
+let comments_jsonl_unlocked store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun _ (cmt : comment) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
+       Buffer.add_char buf '\n')
+    store.comments;
+  Buffer.contents buf
+;;
+let save_comments_jsonl content =
   try
     ensure_masc_dir ();
-    let path = comments_path () in
-    let buf = Buffer.create 4096 in
-    Hashtbl.iter
-      (fun _ (cmt : comment) ->
-         Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
-         Buffer.add_char buf '\n')
-      store.comments;
-    match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+    match Fs_compat.save_file_atomic (comments_path ()) content with
     | Ok () -> ()
     | Error msg -> record_persist_error ~where:"rewrite_comments" msg
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
+;;
+(* Mirrors [rewrite_posts]: snapshot under [store.mutex], disk I/O under
+   the persist lock after releasing the state lock. The previous body
+   iterated [store.comments] and wrote the file with no lock at all,
+   contradicting the interface doc; callers must not hold [store.mutex]. *)
+let rewrite_comments store =
+  let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
+  with_persist_lock store (fun () -> save_comments_jsonl content)
 ;;
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -582,12 +592,36 @@ let create_post_with_audience
         (match with_persist_lock store (fun () -> append_post post) with
          | Error _ as e -> e
          | Ok () ->
-           with_lock store (fun () ->
-             Hashtbl.add store.posts (Post_id.to_string post.id) post;
-             index_post_origin store post;
-             Stdlib.incr store.post_count;
-             invalidate_post_caches store);
-           Ok { post; audience })
+           let committed =
+             with_lock store (fun () ->
+               (* Commit re-checks the policy: staging validated it, but
+                  it can flip while the append is in flight, and commit
+                  is the authoritative gate — a durable row without a
+                  commit stays provisional. *)
+               match
+                 validate_sub_board_post_policy_unlocked store ~author_id ~hearth
+               with
+               | Error _ as e -> e
+               | Ok () ->
+                 Hashtbl.add store.posts (Post_id.to_string post.id) post;
+                 index_post_origin store post;
+                 Stdlib.incr store.post_count;
+                 invalidate_post_caches store;
+                 Ok ())
+           in
+           (match committed with
+            | Ok () -> Ok { post; audience }
+            | Error e ->
+              (* The appended row is an orphan on disk (the policy
+                 flipped mid-append; the post never reached memory).
+                 Rewrite the posts snapshot to dispose of it — the
+                 snapshot cannot contain the orphan. If the rewrite
+                 itself fails, the next successful snapshot rewrite
+                 disposes of the row; a restart before that would
+                 revive the post, because a post row is self-contained
+                 and the loader cannot tell it was never committed. *)
+              rewrite_posts store;
+              Error e))
 ;;
 
 let create_post store ~author ~content ?title ?body ~post_kind ?meta_json

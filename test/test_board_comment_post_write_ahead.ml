@@ -9,9 +9,9 @@
       memory, no reply-count drift, typed [Io_error]);
     - the same call succeeds once the disk is healthy again — the
       failure left no residual state to collide with;
-    - restart derives [reply_count] from the comment WAL, so dropping
-      the eager posts-snapshot save from the comment path loses
-      nothing across a crash. *)
+    - restart derives [reply_count] and the [updated_at] high-water
+      mark from the comment WAL, so dropping the eager posts-snapshot
+      save from the comment path loses nothing across a crash. *)
 
 open Masc
 
@@ -114,6 +114,9 @@ let test_comment_append_failure_commits_nothing () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let test_post_append_failure_commits_nothing () =
+  let working_base =
+    Sys.getenv_opt "MASC_BASE_PATH" |> Option.value ~default:""
+  in
   ignore (block_board_masc_dir_with_file ());
   (match
      Board_dispatch.create_post ~author:"post-wa-author"
@@ -124,22 +127,26 @@ let test_post_append_failure_commits_nothing () =
    | Error (Board.Io_error _) -> ()
    | Error e ->
      Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e));
-  (* Fresh base: the failed create left nothing in memory to list. *)
-  ignore (fresh_test_base_path ());
-  Board.reset_global_for_test ();
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
+  Unix.putenv "MASC_BASE_PATH" working_base;
+  (* Same store, no reset: the failed create must have left nothing in
+     memory for the healthy-path retry to collide with. *)
   (match Board_dispatch.list_posts () with
    | [] -> ()
    | posts ->
      Alcotest.failf "failed create left %d post(s) behind" (List.length posts));
-  match
-    Board_dispatch.create_post ~author:"post-wa-author"
-      ~content:"retry lands durably" ~post_kind:Board.Human_post ()
-  with
-  | Ok _ -> ()
-  | Error e ->
-    Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e)
+  (match
+     Board_dispatch.create_post ~author:"post-wa-author"
+       ~content:"retry lands durably" ~post_kind:Board.Human_post ()
+   with
+   | Ok _ -> ()
+   | Error e ->
+     Alcotest.fail ("retry must succeed, got " ^ Board.show_board_error e));
+  Alcotest.(check int)
+    "exactly the retried post is listed" 1
+    (List.length (Board_dispatch.list_posts ()));
+  Alcotest.(check int)
+    "posts WAL has exactly the retried row, no ghost from the failure" 1
+    (List.length (Fs_compat.load_jsonl (Board.persist_path ())))
 
 let test_restart_recomputes_reply_count_from_comment_wal () =
   let post =
@@ -154,7 +161,8 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   (* No snapshot flush: the posts snapshot on disk still carries
-     reply_count = 0. The comment WAL row alone must be enough. *)
+     reply_count = 0 and the post's creation-time [updated_at]. The
+     comment WAL row alone must restore both. *)
   Board.reset_global_for_test ();
   Board_dispatch.reset_for_test ();
   Board_dispatch.init_jsonl ();
@@ -162,7 +170,16 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
   | Ok loaded ->
     Alcotest.(check int)
       "restart recomputes reply_count from the comment WAL" 1
-      loaded.reply_count
+      loaded.reply_count;
+    (match Board_dispatch.get_comments ~post_id with
+     | Ok [ c ] ->
+       Alcotest.(check (float 0.0))
+         "restart restores updated_at to the comment high-water mark"
+         c.created_at loaded.updated_at
+     | Ok comments ->
+       Alcotest.failf "expected exactly 1 comment, got %d"
+         (List.length comments)
+     | Error e -> Alcotest.fail (Board.show_board_error e))
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let () =

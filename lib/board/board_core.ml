@@ -264,41 +264,67 @@ let add_comment_with_audience
        (match with_persist_lock store (fun () -> append_comment comment) with
         | Error _ as e -> e
         | Ok () ->
-          with_lock store (fun () ->
-            (* Commit from a fresh read: the post can change or vanish
-               while the append is in flight; bumping the stale staged
-               copy would clobber a concurrent unrelated mutation. *)
-            match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-            | None ->
-              (* Post deleted mid-append. The appended row is an orphan
-                 on disk; the next comments snapshot rewrite drops it,
-                 and after a crash the loader tolerates it (reply-count
-                 recalculation skips comments whose post is gone). *)
-              Error (Post_not_found post_id)
-            | Some post ->
-              let post_key = Post_id.to_string pid in
-              let comment_key = Comment_id.to_string comment.id in
-              Hashtbl.add store.comments comment_key comment;
-              let existing =
-                Hashtbl.find_opt store.comments_by_post post_key
-                |> Option.value ~default:[]
-              in
-              Hashtbl.replace
-                store.comments_by_post
-                post_key
-                (comment_key :: existing);
-              Hashtbl.replace
-                store.posts
-                post_key
-                { post with
-                  reply_count = post.reply_count + 1
-                ; updated_at = comment.created_at
-                };
-              mark_dirty_post store post_key;
-              mark_dirty_comment store comment_key;
-              invalidate_post_caches store;
-              invalidate_comment_caches store;
-              Ok { comment; audience })))
+          let committed =
+            with_lock store (fun () ->
+              (* Commit from a fresh read: the post can change or vanish
+                 while the append is in flight; bumping the stale staged
+                 copy would clobber a concurrent unrelated mutation. The
+                 policy is re-checked for the same reason — it can flip
+                 while the append is in flight, and commit is the
+                 authoritative gate. *)
+              match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+              | None -> Error (Post_not_found post_id)
+              | Some post ->
+                (match
+                   validate_sub_board_post_policy_unlocked
+                     store
+                     ~author_id
+                     ~hearth:post.hearth
+                 with
+                 | Error _ as e -> e
+                 | Ok () ->
+                   let post_key = Post_id.to_string pid in
+                   let comment_key = Comment_id.to_string comment.id in
+                   Hashtbl.add store.comments comment_key comment;
+                   let existing =
+                     Hashtbl.find_opt store.comments_by_post post_key
+                     |> Option.value ~default:[]
+                   in
+                   Hashtbl.replace
+                     store.comments_by_post
+                     post_key
+                     (comment_key :: existing);
+                   Hashtbl.replace
+                     store.posts
+                     post_key
+                     { post with
+                       reply_count = post.reply_count + 1
+                     ; updated_at =
+                         (* Never move [updated_at] backwards: a
+                            concurrent mutation can land between staging
+                            and commit with a newer timestamp. *)
+                         Stdlib.Float.max post.updated_at comment.created_at
+                     };
+                   mark_dirty_post store post_key;
+                   mark_dirty_comment store comment_key;
+                   invalidate_post_caches store;
+                   invalidate_comment_caches store;
+                   Ok { comment; audience }))
+          in
+          (match committed with
+           | Ok _ as ok -> ok
+           | Error _ as e ->
+             (* The durable append won but the commit lost (post deleted
+                or policy flipped mid-append), so the appended row is an
+                orphan on disk. Rewrite the comments snapshot to dispose
+                of it — the snapshot cannot contain the orphan because
+                it never reached memory. If the rewrite itself fails,
+                the next successful snapshot rewrite disposes of the
+                row; until then reply-count recalculation on load skips
+                comments whose post is gone, so the orphan cannot
+                distort counts. *)
+             rewrite_comments store;
+             e)))
 ;;
 
 let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =

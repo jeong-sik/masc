@@ -591,6 +591,91 @@ let apply_patch ~old_string ~new_string ~replace_all text =
    [(repo_id, rel)] pair first and the repository URL is looked up by
    id. This makes the sandbox/working-tree join work without forcing
    the operator to register every playground clone path. *)
+(* RFC-0378 §5.1 / #28968: a write inside a linked git worktree must
+   fold to the same [Code_address] as the main-tree write, with the
+   checkout root carried as the [checkout] projection metadata
+   (RFC-0378 §9's proposed representation: the measured
+   [--show-toplevel] value).
+
+   RFC-keeper-workspace-root-only §3.2 owns the mechanism: git itself
+   answers "which checkout holds this file" — no path convention is
+   special-cased (that RFC's deletion list explicitly bans new
+   [.worktrees] literals), so worktrees outside the [.worktrees/]
+   convention fold too. The fold applies only when git's
+   [--git-common-dir] for the file equals the matched repo root's
+   [.git]: that is git's own statement that the checkout is a linked
+   worktree of THIS repository. A nested foreign clone (its own
+   [.git]), a submodule ([.git/modules/...]), or any git failure
+   (not a repo, timeout) leaves today's attribution untouched.
+   Repository identity always comes from the registered catalog URL,
+   never the measured origin — playground clones use local-path
+   origins that do not canonicalise. *)
+type worktree_fold_decision =
+  | Fold_to of string
+  | No_fold
+
+(* One bounded git subprocess per (file directory, matched root); the
+   resolver sits on the path-bearing tool post-hook, so per-call
+   subprocess cost would tax every file-touching turn. Checkout roots
+   do not move while a directory exists, so entries never expire; a
+   catalog change alters [matched_root] and thereby the key. *)
+let worktree_fold_memo : (string * string, worktree_fold_decision) Hashtbl.t =
+  Hashtbl.create 64
+
+let worktree_fold_memo_mutex = Stdlib.Mutex.create ()
+
+let measured_worktree_fold ~matched_root ~file_dir =
+  let key = (file_dir, matched_root) in
+  let cached =
+    Stdlib.Mutex.protect worktree_fold_memo_mutex (fun () ->
+        Hashtbl.find_opt worktree_fold_memo key)
+  in
+  match cached with
+  | Some decision -> decision
+  | None ->
+    let decision =
+      match Repo_git.checkout_identity ~local_path:file_dir with
+      | Error _ -> No_fold
+      | Ok { Repo_git.toplevel; git_common_dir } ->
+        if String.equal toplevel matched_root
+        then No_fold
+        else if String.equal git_common_dir (Filename.concat matched_root ".git")
+        then Fold_to toplevel
+        else No_fold
+    in
+    Stdlib.Mutex.protect worktree_fold_memo_mutex (fun () ->
+        Hashtbl.replace worktree_fold_memo key decision);
+    decision
+
+(* The parsers hand back [rel] as the literal remainder of [abs], so
+   chopping that suffix recovers the matched repository's filesystem
+   root. A non-literal remainder (never produced today) skips folding
+   rather than guessing. *)
+let fs_root_of_rel ~abs ~rel =
+  let suffix = "/" ^ rel in
+  if String.length abs > String.length suffix
+     && String.ends_with ~suffix abs
+  then Some (String.sub abs 0 (String.length abs - String.length suffix))
+  else None
+
+let rel_and_checkout ~abs ~rel =
+  match fs_root_of_rel ~abs ~rel with
+  | None -> rel, None
+  | Some matched_root ->
+    (match
+       measured_worktree_fold ~matched_root ~file_dir:(Filename.dirname abs)
+     with
+     | No_fold -> rel, None
+     | Fold_to checkout_root ->
+       let prefix = checkout_root ^ "/" in
+       if String.length abs > String.length prefix
+          && String.starts_with ~prefix abs
+       then
+         ( String.sub abs (String.length prefix)
+             (String.length abs - String.length prefix)
+         , Some checkout_root )
+       else rel, None)
+
 let resolve_write_attribution ~base_dir ~file_path =
   let abs =
     if Filename.is_relative file_path
@@ -626,11 +711,12 @@ let resolve_write_attribution ~base_dir ~file_path =
       | None ->
         unaddressed (Agent_observation.Unattributed.Unparseable_remote_url url)
       | Some slug ->
+        let rel, checkout = rel_and_checkout ~abs ~rel in
         (match normalize_rel rel with
          | None -> unaddressed Agent_observation.Unattributed.Unregistered_path
          | Some rel ->
            (match Agent_observation.Code_address.v ~codebase:slug ~path:rel with
-            | Ok address -> Agent_observation.Addressed { address; checkout = None }
+            | Ok address -> Agent_observation.Addressed { address; checkout }
             | Error invalid ->
               unaddressed (Agent_observation.Unattributed.Unmintable invalid)))
   in

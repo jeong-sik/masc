@@ -90,6 +90,12 @@ export type ToolCallEntry = {
   keeper_turn_id?: number
   task_id?: string
   lane?: string
+  // Which turn made the call: a submitted operation's turn ('direct') or the
+  // keeper's own autonomous cycle. Both carry the same trace_id, so without
+  // this an operator reading the inspector cannot tell a submission's calls
+  // from work the keeper started on its own. Absent on rows written outside
+  // a keeper turn (runtime MCP) and on pre-#28977 logs.
+  turn_kind?: string
   // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
   execution_id?: string
   result_bytes?: number
@@ -251,6 +257,7 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     keeper_turn_id: asNumber(raw.keeper_turn_id),
     task_id: asString(raw.task_id),
     lane: asString(raw.lane),
+    turn_kind: asString(raw.turn_kind),
     execution_id: asString(raw.execution_id),
     result_bytes: asNumber(raw.result_bytes),
     truncated_to: asNumber(raw.truncated_to),

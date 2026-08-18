@@ -38,6 +38,7 @@ val create_turn_ctx_cell : unit -> turn_ctx_cell
 val set_turn_context :
   cell:turn_ctx_cell ->
   ?agent_name:string ->
+  ?turn_kind:Turn_record.turn_kind ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
@@ -144,6 +145,7 @@ val log_call :
   duration_ms:float ->
   ?model:string ->
   ?agent_name:string ->
+  ?turn_kind:Turn_record.turn_kind ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->
@@ -200,7 +202,11 @@ val log_call :
     [on_committed], when supplied, forces this row through the synchronous
     append boundary and runs only after that append succeeds. It is intended
     for exact completion notifications whose readers must not race the
-    asynchronous log queue. Output is truncated to 4000 bytes. [model] is a compatibility input only;
+    asynchronous log queue. [turn_kind] names which turn made the call —
+    a submitted operation's turn or the keeper's own autonomous cycle —
+    so a reader can join calls to a submission instead of inferring the
+    boundary from timestamps that a concurrent autonomous turn overlaps.
+    Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool

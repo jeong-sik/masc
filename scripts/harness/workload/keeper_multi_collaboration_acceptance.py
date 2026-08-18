@@ -1436,7 +1436,34 @@ class MissionRun:
                 if isinstance(row.get("ts"), (int, float))
                 and turn.started_epoch_seconds <= float(row["ts"])
                 <= turn.finished_epoch_seconds
+                and is_submitted_turn_row(row)
             ]
+
+        def is_submitted_turn_row(row: dict[str, Any]) -> bool:
+            # The mission prompt reaches a keeper only through a submitted
+            # turn. Its autonomous cycle receives "Continue." and calls the
+            # same tools with the same trace_id, so before rows carried
+            # turn_kind (masc#28977) the only available boundary was the
+            # submission's wall clock — and a keeper that started an
+            # autonomous turn while the harness was submitting had its own
+            # compose runs land outside every window, counted as an
+            # exactly-once violation it never committed. Rows without the
+            # field fail closed: no run is attributable, and the assertion
+            # says so rather than passing on an empty universe.
+            return row.get("turn_kind") == "direct"
+
+        def autonomous_composition_runs(composition_tool: str) -> set[tuple[str, str]]:
+            runs: set[tuple[str, str]] = set()
+            for role, rows in self.tool_call_rows.items():
+                for row in rows:
+                    if row.get("composition_tool") != composition_tool:
+                        continue
+                    if is_submitted_turn_row(row):
+                        continue
+                    run_id = row.get("composition_run_id")
+                    if isinstance(run_id, str) and run_id:
+                        runs.add((role, run_id))
+            return runs
 
         def composition_runs(
             composition_tool: str,
@@ -1445,6 +1472,8 @@ class MissionRun:
             for role, rows in self.tool_call_rows.items():
                 for row in rows:
                     if row.get("composition_tool") != composition_tool:
+                        continue
+                    if not is_submitted_turn_row(row):
                         continue
                     run_id = row.get("composition_run_id")
                     if isinstance(run_id, str) and run_id:
@@ -1480,6 +1509,9 @@ class MissionRun:
 
         inline_runs = composition_runs("keeper_compose_mission-snapshot")
         async_runs = composition_runs("keeper_compose_background-snapshot")
+        autonomous_inline_runs = autonomous_composition_runs(
+            "keeper_compose_mission-snapshot"
+        )
         composition_rows = [row for rows in inline_runs.values() for row in rows]
         inline_turn_runs: dict[str, tuple[str, list[dict[str, Any]]]] = {}
         inline_turn_errors: list[str] = []
@@ -1995,7 +2027,8 @@ class MissionRun:
                 and inline_row_universe_exact
                 and inline_action_identities_globally_unique,
                 f"exact completed inline runs={len(inline_turn_runs)}/14 "
-                f"errors={inline_turn_errors} unattributed={sorted(unattributed_inline_runs)}",
+                f"errors={inline_turn_errors} unattributed={sorted(unattributed_inline_runs)} "
+                f"autonomous={sorted(autonomous_inline_runs)}",
             ),
             "composition_parallel_schedule_observed": (
                 parallel_schedule_observed,

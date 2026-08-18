@@ -341,6 +341,100 @@ let test_composition_action_context_persisted () =
         ]
     | _ -> Alcotest.fail "expected exactly one composition action entry")
 
+(* One keeper, one trace: a submitted turn and the keeper's own autonomous
+   cycle each run the same composition tool. Rows of both carry the same
+   keeper, trace_id and composition tool, so a reader asking which run
+   belongs to the submission had nothing to separate them and fell back to
+   the submission's wall clock — which the autonomous run overlaps
+   (masc#28977 RW17: builder-b's autonomous compose runs were read as
+   exactly-once violations of the submitted mission).
+
+   The rows are written the way both production writers do it: context into
+   a per-run cell, read back as a record, passed explicitly to log_call. *)
+let test_composition_rows_separate_submitted_from_autonomous_turn () =
+  with_tmp_log (fun () ->
+    let node_ids = [ "clock"; "board"; "board-peer"; "memory" ] in
+    let log_composition_run ~turn_kind ~keeper_turn_id ~run_id =
+      let cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+      Keeper_tool_call_log.set_turn_context
+        ~cell
+        ~agent_name:"keeper-build-b-agent"
+        ~turn_kind
+        ~lane:"tool_optional"
+        ~trace_id:"trace-shared"
+        ~session_id:"trace-shared"
+        ~keeper_turn_id
+        ();
+      let context : Keeper_tool_call_log_context.turn_context =
+        Keeper_tool_call_log_context.get_turn_context_record ~cell ()
+      in
+      List.iter
+        (fun node_id ->
+           Keeper_tool_call_log.log_call
+             ~keeper_name:"build-b"
+             ~tool_name:"masc_board_stats"
+             ~input:(`Assoc [])
+             ~output_text:"ok"
+             ~success:true
+             ~duration_ms:1.0
+             ?agent_name:context.agent_name
+             ?turn_kind:context.turn_kind
+             ?lane:context.lane
+             ?trace_id:context.trace_id
+             ?session_id:context.session_id
+             ?keeper_turn_id:context.keeper_turn_id
+             ~composition_tool:"keeper_compose_mission-snapshot"
+             ~composition_run_id:run_id
+             ~composition_node_id:node_id
+             ~composition_execution:Keeper_tool_composition_catalog.Inline
+             ~parent_tool_use_id:("call-" ^ run_id)
+             ())
+        node_ids
+    in
+    log_composition_run
+      ~turn_kind:Turn_record.Direct
+      ~keeper_turn_id:2
+      ~run_id:"run-submitted";
+    log_composition_run
+      ~turn_kind:Turn_record.Autonomous
+      ~keeper_turn_id:3
+      ~run_id:"run-autonomous";
+    let entries = Keeper_tool_call_log.read_recent ~n:16 () in
+    Alcotest.(check int) "every node row of both runs persisted" 8
+      (List.length entries);
+    let run_ids_for kind =
+      List.filter_map
+        (fun entry ->
+           match Safe_ops.json_string_opt "turn_kind" entry with
+           | Some value when String.equal value kind ->
+             Safe_ops.json_string_opt "composition_run_id" entry
+           | Some _ | None -> None)
+        entries
+      |> List.sort_uniq String.compare
+    in
+    Alcotest.(check (list string)) "submitted turn owns exactly its run"
+      [ "run-submitted" ]
+      (run_ids_for "direct");
+    Alcotest.(check (list string)) "autonomous cycle owns exactly its run"
+      [ "run-autonomous" ]
+      (run_ids_for "autonomous");
+    let submitted_node_rows =
+      List.filter
+        (fun entry ->
+           match Safe_ops.json_string_opt "turn_kind" entry with
+           | Some value -> String.equal value "direct"
+           | None -> false)
+        entries
+    in
+    Alcotest.(check int) "submitted run keeps all four node rows" 4
+      (List.length submitted_node_rows);
+    Alcotest.(check (list string)) "every node of the submitted run is named"
+      (List.sort String.compare node_ids)
+      (List.filter_map
+         (Safe_ops.json_string_opt "composition_node_id")
+         submitted_node_rows
+       |> List.sort String.compare))
+
 (* ── Redaction: tool names do not suppress evidence ────────────── *)
 
 let test_sensitive_named_tool_logged_with_redaction () =
@@ -1548,6 +1642,8 @@ let () =
         ; eio_test "exact AGENT_CORE occurrence" test_exact_agent_core_occurrence_persisted
         ; eio_test "composition action context"
             test_composition_action_context_persisted
+        ; eio_test "composition rows separate submitted from autonomous turn"
+            test_composition_rows_separate_submitted_from_autonomous_turn
         ] )
     ; ( "redaction",
         [ eio_test "sensitive-named tool logged with redaction"

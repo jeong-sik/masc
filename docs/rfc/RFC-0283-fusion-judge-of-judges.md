@@ -1,3 +1,8 @@
+---
+rfc: "0283"
+status: Implemented
+---
+
 # RFC-0283 — Fusion: judge-of-judges 위상 (flat/staged reducer)
 
 - Status: Implemented

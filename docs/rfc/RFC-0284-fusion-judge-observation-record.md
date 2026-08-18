@@ -1,3 +1,8 @@
+---
+rfc: "0284"
+status: Implemented
+---
+
 # RFC-0284 — Fusion 심판 실행 관측 record (judge observation record)
 
 - Status: Implemented

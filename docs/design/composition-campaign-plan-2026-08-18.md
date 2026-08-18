@@ -75,7 +75,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | recall_injections 스토어는 죽었는데(#26952) RFC-0264가 그 ledger 기반 eval을 여전히 처방 | MED | 디렉터리 삭제 + RFC 폐기 또는 Memory OS 기준 재작성 |
 | RFC-0283·RFC-0284 Draft 표기인데 구현은 출하·라이브 | LOW | 상태 정정 |
 | keeper TOML 129개 중 ~100개, runtime.toml 배정 130행 중 ~110행이 사망 잔재 | LOW | 페르소나 외 삭제 (마이그레이션 없이) |
-| autonomy_stats.jsonl 13일 정지 · board_attention retired-v3 디렉터리 잔존 | LOW | 배선 확인 후 삭제/수리 |
+| autonomy_stats.jsonl 13일 정지 · board_attention retired-v3 디렉터리 잔존 | LOW | 배선 확인 완료 (2026-08-19): `autonomy_stats`는 lib/bin/scripts/dashboard 어디에도 producer/reader가 없고(마지막 기록 08-05), `board_attention_candidates-retired-v3-20260814`는 리포 참조 0. 둘 다 삭제 확정 — live store 삭제는 세션 권한 분류기가 차단하므로 운영자가 base path의 `.masc/` 아래에서 `board_attention_candidates-retired-v3-20260814` 디렉터리와 `autonomy_stats.jsonl`을 1회 삭제 |
 
 ## 3. 실행 케이스 — 각 접근법 3개
 

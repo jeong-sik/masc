@@ -161,7 +161,6 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0253 | Dashboard keeper-v2 surfaces: canonical spacing/radius token scale + off-scal... | Draft | - |
 | 0257 | Per-Keeper memory execution lane | Draft | - |
 | 0261 | gRPC LSP failed-initialize FD/process teardown | Draft | - |
-| 0264 | Memory OS recall outcome-anchored eval harness | Draft | - |
 | 0266 | Fusion async-completion wake + in-progress 가시성 | Draft | - |
 | 0267 | Make task↔goal links visible and explicitly assignable | Implemented | - |
 | 0269 | Process Critic Loop for Keeper Work Traces | Draft | - |
@@ -172,8 +171,8 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0280 | Fusion: validated preset type (Parse, don't validate) | Draft | - |
 | 0281 | WebSocket transport SSOT — separate upgrade-attachment from session-protocol,... | Draft | - |
 | 0282 | Keeper authored content is ordinary instructions | Implemented | - |
-| 0283 | Fusion: judge-of-judges 위상 (flat/staged reducer) | Draft | - |
-| 0284 | Fusion 심판 실행 관측 record (judge observation record) | Draft | - |
+| 0283 | Fusion: judge-of-judges 위상 (flat/staged reducer) | Implemented | - |
+| 0284 | Fusion 심판 실행 관측 record (judge observation record) | Implemented | - |
 | 0287 | ws-direct — a single masc-owned WebSocket stack for server and client | Draft | - |
 | 0289 | Extract progress-classification into its own library for a single substantive... | Draft | - |
 | 0290 | Generic keeper background-work tool (spawn → wake-on-completion) | Draft | - |

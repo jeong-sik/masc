@@ -8,6 +8,7 @@
       base_dir/
         2026-03/
           20.jsonl
+          21.001.jsonl   (completed size-rotation segment of day 21)
           21.jsonl
         2026-04/
           01.jsonl
@@ -238,10 +239,19 @@ let list_month_dirs base_dir =
     && d.[4] = '-'
     && Option.is_some (int_of_string_opt (String.sub d 0 4)))
 
-(** Day files matching [DD.jsonl], newest first. *)
+(** Day files matching [DD.jsonl] or [DD.NNN.jsonl], newest first. *)
 let list_day_files month_path =
   list_subdirs month_path
   |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
+
+(* The day number is always the leading two characters — for both the
+   current [DD.jsonl] and rotated [DD.NNN.jsonl] segments.
+   [Filename.remove_extension] must not be used for this: it maps a
+   segment to ["DD.NNN"], which compares greater than its own day and
+   silently drops segments from range boundaries. *)
+let day_number_of_day_file_name name =
+  if String.length name >= 2 then String.sub name 0 2 else name
+;;
 
 type directory_presence =
   | Directory_present
@@ -312,14 +322,36 @@ let month_directory_name_is_valid name =
   Option.is_some (year_and_month_of_directory_name name)
 ;;
 
-let day_file_name_is_valid ~year ~month name =
-  String.length name = 8
-  && String.equal (String.sub name 2 6) ".jsonl"
-  && substring_is_ascii_digits name ~position:0 ~length:2
-  &&
-  match int_of_string_opt (String.sub name 0 2), days_in_month ~year month with
+(* [DD.jsonl] is the day's current append target; [DD.NNN.jsonl] is a
+   completed size-rotation segment of the same day (see
+   [append_rotating]). Lexicographic name order places a day's segments
+   after the previous day and before the day's current file, so the
+   newest-first listings, the oldest-first prune order, and range
+   selection all order them correctly with no special cases. *)
+let rotation_sequence_digits = 3
+let rotated_segment_name_length = 12 (* "DD." + NNN + ".jsonl" *)
+
+let day_number_is_valid ~year ~month day_text =
+  match int_of_string_opt day_text, days_in_month ~year month with
   | Some day, Some maximum -> day >= 1 && day <= maximum
   | None, _ | _, None -> false
+;;
+
+let day_file_name_is_valid ~year ~month name =
+  let is_current_shape =
+    String.length name = 8
+    && String.equal (String.sub name 2 6) ".jsonl"
+    && substring_is_ascii_digits name ~position:0 ~length:2
+  in
+  let is_rotated_segment_shape =
+    String.length name = rotated_segment_name_length
+    && Char.equal name.[2] '.'
+    && String.equal (String.sub name 6 6) ".jsonl"
+    && substring_is_ascii_digits name ~position:0 ~length:2
+    && substring_is_ascii_digits name ~position:3 ~length:rotation_sequence_digits
+  in
+  (is_current_shape || is_rotated_segment_shape)
+  && day_number_is_valid ~year ~month (String.sub name 0 2)
 ;;
 
 (* A name this layout can never produce is a foreign file, not a corrupted
@@ -786,7 +818,37 @@ let prune_to_max_bytes_unlocked t ~max_bytes ~keep_path =
 
 (* ── Public API ───────────────────────────────────────── *)
 
-let append_unlocked ?max_current_file_bytes t json =
+type append_outcome =
+  | Appended_to_current
+  | Appended_after_rotation of { segment : string }
+  | Skipped_rotation_exhausted of { sequence_limit : int }
+  | Skipped_by_append_guard
+
+(* Shared post-append maintenance for every append entry point:
+   opportunistic once-per-process-day retention prune, then best-effort
+   byte-budget prune that never touches the current day file. Divergence
+   between append paths here would give the same store two different
+   retention behaviours, so both call this one helper. *)
+let run_post_append_pruning_unlocked t ~(dated : Jsonl_writer.dated_path) =
+  (match t.retention_days with
+   | None -> ()
+   | Some days ->
+     let today = dated.month_dir ^ "/" ^ dated.day_file in
+     if
+       not
+         (Option.equal String.equal (Atomic.get t.last_prune_day) (Some today))
+     then begin
+       (* See retention pruning is opportunistic after append durability. *)
+       ignore (prune_unlocked t ~days : int);
+       Atomic.set t.last_prune_day (Some today)
+     end);
+  match t.max_bytes with
+  | None -> ()
+  | Some max_bytes ->
+    (* See byte-budget pruning is best-effort cleanup after append. *)
+    ignore (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int)
+
+let append_unlocked t json =
   let mutex = Atomic.get t.mutex in
   (* [use_ro] serializes file appends without poisoning the shared mutex on
      IO failure, so retry paths can keep using the same registry entry.
@@ -798,50 +860,91 @@ let append_unlocked ?max_current_file_bytes t json =
      was a pre-emptive duplicate of that guarantee — removed here. *)
   Eio.Mutex.use_ro mutex (fun () ->
     let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
-    let fits_current_file =
-      match max_current_file_bytes with
-      | Some max_bytes when max_bytes > 0 ->
-        let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
-        file_size dated.path + row_bytes <= max_bytes
-      | _ -> true
-    in
-    if not fits_current_file
-    then false
-    else begin
-      Jsonl_writer.append_jsonl ~path:dated.path json;
-      (match t.retention_days with
-       | None -> ()
-       | Some days ->
-         let today = dated.month_dir ^ "/" ^ dated.day_file in
-         if
-           not
-             (Option.equal String.equal
-                (Atomic.get t.last_prune_day)
-                (Some today))
-         then begin
-           (* See retention pruning is opportunistic after append durability. *)
-           ignore (prune_unlocked t ~days : int);
-           Atomic.set t.last_prune_day (Some today)
-         end);
-      (match t.max_bytes with
-       | None -> ()
-       | Some max_bytes ->
-         (* See byte-budget pruning is best-effort cleanup after append. *)
-         ignore
-           (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int));
-      true
-    end)
+    Jsonl_writer.append_jsonl ~path:dated.path json;
+    run_post_append_pruning_unlocked t ~dated)
 
-let append_inner t json = ignore (append_unlocked t json : bool)
+let append_inner t json = append_unlocked t json
 
 let append t json =
   (Atomic.get append_guard) (fun () -> append_inner t json)
 
-let append_if_current_file_fits t ~max_current_file_bytes json =
-  let appended = ref false in
+let max_rotation_sequence = 999 (* the [NNN] name space of [DD.NNN.jsonl] *)
+
+let rotated_segment_name ~day_prefix ~sequence =
+  Printf.sprintf "%s.%0*d.jsonl" day_prefix rotation_sequence_digits sequence
+
+(* Highest existing rotation sequence for [day_prefix] plus one. Scans
+   names structurally ([DD.NNN.jsonl] for this day) rather than keeping
+   a counter, so restarts and foreign writers cannot desynchronise it. *)
+let next_rotation_sequence ~month_path ~day_prefix =
+  let day_dot = day_prefix ^ "." in
+  list_subdirs month_path
+  |> List.fold_left
+       (fun highest name ->
+          if
+            String.length name = rotated_segment_name_length
+            && String.starts_with ~prefix:day_dot name
+            && substring_is_ascii_digits name ~position:3
+                 ~length:rotation_sequence_digits
+            && String.equal (String.sub name 6 6) ".jsonl"
+          then
+            match
+              int_of_string_opt (String.sub name 3 rotation_sequence_digits)
+            with
+            | Some sequence -> Stdlib.Int.max highest sequence
+            | None -> highest
+          else highest)
+       0
+  |> ( + ) 1
+
+let append_rotating_unlocked t ~max_current_file_bytes json =
+  let mutex = Atomic.get t.mutex in
+  Eio.Mutex.use_ro mutex (fun () ->
+    let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
+    let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
+    let current_bytes = file_size dated.path in
+    let placement =
+      if
+        max_current_file_bytes <= 0
+        || current_bytes + row_bytes <= max_current_file_bytes
+      then Some Appended_to_current
+      else if current_bytes = 0
+      then
+        (* A single row larger than the cap: rotating an empty file out
+           would spin forever without ever accepting the row. The row
+           lands, the segment runs oversized once, and the next append
+           rotates it out. *)
+        Some Appended_to_current
+      else begin
+        let month_path = Filename.dirname dated.path in
+        let day_prefix = day_number_of_day_file_name dated.day_file in
+        let sequence = next_rotation_sequence ~month_path ~day_prefix in
+        if sequence > max_rotation_sequence
+        then None
+        else begin
+          let segment = rotated_segment_name ~day_prefix ~sequence in
+          (* Same pre-rename step as [prepare_for_directory_removal]:
+             drop any cached writer for the old identity before the
+             rename so the next append opens the fresh file. *)
+          Fs_compat.invalidate_cached_writer dated.path;
+          Sys.rename dated.path (Filename.concat month_path segment);
+          Some (Appended_after_rotation { segment })
+        end
+      end
+    in
+    match placement with
+    | None ->
+      Skipped_rotation_exhausted { sequence_limit = max_rotation_sequence }
+    | Some outcome ->
+      Jsonl_writer.append_jsonl ~path:dated.path json;
+      run_post_append_pruning_unlocked t ~dated;
+      outcome)
+
+let append_rotating t ~max_current_file_bytes json =
+  let outcome = ref Skipped_by_append_guard in
   (Atomic.get append_guard) (fun () ->
-    appended := append_unlocked ~max_current_file_bytes t json);
-  !appended
+    outcome := append_rotating_unlocked t ~max_current_file_bytes json);
+  !outcome
 
 let set_append_guard guard = Atomic.set append_guard guard
 
@@ -1077,7 +1180,7 @@ let iter_range_entries_result t ~since ~until f =
       && String.compare month until_month <= 0
     in
     let day_in_range month day =
-      let day_number = Filename.remove_extension day in
+      let day_number = day_number_of_day_file_name day in
       not
         ((String.equal month since_month
           && String.compare day_number since_day < 0)
@@ -1137,7 +1240,7 @@ let iter_range t ~since ~until f =
         let month_path = Filename.concat t.base_dir m in
         let days = list_day_files month_path |> List.rev in
         List.iter (fun d ->
-          let day_num = Filename.remove_extension d in
+          let day_num = day_number_of_day_file_name d in
           let dominated =
             (m = since_month && String.compare day_num since_day < 0)
             || (m = until_month && String.compare day_num until_day > 0)
@@ -1293,7 +1396,7 @@ let filter_map_range_recent ?(offset = 0) t ~since ~until n ~f =
                 List.iter
                   (fun d ->
                      if !count >= n then raise_notrace Done;
-                     let day_num = Filename.remove_extension d in
+                     let day_num = day_number_of_day_file_name d in
                      let dominated =
                        (m = since_month && String.compare day_num since_day < 0)
                        || (m = until_month && String.compare day_num until_day > 0)

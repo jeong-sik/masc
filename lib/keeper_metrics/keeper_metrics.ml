@@ -201,7 +201,7 @@ type t =
   | RawTraceRetentionUnlinkFailed (* counter: unreachable raw-trace files that could not be deleted *)
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
-  | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
+  | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
 [@@deriving enumerate]
 
 (** String conversion

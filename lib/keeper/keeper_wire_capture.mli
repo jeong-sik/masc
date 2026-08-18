@@ -23,11 +23,15 @@
 
     Writes are best-effort and dated under
     [<masc_root>/wire-capture/YYYY-MM/DD.jsonl] (same [Dated_jsonl] per-day
-    store the cost ledger uses). The active day file and completed-file
-    retention are bounded by
-    [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS] and
-    [MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES]. A write failure is logged and never
-    interrupts the turn.
+    store the cost ledger uses). [MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES] is
+    the store byte budget: the current day file rotates to a completed
+    [DD.NNN.jsonl] segment at an eighth of the budget and capture
+    continues in a fresh file, while the budget prunes the oldest
+    completed files — so a busy day keeps a ring of its newest segments
+    and sheds its oldest instead of going dark after the cap
+    ([Dated_jsonl.append_rotating]). Retention is bounded by
+    [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS]. A write failure is
+    logged and never interrupts the turn.
 
     Motivation: the request boundary is the primary suspect for
     self-reinforcing repetition — the keeper's own prior visible text is

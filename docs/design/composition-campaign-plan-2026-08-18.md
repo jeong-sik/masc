@@ -99,9 +99,9 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 3. async 브로커 오프로드 — 턴 밖 병렬. 즉시성 fan-out엔 부적합, A3-1과 상보.
 
 **A4. Tool 표면 정책·맥락 절감** (MED)
-1. → **policy-before-schema** — 매 모델 호출 전 tool_catalog 메타데이터(surface × 권한 × readonly × sandbox)로 가시 도구 목록 계산, 거부될 도구 스키마는 아예 미전송. CLI 런타임의 도구 거부=턴 종료 실측(99/122)을 근본 제거.
-2. masc_tool_search + 지연 로딩 — 상시 코어 + 이름/한 줄 stub + lexical 검색 (ToolRet 근거로 임베딩 아닌 lexical부터).
-3. input_examples 부여 — 복잡 파라미터 도구에 예시 내장. A1-2 plan 도구가 최대 수혜자라 같은 PR에 동반.
+1. ~~policy-before-schema~~ — **전제 감사 결과 기각 (2026-08-19, W2 PR-6 자리에서 판정)**. 사전 계산으로 걸러낼 "런컨텍스트상 결정적으로 거부될 도구"가 현재 keeper bundle에 존재하지 않는다: 정적 배제(Operator_only·Transport_alias·invalid-schema)는 `Keeper_tool_descriptor.model_visible_descriptors`(keeper_tool_descriptor.ml:2071)가 이미 수행하고, sandbox factory는 keeper bundle이 항상 생성하며(keeper_tools_agent_core_bundle.ml:63), web_search/web_fetch·masc dispatch는 전 keeper에 배선 완료(keeper_tool_runtime.ml:305-324). 근거로 삼았던 실측 99/122는 인자 수준 거부라 스키마 미전송으로 막을 수 없다(그 축은 A4-3 input_examples·plan 도구 문법 교육이 담당). 제거할 거부가 없는 필터는 투기적 게이트다 — §4 "하지 않는 것"의 하드 게이팅 금지에 스스로 걸린다. **구현 심(seam)은 이미 존재**: `compute_tool_surface`(keeper_run_tools_setup.ml:429)가 매 턴 schema_filter를 계산하며 지금은 전체 통과 상수다. 재개 조건: lane별 도구 권한 축소, 또는 런컨텍스트 조건부 거부 클래스가 dispatch에 실제로 생기는 첫 시점.
+2. masc_tool_search + 지연 로딩 — 상시 코어 + 이름/한 줄 stub + lexical 검색 (ToolRet 근거로 임베딩 아닌 lexical부터). A4-1 기각 후에도 유효: 이 축의 목표는 거부 제거가 아니라 프롬프트 스키마 바이트 절감이다.
+3. input_examples 부여 — 복잡 파라미터 도구에 예시 내장. A1-2 plan 도구가 최대 수혜자라 같은 PR에 동반. descriptor `examples` 필드가 이미 존재하므로 채우는 작업이다.
 
 **A5. Acting 관측성 — 기록-화면 갭 청산** (HIGH, 합성과 동반 출하)
 1. → **인스펙터 복원+트리** — 디코더에 route_evidence/runtime_contract/action_radius 복원, composition run 부모-자식 트리 렌더. 서버 변경 0.
@@ -155,7 +155,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | W1 | PR-3 | A5-1: 대시보드 디코더 복원 + 합성 트리 렌더 | — |
 | W1 | PR-4 | B3: RW17 무귀속 원인 확정 + 수리 | — |
 | W2 | PR-5 | A1-2: masc_plan_execute (ReWOO-flat, input_examples 동반) | PR-1 |
-| W2 | PR-6 | A4-1: policy-before-schema 가시 도구 목록 사전 계산 | — |
+| W2 | PR-6 | ~~A4-1: policy-before-schema~~ → 전제 감사로 기각, 본 문서 정정으로 대체 (A4-1 항목 참조) | — |
 | W2 | PR-7 | C1·C2·C3 위생 소형 PR 3~4건 | — |
 | W3 | PR-8 | B1-1: RW20(PoC)·RW21(상호 반론) 미션 + acceptance 확장 | PR-5 권장 |
 | W3 | PR-9 | B2-1: keeper web_search/web_fetch 표면 | — |

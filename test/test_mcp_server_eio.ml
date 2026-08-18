@@ -662,9 +662,25 @@ let test_handle_request_tools_list () =
     false
     (List.mem "masc_voice_ping_pong" names);
   Alcotest.(check bool)
-    "board_search hidden from public surface"
-    false
+    "contains masc_board_search (public surface)"
+    true
     (List.mem "masc_board_search" names);
+  Alcotest.(check bool)
+    "contains masc_task_history (public surface)"
+    true
+    (List.mem "masc_task_history" names);
+  Alcotest.(check bool)
+    "contains masc_keeper_delegate_status (public surface)"
+    true
+    (List.mem "masc_keeper_delegate_status" names);
+  Alcotest.(check bool)
+    "contains masc_keeper_msg (public surface)"
+    true
+    (List.mem "masc_keeper_msg" names);
+  Alcotest.(check bool)
+    "omits masc_fusion_status (keeper-internal, RFC-0266)"
+    false
+    (List.mem "masc_fusion_status" names);
   Alcotest.(check bool)
     "removed experiment_start absent from list"
     false

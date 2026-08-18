@@ -690,9 +690,10 @@ let append_sub_board (sb : sub_board) =
   try
     ensure_masc_dir ();
     let path = sub_boards_path () in
-    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n")
+    Fs_compat.append_file path (Yojson.Safe.to_string (sub_board_to_yojson sb) ^ "\n");
+    Ok ()
   with
-  | Sys_error msg -> record_persist_error ~where:"append_sub_board" msg
+  | Sys_error msg -> persist_io_error ~where:"append_sub_board" msg
 ;;
 
 let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
@@ -726,7 +727,14 @@ let create_sub_board
       (match parse_sub_board_members ~owner:owner_id members with
        | Error e -> Error e
        | Ok members ->
-         let result =
+         (* Write-ahead (#29004, same class as #28934/#28952): validate
+            under [with_lock] with no mutation, durably append outside
+            the store mutex, then commit under [with_lock] from a fresh
+            read. The previous shape mutated first and swallowed the
+            append error ([record_persist_error] + unit): a failed
+            append still returned [Ok sb] whose sub-board existed only
+            in memory and vanished on restart. *)
+         let staged =
            with_lock store (fun () ->
              if Hashtbl.mem store.sub_boards_by_slug slug
              then
@@ -734,7 +742,7 @@ let create_sub_board
                  (Already_exists (Printf.sprintf "Sub-board slug %S already exists" slug))
              else (
                  let id = Sub_board_id.generate () in
-                 let sb =
+                 Ok
                    { id
                    ; slug
                    ; name = String.trim name
@@ -744,17 +752,38 @@ let create_sub_board
                    ; access
                    ; created_at = Time_compat.now ()
                    ; post_count = 0
-                   }
-                 in
-                 Hashtbl.replace store.sub_boards (Sub_board_id.to_string id) sb;
-                 Hashtbl.replace store.sub_boards_by_slug slug (Sub_board_id.to_string id);
-                 Ok sb))
+                   }))
          in
-         (match result with
+         (match staged with
+          | Error _ as e -> e
           | Ok sb ->
-            with_persist_lock store (fun () -> append_sub_board sb);
-            Ok sb
-          | Error _ as e -> e)))
+            (match with_persist_lock store (fun () -> append_sub_board sb) with
+             | Error _ as e -> e
+             | Ok () ->
+               let committed =
+                 with_lock store (fun () ->
+                   if Hashtbl.mem store.sub_boards_by_slug slug
+                   then
+                     Error
+                       (Already_exists
+                          (Printf.sprintf "Sub-board slug %S already exists" slug))
+                   else (
+                     Hashtbl.replace store.sub_boards (Sub_board_id.to_string sb.id) sb;
+                     Hashtbl.replace
+                       store.sub_boards_by_slug
+                       slug
+                       (Sub_board_id.to_string sb.id);
+                     Ok sb))
+               in
+               (match committed with
+                | Ok _ as ok -> ok
+                | Error _ as e ->
+                  (* Lost a same-slug race after the append: the orphan
+                     row would shadow the winner on restart (the loader
+                     is last-row-wins per slug), so rewrite the snapshot
+                     from the committed store now. *)
+                  rewrite_sub_boards store;
+                  e)))))
 ;;
 
 

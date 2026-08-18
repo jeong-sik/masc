@@ -382,6 +382,26 @@ Clears stale data from previous sessions. Does not affect configuration, goals, 
   };
 
   {
+    name = "masc_keeper_msg";
+    description = "Send a direct message to a keeper. Submits the message as an async chat operation and returns operation_id immediately; poll masc_keeper_delegate_status with target {kind: \"keeper\", name} and this operation_id to observe the turn settle.";
+    input_schema = `Assoc [
+      ("type", `String "object");
+      ("properties", `Assoc [
+        ("name", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Keeper handle to message");
+        ]);
+        ("message", `Assoc [
+          ("type", `String "string");
+          ("description", `String "Message text to send to the keeper");
+        ]);
+      ]);
+      ("required", `List [`String "name"; `String "message"]);
+      ("additionalProperties", `Bool false);
+    ];
+  };
+
+  {
     name = "masc_keeper_clear";
     description = "Last-resort context clear for a keeper. \
 Wipes user/assistant/tool messages from the checkpoint; keeps the system prompt \

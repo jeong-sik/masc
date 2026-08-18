@@ -295,6 +295,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_sandbox_stop", mutating_tool);
     ("masc_keeper_delegate", broadcast_tool);
     ("masc_keeper_delegate_status", read_state_tool);
+    (* Submits an async chat operation (same submit_agent_operation path as
+       masc_keeper_delegate); poll masc_keeper_delegate_status for the
+       outcome. *)
+    ("masc_keeper_msg", broadcast_tool);
     ("masc_keeper_delegate_cancel", broadcast_tool);
     ("masc_keeper_delegate_list", read_state_tool);
     ("masc_keeper_audit", read_state_tool);

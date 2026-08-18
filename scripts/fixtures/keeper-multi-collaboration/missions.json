@@ -26,8 +26,7 @@
     "masc_board_search",
     "masc_board_post_get",
     "masc_schedule_create",
-    "masc_schedule_get",
-    "masc_fusion_status"
+    "masc_schedule_get"
   ],
   "keeper_required_tools": [
     "keeper_tasks_list",

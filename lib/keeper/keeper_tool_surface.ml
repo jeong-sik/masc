@@ -470,6 +470,14 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
               ~submitted_by:ctx.agent_name
               ctx
               args))
+  | "masc_keeper_msg" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (Keeper_tool_surface_ops.handle_keeper_msg_from_args
+              ~submitted_by:ctx.agent_name
+              ctx
+              args))
   | "masc_keeper_delegate_status" ->
       Some
         (tool_result_with_tool_name ~tool_name:name
@@ -697,6 +705,15 @@ let () =
              ~submitted_by:agent_name
              ctx
              args))
+    | "masc_keeper_msg" ->
+      with_eio_context (fun ctx ->
+        Some
+          (tool_result_with_tool_name
+             ~tool_name:name
+             (Keeper_tool_surface_ops.handle_keeper_msg_from_args
+                ~submitted_by:agent_name
+                ctx
+                args)))
     | "masc_keeper_up" ->
       (match sw, clock with
        | Some sw, Some clock ->

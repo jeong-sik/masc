@@ -2027,6 +2027,8 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "up" "masc_keeper_up"
       ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Operator_only "msg" "masc_keeper_msg"
+      ~readonly:false
   ]
   @ masc_board_descriptors
   @ masc_library_descriptors

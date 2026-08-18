@@ -1150,20 +1150,24 @@ class MissionRun:
         return observation.data
 
     def wait_for_async_sources(self) -> None:
+        # masc_fusion_status is a keeper-internal tool (RFC-0266 §7 Phase 3
+        # keeper-scoped isolation; see masc#28963/#28960): the operator MCP
+        # session this runner authenticates as can never observe a researcher
+        # keeper's fusion runs through it, so gating on it here would spin the
+        # full deadline on every run. Fusion progress is observed instead via
+        # the researcher's own durable tool-call event (masc_agent_timeline),
+        # checked in evaluate_assertions.
         deadline = time.monotonic() + 180.0
         while time.monotonic() < deadline:
             schedule = self.call(
                 "schedule-poll", "masc_schedule_get", {"schedule_id": self.schedule_id}
             )
-            fusion = self.call("fusion-poll", "masc_fusion_status", {})
             self.observations["schedule"] = schedule
-            self.observations["fusion"] = fusion
             schedule_terminal = any(
                 text_contains(schedule.data, state)
                 for state in ("succeeded", "failed", "cancelled", "expired")
             )
-            fusion_seen = text_contains(fusion.data, self.roles["researcher"])
-            if schedule_terminal and fusion_seen:
+            if schedule_terminal:
                 data = self.read_status("coordinator", "after-schedule")
                 self.writer.write_json(
                     "keeper-status/coordinator-after-schedule.json", data
@@ -1223,7 +1227,6 @@ class MissionRun:
                 {"post_id": post_id, "comment_offset": 0, "comment_limit": 100},
             ),
             "schedule": ("masc_schedule_get", {"schedule_id": self.schedule_id}),
-            "fusion-status": ("masc_fusion_status", {}),
         }
         for label, (tool, arguments) in calls.items():
             observation = self.call(f"observe-{label}", tool, arguments)
@@ -1274,7 +1277,6 @@ class MissionRun:
         tasks = self.observations["tasks"].data
         board = self.observations["board-post"].data
         schedule = self.observations["schedule"].data
-        fusion = self.observations["fusion-status"].data
         histories = {
             key: self.observations[f"task-history-{key}"].data for key in self.task_ids
         }
@@ -1636,8 +1638,11 @@ class MissionRun:
                 for role in ("builder-a", "builder-b")
             ),
             "Comment": len(comment_author_hits) >= 3,
-            "Fusion": self._successful_tool("researcher", "masc_fusion")
-            and text_contains(fusion, self.roles["researcher"]),
+            # masc_fusion_status is keeper-internal (RFC-0266 §7 Phase 3); the
+            # operator session cannot poll it (masc#28963/#28960), so Fusion
+            # progress is observed only through the researcher keeper's own
+            # durable masc_fusion tool-call event.
+            "Fusion": self._successful_tool("researcher", "masc_fusion"),
             "Memory": self._successful_tool("coordinator", "keeper_memory_write"),
             "Context": self.secret.lower() in board_text.lower(),
         }
@@ -1726,9 +1731,11 @@ class MissionRun:
                 "task history or current task state",
             ),
             "fusion_started": (
-                self._successful_tool("researcher", "masc_fusion")
-                and text_contains(fusion, self.roles["researcher"]),
-                "researcher durable tool event and fusion registry",
+                # keeper-side evidence only; masc_fusion_status is
+                # keeper-internal and unreachable from the operator session
+                # (masc#28963/#28960).
+                self._successful_tool("researcher", "masc_fusion"),
+                "researcher durable tool event",
             ),
             "peer_progress_during_fusion": (
                 text_contains(board, "BUILDER_A_DONE") and text_contains(board, "BUILDER_B_DONE"),
@@ -1812,8 +1819,8 @@ class MissionRun:
                     text_contains(value, self.marker)
                     for value in (goals, tasks, board, schedule)
                 )
-                and text_contains(fusion, self.roles["researcher"]),
-                "marker in Goal/Task/Board/Schedule and researcher in Fusion",
+                and self._successful_tool("researcher", "masc_fusion"),
+                "marker in Goal/Task/Board/Schedule and researcher's durable Fusion tool event",
             ),
             "artifact_bundle_complete": (
                 len(artifact_files) >= 20

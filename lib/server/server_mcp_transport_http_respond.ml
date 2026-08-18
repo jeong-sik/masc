@@ -101,11 +101,11 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
 
 let mcp_auth_reject_reason_label
     (failure : Server_mcp_transport_http_types.auth_failure) =
-  (* DET-OK: an absent [auth_error_code] folds to the fixed
-     "unclassified" label on purpose — the metric label set must stay
-     bounded, and the absence itself is what gets counted. Nothing is
-     silently repaired: the paired [Log.Auth] event carries the full
-     failure message and a [`Null] reason for the same reject. *)
+  (* An absent [auth_error_code] folds to the fixed "unclassified"
+     label on purpose — the metric label set must stay bounded, and
+     the absence itself is what gets counted. Nothing is silently
+     repaired: the paired [Log.Auth] event carries the full failure
+     message and a [`Null] reason for the same reject. DET-OK. *)
   Option.value ~default:"unclassified" failure.auth_error_code
 
 let mcp_auth_reject_details ~endpoint ~claimed_agent ~token_presented

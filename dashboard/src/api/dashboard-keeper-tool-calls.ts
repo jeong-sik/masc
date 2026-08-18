@@ -46,8 +46,12 @@ export type ToolCallRuntimeContract = {
   runtime_profile?: string
 }
 
-// What the call touched, as observed by the executor. tool_name / success /
-// duration_ms duplicate the top-level row and are not repeated here.
+// What the call targeted. The server derives this once at record time by
+// parsing the redacted input (lib/keeper/keeper_runtime_contract.ml
+// action_radius_json), so every consumer reads the same value. Note that
+// Execute rows record their cwd here (masc#29013): target_kind "path" does
+// not guarantee a file target. tool_name / success / duration_ms duplicate
+// the top-level row and are not repeated here.
 export type ToolCallActionRadius = {
   action_key?: string
   target_kind?: string
@@ -57,6 +61,8 @@ export type ToolCallActionRadius = {
 }
 
 // How the call was routed: descriptor identity plus executor/backend receipt.
+// status is projected to a string from either wire shape (bare "ok" or a
+// record like {kind:"exit",code:0}).
 export type ToolCallRouteEvidence = {
   descriptor_id?: string
   capability_id?: string
@@ -66,6 +72,7 @@ export type ToolCallRouteEvidence = {
   readonly?: boolean
   retryable?: boolean
   receipt_labels?: Record<string, string>
+  status?: string
 }
 
 export type ToolCallEntry = {
@@ -111,7 +118,10 @@ export type ToolCallEntry = {
   // them), for goal-scoped drill-down alongside task_id/turn.
   goal_ids?: string[]
   // Recorded execution evidence. runtime_contract and action_radius are
-  // written on every row; route_evidence only when the descriptor resolved.
+  // written on every row. route_evidence is omitted only when the writer had
+  // neither descriptor fields nor route-shaped output — an unresolved
+  // descriptor can still yield a row carrying just status/tool_name (see
+  // lib/keeper_tool_call_log_route_evidence.ml).
   runtime_contract?: ToolCallRuntimeContract
   action_radius?: ToolCallActionRadius
   route_evidence?: ToolCallRouteEvidence
@@ -197,6 +207,15 @@ function decodeActionRadius(raw: unknown): ToolCallActionRadius | undefined {
   }
 }
 
+function decodeRouteStatus(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return asString(raw)
+  if (!isRecord(raw)) return undefined
+  const kind = asString(raw.kind)
+  if (kind === undefined) return undefined
+  const code = asNumber(raw.code)
+  return code !== undefined ? `${kind} ${code}` : kind
+}
+
 function decodeRouteEvidence(raw: unknown): ToolCallRouteEvidence | undefined {
   if (!isRecord(raw)) return undefined
   return {
@@ -208,6 +227,7 @@ function decodeRouteEvidence(raw: unknown): ToolCallRouteEvidence | undefined {
     readonly: asBoolean(raw.readonly),
     retryable: asBoolean(raw.retryable),
     receipt_labels: asStringRecord(raw.receipt_labels),
+    status: decodeRouteStatus(raw.status),
   }
 }
 

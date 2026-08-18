@@ -144,6 +144,66 @@ describe('groupToolCallTree', () => {
     expect(nodes.find(node => node.entry === staleParent)?.children).toEqual([])
   })
 
+  it('attaches an async run to the parent recorded at dispatch, before its children', () => {
+    // Recorded async shape (.masc/tool_calls 2026-08-18): the composite
+    // parent row is written at dispatch, so its ts precedes every child ts.
+    const parent = toolCall({
+      ts: 1_787_025_233.044336,
+      tool: 'keeper_compose_mission-snapshot',
+      tool_use_id: 'call_async',
+    })
+    const childClock = compositionChild({
+      ts: 1_787_025_233.045521,
+      tool: 'keeper_time_now',
+      composition_node_id: 'clock',
+      composition_execution: 'async',
+      parent_tool_use_id: 'call_async',
+    })
+    const childBoard = compositionChild({
+      ts: 1_787_025_233.045685,
+      tool: 'masc_board_stats',
+      composition_node_id: 'board',
+      composition_execution: 'async',
+      parent_tool_use_id: 'call_async',
+    })
+
+    const nodes = groupToolCallTree([childBoard, childClock, parent])
+
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]?.entry).toBe(parent)
+    expect(nodes[0]?.children).toEqual([childBoard, childClock])
+  })
+
+  it('attaches an async run to its dispatch parent, not a later reuse of the provider id', () => {
+    const dispatchParent = toolCall({ ts: 80, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
+    const laterReuse = toolCall({ ts: 200, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
+    const child = compositionChild({
+      ts: 90,
+      tool: 'keeper_time_now',
+      composition_node_id: 'clock',
+      composition_execution: 'async',
+      parent_tool_use_id: 'call_dup',
+    })
+
+    const nodes = groupToolCallTree([laterReuse, child, dispatchParent])
+
+    expect(nodes.find(node => node.entry === dispatchParent)?.children).toEqual([child])
+    expect(nodes.find(node => node.entry === laterReuse)?.children).toEqual([])
+  })
+
+  it('leaves a run unattributed when every candidate sits strictly inside the child ts window', () => {
+    // Neither recorded shape: the candidate is after the oldest child and
+    // before the newest child, so attaching would be a guess.
+    const interiorCandidate = toolCall({ ts: 95, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_mid' })
+    const childEarly = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock', parent_tool_use_id: 'call_mid' })
+    const childLate = compositionChild({ ts: 100, tool: 'masc_board_stats', composition_node_id: 'board', parent_tool_use_id: 'call_mid' })
+
+    const nodes = groupToolCallTree([childLate, interiorCandidate, childEarly])
+
+    expect(nodes.map(node => node.entry)).toEqual([childLate, interiorCandidate, childEarly])
+    expect(nodes.every(node => node.children.length === 0)).toBe(true)
+  })
+
   it('never joins on blank provider ids', () => {
     const parent = toolCall({ ts: 100, tool: 'keeper_compose_mission-snapshot', tool_use_id: '' })
     const child = compositionChild({ ts: 90, tool: 'keeper_time_now', parent_tool_use_id: '' })

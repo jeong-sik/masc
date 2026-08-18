@@ -73,11 +73,27 @@ function tryPrettyJson(s: string): string | null {
 }
 
 // Route links derive from the recorded row (action_radius target plus the
-// identity fields the writer persisted), never from re-parsing the tool
-// input: the log is the authority for what the call actually touched.
+// identity fields the writer persisted) instead of re-deriving them from the
+// tool input here: the server parses the redacted input once at record time
+// (keeper_runtime_contract.action_radius_json), so every consumer reads the
+// same recorded value.
+//
+// Execute rows record their cwd as target_path with target_kind "path"
+// (masc#29013) — a directory, not a file — so they are held back from Code
+// link promotion by exact identity (recorded descriptor id, with the tool
+// name covering rows that carry no route_evidence) until the writer records
+// a typed file/cwd distinction.
+const EXECUTE_DESCRIPTOR_ID = 'agent.execute'
+const EXECUTE_TOOL_NAME = 'Execute'
+
+function recordsCwdAsTarget(entry: ToolCallEntry): boolean {
+  return entry.route_evidence?.descriptor_id === EXECUTE_DESCRIPTOR_ID
+    || entry.tool === EXECUTE_TOOL_NAME
+}
+
 function toolCallRouteLinks(entry: ToolCallEntry): ReadonlyArray<IdeContextRouteLink> {
   const radius = entry.action_radius
-  const filePath = radius?.target_kind === 'path'
+  const filePath = radius?.target_kind === 'path' && !recordsCwdAsTarget(entry)
     ? radius.target_path ?? radius.observed_paths?.[0]
     : undefined
   const goalId = entry.goal_ids?.[0]
@@ -111,11 +127,20 @@ export type ToolCallTreeNode = {
 // composite parent row they were dispatched from. The join is typed-field
 // equality on recorded identity: parent.tool === child.composition_tool and
 // parent.tool_use_id === child.parent_tool_use_id, both non-blank (provider
-// ids may be blank or repeated). When several parent rows share that key,
-// each run attaches to the candidate nearest at-or-after its newest child —
-// the parent row is written when the composite completes. Children whose
-// parent row is outside the given list stay top-level, so a filtered window
-// never hides recorded calls.
+// ids may be blank or repeated).
+//
+// Recorded write order differs by execution mode: inline composites write
+// the parent row after the children complete (parent ts >= every child ts),
+// async composites write it at dispatch (parent ts < every child ts) — both
+// observed in .masc/tool_calls 2026-08-18. When several parent rows share
+// the join key, the recorded composition_execution of the children picks the
+// shape to try first: an all-async run attaches to the candidate nearest
+// at-or-before its oldest child, any other run to the candidate nearest
+// at-or-after its newest child, with the other shape as fallback. A
+// candidate set strictly inside the child ts window matches neither
+// recorded shape and is left unattributed rather than guessed. Children
+// whose parent row is outside the given list stay top-level, so a filtered
+// window never hides recorded calls.
 export function groupToolCallTree(entries: readonly ToolCallEntry[]): ToolCallTreeNode[] {
   const parentKey = (tool: string, toolUseId: string): string => `${tool}\u0000${toolUseId}`
   const parentsByKey = new Map<string, ToolCallEntry[]>()
@@ -131,7 +156,12 @@ export function groupToolCallTree(entries: readonly ToolCallEntry[]): ToolCallTr
     }
   }
 
-  type RunGroup = { key: string; children: ToolCallEntry[]; newestChildTs: number }
+  type RunGroup = {
+    key: string
+    children: ToolCallEntry[]
+    newestChildTs: number
+    oldestChildTs: number
+  }
   const groupsByRun = new Map<string, RunGroup>()
   for (const entry of entries) {
     if (entry.composition_run_id === undefined) continue
@@ -144,10 +174,12 @@ export function groupToolCallTree(entries: readonly ToolCallEntry[]): ToolCallTr
         key,
         children: [entry],
         newestChildTs: entry.ts,
+        oldestChildTs: entry.ts,
       })
     } else {
       group.children.push(entry)
       group.newestChildTs = Math.max(group.newestChildTs, entry.ts)
+      group.oldestChildTs = Math.min(group.oldestChildTs, entry.ts)
     }
   }
 
@@ -156,16 +188,28 @@ export function groupToolCallTree(entries: readonly ToolCallEntry[]): ToolCallTr
   for (const group of groupsByRun.values()) {
     const candidates = parentsByKey.get(group.key)
     if (candidates === undefined) continue
-    let parent: ToolCallEntry | null = null
-    for (const candidate of candidates) {
-      if (candidate.ts < group.newestChildTs) continue
-      if (parent === null || candidate.ts < parent.ts) parent = candidate
-    }
-    if (parent === null) {
+    // Inline shape: parent written after the children completed.
+    const completionParent = (): ToolCallEntry | null => {
+      let found: ToolCallEntry | null = null
       for (const candidate of candidates) {
-        if (parent === null || candidate.ts > parent.ts) parent = candidate
+        if (candidate.ts < group.newestChildTs) continue
+        if (found === null || candidate.ts < found.ts) found = candidate
       }
+      return found
     }
+    // Async shape: parent written at dispatch, before every child.
+    const dispatchParent = (): ToolCallEntry | null => {
+      let found: ToolCallEntry | null = null
+      for (const candidate of candidates) {
+        if (candidate.ts > group.oldestChildTs) continue
+        if (found === null || candidate.ts > found.ts) found = candidate
+      }
+      return found
+    }
+    const allAsync = group.children.every(child => child.composition_execution === 'async')
+    const parent = allAsync
+      ? dispatchParent() ?? completionParent()
+      : completionParent() ?? dispatchParent()
     if (parent === null) continue
     const existing = childrenByParent.get(parent)
     if (existing === undefined) {
@@ -627,6 +671,7 @@ function ToolCallEvidenceSection({ entry }: { entry: ToolCallEntry }) {
           ['runtime handler', route?.runtime_handler],
           ['readonly', formatFlag(route?.readonly)],
           ['retryable', formatFlag(route?.retryable)],
+          ['status', route?.status],
           ['receipt labels', receiptLabels],
         ]}
       />

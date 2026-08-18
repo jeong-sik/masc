@@ -579,6 +579,44 @@ describe('keeper tool telemetry fetchers', () => {
     })
   })
 
+  it('projects route_evidence.status from both wire shapes', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'WebSearch',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 5,
+            route_evidence: { descriptor_id: 'agent.search_web', status: 'ok' },
+          },
+          {
+            ts: 2,
+            keeper: 'keeper-alpha',
+            tool: 'Execute',
+            input: {},
+            output: 'done',
+            success: true,
+            duration_ms: 5,
+            route_evidence: { descriptor_id: 'agent.execute', status: { kind: 'exit', code: 0 } },
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+
+    expect(result.entries[0]?.route_evidence?.status).toBe('ok')
+    expect(result.entries[1]?.route_evidence?.status).toBe('exit 0')
+  })
+
   it('leaves execution evidence absent on rows recorded before it was written', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({

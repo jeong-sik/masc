@@ -84,7 +84,7 @@ describe('KeeperToolCallInspector render', () => {
     expect(outputCopy?.getAttribute('title')).toBe('도구 호출 출력 복사')
   })
 
-  it('links recorded path targets back to the Code IDE route, ignoring tool input', async () => {
+  it('links recorded path targets back to the Code IDE route', async () => {
     const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
       keeper: 'analyst',
       count: 1,
@@ -95,9 +95,11 @@ describe('KeeperToolCallInspector render', () => {
           ts: 1_777_100_000,
           keeper: 'analyst',
           tool: 'keeper_fs_read',
-          // The input names a different file on purpose: route links must come
-          // from the recorded action_radius, never from re-parsing the input.
-          input: { file_path: 'lib/other.ml', line: 12 },
+          // The recorded action_radius mirrors the input's path (the server
+          // derives it from the input at record time). The client reads only
+          // the recorded value: the input's line number is not re-parsed, so
+          // the link carries no line.
+          input: { file_path: 'lib/runtime.ml', line: 12 },
           output: 'file contents',
           success: true,
           duration_ms: 42,
@@ -335,6 +337,54 @@ describe('KeeperToolCallInspector render', () => {
     expect(dossier?.textContent).toContain('no failed calls in this window')
     expect(container.querySelector('[title="deferred"]')?.textContent).toBe('D')
     expect(container.querySelector('[data-composition-node="wait_for_board"]')).not.toBeNull()
+  })
+
+  it('does not promote Execute cwd targets to Code links', async () => {
+    const fetchKeeperToolCalls = vi.fn().mockResolvedValue({
+      keeper: 'analyst',
+      count: 1,
+      source: 'tool_call_io',
+      health: 'ok',
+      entries: [
+        {
+          ts: 1_777_100_000,
+          keeper: 'analyst',
+          tool: 'Execute',
+          input: { argv: ['git', 'status'], cwd: 'repos/masc' },
+          output: 'clean',
+          success: true,
+          duration_ms: 42,
+          // Recorded shape for Execute rows: the writer stores the cwd as
+          // target_path (masc#29013) — a directory, not a file.
+          action_radius: {
+            action_key: 'Execute',
+            target_kind: 'path',
+            target_path: 'repos/masc',
+            observed_paths: ['repos/masc'],
+            error: null,
+          },
+          route_evidence: {
+            descriptor_id: 'agent.execute',
+          },
+        },
+      ],
+    })
+
+    const { KeeperToolCallInspector } = await loadInspector(fetchKeeperToolCalls)
+    await act(async () => {
+      render(html`<${KeeperToolCallInspector} keeperName="analyst" />`, container)
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    const rowToggle = container.querySelector('button[aria-expanded="false"]') as HTMLButtonElement | null
+    await act(async () => {
+      rowToggle?.click()
+      await Promise.resolve()
+    })
+    await flushUi()
+
+    expect(container.querySelector('[data-testid="keeper-tool-code-link"]')).toBeNull()
   })
 
   it('does not render Code links for unsafe absolute recorded target paths', async () => {

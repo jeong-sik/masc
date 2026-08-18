@@ -86,7 +86,7 @@ let test_schemas_are_the_descriptor_schemas () =
     in
     Alcotest.(check (list string))
       "the surface is read-only"
-      [ "tool_read_file"; "tool_search_files" ]
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch" ]
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
@@ -224,7 +224,7 @@ let test_workspace_producer_gets_owned_read_surface () =
   | Ok surface ->
     Alcotest.(check (list string))
       "workspace producer surface"
-      [ "tool_read_file" ]
+      [ "tool_read_file"; "masc_web_fetch" ]
       (VAT.schemas surface
        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
     (match
@@ -301,6 +301,61 @@ let test_prompt_states_the_available_surface () =
       (Astring.String.is_infix ~affix:"do not repair what you are judging" with_tools))
 ;;
 
+
+(* masc#28989: a URL left in note evidence must be inspectable by the judge
+   itself. The fetch boundary is stubbed; what is pinned here is the surface —
+   the tool is offered on both producer scopes, a valid call dispatches through
+   the shared guards, and the typed envelope reaches the judge. *)
+let test_web_fetch_is_offered_and_dispatches () =
+  with_surface (fun _config surface ->
+    Alcotest.(check bool)
+      "keeper producer offers tool_web_fetch"
+      true
+      (List.exists
+         (fun (schema : Masc_domain.tool_schema) ->
+           String.equal schema.name "masc_web_fetch")
+         (VAT.schemas surface));
+    Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+      (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+        Ok
+          { Masc.Tool_misc_web_fetch.http_status = Some 200
+          ; final_url = url
+          ; redirect_count = 0
+          ; content_type = Some "text/plain"
+          ; downloaded_bytes = Some 20
+          ; body = "diff --git a/x b/x\n"
+          })
+      (fun () ->
+        match
+          VAT.dispatch
+            surface
+            ~name:"masc_web_fetch"
+            ~args:
+              (`Assoc
+                [ "url", `String "https://github.com/jeong-sik/masc/pull/28988"
+                ])
+        with
+        | Error reason -> Alcotest.failf "web fetch dispatch failed: %s" reason
+        | Ok output ->
+          Alcotest.(check bool)
+            "envelope carries the fetched text"
+            true
+            (Astring.String.is_infix ~affix:"diff --git" output)))
+;;
+
+let test_web_fetch_refuses_a_private_target () =
+  with_surface (fun _config surface ->
+    match
+      VAT.dispatch
+        surface
+        ~name:"masc_web_fetch"
+        ~args:(`Assoc [ "url", `String "http://127.0.0.1:8935/health" ])
+    with
+    | Ok output ->
+      Alcotest.failf "private-network fetch must be refused, got: %s" output
+    | Error _ -> ())
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -320,6 +375,10 @@ let () =
     ; ( "dispatch"
       , [ Alcotest.test_case "unknown tool name is an error" `Quick
             test_unknown_tool_name_is_an_error
+        ; Alcotest.test_case "web fetch is offered and dispatches" `Quick
+            test_web_fetch_is_offered_and_dispatches
+        ; Alcotest.test_case "web fetch refuses a private target" `Quick
+            test_web_fetch_refuses_a_private_target
         ] )
     ; ( "prompt"
       , [ Alcotest.test_case "prompt states the available surface" `Quick

@@ -522,6 +522,7 @@ let attempt_inference_policy
 let run_named
     ~runtime_id
     ?(keeper_name = "")
+    ?pre_tool_rejects
     ~base_path
     ~goal
     ?goal_blocks
@@ -621,6 +622,11 @@ let run_named
      selecting a fresh lane walk. A deferred suffix was already frozen before
      pre-dispatch shaping, so re-reading wall-clock quota state here could make
      the actual provider differ from the runtime used to shape the request. *)
+  let pre_tool_rejects =
+    match pre_tool_rejects with
+    | Some rejects -> rejects
+    | None -> ref []
+  in
   let demote_quota_exhausted candidates =
     quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
@@ -874,6 +880,7 @@ let run_named
           Keeper_codex_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~pre_tool_rejects
             ~base_path
             ~goal
             ~goal_blocks
@@ -973,6 +980,7 @@ let run_named
           Keeper_antigravity_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~pre_tool_rejects
             ~base_path
             ~goal
             ~goal_blocks
@@ -1052,6 +1060,7 @@ let run_named
           Keeper_claude_code_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~pre_tool_rejects
             ~base_path
             ~goal
             ~goal_blocks

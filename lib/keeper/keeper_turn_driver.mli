@@ -103,6 +103,7 @@ type named_run_result =
 val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
+  ?pre_tool_rejects:Keeper_official_client_host.rejected_tool_call list ref ->
   base_path:string ->
   goal:string ->
   ?goal_blocks:Agent_core.Types.content_block list ->

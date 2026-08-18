@@ -1063,6 +1063,7 @@
   test_board_dispatch
   test_board_sort
   test_board_vote_persistence
+  test_board_comment_post_write_ahead
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle
@@ -1202,6 +1203,7 @@
   test_board_dispatch
   test_board_sort
   test_board_vote_persistence
+  test_board_comment_post_write_ahead
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle

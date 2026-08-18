@@ -435,21 +435,6 @@ let append_comment (c : comment) =
   | Sys_error msg -> persist_io_error ~where:"append_comment" msg
 ;;
 
-let rollback_fresh_post store (post : post) =
-  with_lock store (fun () ->
-    let key = Post_id.to_string post.id in
-    match Hashtbl.find_opt store.posts key with
-    | None -> ()
-    | Some current
-      when Stdlib.Float.equal current.created_at post.created_at
-           && Stdlib.Float.equal current.updated_at post.updated_at ->
-      Hashtbl.remove store.posts key;
-      unindex_post_origin store post;
-      store.post_count := max 0 (!(store.post_count) - 1);
-      invalidate_post_caches store
-    | Some _ -> ())
-;;
-
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
 let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
 let sub_board_post_counts_unlocked store =
@@ -557,47 +542,52 @@ let create_post_with_audience
       with
       | Error _ as error -> error
       | Ok audience ->
-      let board_result =
+      (* Write-ahead (PR #28934 class, #28952): validate under
+         [with_lock] with no mutation, durably append outside any lock,
+         then commit under [with_lock]. The previous shape mutated
+         first and appended second, so a racing [flush_dirty] could
+         snapshot-write a post whose durable append was about to fail
+         and be rolled back — reviving it from the snapshot on restart.
+         If staging rejects or the append fails, nothing was mutated. *)
+      let staged =
         with_lock store (fun () ->
           match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
             | Error e -> Error e
             | Ok () ->
               let now = Time_compat.now () in
-              let post =
-                    { id = Post_id.generate ()
-                    ; author = author_id
-                    ; title = normalized_title
-                    ; body = normalized_body
-                    ; content = normalized_body
-                    ; post_kind = normalized_kind
-                    ; meta_json = normalized_meta
-                    ; visibility
-                    ; created_at = now
-                    ; updated_at = now
-                    ; expires_at
-                    ; votes_up = 0
-                    ; votes_down = 0
-                    ; reply_count = 0
-                    ; pinned = false
-                    ; hearth
-                    ; thread_id
-                    ; origin
-                    }
-                  in
-                  Hashtbl.add store.posts (Post_id.to_string post.id) post;
-                  index_post_origin store post;
-                  Stdlib.incr store.post_count;
-                  invalidate_post_caches store;
-              Ok post)
+              Ok
+                { id = Post_id.generate ()
+                ; author = author_id
+                ; title = normalized_title
+                ; body = normalized_body
+                ; content = normalized_body
+                ; post_kind = normalized_kind
+                ; meta_json = normalized_meta
+                ; visibility
+                ; created_at = now
+                ; updated_at = now
+                ; expires_at
+                ; votes_up = 0
+                ; votes_down = 0
+                ; reply_count = 0
+                ; pinned = false
+                ; hearth
+                ; thread_id
+                ; origin
+                })
       in
-      match board_result with
+      match staged with
+      | Error _ as e -> e
       | Ok post ->
         (match with_persist_lock store (fun () -> append_post post) with
-         | Ok () -> Ok { post; audience }
-         | Error e ->
-           rollback_fresh_post store post;
-           Error e)
-      | Error _ as e -> e
+         | Error _ as e -> e
+         | Ok () ->
+           with_lock store (fun () ->
+             Hashtbl.add store.posts (Post_id.to_string post.id) post;
+             index_post_origin store post;
+             Stdlib.incr store.post_count;
+             invalidate_post_caches store);
+           Ok { post; audience })
 ;;
 
 let create_post store ~author ~content ?title ?body ~post_kind ?meta_json

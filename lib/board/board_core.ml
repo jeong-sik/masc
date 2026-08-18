@@ -11,32 +11,6 @@ include Board_core_persist
    indentation level. *)
 let ( let* ) = Result.bind
 
-let rollback_fresh_comment store ~(comment : comment) ~(previous_post : post) =
-  with_lock store (fun () ->
-    let post_key = Post_id.to_string comment.post_id in
-    let comment_key = Comment_id.to_string comment.id in
-    Hashtbl.remove store.comments comment_key;
-    (match Hashtbl.find_opt store.comments_by_post post_key with
-     | None -> ()
-     | Some ids ->
-       (match List.filter (fun id -> not (String.equal id comment_key)) ids with
-        | [] -> Hashtbl.remove store.comments_by_post post_key
-        | filtered -> Hashtbl.replace store.comments_by_post post_key filtered));
-    (match Hashtbl.find_opt store.posts post_key with
-     | None -> ()
-     | Some current ->
-       let updated_at =
-         if Stdlib.Float.equal current.updated_at comment.created_at
-         then previous_post.updated_at
-         else current.updated_at
-       in
-       Hashtbl.replace
-         store.posts
-         post_key
-         { current with reply_count = max 0 (current.reply_count - 1); updated_at });
-    invalidate_post_caches store;
-    invalidate_comment_caches store)
-;;
 
 let get_post store ~post_id : (post, board_error) Result.t =
   maybe_sweep store;
@@ -244,80 +218,87 @@ let add_comment_with_audience
   then Error (Validation_error "Content cannot be empty")
   else
     let* audience = Board_audience.audience_for_comment ~content in
-            let board_result =
-              with_lock store (fun () ->
-                (* Verify post exists *)
-                match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-                | None -> Error (Post_not_found post_id)
-                | Some post ->
-                  match
-                    validate_sub_board_post_policy_unlocked
-                      store
-                      ~author_id
-                      ~hearth:post.hearth
-                  with
-                      | Error e -> Error e
-                      | Ok () ->
-                    let now = Time_compat.now () in
-                    let comment =
-                      { id = Comment_id.generate ()
-                      ; post_id = pid
-                      ; parent_id = parent_cid
-                      ; author = author_id
-                      ; content
-                      ; created_at = now
-                      ; expires_at =
-                          (if ttl_hours = 0
-                           then 0.0
-                           else
-                             now
-                             +. (Stdlib.Float.of_int ttl_hours
-                                 *. Masc_time_constants.hour))
-                      ; votes_up = 0
-                      ; votes_down = 0
-                      }
-                    in
-                    Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
-                    (* Update comments_by_post index *)
-                    let post_key = Post_id.to_string pid in
-                    let existing =
-                      Hashtbl.find_opt store.comments_by_post post_key
-                      |> Option.value ~default:[]
-                    in
-                    Hashtbl.replace
-                      store.comments_by_post
-                      post_key
-                      (Comment_id.to_string comment.id :: existing);
-                    (* Update post reply count and updated_at *)
-                    Hashtbl.replace
-                      store.posts
-                      post_key
-                      { post with reply_count = post.reply_count + 1; updated_at = now };
-                    mark_dirty_post store post_key;
-                    mark_dirty_comment store (Comment_id.to_string comment.id);
-                    invalidate_post_caches store;
-                    invalidate_comment_caches store;
-                    Ok (comment, post, posts_jsonl_unlocked store))
-            in
-            match board_result with
-            | Ok (comment, previous_post, posts_jsonl) ->
-              (match
-                 with_persist_lock store (fun () ->
-                   match append_comment comment with
-                   | Error _ as e -> e
-                   | Ok () ->
-                     save_posts_jsonl posts_jsonl;
-                     Ok ())
-               with
-               | Ok () ->
-                 with_lock store (fun () ->
-                   mark_dirty_post store (Post_id.to_string comment.post_id);
-                   mark_dirty_comment store (Comment_id.to_string comment.id));
-                 Ok { comment; audience }
-               | Error e ->
-                 rollback_fresh_comment store ~comment ~previous_post;
-                 Error e)
-            | Error _ as e -> e
+    (* Write-ahead (PR #28934 class, #28952): validate under [with_lock]
+       with no mutation, durably append outside any lock, then commit
+       under [with_lock] from a fresh read. The previous shape mutated
+       first and appended second, so a racing [flush_dirty] could
+       snapshot-write a comment whose durable append was about to fail
+       and be rolled back — reviving it from the snapshot on restart.
+       If staging rejects or the append fails, nothing was mutated, so
+       there is nothing to roll back. *)
+    let staged =
+      with_lock store (fun () ->
+        match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+        | None -> Error (Post_not_found post_id)
+        | Some post ->
+          (match
+             validate_sub_board_post_policy_unlocked
+               store
+               ~author_id
+               ~hearth:post.hearth
+           with
+           | Error e -> Error e
+           | Ok () ->
+             let now = Time_compat.now () in
+             Ok
+               { id = Comment_id.generate ()
+               ; post_id = pid
+               ; parent_id = parent_cid
+               ; author = author_id
+               ; content
+               ; created_at = now
+               ; expires_at =
+                   (if ttl_hours = 0
+                    then 0.0
+                    else
+                      now
+                      +. (Stdlib.Float.of_int ttl_hours
+                          *. Masc_time_constants.hour))
+               ; votes_up = 0
+               ; votes_down = 0
+               }))
+    in
+    (match staged with
+     | Error _ as e -> e
+     | Ok comment ->
+       (match with_persist_lock store (fun () -> append_comment comment) with
+        | Error _ as e -> e
+        | Ok () ->
+          with_lock store (fun () ->
+            (* Commit from a fresh read: the post can change or vanish
+               while the append is in flight; bumping the stale staged
+               copy would clobber a concurrent unrelated mutation. *)
+            match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+            | None ->
+              (* Post deleted mid-append. The appended row is an orphan
+                 on disk; the next comments snapshot rewrite drops it,
+                 and after a crash the loader tolerates it (reply-count
+                 recalculation skips comments whose post is gone). *)
+              Error (Post_not_found post_id)
+            | Some post ->
+              let post_key = Post_id.to_string pid in
+              let comment_key = Comment_id.to_string comment.id in
+              Hashtbl.add store.comments comment_key comment;
+              let existing =
+                Hashtbl.find_opt store.comments_by_post post_key
+                |> Option.value ~default:[]
+              in
+              Hashtbl.replace
+                store.comments_by_post
+                post_key
+                (comment_key :: existing);
+              Hashtbl.replace
+                store.posts
+                post_key
+                { post with
+                  reply_count = post.reply_count + 1
+                ; updated_at = comment.created_at
+                };
+              mark_dirty_post store post_key;
+              mark_dirty_comment store comment_key;
+              invalidate_post_caches store;
+              invalidate_comment_caches store;
+              Ok { comment; audience })))
 ;;
 
 let add_comment store ~post_id ~author ~content ?parent_id ?ttl_hours () =

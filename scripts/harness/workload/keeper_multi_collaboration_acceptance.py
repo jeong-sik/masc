@@ -26,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -41,6 +42,13 @@ DEFAULT_CATALOG = (
     / "fixtures"
     / "keeper-multi-collaboration"
     / "missions.json"
+)
+COMPOSITION_FIXTURE = (
+    REPO_ROOT
+    / "scripts"
+    / "fixtures"
+    / "keeper-multi-collaboration"
+    / "tool-compositions.toml"
 )
 SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
 EXPECTED_ROLES = {"coordinator", "builder-a", "builder-b", "reviewer", "researcher"}
@@ -588,6 +596,54 @@ def health_binary_commit(health: dict[str, Any]) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def composition_catalog_status(masc_root: str) -> dict[str, Any]:
+    """Compare the composition names this campaign's fixture requires against
+    the catalog installed at the deployed runtime's config root.
+
+    keeper_compose_* tools are a config-driven surface: Keeper_run_tools_setup
+    reads <config_root>/tool-compositions.toml on every turn, so a missing or
+    incomplete file makes every composition mission fail eight minutes in with
+    a downstream browser timeout instead of failing here (masc#28975, run
+    e0-r3-20260818). The runner and the runtime share a host by the
+    --expected-base-path contract, so reading the file the server reads is a
+    legitimate read-only preflight check."""
+    with open(COMPOSITION_FIXTURE, "rb") as handle:
+        fixture = tomllib.load(handle)
+    required = sorted(
+        entry["name"] for entry in fixture.get("compositions", [])
+    )
+    installed_path = pathlib.Path(masc_root) / "config" / "tool-compositions.toml"
+    report: dict[str, Any] = {
+        "required": required,
+        "installed_path": str(installed_path),
+        "fixture_path": str(COMPOSITION_FIXTURE),
+    }
+    if not installed_path.is_file():
+        report["status"] = "missing_file"
+        report["installed"] = []
+        report["missing"] = required
+        return report
+    try:
+        with open(installed_path, "rb") as handle:
+            installed_catalog = tomllib.load(handle)
+    except tomllib.TOMLDecodeError as error:
+        report["status"] = "unparseable"
+        report["error"] = str(error)
+        return report
+    installed = sorted(
+        name
+        for entry in installed_catalog.get("compositions", [])
+        if isinstance(entry, dict)
+        for name in [entry.get("name")]
+        if isinstance(name, str)
+    )
+    missing = sorted(set(required) - set(installed))
+    report["installed"] = installed
+    report["missing"] = missing
+    report["status"] = "ok" if not missing else "missing_names"
+    return report
+
+
 def preflight(
     *,
     catalog: dict[str, Any],
@@ -623,8 +679,11 @@ def preflight(
     available = client.list_tools()
     required = set(catalog["operator_required_tools"])
     missing = sorted(required - available)
+    compositions = composition_catalog_status(health_masc_root(health))
     result = {
-        "status": "passed" if not missing else "failed",
+        "status": (
+            "passed" if not missing and compositions["status"] == "ok" else "failed"
+        ),
         "checked_at": utc_now(),
         "mcp_url": mcp_url,
         "health_url": health_url,
@@ -636,9 +695,16 @@ def preflight(
         "available_tool_count": len(available),
         "missing_operator_tools": missing,
         "keeper_required_tools": catalog["keeper_required_tools"],
+        "composition_catalog": compositions,
     }
     if missing:
         raise AcceptanceError(f"deployed runtime is missing operator tools: {missing}")
+    if compositions["status"] != "ok":
+        raise AcceptanceError(
+            "composition catalog is not installed for this campaign: "
+            f"status={compositions['status']} missing={compositions.get('missing')} — "
+            f"install {compositions['fixture_path']} at {compositions['installed_path']}"
+        )
     return client, health, result
 
 
@@ -682,6 +748,7 @@ class MissionRun:
             "researcher": f"rw-{self.slug}-research",
         }
         self.task_ids: dict[str, str] = {}
+        self.task_create_receipts: dict[str, ToolObservation] = {}
         self.turns: dict[str, TurnObservation] = {}
         self.statuses: dict[str, Any] = {}
         self.observations: dict[str, ToolObservation] = {}
@@ -824,6 +891,13 @@ class MissionRun:
                 },
             )
             self.task_ids[key] = extract_identity(observation.text, ["task-"])
+            # The server's creation receipt echoes the persisted task with its
+            # goal_id — the durable evidence of goal linkage. The Quest Board
+            # text projection consumed at observation time does not render
+            # goal links at all, so judging linkage from it fails every run
+            # even though the linkage is real (masc#28976, run
+            # e0-r4-20260818).
+            self.task_create_receipts[key] = observation
 
         mentions = " ".join(f"@{keeper}" for keeper in self.roles.values())
         board = self.call(
@@ -1243,8 +1317,12 @@ class MissionRun:
                 },
             )
             encoded_keeper = urllib.parse.quote(self.roles[role], safe="")
+            # 500, not 200: the durable inspector is now the assertion
+            # evidence stream, and r4 roles already reached 139 rows in a
+            # single campaign — headroom keeps a longer mission ladder from
+            # clipping the early turns the assertions need.
             tool_calls = self.dashboard_get(
-                f"/api/v1/keepers/{encoded_keeper}/tool-calls?limit=200"
+                f"/api/v1/keepers/{encoded_keeper}/tool-calls?limit=500"
             )
             entries = tool_calls.get("entries")
             if not isinstance(entries, list) or not all(
@@ -1293,19 +1371,28 @@ class MissionRun:
         return json.dumps(self.statuses.get(role), ensure_ascii=False).lower()
 
     def _tool_events(self, role: str, tool_name: str) -> list[dict[str, Any]]:
-        observation = self.observations.get(f"timeline-{role}")
-        data = observation.data if observation else None
-        if not isinstance(data, dict):
-            return []
-        events = data.get("events") or []
+        # Judged from the durable tool-call inspector rows, not from
+        # masc_agent_timeline: the timeline is a lossy window that dropped
+        # early-turn events (masc_fusion, keeper_memory_write) even under its
+        # limit, flipping real successes to FAIL in run e0-r4-20260818
+        # (masc#28976). Rows nested inside a composition run are excluded —
+        # a composition node executing masc_board_stats is not the keeper
+        # calling it. Normalized to the {"detail": {...}} event shape the
+        # assertion sites consume, ordered by timestamp so
+        # rejected-then-recovered sequences stay judgeable.
         accepted_names = TOOL_ALIASES.get(tool_name, {tool_name})
+        rows = self.tool_call_rows.get(role) or []
         return [
-            event
-            for event in events
-            if isinstance(event, dict)
-            and event.get("type") == "tool_call"
-            and isinstance(event.get("detail"), dict)
-            and event["detail"].get("tool_name") in accepted_names
+            {
+                "detail": {
+                    "tool_name": row.get("tool"),
+                    "success": row.get("success"),
+                },
+                "ts": row.get("ts"),
+            }
+            for row in sorted(rows, key=lambda row: float(row.get("ts") or 0.0))
+            if row.get("tool") in accepted_names
+            and not row.get("composition_tool")
         ]
 
     def _successful_tool(self, role: str, tool_name: str) -> bool:
@@ -1534,15 +1621,22 @@ class MissionRun:
         all_composition_run_ids = {
             run_id for _, run_id in set(inline_runs) | set(async_runs)
         }
+        # Uniqueness is judged as uniqueness, not as a fixed count: pinning
+        # these to 14/15/58 made one duplicate compose call (already rejected
+        # by composition_inline_observed's exactly-once contract) cascade into
+        # three unrelated structure assertions in run e0-r4-20260818
+        # (masc#28976). Each failure mode stays owned by exactly one check.
         composition_run_ids_globally_unique = (
-            len(inline_runs) == 14
-            and len(async_runs) == 1
-            and len(all_composition_run_ids) == 15
+            len(inline_runs) > 0
+            and len(async_runs) > 0
+            and len(all_composition_run_ids) == len(inline_runs) + len(async_runs)
         )
         all_nested_action_identities_globally_unique = (
-            len(all_nested_action_rows) == 58
-            and len({row.get("execution_id") for row in all_nested_action_rows}) == 58
-            and len({row.get("tool_use_id") for row in all_nested_action_rows}) == 58
+            len(all_nested_action_rows) > 0
+            and len({row.get("execution_id") for row in all_nested_action_rows})
+            == len(all_nested_action_rows)
+            and len({row.get("tool_use_id") for row in all_nested_action_rows})
+            == len(all_nested_action_rows)
         )
 
         coordinator_runtime_turn_ids: dict[str, int] = {}
@@ -1564,7 +1658,10 @@ class MissionRun:
                 continue
             coordinator_runtime_turn_ids[label] = next(iter(keeper_turn_ids))
         required_inline_rows = [rows for _, rows in inline_turn_runs.values()]
-        parallel_schedule_observed = len(required_inline_rows) == 14 and all(
+        # Structure is judged over every attributed run; the 14-turn
+        # exactly-once count contract is composition_inline_observed's job
+        # alone (see the uniqueness comment above).
+        parallel_schedule_observed = len(required_inline_rows) > 0 and all(
             all(
                 any(
                     row.get("composition_node_id") == node
@@ -1577,7 +1674,7 @@ class MissionRun:
             )
             for rows in required_inline_rows
         )
-        sequential_dataflow_observed = len(required_inline_rows) == 14 and all(
+        sequential_dataflow_observed = len(required_inline_rows) > 0 and all(
             any(
                 isinstance(row.get("input"), dict)
                 and row["input"].get("query") == clock_output.get("now_iso")
@@ -1732,9 +1829,22 @@ class MissionRun:
                 self.roles["coordinator"],
             ),
             "tasks_linked_to_goal": (
+                # Goal linkage is judged from the creation receipts (the
+                # server echoes the persisted task, goal_id included); the
+                # Quest Board text projection never renders goal links, so
+                # searching it for the goal id fails even when linkage is
+                # real (masc#28976). The projection still proves the tasks
+                # are alive on the board at observation time.
                 all(task_id.lower() in task_text.lower() for task_id in self.task_ids.values())
-                and self.goal_id.lower() in task_text.lower(),
-                f"{len(self.task_ids)} task ids plus goal id",
+                and len(self.task_create_receipts) == len(self.task_ids)
+                and all(
+                    isinstance(receipt.data, dict)
+                    and receipt.data.get("ok") is True
+                    and receipt.data.get("goal_id") == self.goal_id
+                    for receipt in self.task_create_receipts.values()
+                ),
+                f"{len(self.task_ids)} task ids on the board; "
+                f"{len(self.task_create_receipts)} creation receipts carry goal_id",
             ),
             "parallel_wave_completed": (
                 len(parallel_turns) == 5 and all(turn.status == "passed" for turn in parallel_turns),

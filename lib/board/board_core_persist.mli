@@ -54,10 +54,6 @@ val ensure_masc_dir : unit -> unit
 val max_jsonl_bytes : int
 val rotate_if_needed : string -> unit
 
-val posts_jsonl_unlocked : store -> string
-(* [save_posts_jsonl_result] is the result-returning inner form of
-   [save_posts_jsonl] below, which is the door callers use. *)
-val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string

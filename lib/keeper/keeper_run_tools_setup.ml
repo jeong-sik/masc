@@ -155,7 +155,10 @@ let expected_model_tool_names ~model_visible_descriptors ~composition_catalog =
     | None -> []
     | Some catalog -> Keeper_tool_composition_catalog.model_tool_names catalog
   in
-  List.sort_uniq String.compare (descriptor_names @ composition_names)
+  List.sort_uniq
+    String.compare
+    (Keeper_tool_composition_surface.plan_execute_tool_name
+     :: (descriptor_names @ composition_names))
 ;;
 
 let prepare_agent_setup

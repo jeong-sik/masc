@@ -10,6 +10,57 @@ let empty_input_schema =
     ]
 ;;
 
+
+let plan_execute_tool_name = "keeper_plan_execute"
+
+let plan_execute_input_schema =
+  let node_schema =
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ; ( "after"
+              , `Assoc
+                  [ "type", `String "array"
+                  ; "items", `Assoc [ "type", `String "string" ]
+                  ] )
+            ; "input", `Assoc [ "type", `String "object" ]
+            ] )
+      ; "required", `List [ `String "id"; `String "tool" ]
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc [ "nodes", `Assoc [ "type", `String "array"; "items", node_schema ] ] )
+    ; "required", `List [ `String "nodes" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let plan_execute_description =
+  String.concat
+    ""
+    [ "Execute a plan you define in this turn: a list of tool nodes run as one "
+    ; "dependency DAG (independent nodes overlap when their tools allow "
+    ; "concurrent execution; \"after\" edges and output references order the "
+    ; "rest). Only tools that declare a composable JSON output can feed a "
+    ; "downstream node; reference one with "
+    ; "{\"kind\":\"output\",\"node\":\"<id>\",\"pointer\":\"/field\"}. Input "
+    ; "templates: {\"kind\":\"literal\",\"value\":...} | output | "
+    ; "{\"kind\":\"object\",\"fields\":[{\"name\":...,\"value\":<template>}]} | "
+    ; "{\"kind\":\"array\",\"items\":[...]}. A node without \"input\" receives "
+    ; "{}. Terminal tools are rejected. Example: "
+    ; "{\"nodes\":[{\"id\":\"clock\",\"tool\":\"keeper_time_now\"},"
+    ; "{\"id\":\"memory\",\"tool\":\"keeper_memory_search\",\"after\":[\"clock\"],"
+    ; "\"input\":{\"kind\":\"object\",\"fields\":[{\"name\":\"query\","
+    ; "\"value\":{\"kind\":\"output\",\"node\":\"clock\",\"pointer\":\"/now_iso\"}}]}}]}"
+    ]
+;;
+
 let request_id_input_schema =
   `Assoc
     [ "type", `String "object"
@@ -710,7 +761,7 @@ let make_request_control_tool
 ;;
 
 let make_tools
-      ~catalog
+      ?catalog
       ~(config : Workspace.config)
       ~meta
       ~publication_recovery
@@ -730,8 +781,11 @@ let make_tools
       ()
   =
   let composition_tools =
-    Catalog.entries catalog
-    |> List.map (fun (entry : Catalog.entry) ->
+    match catalog with
+    | None -> []
+    | Some catalog ->
+      Catalog.entries catalog
+      |> List.map (fun (entry : Catalog.entry) ->
     let tool_name = Catalog.tool_name entry in
     let completion = Executor.outer_completion entry.plan in
     let descriptor =
@@ -901,10 +955,173 @@ let make_tools
                   ~start_time
                   "composition result manifest persistence failed")))))
   in
-  let has_async =
-    Catalog.entries catalog
-    |> List.exists (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+  let plan_execute_tool =
+    let tool_name = plan_execute_tool_name in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env
+      ~descriptor:
+        (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+      ~base_path:config.base_path
+      ?on_externalization_error
+      ~externalization_error_recoverable:false
+      ~name:tool_name
+      ~description:plan_execute_description
+      ~input_schema:plan_execute_input_schema
+      (fun execution_env input ->
+        let start_time = Time_compat.now () in
+        match
+          Tool_input_validation.validate_args
+            ~schema:plan_execute_input_schema
+            ~name:tool_name
+            ~args:input
+            ()
+        with
+        | Error rejection -> rejection
+        | Ok _ ->
+          (match Agent_core.Tool.Execution_env.invocation execution_env with
+           | None ->
+             Tool_result.runtime_err
+               ~tool_name
+               ~start_time
+               "composition execution requires Agent-Core invocation identity"
+           | Some parent_invocation ->
+             let descriptors = Keeper_tool_descriptor.all_descriptors () in
+             (match Keeper_tool_plan_request.plan_of_json ~descriptors input with
+              | Error error ->
+                let data =
+                  `Assoc
+                    [ "composition_tool", `String tool_name
+                    ; "error", Keeper_tool_plan_request.error_to_json error
+                    ; ( "composable_tools"
+                      , Json_util.json_string_list
+                          (Keeper_tool_plan_request.composable_tool_names
+                             ~descriptors) )
+                    ]
+                in
+                Tool_result.make_err
+                  ~tool_name
+                  ~class_:Tool_result.Policy_rejection
+                  ~start_time
+                  ~data
+                  (Keeper_tool_plan_request.error_message error)
+              | Ok plan ->
+                (match Executor.outer_completion plan with
+                 | Agent_core.Tool_contract.Terminal_after_success _ ->
+                   Tool_result.make_err
+                     ~tool_name
+                     ~class_:Tool_result.Policy_rejection
+                     ~start_time
+                     "a model-defined plan cannot contain a terminal tool; call the terminal tool as its own action"
+                 | Agent_core.Tool_contract.Continue_after_success ->
+                   let turn_context =
+                     Option.map
+                       (fun cell ->
+                          Keeper_tool_call_log_context.get_turn_context_record
+                            ~cell
+                            ())
+                       turn_ctx_cell
+                   in
+                   let run_id = Keeper_tool_plan.Run_id.fresh () in
+                   let composition_run_id =
+                     Keeper_tool_plan.Composition_run_id.fresh ()
+                   in
+                   let execution =
+                     Executor.execute_keeper
+                       ~plan
+                       ~run_id
+                       ~composition_run_id
+                       ~parent_invocation
+                       ~config
+                       ~meta
+                       ~publication_recovery
+                       ~ctx_snapshot
+                       ?turn_sandbox_factory
+                       ?clock
+                       ?continuation_channel
+                       ?gate_context
+                       ?gate_grant
+                       ?record_gate_result
+                       ?on_completed
+                       ?on_deferred
+                       ?on_external_effect_deferred
+                       ?on_failed
+                       ?observe_node_result:
+                         (Option.map
+                            (fun turn_context ->
+                               observe_node_result
+                                 ~composition_tool:tool_name
+                                 ~composition_execution:Catalog.Inline
+                                 ~composition_run_id
+                                 ~parent_invocation
+                                 ~meta
+                                 ~turn_context)
+                            turn_context)
+                       ()
+                   in
+                   (match execution with
+                    | Error
+                        ({ Executor.effect_disposition =
+                             ( Tool_result.Proven_post_effect
+                             | Tool_result.Effect_outcome_unknown )
+                         ; _
+                         } as failure) ->
+                      Option.iter
+                        (fun mark_failed ->
+                           let diagnostic =
+                             failure_data ~tool_name failure
+                             |> Yojson.Safe.to_string
+                           in
+                           mark_failed
+                             { Keeper_tools_agent_core.failure_class =
+                                 failure_class failure
+                             ; effect_disposition = failure.effect_disposition
+                             ; diagnostic
+                             })
+                        on_failed
+                    | Ok _
+                    | Error
+                        { Executor.effect_disposition =
+                            Tool_result.Proven_pre_effect
+                        ; _
+                        } ->
+                      ());
+                   let result =
+                     result_of_execution ~tool_name ~start_time execution
+                   in
+                   (match
+                      Tool_bridge.attach_artifact_manifest
+                        ~base_path:config.base_path
+                        result
+                    with
+                    | Ok result -> result
+                    | Error { message; _ } ->
+                      let diagnostic =
+                        "composition result manifest persistence failed: "
+                        ^ message
+                      in
+                      Option.iter
+                        (fun mark_failed ->
+                           mark_failed
+                             { Keeper_tools_agent_core.failure_class =
+                                 Tool_result.Runtime_failure
+                             ; effect_disposition =
+                                 Tool_result.Effect_outcome_unknown
+                             ; diagnostic
+                             })
+                        on_failed;
+                      Tool_result.make_err
+                        ~tool_name
+                        ~class_:Tool_result.Runtime_failure
+                        ~start_time
+                        "composition result manifest persistence failed")))))
   in
+  let has_async =
+    match catalog with
+    | None -> false
+    | Some catalog ->
+      Catalog.entries catalog
+      |> List.exists (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+  in
+  let composition_tools = composition_tools @ [ plan_execute_tool ] in
   if not has_async
   then composition_tools
   else

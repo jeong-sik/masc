@@ -356,9 +356,16 @@ let test_catalog_tools_join_runtime_projection_authority () =
     "dynamic composition joins descriptor projection"
     true
     (List.mem "keeper_compose_projected" expected);
+  check bool
+    "model-defined plan tool always joins the projection"
+    true
+    (List.mem
+       Masc.Keeper_tool_composition_surface.plan_execute_tool_name
+       expected);
+  (* One catalog tool plus the always-present keeper_plan_execute. *)
   check int
-    "projection adds exactly one composition tool"
-    (List.length descriptor_names + 1)
+    "projection adds the catalog tool and the plan tool"
+    (List.length descriptor_names + 2)
     (List.length expected)
 ;;
 

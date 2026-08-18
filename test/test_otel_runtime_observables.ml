@@ -99,6 +99,44 @@ let test_fd_samples_present () =
     check bool "legacy pressure gauge absent" true
       (Option.is_none (find "masc_fd_pressure_active" samples)))
 
+(* masc#29023: the store writer lands every computed sample in an
+   Otel_metric_store cell, so fleet HTTP and the dashboard read them
+   with no collector installed. *)
+let test_store_writer_lands_samples_in_cells () =
+  with_temp_masc_root (fun root ->
+    Obs.For_testing.reset_store_cache ();
+    let written = Obs.For_testing.write_samples_to_store ~masc_root:root () in
+    check bool "writer reports the sample count" true (written > 0);
+    let samples = Obs.For_testing.samples ~masc_root:root () in
+    let queue =
+      List.find
+        (fun (s : Otel_metrics.sample) ->
+          String.equal s.name "masc_console_sink_queue_depth")
+        samples
+    in
+    check (float 0.0)
+      "console queue depth readable from the store with no collector"
+      queue.value
+      (Masc.Otel_metric_store.metric_value_or_zero
+         "masc_console_sink_queue_depth"
+         ());
+    match
+      List.find_opt
+        (fun (s : Otel_metrics.sample) ->
+          String.equal s.name "masc_store_bytes"
+          && s.labels = [ "store", "tool_calls" ])
+        samples
+    with
+    | None -> fail "masc_store_bytes sample missing"
+    | Some bytes ->
+      check (float 0.0)
+        "store bytes readable from the labeled cell"
+        bytes.value
+        (Masc.Otel_metric_store.metric_value_or_zero
+           "masc_store_bytes"
+           ~labels:[ "store", "tool_calls" ]
+           ()))
+
 let () =
   run "otel_runtime_observables"
     [ ( "samples"
@@ -107,5 +145,7 @@ let () =
             test_bus_and_pool_absent_without_subsystems
         ; test_case "store bytes from walk + cache" `Quick test_store_bytes_from_walk
         ; test_case "fd samples present" `Quick test_fd_samples_present
+        ; test_case "store writer lands samples in cells (masc#29023)" `Quick
+            test_store_writer_lands_samples_in_cells
         ] )
     ]

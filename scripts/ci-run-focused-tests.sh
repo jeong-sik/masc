@@ -342,6 +342,10 @@ board_attention_targets=(
   @test/runtest-test_keeper_board_attention_worker
 )
 
+mcp_tool_matrix_targets=(
+  @test/runtest-test_mcp_tool_matrix
+)
+
 agent_core_targets=(
   @packages/agent_core/test/runtest
   # Recursive alias: runs the ppx_inline_test suites embedded in
@@ -386,6 +390,14 @@ run_shell_group focused-failure-reporting \
 
 run_group board-attention-worker 180 "${board_attention_targets[@]}" || overall_status=1
 run_group normal 1200 "${normal_targets[@]}" || overall_status=1
+
+# Own group, not part of [normal_targets]: the matrix's tools/call sweep is an
+# Alcotest `Slow case, so it must run without ALCOTEST_QUICK_TESTS, and it
+# spawns one runner subprocess (fresh git repo + workspace) per raw schema —
+# a several-minute wall-clock profile that would otherwise eat the shared
+# normal-group timeout. Wired by masc#28926 after the suite went green
+# (36 same-class drift failures repaired in the same change).
+run_group mcp-tool-matrix 900 "${mcp_tool_matrix_targets[@]}" || overall_status=1
 
 if [[ "${RUN_AGENT_CORE:-false}" == "true" ]]; then
   run_group agent-core 900 "${agent_core_targets[@]}" || overall_status=1

@@ -86,7 +86,11 @@ let strict_success_names =
 
 let strict_guard_cases =
   [
-    ("masc_keeper_delegate", [ "requires Eio context" ]);
+    (* The runner plumbs sw/clock (RFC-0182 Phase 5 PR-A.2), so the dispatch
+       no longer stops at the "requires Eio context" gate: the deliberately
+       invalid target name ("bad keeper!") must be rejected by argument
+       validation. *)
+    ("masc_keeper_delegate", [ "keeper_name must match" ]);
   ]
 
 let endpoint_unavailable_guard_names =
@@ -106,10 +110,16 @@ let endpoint_unavailable_guard_fragments =
     "not available on this MCP endpoint";
   ]
 
-let generic_matrix_excluded_names = []
-(* Was [masc_keeper_delegate; masc_operator_snapshot] — both now have proper
-   expectations: delegate has strict_guard_cases, operator_snapshot is in
-   endpoint_unavailable_guard_names. *)
+let generic_matrix_excluded_names =
+  [
+    (* Awaiting the fusion MCP execution wiring (#28960, in flight in a
+       parallel session): the endpoint currently answers both with the typed
+       keeper-internal refusal, and the MCP-side binding decision (which
+       fusion runs a non-keeper caller may read) belongs to that change.
+       Remove both entries together with that wiring. *)
+    "masc_fusion";
+    "masc_fusion_status";
+  ]
 
 let string_starts_with ~prefix s =
   let plen = String.length prefix in
@@ -324,6 +334,13 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net
       ~base_path
   in
+  (* The matrix models a fully booted server: tools behind the startup gate
+     (e.g. masc_keeper_up) must see [state_ready], exactly as after the
+     production bootstrap publishes readiness. *)
+  (match Masc.Server_startup_state.mark_state_ready () with
+  | Ok () -> ()
+  | Error err ->
+      failwith (Masc.Server_startup_state.state_ready_error_to_string err));
   seed_keeper_config base_path tool_matrix_agent_name;
   let auth_token =
     match
@@ -528,6 +545,43 @@ let prepare_for_name fixture name =
       ]
   then
     ignore (ensure_code_file fixture);
+  if name = "masc_get_metrics" then begin
+    (* The read contract needs at least one recorded metric for the calling
+       agent; an empty store answers with a not_found rejection instead. *)
+    let now = Unix.gettimeofday () in
+    Masc.Metrics_store_eio.record
+      (Mcp_server.workspace_config fixture.state)
+      {
+        Masc.Metrics_store_eio.id = Masc.Metrics_store_eio.generate_id ();
+        agent_id = fixture.agent_name;
+        task_id = "tool-matrix-metric";
+        started_at = now;
+        completed_at = Some now;
+        success = true;
+        error_message = None;
+        collaborators = [];
+        handoff_from = None;
+        handoff_to = None;
+      }
+  end;
+  if name = "masc_task_set_goal" then begin
+    (* masc_task_set_goal links goalless tasks only (RFC-0267 Phase 2), but
+       [ensure_task] creates its task already linked to the fixture goal.
+       Seed a goalless task first so the shared task-id cache serves it. *)
+    let body =
+      execute_tool_ok fixture ~name:"masc_add_task"
+        ~arguments:
+          (`Assoc
+            [
+              ("title", `String "Tool Matrix Goalless Task");
+              ("priority", `Int 2);
+              ("description", `String "goalless task fixture");
+            ])
+    in
+    match extract_id body ~fields:[ "task_id"; "id" ] ~prefixes:[ "task-" ] with
+    | Some task_id -> fixture.task_id <- Some task_id
+    | None -> failwith ("failed to parse goalless task id from: " ^ body)
+  end;
   if name = "masc_library_add" then
     mkdir_p (Filename.concat fixture.base_path "docs/library");
   if List.mem name [ "masc_library_list"; "masc_library_read"; "masc_library_search" ] then
@@ -807,6 +861,11 @@ let web_search_guard_fragments =
     "search endpoint returned no http status";
     "search endpoint returned http";
     "search endpoint returned a non-rss payload";
+    (* A credential-less environment (CI runner) has an empty provider
+       chain; the tool answers with the operator-facing remedy instead
+       of a hit list. Referenced from the .mli so the expectation
+       cannot drift from the message the lib actually renders. *)
+    Masc.Tool_misc_web_search.no_provider_configured_message;
   ]
 
 let guard_fragments_for_name name =
@@ -814,6 +873,10 @@ let guard_fragments_for_name name =
     web_search_guard_fragments
   else if
     string_starts_with ~prefix:"keeper_" name
+    (* analyze_image is a keeper shard runtime tool (catalog
+       [keeper_shard_read]) without the [keeper_] name prefix; the MCP
+       endpoint answers it with the keeper-internal refusal. *)
+    || String.equal name "analyze_image"
   then
     endpoint_unavailable_guard_fragments @ state_guard_fragments
   else if

@@ -2322,8 +2322,14 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
         | _ -> Alcotest.fail "missing content text")
     | _ -> Alcotest.fail "missing content"
   in
-  Alcotest.(check bool) "mentions unknown keeper internal tool" true
-    (String_util.contains_substring msg "Unknown tool: keeper_time_now");
+  (* keeper_time_now is registered but keeper-internal: the endpoint blocks
+     it with the typed refusal, not the "Unknown tool" misreport. *)
+  Alcotest.(check bool) "names keeper_time_now" true
+    (String_util.contains_substring msg "keeper_time_now");
+  Alcotest.(check bool) "mentions keeper-internal refusal" true
+    (String_util.contains_substring msg "keeper-internal");
+  Alcotest.(check bool) "mentions endpoint unavailability" true
+    (String_util.contains_substring msg "not available on this MCP endpoint");
   cleanup_dir base_path
 
 let tool_names_from_list_response response =
@@ -2419,10 +2425,15 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_unknown_execu
             | _ -> Alcotest.fail "missing content text")
         | _ -> Alcotest.fail "missing content"
       in
-      Alcotest.(check bool) "mentions unknown tool_execute" true
-        (String_util.contains_substring msg "Unknown tool: tool_execute");
-      Alcotest.(check bool) "mentions registry inconsistency" true
-        (String_util.contains_substring msg "registry inconsistency"))
+      (* tool_execute is registered (tag registry) but has no executor on the
+         MCP endpoint: the rejection is the typed keeper-internal refusal,
+         not the "Unknown tool (registry inconsistency)" misreport. *)
+      Alcotest.(check bool) "names tool_execute" true
+        (String_util.contains_substring msg "tool_execute");
+      Alcotest.(check bool) "mentions keeper-internal refusal" true
+        (String_util.contains_substring msg "keeper-internal");
+      Alcotest.(check bool) "mentions endpoint unavailability" true
+        (String_util.contains_substring msg "not available on this MCP endpoint"))
 
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->

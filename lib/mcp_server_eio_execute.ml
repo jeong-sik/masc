@@ -398,10 +398,30 @@ let execute_tool_eio
                       per-request context built above. The [Tool_dispatch] tag
                       stays subsystem-agnostic; this is where the concrete
                       handler is bound. *)
-                   Keeper_tool_boundary.dispatch
-                     (make_keeper_tool_ctx ())
-                     ~name
-                     ~args:coerced_args
+                   (match
+                      Keeper_tool_boundary.dispatch
+                        (make_keeper_tool_ctx ())
+                        ~name
+                        ~args:coerced_args
+                    with
+                    | Some result -> Some result
+                    | None ->
+                      (* This composition root binds [Mod_external] to the
+                         keeper subsystem, so a [Mod_external] name the keeper
+                         boundary declines is a keeper-internal runtime tool
+                         (descriptor-owned executor, e.g. keeper_time_now,
+                         keeper_voice_*, tool_read_file). This endpoint has no
+                         executor for it; reporting "Unknown tool (registry
+                         inconsistency)" was a lie — the name is registered,
+                         the endpoint just cannot run it. *)
+                      Some
+                        (Tool_result.error
+                           ~failure_class:Tool_result.Workflow_rejection
+                           ~tool_name:name
+                           ~start_time
+                           (Printf.sprintf
+                              "tool '%s' is keeper-internal; not available on this MCP endpoint"
+                              name)))
                  | Mod_keeper_task ->
                    Some
                      (Tool_result.error
@@ -409,7 +429,8 @@ let execute_tool_eio
                         ~tool_name:name
                         ~start_time
                         (Printf.sprintf
-                           "tool '%s' is a keeper task tool; use the keeper in-process task handler"
+                           "tool '%s' is keeper-internal; not available on this MCP endpoint \
+                            (use the keeper in-process task handler)"
                            name))
                  | Mod_inline ->
                    let mcp_runtime_ctx : Mcp_tool_runtime.context =

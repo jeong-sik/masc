@@ -117,7 +117,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 - 저장소 실습이 필요한 미션은 신규 private 저장소에서만 수행한다.
 
 **B2. Web/Browser keeper 도구** (HIGH)
-1. → **web_search + web_fetch 확장 (읽기 전용)** — 판사가 이미 web_fetch 보유(#29001), keeper 표면으로 확장. 4행 중 3행을 브라우저 없이 해제.
+1. → **web_search + web_fetch 확장 (읽기 전용)** — **전제 감사 결과 구축 단계는 이미 출하됨 (2026-08-19 확인)**: WebSearch/WebFetch descriptor가 `Preferred_public_name`으로 keeper 모델에 투영되고(keeper_tool_descriptor.ml, `agent.search_web`/`agent.fetch_web`), keeper 런타임이 network-read Gate 경유로 실제 핸들러에 배선돼 있다(keeper_tool_in_process_runtime.ml:251 `with_external_gate_execution` → `Tool_misc_web_search.handle`). 남은 것은 도구 구축이 아니라 **evidence 행 해제** — web 도구를 실제로 쓰는 미션 라운드에서 tool-calls 증거를 수집해 매트릭스 행을 채우는 일이며, 이는 RW20+ 신규 라운드 판정(B1)과 같은 트랙에서 진행한다.
 2. 브라우저 sidecar (CDP) — browser 축 ~17행을 채우는 정공법, sidecar 수명주기 부담으로 2수.
 3. 기존 브라우저 MCP 프록시 — 외부 프로세스 신뢰·정책 경계가 Gate 밖에 생겨 보류.
 
@@ -158,7 +158,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | W2 | PR-6 | ~~A4-1: policy-before-schema~~ → 전제 감사로 기각, 본 문서 정정으로 대체 (A4-1 항목 참조) | — |
 | W2 | PR-7 | C1·C2·C3 위생 소형 PR 3~4건 | — |
 | W3 | PR-8 | B1-1: RW20(PoC)·RW21(상호 반론) 미션 + acceptance 확장 | PR-5 권장 |
-| W3 | PR-9 | B2-1: keeper web_search/web_fetch 표면 | — |
+| W3 | PR-9 | ~~B2-1: keeper web_search/web_fetch 표면~~ → 이미 출하 확인, 본 문서 정정으로 대체 (B2-1 항목 참조). evidence 행 해제는 RW20+ 라운드로 | — |
 | W3 | PR-10 | D5 척살 스윕 | — |
 | W4 | PR-11+ | A5-2 Acting 타임라인 · B4-1 스크래치 러너 · A1-3/B2-2는 측정 결과로 결정 | W2·W3 실측 |
 

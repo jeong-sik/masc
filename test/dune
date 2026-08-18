@@ -71,6 +71,7 @@
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
   test_error_body_wire_shape
+  test_log_ring_bounds
   test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure
@@ -372,6 +373,7 @@
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
   test_error_body_wire_shape
+  test_log_ring_bounds
   test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure

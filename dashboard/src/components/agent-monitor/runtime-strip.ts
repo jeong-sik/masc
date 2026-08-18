@@ -40,7 +40,7 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const ctxPct = ctxRatio != null ? Math.round(ctxRatio * 100) : null
   const generation = keeper.generation
   const runtime = keeperDisplayRuntime(keeper)
-  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const activity = keeperActivityDisplay(keeper)
   if (runtime) loadRuntimeCatalog()
   const catalogState = runtime ? runtimeCatalogState.value : null
   const catalog = catalogState?.status === 'loaded' ? catalogState.data : []

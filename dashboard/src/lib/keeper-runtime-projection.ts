@@ -149,7 +149,6 @@ export function shortCommit(value: string | null | undefined): string | null {
 
 export function deriveKeeperLinkedRuntimeState(keeper: Keeper | null | undefined): KeeperLinkedRuntimeState {
   if (!keeper) return 'unlinked'
-  if (keeper.agent?.exists === false) return 'offline'
   return isKeeperOffline(keeper) ? 'offline' : 'online'
 }
 

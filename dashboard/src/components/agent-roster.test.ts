@@ -294,7 +294,7 @@ describe('rosterStateNote — RFC-0135 §1.1 typed-state conditioning', () => {
 
   it('offline keeper with assigned task shows interrupted work label', () => {
     const note = rosterStateNote(
-      k({ phase: 'Crashed', status: 'offline', agent: { current_task: 'task-001', exists: true } }),
+      k({ phase: 'Crashed', status: 'offline' }),
       null,
       null,
     )

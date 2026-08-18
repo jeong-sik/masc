@@ -385,7 +385,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                ]
          in
          let keepalive_running = runtime_keepalive_running config m in
-         let agent_status = parse_agent_status config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
            Workspace_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
@@ -638,7 +637,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
             if String.trim m.instructions = "" then `Null else `String m.instructions);
            ("paused", `Bool m.paused);
            ("keepalive_running", `Bool keepalive_running);
-           ("agent", agent_status);
            ("keeper_age_s", Json_util.float_opt_to_json keeper_age_s);
            ("last_turn_ago_s", Json_util.float_opt_to_json last_turn_ago_s);
            ("last_handoff_ago_s", Json_util.float_opt_to_json last_handoff_ago_s);

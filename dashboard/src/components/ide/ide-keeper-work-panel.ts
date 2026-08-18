@@ -354,7 +354,7 @@ export function keeperWorkSummary(
 ): KeeperWorkSummary {
   const displayName = normalizedKeeperName(keeperName)
   const keeper = findKeeper(displayName, keeperList)
-  const explicitCurrentTaskId = firstNonEmptyString(keeper?.agent?.current_task)
+  const explicitCurrentTaskId = null
   const assigneeTasks = taskList
     .filter(task => taskMatchesKeeper(task, displayName, keeper))
     .filter(task => task.status !== 'done' && task.status !== 'cancelled')

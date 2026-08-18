@@ -472,7 +472,13 @@ let capture_cache_reloads_when_retention_changes () =
    fires. *)
 let capture_rotates_when_current_file_cap_would_be_exceeded () =
   with_flag "1" (fun () ->
-    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
+    (* The byte budget must hold the rotated segment plus the oversized
+       current record (~4.5KB here), or the budget prune sheds the
+       segment the moment it rotates — that shedding is the ring
+       working, but this case pins rotation itself. The segment cap is
+       an eighth of the budget (1KB), small enough that the second
+       record still triggers the rotation. *)
+    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "8192" (fun () ->
       let base = Filename.temp_dir "wirecap_cap" "" in
       let keeper_name = "wirecap_cap_metric" in
       Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name ~turn_id:11

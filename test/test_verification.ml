@@ -107,6 +107,70 @@ let test_verdict_event_preserves_typed_authority () =
      | `Assoc fields -> List.mem_assoc "verifier" fields
      | _ -> Alcotest.fail "verdict event must be an object")
 
+(* The stalled-review board projection is the only surface that tells the
+   assignee a non-retryable deferral happened and how to move forward.
+   Pin the content naming both forward paths and the typed metadata. *)
+let test_stalled_projection_names_forward_paths () =
+  let content =
+    VP.For_testing.stalled_board_content
+      ~task_id:"task-101"
+      ~verification_id:"vrf-101"
+      ~gate:"artifact_unreadable"
+      ~detail:"evidence path escapes the playground"
+  in
+  let contains needle =
+    let nl = String.length needle and hl = String.length content in
+    let rec loop i =
+      i + nl <= hl
+      && (String.equal (String.sub content i nl) needle || loop (i + 1))
+    in
+    nl = 0 || loop 0
+  in
+  List.iter
+    (fun needle ->
+       Alcotest.(check bool)
+         (Printf.sprintf "content names %S" needle)
+         true
+         (contains needle))
+    [ "task-101"
+    ; "vrf:vrf-101"
+    ; "artifact_unreadable"
+    ; "evidence path escapes the playground"
+    ; "submit_for_verification"
+    ; "HITL"
+    ]
+
+let test_stalled_metadata_preserves_typed_authority () =
+  let metadata =
+    VP.For_testing.stalled_metadata
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-9" })
+      ~task_id:"task-102"
+      ~verification_id:"vrf-102"
+      ~gate:"review_preparation"
+      ~detail:"required artifact list is empty"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "metadata type"
+    "verification_stalled"
+    (metadata |> member "type" |> to_string);
+  Alcotest.(check string)
+    "task id"
+    "task-102"
+    (metadata |> member "task_id" |> to_string);
+  Alcotest.(check string)
+    "authority kind"
+    "system_llm_agent"
+    (metadata |> member "authority_kind" |> to_string);
+  Alcotest.(check string)
+    "gate"
+    "review_preparation"
+    (metadata |> member "gate" |> to_string);
+  Alcotest.(check string)
+    "detail"
+    "required artifact list is empty"
+    (metadata |> member "detail" |> to_string)
+
 let test_rejected_verdict_event_preserves_wire_type () =
   let event =
     VP.For_testing.verdict_event_json
@@ -2310,6 +2374,10 @@ let () =
         test_verdict_event_preserves_typed_authority;
       Alcotest.test_case "rejected verdict keeps wire type" `Quick
         test_rejected_verdict_event_preserves_wire_type;
+      Alcotest.test_case "stalled projection names forward paths" `Quick
+        test_stalled_projection_names_forward_paths;
+      Alcotest.test_case "stalled metadata keeps typed authority" `Quick
+        test_stalled_metadata_preserves_typed_authority;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

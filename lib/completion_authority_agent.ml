@@ -551,6 +551,17 @@ let process_task_once
            | Some reason -> reason
            | None -> gate
          in
+         (* A non-retryable deferral never gets another automatic attempt, so
+            the registry row would be its only surface. Promote it to the
+            Board so the assignee/operator sees the forward path. *)
+         if not result.retryable
+         then
+           Verification_protocol.notify_stalled_verification
+             ~authority
+             ~task_id:task.id
+             ~verification_id
+             ~gate
+             ~detail;
          complete
            ~evaluator_runtime
            ( defer

@@ -465,40 +465,66 @@ let capture_cache_reloads_when_retention_changes () =
       Alcotest.(check bool) "old capture pruned after retention change" false
         (Sys.file_exists old_file)))
 
-let capture_skips_when_current_file_cap_would_be_exceeded () =
+(* #29009: the byte cap rotates the full current file to a completed
+   [DD.NNN.jsonl] segment instead of dropping every later record of the
+   day. Both records survive — the earlier one byte-identical in the
+   segment, the new one in the fresh current file — and no skip metric
+   fires. *)
+let capture_rotates_when_current_file_cap_would_be_exceeded () =
   with_flag "1" (fun () ->
-    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
+    (* The byte budget must hold the rotated segment plus the oversized
+       current record (~4.5KB here), or the budget prune sheds the
+       segment the moment it rotates — that shedding is the ring
+       working, but this case pins rotation itself. The segment cap is
+       an eighth of the budget (1KB), small enough that the second
+       record still triggers the rotation. *)
+    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "8192" (fun () ->
       let base = Filename.temp_dir "wirecap_cap" "" in
       let keeper_name = "wirecap_cap_metric" in
       Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name ~turn_id:11
         ~agent_core_turn:1 ~response_text:"small" ();
       let files = find_jsonl base in
       Alcotest.(check int) "small record written" 1 (List.length files);
-      let before = read_file (List.hd files) in
-      let labels =
-        [ ("keeper", keeper_name)
-        ; ("turn_id", "12")
-        ; ("reason", "current_file_byte_cap")
-        ]
+      let current_file = List.hd files in
+      let first_record = read_file current_file in
+      let skip_value reason =
+        metric_value record_skipped_metric
+          ~labels:
+            [ ("keeper", keeper_name); ("turn_id", "12"); ("reason", reason) ]
       in
-      let legacy_labels =
-        [ ("keeper", keeper_name); ("turn_id", "12"); ("reason", "cap") ]
+      let exhausted_before = skip_value "rotation_sequence_exhausted" in
+      let guard_before = skip_value "append_guard_refused" in
+      Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name
+        ~turn_id:12
+        ~agent_core_turn:1 ~response_text:(String.make 4096 'x') ();
+      let files_after = find_jsonl base in
+      Alcotest.(check int)
+        "cap rotates the full file into a segment: two jsonl files"
+        2
+        (List.length files_after);
+      let segment =
+        match List.filter (fun f -> f <> current_file) files_after with
+        | [ segment ] -> segment
+        | _ -> Alcotest.fail "expected exactly one rotated segment"
       in
-      let legacy_before = metric_value record_skipped_metric ~labels:legacy_labels in
-      check_metric_delta "current-file cap skip metric increments"
-        record_skipped_metric ~labels (fun () ->
-          Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name
-            ~turn_id:12
-            ~agent_core_turn:1 ~response_text:(String.make 4096 'x') ());
-      let after = read_file (List.hd files) in
+      Alcotest.(check bool) "segment name carries a rotation sequence" true
+        (contains ~needle:".001.jsonl" segment);
       Alcotest.(check string)
-        "oversized record skipped without mutating current day file"
-        before
-        after;
+        "earlier record survives byte-identical in the segment"
+        first_record
+        (read_file segment);
+      Alcotest.(check bool)
+        "oversized record landed in the fresh current file"
+        true
+        (contains ~needle:(String.make 64 'x') (read_file current_file));
       Alcotest.(check (float 0.0001))
-        "legacy cap reason label is not incremented"
-        legacy_before
-        (metric_value record_skipped_metric ~labels:legacy_labels)))
+        "rotation is not counted as a skip (exhausted reason)"
+        exhausted_before
+        (skip_value "rotation_sequence_exhausted");
+      Alcotest.(check (float 0.0001))
+        "rotation is not counted as a skip (guard reason)"
+        guard_before
+        (skip_value "append_guard_refused")))
 
 let response_capture_matches_replayed_history_text () =
   with_flag "1" (fun () ->
@@ -600,8 +626,8 @@ let () =
             startup_prune_removes_old_files_without_new_capture;
           Alcotest.test_case "capture store reloads on retention change" `Quick
             capture_cache_reloads_when_retention_changes;
-          Alcotest.test_case "current file cap skips oversized record" `Quick
-            capture_skips_when_current_file_cap_would_be_exceeded;
+          Alcotest.test_case "current file cap rotates into a segment" `Quick
+            capture_rotates_when_current_file_cap_would_be_exceeded;
           Alcotest.test_case "trace_id is emitted when provided" `Quick
             response_trace_id_emitted;
           Alcotest.test_case "captured response matches replayed history text"

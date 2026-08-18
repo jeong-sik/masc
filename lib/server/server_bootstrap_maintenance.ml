@@ -508,7 +508,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      span / no [tool_dispatch_total] metric). *)
   Tool_dispatch.set_span_wrapper Tool_telemetry.with_span;
   Otel_metric_store.register_otel_source_once ();
-  Otel_runtime_observables.register_once
+  Otel_runtime_observables.start_store_writer
+    ~sw
+    ~clock
     ~masc_root:(Workspace.masc_root_dir (Mcp_server.workspace_config state))
     ();
   Otel_spans.setup_exporter ~sw env;

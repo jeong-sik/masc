@@ -235,6 +235,25 @@ let samples ~masc_root () =
     ]
 ;;
 
+(* masc#29023: these samples used to reach the world only through the
+   OTLP export tick, and that tick fires only when a collector backend
+   is installed — with no collector every surface above computed
+   nothing. Sampling is now decoupled from export: the store writer
+   lands the values in Otel_metric_store cells (always readable by the
+   fleet HTTP and dashboard surfaces), and the store's own registered
+   OTLP source exports those cells when a collector exists — one
+   writer, one exporter, no duplicate series. Cumulative readings land
+   via [set_gauge] exactly like the GC sampler's
+   monotonic-by-construction gauges. *)
+let write_samples_to_store ~masc_root () =
+  let samples = samples ~masc_root () in
+  List.iter
+    (fun { Otel_metrics.name; value; labels; kind = _ } ->
+       Otel_metric_store_core.set_gauge name ~labels value)
+    samples;
+  List.length samples
+;;
+
 let registered = Atomic.make false
 let registration_mu = Stdlib.Mutex.create ()
 
@@ -244,8 +263,27 @@ let register_once ~masc_root () =
     Stdlib.Mutex.protect registration_mu (fun () ->
       if not (Atomic.get registered)
       then (
-        Otel_metrics.register_source (fun () -> samples ~masc_root ());
+        (* One synchronous write keeps the RFC-0217 property: every
+           sample is present from process start, absence never reads as
+           zero. *)
+        ignore (write_samples_to_store ~masc_root () : int);
         Atomic.set registered true))
+;;
+
+(* One refresh per half minute keeps queue-depth and byte-size surfaces
+   near-live while the directory walks stay amortized behind their own
+   60s cache. *)
+let store_writer_interval_s = 30.0
+
+let start_store_writer ~sw ~clock ~masc_root () =
+  register_once ~masc_root ();
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock store_writer_interval_s;
+      ignore (write_samples_to_store ~masc_root () : int);
+      loop ()
+    in
+    loop ())
 ;;
 
 module For_testing = struct

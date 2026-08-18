@@ -1,5 +1,7 @@
-(** Computed-at-export-tick OTel samples for runtime health surfaces with no
-    store cell: console-sink writer health (#20684: dropped mirror lines +
+(** Periodically sampled runtime health surfaces (masc#29023: sampling
+    is driven by the store-writer fiber, not the OTLP export tick, so
+    the values exist with or without a collector). Covers surfaces with
+    no at-source store cell: console-sink writer health (#20684: dropped mirror lines +
     queue depth), keeper transition-audit drain queue depth (#20677), fd
     accounting (open/limit/pressure/in-flight per kind), event-bus
     backpressure (#20676: masc_event_bus_* subscriber depth / drops /
@@ -18,6 +20,26 @@
     [Otel_metric_store.register_otel_source_once]). [masc_root] anchors the
     watched store directories. *)
 val register_once : masc_root:string -> unit -> unit
+
+(** Compute the samples once and land them in [Otel_metric_store]
+    cells via [set_gauge] (masc#29023). The store is the single
+    always-on read surface — fleet HTTP and the dashboard read it with
+    no collector required — and the store's own registered OTLP source
+    exports the same cells when a collector exists, so there is one
+    writer and one exporter with no duplicate series. Returns how many
+    samples were written. *)
+val write_samples_to_store : masc_root:string -> unit -> int
+
+(** Start the maintenance fiber that refreshes the store cells every
+    half minute (first write happens synchronously through
+    {!register_once}). Call once from server bootstrap next to the
+    other maintenance fibers. *)
+val start_store_writer :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  masc_root:string ->
+  unit ->
+  unit
 
 module For_testing : sig
   val samples : masc_root:string -> unit -> Otel_metrics.sample list

@@ -374,7 +374,13 @@ class McpClient:
                 return value
         raise AcceptanceError("MCP SSE response had no matching JSON-RPC payload")
 
-    def request(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    def request(
+        self,
+        method: str,
+        params: dict[str, Any],
+        *,
+        _retry_on_stale_session: bool = True,
+    ) -> dict[str, Any]:
         request_id = self._next_id()
         payload = json.dumps(
             {
@@ -408,6 +414,28 @@ class McpClient:
                     self.protocol_version = protocol_version
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
+            if (
+                _retry_on_stale_session
+                and error.code == 404
+                and self.session_id is not None
+                and method != "initialize"
+            ):
+                # RFC-0100 Q3: the server answers a POST that echoes a
+                # session id it has no state for with 404 so the client
+                # re-handshakes — and it reaps sessions whose grace period
+                # (MASC_SESSION_SSE_GRACE_PERIOD_SEC, default 300s) elapses
+                # without activity. This runner's primary session sits idle
+                # while per-turn sub-clients drive keeper turns, so a long
+                # mission phase crosses that window (run
+                # e0-collab-20260818-1157 died exactly this way). The 404
+                # is raised by the session check before dispatch, so the
+                # rejected request never executed and one replay on a fresh
+                # session is safe for mutations too.
+                self.session_id = None
+                self.initialize()
+                return self.request(
+                    method, params, _retry_on_stale_session=False
+                )
             raise AcceptanceError(f"MCP HTTP {error.code}: {detail[:1000]}") from error
         except urllib.error.URLError as error:
             raise AcceptanceError(f"MCP transport failed: {error}") from error

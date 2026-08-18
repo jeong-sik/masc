@@ -7,7 +7,13 @@
     durable store holds: the AGENT_CORE checkpoint keeps [system_prompt] and the
     replayed messages, but nothing else keeps the per-turn injected context.
     Tool schemas use the same {!Agent_core.Tool.schema_to_json} projection AGENT_CORE
-    prepares for the provider. String content is passed through
+    prepares for the provider; the redacted schema array is stored once in the
+    shared {!Tool_blob_store} under its content address and each request row
+    carries a [tools_ref] normalized artifact reference instead of the inline
+    array (measured 2026-08-18 on a live root: 2,702 rows held 2 unique
+    ~80KB arrays — 99.3% of all capture bytes were copies). Blob maintenance
+    already lists wire-capture as a durable consumer, so the blob expires with
+    the last retained row that references it. String content is passed through
     {!Llm_provider.Secret_redactor} and the exact {!Keeper_secret_redaction}
     projection snapshot before it is written.
 
@@ -91,8 +97,9 @@ val capture_request :
     correlation. [base_path] selects the exact Keeper secret projection
     snapshot; [masc_root] must already be the effective cluster-aware MASC
     root. [tool_schema_bytes] records the byte length of the exact unredacted
-    compact JSON schema array while [tools] stores its recursively redacted
-    content. [history_messages] is consumed for [history_message_count] and
+    compact JSON schema array while [tools_ref] points at its recursively
+    redacted content in the shared blob store (see the module header).
+    [history_messages] is consumed for [history_message_count] and
     [history_messages_digest] only; the messages themselves are not written
     (see the module header). *)
 

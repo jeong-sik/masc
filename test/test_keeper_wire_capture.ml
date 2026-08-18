@@ -110,15 +110,28 @@ let check_json_null label key json =
       (Yojson.Safe.to_string other)
 ;;
 
-let json_list key json =
-  match json_member key json with
-  | `List items -> items
-  | other ->
-    Alcotest.failf "field %s must be list, got %s" key (Yojson.Safe.to_string other)
-;;
-
-let check_json_list_length label key expected json =
-  Alcotest.(check int) label expected (List.length (json_list key json))
+(* Decode the row's [tools_ref] and fetch the redacted schema array it points
+   at from the shared blob store, failing loudly on any malformed or missing
+   link so a broken reference chain cannot pass as an empty surface. *)
+let fetch_tools_blob ~base json =
+  match
+    Tool_output.normalized_artifact_ref_of_json (json_member "tools_ref" json)
+  with
+  | Tool_output.Not_normalized_artifact_ref ->
+    Alcotest.failf "tools_ref is not a normalized artifact reference: %s"
+      (Yojson.Safe.to_string (json_member "tools_ref" json))
+  | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+    Alcotest.failf "tools_ref is malformed: %s" detail
+  | Tool_output.Decoded_normalized_artifact_ref reference ->
+    let store = Tool_blob_store.create ~base_path:base in
+    (match
+       Tool_blob_store.fetch store ~sha256:reference.Tool_output.sha256
+     with
+     | Ok (Some bytes) -> reference, bytes
+     | Ok None -> Alcotest.fail "tools blob missing from the store"
+     | Error error ->
+       Alcotest.failf "tools blob fetch failed: %s"
+         (Tool_blob_store.fetch_error_to_string error))
 ;;
 
 let metric_value name ~labels =
@@ -218,7 +231,9 @@ let enabled_writes_redacted () =
     check_json_int "empty tool count recorded" "tool_count" 0 json;
     check_json_int "empty tool schema bytes recorded" "tool_schema_bytes"
       (String.length "[]") json;
-    check_json_list_length "empty tool schemas recorded" "tools" 0 json;
+    let _reference, tools_bytes = fetch_tools_blob ~base json in
+    Alcotest.(check string) "empty tool schemas stored as [] blob" "[]"
+      tools_bytes;
     check_json_string "user message recorded" "user_message" "hello world" json;
     check_json_int "history_message_count recorded" "history_message_count" 2
       json;
@@ -288,15 +303,18 @@ let request_captures_exact_redacted_tool_schemas () =
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
     let json = parse_single_jsonl content in
-    Alcotest.(check bool) "tool schema secret is redacted" false
+    Alcotest.(check bool) "tool schema secret is redacted from the row" false
       (contains ~needle:projected_secret content);
     check_json_int "tool count recorded" "tool_count" 1 json;
     check_json_int "pre-redaction tool schema bytes recorded"
       "tool_schema_bytes"
       (Yojson.Safe.to_string raw_tools |> String.length)
       json;
-    match json_list "tools" json with
-    | [ tool_json ] ->
+    let _reference, tools_bytes = fetch_tools_blob ~base json in
+    Alcotest.(check bool) "tool schema secret is redacted from the blob" false
+      (contains ~needle:projected_secret tools_bytes);
+    match Yojson.Safe.from_string tools_bytes with
+    | `List [ tool_json ] ->
       check_json_string "tool name recorded" "name" "probe_tool" tool_json;
       Alcotest.(check bool) "tool description redaction marker present" true
         (contains ~needle:"[REDACTED]" (json_string "description" tool_json));
@@ -308,7 +326,52 @@ let request_captures_exact_redacted_tool_schemas () =
       Alcotest.(check bool) "parameter description is recursively redacted" true
         (contains ~needle:"[REDACTED]"
            (json_string "description" query_schema))
-    | _ -> Alcotest.fail "tool schema list shape should have been checked above")
+    | other ->
+      Alcotest.failf "tools blob must hold a one-schema array, got %s"
+        (Yojson.Safe.to_string other))
+
+(* Two requests over the same tool surface must share one content address:
+   the blob store dedups by sha256, so the day file carries two small
+   references instead of two ~80KB schema copies. *)
+let tools_blob_is_shared_across_requests () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_dedup" "" in
+    let tool =
+      Agent_core.Tool.create
+        ~name:"probe_tool"
+        ~description:"stable schema"
+        ~parameters:
+          [ { Agent_core.Types.name = "query"
+            ; description = "query text"
+            ; param_type = Agent_core.Types.String
+            ; required = true
+            }
+          ]
+        (fun _input -> Ok { Agent_core.Types.content = "ok"; _meta = None })
+    in
+    let capture ~turn_id =
+      Wire.capture_request ~base_path:base ~masc_root:base
+        ~keeper_name:"sangsu" ~turn_id ~agent_core_turn:1 ~system_prompt:"sys"
+        ~extra_system_context:None ~user_message:"u" ~history_messages:[]
+        ~tools:[ tool ] ()
+    in
+    capture ~turn_id:1;
+    capture ~turn_id:2;
+    let files = find_jsonl base in
+    Alcotest.(check int) "one day file written" 1 (List.length files);
+    let rows =
+      read_file (List.hd files)
+      |> String.split_on_char '\n'
+      |> List.filter (fun line -> not (String.equal "" (String.trim line)))
+      |> List.map Yojson.Safe.from_string
+    in
+    match List.map (fetch_tools_blob ~base) rows with
+    | [ (first_ref, first_bytes); (second_ref, second_bytes) ] ->
+      Alcotest.(check string) "both rows share one content address"
+        first_ref.Tool_output.sha256 second_ref.Tool_output.sha256;
+      Alcotest.(check string) "both rows resolve the same bytes" first_bytes
+        second_bytes
+    | rows -> Alcotest.failf "expected two request rows, got %d" (List.length rows))
 
 let request_trace_id_emitted () =
   with_flag "1" (fun () ->
@@ -605,6 +668,8 @@ let () =
             enabled_writes_redacted;
           Alcotest.test_case "captures exact redacted tool schemas" `Quick
             request_captures_exact_redacted_tool_schemas;
+          Alcotest.test_case "tools blob is shared across requests" `Quick
+            tools_blob_is_shared_across_requests;
           Alcotest.test_case "write failure is best effort" `Quick
             request_capture_failure_is_best_effort;
           Alcotest.test_case "trace_id is emitted when provided" `Quick

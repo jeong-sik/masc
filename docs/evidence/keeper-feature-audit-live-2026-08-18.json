@@ -43,24 +43,29 @@
     {
       "id": "async-catalog-now-live",
       "severity": "info",
-      "summary": "#28940 의 카탈로그 공백 해소 확인 — config/tool-compositions.toml 이 12:49 KST 생성(inline 1 + async 1), 18:35 재시작 서버가 로드, keeper 도구 표면에 keeper_compose_mission-snapshot / keeper_compose_background-snapshot / keeper_composition_status / keeper_composition_cancel 노출.",
+      "summary": "#28940 의 카탈로그 공백 해소 확인 — config/tool-compositions.toml 이 12:49 KST 생성(inline 1 + async 1), 18:35 재시작 서버가 로드, keeper 도구 표면에 keeper_compose_mission-snapshot / keeper_compose_background-snapshot / keeper_composition_status / keeper_composition_cancel 노출. 22:35 라이브 E4 실측: masc_keeper_msg(외부 MCP)로 rtprobe에 지시 → keeper 턴(deepseek-v4-flash, turn 248-249)이 keeper_compose_background-snapshot 호출(execution=async, request_id kmsg-e7ba1d0a…, status=queued, durability=durable) → keeper_composition_status 폴링(status=done, ok=true, 노드별 execution_id receipt) → 두 원문 JSON을 chat lane에 보고. accept→poll→terminal 체인 라이브 증명 완료.",
       "evidence": [
         "config/tool-compositions.toml mtime 2026-08-18 12:49, execution=inline(4행)+async(43행)",
-        "out.log 20:06:38 rondo available-tools 목록에 composition 4종 포함 (라인 5093)"
+        "out.log 20:06:38 rondo available-tools 목록에 composition 4종 포함 (라인 5093)",
+        "out.log 22:35:21/22:35:23 tool_call 라인 (outcome=ok) + keeper_chat/rtprobe.jsonl 응답 원문 + delegate_status Succeeded"
       ],
-      "next": "rtprobe keeper 에 masc_keeper_msg 로 accept→status 실측 요청 발신 (kmsg-185b07072e6a97966eaca34ec0354bed, queued)"
+      "next": "cancel 경로와 process-restart 회복 실측 잔여."
     },
     {
       "id": "fusion-status-honest-rejection",
       "severity": "info",
       "summary": "#28963 의 외부 표면 거짓말('Unknown tool (registry inconsistency)')이 정직한 typed 거부로 교체 확인 — tools/call masc_fusion_status → \"tool 'masc_fusion_status' is keeper-internal; not available on this MCP endpoint\".",
-      "evidence": ["tools/call 실측 22:07 KST, isError=true + keeper-internal 메시지"]
+      "evidence": [
+        "tools/call 실측 22:07 KST, isError=true + keeper-internal 메시지"
+      ]
     },
     {
       "id": "external-tools-list-44",
       "severity": "info",
       "summary": "외부 tools/list 커서 전수 44종 — #28964 의 4종(masc_board_search, masc_task_history, masc_keeper_delegate_status, masc_keeper_msg) 노출 확인.",
-      "evidence": ["tools/list cursor walk, 44 tools, 22:05 KST"]
+      "evidence": [
+        "tools/list cursor walk, 44 tools, 22:05 KST"
+      ]
     },
     {
       "id": "dashboard-render-healthy",
@@ -75,7 +80,17 @@
       "id": "rondo-malformed-tool-name",
       "severity": "P3-candidate",
       "summary": "keeper rondo 가 'Execute[\"argv\"]' 라는 이름으로 도구 호출 → 'Tool not found'. 모델이 이름+인자를 결합해 낸 형태를 정규화 없이 그대로 조회 — #28885(인자 검증 거부로 턴 사망, failover 0회) 인접 클래스.",
-      "evidence": ["out.log 20:06:38 라인 5093, agent_tools.find_and_execute_tool"]
+      "evidence": [
+        "out.log 20:06:38 라인 5093, agent_tools.find_and_execute_tool"
+      ]
+    },
+    {
+      "id": "wire-capture-day-cap-saturated",
+      "severity": "P3-candidate",
+      "summary": "keeper_wire_capture가 22:35에 연속 WARN — \"current day file would exceed 268435456 bytes\" — 오늘 일자 캡처가 상한 포화로 레코드 스킵 중. 경고는 남으나 스킵 규모의 집계 관측은 없음.",
+      "evidence": [
+        "out.log 22:35:18/21/23 WARN 3연속"
+      ]
     }
   ],
   "board_write_ahead": {

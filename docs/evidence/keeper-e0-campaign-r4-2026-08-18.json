@@ -203,7 +203,7 @@
       "attempt": "r3",
       "run_id": "e0-r3-20260818",
       "died": "no tool-compositions.toml at the live config root — zero keeper_compose_* tools",
-      "repair": "fixture installed at ~/me/.masc/config (hash-identical); preflight gap masc#28975"
+      "repair": "fixture installed at <base-path>/.masc/config (hash-identical); preflight gap masc#28975"
     },
     {
       "attempt": "r4",

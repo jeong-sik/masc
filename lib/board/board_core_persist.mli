@@ -27,6 +27,12 @@ val flusher_schedule_dropped_count : unit -> int
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 
+(** [persist_io_error ~where msg] records the failure via
+    {!record_persist_error} and returns the typed
+    [Error (Io_error "<where>: <msg>")] the append paths surface to
+    their callers. *)
+val persist_io_error : where:string -> string -> ('a, board_error) result
+
 val create_store : unit -> store
 
 val invalidate_post_caches : store -> unit

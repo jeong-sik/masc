@@ -251,6 +251,26 @@ def source_sha() -> str:
         return "unknown"
 
 
+def keeper_is_live(data: Any) -> bool:
+    """A keeper can receive missions when its keepalive loop runs and the
+    registry reports a running fiber. These are the fields
+    ``masc_keeper_status`` actually emits (``runtime.phase`` /
+    ``runtime.fiber_health`` from the keeper registry FSM). The previous
+    predicate demanded ``agent.exists``, but ``parse_agent_status`` never
+    emits an ``exists`` key and keepers on this build never materialize an
+    agents-dir identity file, so no fleet could ever pass bootstrap."""
+    if not isinstance(data, dict):
+        return False
+    runtime = data.get("runtime")
+    if not isinstance(runtime, dict):
+        return False
+    return (
+        bool(data.get("keepalive_running"))
+        and runtime.get("phase") == "running"
+        and runtime.get("fiber_health") == "alive"
+    )
+
+
 def parse_json_maybe(text: str) -> Any:
     try:
         value = json.loads(text)
@@ -719,13 +739,7 @@ class MissionRun:
                 except AcceptanceError:
                     continue
                 data = status.data
-                if isinstance(data, dict):
-                    live = bool(data.get("keepalive_running")) and bool(
-                        (data.get("agent") or {}).get("exists")
-                    )
-                else:
-                    live = "keepalive" in status.text.lower() and "true" in status.text.lower()
-                if live:
+                if keeper_is_live(data):
                     self.statuses[role] = data
                     pending.remove(role)
             if pending:
@@ -1676,10 +1690,7 @@ class MissionRun:
             "all_keepers_live": (
                 len(self.statuses) == len(self.roles)
                 and all(
-                    isinstance(self.statuses.get(role), dict)
-                    and bool(self.statuses[role].get("agent", {}).get("exists"))
-                    and bool(self.statuses[role].get("keepalive_running"))
-                    for role in self.roles
+                    keeper_is_live(self.statuses.get(role)) for role in self.roles
                 ),
                 f"observed live keepalive status for {len(self.statuses)}/{len(self.roles)} roles",
             ),

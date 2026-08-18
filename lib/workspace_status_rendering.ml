@@ -212,15 +212,26 @@ let status_summary_string
           (Printf.sprintf
              "  … and %d more agents\n"
              (agent_count - max_agents_display)));
+  let task_goal_index =
+    Workspace_goal_index.build_task_goal_index_for_config ctx.config
+  in
   Buffer.add_string buf "\nQuest Board:\n";
   List.iter
     (fun (task : Masc_domain.task) ->
       Workspace_query.safe_yield ();
       let status_icon, status_label = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
+      let goal_ids =
+        Option.value (Hashtbl.find_opt task_goal_index task.id) ~default:[]
+      in
+      let goal_suffix =
+        match goal_ids with
+        | [] -> ""
+        | ids -> " goal:" ^ String.concat "," ids
+      in
       Buffer.add_string buf
-        (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id
-           task.priority status_label task.title assignee))
+        (Printf.sprintf "  %s %s P%d [%s] %s (%s)%s\n" status_icon task.id
+           task.priority status_label task.title assignee goal_suffix))
     shown_active_tasks;
   if (match active_tasks with [] -> true | _ -> false) then
     Buffer.add_string buf "  (no active tasks)\n";

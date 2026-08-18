@@ -105,7 +105,7 @@ let test_fd_samples_present () =
 let test_store_writer_lands_samples_in_cells () =
   with_temp_masc_root (fun root ->
     Obs.For_testing.reset_store_cache ();
-    let written = Obs.write_samples_to_store ~masc_root:root () in
+    let written = Obs.For_testing.write_samples_to_store ~masc_root:root () in
     check bool "writer reports the sample count" true (written > 0);
     let samples = Obs.For_testing.samples ~masc_root:root () in
     let queue =

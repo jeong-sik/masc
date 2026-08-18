@@ -266,6 +266,7 @@ let register_once ~masc_root () =
         (* One synchronous write keeps the RFC-0217 property: every
            sample is present from process start, absence never reads as
            zero. *)
+        (* fire-and-forget: the count only serves callers that log it *)
         ignore (write_samples_to_store ~masc_root () : int);
         Atomic.set registered true))
 ;;
@@ -280,6 +281,7 @@ let start_store_writer ~sw ~clock ~masc_root () =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock store_writer_interval_s;
+      (* fire-and-forget: the count only serves callers that log it *)
       ignore (write_samples_to_store ~masc_root () : int);
       loop ()
     in
@@ -288,5 +290,6 @@ let start_store_writer ~sw ~clock ~masc_root () =
 
 module For_testing = struct
   let samples = samples
+  let write_samples_to_store = write_samples_to_store
   let reset_store_cache () = Atomic.set store_cache (neg_infinity, [])
 end

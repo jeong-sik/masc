@@ -19,20 +19,8 @@
     from server bootstrap (next to
     [Otel_metric_store.register_otel_source_once]). [masc_root] anchors the
     watched store directories. *)
-val register_once : masc_root:string -> unit -> unit
-
-(** Compute the samples once and land them in [Otel_metric_store]
-    cells via [set_gauge] (masc#29023). The store is the single
-    always-on read surface — fleet HTTP and the dashboard read it with
-    no collector required — and the store's own registered OTLP source
-    exports the same cells when a collector exists, so there is one
-    writer and one exporter with no duplicate series. Returns how many
-    samples were written. *)
-val write_samples_to_store : masc_root:string -> unit -> int
-
 (** Start the maintenance fiber that refreshes the store cells every
-    half minute (first write happens synchronously through
-    {!register_once}). Call once from server bootstrap next to the
+    half minute (the first write happens synchronously before the fiber starts). Call once from server bootstrap next to the
     other maintenance fibers. *)
 val start_store_writer :
   sw:Eio.Switch.t ->
@@ -43,5 +31,12 @@ val start_store_writer :
 
 module For_testing : sig
   val samples : masc_root:string -> unit -> Otel_metrics.sample list
+
+  (** Compute the samples once and land them in [Otel_metric_store]
+      cells via [set_gauge] (masc#29023) — the internal step the
+      {!start_store_writer} fiber repeats. Returns how many samples
+      were written. Exposed for tests; production callers go through
+      {!start_store_writer}. *)
+  val write_samples_to_store : masc_root:string -> unit -> int
   val reset_store_cache : unit -> unit
 end

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { blobMarkerOfOutput, deriveKeeperToolCallDossier, formatInput } from './keeper-tool-call-inspector'
+import {
+  blobMarkerOfOutput,
+  deriveKeeperToolCallDossier,
+  formatInput,
+  groupToolCallTree,
+} from './keeper-tool-call-inspector'
 import type { ToolCallEntry } from '../api/dashboard'
 
 function toolCall(overrides: Partial<ToolCallEntry> = {}): ToolCallEntry {
@@ -86,6 +91,77 @@ describe('blobMarkerOfOutput', () => {
   it('returns null for inline string outputs', () => {
     expect(blobMarkerOfOutput('{"ok":true}')).toBeNull()
     expect(blobMarkerOfOutput('')).toBeNull()
+  })
+})
+
+describe('groupToolCallTree', () => {
+  const compositionChild = (overrides: Partial<ToolCallEntry> = {}): ToolCallEntry =>
+    toolCall({
+      composition_tool: 'keeper_compose_mission-snapshot',
+      composition_run_id: 'run-1',
+      composition_execution: 'inline',
+      parent_tool_use_id: 'call_parent',
+      ...overrides,
+    })
+
+  it('nests composition children under their composite parent', () => {
+    const parent = toolCall({
+      ts: 100,
+      tool: 'keeper_compose_mission-snapshot',
+      tool_use_id: 'call_parent',
+    })
+    const childBoard = compositionChild({ ts: 95, tool: 'masc_board_stats', composition_node_id: 'board' })
+    const childClock = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock' })
+
+    // Newest-first display order, as the inspector passes it.
+    const nodes = groupToolCallTree([parent, childBoard, childClock])
+
+    expect(nodes).toHaveLength(1)
+    expect(nodes[0]?.entry).toBe(parent)
+    expect(nodes[0]?.children).toEqual([childBoard, childClock])
+  })
+
+  it('keeps children top-level when the parent row is outside the window', () => {
+    const childBoard = compositionChild({ ts: 95, tool: 'masc_board_stats', composition_node_id: 'board' })
+    const childClock = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock' })
+
+    const nodes = groupToolCallTree([childBoard, childClock])
+
+    expect(nodes.map(node => node.entry)).toEqual([childBoard, childClock])
+    expect(nodes.every(node => node.children.length === 0)).toBe(true)
+  })
+
+  it('attaches a run to the nearest parent at or after its newest child when provider ids repeat', () => {
+    const lateParent = toolCall({ ts: 200, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
+    const nearParent = toolCall({ ts: 100, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
+    const staleParent = toolCall({ ts: 50, tool: 'keeper_compose_mission-snapshot', tool_use_id: 'call_dup' })
+    const child = compositionChild({ ts: 90, tool: 'keeper_time_now', composition_node_id: 'clock', parent_tool_use_id: 'call_dup' })
+
+    const nodes = groupToolCallTree([lateParent, nearParent, child, staleParent])
+
+    expect(nodes.find(node => node.entry === nearParent)?.children).toEqual([child])
+    expect(nodes.find(node => node.entry === lateParent)?.children).toEqual([])
+    expect(nodes.find(node => node.entry === staleParent)?.children).toEqual([])
+  })
+
+  it('never joins on blank provider ids', () => {
+    const parent = toolCall({ ts: 100, tool: 'keeper_compose_mission-snapshot', tool_use_id: '' })
+    const child = compositionChild({ ts: 90, tool: 'keeper_time_now', parent_tool_use_id: '' })
+
+    const nodes = groupToolCallTree([parent, child])
+
+    expect(nodes.map(node => node.entry)).toEqual([parent, child])
+    expect(nodes.every(node => node.children.length === 0)).toBe(true)
+  })
+
+  it('keeps plain rows as leaf nodes in display order', () => {
+    const first = toolCall({ ts: 3, tool: 'Execute' })
+    const second = toolCall({ ts: 2, tool: 'keeper_context_status' })
+
+    const nodes = groupToolCallTree([first, second])
+
+    expect(nodes.map(node => node.entry)).toEqual([first, second])
+    expect(nodes.map(node => node.children)).toEqual([[], []])
   })
 })
 

@@ -452,6 +452,163 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.parent_tool_use_id).toBe('outer-7')
   })
 
+  it('decodes recorded execution evidence (runtime contract, action radius, route evidence)', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            // Field shapes mirror a recorded .masc/tool_calls row (2026-08-18),
+            // anonymized. Nested nullable fields arrive as explicit nulls.
+            ts: 1787024860.1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_time_now',
+            input: {},
+            output: '{"now_iso":"2026-08-18T05:00:00Z"}',
+            success: true,
+            duration_ms: 0.5,
+            thinking_enabled: true,
+            prompt_fingerprint: '464ce7b3280c24fe1cbdcd990a70db87',
+            runtime_contract: {
+              keeper_name: 'keeper-alpha',
+              agent_name: 'keeper-alpha-agent',
+              trace_id: 'trace-1',
+              session_id: 'trace-1',
+              generation: 1,
+              keeper_turn_id: 29567,
+              task_id: null,
+              goal_ids: [],
+              sandbox_profile: 'local',
+              sandbox_root: '/sandbox/keeper-alpha/',
+              allowed_paths: ['.masc/playground/keeper-alpha/'],
+              path_resolution: {
+                read_implicit_cwd: false,
+                read_explicit_cwd_supported: true,
+                read_basis: 'Read file_path resolves against explicit cwd when cwd is provided.',
+                discover_before_read: 'Inspect visible paths before Read.',
+                execute_path_basis: 'Execute path arguments resolve against cwd.',
+                masc_state_basis: '.masc runtime state is not a sandbox filesystem target.',
+              },
+              network_mode: 'inherit',
+              runtime_profile: 'ollama_cloud.example-model',
+            },
+            action_radius: {
+              tool_name: 'keeper_time_now',
+              action_key: 'keeper_time_now',
+              target_kind: 'tool',
+              target_path: null,
+              sandbox_target: 'local',
+              observed_paths: [],
+              success: true,
+              duration_ms: 0.5,
+              error: null,
+            },
+            route_evidence: {
+              descriptor_id: 'keeper.time.now',
+              capability_id: 'keeper_time_now',
+              keeper_model_projection: 'internal_name',
+              public_name: 'keeper_time_now',
+              canonical_name: 'keeper_time_now',
+              executor: 'in_process',
+              backend: 'ocaml_runtime',
+              sandbox: 'none',
+              runtime_handler: 'tool_time_now',
+              execution: 'concurrent',
+              composable_output: { kind: 'json' },
+              receipt_labels: {
+                descriptor_id: 'keeper.time.now',
+                executor: 'in_process',
+                keeper_tool_group: 'meta',
+                input_schema_source: 'descriptor_owned',
+              },
+              eval_tags: [],
+              readonly: true,
+              retryable: true,
+              cwd_scope: null,
+              polling_read: false,
+              tool_name: 'keeper_time_now',
+            },
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    expect(entry?.thinking_enabled).toBe(true)
+    expect(entry?.thinking_budget).toBeUndefined()
+    expect(entry?.tool_choice).toBeUndefined()
+    expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
+    expect(entry?.runtime_contract).toMatchObject({
+      agent_name: 'keeper-alpha-agent',
+      generation: 1,
+      sandbox_root: '/sandbox/keeper-alpha/',
+      allowed_paths: ['.masc/playground/keeper-alpha/'],
+      network_mode: 'inherit',
+      runtime_profile: 'ollama_cloud.example-model',
+    })
+    expect(entry?.runtime_contract?.path_resolution).toMatchObject({
+      read_implicit_cwd: false,
+      read_explicit_cwd_supported: true,
+    })
+    expect(entry?.action_radius).toMatchObject({
+      action_key: 'keeper_time_now',
+      target_kind: 'tool',
+      observed_paths: [],
+    })
+    // Explicit wire nulls decode to absent, not to empty strings.
+    expect(entry?.action_radius?.target_path).toBeUndefined()
+    expect(entry?.action_radius?.error).toBeUndefined()
+    expect(entry?.route_evidence).toMatchObject({
+      descriptor_id: 'keeper.time.now',
+      capability_id: 'keeper_time_now',
+      executor: 'in_process',
+      backend: 'ocaml_runtime',
+      runtime_handler: 'tool_time_now',
+      readonly: true,
+      retryable: true,
+    })
+    expect(entry?.route_evidence?.receipt_labels).toEqual({
+      descriptor_id: 'keeper.time.now',
+      executor: 'in_process',
+      keeper_tool_group: 'meta',
+      input_schema_source: 'descriptor_owned',
+    })
+  })
+
+  it('leaves execution evidence absent on rows recorded before it was written', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_context_status',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 5,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    expect(entry?.runtime_contract).toBeUndefined()
+    expect(entry?.action_radius).toBeUndefined()
+    expect(entry?.route_evidence).toBeUndefined()
+    expect(entry?.thinking_enabled).toBeUndefined()
+    expect(entry?.prompt_fingerprint).toBeUndefined()
+  })
+
   it('keeps missing or malformed tool-call duration unmeasured', async () => {
     const fetchMock = vi.fn(() => Promise.resolve(
       new Response(JSON.stringify({

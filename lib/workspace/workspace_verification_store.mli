@@ -153,10 +153,6 @@ val note_reference_form : string
     classifier. The artifact form has no such caller: a message that has to
     name both uses {!resolvable_reference_forms}. *)
 
-val pull_request_reference_form : string
-(** The accepted form for forge evidence:
-    [pull-request:https://github.com/<owner>/<repo>/pull/<number>]. *)
-
 val pull_request_locator_url : pull_request_locator -> string
 (** The canonical web URL a locator names — the inverse of the reference
     parser, so the fetcher and the snapshot spell the same URL. *)

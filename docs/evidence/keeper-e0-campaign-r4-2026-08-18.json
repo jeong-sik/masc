@@ -1,0 +1,256 @@
+{
+  "schema": "masc.keeper_e0_campaign_receipt.v1",
+  "captured_at": "2026-08-18T04:07:28Z",
+  "run": {
+    "run_id": "e0-r4-20260818",
+    "mission_marker": "keeper-collab-e0-r4-20260818",
+    "runtime_id": "glm-coding.glm-5-turbo",
+    "binary_commit": "283a2221ba95bf24ee54237cfd9f9d3e8316c74c",
+    "runner_source_sha_at_launch": "283a2221ba95bf24ee54237cfd9f9d3e8316c74c",
+    "runner_source_sha_at_bundle": "7b92b00ef54e5b67442ea3fd01127cba6741c2d2",
+    "runner_sha_note": "docs-only #28969 merged mid-campaign and the shared checkout pulled; binary and launched runner code are both 283a2221ba. r5 runs from a SHA-pinned worktree.",
+    "status": "failed"
+  },
+  "verdict": {
+    "missions_passed": 6,
+    "missions_total": 19,
+    "assertions_passed": 22,
+    "assertions_total": 37,
+    "passed_missions": [
+      "RW01",
+      "RW04",
+      "RW07",
+      "RW10",
+      "RW12",
+      "RW18"
+    ],
+    "missions": [
+      {
+        "id": "RW01",
+        "name": "five_keeper_role_fleet",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW02",
+        "name": "shared_goal_assignment",
+        "status": "failed",
+        "failed_assertions": [
+          "tasks_linked_to_goal"
+        ]
+      },
+      {
+        "id": "RW03",
+        "name": "parallel_distinct_task_work",
+        "status": "failed",
+        "failed_assertions": [
+          "parallel_wave_completed"
+        ]
+      },
+      {
+        "id": "RW04",
+        "name": "board_comment_handoff",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW05",
+        "name": "ide_artifact_task_evidence",
+        "status": "failed",
+        "failed_assertions": [
+          "ide_annotation_observed"
+        ]
+      },
+      {
+        "id": "RW06",
+        "name": "fusion_while_peers_progress",
+        "status": "failed",
+        "failed_assertions": [
+          "fusion_started"
+        ]
+      },
+      {
+        "id": "RW07",
+        "name": "schedule_wake_interleaves",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW08",
+        "name": "deterministic_tool_rejection_recovery",
+        "status": "failed",
+        "failed_assertions": [
+          "invalid_tool_turn_settled",
+          "same_keeper_recovered"
+        ]
+      },
+      {
+        "id": "RW09",
+        "name": "fleet_failure_isolation",
+        "status": "failed",
+        "failed_assertions": [
+          "same_keeper_recovered"
+        ]
+      },
+      {
+        "id": "RW10",
+        "name": "restart_context_continuity",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW11",
+        "name": "durable_memory_continuity",
+        "status": "failed",
+        "failed_assertions": [
+          "memory_write_observed"
+        ]
+      },
+      {
+        "id": "RW12",
+        "name": "completion_authority_boundary",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW13",
+        "name": "single_task_claim_contention",
+        "status": "failed",
+        "failed_assertions": [
+          "contention_loser_continued"
+        ]
+      },
+      {
+        "id": "RW14",
+        "name": "goal_task_reconciliation",
+        "status": "failed",
+        "failed_assertions": [
+          "tasks_linked_to_goal"
+        ]
+      },
+      {
+        "id": "RW15",
+        "name": "all_surface_interleave",
+        "status": "failed",
+        "failed_assertions": [
+          "all_surfaces_observed"
+        ]
+      },
+      {
+        "id": "RW16",
+        "name": "correlated_product_outcome_bundle",
+        "status": "failed",
+        "failed_assertions": [
+          "correlation_marker_complete",
+          "artifact_bundle_complete"
+        ]
+      },
+      {
+        "id": "RW17",
+        "name": "typed_inline_and_async_tool_composition",
+        "status": "failed",
+        "failed_assertions": [
+          "composition_inline_observed",
+          "composition_parallel_schedule_observed",
+          "composition_sequential_dataflow_observed",
+          "composition_async_observed"
+        ]
+      },
+      {
+        "id": "RW18",
+        "name": "same_keeper_eleven_linked_turn_restart_recall",
+        "status": "passed",
+        "failed_assertions": []
+      },
+      {
+        "id": "RW19",
+        "name": "durable_turn_span_dashboard_projection",
+        "status": "failed",
+        "failed_assertions": [
+          "persistence_tiers_dashboard_projection_observed"
+        ]
+      }
+    ]
+  },
+  "failure_triage": {
+    "harness_misjudgment": {
+      "issue": "masc#28976",
+      "repair_pr": "masc#28979",
+      "summary": "assertions consumed three lossy projections (windowed agent timeline, Quest Board text without goal links, stale RW06 evidence catalog); durable inspector rows record the successes"
+    },
+    "environment": {
+      "summary": "glm lane provider rate limit failed one parallel turn and left three turns unsettled (RW03/08/09/13 cascade); persistence-tier check assumes an isolated runtime but ran against the shared fleet (RW19); shared checkout pull race during the campaign"
+    },
+    "model_behavior": {
+      "issue": "masc#28977",
+      "summary": "builder-a dropped keeper_ide_annotate after an argument rejection without retrying; coordinator called keeper_compose_mission-snapshot twice in continuity-2 against an exactly-once instruction; builder-b's rejection-then-recovery worked"
+    }
+  },
+  "journey": [
+    {
+      "attempt": "r1",
+      "run_id": "e0-collab-20260818-1120",
+      "died": "fleet bootstrap — liveness predicate demanded agent.exists which the server never emits",
+      "repair": "masc#28972"
+    },
+    {
+      "attempt": "r2",
+      "run_id": "e0-collab-20260818-1157",
+      "died": "idle primary MCP session reaped at grace 300s; runner lacked the prescribed re-handshake",
+      "repair": "masc#28974"
+    },
+    {
+      "attempt": "r3",
+      "run_id": "e0-r3-20260818",
+      "died": "no tool-compositions.toml at the live config root — zero keeper_compose_* tools",
+      "repair": "fixture installed at <base-path>/.masc/config (hash-identical); preflight gap masc#28975"
+    },
+    {
+      "attempt": "r4",
+      "run_id": "e0-r4-20260818",
+      "died": null,
+      "note": "first full-ladder completion"
+    }
+  ],
+  "browser_proofs": {
+    "keeper-composition-inspector.png": {
+      "sha256": "3063c12a4d82200098efe99dd48f96473cc6a1eb470a7008e04e1fd00ee42faf"
+    },
+    "keeper-persistence-proof.png": {
+      "sha256": "6f26640051a7d1e1cce136122180523ffbd659bd53f7aeb7e6c1c80fe4ca1646"
+    },
+    "composition_measurement": {
+      "schema": "masc.keeper_composition_browser_evidence.v1",
+      "keeper": "rw-e0-r4-20260818-coord",
+      "nodes": [
+        "board",
+        "board-peer",
+        "clock",
+        "memory"
+      ],
+      "execution": "inline",
+      "dispositions": [
+        "completed",
+        "completed",
+        "completed",
+        "completed"
+      ]
+    }
+  },
+  "raw_source_paths_untracked": {
+    "root": "reports/e0-campaign-20260818-r4/",
+    "files": [
+      "bundle.json",
+      "assertions.json",
+      "observations/",
+      "turns/",
+      "raw/",
+      "browser/"
+    ],
+    "prior_attempts": [
+      "reports/e0-campaign-20260818/fatal.json",
+      "reports/e0-campaign-20260818-r2/fatal.json",
+      "reports/e0-campaign-20260818-r3/fatal.json"
+    ]
+  }
+}

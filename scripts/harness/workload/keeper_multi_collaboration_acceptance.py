@@ -52,7 +52,10 @@ COMPOSITION_FIXTURE = (
 )
 SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
 EXPECTED_ROLES = {"coordinator", "builder-a", "builder-b", "reviewer", "researcher"}
-TOOL_ALIASES = {"tool_write_file": {"tool_write_file", "Write"}}
+TOOL_ALIASES = {
+    "tool_write_file": {"tool_write_file", "Write"},
+    "tool_execute": {"tool_execute", "Execute"},
+}
 
 KNOWN_ASSERTIONS = {
     "all_keepers_live",
@@ -92,6 +95,10 @@ KNOWN_ASSERTIONS = {
     "composition_turn_context_observed",
     "composition_dashboard_browser_observed",
     "persistence_tiers_dashboard_projection_observed",
+    "poc_execution_proof_observed",
+    "poc_review_cites_execution",
+    "debate_restatement_faithful",
+    "debate_verdict_cites_rebuttal",
 }
 
 
@@ -519,12 +526,12 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
-    if not isinstance(missions, list) or len(missions) != 19:
-        raise AcceptanceError("mission catalog must contain exactly 19 missions")
+    if not isinstance(missions, list) or len(missions) != 21:
+        raise AcceptanceError("mission catalog must contain exactly 21 missions")
     ids = [mission.get("id") for mission in missions]
-    expected_ids = [f"RW{index:02d}" for index in range(1, 20)]
+    expected_ids = [f"RW{index:02d}" for index in range(1, 22)]
     if ids != expected_ids:
-        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW19")
+        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW21")
     roles = catalog.get("roles")
     if not isinstance(roles, list) or set(roles) != EXPECTED_ROLES:
         raise AcceptanceError("catalog must define the exact five collaboration roles")
@@ -733,6 +740,12 @@ class MissionRun:
         self.run_id = run_id
         self.slug = safe_slug(run_id, 16)
         self.marker = f"keeper-collab-{self.slug}"
+        # RW20/RW21 tokens. Deterministic per run so evaluators match them
+        # exactly; the debate tokens are handed only to their originator's
+        # prompt, so a responder can produce them only by reading the Board.
+        self.poc_output_token = f"POC_OUTPUT={self.marker}-executed"
+        self.debate_claim_token = f"{self.marker}-position-A"
+        self.debate_rebuttal_token = f"{self.marker}-counter-B"
         self.runtime_id = runtime_id
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
@@ -1204,6 +1217,86 @@ class MissionRun:
             ),
         )
 
+    def run_poc_delivery(self, post_id: str) -> None:
+        # RW20: the completion claim must be an execution log, not a file's
+        # existence. The requester posts the requirement, the builder writes
+        # AND runs the artifact so the expected output token lands in a
+        # durable Execute tool row, and the reviewer quotes that token back.
+        # The reviewer's prompt does not carry the token wording as a fait
+        # accompli claim — but the token itself is deterministic so the
+        # evaluator can match it exactly without semantic classification.
+        output_token = self.poc_output_token
+        self.run_turn(
+            "researcher",
+            "poc-request",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 POC_REQUEST={self.marker}-poc comment를 남기세요. "
+                f"요구 내용: 실행하면 정확히 '{output_token}' 한 줄을 출력하는 스크립트."
+            ),
+        )
+        self.run_turn(
+            "builder-a",
+            "poc-implement",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Write(tool_write_file)로 playground의 artifacts/{self.marker}-poc.sh에 "
+                f"정확히 '{output_token}' 한 줄을 출력하는 셸 스크립트를 쓰세요. "
+                "그 다음 Execute(tool_execute)로 그 스크립트를 실제로 실행해 출력을 확인하고, "
+                f"Board post {post_id}에 실행에서 얻은 출력 그대로 POC_EXECUTED=<출력의 = 뒤 값> "
+                "comment를 남기세요. 실행 없이 완료를 주장하지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "poc-review",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 POC_REQUEST와 POC_EXECUTED comment를 읽고, "
+                "실행 출력이 요구와 일치하는지 확인한 뒤 POC_REVIEW_CONFIRMS=<POC_EXECUTED의 값 그대로> "
+                "comment를 남기세요. 값을 새로 만들지 말고 board에서 읽은 값만 인용하세요."
+            ),
+        )
+
+    def run_debate(self, post_id: str) -> None:
+        # RW21: the restatement and citation tokens are deliberately absent
+        # from the responder prompts — the only way to produce them is to
+        # read the opposing comment on the Board, which is what the mission
+        # verifies (the same mechanism context_secret_recalled uses).
+        claim_token = self.debate_claim_token
+        rebuttal_token = self.debate_rebuttal_token
+        self.run_turn(
+            "builder-a",
+            "debate-claim",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 DEBATE_CLAIM={claim_token} comment를 남기고, "
+                "같은 comment에 '실패한 source는 즉시 재시도해야 한다'는 입장을 한 문장으로 쓰세요."
+            ),
+        )
+        self.run_turn(
+            "builder-b",
+            "debate-rebut",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 DEBATE_CLAIM comment를 찾아 읽으세요. "
+                "하나의 comment 안에 먼저 DEBATE_RESTATE=<읽은 DEBATE_CLAIM의 = 뒤 값 그대로>로 "
+                f"상대 주장을 재진술한 뒤, DEBATE_REBUTTAL={rebuttal_token}과 함께 "
+                "그 입장에 반대하는 구체적 근거 한 문장을 쓰세요. 재진술 값을 추측하지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "debate-verdict",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 DEBATE_CLAIM과 DEBATE_REBUTTAL comment를 모두 읽고, "
+                "어느 쪽이 더 설득력 있는지 한 문장으로 판정한 뒤 "
+                "DEBATE_VERDICT_CITES=<읽은 DEBATE_REBUTTAL의 = 뒤 값 그대로> comment를 남기세요. "
+                "인용 값을 추측하지 마세요."
+            ),
+        )
+
     def restart_and_recall(self, post_id: str) -> None:
         self.writer.write_json(
             "keeper-status/coordinator-before-restart.json",
@@ -1464,6 +1557,35 @@ class MissionRun:
                     if isinstance(run_id, str) and run_id:
                         runs.add((role, run_id))
             return runs
+
+        def successful_windowed_tool(role: str, label: str, tool_name: str) -> bool:
+            # A durable, non-composition tool row of the given name that
+            # succeeded inside the labeled turn's wall-clock window.
+            turn = self.turns.get(label)
+            if turn is None:
+                return False
+            accepted_names = TOOL_ALIASES.get(tool_name, {tool_name})
+            return any(
+                row.get("tool") in accepted_names
+                and row.get("success") is True
+                and not row.get("composition_tool")
+                for row in rows_for_turn(role, turn)
+            )
+
+        def windowed_execute_output_contains(
+            role: str, label: str, needle: str
+        ) -> bool:
+            turn = self.turns.get(label)
+            if turn is None:
+                return False
+            return any(
+                row.get("tool") in TOOL_ALIASES["tool_execute"]
+                and row.get("success") is True
+                and not row.get("composition_tool")
+                and isinstance(row.get("output"), str)
+                and needle in row["output"]
+                for row in rows_for_turn(role, turn)
+            )
 
         def composition_runs(
             composition_tool: str,
@@ -2091,6 +2213,46 @@ class MissionRun:
                 persistence_projection_passed,
                 persistence_projection_detail,
             ),
+            "poc_execution_proof_observed": (
+                successful_windowed_tool("builder-a", "poc-implement", "tool_write_file")
+                and windowed_execute_output_contains(
+                    "builder-a", "poc-implement", self.poc_output_token
+                )
+                and text_contains(board, f"POC_EXECUTED={self.marker}-executed"),
+                "builder-a wrote the artifact, a durable Execute row carries the "
+                "expected output token, and the Board claim quotes that execution",
+            ),
+            "poc_review_cites_execution": (
+                text_contains(board, f"POC_REVIEW_CONFIRMS={self.marker}-executed")
+                and successful_windowed_tool(
+                    "reviewer", "poc-review", "masc_board_comment"
+                ),
+                "reviewer's own comment quotes the executed output token read "
+                "from the Board",
+            ),
+            "debate_restatement_faithful": (
+                text_contains(
+                    board, f"DEBATE_RESTATE={self.debate_claim_token}"
+                )
+                and successful_windowed_tool(
+                    "builder-b", "debate-rebut", "masc_board_comment"
+                )
+                and text_contains(
+                    board, f"DEBATE_REBUTTAL={self.debate_rebuttal_token}"
+                ),
+                "builder-b restated the exact claim token (absent from its "
+                "prompt, readable only on the Board) before rebutting",
+            ),
+            "debate_verdict_cites_rebuttal": (
+                text_contains(
+                    board, f"DEBATE_VERDICT_CITES={self.debate_rebuttal_token}"
+                )
+                and successful_windowed_tool(
+                    "reviewer", "debate-verdict", "masc_board_comment"
+                ),
+                "reviewer's verdict quotes the rebuttal token (absent from its "
+                "prompt, readable only on the Board)",
+            ),
         }
         malformed = [
             name
@@ -2111,6 +2273,8 @@ class MissionRun:
         self.run_parallel_wave(post_id)
         self.run_contention(post_id)
         self.run_failure_recovery(post_id)
+        self.run_poc_delivery(post_id)
+        self.run_debate(post_id)
         self.run_continuity_chain(post_id)
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()

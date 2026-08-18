@@ -1,7 +1,13 @@
-(** Materialize validated catalog entries as first-class Agent-Core tools. *)
+(** Materialize validated catalog entries as first-class Agent-Core tools,
+    plus the always-present [keeper_plan_execute] tool that runs one
+    model-defined inline plan through the same executor. *)
+
+(** Model-visible name of the model-defined plan tool. Registered even when no
+    composition catalog exists. *)
+val plan_execute_tool_name : string
 
 val make_tools
-  :  catalog:Keeper_tool_composition_catalog.t
+  :  ?catalog:Keeper_tool_composition_catalog.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:

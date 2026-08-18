@@ -30,6 +30,7 @@ let metric_goal_attainment_measured = "masc_goal_attainment_measured"
 let metric_sse_reconnects = Otel_metric_store_core.declare_counter "masc_sse_reconnects_total"
 let metric_sse_idle_evictions = Otel_metric_store_core.declare_counter "masc_sse_idle_evictions_total"
 let metric_sse_rejects = Otel_metric_store_core.declare_counter "masc_sse_rejects_total"
+let metric_mcp_auth_rejects = Otel_metric_store_core.declare_counter "masc_mcp_auth_rejects_total"
 
 let metric_provider_prefix_cache_creation_tokens =
   Otel_metric_store_core.declare_counter "masc_provider_prefix_cache_creation_tokens_total"

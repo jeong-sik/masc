@@ -307,9 +307,31 @@ let test_docker_playground_path_also_resolves () =
       (Agent_observation.Code_address.path address))
 ;;
 
-(* #28968 / RFC-0378 §5.1 — a write inside a git worktree checkout
-   must fold to the same Code_address as the main-tree write, with the
-   worktree directory carried as [checkout] projection metadata. *)
+(* #28968 / RFC-0378 §5.1 — a write inside a linked git worktree must
+   fold to the same Code_address as the main-tree write, with the
+   measured checkout root carried as [checkout] projection metadata.
+   The mechanism is git's own answer (toplevel + common dir), so the
+   fixtures build real repositories: [git init] + [git worktree add],
+   exactly like test_repo_git.ml. Temp paths are realpath-ed first —
+   git prints resolved paths and macOS tempdirs live behind
+   /var -> /private/var (the #28932 symlink trap). *)
+
+let run_or_fail ~cwd argv =
+  let cmd = String.concat " " (List.map Filename.quote argv) in
+  let full =
+    Printf.sprintf "cd %s && %s >/dev/null 2>&1" (Filename.quote cwd) cmd
+  in
+  if Sys.command full <> 0 then failf "fixture command failed: %s" cmd
+;;
+
+let init_git_repo path =
+  mkdir_p path;
+  run_or_fail ~cwd:path [ "git"; "init"; "-b"; "main" ];
+  run_or_fail ~cwd:path [ "git"; "config"; "user.email"; "test@example.com" ];
+  run_or_fail ~cwd:path [ "git"; "config"; "user.name"; "Test User" ];
+  run_or_fail ~cwd:path
+    [ "git"; "commit"; "--allow-empty"; "-m"; "initial" ]
+;;
 
 let register_repo ~base_dir ~id ~local_path =
   let repo =
@@ -338,22 +360,18 @@ let addressed_record_or_fail label = function
     failf "%s: expected Addressed, got %s" label (attribution_to_string got)
 ;;
 
-(* Mark [dir] as a git worktree checkout the way git does: a [.git]
-   marker file at the checkout root. *)
-let mark_worktree dir =
-  mkdir_p dir;
-  let oc = open_out (Filename.concat dir ".git") in
-  output_string oc "gitdir: elsewhere\n";
-  close_out oc
+let with_real_base_dir f =
+  with_temp_base_dir (fun base_dir -> f (Unix.realpath base_dir))
 ;;
 
 let test_worktree_checkout_folds_to_main_tree_address () =
-  with_temp_base_dir (fun base_dir ->
+  with_real_base_dir (fun base_dir ->
     let repo_root = Filename.concat base_dir "workspace/repo" in
-    mkdir_p repo_root;
+    init_git_repo repo_root;
     touch (Filename.concat repo_root "lib/foo.ml");
+    run_or_fail ~cwd:repo_root
+      [ "git"; "worktree"; "add"; ".worktrees/task-9" ];
     let worktree_dir = Filename.concat repo_root ".worktrees/task-9" in
-    mark_worktree worktree_dir;
     touch (Filename.concat worktree_dir "lib/foo.ml");
     register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
     let main_record =
@@ -382,8 +400,8 @@ let test_worktree_checkout_folds_to_main_tree_address () =
       (Agent_observation.Code_address.codebase worktree_record.Agent_observation.address);
     check
       (option string)
-      "worktree write carries its checkout directory"
-      (Some ".worktrees/task-9")
+      "worktree write carries the measured checkout root"
+      (Some (Unix.realpath worktree_dir))
       worktree_record.Agent_observation.checkout;
     check
       (option string)
@@ -392,56 +410,91 @@ let test_worktree_checkout_folds_to_main_tree_address () =
       main_record.Agent_observation.checkout)
 ;;
 
-let test_multi_segment_worktree_dir_folds_via_git_marker () =
-  with_temp_base_dir (fun base_dir ->
+let test_out_of_convention_worktree_folds_too () =
+  with_real_base_dir (fun base_dir ->
     let repo_root = Filename.concat base_dir "workspace/repo" in
-    mkdir_p repo_root;
-    let worktree_dir = Filename.concat repo_root ".worktrees/feature/pk-1" in
-    mark_worktree worktree_dir;
+    init_git_repo repo_root;
+    (* No [.worktrees/] convention anywhere: git, not a path shape,
+       decides what is a checkout (RFC-keeper-workspace-root-only
+       §3.2). *)
+    run_or_fail ~cwd:repo_root [ "git"; "worktree"; "add"; "tmp/anywhere" ];
+    let worktree_dir = Filename.concat repo_root "tmp/anywhere" in
     touch (Filename.concat worktree_dir "lib/foo.ml");
     register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
     let record =
       addressed_record_or_fail
-        "multi-segment worktree"
+        "out-of-convention worktree"
         (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
            ~base_dir
            ~file_path:(Filename.concat worktree_dir "lib/foo.ml"))
     in
     check
       string
-      "branch-named worktree folds past every marked segment"
+      "convention-free worktree folds to the repo-relative path"
       "lib/foo.ml"
       (Agent_observation.Code_address.path record.Agent_observation.address);
     check
       (option string)
-      "checkout keeps the full worktree directory"
-      (Some ".worktrees/feature/pk-1")
+      "checkout carries the measured root"
+      (Some (Unix.realpath worktree_dir))
       record.Agent_observation.checkout)
 ;;
 
-let test_unmarked_worktrees_dir_stays_literal () =
-  with_temp_base_dir (fun base_dir ->
+let test_nested_foreign_clone_does_not_fold () =
+  with_real_base_dir (fun base_dir ->
     let repo_root = Filename.concat base_dir "workspace/repo" in
-    mkdir_p repo_root;
-    (* A .worktrees/ subtree with no .git marker anywhere is not a
-       checkout — the literal address is the correct one. *)
+    init_git_repo repo_root;
+    (* A different repository nested inside the matched tree: its
+       common dir is its own [.git], not the matched repo's, so the
+       fold must not fire and today's attribution stands. *)
+    let foreign = Filename.concat repo_root "vendor/other" in
+    init_git_repo foreign;
+    touch (Filename.concat foreign "lib/foo.ml");
+    register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
+    let record =
+      addressed_record_or_fail
+        "nested foreign clone"
+        (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
+           ~base_dir
+           ~file_path:(Filename.concat foreign "lib/foo.ml"))
+    in
+    check
+      string
+      "foreign clone keeps its literal path under the matched repo"
+      "vendor/other/lib/foo.ml"
+      (Agent_observation.Code_address.path record.Agent_observation.address);
+    check
+      (option string)
+      "foreign clone claims no checkout"
+      None
+      record.Agent_observation.checkout)
+;;
+
+let test_plain_subdir_stays_literal () =
+  with_real_base_dir (fun base_dir ->
+    let repo_root = Filename.concat base_dir "workspace/repo" in
+    init_git_repo repo_root;
+    (* A plain directory that merely LOOKS like the worktree
+       convention: git says it is part of the main checkout, so the
+       literal address is the correct one. *)
     touch (Filename.concat repo_root ".worktrees/notes/lib/foo.ml");
     register_repo ~base_dir ~id:"repo" ~local_path:repo_root;
     let record =
       addressed_record_or_fail
-        "unmarked .worktrees"
+        "plain subdir"
         (Masc.Keeper_tool_filesystem_runtime.resolve_write_attribution
            ~base_dir
-           ~file_path:(Filename.concat repo_root ".worktrees/notes/lib/foo.ml"))
+           ~file_path:
+             (Filename.concat repo_root ".worktrees/notes/lib/foo.ml"))
     in
     check
       string
-      "no marker: literal path is kept"
+      "plain subdir keeps its literal path"
       ".worktrees/notes/lib/foo.ml"
       (Agent_observation.Code_address.path record.Agent_observation.address);
     check
       (option string)
-      "no marker: no checkout claimed"
+      "plain subdir claims no checkout"
       None
       record.Agent_observation.checkout)
 ;;
@@ -475,13 +528,17 @@ let () =
             `Quick
             test_worktree_checkout_folds_to_main_tree_address
         ; test_case
-            "multi-segment worktree dir folds via git marker (#28968)"
+            "out-of-convention worktree folds too (#28968)"
             `Quick
-            test_multi_segment_worktree_dir_folds_via_git_marker
+            test_out_of_convention_worktree_folds_too
         ; test_case
-            "unmarked .worktrees dir keeps its literal address (#28968)"
+            "nested foreign clone does not fold (#28968)"
             `Quick
-            test_unmarked_worktrees_dir_stays_literal
+            test_nested_foreign_clone_does_not_fold
+        ; test_case
+            "plain look-alike subdir keeps its literal address (#28968)"
+            `Quick
+            test_plain_subdir_stays_literal
         ] )
     ]
 ;;

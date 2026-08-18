@@ -10,7 +10,6 @@ import { lastEvent } from '../sse'
 import { formatTimeHms } from '../lib/format-time'
 import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
-import { asRecord, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, durationColor, prettyJson } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
@@ -73,51 +72,160 @@ function tryPrettyJson(s: string): string | null {
   return prettyJson(s)
 }
 
-function parseInputRecord(input: string): Record<string, unknown> | null {
-  try {
-    return asRecord(JSON.parse(input))
-  } catch {
-    return null
-  }
-}
+// Route links derive from the recorded row (action_radius target plus the
+// identity fields the writer persisted) instead of re-deriving them from the
+// tool input here: the server parses the redacted input once at record time
+// (keeper_runtime_contract.action_radius_json), so every consumer reads the
+// same recorded value.
+//
+// Execute rows record their cwd as target_path with target_kind "path"
+// (masc#29013) — a directory, not a file — so they are held back from Code
+// link promotion by exact identity (recorded descriptor id, with the tool
+// name covering rows that carry no route_evidence) until the writer records
+// a typed file/cwd distinction.
+const EXECUTE_DESCRIPTOR_ID = 'agent.execute'
+const EXECUTE_TOOL_NAME = 'Execute'
 
-function mergeToolInputContext(
-  context: MutableRouteContext,
-  input: unknown,
-  depth = 0,
-): void {
-  if (depth > 4) return
-  if (typeof input === 'string') {
-    mergeToolInputContext(context, parseInputRecord(input), depth + 1)
-    return
-  }
-  const record = asRecord(input)
-  if (!record) return
-  const failureEnvelope = asRecord(record.failure_envelope)
-  mergeRouteRecord(context, asRecord(record.context))
-  mergeRouteRecord(context, asRecord(record.evidence_ref))
-  mergeRouteRecord(context, asRecord(failureEnvelope?.evidence_ref))
-  mergeRouteRecord(context, asRecord(record.tool_args))
-  mergeToolInputContext(context, record.input, depth + 1)
-  mergeRouteRecord(context, record, true)
+function recordsCwdAsTarget(entry: ToolCallEntry): boolean {
+  return entry.route_evidence?.descriptor_id === EXECUTE_DESCRIPTOR_ID
+    || entry.tool === EXECUTE_TOOL_NAME
 }
 
 function toolCallRouteLinks(entry: ToolCallEntry): ReadonlyArray<IdeContextRouteLink> {
-  const context: MutableRouteContext = {}
-  mergeToolInputContext(context, entry.input)
-  if (!hasRouteContext(context)) return []
+  const radius = entry.action_radius
+  const filePath = radius?.target_kind === 'path' && !recordsCwdAsTarget(entry)
+    ? radius.target_path ?? radius.observed_paths?.[0]
+    : undefined
+  const goalId = entry.goal_ids?.[0]
+  const taskId = entry.task_id
+  const sessionId = entry.session_id
+  if (filePath === undefined && goalId === undefined && taskId === undefined && sessionId === undefined) {
+    return []
+  }
   const links = routeLinksForContext({
-    ...context,
+    filePath,
+    goalId,
+    taskId,
+    sessionId,
     surface: 'Tool',
     label: entry.tool,
     sourceId: `tool:${entry.keeper}:${entry.ts}:${entry.tool}`,
     keeperId: entry.keeper,
-    telemetry: context.logId !== undefined
-      || context.sessionId !== undefined
-      || context.operationId !== undefined
-      || context.workerRunId !== undefined,
+    telemetry: sessionId !== undefined,
   })
   return links.some(link => link.label !== 'Keeper') ? links : []
+}
+
+// ── Composition tree grouping ───────────────────────────
+
+export type ToolCallTreeNode = {
+  entry: ToolCallEntry
+  children: ToolCallEntry[]
+}
+
+// Nest composition children (rows carrying a composition_run_id) under the
+// composite parent row they were dispatched from. The join is typed-field
+// equality on recorded identity: parent.tool === child.composition_tool and
+// parent.tool_use_id === child.parent_tool_use_id, both non-blank (provider
+// ids may be blank or repeated).
+//
+// Recorded write order differs by execution mode: inline composites write
+// the parent row after the children complete (parent ts >= every child ts),
+// async composites write it at dispatch (parent ts < every child ts) — both
+// observed in .masc/tool_calls 2026-08-18. When several parent rows share
+// the join key, the recorded composition_execution of the children picks the
+// shape to try first: an all-async run attaches to the candidate nearest
+// at-or-before its oldest child, any other run to the candidate nearest
+// at-or-after its newest child, with the other shape as fallback. A
+// candidate set strictly inside the child ts window matches neither
+// recorded shape and is left unattributed rather than guessed. Children
+// whose parent row is outside the given list stay top-level, so a filtered
+// window never hides recorded calls.
+export function groupToolCallTree(entries: readonly ToolCallEntry[]): ToolCallTreeNode[] {
+  const parentKey = (tool: string, toolUseId: string): string => `${tool}\u0000${toolUseId}`
+  const parentsByKey = new Map<string, ToolCallEntry[]>()
+  for (const entry of entries) {
+    if (entry.composition_run_id !== undefined) continue
+    if (entry.tool_use_id === undefined || entry.tool_use_id === '') continue
+    const key = parentKey(entry.tool, entry.tool_use_id)
+    const bucket = parentsByKey.get(key)
+    if (bucket === undefined) {
+      parentsByKey.set(key, [entry])
+    } else {
+      bucket.push(entry)
+    }
+  }
+
+  type RunGroup = {
+    key: string
+    children: ToolCallEntry[]
+    newestChildTs: number
+    oldestChildTs: number
+  }
+  const groupsByRun = new Map<string, RunGroup>()
+  for (const entry of entries) {
+    if (entry.composition_run_id === undefined) continue
+    if (entry.composition_tool === undefined) continue
+    if (entry.parent_tool_use_id === undefined || entry.parent_tool_use_id === '') continue
+    const key = parentKey(entry.composition_tool, entry.parent_tool_use_id)
+    const group = groupsByRun.get(entry.composition_run_id)
+    if (group === undefined) {
+      groupsByRun.set(entry.composition_run_id, {
+        key,
+        children: [entry],
+        newestChildTs: entry.ts,
+        oldestChildTs: entry.ts,
+      })
+    } else {
+      group.children.push(entry)
+      group.newestChildTs = Math.max(group.newestChildTs, entry.ts)
+      group.oldestChildTs = Math.min(group.oldestChildTs, entry.ts)
+    }
+  }
+
+  const childrenByParent = new Map<ToolCallEntry, ToolCallEntry[]>()
+  const nestedChildren = new Set<ToolCallEntry>()
+  for (const group of groupsByRun.values()) {
+    const candidates = parentsByKey.get(group.key)
+    if (candidates === undefined) continue
+    // Inline shape: parent written after the children completed.
+    const completionParent = (): ToolCallEntry | null => {
+      let found: ToolCallEntry | null = null
+      for (const candidate of candidates) {
+        if (candidate.ts < group.newestChildTs) continue
+        if (found === null || candidate.ts < found.ts) found = candidate
+      }
+      return found
+    }
+    // Async shape: parent written at dispatch, before every child.
+    const dispatchParent = (): ToolCallEntry | null => {
+      let found: ToolCallEntry | null = null
+      for (const candidate of candidates) {
+        if (candidate.ts > group.oldestChildTs) continue
+        if (found === null || candidate.ts > found.ts) found = candidate
+      }
+      return found
+    }
+    const allAsync = group.children.every(child => child.composition_execution === 'async')
+    const parent = allAsync
+      ? dispatchParent() ?? completionParent()
+      : completionParent() ?? dispatchParent()
+    if (parent === null) continue
+    const existing = childrenByParent.get(parent)
+    if (existing === undefined) {
+      childrenByParent.set(parent, [...group.children])
+    } else {
+      existing.push(...group.children)
+    }
+    for (const child of group.children) nestedChildren.add(child)
+  }
+
+  const nodes: ToolCallTreeNode[] = []
+  for (const entry of entries) {
+    if (nestedChildren.has(entry)) continue
+    nodes.push({ entry, children: childrenByParent.get(entry) ?? [] })
+  }
+  return nodes
 }
 
 type ToolCallDossierCard = {
@@ -500,6 +608,109 @@ function ToolCallOutputBlock({ entry }: { entry: ToolCallEntry }) {
   `
 }
 
+// ── Recorded execution evidence (route / contract / radius) ──
+
+type EvidencePair = readonly [string, string | undefined]
+
+function EvidenceBlock({ title, pairs }: { title: string; pairs: ReadonlyArray<EvidencePair> }) {
+  const rows = pairs.filter((pair): pair is readonly [string, string] => pair[1] !== undefined)
+  if (rows.length === 0) return null
+  return html`
+    <details class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5">
+      <summary class="cursor-pointer text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${title}</summary>
+      <div class="mt-1 space-y-0.5">
+        ${rows.map(([label, value]) => html`
+          <div key=${label} class="flex gap-2 text-3xs">
+            <span class="w-28 flex-shrink-0 text-[var(--color-fg-muted)]">${label}</span>
+            <span class="min-w-0 break-all font-mono text-[var(--color-fg-secondary)]">${value}</span>
+          </div>
+        `)}
+      </div>
+    </details>
+  `
+}
+
+function formatFlag(value: boolean | undefined): string | undefined {
+  if (value === undefined) return undefined
+  return value ? 'true' : 'false'
+}
+
+function joinedOrAbsent(values: readonly string[] | undefined): string | undefined {
+  return values !== undefined && values.length > 0 ? values.join(' · ') : undefined
+}
+
+function ToolCallEvidenceSection({ entry }: { entry: ToolCallEntry }) {
+  const route = entry.route_evidence
+  const contract = entry.runtime_contract
+  const radius = entry.action_radius
+  if (route === undefined && contract === undefined && radius === undefined) return null
+  const receiptEntries = route?.receipt_labels !== undefined ? Object.entries(route.receipt_labels) : []
+  const receiptLabels = receiptEntries.length > 0
+    ? receiptEntries.map(([key, value]) => `${key}=${value}`).join(' ')
+    : undefined
+  const pathResolution = contract?.path_resolution
+  const pathResolutionFlags = pathResolution === undefined
+    ? undefined
+    : [
+        pathResolution.read_implicit_cwd !== undefined
+          ? `read_implicit_cwd=${pathResolution.read_implicit_cwd}`
+          : null,
+        pathResolution.read_explicit_cwd_supported !== undefined
+          ? `read_explicit_cwd_supported=${pathResolution.read_explicit_cwd_supported}`
+          : null,
+      ].filter((part): part is string => part !== null).join(' ') || undefined
+  return html`
+    <div class="space-y-1 v2-monitoring-panel" data-testid="tool-call-evidence">
+      <${EvidenceBlock}
+        title="route evidence"
+        pairs=${[
+          ['descriptor', route?.descriptor_id],
+          ['capability', route?.capability_id],
+          ['executor', route?.executor],
+          ['backend', route?.backend],
+          ['runtime handler', route?.runtime_handler],
+          ['readonly', formatFlag(route?.readonly)],
+          ['retryable', formatFlag(route?.retryable)],
+          ['status', route?.status],
+          ['receipt labels', receiptLabels],
+        ]}
+      />
+      <${EvidenceBlock}
+        title="runtime contract"
+        pairs=${[
+          ['agent', contract?.agent_name],
+          ['generation', contract?.generation !== undefined ? String(contract.generation) : undefined],
+          ['sandbox root', contract?.sandbox_root],
+          ['allowed paths', joinedOrAbsent(contract?.allowed_paths)],
+          ['network mode', contract?.network_mode],
+          ['runtime profile', contract?.runtime_profile],
+          ['path resolution', pathResolutionFlags],
+        ]}
+      />
+      <${EvidenceBlock}
+        title="action radius"
+        pairs=${[
+          ['action key', radius?.action_key],
+          ['target kind', radius?.target_kind],
+          ['target path', radius?.target_path],
+          ['observed paths', joinedOrAbsent(radius?.observed_paths)],
+          ['error', radius?.error],
+        ]}
+      />
+    </div>
+  `
+}
+
+function invocationLabel(entry: ToolCallEntry): string | null {
+  const parts = [
+    entry.thinking_enabled !== undefined ? `thinking ${entry.thinking_enabled ? 'on' : 'off'}` : null,
+    entry.thinking_budget !== undefined ? `budget ${entry.thinking_budget}` : null,
+    entry.tool_choice !== undefined ? `tool_choice ${entry.tool_choice}` : null,
+    entry.prompt_fingerprint !== undefined ? `prompt ${entry.prompt_fingerprint.slice(0, 12)}` : null,
+  ].filter((part): part is string => part !== null)
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const expanded = useSignal(false)
   const cat = toolCategory(entry.tool)
@@ -552,6 +763,11 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           ${entry.model ? html`
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}
+          ${invocationLabel(entry) !== null ? html`
+            <div class="text-3xs text-[var(--color-fg-muted)]">
+              invocation: <span class="text-[var(--color-fg-secondary)] font-mono" title=${entry.prompt_fingerprint}>${invocationLabel(entry)}</span>
+            </div>
+          ` : null}
           <div class="text-3xs text-[var(--color-fg-muted)]">
             occurrence: <span class="text-[var(--color-fg-secondary)] font-mono">${entryScopeLabel(entry)}</span>
           </div>
@@ -577,6 +793,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
               </div>
             </div>
           ` : null}
+          <${ToolCallEvidenceSection} entry=${entry} />
           <${CopyableToolCallBlock}
             title="입력"
             value=${formattedInput}
@@ -742,7 +959,21 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           <span class="w-5 text-center">OK</span>
           <span class="w-4"></span>
         </div>
-        ${sorted.map((entry: ToolCallEntry) => html`<${ToolCallRow} key=${`${entry.ts}-${entry.keeper}-${entry.tool}`} entry=${entry} />`)}
+        ${groupToolCallTree(sorted).map((node: ToolCallTreeNode) => html`
+          <div key=${`${node.entry.ts}-${node.entry.keeper}-${node.entry.tool}`}>
+            <${ToolCallRow} entry=${node.entry} />
+            ${node.children.length > 0 ? html`
+              <div
+                class="ml-4 border-l border-[var(--color-accent-border)] v2-monitoring-panel"
+                data-composition-children=${node.entry.tool_use_id}
+              >
+                ${node.children.map((child: ToolCallEntry) => html`
+                  <${ToolCallRow} key=${`${child.ts}-${child.keeper}-${child.tool}-${child.composition_node_id ?? ''}`} entry=${child} />
+                `)}
+              </div>
+            ` : null}
+          </div>
+        `)}
       </div>
     </div>
   `

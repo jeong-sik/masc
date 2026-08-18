@@ -489,6 +489,32 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
+(* Quest Board rendering surfaces a task's goal link from the RFC-0267
+   goal_task_links side registry (the task record itself carries no goal_id). *)
+let () =
+  test "dispatch_status_surfaces_task_goal_link" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    ignore
+      (Workspace.add_task ctx.config ~title:"Goal-linked task" ~priority:2 ~description:"");
+    (match
+       Workspace_goal_index.link_task_to_goal_result
+         ctx.config
+         ~goal_id:"g-1"
+         ~task_id:"task-001"
+     with
+     | Ok () -> ()
+     | Error msg -> failwith ("goal link failed: " ^ msg));
+    let args = `Assoc [] in
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      let msg = status_message result in
+      assert_contains msg "Goal-linked task";
+      assert_contains msg "goal:g-1"
+    | None -> failwith "dispatch returned None")
+;;
+
 let () =
   test "dispatch_status_surfaces_awaiting_verification_assignment" (fun () ->
     (

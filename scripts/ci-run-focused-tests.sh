@@ -326,6 +326,7 @@ normal_targets=(
   @test/runtest-test_board_karma_ledger
   @test/runtest-test_board_vote_persistence
   @test/runtest-test_log_ring_bounds
+  @test/runtest-test_board_comment_post_write_ahead
   @test/runtest-test_keeper_event_queue
   @test/runtest-test_keeper_event_queue_owner_lock
   @test/runtest-test_keeper_event_queue_persist_poison

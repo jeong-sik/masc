@@ -334,6 +334,7 @@ function entryScopeLabel(entry: ToolCallEntry): string {
       ? `tool_use_id ${entry.tool_use_id === '' ? '(blank)' : entry.tool_use_id}`
       : null,
     typeof entry.keeper_turn_id === 'number' ? `keeper ${entry.keeper_turn_id}` : null,
+    entry.turn_kind ? `turn ${entry.turn_kind}` : null,
     entry.lane ? `lane ${entry.lane}` : null,
     entry.task_id ? `task ${entry.task_id}` : null,
     goalIds.length > 0 ? `goal ${goalIds.join(',')}` : null,

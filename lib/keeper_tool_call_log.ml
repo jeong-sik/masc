@@ -423,6 +423,7 @@ let log_call
       ~(duration_ms : float)
       ?(model : string = "")
       ?agent_name
+      ?turn_kind
       ?lane
       ?tool_choice
       ?thinking_enabled
@@ -501,6 +502,16 @@ let log_call
       let lane_field =
         match lane with
         | Some value -> [ "lane", `String value ]
+        | None -> []
+      in
+      (* Names the turn that made the call: a submitted operation's turn or
+         the keeper's own autonomous cycle. Both produce identical rows
+         otherwise, so a reader joining calls to a submission had to guess
+         from timestamps (#28977). *)
+      let turn_kind_field =
+        match turn_kind with
+        | Some value ->
+          [ "turn_kind", `String (Turn_record.turn_kind_to_string value) ]
         | None -> []
       in
       let tool_choice_field =
@@ -691,6 +702,7 @@ let log_call
            @ route_evidence_field
            @ model_field
            @ runtime_profile_field
+           @ turn_kind_field
            @ lane_field
            @ tool_choice_field
            @ thinking_enabled_field

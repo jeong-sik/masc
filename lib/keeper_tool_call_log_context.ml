@@ -7,6 +7,7 @@
 
 type turn_context =
   { agent_name : string option
+  ; turn_kind : Turn_record.turn_kind option
   ; lane : string option
   ; tool_choice : string option
   ; thinking_enabled : bool option
@@ -28,6 +29,7 @@ type turn_context =
 
 let empty_turn_context =
   { agent_name = None
+  ; turn_kind = None
   ; lane = None
   ; tool_choice = None
   ; thinking_enabled = None
@@ -55,6 +57,7 @@ let create_cell () : cell = ref empty_turn_context
 let set_turn_context
       ~(cell : cell)
       ?agent_name
+      ?turn_kind
       ?lane
       ?tool_choice
       ?thinking_enabled
@@ -76,6 +79,7 @@ let set_turn_context
   =
   cell
   := { agent_name
+     ; turn_kind
      ; lane
      ; tool_choice
      ; thinking_enabled

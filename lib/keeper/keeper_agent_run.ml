@@ -575,6 +575,7 @@ let run_turn
       ~start_turn_count
       ~generation
       ~keeper_turn_id:manifest_keeper_turn_id
+      ~turn_kind
       ~runtime_id
       ~is_retry
       ~config_root

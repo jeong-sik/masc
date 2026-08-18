@@ -28,7 +28,7 @@
   },
   "live_cross_checks": {
     "github_credential": {
-      "source": "~/.masc/tool_calls/2026-08/{18,19}.jsonl",
+      "source": "<base-path>/.masc/tool_calls/2026-08/{18,19}.jsonl",
       "keeper_git_executions": 2,
       "keeper_gh_executions": 6,
       "successes": 8,

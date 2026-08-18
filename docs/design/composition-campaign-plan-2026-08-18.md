@@ -27,7 +27,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 
 | 갭 | 심각도 | 액션 | 케이스 |
 |---|---|---|---|
-| 합성이 정적·무인자 — 모델 입력 스키마가 빈 closed object (`keeper_tool_composition_surface.ml:4-11`) | HIGH | 턴 타임 플랜 정의/파라미터화 경로 개설 | A1 |
+| 합성 실행 도구가 정적·무인자 — 모델 입력 스키마가 빈 closed object (`keeper_tool_composition_surface.ml:4-11`; status/cancel 제어 도구는 request_id 인자를 받으므로 해당 없음) | HIGH | 턴 타임 플랜 정의/파라미터화 경로 개설 | A1 |
 | composable 출력 3개뿐 (Execute·time_now·board_stats, `keeper_tool_descriptor.ml:742,1359,1656`) — 나머지 Opaque라 체인 불가 | HIGH | 출력 스키마 커버리지 전면 확대 | A2 |
 | Concurrent 선언 2개뿐 (기본 Serial `:531`) — 병렬이 사실상 공집합 | HIGH | readonly 서술자 Concurrent 승격 | A3 |
 | Tool Group은 표시 메타데이터일 뿐 실행 문법에 없음 (`keeper_tool_plan.mli:1-4`) | MED | A1 플랜 경로에 흡수 | A1·A4 |
@@ -51,7 +51,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 |---|---|---|---|
 | sangsu 실효 런타임이 운영 의도(deepseek)와 모순 — shadow lane 첫 후보가 glm이라 glm에서 turning (22:01 로그 실측) | MED | lane 정의 의도 정렬 | C1 |
 | llama_cpp :9010 다운 — head로 둔 keeper 2개가 매 턴 조용히 failover (latency 684s 기록) | MED | 재기동 또는 lane 제거 | C1 |
-| wire-capture 256MB 일일 상한 도달로 레코드 드롭 진행 중 (18:35 boot 로그 반복 WARN) | MED | 드롭 대신 파일 회전 | C2 |
+| wire-capture 일일 상한 도달로 레코드 드롭 진행 중 (18:35 boot 로그 반복 WARN). 현재 256MiB는 env 오버라이드 값, 코드 기본은 64MiB (`env_config_keeper.ml:85`) — 수리 시 이 SSOT 기준 | MED | 드롭 대신 파일 회전 | C2 |
 | 검증 리뷰 retryable=false 종결 시 영구 정지 — 표면이 registry 행뿐 (`verification_run_registry.mli:14-24`) | MED | 정지 리뷰 board 표면 + 재제출 경로 | C3 |
 | 토큰 추정 String.length/4+4 (CJK 과소), proactive 유사도 word Jaccard (spec §15 자인 부채) | MED | provider를 환산 oracle로 | C3 |
 | Memory OS 잠금 경로 `.lock` 이중 append — `*.lock.lock` (`keeper_memory_os_current.ml:539,550`) | LOW | lock_path 일원화 | C3 |
@@ -62,7 +62,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | 갭 | 심각도 | 액션 | 케이스 |
 |---|---|---|---|
 | 클라이언트 디코더가 기록 필드 대량 폐기 — runtime_contract·action_radius·route_evidence·thinking 설정·prompt_fingerprint (`dashboard-keeper-tool-calls.ts:95-143`). 서버는 그대로 서빙 | HIGH | 디코더 복원 | A5 |
-| 합성 run의 시각 중첩 없음 — occurrence 텍스트 한 줄 | MED | 합성 트리 렌더 (A1 동반 필수) | A5 |
+| 합성 run의 시각 중첩 없음 — occurrence 텍스트 한 줄 | MED | 합성 트리 렌더 (W1 PR-3에서 선행 — A1 출하 전에 관측이 준비되어야 함) | A5 |
 | agent-core-events(당일 tool_called/completed 각 4,266건 + turn_ready 로스터)에 대시보드 리더 전무 | MED | Acting 표면 신설 | A5 |
 | raw trace 뷰어 없음 — turn record의 ref가 텍스트 라벨로만 렌더 (`keeper-turn-inspector.ts:988`) | MED | ref → 열람 뷰어 연결 | A5 |
 | 자율 턴 thinking 사후 재구성 불가 (trajectory는 char_count만 — 설계 의도이나 runaway 포렌식 차단) | MED | 보존 정책 재결정 | A5 결정 |
@@ -89,9 +89,9 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 3. code-as-action 레인 — registry에서 typed binding 기계 생성 + isolate 실행 (CodeAct·Code Mode·Anthropic PTC). 천장 최고이나 샌드박스 경계와 하네스 선행 필요. A1-2 부족이 측정으로 확인된 뒤.
 
 **A2. composable 출력 3 → 전면** (HIGH)
-1. read-only 핵심 15~20개 수작업 선언 — 즉시 착수 가능, 커버리지가 손 속도에 묶임.
-2. → **인코더 기계 유도 codemod** — 기존 typed encoder에서 closed-subset 스키마 자동 파생, 파생 불가만 명시적 Opaque. 전수 커버리지 + drift 원천 차단.
-3. producer 계약화 — 도구 반환 자체를 typed value로. 가장 근본이나 전 반환 경로 대상, A2-2 후 점진 전환.
+1. → **read-only 핵심 수작업 선언 (1차)** — 실제 출력 구성 코드와 대조 검증한 수기 스키마. 구조화 출력(success_data) 도구 5곳이 최우선 후보.
+2. 인코더 기계 유도 codemod — **반증됨** (#29007 적대적 리뷰): 파생 원천이 될 typed encoder 층이 존재하지 않는다. 기존 composable 3개도 수기 스키마이고 출력 경로는 success(평문 문자열) 29곳 vs success_data(구조화) 5곳. encoder 층이 A2-3으로 생긴 뒤에만 재검토.
+3. **producer 계약화 (근본, 2차)** — 도구 반환을 typed value로 계약화하고 스키마는 타입에서 유도. 전수 커버리지로 가는 실경로. A2-1 이후 점진 전환.
 
 **A3. Concurrent 2 → readonly 전면** (HIGH)
 1. → **readonly 서술자 일괄 승격** — 핸들러 동시성 안전성 감사 후 `ordinary_execution_mode:Concurrent`. 독립 read-only 병렬·부작용 직렬 원칙(Anthropic parallel tool use와 동일).
@@ -150,7 +150,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 
 | Wave | PR | 내용 | 의존 |
 |---|---|---|---|
-| W1 | PR-1 | A2: read-only 핵심 서술자 Json_output 부여 + 검증 테스트 | — |
+| W1 | PR-1 | A2-1: read-only 핵심 서술자 Json_output 수기 부여 + 검증 테스트 | — |
 | W1 | PR-2 | A3: readonly 서술자 Concurrent 승격 + 승격 심사 기준 | PR-1 (Stacked) |
 | W1 | PR-3 | A5-1: 대시보드 디코더 복원 + 합성 트리 렌더 | — |
 | W1 | PR-4 | B3: RW17 무귀속 원인 확정 + 수리 | — |

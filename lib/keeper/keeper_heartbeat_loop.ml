@@ -328,7 +328,9 @@ let failed_source_disposition
   | Keeper_unified_turn.Follow_failure_route ->
     (match failure.Keeper_unified_turn.route with
      | Keeper_runtime_failure_route.Exhausted_visible_alive
-         { terminal = Keeper_runtime_failure_route.Provider_attempt_effect_fenced
+         { terminal =
+             ( Keeper_runtime_failure_route.Provider_attempt_effect_fenced
+             | Keeper_runtime_failure_route.Tool_correction_lost )
          ; detail
          ; _
          } -> Quarantine_source { detail }

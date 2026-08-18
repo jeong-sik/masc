@@ -52,6 +52,8 @@ let blocker_class_of_core_error (err : Agent_core.Error.t) : blocker_class optio
     Some Terminal_effect_failed
   | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _) ->
     Some Provider_attempt_effect_fenced
+  | Some (Keeper_turn_driver.Tool_correction_lost _) ->
+    Some Tool_correction_lost
   | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
     Some Receipt_persistence_failed
   | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
@@ -145,6 +147,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Incomplete_tool_transcript
     | Terminal_effect_failed
     | Provider_attempt_effect_fenced
+    | Tool_correction_lost
     | Receipt_persistence_failed
     | Gate_replay_repair_required -> if summary = "" then str else summary
   in

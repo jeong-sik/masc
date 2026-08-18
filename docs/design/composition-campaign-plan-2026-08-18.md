@@ -53,7 +53,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | llama_cpp :9010 다운 — head로 둔 keeper 2개가 매 턴 조용히 failover (latency 684s 기록) | MED | 재기동 또는 lane 제거 | C1 |
 | wire-capture 일일 상한 도달로 레코드 드롭 진행 중 (18:35 boot 로그 반복 WARN). 현재 256MiB는 env 오버라이드 값, 코드 기본은 64MiB (`env_config_keeper.ml:85`) — 수리 시 이 SSOT 기준 | MED | 드롭 대신 파일 회전 | C2 |
 | 검증 리뷰 retryable=false 종결 시 영구 정지 — 표면이 registry 행뿐 (`verification_run_registry.mli:14-24`) | MED | 정지 리뷰 board 표면 + 재제출 경로 | C3 |
-| 토큰 추정 String.length/4+4 (CJK 과소), proactive 유사도 word Jaccard (spec §15 자인 부채) | MED | provider를 환산 oracle로 | C3 |
+| 토큰 추정 String.length/4+4 (CJK 과소), proactive 유사도 word Jaccard (spec §15 자인 부채) | MED | **전제 소멸 확인 (2026-08-19)**: Jaccard 유사도 게이트는 #27478(2026-08-08)이 proactive Quality Gate 전체와 함께 이미 삭제. `/4` 토큰 추정기는 현재 lib/ 어디에도 없음(`/ 4`·`asr 2`·`token_estimate` 계열 전수 스윕 + `git log -S` 역추적). Memory OS 예산은 `keeper_memory_os_budget.ml`이 정확한 렌더링 바이트를 세고, window-fit oracle은 provider로 이미 이관됨. 남은 액션 없음 | C3 |
 | Memory OS 잠금 경로 `.lock` 이중 append — `*.lock.lock` (`keeper_memory_os_current.ml:539,550`) | LOW | lock_path 일원화 | C3 |
 | goal reconciliation 부팅마다 e0 goal 3건 ambiguous 실패 · taskmaster paused인데 hourly wake 발화 | LOW | 잔여 상태 정리 | C4 |
 
@@ -117,7 +117,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 - 저장소 실습이 필요한 미션은 신규 private 저장소에서만 수행한다.
 
 **B2. Web/Browser keeper 도구** (HIGH)
-1. → **web_search + web_fetch 확장 (읽기 전용)** — 판사가 이미 web_fetch 보유(#29001), keeper 표면으로 확장. 4행 중 3행을 브라우저 없이 해제.
+1. → **web_search + web_fetch 확장 (읽기 전용)** — **전제 감사 결과 구축 단계는 이미 출하됨 (2026-08-19 확인)**: WebSearch/WebFetch descriptor가 `Preferred_public_name`으로 keeper 모델에 투영되고(keeper_tool_descriptor.ml, `agent.search_web`/`agent.fetch_web`), keeper 런타임이 network-read Gate 경유로 실제 핸들러에 배선돼 있다(keeper_tool_in_process_runtime.ml:251 `with_external_gate_execution` → `Tool_misc_web_search.handle`). 남은 것은 도구 구축이 아니라 **evidence 행 해제** — web 도구를 실제로 쓰는 미션 라운드에서 tool-calls 증거를 수집해 매트릭스 행을 채우는 일이며, 이는 RW20+ 신규 라운드 판정(B1)과 같은 트랙에서 진행한다.
 2. 브라우저 sidecar (CDP) — browser 축 ~17행을 채우는 정공법, sidecar 수명주기 부담으로 2수.
 3. 기존 브라우저 MCP 프록시 — 외부 프로세스 신뢰·정책 경계가 Gate 밖에 생겨 보류.
 
@@ -142,7 +142,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 
 **C2. 관측 파이프 손실** — 1) → wire-capture 상한 드롭을 파일 회전으로 교체 2) 일 256MB를 채우는 레코드 구성 진단 3) autonomy_stats 13일 정지의 사인 확정(죽었으면 D5 척살로 이관).
 
-**C3. 정공법 교체** — 1) → provider를 토큰 환산 oracle로 2) 정지 리뷰 board 승격 + 재제출 경로 3) lock_path 일원화.
+**C3. 정공법 교체** — 1) ~~provider를 토큰 환산 oracle로~~ 전제 소멸 확인(갭 매트릭스 해당 행 참조: Jaccard는 #27478로 삭제, `/4` 추정기 부재, 바이트 예산·provider oracle 이미 정공법) 2) 정지 리뷰 board 승격 + 재제출 경로 — 미착수 3) lock_path 일원화 — PR #29033.
 
 ## 4. PR 분해
 
@@ -158,7 +158,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | W2 | PR-6 | ~~A4-1: policy-before-schema~~ → 전제 감사로 기각, 본 문서 정정으로 대체 (A4-1 항목 참조) | — |
 | W2 | PR-7 | C1·C2·C3 위생 소형 PR 3~4건 | — |
 | W3 | PR-8 | B1-1: RW20(PoC)·RW21(상호 반론) 미션 + acceptance 확장 | PR-5 권장 |
-| W3 | PR-9 | B2-1: keeper web_search/web_fetch 표면 | — |
+| W3 | PR-9 | ~~B2-1: keeper web_search/web_fetch 표면~~ → 이미 출하 확인, 본 문서 정정으로 대체 (B2-1 항목 참조). evidence 행 해제는 RW20+ 라운드로 | — |
 | W3 | PR-10 | D5 척살 스윕 | — |
 | W4 | PR-11+ | A5-2 Acting 타임라인 · B4-1 스크래치 러너 · A1-3/B2-2는 측정 결과로 결정 | W2·W3 실측 |
 

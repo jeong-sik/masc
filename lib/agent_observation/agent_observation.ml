@@ -127,7 +127,8 @@ module Code_address = struct
 
   let invalid_to_string = function
     | Empty_codebase -> "empty codebase slug"
-    | Malformed_codebase -> "codebase is not a canonical host_path slug"
+    | Malformed_codebase ->
+      "codebase is not a canonical host_path slug (e.g. example.com_owner_repo)"
     | Empty_path -> "empty repo-relative path"
     | Absolute_path -> "path is absolute, expected repo-root relative"
     | Malformed_path -> "path is not syntactically valid"

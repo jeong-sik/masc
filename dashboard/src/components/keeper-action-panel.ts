@@ -29,6 +29,8 @@ import {
 import { KEEPER_PURGE_ARTIFACTS, purgeKeeper } from '../api/keeper-lifecycle'
 import {
   applyOptimisticKeeperDirective,
+  keeperPurgePending,
+  markKeeperPurgePending,
   refreshKeeperRuntimeStatus,
 } from '../store'
 import type { Keeper } from '../types'
@@ -164,6 +166,11 @@ export async function runKeeperAction(
     if (!confirmed) return
     try {
       const result = await purgeKeeper(name)
+      // The row stays until a refresh stops returning this keeper. Mark it
+      // pending first so the operator sees the submit land instead of an
+      // unchanged row — the refresh below still returns the keeper, because
+      // the server deletes asynchronously.
+      markKeeperPurgePending(name)
       showToast(`${name} ${noun} 요청됨 (operation ${result.operation_id})`, 'success')
       afterAction()
     } catch (err) {
@@ -229,6 +236,7 @@ export function KeeperActionButtons({
 }) {
   const busy = useSignal(false)
   const vis = keeperActionVisibility(keeper)
+  const purgePending = keeperPurgePending.value.has(keeper.name)
 
   async function handle(e: Event, action: KeeperActionKey) {
     if (stopPropagation) e.stopPropagation()
@@ -305,11 +313,13 @@ export function KeeperActionButtons({
         ? html`<${ActionButton}
             variant="danger"
             size=${size}
-            disabled=${busy.value}
+            disabled=${busy.value || purgePending}
             onClick=${(e: Event) => handle(e, 'purge')}
-            title=${KEEPER_ACTION_LABELS.purge.title}
+            title=${purgePending
+              ? '제거 요청이 접수됐고 서버가 삭제하는 중입니다. 완료되면 목록에서 사라집니다.'
+              : KEEPER_ACTION_LABELS.purge.title}
             testId="keeper-action-purge"
-          >${text('purge')}<//>`
+          >${purgePending ? '제거 중' : text('purge')}<//>`
         : null}
     </div>
   `

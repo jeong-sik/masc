@@ -25,6 +25,8 @@ vi.mock('../api/keeper-lifecycle', () => ({
 }))
 vi.mock('../store', () => ({
   keepers: { value: [] },
+  keeperPurgePending: { value: new Set<string>() },
+  markKeeperPurgePending: vi.fn(),
   applyOptimisticKeeperDirective: vi.fn(() => () => {}),
   refreshKeeperRuntimeStatus: vi.fn(async () => undefined),
 }))
@@ -34,7 +36,11 @@ import { purgeKeeper } from '../api/keeper-lifecycle'
 import { requestConfirm } from './common/confirm-dialog'
 import { showToast } from './common/toast'
 import { keeperActionVisibility } from '../lib/keeper-predicates'
-import { applyOptimisticKeeperDirective, refreshKeeperRuntimeStatus } from '../store'
+import {
+  applyOptimisticKeeperDirective,
+  markKeeperPurgePending,
+  refreshKeeperRuntimeStatus,
+} from '../store'
 import { runKeeperAction } from './keeper-action-panel'
 import type { Keeper } from '../types'
 
@@ -243,6 +249,26 @@ describe('purge action', () => {
     expect(options.message).toContain('대화 기록')
     expect(purgeKeeper).toHaveBeenCalledWith('test')
     expect(refreshKeeperRuntimeStatus).toHaveBeenCalled()
+  })
+
+  // The refresh fired right after the submit still returns the keeper, because
+  // the server deletes asynchronously. Marking the name is what makes the
+  // operator see the submit land instead of an unchanged row.
+  it('marks the keeper pending so the row does not redraw unchanged', async () => {
+    vi.mocked(requestConfirm).mockResolvedValueOnce(true)
+
+    await runKeeperAction('test', 'purge')
+
+    expect(markKeeperPurgePending).toHaveBeenCalledWith('test')
+  })
+
+  it('does not mark the keeper pending when the endpoint rejects', async () => {
+    vi.mocked(requestConfirm).mockResolvedValueOnce(true)
+    vi.mocked(purgeKeeper).mockRejectedValueOnce(new Error('nope'))
+
+    await runKeeperAction('test', 'purge')
+
+    expect(markKeeperPurgePending).not.toHaveBeenCalled()
   })
 
   it('surfaces the failure and does not refresh when the endpoint rejects', async () => {

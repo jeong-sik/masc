@@ -20,12 +20,12 @@
     <env>
       <repo>https://github.com/jeong-sik/masc</repo>
       <workdir>~/me/workspace/yousleepwhen/masc</workdir>
-      <runtime_dir>~/me/.masc</runtime_dir>
+      <runtime_dir><base-path>/.masc</runtime_dir>
       <lang>OCaml 5.5, TypeScript</lang>
     </env>
   </project>
 
-  <providers note="Rate Limit 에 따라 가용성이 바뀐다. 런타임 설정은 ~/me/.masc 참고.">
+  <providers note="Rate Limit 에 따라 가용성이 바뀐다. 런타임 설정은 <base-path>/.masc 참고.">
     <subscription>
       <p name="OpenAI Codex" plan="Codex Pro $200"/>
       <p name="Anthropic Claude Code" plan="Max $200"/>
@@ -396,7 +396,7 @@
     <req>결과물에 로그 + 실측 + 브라우저 스크린샷을 포함한다.</req>
   </evidence>
 
-  <runtime_data path="~/me/.masc">
+  <runtime_data path="<base-path>/.masc">
     <rule>기능 개발에 불필요하고 용량이 부담되면 지우고 새로 한다.</rule>
     <rule>Keeper 프롬프트도 변화시키면서 진행해도 된다.</rule>
   </runtime_data>

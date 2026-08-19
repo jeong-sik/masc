@@ -15,7 +15,8 @@ related: ["0376", "0315"]
 체크포인트 메시지 목록에 포함되지 않는다는 뜻이다.
 
 턴이 replay 에 남기는 것은 도구 호출과 그 결과다. 다음 사이클로 이어져야 하는
-의도는 텍스트가 아니라 plan / task / memory / board 도구로 표현한다.
+의도는 텍스트가 아니라 task / memory 도구로 표현한다. §4 가 그 자격을 실측으로
+정한다.
 
 RFC-0376 은 "발화는 도구 호출로 표현한다" 를 정했다. 이 RFC 는 같은 문장을 기억에
 적용한다 — 이어져야 할 것도 도구로 표현한다.
@@ -147,10 +148,25 @@ RFC-0376 은 배달을 닫았지만 replay 를 다루지 않았다. 사고가 �
 도구 호출 유무로 가르는 축은 #27014 가 실측으로 기각했다.
 
 남는 축은 하나다. 이어져야 하는 의도라면 그것을 담는 1급 수단으로 표현한다.
-masc 에는 이미 `keeper_plan_execute`, `keeper_task_create`,
-`keeper_memory_write`, `masc_board_post` 가 있다. "다음에 큐를 보겠다" 는 plan
-이고, plan 은 도구로 쓰면 durable 하게 남는다. 텍스트로 쓰면 남지 않는다 — 이
-RFC 이후로는.
+
+수단의 자격은 "그 도구가 남긴 것이 다음 턴 입력에 실제로 나타나는가" 다. §2.0 과
+같은 턴에서 확인한 것은 둘이다.
+
+| 수단 | 다음 턴에 나타나는 경로 | 같은 턴의 실측 |
+|---|---|---|
+| `keeper_task_create` | world observation | `unclaimed_task_count` 55, `claimable_task_count` 52 |
+| `keeper_memory_write` | `extra_system_context` 의 Memory OS Recall | 14,492 bytes, 항목 41건 |
+
+`masc_board_post` 는 board 이벤트로 관측되지만 이 턴의 `pending_board_events` 가
+0 이어서 적재 경로를 실측하지 못했다. 자격은 확인 대상으로 남는다.
+
+`keeper_plan_execute` 는 이 목록에 넣지 않는다.
+`Keeper_tool_composition_surface` 의 mli 가 "runs one model-defined inline plan
+through the same executor" 로 규정하듯 그 턴의 실행 수단이며, 다음 사이클로 넘길
+의도의 저장소가 아니다.
+
+"다음에 큐를 보겠다" 는 task 이거나 memory 다. 도구로 쓰면 다음 턴이 읽고,
+텍스트로 쓰면 이 RFC 이후로는 읽지 않는다.
 
 이것은 keeper 행동 계약의 변경이며, §7 이 그 이행을 다룬다.
 
@@ -168,7 +184,7 @@ RFC 이후로는.
 ### 5.2 replay 에 남는 것
 
 - ToolUse / ToolResult 쌍 전체. 그 턴이 실제로 한 일이다.
-- 도구가 만든 durable 사실은 각자의 저장소에 남는다. plan, task, goal, memory,
+- 도구가 만든 durable 사실은 각자의 저장소에 남는다. task, goal, memory,
   board post 는 이 변경의 영향을 받지 않는다.
 
 도구를 호출한 자율턴은 그 호출과 결과가 남고 최종 텍스트만 빠진다. 도구를
@@ -206,8 +222,8 @@ RFC-0376 §4.3 이 dashboard chat 응답 계약으로 보존하기로 한 지점
 §4 의 결정은 keeper 가 의도를 텍스트 대신 도구로 표현할 때만 #27014 의 근거를
 보존한다. 코드만 바꾸면 계획 유실이 재발한다.
 
-- 자율 지침에 "다음 사이클로 이어져야 하는 것은 plan / task / memory 로 남긴다"
-  를 명시한다. 지침 문구는 구현 PR 에서 확정한다.
+- 자율 지침에 "다음 사이클로 이어져야 하는 것은 task / memory 로 남긴다" 를
+  명시한다. 지침 문구는 구현 PR 에서 확정한다.
 - 이행 전후로 §2.5 의 `autonomous_tool_turn_count` 비율을 측정한다. 텍스트 전용
   자율턴이 도구 호출로 옮겨가는지가 이행 여부를 말한다.
 - 이행이 관측되지 않으면 §5.1 을 적용하지 않는다. 순서는 지침이 먼저다.
@@ -248,7 +264,7 @@ RFC-0376 §4.3 이 dashboard chat 응답 계약으로 보존하기로 한 지점
 - 도구를 호출하지 않은 자율턴 다음의 턴 프롬프트에 그 턴의 wake cue 와 최종
   텍스트가 없다.
 - 도구를 호출한 자율턴 다음의 턴 프롬프트에 그 턴의 ToolUse / ToolResult 가 있다.
-- 자율턴이 plan / task / memory 도구로 남긴 사실은 다음 사이클에서 읽힌다.
+- 자율턴이 task / memory 도구로 남긴 사실은 다음 사이클에서 읽힌다.
 - dashboard chat 에서 사용자가 물으면 응답이 그대로 표시되고 다음 턴 프롬프트에
   남는다.
 - 대시보드 keeper chat 의 자율턴 카드가 최종 텍스트를 그대로 보여준다.

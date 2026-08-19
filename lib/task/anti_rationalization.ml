@@ -393,7 +393,7 @@ let review
       ; fallback_reason = Some reason
       ; retryable = true
       }
-  | Ok (first_slot :: _ as slots) ->
+  | Ok (first_slot :: rest_slots) ->
     (match
        build_prompt
          ~few_shot_block
@@ -528,5 +528,5 @@ let review
                 ; retryable
                 }))
        in
-       attempt first_slot (List.tl slots))
+       attempt first_slot rest_slots)
 ;;

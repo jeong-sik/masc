@@ -124,10 +124,7 @@ fi
 echo "[ci-test-targets] OK - $(wc -l < "$referenced" | tr -d ' ') CI targets, all declared in Dune"
 
 # Exact current count. Adding an unwired suite is a regression.
-# Back to 521 while test_keeper_task_outcomes is unwired again (#29120). #29103
-# lowered this to 520 on a run whose own Build and Test was red, so the wiring
-# never held a green suite.
-UNWIRED_BASELINE=521
+UNWIRED_BASELINE=520
 unwired="$(comm -13 "$referenced" "$declared" | wc -l | tr -d ' ')"
 
 if [ "$unwired" -gt "$UNWIRED_BASELINE" ]; then

@@ -49,7 +49,8 @@ trap 'rm -f "$current_tmp"' EXIT
       -o -type f -print
   done
 } | sort -u \
-  | xargs rg --with-filename --no-heading --line-number --color=never \
+  | tr '\n' '\0' \
+  | xargs -0 rg --with-filename --no-heading --line-number --color=never \
       "$RESIDUE_PATTERN" \
   | while IFS=: read -r path line content; do
       [[ -n "${path:-}" && -n "${line:-}" ]] || continue

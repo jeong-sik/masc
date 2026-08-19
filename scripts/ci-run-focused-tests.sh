@@ -336,6 +336,17 @@ normal_targets=(
   @test/runtest-test_keeper_event_queue_state_v2
   @test/runtest-test_keeper_connector_attention_wake
   @test/runtest-test_keeper_scheduled_stimulus_channel
+  @test/runtest-test_fusion_delivery_obligation
+  @test/runtest-test_fusion_agent_core_error_detail
+  @test/runtest-test_fusion_status_tool
+  @test/runtest-test_fusion_judge_usage
+  @test/runtest-test_fusion_metrics
+  @test/runtest-test_fusion_sink_meta
+  @test/runtest-test_fusion_run_registry_persist
+  @test/fusion_core/runtest-test_fusion
+  @test/fusion_core/runtest-test_fusion_harness
+  @test/fusion_core/runtest-test_fusion_run_registry
+  @test/fusion_core/runtest-test_fusion_config_json
   @test/runtest-test_keeper_external_attention
   @test/runtest-test_keeper_manual_compaction_preemption
   @test/runtest-test_keeper_compaction_unit

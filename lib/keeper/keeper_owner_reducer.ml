@@ -61,16 +61,6 @@ type shutdown_latch =
   | Operator_stopped
   | Dead_tombstone
 
-type compaction_result =
-  { count_delta : int
-  ; at : float
-  ; before_tokens : int
-  ; after_tokens : int
-  ; checked_at : float
-  ; decision : Keeper_meta_contract.compaction_runtime_decision
-  ; updated_at : string
-  }
-
 type profile_update =
   { instructions : string
   ; autonomous_instructions : string option
@@ -140,11 +130,11 @@ type meta_command =
       { blocker : Keeper_meta_contract.blocker_info option
       ; updated_at : string
       }
-  | Record_compaction of compaction_result
   | Record_compaction_commit of
       { trace_id : Keeper_id.Trace_id.t
       ; generation : int
       ; commit_count : int
+      ; at : float
       ; updated_at : string
       }
   | Ack_message_scope of
@@ -713,44 +703,24 @@ let apply_existing (state : state) meta command =
   | Set_blocker { blocker; updated_at } ->
     let runtime = { meta.runtime with last_blocker = blocker } in
     Ok (with_meta state { meta with runtime; updated_at })
-  | Record_compaction result ->
-    if result.count_delta < 0
-    then Error (Invalid_delta "compaction count_delta must be non-negative")
-    else if result.before_tokens < 0
-    then Error (Invalid_delta "compaction before_tokens must be non-negative")
-    else if result.after_tokens < 0
-    then Error (Invalid_delta "compaction after_tokens must be non-negative")
-    else if not (Float.is_finite result.at)
-    then Error (Invalid_delta "compaction at must be finite")
-    else if not (Float.is_finite result.checked_at)
-    then Error (Invalid_delta "compaction checked_at must be finite")
-    else
-      let previous = meta.runtime.compaction_rt in
-      (match checked_add "compaction count" previous.count result.count_delta with
-       | Error _ as error -> error
-       | Ok count ->
-         let compaction_rt =
-           { Keeper_meta_contract.count
-           ; last_ts = result.at
-           ; last_before_tokens = result.before_tokens
-           ; last_after_tokens = result.after_tokens
-           ; last_check_ts = result.checked_at
-           ; last_decision = result.decision
-           }
-         in
-         let meta = Keeper_meta_contract.map_compaction_rt (fun _ -> compaction_rt) meta in
-         Ok (with_meta state { meta with updated_at = result.updated_at }))
-  | Record_compaction_commit { trace_id; generation; commit_count; updated_at } ->
+  | Record_compaction_commit { trace_id; generation; commit_count; at; updated_at } ->
     if
       not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
       || not (Int.equal meta.runtime.nonce generation)
     then Error Identity_generation_mismatch
     else if commit_count < 0
     then Error (Invalid_delta "compaction commit count is negative")
+    else if not (Float.is_finite at)
+    then Error (Invalid_delta "compaction at must be finite")
     else
+      (* [count] alone said a compaction happened without saying when, so 136
+         commits left last_ts at zero and nothing could measure the interval
+         between them (#29109). The token pair stays unwritten here: this
+         commit path has no measurement of the context before or after. *)
       let compaction_rt =
         { meta.runtime.compaction_rt with
           count = max meta.runtime.compaction_rt.count commit_count
+        ; last_ts = at
         }
       in
       let meta = Keeper_meta_contract.map_compaction_rt (fun _ -> compaction_rt) meta in

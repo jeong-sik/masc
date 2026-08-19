@@ -1120,7 +1120,14 @@
 .wk-viewtoggle button:hover { color: var(--text-bright); }
 .wk-viewtoggle button.on { background: var(--volt-wash); color: var(--volt-strong); }
 
-.wk-kanban { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(244px, 1fr); gap: 12px; align-items: start; overflow-x: auto; padding-bottom: 14px; }
+/* OVERRIDE (intentional divergence from prototype): grid-template-columns must be
+   cleared here. The prototype renders exactly 5 kanban columns, so its earlier
+   repeat(5) base rule and this auto-flow override coexist without visible effect.
+   The live dashboard renders 9 protocol status columns (work.ts KANBAN_COLUMNS);
+   with repeat(5) still in effect the first five land in explicit minmax(0,1fr)
+   tracks and get squeezed to ~65px while implicit tracks hold 244px. `unset`
+   makes every column size via grid-auto-columns. Guarded by work-kanban.test.ts. */
+.wk-kanban { display: grid; grid-template-columns: unset; grid-auto-flow: column; grid-auto-columns: minmax(244px, 1fr); gap: 12px; align-items: start; overflow-x: auto; padding-bottom: 14px; }
 .wk-kcol { display: flex; flex-direction: column; min-width: 0; background: color-mix(in oklab, var(--bg-panel) 40%, var(--bg-deep)); border: 1px solid var(--border-soft); border-top: 2px solid var(--border-main); border-radius: var(--radius-sm); }
 .wk-kcol.st-todo { border-top-color: var(--status-warn); }
 .wk-kcol.st-claimed, .wk-kcol.st-verify { border-top-color: var(--info); }

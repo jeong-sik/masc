@@ -1721,14 +1721,10 @@
 
 (include stanzas/test_keeper_scheduled_stimulus_channel.inc)
 
-<<<<<<< HEAD
 (include stanzas/test_server_dashboard_runtime_observables.inc)
 
-||||||| parent of a0845236a5 (test(keeper): feature-test the typed reasoning observation pipe)
-=======
 (include stanzas/test_keeper_thinking_observation.inc)
 
->>>>>>> a0845236a5 (test(keeper): feature-test the typed reasoning observation pipe)
 (include stanzas/test_otel_port_ssot.inc)
 
 (include stanzas/test_otel_zero_fill.inc)

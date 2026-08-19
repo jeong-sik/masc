@@ -12,11 +12,19 @@ open Alcotest
 module Obs = Masc.Keeper_agent_run_thinking_trajectory
 module T = Agent_core.Types
 
+(* Every case gets its own root AND its own trace id: Trajectory keeps
+   per-(keeper, trace) writer state cached in-process, so reusing a path
+   after rm_rf would leave a cached writer pointed at the unlinked file
+   and the re-created directory would stay empty on read-back. *)
+let case_counter = ref 0
+
 let with_temp_masc_root f =
+  incr case_counter;
+  let case = !case_counter in
   let root =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "thinking-obs-%d" (Unix.getpid ()))
+      (Printf.sprintf "thinking-obs-%d-%d" (Unix.getpid ()) case)
   in
   Unix.mkdir root 0o755;
   let rec rm_rf path =
@@ -30,13 +38,13 @@ let with_temp_masc_root f =
 ;;
 
 let keeper_name = "thinker"
-let trace_id = "trace-think-1"
+let trace_id () = Printf.sprintf "trace-think-%d" !case_counter
 
 let make_acc root =
   Trajectory.create_accumulator
     ~masc_root:root
     ~keeper_name
-    ~trace_id
+    ~trace_id:(trace_id ())
     ~generation:1
     ()
 ;;
@@ -56,7 +64,7 @@ let sample_content =
 ;;
 
 let thinking_lines root =
-  Trajectory.read_all_lines ~masc_root:root ~keeper_name ~trace_id
+  Trajectory.read_all_lines ~masc_root:root ~keeper_name ~trace_id:(trace_id ())
   |> List.filter_map (function
     | Trajectory.Withheld_thinking entry -> Some entry
     | Trajectory.Tool_call _ -> None)

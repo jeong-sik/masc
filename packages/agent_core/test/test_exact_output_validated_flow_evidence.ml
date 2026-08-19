@@ -327,6 +327,102 @@ let test_projection_failure_is_typed_and_short_circuits_acceptance () =
      | Ok _ | Error _ -> fail "projection failure lost its typed ordinal and cause")
 ;;
 
+(* A quota refusal now advances the lane, so it also reaches durable evidence
+   as its own wire form. Folded into [completion_failed_before_dispatch] the
+   transcript would claim the request never left, while the receipt records one
+   dispatch and a 429 response — an internally inconsistent transcript that
+   validation rejects. *)
+let with_rate_limited_first_server f =
+  let posts = Atomic.make 0 in
+  let result =
+    Eio_main.run
+    @@ fun env ->
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let port = fresh_port () in
+    let handler _conn _request body =
+      ignore (Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) : string);
+      let index = Atomic.fetch_and_add posts 1 in
+      if index = 0
+      then
+        Cohttp_eio.Server.respond_string
+          ~status:(Cohttp.Code.status_of_code 429)
+          ~body:{|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|}
+          ()
+      else
+        Cohttp_eio.Server.respond_string
+          ~status:`OK
+          ~body:(openai_response {|{"name":"accepted"}|})
+          ()
+    in
+    let socket =
+      Eio.Net.listen
+        net
+        ~sw
+        ~backlog:8
+        ~reuse_addr:true
+        (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+    in
+    let server = Cohttp_eio.Server.make ~callback:handler () in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+    f ~net ~base_url:(Printf.sprintf "http://127.0.0.1:%d" port)
+  in
+  result, Atomic.get posts
+;;
+
+let test_rate_limited_advance_survives_the_durable_round_trip () =
+  let result, posts =
+    with_rate_limited_first_server
+    @@ fun ~net ~base_url ->
+    with_catalog ~base_url
+    @@ fun snapshot ->
+    EO.execute_flow_once
+      ~net
+      ~before_measurement_dispatch:(fun _ -> Ok ())
+      ~on_measurement_terminal:(fun _ -> Ok ())
+      ~before_dispatch:(fun _ -> Ok ())
+      ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+      ~validate:(fun success -> EO.Accept (candidate_id success))
+      (start_flow snapshot)
+  in
+  check int "the refused candidate and its successor each dispatch once" 2 posts;
+  match result with
+  | Error _ -> fail "the rate-limited candidate did not advance to its successor"
+  | Ok success ->
+    check string "successor accepted" "evidence-c" success.accepted;
+    let accepted_calls = ref 0 in
+    let rejection_calls = ref 0 in
+    let durable =
+      match snapshot success ~accepted_calls ~rejection_calls with
+      | Ok durable -> durable
+      | Error _ -> fail "a rate-limited advance did not produce durable evidence"
+    in
+    let encoded = EO.validated_flow_evidence_to_string durable in
+    let contains needle =
+      let n = String.length needle in
+      let rec scan i =
+        i + n <= String.length encoded
+        && (String.equal (String.sub encoded i n) needle || scan (i + 1))
+      in
+      scan 0
+    in
+    check bool "the advance names the refusal" true (contains {|"rate_limited"|});
+    check bool "the advance carries the status" true (contains {|"http_status":429|});
+    (match EO.validated_flow_evidence_of_string encoded with
+     | Ok decoded ->
+       check
+         string
+         "the rate-limited transcript decodes to the same digest"
+         (EO.validated_flow_evidence_sha256 durable)
+         (EO.validated_flow_evidence_sha256 decoded)
+     | Error error ->
+       failf
+         "a rate-limited transcript did not decode: %s"
+         (EO.validated_flow_evidence_decode_error_to_string error))
+;;
+
 let () =
   run
     "exact-output validated flow evidence"
@@ -335,6 +431,10 @@ let () =
             "mixed order round trip and projector cardinality"
             `Quick
             test_mixed_transcript_round_trip_and_projector_cardinality
+        ; test_case
+            "rate-limited advance round trip"
+            `Quick
+            test_rate_limited_advance_survives_the_durable_round_trip
         ; test_case
             "typed projection failure"
             `Quick

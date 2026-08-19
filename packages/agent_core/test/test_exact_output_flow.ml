@@ -3495,9 +3495,11 @@ let test_context_window_400_prose_remains_terminal () =
   | Error (EO.Flow_exact_execution_failed failure) ->
     check
       bool
-      "HTTP 400 prose remains unattributed completion failure"
+      "HTTP 400 prose stays terminal as a typed invalid request"
       true
-      (failure.cause.cause = EO.Completion_failed)
+      (failure.cause.cause
+       = EO.Provider_response_refused
+           { http_status = 400; refusal = EO.Invalid_request })
   | Ok _ | Error _ -> fail "HTTP 400 prose did not remain terminal"
 ;;
 
@@ -3507,8 +3509,25 @@ let test_serialized_request_413_refusal_advances_once_to_successor () =
     ~first_response:
       (Cohttp.Code.status_of_code 413, {|{"error":"request body too large"}|})
     ~assert_cause:(function
-      | EO.Serialized_request_refused { http_status = 413 } -> ()
+      | EO.Provider_response_refused
+          { http_status = 413; refusal = EO.Request_body_refused } -> ()
       | _ -> fail "HTTP 413 lost its typed serialized-request cause")
+;;
+
+(* A 429 says the binding's quota is spent, not that the request is bad. Before
+   the refusal kind survived classification it arrived as [Completion_failed],
+   which the advance table reads as terminal: the lane stopped on its first
+   candidate and the keeper reported "completion failed" with no status. *)
+let test_rate_limited_429_refusal_advances_once_to_successor () =
+  assert_typed_capacity_refusal_advances_once
+    ~label:"rate-limited"
+    ~first_response:
+      ( Cohttp.Code.status_of_code 429
+      , {|{"error":{"code":"1302","message":"Rate limit reached for requests"}}|} )
+    ~assert_cause:(function
+      | EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited } ->
+        ()
+      | _ -> fail "HTTP 429 lost its typed rate-limit cause")
 ;;
 
 let test_generic_400_remains_terminal_without_advance () =
@@ -3541,9 +3560,17 @@ let test_generic_400_remains_terminal_without_advance () =
   match result with
   | Error
       (EO.Flow_exact_execution_failed
-         { candidate; cause = { cause = EO.Completion_failed; _ }; _ }) ->
+         { candidate
+         ; cause =
+             { cause =
+                 EO.Provider_response_refused
+                   { http_status = 400; refusal = EO.Invalid_request }
+             ; _
+             }
+         ; _
+         }) ->
     check string "generic 400 terminal candidate" "generic-400-a" (candidate_id candidate)
-  | Ok _ | Error _ -> fail "generic 400 did not remain a completion failure"
+  | Ok _ | Error _ -> fail "generic 400 did not remain a typed invalid request"
 ;;
 
 let test_postdispatch_and_structural_outcomes_never_advance () =
@@ -3594,7 +3621,11 @@ let test_postdispatch_and_structural_outcomes_never_advance () =
     | Ok _ | Error _ -> fail (label ^ " did not remain terminal")
   in
   run ~abort_completion:true "partial" "unused";
-  run ~status:`Too_many_requests "response" "rate limited";
+  (* A 429 used to sit here, pinning the behaviour of the era when every
+     unclassified HTTP failure became [Completion_failed]. It advances now and
+     is covered by its own case; 500 keeps a post-dispatch response failure
+     under this assertion. *)
+  run ~status:`Internal_server_error "response" "server error";
   run "tool" tool_response
 ;;
 
@@ -4179,6 +4210,10 @@ let () =
             "HTTP 413 serialized request advances with one dispatch per candidate"
             `Quick
             test_serialized_request_413_refusal_advances_once_to_successor
+        ; test_case
+            "HTTP 429 rate limit advances with one dispatch per candidate"
+            `Quick
+            test_rate_limited_429_refusal_advances_once_to_successor
         ; test_case
             "generic 400 remains terminal"
             `Quick

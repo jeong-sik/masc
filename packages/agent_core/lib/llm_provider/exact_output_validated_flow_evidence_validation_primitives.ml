@@ -124,6 +124,15 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
     && attempt.http_status = Some http_status
     && Option.is_some attempt.provider_trace_sha256
     && Option.is_some attempt.raw_response_sha256
+  (* [Retry.classify_error] produces [RateLimited] from status 429 alone, so an
+     advance recorded as rate-limited must carry that status and the one
+     dispatch that received it. *)
+  | Rate_limited { http_status }, Response_received ->
+    http_status = 429
+    && attempt.dispatch_count = 1
+    && attempt.http_status = Some http_status
+    && Option.is_some attempt.provider_trace_sha256
+    && Option.is_some attempt.raw_response_sha256
   | Invalid_json_output, (Response_received | Terminal) ->
     attempt.dispatch_count = 1
     && successful_http_status attempt.http_status
@@ -132,6 +141,7 @@ let attempt_advance_state_is_valid (attempt : attempt) (failure : transport_fail
   | Candidate_rejected, _
   | Completion_failed_before_dispatch, (Response_received | Terminal)
   | Serialized_request_refused _, (Before_dispatch | Terminal)
+  | Rate_limited _, (Before_dispatch | Terminal)
   | Invalid_json_output, Before_dispatch -> false
 ;;
 

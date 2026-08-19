@@ -350,20 +350,33 @@ let select_all_message_names_newest_first ~since_seq names =
     Filtering here costs a wider directory walk, bounded by the messages that
     exist rather than by a guess, and stops as soon as [limit] matches are
     found. *)
-let collect_recent_messages config ~msgs_path ~since_seq ~limit ?keep ~warn_label () =
+(* The two reads walk different amounts of the directory, so which one is
+   wanted is a caller's decision rather than a default. [Newest_window] can stop
+   at [limit] names because every name it reads is an answer; [Matching] cannot
+   know how far back the [limit]-th match sits. Collapsing them into an optional
+   predicate would make the cheap walk the silent default for a caller that
+   needed the other one — the exact shape that put a filter after the read in
+   the first place. *)
+type message_scan =
+  | Newest_window
+  | Matching of (Masc_domain.message -> bool)
+
+let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_label =
   if not (Sys.file_exists msgs_path) then []
   else
     let names =
       Sys.readdir msgs_path
       |> Array.to_list
       |> List.filter is_valid_filename
-      |> (match keep with
-          (* Unfiltered: the newest [limit] names ARE the answer, so the walk
-             stays bounded by [limit] rather than by the directory. *)
-          | None -> select_recent_message_names ~since_seq ~limit
-          | Some _ -> select_all_message_names_newest_first ~since_seq)
+      |> (match scan with
+          | Newest_window -> select_recent_message_names ~since_seq ~limit
+          | Matching _ -> select_all_message_names_newest_first ~since_seq)
     in
-    let keep = Option.value keep ~default:(fun _ -> true) in
+    let keep (msg : Masc_domain.message) =
+      match scan with
+      | Newest_window -> true
+      | Matching predicate -> predicate msg
+    in
     let rec loop remaining acc = function
       | _ when remaining <= 0 -> List.rev acc
       | [] -> List.rev acc
@@ -393,7 +406,13 @@ let get_messages_raw config ~since_seq ~limit =
   if not (root_is_initialized config) then []
   else
     let msgs_path = messages_dir config in
-    collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message" ()
+    collect_recent_messages
+      config
+      ~msgs_path
+      ~since_seq
+      ~limit
+      ~scan:Newest_window
+      ~warn_label:"message"
 
 let get_messages_matching config ~since_seq ~limit ~keep =
   if not (root_is_initialized config) then []
@@ -404,9 +423,8 @@ let get_messages_matching config ~since_seq ~limit ~keep =
       ~msgs_path
       ~since_seq
       ~limit
-      ~keep
+      ~scan:(Matching keep)
       ~warn_label:"message"
-      ()
 
 let get_all_messages_raw config ~since_seq =
   if not (root_is_initialized config) then []

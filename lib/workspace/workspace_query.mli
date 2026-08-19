@@ -149,9 +149,15 @@ val safe_yield : unit -> unit
 (** [take_first n xs] returns the first [n] elements of [xs]. *)
 val take_first : int -> 'a list -> 'a list
 
+(** How far back a message read walks. [Newest_window] stops at [limit] names
+    because each one is an answer; [Matching] keeps walking until [limit]
+    messages satisfy the predicate. *)
+type message_scan =
+  | Newest_window
+  | Matching of (Masc_domain.message -> bool)
+
 (** Read most-recent messages from filesystem or PG backend without
     parsing the entire history directory. *)
 val collect_recent_messages :
   config -> msgs_path:string -> since_seq:int -> limit:int ->
-  ?keep:(Masc_domain.message -> bool) ->
-  warn_label:string -> unit -> Masc_domain.message list
+  scan:message_scan -> warn_label:string -> Masc_domain.message list

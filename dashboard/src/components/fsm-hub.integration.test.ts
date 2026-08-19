@@ -110,6 +110,7 @@ const REAL_GATE_KEEPERS_SHAPE: GateKeepersData = {
     { name: 'masc-improver', runtimeLabel: 'keeper-masc-improver-agent', status: 'active' },
   ],
   directoryIssues: [],
+  listing: { total: 5, limit: 200, truncated: false },
 }
 
 describe('FSM Hub integration — API response shape', () => {

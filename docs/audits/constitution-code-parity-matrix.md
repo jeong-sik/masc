@@ -29,7 +29,7 @@
 | B4 | ParallelTool — read 툴 4종 Concurrent 승격 + fail-closed admission (fan-out 엔진은 기존 `Agent_tool_batch_plan`이 커버) | `keeper_tool_descriptor.ml` | PR #29146 |
 | B5 | 스트리밍 문자열 dedup — exact-prefix retransmission drop / 누적 스냅샷 suffix reconcile, `masc_keeper_stream_text_delta_dedup_total{action=drop\|reconcile}` | `keeper_chat_agent_core_stream_bridge.ml` | PR #29149 |
 | B6 | tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버) | RFC-0386, `keeper_tool_descriptor.mli:69-82` | PR #29148 |
-| B7 | Verifier keeper급 standalone 격상 — RFC-0361 D7 개정 완료, 코드 1단계(lane)/2단계(identity+lifecycle) 대기 | RFC-0361 D7 | RFC PR #29147 |
+| B7 | Verifier keeper급 standalone 격상 — RFC-0361 D7 개정 + 코드 1단계 `verifier_exact` lane(cross_verifier 흡수, frozen-order failover). 2단계(identity+lifecycle)는 RFC 후속 | RFC-0361 D7 | RFC PR #29147, 코드 PR #29155 |
 
 ## C. 코드 정리 (헌법 금지 패턴 잔여)
 
@@ -52,7 +52,7 @@
 | 구분 | 건수 | 상태 |
 |---|---|---|
 | A. 문서 보충 | 10 | PR #29140 |
-| B. 코드 보충 | 7 | B1-B3 #29152 / B4 #29146 / B5 #29149 / B6 #29148 / B7-RFC #29147 열림; B7-코드 작업 중 |
+| B. 코드 보충 | 7 | B1-B3 #29152 / B4 #29146 / B5 #29149 / B6 #29148 / B7-RFC #29147 / B7-코드 #29155 열림 |
 | C. 코드 정리 | 4 | PR #29141 |
 | D. RFC stale | 2 | PR #29142 |
-| PR 열림 | 21 / 23 | B7-코드(lane + identity/lifecycle) 남음 |
+| PR 열림 | 23 / 23 | B7 2단계(identity+lifecycle)는 RFC-0361 D7 후속 범위 |

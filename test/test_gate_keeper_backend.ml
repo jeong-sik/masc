@@ -1399,6 +1399,95 @@ let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
   check (list string) "message-2 args routed to its own fresh block"
     [ "{\"b\":2}" ] second_args
 
+let stream_text_deltas events =
+  List.filter_map
+    (function Keeper_chat_events.Text_delta text -> Some text | _ -> None)
+    events
+
+let test_keeper_stream_bridge_text_delta_passthrough_incremental () =
+  let open Agent_core.Types in
+  let events =
+    translate_agent_core_stream_events
+      [
+        ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
+        ContentBlockDelta { index = 0; delta = TextDelta "" };
+        ContentBlockDelta { index = 0; delta = TextDelta " world" };
+        ContentBlockDelta { index = 1; delta = TextDelta "second block" };
+      ]
+  in
+  check (list string) "incremental deltas pass through in order"
+    [ "Hello"; ""; " world"; "second block" ]
+    (stream_text_deltas events)
+
+let test_keeper_stream_bridge_text_delta_reconciles_cumulative_snapshot () =
+  let open Agent_core.Types in
+  (* An OpenAI-compatible provider that puts the cumulative text-so-far into
+     each chunk's content instead of an incremental delta: only the unseen
+     suffix may reach the user. *)
+  let events =
+    translate_agent_core_stream_events
+      [
+        ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
+        ContentBlockDelta { index = 0; delta = TextDelta "Hello world" };
+        ContentBlockDelta { index = 0; delta = TextDelta "Hello world!" };
+      ]
+  in
+  check (list string) "cumulative snapshots forward only the new suffix"
+    [ "Hello"; " world"; "!" ]
+    (stream_text_deltas events)
+
+let test_keeper_stream_bridge_text_delta_drops_retransmission () =
+  let open Agent_core.Types in
+  (* A reconnecting transport re-sends a chunk that was already delivered:
+     the replayed bytes are an exact prefix of the accumulated text and must
+     be dropped, not shown twice. *)
+  let events =
+    translate_agent_core_stream_events
+      [
+        ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
+        ContentBlockDelta { index = 0; delta = TextDelta " world" };
+        ContentBlockDelta { index = 0; delta = TextDelta "Hello" };
+        ContentBlockDelta { index = 0; delta = TextDelta "Hello world" };
+        ContentBlockDelta { index = 0; delta = TextDelta " again" };
+      ]
+  in
+  check (list string) "retransmitted prefixes drop, new text still flows"
+    [ "Hello"; " world"; " again" ]
+    (stream_text_deltas events)
+
+let test_keeper_stream_bridge_text_dedup_resets_per_message () =
+  let open Agent_core.Types in
+  (* Block indices restart per provider message, so the accumulated text used
+     for dedup must reset at MessageStop: message 2 reusing index 0 with text
+     that is a prefix of message 1's text is new content, not a duplicate. *)
+  let events =
+    translate_agent_core_stream_events
+      [
+        ContentBlockDelta { index = 0; delta = TextDelta "abcdef" };
+        MessageStop;
+        ContentBlockDelta { index = 0; delta = TextDelta "abc" };
+      ]
+  in
+  check (list string) "dedup state is message-scoped"
+    [ "abcdef"; "abc" ]
+    (stream_text_deltas events)
+
+let test_keeper_stream_bridge_text_delta_appends_unrelated_overlap () =
+  let open Agent_core.Types in
+  (* A delta that shares neither an exact-prefix relation with the accumulated
+     text is new content by the deterministic rule and passes through — the
+     bridge never guesses at partial overlaps. *)
+  let events =
+    translate_agent_core_stream_events
+      [
+        ContentBlockDelta { index = 0; delta = TextDelta "abc" };
+        ContentBlockDelta { index = 0; delta = TextDelta "bcd" };
+      ]
+  in
+  check (list string) "non-prefix delta appends verbatim"
+    [ "abc"; "bcd" ]
+    (stream_text_deltas events)
+
 let test_keeper_stream_bridge_surfaces_agent_core_message_metadata () =
   let open Agent_core.Types in
   let usage_start =
@@ -2812,6 +2901,16 @@ let () =
             test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse;
           test_case "stream bridge isolates tool blocks across messages" `Quick
             test_keeper_stream_bridge_isolates_tool_blocks_across_messages;
+          test_case "stream bridge passes through incremental text deltas" `Quick
+            test_keeper_stream_bridge_text_delta_passthrough_incremental;
+          test_case "stream bridge reconciles cumulative text snapshots" `Quick
+            test_keeper_stream_bridge_text_delta_reconciles_cumulative_snapshot;
+          test_case "stream bridge drops retransmitted text deltas" `Quick
+            test_keeper_stream_bridge_text_delta_drops_retransmission;
+          test_case "stream bridge text dedup resets per message" `Quick
+            test_keeper_stream_bridge_text_dedup_resets_per_message;
+          test_case "stream bridge appends non-prefix text deltas verbatim" `Quick
+            test_keeper_stream_bridge_text_delta_appends_unrelated_overlap;
           test_case "stream bridge surfaces AGENT_CORE message metadata" `Quick
             test_keeper_stream_bridge_surfaces_agent_core_message_metadata;
           test_case "stream bridge scopes terminal text to final message" `Quick

@@ -15,6 +15,19 @@ type reconciliation_summary = {
   failed_count : int;
 }
 
+(** Decide which keeper a completion wakes when several carry the goal.
+
+    RFC-0362's [owner] names the keeper responsible for turning the Goal into
+    Tasks, so it settles a tie that the [active_goal_ids] reverse index cannot:
+    a collaboration mission legitimately puts several keepers on one goal. An
+    owner outside [keeper_names], or none at all, is an error rather than a
+    guess — the wake goes to a keeper the Goal named or to nobody. *)
+val resolve_ambiguous_assignment :
+  goal_id:string ->
+  owner:string option ->
+  keeper_names:string list ->
+  (string, string) result
+
 val enqueue_if_ready :
   config:Workspace.config ->
   completing_agent_name:string ->

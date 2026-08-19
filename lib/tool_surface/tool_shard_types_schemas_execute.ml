@@ -214,30 +214,18 @@ let tool_execute_schema : Masc_domain.tool_schema =
         [ "type", `String "object"
         ; "properties", `Assoc properties
         ; "additionalProperties", `Bool false
-        ; ( "oneOf"
-          , `List
-              [ `Assoc
-                  [ "required", `List [ `String "argv" ]
-                  ; ( "not"
-                    , `Assoc [ "required", `List [ `String "pipeline" ] ] )
-                  ; ( "description"
-                    , `String
-                        "Single-process form: include one non-empty 'argv'. \
-                         DO NOT also include 'pipeline' \
-                         in the same call." )
-                  ]
-              ; `Assoc
-                  [ "required", `List [ `String "pipeline" ]
-                  ; ( "not"
-                    , `Assoc
-                        [ "required", `List [ `String "argv" ] ] )
-                  ; ( "description"
-                    , `String
-                        "Pipeline form: include 'pipeline' array of exec \
-                         stages.  DO NOT also include top-level 'argv' in the \
-                         same call." )
-                  ]
-              ] )
+        (* oneOf/not is deliberately absent. Keeper_tool_execute_typed_input.of_json
+           already rejects argv+pipeline together ("$.argv and $.pipeline are
+           mutually exclusive") and rejects neither-present ("$.argv or
+           $.pipeline is required"), so the keyword carried no extra guarantee.
+
+           It did carry a cost. Execute was the only descriptor exposing oneOf,
+           and it is the only descriptor whose calls arrived with the variant
+           selector fused into the tool name: Execute["argv"], Execute".",
+           Execute<float>. Measured 2026-08-18..19 in system_log: 445 such calls
+           rejected as "Tool not found", 0 successful Execute calls ever. A small
+           model expressing "the argv branch" has nowhere to put that choice on
+           the wire, so it decorates the name. *)
         ]
   }
 ;;

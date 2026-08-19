@@ -552,6 +552,13 @@ jobs:
       - name: Check CI test targets
         run: bash scripts/audit-ci-test-targets.sh
 
+      # A route that authorizes against a tool name the catalog never registered
+      # is closed to every credential, admin included, and the denial reads as a
+      # role problem. POST /api/v1/prompts shipped that way with a working
+      # dashboard editor in front of it (#29085).
+      - name: Check route tool catalog registration
+        run: bash scripts/audit-route-tool-catalog.sh
+
       - name: Check Keeper real-world secret boundary
         run: |
           python3 scripts/ci/check-keeper-realworld-secret-boundary.py

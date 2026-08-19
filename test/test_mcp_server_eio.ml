@@ -22,7 +22,9 @@ let () =
   let (_operator_force_link : unit) = Operator_tool.force_link in
   let (_dashboard_ws_sessions : int) = Server_mcp_transport_ws.session_count () in
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test.local");
-  Atomic.set Workspace_hooks.get_cross_verifier_runtime_id_fn (fun () -> None)
+  Atomic.set
+    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    (fun () -> Ok [ "test.local" ])
 
 let () =
   (* These process-global registries are installed by module initializers in the

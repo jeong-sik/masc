@@ -77,7 +77,19 @@ val review
   -> review_request
   -> review_result
 (** [base_path] is the workspace BasePath selected by the caller. The review
-    must not rediscover it from process-global environment state. *)
+    must not rediscover it from process-global environment state.
+
+    Without [~evaluator_runtime], the evaluator slots come from the published
+    [verifier_exact] exact-output lane (RFC-0361 D7(a)) and are tried in frozen
+    declaration order: a slot that fails or returns no valid verdict tool call
+    yields to the next slot, and the terminal result describes the last
+    attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
+    failover. *)
+
+val verifier_exact_lane_id : string
+(** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
+    lane id every completion-authority judgement call resolves through
+    (RFC-0361 D7(a)). *)
 
 (** Render the single prompt-registry SSOT. There is no inline fallback prompt;
     an error keeps the Task nonterminal. *)

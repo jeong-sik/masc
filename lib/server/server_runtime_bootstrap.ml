@@ -357,7 +357,11 @@ let configure_exact_output_registry ?config_root () =
        warn_optional_exact_output_lane
          registry
          ~lane_id:"librarian_exact"
-         ~feature:"librarian")
+         ~feature:"librarian";
+       warn_optional_exact_output_lane
+         registry
+         ~lane_id:Runtime.verifier_exact_lane_id
+         ~feature:"completion authority")
 ;;
 
 let install_domain_pool_references domain_pool =

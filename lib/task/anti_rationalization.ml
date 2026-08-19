@@ -287,30 +287,45 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
 ;;
 
 (* ================================================================ *)
-(* Cross-model runtime selection (#3067)                             *)
+(* Cross-model runtime selection (#3067, RFC-0361 D7(a))             *)
 (* ================================================================ *)
 
-(** Default evaluator runtime name. Override via [~evaluator_runtime]
-    to force a specific evaluator profile. Without an override, the
-    concrete profile comes from [routes.cross_verifier].
+(** [\[runtime.exact_output_lanes.verifier_exact\]] — the dedicated exact-output
+    lane every completion-authority judgement call runs on. The lane's admitted
+    slots, in frozen declaration order, are the single provider-selection SSOT:
+    the retired [\[runtime\].cross_verifier] single-runtime binding is absorbed
+    into the lane's first slot, and there is no second selector path (no
+    cross_verifier read, no [\[runtime\].default] fallback).
 
     Cross-model evaluation is more effective than same-model different-role
     because different model architectures have different blindspots.
     See: Anthropic "Harness Design" blog analysis. *)
-(* Function, not a module-level value: [Runtime.get_default_runtime_id] fail-fasts
-   until [Runtime.init_default] runs at startup (RFC-0206 §2.1). A module-level
-   binding evaluates at load time and crashes boot; defer to call time.
+let verifier_exact_lane_id = "verifier_exact"
 
-   Prefer [\[runtime\].cross_verifier] when set: the verdict channel is the
-   [report_review_verdict] tool call, so the evaluator needs a tool-calling
-   model — no wire response format is requested
-   ([Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config]).
-   Explicit routing restores cross-model separation from the generator.
-   [None] = inherit the global default (legacy). *)
-let default_evaluator_runtime () =
-  match (Atomic.get Workspace_hooks.get_cross_verifier_runtime_id_fn) () with
-  | Some id -> id
-  | None -> (Atomic.get Workspace_hooks.get_default_runtime_id_fn) ()
+(** Ordered evaluator slot list for one review. An explicit
+    [~evaluator_runtime] override is a single-slot lane (tests,
+    [--evaluator-runtime]); without one the published [verifier_exact] lane
+    supplies the frozen declaration order. The verdict channel is the
+    [report_review_verdict] tool call, so every slot needs a tool-calling
+    model — no wire response format is requested
+    ([Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config]). *)
+let resolve_evaluator_slots = function
+  | Some runtime when String.trim runtime <> "" -> Ok [ runtime ]
+  | Some _ -> Error "task completion evaluator runtime is empty"
+  | None ->
+    (try
+       match (Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn) () with
+       | Ok [] ->
+         Error "verifier_exact exact-output lane resolved to no admitted slots"
+       | Ok slots -> Ok slots
+       | Error detail -> Error detail
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "verifier_exact exact-output lane resolution failed: %s"
+            (Printexc.to_string exn)))
 ;;
 
 (* ================================================================ *)
@@ -318,24 +333,6 @@ let default_evaluator_runtime () =
 (* ================================================================ *)
 
 let unresolved_evaluator_runtime = "unresolved"
-
-let resolve_evaluator_runtime = function
-  | Some runtime when String.trim runtime <> "" -> Ok runtime
-  | Some _ -> Error "task completion evaluator runtime is empty"
-  | None ->
-    (try
-       let runtime = default_evaluator_runtime () in
-       if String.trim runtime = ""
-       then Error "default task completion evaluator runtime is empty"
-       else Ok runtime
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Error
-         (Printf.sprintf
-            "task completion evaluator runtime resolution failed: %s"
-            (Printexc.to_string exn)))
-;;
 
 let review
       ?evaluator_runtime
@@ -366,7 +363,7 @@ let review
       (fun message -> Log.Task.warn "task_id=%s %s" req.task_id message)
       fmt
   in
-  match resolve_evaluator_runtime evaluator_runtime with
+  match resolve_evaluator_slots evaluator_runtime with
   | Error reason ->
     (Atomic.get outcome_observer_fn)
       ~outcome:"unavailable"
@@ -380,7 +377,23 @@ let review
       ; fallback_reason = Some reason
       ; retryable = true
       }
-  | Ok evaluator_runtime ->
+  | Ok [] ->
+    (* [resolve_evaluator_slots] never yields an empty list; this arm keeps the
+       match total without inventing a runtime. *)
+    (Atomic.get outcome_observer_fn)
+      ~outcome:"unavailable"
+      ~runtime:unresolved_evaluator_runtime;
+    let reason = "verifier_exact exact-output lane resolved to no admitted slots" in
+    task_warn "[task-completion-review] %s; task remains nonterminal" reason;
+    emit
+      { verdict = None
+      ; evaluator_runtime = unresolved_evaluator_runtime
+      ; generator_runtime
+      ; gate = Evaluator_unavailable
+      ; fallback_reason = Some reason
+      ; retryable = true
+      }
+  | Ok (first_slot :: _ as slots) ->
     (match
        build_prompt
          ~few_shot_block
@@ -393,14 +406,14 @@ let review
      | Error detail ->
        (Atomic.get outcome_observer_fn)
          ~outcome:"unavailable"
-         ~runtime:evaluator_runtime;
+         ~runtime:first_slot;
        task_warn
          "[task-completion-review] prompt unavailable runtime=%s: %s"
-         evaluator_runtime
+         first_slot
          detail;
        emit
          { verdict = None
-         ; evaluator_runtime
+         ; evaluator_runtime = first_slot
          ; generator_runtime
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
@@ -408,17 +421,23 @@ let review
          }
      | Ok prompt ->
        (match generator_runtime with
-        | Some generator when String.equal generator evaluator_runtime ->
+        | Some generator when List.exists (String.equal generator) slots ->
           task_warn
-            "[task-completion-review] generator and evaluator runtime are both %s"
-            evaluator_runtime
+            "[task-completion-review] generator runtime %s is one of the verifier_exact lane slots"
+            generator
         | None | Some _ -> ());
-       let reviewer_result =
+       (* Frozen-order slot failover, the same contract as the librarian /
+          compaction lanes: each slot is tried at most once, in declaration
+          order, and a slot that produces no usable verdict — provider error or
+          a reply without exactly one valid verdict tool call — yields to the
+          next slot. The terminal result describes the last attempt, so a
+          single-slot lane reports exactly what the pre-lane path reported. *)
+       let run_attempt slot =
          try
            (Atomic.get run_llm_reviewer_fn)
              ~base_path
              ?sw
-             ~evaluator_runtime
+             ~evaluator_runtime:slot
              ~prompt
              ~report_tool_schema:report_review_verdict_schema
              ~lookup
@@ -433,59 +452,81 @@ let review
                    "task completion evaluator raised unexpectedly: %s"
                    (Printexc.to_string exn)))
        in
-       (match reviewer_result with
-        | Ok (Some verdict) ->
-          (match verdict with
-           | Approve ->
-             task_info
-               "[task-completion-review] LLM approved runtime=%s"
-               evaluator_runtime
-           | Reject reason ->
-             task_info
-               "[task-completion-review] LLM rejected runtime=%s reason=%s"
-               evaluator_runtime
-               reason);
-          emit
-            { verdict = Some verdict
-            ; evaluator_runtime
-            ; generator_runtime
-            ; gate = Structured_tool
-            ; fallback_reason = None
-            ; retryable = true
-            }
-        | Ok None ->
-          let detail =
-            "task completion evaluator did not call report_review_verdict exactly once"
-          in
-          (Atomic.get outcome_observer_fn)
-            ~outcome:"invalid_verdict"
-            ~runtime:evaluator_runtime;
-          task_warn "[task-completion-review] %s" detail;
-          emit
-            { verdict = None
-            ; evaluator_runtime
-            ; generator_runtime
-            ; gate = Invalid_verdict
-            ; fallback_reason = Some detail
-            ; retryable = true
-            }
-        | Error error ->
-          let detail = Agent_core.Error.to_string error in
-          let retryable = Agent_core.Error.is_retryable error in
-          (Atomic.get outcome_observer_fn)
-            ~outcome:"unavailable"
-            ~runtime:evaluator_runtime;
-          task_warn
-            "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; task remains nonterminal: %s"
-            evaluator_runtime
-            retryable
-            detail;
-          emit
-            { verdict = None
-            ; evaluator_runtime
-            ; generator_runtime
-            ; gate = Evaluator_unavailable
-            ; fallback_reason = Some detail
-            ; retryable
-            }))
+       let rec attempt slot remaining =
+         match run_attempt slot with
+         | Ok (Some verdict) ->
+           (match verdict with
+            | Approve ->
+              task_info
+                "[task-completion-review] LLM approved runtime=%s"
+                slot
+            | Reject reason ->
+              task_info
+                "[task-completion-review] LLM rejected runtime=%s reason=%s"
+                slot
+                reason);
+           emit
+             { verdict = Some verdict
+             ; evaluator_runtime = slot
+             ; generator_runtime
+             ; gate = Structured_tool
+             ; fallback_reason = None
+             ; retryable = true
+             }
+         | Ok None ->
+           let detail =
+             "task completion evaluator did not call report_review_verdict exactly once"
+           in
+           (Atomic.get outcome_observer_fn)
+             ~outcome:"invalid_verdict"
+             ~runtime:slot;
+           (match remaining with
+            | next :: rest ->
+              task_warn
+                "[task-completion-review] %s runtime=%s; failing over to next verifier_exact slot %s"
+                detail
+                slot
+                next;
+              attempt next rest
+            | [] ->
+              task_warn "[task-completion-review] %s" detail;
+              emit
+                { verdict = None
+                ; evaluator_runtime = slot
+                ; generator_runtime
+                ; gate = Invalid_verdict
+                ; fallback_reason = Some detail
+                ; retryable = true
+                })
+         | Error error ->
+           let detail = Agent_core.Error.to_string error in
+           let retryable = Agent_core.Error.is_retryable error in
+           (Atomic.get outcome_observer_fn)
+             ~outcome:"unavailable"
+             ~runtime:slot;
+           (match remaining with
+            | next :: rest ->
+              task_warn
+                "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; failing over to next verifier_exact slot %s: %s"
+                slot
+                retryable
+                next
+                detail;
+              attempt next rest
+            | [] ->
+              task_warn
+                "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; task remains nonterminal: %s"
+                slot
+                retryable
+                detail;
+              emit
+                { verdict = None
+                ; evaluator_runtime = slot
+                ; generator_runtime
+                ; gate = Evaluator_unavailable
+                ; fallback_reason = Some detail
+                ; retryable
+                }))
+       in
+       attempt first_slot (List.tl slots))
 ;;

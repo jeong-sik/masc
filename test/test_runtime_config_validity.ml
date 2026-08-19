@@ -1000,6 +1000,7 @@ check
   ; "compaction_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
+  ; "verifier_exact"
   ]
   (List.map fst lane_signatures);
 check
@@ -1015,6 +1016,25 @@ check
        String.equal lane_id "board_attention_exact"
        || String.equal lane_id "hitl_auto_judge")
      lane_signatures);
+(* RFC-0361 D7(a): the completion-authority judgement lane is the single
+   provider-selection SSOT; slot 1 absorbs the retired [runtime].cross_verifier
+   binding and failover follows declaration order. *)
+check
+  (option (list string))
+  "verifier_exact absorbs cross_verifier as its first slot"
+  (Some [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ])
+  (match
+     List.find_opt
+       (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
+       lane_signatures
+   with
+   | Some (_, slot_ids) -> Some slot_ids
+   | None -> None);
+check
+  (option string)
+  "cross_verifier is absorbed into the verifier_exact lane"
+  None
+  cross_verifier;
 List.iter
   (fun (lane : Runtime_schema.exact_output_lane_decl) ->
      check bool
@@ -1032,6 +1052,15 @@ List.iter
         ~default_runtime_id:default.id
         ~assignments
         ~cross_verifier_runtime_id:cross_verifier
+        ~verifier_exact_slot_ids:
+          (match
+             List.find_opt
+               (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+                  String.equal lane.id Runtime.verifier_exact_lane_id)
+               config.exact_output_lane_decls
+           with
+           | Some lane -> lane.slot_ids
+           | None -> [])
         ~media_failover
         ~lanes
     in
@@ -1830,18 +1859,20 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
       ~cross_verifier_runtime_id:(Some "cross-e")
+      ~verifier_exact_slot_ids:[ "verifier-a"; "lane-b" ]
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
   in
   check
     (list string)
-    "routed lane candidates, special routes, and media failover are deduplicated \
-     without admitting a dormant lane"
+    "routed lane candidates, special routes, verifier_exact slots, and media \
+     failover are deduplicated without admitting a dormant lane"
     [ "lane-a"
     ; "lane-b"
     ; "assigned-b"
     ; "media-c"
     ; "cross-a"
+    ; "verifier-a"
     ]
     actual
 ;;

@@ -23,4 +23,13 @@ describe('v2 overview CSS', () => {
     )
     expect(reasonText['overflow-wrap']).toBe('anywhere')
   })
+
+  it('closes the KPI strip when the last cell would sit alone on a row', () => {
+    // The vendored .ov-kpis grid paints --border-soft behind its 1px gaps, so a
+    // grid track with no cell shows as a bare band. The overview renders 7 KPIs
+    // into a 6-column strip; without this span the 7th sits beside five empty
+    // tracks. See the rule's comment in v2-overview.css.
+    const trailing = declarationsForSelector(css, '.v2-overview-kpis > .ov-kpi:last-child')
+    expect(trailing['grid-column']).toBe('1 / -1')
+  })
 })

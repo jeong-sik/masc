@@ -321,7 +321,6 @@ let keeper_list_row_json ~runtime_class config name =
             ("status", `String status); ("keepalive_running", `Bool keepalive_running);
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
-            ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))
 let with_keeper_name args name =

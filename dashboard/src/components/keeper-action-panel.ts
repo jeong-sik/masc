@@ -11,10 +11,11 @@
 //   wakeup    → POST /api/v1/keepers/:name/directive  { action: "wakeup" }
 //   boot      → POST /api/v1/keepers/:name/boot
 //   shutdown  → POST /api/v1/keepers/:name/shutdown
+//   purge     → POST /api/v1/dashboard/agents/purge  { agent_name }
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
-import { Pause, Play, Power, RotateCcw, Square } from 'lucide-preact'
+import { Pause, Play, Power, RotateCcw, Square, Trash2 } from 'lucide-preact'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import { showToast } from './common/toast'
@@ -25,6 +26,7 @@ import {
   shutdownKeeper,
   wakeKeeper,
 } from '../api/keeper'
+import { KEEPER_PURGE_ARTIFACTS, purgeKeeper } from '../api/keeper-lifecycle'
 import {
   applyOptimisticKeeperDirective,
   refreshKeeperRuntimeStatus,
@@ -46,7 +48,13 @@ function afterAction(): void {
   })
 }
 
-export type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
+export type KeeperActionKey =
+  | 'pause'
+  | 'resume'
+  | 'wakeup'
+  | 'boot'
+  | 'shutdown'
+  | 'purge'
 
 /**
  * Single source of truth for keeper-action 한국어 라벨.
@@ -109,6 +117,13 @@ export const KEEPER_ACTION_LABELS: Record<KeeperActionKey, KeeperActionLabel> = 
     icon: Square,
     danger: true,
   },
+  purge: {
+    noun: '제거', verb: '제거하기', compact: '제거', label: '제거',
+    title:
+      '제거: keeper 와 그 저장소를 영구 삭제합니다 (되돌릴 수 없음). 실행 중이 아닌 keeper 에만 보입니다.',
+    icon: Trash2,
+    danger: true,
+  },
 }
 
 /** Execute a lifecycle action for a single keeper with toast feedback.
@@ -130,6 +145,32 @@ export async function runKeeperAction(
     if (!confirmed) return
   }
   const noun = KEEPER_ACTION_LABELS[action].noun
+
+  // Purge is not a lifecycle directive: it deletes the keeper and every store
+  // it owns, and the endpoint answers 202 with an operation id rather than the
+  // { ok, error } shape the directive calls share. It is handled here, ahead of
+  // the directive switch, so the confirmation naming the deleted stores cannot
+  // be bypassed by a caller surface.
+  if (action === 'purge') {
+    const confirmed = await requestConfirm({
+      title: '키퍼 영구 제거',
+      message:
+        `${name} 키퍼를 영구 제거합니다. 되돌릴 수 없습니다.\n\n`
+        + `함께 삭제되는 항목:\n`
+        + KEEPER_PURGE_ARTIFACTS.map(item => `  · ${item}`).join('\n'),
+      confirmText: '영구 제거',
+      tone: 'danger',
+    })
+    if (!confirmed) return
+    try {
+      const result = await purgeKeeper(name)
+      showToast(`${name} ${noun} 요청됨 (operation ${result.operation_id})`, 'success')
+      afterAction()
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : `${noun} 실패`, 'error')
+    }
+    return
+  }
 
   // Optimistic UI: pause/resume/wakeup mutate `paused` + phase locally
   // before the POST returns so the row's button set flips instantly. On
@@ -259,6 +300,16 @@ export function KeeperActionButtons({
             onClick=${(e: Event) => handle(e, 'shutdown')}
             title=${KEEPER_ACTION_LABELS.shutdown.title}
           >${text('shutdown')}<//>`
+        : null}
+      ${vis.canPurge
+        ? html`<${ActionButton}
+            variant="danger"
+            size=${size}
+            disabled=${busy.value}
+            onClick=${(e: Event) => handle(e, 'purge')}
+            title=${KEEPER_ACTION_LABELS.purge.title}
+            testId="keeper-action-purge"
+          >${text('purge')}<//>`
         : null}
     </div>
   `

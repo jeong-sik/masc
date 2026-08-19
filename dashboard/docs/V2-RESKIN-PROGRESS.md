@@ -5,12 +5,13 @@ keeper-v2 design prototype (icons, fonts, colors, margins, padding, weight),
 SSOT CSS, production-grade, no stub/hardcode/silent-failure.
 
 ## Ground truth (prototype)
-- Source: keeper-v2 design prototype (jsx + `styles/`), provided out-of-repo by the
-  designer. Point `$KEEPER_V2_PROTO` at its local checkout; the vendored SSOT copy of
-  its CSS lives in `src/styles/keeper-v2/` (the in-repo source of truth for the skin).
-- Standalone (rendered target): the `Keeper Agent v2 (standalone)` HTML from that
-  prototype, served locally (`?surface=<id>` deep-links) — e.g.
-  `python3 -m http.server` inside `$KEEPER_V2_PROTO`.
+- Source: the keeper-v2 design prototype is now IN-REPO at
+  `dashboard/prototypes/keeper-v2/` (v3 export, #29046) — `$KEEPER_V2_PROTO`
+  indirection is no longer needed. The vendored SSOT copy of its CSS lives in
+  `src/styles/keeper-v2/` (the in-repo source of truth for the skin).
+- Standalone (rendered target): `Keeper Agent v3.html` from that directory,
+  served locally (`?surface=<id>` deep-links) — e.g.
+  `python3 -m http.server` inside `dashboard/prototypes/keeper-v2/`.
 - Maps (transient investigation output, regenerable, not committed):
   proto-data-contract, proto-keepers-dom, proto-css-tokens, live-store-mapping,
   current-shell-inventory.
@@ -39,18 +40,17 @@ DONE + verified in-browser (11 surfaces): overview, keepers (roster/rail/chat he
 approvals, board, connectors, logs, settings, workspace, schedule (shell+panel), code/IDE,
 fusion. Far-surface rebuilds (schedule-panel, ide, fusion) landed cleanly.
 
-REMAINING (reverted — rate-limited mid-rewrite, need careful redo):
-- monitoring/Monitor (agent-roster.ts): fl-* row retarget worked, but the rebuild left a
-  DUPLICATE "Keeper Fleet" header (shell SurfaceLead + a second header) + misplaced foot
-  ticker + skeleton stat bars. Note: monitoring is in dashboard-shell's "no own header"
-  list → SurfaceLead renders the title; a rebuild must NOT add a second top header.
-- runtime-editor (runtime-environment-editor.ts + runtime-toml-editor.ts): structure good
-  (.rt-nav sections switch, .rt-lane/.rt-card), but EMBEDDED in settings narrower than the
-  prototype full surface → .rt-lane flex (label-l flex:1 + wide .rt-select control) squeezes
-  the label to ~50px → vertical text wrap. Fix: full-width embed and/or cap .rt-select and/or
-  stack .rt-lane label-above-control when narrow.
-- mobile bottom tab bar (.v2-nav.is-mnav) in nav-rail-v2.ts (desktop-only so far).
-- keepers chat thread/composer (KeeperConversationPanel, board-shared) still .kw-*.
+REMAINING (re-audited 2026-08-19 against the tree — three of four were stale):
+- [x] monitoring duplicate header: RESOLVED in-tree. `status.ts:105-117` skips the
+  SurfaceHeader for `section === 'agents'`; `agent-roster.ts` `.fl-top` owns the header
+  alone, and `monitoring` sits in dashboard-shell's SURFACE_OWN_LEAD_IDS.
+- [x] runtime-editor embed squeeze: RESOLVED in-tree. `keeper-v2/runtime.css` carries the
+  local contract (`.rt-lane` flex-wrap + `.rt-select` max-width 320px), documented at
+  `runtime-environment-editor.ts:498`. Browser re-verify only.
+- [x] mobile bottom tab bar: SHIPPED. `.v2-nav.is-mnav` + more-sheet in
+  `nav-rail-v2.ts:124`, guarded by `mobile-bottom-reserve.test.ts`.
+- [ ] keepers chat thread/composer (KeeperConversationPanel, keeper-shared) still .kw-* —
+  the one real remaining rework (see Deferred polish; planned as v3-delta PR-6).
 
 ## Remaining deltas (adversarial, prioritized)
 - [ ] Keepers roster header: current = verbose stat grid (12/9/0/3) + chips;
@@ -63,9 +63,28 @@ REMAINING (reverted — rate-limited mid-rewrite, need careful redo):
 - [ ] Keepers chat header actions = FSM_ACTIONS glyphs (⏸◉⇄■⚙).
 - [ ] Per-surface audit: overview (도메인 현황 cards), board, schedule, runtime,
       monitor, approvals, work, logs, ide, connectors, settings.
-- [ ] Mobile bottom tab bar (.v2-nav.is-mnav) + more-sheet.
+- [x] Mobile bottom tab bar (.v2-nav.is-mnav) + more-sheet — shipped (see above).
 - [ ] Stray focus-mode toggle bottom-left on non-primary surfaces.
 - [ ] Final cleanup PR: remove legacy *-v2.css / v2-shell.css / app-shell-v2.css once surfaces migrated.
+
+## v3 delta sync (2026-08-19, prototype #29046)
+The in-repo prototype is the v3 export; the vendored CSS was v2-era plus local
+evolution. Per-file disposition of the v2→v3 delta (base `2782405bc3`):
+- craft.css: adopted the v3 desktop `--pad-surface` horizontal tightening
+  (42→30 / 26→18 / 18→14); the local ≤900px media-query tiers stay.
+- memory.css: adopted `.mem-ttl` (salience-bar replacement, RFC-0247) and
+  `.mem-retain*` (retention notice) — mirrored into memory-inspector-v2.css per
+  that file's SYNC CONTRACT. Everything else was already pre-applied.
+- colors_and_type.css: NO-OP — the whole v3 delta is the local-ttf @font-face
+  block, superseded by the dashboard font policy (fonts.css owns fonts).
+- schedule.css / logs.css: VERIFIED, kept as-is. logs has zero missing
+  selectors; schedule's 36 v3-only selectors (.sch-act/.sch-risk/.sch-decision/
+  .sch-reject/…) have zero DOM consumers — the surface renders real projection
+  data with shared ActionButton/StatusChip instead of the prototype's mock
+  operator actions (mark-don't-fake), so the dead selectors are not vendored.
+- Still queued (separate PRs): v2.css (PR-2), surfaces.css (PR-3),
+  fusion/runtime/keeper-config (PR-4), prompt-book (PR-4b), fleet + monitor.css
+  vendoring + agent-roster ctx column (PR-5), chat .kw-* retarget (PR-6).
 
 ## Notes
 - Live data gaps (mark, don't fake): schedule/cron (no signal), context window

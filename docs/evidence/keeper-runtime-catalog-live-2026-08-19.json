@@ -1,0 +1,53 @@
+{
+  "captured_at": "2026-08-19T08:53:20Z",
+  "purpose": "Multi Runtime 행 — 재배포된 라이브 카탈로그 실측, 매트릭스 수치와 대조",
+  "endpoint": "GET /api/v1/runtime/resolved",
+  "config_path": "/Users/dancer/me/.masc/config/runtime.toml",
+  "generated_at": "2026-08-19T08:53:20Z",
+  "live_counts": {
+    "runtimes": 50,
+    "lanes": 37,
+    "assignments": 129
+  },
+  "matrix_recorded": {
+    "runtimes": 49,
+    "lanes": 11,
+    "assignments": 37,
+    "note": "08-15 18:44Z 실측값"
+  },
+  "delta": {
+    "runtimes": "+1 (49 -> 50)",
+    "lanes": "+26 (11 -> 37)",
+    "assignments": "+92 (37 -> 129)",
+    "reading": "lane과 assignment가 크게 늘었다. 08-15 이후 설정이 확장됐다는 뜻이고, 매트릭스의 '배포 설정도 lane 1개·assignment 0이라 다중 lane 실가동 아님'이라는 Multi Lane 행 기술과도 어긋난다."
+  },
+  "dispatchability": {
+    "keeper_dispatchable": 50,
+    "blocked": 0,
+    "blocked_reasons": {},
+    "reading": "50개 전부 디스패치 가능하고 차단 사유가 하나도 없다."
+  },
+  "provider_families": {
+    "Claude Code Max Subscription": 7,
+    "Antigravity Google Subscription": 11,
+    "Local Llama Server (Qwen3.6 35B Uncensored)": 2,
+    "Codex ChatGPT Subscription": 10,
+    "Ollama Cloud": 11,
+    "Local Ollama": 3,
+    "Local llama-server (llama.cpp b10180)": 1,
+    "Z.AI Coding": 2,
+    "Kimi For Coding Subscription": 3
+  },
+  "local_runtimes": 34,
+  "context_window_range": {
+    "min": 32768,
+    "max": 1048576
+  },
+  "default_runtime": {
+    "id": "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731",
+    "provider": "Ollama Cloud",
+    "model": "deepseek-v4-flash:0731"
+  },
+  "verdict": "카탈로그가 50 runtime·37 lane·129 assignment로 살아 있고 전부 디스패치 가능하다. 매트릭스에 적힌 49/11/37은 08-15 시점 값이라 stale이며, 특히 lane 11 -> 37과 assignment 37 -> 129는 Multi Lane 행의 '다중 lane 실가동 아님' 판정을 다시 봐야 한다는 뜻이다.",
+  "caveat": "디스패치 가능은 카탈로그가 그렇게 선언한다는 뜻이지 각 runtime이 실제로 응답한다는 증거가 아니다. 10T 실서빙 확인(24/49)은 별도 축이다."
+}

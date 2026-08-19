@@ -114,6 +114,7 @@ vi.mock('../keeper-state', async () => {
           && entry.source !== 'tool_result'
           && entry.source !== 'system'),
     ),
+    isAutonomousTurnEntry: (entry: { source?: string }) => entry.source === 'autonomous_turn',
   }
 })
 
@@ -170,6 +171,7 @@ import {
   resetToolCallOutputs,
 } from '../tool-call-output-store'
 import { shellAuthSummary } from '../store'
+import { chatShowAutonomous } from '../lib/chat-view-prefs'
 import type { KeeperConversationEntry } from '../types'
 import {
   KeeperConversationPanel,
@@ -245,6 +247,7 @@ describe('KeeperConversationPanel', () => {
     })
     keeperThreads.value = {}
     keeperSending.value = {}
+    chatShowAutonomous.value = true
     keeperHydrating.value = {}
     keeperStatusDetails.value = {}
     keeperActionErrors.value = {}
@@ -339,6 +342,52 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
     expect(container.querySelector('textarea')?.getAttribute('placeholder')).toBe('메시지 입력...')
     expect(hydrateKeeperStatus).not.toHaveBeenCalled()
+  })
+
+  it('hides autonomous turns when the autonomous view pref is off', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '직접 질문',
+          rawText: '직접 질문',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'autonomous-1',
+          role: 'assistant',
+          source: 'autonomous_turn',
+          label: 'sangsu',
+          text: '자율 작업 결과',
+          rawText: '자율 작업 결과',
+          timestamp: '2026-03-24T00:02:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+    expect(container.textContent).toContain('자율턴')
+
+    chatShowAutonomous.value = false
+    await waitFor(() => {
+      expect(container.textContent).not.toContain('자율턴')
+    })
+    expect(container.textContent).toContain('직접 질문')
   })
 
   it('renders the primary conversation layout as an airy canvas', async () => {

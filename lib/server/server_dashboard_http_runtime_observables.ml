@@ -156,15 +156,19 @@ let event_bus_json metrics =
       |> List.sort (fun a b -> compare (canon a) (canon b))
       |> List.map (fun (m : Otel_metric_store.metric) ->
         let canon_labels = canon m in
+        (* The producer encodes an absent subscription purpose as
+           "unspecified" (bus_samples_of); mirroring that encoding is a
+           projection of the producer's own default, not a guess on
+           unknown input. sound-partial: allow *)
+        let purpose = Option.value (label m "purpose") ~default:"unspecified" in
+        let overflow = Option.value (label m "overflow") ~default:"unspecified" in
         `Assoc
-          [ ( "purpose"
-            , `String (Option.value (label m "purpose") ~default:"unspecified") )
+          [ "purpose", `String purpose
           ; ( "capacity"
             , match Option.bind (label m "capacity") int_of_string_opt with
               | Some capacity -> `Int capacity
               | None -> `Null )
-          ; ( "overflow"
-            , `String (Option.value (label m "overflow") ~default:"unspecified") )
+          ; "overflow", `String overflow
           ; "depth", `Int (int_of_float m.value)
           ; "dropped_total", opt_int (find_by_labels dropped_rows canon_labels)
           ; "capacity_total", opt_int (find_by_labels capacity_rows canon_labels)
@@ -198,8 +202,11 @@ let runtime_observables_http_json () =
       Otel_metric_store.metric_runtime_observables_last_write_unixtime
   in
   let last_write_json, age_json =
+    (* NDT-OK: wall-clock feeds only the presented age of the freshness
+       stamp; no deterministic branch depends on the value. *)
+    let now = Unix.gettimeofday () in
     match last_write with
-    | Some t -> `Float t, `Float (Float.max 0.0 (Unix.gettimeofday () -. t))
+    | Some t -> `Float t, `Float (Float.max 0.0 (now -. t))
     | None -> `Null, `Null
   in
   `Assoc

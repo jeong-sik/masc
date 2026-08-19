@@ -230,9 +230,12 @@ let write_samples_to_store ~masc_root () =
     (fun { Otel_metrics.name; value; labels; kind = _ } ->
        Otel_metric_store_core.set_gauge name ~labels value)
     samples;
+  (* NDT-OK: the wall-clock read is the datum itself — a freshness stamp
+     cell for the read surface; no deterministic branch consumes it. *)
+  let stamped_at = Unix.gettimeofday () in
   Otel_metric_store_core.set_gauge
     Otel_metric_store.metric_runtime_observables_last_write_unixtime
-    (Unix.gettimeofday ());
+    stamped_at;
   List.length samples
 ;;
 

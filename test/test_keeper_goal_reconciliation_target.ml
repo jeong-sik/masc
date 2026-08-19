@@ -1,59 +1,45 @@
-(** Which keeper a Goal completion wakes when several carry the goal.
+(** Who a Goal completion wakes when several keepers carry it.
 
-    The resolver reads the reverse index of keepers holding the goal in
-    [active_goal_ids] and, before this change, failed outright whenever that
-    index held more than one name. A collaboration mission puts five keepers on
-    one goal, so every completion in the E0 campaign logged an ambiguity error.
-    The failure left goal and task state untouched, so the next scan found the
-    same goal ready and failed again — fifty-one hours of it in the live store.
+    The resolver used to fail whenever the reverse index of [active_goal_ids]
+    held more than one name. A collaboration mission puts five keepers on one
+    goal, so every completion logged an ambiguity error, and since the failure
+    changed no state the next scan found the same goal and failed again — 51
+    hours of it in the live store (#29083).
 
-    RFC-0362's [owner] already names the keeper responsible for turning the Goal
-    into Tasks. These tests pin that it settles the tie, and that it never
-    invents a target: a Goal with no owner, or one naming somebody who is not
-    working under it, still fails. *)
+    Treating several recipients as an error was the mistake. A wake is a message
+    into a keeper's queue, not a contract, and MASC's own rule says not to use
+    `Ambiguous` as a scheduling gate. So the gate is gone: everyone carrying the
+    goal hears, and the declared owner (RFC-0362) narrows that when the Goal
+    names one who is actually working under it. *)
 
 open Alcotest
 open Masc
 
-let resolve = Keeper_goal_reconciliation_wake.resolve_ambiguous_assignment
+let resolve = Keeper_goal_reconciliation_wake.resolve_assignment
+let names = list string
 
 let () =
   run "keeper_goal_reconciliation_target"
-    [ ( "owner"
-      , [ test_case "declared owner settles a multi-keeper goal" `Quick (fun () ->
-            match
-              resolve ~goal_id:"goal-collab" ~owner:(Some "coord")
-                ~keeper_names:[ "build-a"; "build-b"; "coord"; "research"; "review" ]
-            with
-            | Ok name -> check string "wakes the owner" "coord" name
-            | Error detail -> fail ("expected the owner, got error: " ^ detail))
-        ; test_case "no declared owner stays an error" `Quick (fun () ->
-            match
-              resolve ~goal_id:"goal-ownerless" ~owner:None
-                ~keeper_names:[ "build-a"; "build-b" ]
-            with
-            | Error detail ->
-              check bool "names the missing owner" true
-                (String_util.contains_substring detail "no declared owner")
-            | Ok name ->
-              fail ("an ownerless goal must not pick a target, picked: " ^ name))
-        ; test_case "owner outside the working set stays an error" `Quick (fun () ->
-            match
-              resolve ~goal_id:"goal-stale-owner" ~owner:(Some "retired")
-                ~keeper_names:[ "build-a"; "build-b" ]
-            with
-            | Error detail ->
-              check bool "names the mismatch" true
-                (String_util.contains_substring detail "not among its active keepers")
-            | Ok name ->
-              fail ("an owner nobody works under must not be woken, picked: " ^ name))
-        ; test_case "single-keeper set still honours a matching owner" `Quick (fun () ->
-            match
-              resolve ~goal_id:"goal-solo" ~owner:(Some "solo")
-                ~keeper_names:[ "solo" ]
-            with
-            | Ok name -> check string "wakes the owner" "solo" name
-            | Error detail -> fail ("expected the owner, got error: " ^ detail))
+    [ ( "assignment"
+      , [ test_case "several carriers all hear" `Quick (fun () ->
+            check names "everyone carrying the goal"
+              [ "build-a"; "build-b"; "coord"; "research"; "review" ]
+              (resolve ~owner:None
+                 ~keeper_names:[ "build-a"; "build-b"; "coord"; "research"; "review" ]))
+        ; test_case "declared owner narrows the wake" `Quick (fun () ->
+            check names "only the owner"
+              [ "coord" ]
+              (resolve ~owner:(Some "coord")
+                 ~keeper_names:[ "build-a"; "build-b"; "coord" ]))
+        ; test_case "owner outside the working set does not silence the rest" `Quick
+            (fun () ->
+              check names "everyone still hears"
+                [ "build-a"; "build-b" ]
+                (resolve ~owner:(Some "retired") ~keeper_names:[ "build-a"; "build-b" ]))
+        ; test_case "single carrier is unchanged" `Quick (fun () ->
+            check names "the one carrier" [ "solo" ] (resolve ~owner:None ~keeper_names:[ "solo" ]))
+        ; test_case "nobody carrying stays empty" `Quick (fun () ->
+            check names "no recipients" [] (resolve ~owner:(Some "coord") ~keeper_names:[]))
         ] )
     ]
 ;;

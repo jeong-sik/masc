@@ -156,6 +156,7 @@ function makeLogsData(entries: readonly LogEntry[]): LogsData {
       scope: 'dashboard_logs',
       durableStore: '/workspace/.masc/logs/system_log_2026-06-21.jsonl',
     },
+    ring: { startSeq: 0, total: entries.length, droppedBefore: false },
     total: entries.length,
     entries,
   }

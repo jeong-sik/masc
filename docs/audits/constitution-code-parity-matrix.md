@@ -23,9 +23,9 @@
 
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
-| B1 | Goal 생성 시 정량 성공조건 필수화 (현재 `metric`/`target_value`는 option) | `goal_store.mli:41-42`, `workspace_goals.ml:238-248` | 대기 |
-| B2 | Goal Verifier 검증 게이트 (생성 시 실재성·도달가능성 체크) — goal 경로에 verifier 와이어링 전무 | `lib/goal/` | 대기 |
-| B3 | Goal 완료 = Verifier 증명 + 인간 최종 확인 (현재 `Request_complete → Completed` 즉시 전이) | `goal_phase.ml:132` | 대기 |
+| B1 | Goal 생성 시 정량 성공조건 필수화 — 생성 경로가 non-blank `metric`+`target_value` 요구 | `goal_store.mli`, `workspace_goals.ml` | PR #29152 |
+| B2 | Goal Verifier 검증 게이트 — 생성 시 `Criterion_pending` durable 기록(`.masc/goal_verifications.json`), `record_criterion_*` verdict | `lib/goal/goal_verification.ml` | PR #29152 |
+| B3 | Goal 완료 = Verifier 증명 + 인간 최종 확인 — `Verifying`/`Awaiting_confirmation` gate phase, `Request_complete → Completed` 직행 폐기 | `goal_phase.ml`, RFC-0387 | PR #29152 |
 | B4 | ParallelTool — read 툴 4종 Concurrent 승격 + fail-closed admission (fan-out 엔진은 기존 `Agent_tool_batch_plan`이 커버) | `keeper_tool_descriptor.ml` | PR #29146 |
 | B5 | 스트리밍 문자열 dedup — exact-prefix retransmission drop / 누적 스냅샷 suffix reconcile, `masc_keeper_stream_text_delta_dedup_total{action=drop\|reconcile}` | `keeper_chat_agent_core_stream_bridge.ml` | PR #29149 |
 | B6 | tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버) | RFC-0386, `keeper_tool_descriptor.mli:69-82` | PR #29148 |
@@ -52,7 +52,7 @@
 | 구분 | 건수 | 상태 |
 |---|---|---|
 | A. 문서 보충 | 10 | PR #29140 |
-| B. 코드 보충 | 7 | B4 #29146 / B5 #29149 / B6 #29148 / B7-RFC #29147 열림; B1-B3·B7-코드 작업 중 |
+| B. 코드 보충 | 7 | B1-B3 #29152 / B4 #29146 / B5 #29149 / B6 #29148 / B7-RFC #29147 열림; B7-코드 작업 중 |
 | C. 코드 정리 | 4 | PR #29141 |
 | D. RFC stale | 2 | PR #29142 |
-| PR 열림 | 20 / 23 | B1-B3, B7-코드 남음 |
+| PR 열림 | 21 / 23 | B7-코드(lane + identity/lifecycle) 남음 |

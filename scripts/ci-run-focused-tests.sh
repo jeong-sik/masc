@@ -102,9 +102,7 @@ normal_targets=(
   @test/runtest-test_keeper_shutdown_ownerless_admission_release
   @test/runtest-test_keeper_create_admission_transaction
   @test/runtest-test_keeper_task_create_typed_failure
-  # test_keeper_task_outcomes is wired back once its last two cases pass —
-  # see #29120. #29103 added it here without a green run, and two of its
-  # twelve cases have never passed in CI.
+  @test/runtest-test_keeper_task_outcomes
   @test/runtest-test_keeper_toml_accessor_matrix
   @test/runtest-test_keeper_tool_execute_stream_close
   @test/runtest-test_keeper_turn_dispatch_authority

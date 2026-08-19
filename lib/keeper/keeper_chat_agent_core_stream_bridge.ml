@@ -304,6 +304,10 @@ let translate ~redact_text ~base_dir bridge_state
       }
   | ContentBlockDelta { index; delta = TextDelta text } -> (
       let accumulated =
+        (* DET-OK: [text_by_index] is deterministic local bridge state keyed by
+           content-block index; an absent key means no prior text for this
+           block, so "" is the sound identity for append/snapshot compare —
+           not a default on unknown wire input. *)
         Option.value ~default:"" (List.assoc_opt index bridge_state.text_by_index)
       in
       match classify_text_delta ~accumulated text with

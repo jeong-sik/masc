@@ -334,6 +334,7 @@ normal_targets=(
   @test/runtest-test_keeper_event_queue_persist_poison
   @test/runtest-test_keeper_event_queue_state_v2
   @test/runtest-test_keeper_connector_attention_wake
+  @test/runtest-test_keeper_scheduled_stimulus_channel
   @test/runtest-test_keeper_external_attention
   @test/runtest-test_keeper_manual_compaction_preemption
   @test/runtest-test_keeper_compaction_unit

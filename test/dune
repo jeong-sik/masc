@@ -1719,6 +1719,8 @@
 
 (include stanzas/test_otel_runtime_observables.inc)
 
+(include stanzas/test_keeper_scheduled_stimulus_channel.inc)
+
 (include stanzas/test_otel_port_ssot.inc)
 
 (include stanzas/test_otel_zero_fill.inc)

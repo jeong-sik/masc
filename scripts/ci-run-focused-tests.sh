@@ -127,6 +127,7 @@ normal_targets=(
   @test/runtest-test_channel_gate_discord_state
   @test/runtest-test_channel_gate_imessage_state
   @test/runtest-test_channel_gate_metrics
+  @test/runtest-test_channel_gate_slack_state
   @test/runtest-test_client_registry_eio
   @test/runtest-test_code_navigation_eio
   @test/runtest-test_common
@@ -197,6 +198,7 @@ normal_targets=(
   @test/runtest-test_keeper_playground_checkout_discovery
   @test/runtest-test_keeper_autonomous_turn_source
   @test/runtest-test_keeper_autoboot_single_owner
+  @test/runtest-test_keeper_list_truncation
   @test/runtest-test_keeper_meta_current_schema
   @test/runtest-test_keeper_meta_invalid_recovery
   @test/runtest-dashboard-http-behavior-contracts

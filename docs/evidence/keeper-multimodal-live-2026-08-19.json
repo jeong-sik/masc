@@ -1,0 +1,20 @@
+{
+  "captured_at": "2026-08-19T04:50:00Z",
+  "purpose": "MultiModal(vision) 행 live 축 실측 — 서빙/행사 분리 판정",
+  "tool_identity": "analyze_image (lib/keeper/keeper_tool_in_process_runtime.ml:1731 → Keeper_vision_tool.handle_with_outcome)",
+  "serving": {
+    "schema_exposed_in_today_wire": 65,
+    "sample": "{\"name\":\"analyze_image\",\"description\":\"Read a stored image artifact and ...\"} — available-tools 스키마로 keeper 턴 프롬프트에 노출",
+    "source": "<base-path>/.masc/wire-capture/2026-08/19.001.jsonl"
+  },
+  "exercise": {
+    "calls_in_august_full_store": 0,
+    "observation_window": "2026-08-01 ~ 08-19 tool_calls dated store 전수 (키워드 vision/image/multimodal/screenshot/browse — tool 이름 analyze_image는 'image'에 매치되므로 위음성 없음)",
+    "source": "<base-path>/.masc/tool_calls/2026-08/*.jsonl"
+  },
+  "provisioning": {
+    "per_keeper_vision_files": 0,
+    "note": "<base-path>/.masc/config/keepers/*.vision 부재 — keeper별 vision 설정 프로비저닝 없음"
+  },
+  "verdict": "서빙 라이브 PASS(스키마 노출 65회/일) / 행사 0(8월 전수). 호출 실측에는 이미지 자극 주입(vision artifact 저장 + keeper 지시)이 필요 — Async Tool 08-18 E4와 같은 운영자 지시형 라이브 실험이 다음 단계."
+}

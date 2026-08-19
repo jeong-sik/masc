@@ -32,6 +32,7 @@ import { AgentCoreHealthChip } from './agent-core-health-chip'
 import { RuntimeHealthSnapshot } from './runtime-health-snapshot'
 import { RuntimeMonitor } from './runtime-monitor'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { RuntimeObservablesPanel } from './runtime-observables-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
 import { TelemetryPanel, isTelemetryView, TELEMETRY_VIEW_CHIPS } from './telemetry-panel'
 import { RouteLink } from './common/route-link'
@@ -174,6 +175,9 @@ export function RuntimePanel() {
             <${AgentCoreHealthChip} />
             <${RuntimeMonitor} />
             <${HiddenDiagnosticsLinks} />
+            <${CollapsibleSection} id="runtime-details-observables" title="프로세스 관측">
+              <${RuntimeObservablesPanel} />
+            <//>
             <${CollapsibleSection} id="runtime-details-verification" title="형식검증">
               <${VerificationSpecsPanel} />
             <//>

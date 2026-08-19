@@ -94,15 +94,55 @@ let exact_producer_keeper_name ~config ~completing_agent_name =
   | Keeper_identity_binding.Lookup_failed detail -> Error detail
 ;;
 
+(* RFC-0362 names [owner] as the keeper responsible for turning this Goal into
+   Tasks, which is exactly who a completion should wake. The reverse index of
+   keepers carrying the goal in [active_goal_ids] answers a different question —
+   who is working on it — and a collaboration mission legitimately has several. *)
+let goal_owner_keeper ~config goal_id =
+  match Goal_store.get_goal config ~goal_id with
+  | Some { Goal_store.owner = Some owner; _ } ->
+    (match String.trim owner with
+     | "" -> None
+     | owner -> Some owner)
+  | Some { Goal_store.owner = None; _ } | None -> None
+;;
+
+(* Several keepers carry this goal. The declared owner settles it when it is one
+   of them; an owner outside the set, or none at all, still fails rather than
+   picking a keeper this Goal never named. Pure so the decision is testable
+   without a workspace. *)
+let resolve_ambiguous_assignment ~goal_id ~owner ~keeper_names =
+  match owner with
+  | Some owner when List.mem owner keeper_names -> Ok owner
+  | Some owner ->
+    Error
+      (Printf.sprintf
+         "Goal owner is not among its active keepers goal_id=%s owner=%s \
+          keepers=%s"
+         goal_id
+         owner
+         (String.concat "," keeper_names))
+  | None ->
+    Error
+      (Printf.sprintf
+         "ambiguous active Goal assignment with no declared owner goal_id=%s \
+          keepers=%s"
+         goal_id
+         (String.concat "," keeper_names))
+;;
+
 let target_keeper_name ~config ~completing_agent_name ~goal_id =
   match assigned_keeper_resolution ~config goal_id with
   | Assigned_keeper keeper_name -> Ok (Some keeper_name)
   | Ambiguous_assigned_keepers keeper_names ->
-    Error
-      (Printf.sprintf
-         "ambiguous active Goal assignment goal_id=%s keepers=%s"
-         goal_id
-         (String.concat "," keeper_names))
+    (match
+       resolve_ambiguous_assignment
+         ~goal_id
+         ~owner:(goal_owner_keeper ~config goal_id)
+         ~keeper_names
+     with
+     | Ok owner -> Ok (Some owner)
+     | Error detail -> Error detail)
   | Assigned_keeper_lookup_failed detail -> Error detail
   | No_assigned_keeper ->
     (match exact_producer_keeper_name ~config ~completing_agent_name with

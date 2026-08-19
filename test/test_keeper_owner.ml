@@ -280,6 +280,8 @@ let test_reducer_rejects_invalid_compaction_numbers () =
       ; generation = meta.runtime.nonce
       ; commit_count = 1
       ; at = Float.nan
+      ; before_bytes = 0
+      ; after_bytes = 0
       ; updated_at = "invalid"
       }
   in
@@ -373,6 +375,8 @@ let test_turn_delta_preserves_concurrent_compaction_observation () =
             ; generation = before.runtime.nonce
             ; commit_count = 1
             ; at = 99.0
+            ; before_bytes = 4096
+            ; after_bytes = 1024
             ; updated_at = "compacted"
             }))
   in

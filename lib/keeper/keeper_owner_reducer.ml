@@ -135,6 +135,8 @@ type meta_command =
       ; generation : int
       ; commit_count : int
       ; at : float
+      ; before_bytes : int
+      ; after_bytes : int
       ; updated_at : string
       }
   | Ack_message_scope of
@@ -703,7 +705,9 @@ let apply_existing (state : state) meta command =
   | Set_blocker { blocker; updated_at } ->
     let runtime = { meta.runtime with last_blocker = blocker } in
     Ok (with_meta state { meta with runtime; updated_at })
-  | Record_compaction_commit { trace_id; generation; commit_count; at; updated_at } ->
+  | Record_compaction_commit
+      { trace_id; generation; commit_count; at; before_bytes; after_bytes; updated_at }
+    ->
     if
       not (Keeper_id.Trace_id.equal meta.runtime.trace_id trace_id)
       || not (Int.equal meta.runtime.nonce generation)
@@ -712,15 +716,21 @@ let apply_existing (state : state) meta command =
     then Error (Invalid_delta "compaction commit count is negative")
     else if not (Float.is_finite at)
     then Error (Invalid_delta "compaction at must be finite")
+    else if before_bytes < 0 || after_bytes < 0
+    then Error (Invalid_delta "compaction checkpoint bytes must be non-negative")
     else
-      (* [count] alone said a compaction happened without saying when, so 136
-         commits left last_ts at zero and nothing could measure the interval
-         between them (#29109). The token pair stays unwritten here: this
-         commit path has no measurement of the context before or after. *)
+      (* [count] alone said a compaction happened without saying when or how
+         much it saved, so 136 commits left last_ts at zero and both token
+         fields at zero (#29109). The sizes come from the evidence the
+         preparation already measured on both sides of the checkpoint; the
+         cycle outcome now carries them this far instead of dropping them with
+         the recovery. *)
       let compaction_rt =
         { meta.runtime.compaction_rt with
           count = max meta.runtime.compaction_rt.count commit_count
         ; last_ts = at
+        ; last_before_tokens = before_bytes
+        ; last_after_tokens = after_bytes
         }
       in
       let meta = Keeper_meta_contract.map_compaction_rt (fun _ -> compaction_rt) meta in

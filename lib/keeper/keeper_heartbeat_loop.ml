@@ -276,8 +276,11 @@ let manual_compaction_requested_of_stimuli = function
 
 
 let rec compaction_outcomes_of_cycle_outcome = function
-  | Cycle.Manual_compaction_applied { receipt; followup } ->
-    `Manual_committed receipt.commit_count
+  | Cycle.Manual_compaction_applied { receipt; evidence; followup } ->
+    `Manual_committed
+      ( receipt.commit_count
+      , evidence.Keeper_compaction_evidence.before_checkpoint_bytes
+      , evidence.Keeper_compaction_evidence.after_checkpoint_bytes )
     :: compaction_outcomes_of_cycle_outcome followup
   | Cycle.Manual_compaction_failed _ -> [ `Failed ]
   | Cycle.Failed { failure; _ } ->
@@ -981,7 +984,7 @@ let run_keepalive_unified_turn
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                `Failed
-           | `Manual_committed commit_count as outcome ->
+           | `Manual_committed (commit_count, before_bytes, after_bytes) as outcome ->
              record_compaction_outcome_metric
                ~keeper_name:meta_after_triage.name
                outcome;
@@ -994,6 +997,8 @@ let run_keepalive_unified_turn
                      ; generation = meta_after_triage.runtime.nonce
                      ; commit_count
                      ; at = Unix.gettimeofday () (* NDT-OK: stamps when this commit landed; no branch reads it *)
+                     ; before_bytes
+                     ; after_bytes
                      ; updated_at = Masc_domain.now_iso ()
                      })
               with

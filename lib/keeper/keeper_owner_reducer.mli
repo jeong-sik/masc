@@ -141,6 +141,8 @@ type meta_command =
       ; generation : int
       ; commit_count : int
       ; at : float
+      ; before_bytes : int
+      ; after_bytes : int
       ; updated_at : string
       }
   | Ack_message_scope of

@@ -26,10 +26,10 @@
 | B1 | Goal 생성 시 정량 성공조건 필수화 (현재 `metric`/`target_value`는 option) | `goal_store.mli:41-42`, `workspace_goals.ml:238-248` | 대기 |
 | B2 | Goal Verifier 검증 게이트 (생성 시 실재성·도달가능성 체크) — goal 경로에 verifier 와이어링 전무 | `lib/goal/` | 대기 |
 | B3 | Goal 완료 = Verifier 증명 + 인간 최종 확인 (현재 `Request_complete → Completed` 즉시 전이) | `goal_phase.ml:132` | 대기 |
-| B4 | ParallelTool 실행 모듈 (현재 `disable_parallel_tool_use` 억제 플래그만 존재) | `keeper_context_core_accessors.ml:61` | 대기 |
+| B4 | ParallelTool — read 툴 4종 Concurrent 승격 + fail-closed admission (fan-out 엔진은 기존 `Agent_tool_batch_plan`이 커버) | `keeper_tool_descriptor.ml` | PR #29146 |
 | B5 | 스트리밍 문자열 dedup (현재 텍스트 델타 pass-through) | `keeper_chat_agent_core_stream_bridge.ml:255-261` | 대기 |
-| B6 | Batch/Multitool 실행 개념 (tool 타입 부재) | `keeper_tool_composition_catalog.ml` | 대기 |
-| B7 | Verifier를 keeper급 standalone agent로 (현재 프로토콜+도구 수준) | `keeper_unified_metrics_support.ml:400` | 대기 |
+| B6 | tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버) | RFC-0386, `keeper_tool_descriptor.mli:69-82` | PR #29148 |
+| B7 | Verifier keeper급 standalone 격상 — RFC-0361 D7 개정 완료, 코드 1단계(lane)/2단계(identity+lifecycle) 대기 | RFC-0361 D7 | RFC PR #29147 |
 
 ## C. 코드 정리 (헌법 금지 패턴 잔여)
 
@@ -52,7 +52,7 @@
 | 구분 | 건수 | 상태 |
 |---|---|---|
 | A. 문서 보충 | 10 | PR #29140 |
-| B. 코드 보충 | 7 | 진행중 (B1-B3/B4/B5/B6 에이전트 작업 중, B7은 B1-B3 후속) |
+| B. 코드 보충 | 7 | B4 #29146 / B6 #29148 / B7-RFC #29147 열림; B1-B3·B5 작업 중 |
 | C. 코드 정리 | 4 | PR #29141 |
 | D. RFC stale | 2 | PR #29142 |
-| PR 열림 | 16 / 23 | B 그룹 7건 남음 |
+| PR 열림 | 19 / 23 | B1-B3, B5, B7-코드 남음 |

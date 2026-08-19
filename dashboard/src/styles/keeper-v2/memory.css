@@ -79,7 +79,7 @@
 .mem-store-meta { display: flex; align-items: center; gap: 12px; margin-top: 6px; font-size: 10.5px; color: var(--text-dim); }
 .mem-src { color: var(--text-dim); }
 /* TTL / current badge — replaces the deleted salience bar (RFC-0247) */
-.mem-ttl { flex: none; font-size: 9.5px; letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.mem-ttl { flex: none; font-size: var(--fs-9-5); letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
 .mem-ttl.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
 .mem-ttl.expired { color: var(--text-dim); border-style: dashed; }
 .mem-leg-tag { margin-left: 6px; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 32%, transparent); border-radius: var(--radius-xs); padding: 0 4px; }
@@ -96,7 +96,7 @@
 .mem-op.pin { color: var(--volt-strong); }
 .mem-op.summarize { color: var(--info); }
 /* 보존 정책 고지 — 주기 consolidation 제거(2026-08) */
-.mem-retain { display: flex; flex-direction: column; gap: 3px; margin: 0 0 10px; padding: 8px 10px; border: 1px dashed var(--border-main); border-radius: var(--radius-xs); font-size: 10px; letter-spacing: 0.04em; color: var(--text-dim); }
+.mem-retain { display: flex; flex-direction: column; gap: 3px; margin: 0 0 10px; padding: 8px 10px; border: 1px dashed var(--border-main); border-radius: var(--radius-xs); font-size: var(--fs-10); letter-spacing: 0.04em; color: var(--text-dim); }
 .mem-retain b { color: var(--text-mid); font-weight: 400; }
 .mem-retain-g { font-family: var(--font-ui); font-size: var(--fs-11); letter-spacing: 0; line-height: 1.5; color: var(--text-dim); text-wrap: pretty; }
 .mem-op.compact { color: var(--status-warn); }

@@ -35,3 +35,29 @@ let metric_memory_usage_bytes = "masc_memory_usage_bytes"
    non-yielding syscall or CPU hog -- the shared root cause of the
    2026-06 fleet freezes (#20677, #20684). *)
 let metric_eio_loop_lag_seconds = "masc_eio_loop_lag_seconds"
+
+(* Runtime-observable store cells: written by the Otel_runtime_observables
+   store writer (30s cadence plus one synchronous bootstrap write,
+   masc#29023) and read back by the dashboard runtime-observables endpoint.
+   Names lived as locals in otel_runtime_observables.ml while that module
+   was the only site; the endpoint made them two-site constants. *)
+let metric_console_sink_dropped = "masc_console_sink_dropped_total"
+let metric_console_sink_queue_depth = "masc_console_sink_queue_depth"
+let metric_transition_audit_queue_depth = "masc_keeper_transition_audit_queue_depth"
+let metric_fd_active_operations = "masc_fd_active_operations"
+let metric_fd_resource_errors = "masc_fd_resource_errors_total"
+let metric_store_bytes = "masc_store_bytes"
+let metric_store_files = "masc_store_files"
+let metric_bus_subscriber_dropped = "masc_event_bus_subscriber_dropped_total"
+let metric_bus_subscriber_depth = "masc_event_bus_subscriber_depth"
+let metric_bus_subscribers = "masc_event_bus_subscribers"
+(* The masc_pool_* series predate the observables module; the idle and
+   inflight gauges keep their historical *_total suffix. *)
+let metric_pool_idle = "masc_pool_idle_total"
+let metric_pool_inflight = "masc_pool_inflight_total"
+let metric_pool_reuse = "masc_pool_reuse_total"
+let metric_pool_evict = "masc_pool_evict_total"
+let metric_pool_evict_failure = "masc_pool_evict_failure_total"
+let metric_pool_create = "masc_pool_create_total"
+let metric_runtime_observables_last_write_unixtime =
+  "masc_runtime_observables_last_write_unixtime"

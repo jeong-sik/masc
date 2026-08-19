@@ -198,6 +198,7 @@ normal_targets=(
   @test/runtest-test_keeper_playground_checkout_discovery
   @test/runtest-test_keeper_autonomous_turn_source
   @test/runtest-test_keeper_autoboot_single_owner
+  @test/runtest-test_keeper_list_truncation
   @test/runtest-test_keeper_meta_current_schema
   @test/runtest-test_keeper_meta_invalid_recovery
   @test/runtest-dashboard-http-behavior-contracts

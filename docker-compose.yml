@@ -5,7 +5,7 @@
 #                                        └──prometheusremotewrite──▶ victoriametrics (metrics)
 #   grafana ──queries──▶ jaeger + victoriametrics (UI: http://localhost:3000)
 #
-# Production runs on Railway today; this compose file is for:
+# This compose file is for:
 #   - reproducible local stack-style runs,
 #   - k8s/Nomad migrations that read compose for restart/log knobs,
 #   - local observability development.

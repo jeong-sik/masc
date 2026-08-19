@@ -334,16 +334,36 @@ let select_all_message_names ~since_seq names =
        if cmp <> 0 then cmp else String.compare name_a name_b)
   |> List.map snd
 
-(** Read most-recent messages without parsing the entire history directory. *)
-let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
+let select_all_message_names_newest_first ~since_seq names =
+  select_all_message_names ~since_seq names |> List.rev
+
+(** Read most-recent messages without parsing the entire history directory.
+
+    [keep] decides which messages COUNT toward [limit]. Without it a caller that
+    filters afterwards cannot express "the newest [limit] messages of MINE": the
+    store returns [limit] messages from every agent and the caller's filter thins
+    them to an unpredictable number, which is zero once other agents fill the
+    window. Callers used to compensate by requesting a multiple of what they
+    wanted — 200, 2000, [limit * 5], [limit * 10] capped at 1000, a different
+    guess at each call site — and each guess is wrong at some fleet size.
+
+    Filtering here costs a wider directory walk, bounded by the messages that
+    exist rather than by a guess, and stops as soon as [limit] matches are
+    found. *)
+let collect_recent_messages config ~msgs_path ~since_seq ~limit ?keep ~warn_label () =
   if not (Sys.file_exists msgs_path) then []
   else
     let names =
       Sys.readdir msgs_path
       |> Array.to_list
       |> List.filter is_valid_filename
-      |> select_recent_message_names ~since_seq ~limit
+      |> (match keep with
+          (* Unfiltered: the newest [limit] names ARE the answer, so the walk
+             stays bounded by [limit] rather than by the directory. *)
+          | None -> select_recent_message_names ~since_seq ~limit
+          | Some _ -> select_all_message_names_newest_first ~since_seq)
     in
+    let keep = Option.value keep ~default:(fun _ -> true) in
     let rec loop remaining acc = function
       | _ when remaining <= 0 -> List.rev acc
       | [] -> List.rev acc
@@ -355,7 +375,8 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label =
             match read_json config path with
             | json ->
                 (match message_of_yojson json with
-                 | Ok msg when msg.seq > since_seq -> loop (remaining - 1) (msg :: acc) rest
+                 | Ok msg when msg.seq > since_seq && keep msg ->
+                     loop (remaining - 1) (msg :: acc) rest
                  | Ok _ | Error _ -> loop remaining acc rest)
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
@@ -372,7 +393,20 @@ let get_messages_raw config ~since_seq ~limit =
   if not (root_is_initialized config) then []
   else
     let msgs_path = messages_dir config in
-    collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message"
+    collect_recent_messages config ~msgs_path ~since_seq ~limit ~warn_label:"message" ()
+
+let get_messages_matching config ~since_seq ~limit ~keep =
+  if not (root_is_initialized config) then []
+  else
+    let msgs_path = messages_dir config in
+    collect_recent_messages
+      config
+      ~msgs_path
+      ~since_seq
+      ~limit
+      ~keep
+      ~warn_label:"message"
+      ()
 
 let get_all_messages_raw config ~since_seq =
   if not (root_is_initialized config) then []

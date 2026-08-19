@@ -1,0 +1,26 @@
+{
+  "captured_at": "2026-08-19T05:55:00Z",
+  "purpose": "Web 행 — 08-19 t5가 기록한 'WebFetch 스토어 무대응 비대칭' 판정의 재검증",
+  "prior_claim": "08-19 t5 실측: sangsu 타임라인에서 WebSearch x2는 tool_calls 스토어와 1:1로 맞았으나 WebFetch x1은 스토어에 대응 레코드가 없어 비대칭으로 기록",
+  "source": "<base-path>/.masc/tool_calls/2026-08/*.jsonl (8월 전수)",
+  "totals_august": { "WebSearch": 701, "WebFetch": 321 },
+  "by_day_recent": {
+    "08-14": { "WebSearch": 61, "WebFetch": 21 },
+    "08-15": { "WebSearch": 56, "WebFetch": 6 },
+    "08-16": { "WebSearch": 35, "WebFetch": 11 },
+    "08-17": { "WebSearch": 11, "WebFetch": 4 },
+    "08-18": { "WebSearch": 9, "WebFetch": 4 },
+    "08-19": { "WebSearch": 5, "WebFetch": 0 }
+  },
+  "record_shape_sample": {
+    "ts": "08-18 17:17:31Z",
+    "keeper": "code-reviewer",
+    "tool": "WebFetch",
+    "success": true,
+    "duration_ms": 955,
+    "input": { "url": "https://github.com/jeong-sik/masc/pull/29012.diff", "extractMode": "text", "maxChars": 30000 },
+    "output_head": "{\"status\":\"ok\",\"url\":\"...29012.diff\",\"final_url\":\"https://patc...\"}"
+  },
+  "verdict": "WebFetch는 스토어에 정상 기록된다 — 8월 전수 321건, 08-14~08-18 매일 4~21건, 레코드에 status/final_url(리다이렉트 추적)·duration_ms까지 담긴다. 따라서 '스토어가 WebFetch에 무대응'이라는 일반 결함은 성립하지 않는다.",
+  "revised_reading": "08-19 당일만 WebFetch 0건이다. t5의 관측은 '그 keeper의 그 호출이 스토어에 없다'는 개별 사건이지 도구 전체의 비대칭이 아니다. 남는 질문은 t5가 본 특정 호출이 왜 누락됐는가(다른 경로·실패 후 미기록 여부)이며, 재현하려면 같은 keeper·같은 창에서 WebFetch를 다시 발화시켜야 한다."
+}

@@ -70,6 +70,53 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+(* A page is not the backlog. The sort keys on priority alone and is stable, so
+   within one priority the newest task sits last and falls off [limit] first.
+   Eight tasks registered at priority 2 and 3 stayed invisible across nineteen
+   todo listings because the response gave no sign it had cut anything (#29101). *)
+let test_tasks_list_reports_truncation () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let meta = meta_with_active_goals [] in
+       for index = 1 to 4 do
+         ignore
+           (Task.handle_keeper_task_tool
+              ~config
+              ~meta
+              ~name:"keeper_task_create"
+              ~args:
+                (`Assoc
+                  [ "title", `String (Printf.sprintf "task %d" index)
+                  ; "description", `String "truncation fixture"
+                  ; "priority", `Int 3
+                  ]))
+       done;
+       let list_with_limit limit =
+         let execution =
+           Task.handle_keeper_task_tool_with_outcome
+             ~config
+             ~meta
+             ~name:"keeper_tasks_list"
+             ~args:(`Assoc [ "limit", `Int limit ])
+         in
+         match execution.data with
+         | Some data -> data
+         | None -> fail "expected producer-owned snapshot"
+       in
+       let cut = list_with_limit 2 in
+       check int "matching count is the whole backlog" 4 U.(cut |> member "matching_count" |> to_int);
+       check int "returned count is the page" 2 U.(cut |> member "returned_count" |> to_int);
+       check bool "cut page says so" true U.(cut |> member "truncated" |> to_bool);
+       check int "page holds the limit" 2 U.(cut |> member "snapshot" |> to_list |> List.length);
+       let whole = list_with_limit 50 in
+       check int "whole backlog matches" 4 U.(whole |> member "matching_count" |> to_int);
+       check bool "whole backlog is not truncated" false U.(whole |> member "truncated" |> to_bool))
+;;
+
 let test_tasks_list_returns_snapshot_and_unchanged () =
   let base_path = temp_dir () in
   Fun.protect
@@ -485,6 +532,10 @@ let () =
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
+        ; test_case
+            "keeper_tasks_list reports a truncated page"
+            `Quick
+            test_tasks_list_reports_truncation
         ; test_case
             "keeper_tasks_list returns snapshot and unchanged"
             `Quick

@@ -835,6 +835,58 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('compact 임계 근접')
   })
 
+  it('annotates the observed context window next to the percentage (.fl-ctx-win)', async () => {
+    keepers.value = [
+      {
+        name: 'rondo',
+        agent_name: 'keeper-rondo-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        context_ratio: 0.62,
+        context_tokens: 79_360,
+        context_max: 128_000,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const val = container.querySelector('.fl-ctx-val')
+    expect(val?.textContent).toContain('62%')
+    // Window annotation renders only from an actually-received context_max —
+    // never derived (mark, don't fake).
+    expect(val?.querySelector('.fl-ctx-win')?.textContent).toBe('/ 128.0K')
+  })
+
+  it('omits the window annotation when context_max was not received', async () => {
+    keepers.value = [
+      {
+        name: 'rondo',
+        agent_name: 'keeper-rondo-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        context_ratio: 0.4,
+        context_tokens: null,
+        context_max: null,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const val = container.querySelector('.fl-ctx-val')
+    expect(val?.textContent).toContain('40%')
+    expect(val?.querySelector('.fl-ctx-win')).toBeNull()
+  })
+
   it('does not render the internal namespace-separation disclaimer strip', async () => {
     agents.value = [
       makeAgent({

@@ -161,6 +161,7 @@ normal_targets=(
   @test/runtest-test_dashboard_nav_event
   @test/runtest-test_dashboard_perf
   @test/runtest-test_dashboard_recent_terminal_tasks
+  @test/runtest-test_server_dashboard_runtime_observables
   @test/runtest-test_auth_ambiguous_lookup_9786
   @test/runtest-test_auth_credential_hash_collision
   @test/runtest-test_mcp_auth_reject_observability

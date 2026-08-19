@@ -39,4 +39,10 @@ module For_testing : sig
     meta:Keeper_meta_contract.keeper_meta ->
     request_id:string ->
     Tool_result.result
+
+  val cancel_result :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    request_id:string ->
+    Tool_result.result
 end

@@ -8,6 +8,56 @@ open Alcotest
 module Descriptor = Masc.Keeper_tool_descriptor
 module Catalog = Masc.Keeper_tool_composition_catalog
 module Surface = Masc.Keeper_tool_composition_surface
+module Call_log = Masc.Keeper_tool_call_log
+module Workspace = Masc.Workspace
+
+let temp_dir prefix =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let cleanup_dir path =
+  let rec rm target =
+    if Sys.file_exists target
+    then
+      if Sys.is_directory target
+      then (
+        Sys.readdir target
+        |> Array.iter (fun name -> rm (Filename.concat target name));
+        Unix.rmdir target)
+      else Unix.unlink target
+  in
+  try rm path with _ -> ()
+;;
+
+let make_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String "tool-kind-keeper"
+          ; ( "agent_name"
+            , `String
+                (Masc.Keeper_identity.keeper_agent_name "tool-kind-keeper") )
+          ; "trace_id", `String "tool-kind-trace"
+          ; "allowed_paths", `List [ `String "*" ]
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> failwith ("make_meta failed: " ^ err)
+;;
+
+let expect_tool_kind_field expected json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "tool_kind" fields with
+     | Some (`String actual) when String.equal actual expected -> ()
+     | Some other ->
+       failf "tool_kind is %s, expected %s" (Yojson.Safe.to_string other) expected
+     | None -> failf "tool_kind field missing, expected %s" expected)
+  | _ -> fail "expected a JSON object carrying tool_kind"
+;;
 
 let tool_kind_testable =
   testable
@@ -161,6 +211,73 @@ let test_async_controls_and_plan_execute_declare_kinds () =
     Surface.plan_execute_tool_kind
 ;;
 
+(* Composition surface tools are materialized Agent_core tools outside the
+   descriptor registry, so their kind must be observable on their own result
+   payloads and route evidence — not on descriptor evidence. *)
+let test_status_result_payload_carries_tool_kind () =
+  let dir = temp_dir "tool-kind-status" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+       let config = Workspace.default_config dir in
+       let meta = make_meta () in
+       let result =
+         Surface.For_testing.status_result ~config ~meta ~request_id:"no-such-request"
+       in
+       expect_tool_kind_field "async_composition" (Tool_result.data result))
+;;
+
+let test_cancel_result_payload_carries_tool_kind () =
+  let dir = temp_dir "tool-kind-cancel" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+       let config = Workspace.default_config dir in
+       let meta = make_meta () in
+       let result =
+         Surface.For_testing.cancel_result ~config ~meta ~request_id:"no-such-request"
+       in
+       expect_tool_kind_field "async_composition" (Tool_result.data result))
+;;
+
+let test_route_evidence_picks_composition_tool_kind () =
+  let output_text =
+    `Assoc
+      [ "composition_tool", `String "keeper_compose_clock-inline"
+      ; "tool_kind", `String "composition"
+      ; "actions", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    Call_log.route_evidence_json_of_tool_io
+      ~tool_name:"keeper_compose_clock-inline"
+      ~input:(`Assoc [])
+      ~output_text
+  with
+  | Some evidence -> expect_tool_kind_field "composition" evidence
+  | None -> fail "composition tool call produced no route evidence"
+;;
+
+let test_route_evidence_picks_batch_plan_tool_kind () =
+  let output_text =
+    `Assoc
+      [ "composition_tool", `String Surface.plan_execute_tool_name
+      ; "tool_kind", `String "batch_plan"
+      ; "actions", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    Call_log.route_evidence_json_of_tool_io
+      ~tool_name:Surface.plan_execute_tool_name
+      ~input:(`Assoc [])
+      ~output_text
+  with
+  | Some evidence -> expect_tool_kind_field "batch_plan" evidence
+  | None -> fail "batch plan tool call produced no route evidence"
+;;
+
 let () =
   run
     "keeper_tool_kind"
@@ -197,6 +314,22 @@ let () =
             "async controls and plan execute declare kinds"
             `Quick
             test_async_controls_and_plan_execute_declare_kinds
+        ; test_case
+            "status result payload carries tool kind"
+            `Quick
+            test_status_result_payload_carries_tool_kind
+        ; test_case
+            "cancel result payload carries tool kind"
+            `Quick
+            test_cancel_result_payload_carries_tool_kind
+        ; test_case
+            "route evidence picks composition tool kind"
+            `Quick
+            test_route_evidence_picks_composition_tool_kind
+        ; test_case
+            "route evidence picks batch plan tool kind"
+            `Quick
+            test_route_evidence_picks_batch_plan_tool_kind
         ] )
     ]
 ;;

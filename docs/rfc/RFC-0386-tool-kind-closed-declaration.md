@@ -71,8 +71,24 @@ parse 는 strict 하다. `tool_kind_of_string` 은 알 수 없는 문자열을
 
 ## 4. 노출
 
-`route_evidence_json` 과 `discovery_fields` 가 `"tool_kind"` 필드를
-실는다. evidence 소비자는 키로 읽으므로 additive 변경이다.
+두 경로가 있다. 어느 쪽도 문자열 매칭으로 분류하지 않는다.
+
+1. **descriptor-backed 툴** — `route_evidence_json` 과
+   `discovery_fields` 가 `"tool_kind"` 필드를 실는다(현재 전부
+   `"atomic"`).
+2. **composition surface 툴** — `keeper_compose_*`,
+   `keeper_plan_execute`, `keeper_composition_status/cancel` 은 TOML
+   카탈로그에서 구체화되는 `Agent_core.Tool.t` 이며 Keeper descriptor
+   registry 에 속하지 않는다(`Keeper_tool_descriptor_resolution` 이
+   `None` 을 반환). 따라서 descriptor route evidence 경로는 이 툴들을
+   커버하지 않고, kind 는 이 툴들 자신의 관측 경로에 실린다:
+   - 실행/제출 결과 payload (`result_of_execution`, `failure_data`,
+     async submission, status/cancel 결과) 의 `"tool_kind"` 필드
+   - 노드별 tool-call log envelope 의 `"composition_tool_kind"` 필드
+     (typed `?composition_tool_kind` 파라미터로 전달)
+   - 호출 route evidence: `route_evidence_json_of_tool_io` 가 출력
+     payload 의 `"tool_kind"` 를 흡수한다. composition 툴 호출의
+     `route_evidence` 에 kind 가 나타난다.
 
 ## 5. 범위 밖
 
@@ -92,3 +108,7 @@ parse 는 strict 하다. `tool_kind_of_string` 은 알 수 없는 문자열을
   `"tool_kind": "atomic"` 이 실리는지.
 - 카탈로그 inline/async 엔트리와 status/cancel 컨트롤,
   `keeper_plan_execute` 의 kind 태깅.
+- composition surface 툴의 실제 관측 경로: status/cancel 결과 payload 에
+  `"tool_kind": "async_composition"` 이 실리고, composition/batch_plan 툴
+  호출의 route evidence 에 각각 `"composition"` / `"batch_plan"` 이
+  나타나는지.

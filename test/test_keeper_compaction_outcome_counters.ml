@@ -46,6 +46,8 @@ let persist_commit_projection config meta ~commit_count =
          ; generation = meta.runtime.nonce
          ; commit_count
          ; at = commit_at
+         ; before_bytes = 0
+         ; after_bytes = 0
          ; updated_at = Masc.Keeper_meta_contract.now_iso ()
          })
   with
@@ -92,6 +94,8 @@ let test_missing_keeper_has_no_commit_state () =
            ; generation = 1
            ; commit_count = 1
            ; at = commit_at
+           ; before_bytes = 0
+           ; after_bytes = 0
            ; updated_at = Masc.Keeper_meta_contract.now_iso ()
            })
     with

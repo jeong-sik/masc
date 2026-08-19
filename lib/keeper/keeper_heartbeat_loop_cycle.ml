@@ -59,6 +59,11 @@ type cycle_outcome =
       }
   | Manual_compaction_applied of
       { receipt : Keeper_manual_compaction.applied_receipt
+      ; evidence : Keeper_compaction_evidence.t
+        (* The recovery this success carries measured the checkpoint on both
+           sides of the compaction. Dropping it here left the owner projection
+           able to say a compaction happened but not how much it saved
+           (#29109). *)
       ; followup : cycle_outcome
       }
 
@@ -266,7 +271,10 @@ let run_keeper_cycle_with
        Manual_compaction_not_applied { meta = meta_after_triage; no_compaction }
      | `Applied (success : Keeper_manual_compaction.success) ->
        Manual_compaction_applied
-         { receipt = success.receipt; followup = run_standard_cycle () })
+         { receipt = success.receipt
+         ; evidence = success.recovery.evidence
+         ; followup = run_standard_cycle ()
+         })
 ;;
 
 let run_keeper_cycle

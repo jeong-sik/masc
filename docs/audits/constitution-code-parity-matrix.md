@@ -8,16 +8,16 @@
 
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
-| A1 | reclaim claim gate 폐지 (RFC-0323). reclaim_policy는 claim을 막지 않고 release/cancel 데이터 파이프라이닝 용도 | `workspace_task_claim.ml:103-104`, `types_core.ml:654-659` | 대기 |
-| A2 | karma 예외: 자기투표·삭제 콘텐츠는 이벤트 미생성. "upvote 1건당 1건" → "타인 콘텐츠 upvote당 1건"으로 정정 | `board_votes.ml:904-907,921` | 대기 |
-| A3 | karma ledger는 비영속, vote_log에서 재구축. delta 보존은 wire 계약 수준 | `board_votes.ml:924-932` | 대기 |
-| A4 | AwaitingVerification 재시도: 지수 backoff가 아니라 고정 간격 + `retryable` boolean + 전역 동시성 세마포어 | `completion_authority_agent.ml:296-319,619-626,658` | 대기 |
-| A5 | Fusion 구현 확장: `Bridge_error`/`Invalid_max_output_tokens`/`Invalid_timeout_s` variant, `web_tools` 필드, topology 확장(RFC-0283/0284) | `fusion_types.ml:64-71,329-338` | 대기 |
-| A6 | RFC 경로 표기: `docs/rfc/` (설계서의 `docs/rfcs`는 오기) | — | 대기 |
-| A7 | keeper.env는 OCaml 런타임이 읽지 않음. `scripts/deploy.sh` 전용 API 키 env 파일 | `deploy.sh:125`, lib/ 참조 0건 | 대기 |
-| A8 | 명칭 매핑 정리: Cross-Verification→`cross_verifier` lane, GithubCredential→`keeper_github_identity`, CoT→thinking trajectory, MultiTurn→stream bridge | `runtime_toml.ml:1314`, `keeper_github_identity.ml` | 대기 |
-| A9 | Goal drop 사유는 전용 필드 없이 공용 `note` | `workspace_goals.ml:399` | 대기 |
-| A10 | visibility 시맨틱은 타입 강제가 아니라 docstring 선언 ("enforced by callers") | `board_types.mli:7,72-76` | 대기 |
+| A1 | reclaim claim gate 폐지 (RFC-0323). reclaim_policy는 claim을 막지 않고 release/cancel 데이터 파이프라이닝 용도 | `workspace_task_claim.ml:103-104`, `types_core.ml:654-659` | PR #29140 |
+| A2 | karma 예외: 자기투표·삭제 콘텐츠는 이벤트 미생성. "upvote 1건당 1건" → "타인 콘텐츠 upvote당 1건"으로 정정 | `board_votes.ml:904-907,921` | PR #29140 |
+| A3 | karma ledger는 비영속, vote_log에서 재구축. delta 보존은 wire 계약 수준 | `board_votes.ml:924-932` | PR #29140 |
+| A4 | AwaitingVerification 재시도: 지수 backoff가 아니라 고정 간격 + `retryable` boolean + 전역 동시성 세마포어 | `completion_authority_agent.ml:296-319,619-626,658` | PR #29140 |
+| A5 | Fusion 구현 확장: `Bridge_error`/`Invalid_max_output_tokens`/`Invalid_timeout_s` variant, `web_tools` 필드, topology 확장(RFC-0283/0284) | `fusion_types.ml:64-71,329-338` | PR #29140 |
+| A6 | RFC 경로 표기: `docs/rfc/` (설계서의 `docs/rfcs`는 오기) | — | PR #29140 |
+| A7 | keeper.env는 OCaml 런타임이 읽지 않음. `scripts/deploy.sh` 전용 API 키 env 파일 | `deploy.sh:125`, lib/ 참조 0건 | PR #29140 |
+| A8 | 명칭 매핑 정리: Cross-Verification→`cross_verifier` lane, GithubCredential→`keeper_github_identity`, CoT→thinking trajectory, MultiTurn→stream bridge | `runtime_toml.ml:1314`, `keeper_github_identity.ml` | PR #29140 |
+| A9 | Goal drop 사유는 전용 필드 없이 공용 `note` | `workspace_goals.ml:399` | PR #29140 |
+| A10 | visibility 시맨틱은 타입 강제가 아니라 docstring 선언 ("enforced by callers") | `board_types.mli:7,72-76` | PR #29140 |
 
 ## B. 코드 보충 (문서가 앞서 나감 — 미구현 주장)
 
@@ -35,24 +35,24 @@
 
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
-| C1 | 연속 실패 예산 숫자 게이트 (3, 5) — crash accounting 전환 | `keeper_unified_turn_failure.ml:14,26,43,62` | 대기 |
-| C2 | 반복 툴 호출 threshold=3 → 턴 yield 직접 결정 | `keeper_agent_run.ml:135,165,776` | 대기 |
-| C3 | `"SKIP:"` 접두사 문자열 매칭으로 turn_mode 분류 (dead branch 추정) | `keeper_unified_metrics_support.ml:347` | 대기 |
-| C4 | provider 에러 detail 자유 텍스트 접두사 검사 잔여 (RFC-0371 §3.7 인정됨) | `keeper_error_classify.ml:172` | 대기 |
+| C1 | 연속 실패 예산 숫자 게이트 (3, 5) — crash accounting 전환 | `keeper_unified_turn_failure.ml:14,26,43,62` | PR #29141 |
+| C2 | 반복 툴 호출 threshold=3 → 턴 yield 직접 결정 | `keeper_agent_run.ml:135,165,776` | PR #29141 |
+| C3 | `"SKIP:"` 접두사 문자열 매칭으로 turn_mode 분류 (dead branch 추정) | `keeper_unified_metrics_support.ml:347` | PR #29141 |
+| C4 | provider 에러 detail 자유 텍스트 접두사 검사 잔여 (RFC-0371 §3.7 인정됨) | `keeper_error_classify.ml:172` | PR #29141 |
 
 ## D. SSOT 문서 stale (RFC-0252 갱신)
 
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
-| D1 | `per_hour_budget`/`Over_hourly_budget` 제거 미반영 (PR #22051) | `fusion_types.ml:340-344` | 대기 |
-| D2 | `Budget_exhausted` variant, `confidence` 필드, `max_fibers` 다이어그램 잔재 | `docs/rfc/RFC-0252` §4-5 | 대기 |
+| D1 | `per_hour_budget`/`Over_hourly_budget` 제거 미반영 (PR #22051) | `fusion_types.ml:340-344` | PR #29142 |
+| D2 | `Budget_exhausted` variant, `confidence` 필드, `max_fibers` 다이어그램 잔재 | `docs/rfc/RFC-0252` §4-5 | PR #29142 |
 
 ## 요약
 
-| 구분 | 건수 |
-|---|---|
-| A. 문서 보충 | 10 |
-| B. 코드 보충 | 7 |
-| C. 코드 정리 | 4 |
-| D. RFC stale | 2 |
-| 완료 | 0 / 23 |
+| 구분 | 건수 | 상태 |
+|---|---|---|
+| A. 문서 보충 | 10 | PR #29140 |
+| B. 코드 보충 | 7 | 진행중 (B1-B3/B4/B5/B6 에이전트 작업 중, B7은 B1-B3 후속) |
+| C. 코드 정리 | 4 | PR #29141 |
+| D. RFC stale | 2 | PR #29142 |
+| PR 열림 | 16 / 23 | B 그룹 7건 남음 |

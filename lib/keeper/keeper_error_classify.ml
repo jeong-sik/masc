@@ -164,7 +164,19 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
       message text is matched here — free-form provider bodies are not a
       classification source (see [is_provider_rejected_parse_error]).
     - ["Context overflow: empty completion"] — a context-overflow diagnostic,
-      already classified by [is_context_overflow] on the typed path. *)
+      already classified by [is_context_overflow] on the typed path.
+
+    Why a string prefix survives here (constitution exception, RFC-0371
+    §3.7): the typed [stop_reason] is deliberately flattened into [detail]
+    at the agent-core boundary (agent_core [Error.of_provider_failure],
+    [Empty_attributed] arm), so by the time the error reaches MASC the
+    prefix is the ONLY remaining discriminator between an empty-completion
+    [ProviderUnavailable] and the other [ProviderUnavailable] producers
+    (CLI startup failure, unknown provider failure). The marker is owned by
+    a single renderer ([error.ml]: ["empty completion (stop_reason=%s): %s"]),
+    not free-form provider prose. Re-typing requires a pinned Agent Core
+    error-variant change; that pin update — not this classifier — is where
+    the typed shape must be introduced. *)
 let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   match err with
   | Agent_core.Error.Provider

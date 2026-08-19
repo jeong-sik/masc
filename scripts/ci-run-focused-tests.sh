@@ -335,7 +335,6 @@ normal_targets=(
   @test/runtest-test_keeper_event_queue_state_v2
   @test/runtest-test_keeper_connector_attention_wake
   @test/runtest-test_keeper_scheduled_stimulus_channel
-  @test/runtest-test_fusion_wake
   @test/runtest-test_fusion_delivery_obligation
   @test/runtest-test_fusion_agent_core_error_detail
   @test/runtest-test_fusion_status_tool

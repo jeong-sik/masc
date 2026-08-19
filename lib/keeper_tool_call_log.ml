@@ -440,6 +440,7 @@ let log_call
       ?composition_run_id
       ?composition_node_id
       ?composition_execution
+      ?composition_tool_kind
       ?parent_tool_use_id
       ?trace_id
       ?session_id
@@ -606,6 +607,14 @@ let log_call
           ]
         | None -> []
       in
+      let composition_tool_kind_field =
+        match composition_tool_kind with
+        | Some value ->
+          [ ( "composition_tool_kind"
+            , `String (Keeper_tool_descriptor.tool_kind_to_string value) )
+          ]
+        | None -> []
+      in
       let session_id_field =
         match session_id with
         | Some value -> [ "session_id", `String value ]
@@ -717,6 +726,7 @@ let log_call
            @ typed_result_fields
            @ composition_fields
            @ composition_execution_field
+           @ composition_tool_kind_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

@@ -6,6 +6,10 @@
     composition catalog exists. *)
 val plan_execute_tool_name : string
 
+(** Execution-semantics kind (RFC-0386) of the model-defined plan tool:
+    [Keeper_tool_descriptor.Batch_plan_tool]. *)
+val plan_execute_tool_kind : Keeper_tool_descriptor.tool_kind
+
 val make_tools
   :  ?catalog:Keeper_tool_composition_catalog.t
   -> config:Workspace.config
@@ -31,6 +35,12 @@ val make_tools
 
 module For_testing : sig
   val status_result :
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    request_id:string ->
+    Tool_result.result
+
+  val cancel_result :
     config:Workspace.config ->
     meta:Keeper_meta_contract.keeper_meta ->
     request_id:string ->

@@ -93,6 +93,15 @@ let execution_mode_to_string = function
   | Async -> "async"
 ;;
 
+let tool_kind (entry : entry) =
+  match entry.execution with
+  | Inline -> Keeper_tool_descriptor.Composition_tool
+  | Async -> Keeper_tool_descriptor.Async_composition_tool
+;;
+
+let status_tool_kind = Keeper_tool_descriptor.Async_composition_tool
+let cancel_tool_kind = Keeper_tool_descriptor.Async_composition_tool
+
 let path ~config_root = Filename.concat config_root "tool-compositions.toml"
 
 let entries catalog = catalog

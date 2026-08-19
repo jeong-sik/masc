@@ -395,6 +395,11 @@ let keeper_artifact_path config keeper_name artifact =
          (Config_dir_resolver.keepers_dir_for_base_path
             ~base_path:config.Workspace.base_path)
          (keeper_name ^ ".toml"))
+  | Keeper_chat_store_artifact ->
+    Some
+      (Keeper_chat_store.chat_path
+         ~base_dir:config.Workspace.base_path
+         ~keeper_name)
   | Agent_artifact_bundle _ -> None
 ;;
 
@@ -438,6 +443,7 @@ let purge_dashboard_keeper_artifacts config operation =
             | Keeper_runtime_directory_artifact
             | Keeper_memory_current_artifact
             | Keeper_configuration_artifact
+            | Keeper_chat_store_artifact
             | Agent_artifact_bundle _ -> ());
            (match remove_path_strict path with
             | Error _ as error -> error
@@ -451,6 +457,7 @@ let purge_dashboard_keeper_artifacts config operation =
                | Keeper_memory_current_artifact
                | Keeper_memory_journal_artifact
                | Keeper_configuration_artifact
+               | Keeper_chat_store_artifact
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug
                 "dashboard Keeper purge artifact: keeper=%s path=%s outcome=%s"

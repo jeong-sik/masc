@@ -132,6 +132,17 @@ let runtime_yield_reason request =
     Runtime_agent.Durable_stimulus_waiting
 ;;
 
+(* Constitution exception (named bound + rationale): loop detection is
+   inherently a repetition count, so no closed variant can replace the
+   number — what counts as "the same call" is already typed (tool name +
+   input/output fingerprints in [same_exact_tool_call]). The yield is a
+   cooperative turn boundary, not a keeper lifecycle gate: the keeper loop
+   stays active and decides the next cycle from the yielded outcome. 3 =
+   the first call plus two identical repeats: a single repeat (count 2) can
+   still be legitimate (an idempotent poll or a deliberate re-read while the
+   model waits for state to change); the second consecutive repeat with an
+   unchanged input AND output fingerprint means the world did not change
+   and the model made no progress — a deterministic loop. *)
 let repeated_tool_call_yield_threshold = 3
 
 let same_present_fingerprint left right =

@@ -4,6 +4,10 @@ open Alcotest
 
 module Meta_store = Masc.Keeper_meta_store
 
+(* The commit stamp: this suite asserts on counters alone and never reads it
+   back, so a fixed value keeps the fixtures reproducible. *)
+let commit_at = 1_700_000_000.0
+
 let make_meta ~name : Masc.Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -41,6 +45,7 @@ let persist_commit_projection config meta ~commit_count =
          { trace_id = meta.runtime.trace_id
          ; generation = meta.runtime.nonce
          ; commit_count
+         ; at = commit_at
          ; updated_at = Masc.Keeper_meta_contract.now_iso ()
          })
   with
@@ -86,6 +91,7 @@ let test_missing_keeper_has_no_commit_state () =
                (make_meta ~name:"compaction-unregistered").runtime.trace_id
            ; generation = 1
            ; commit_count = 1
+           ; at = commit_at
            ; updated_at = Masc.Keeper_meta_contract.now_iso ()
            })
     with

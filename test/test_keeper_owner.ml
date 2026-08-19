@@ -273,14 +273,13 @@ let test_reducer_rejects_invalid_compaction_numbers () =
     | Ok state -> state
     | Error error -> fail (Reducer.error_to_string error)
   in
+  let meta = Option.get (Reducer.projection state).meta in
   let command =
-    Reducer.Record_compaction
-      { count_delta = 1
+    Reducer.Record_compaction_commit
+      { trace_id = meta.runtime.trace_id
+      ; generation = meta.runtime.nonce
+      ; commit_count = 1
       ; at = Float.nan
-      ; before_tokens = -1
-      ; after_tokens = 0
-      ; checked_at = 42.0
-      ; decision = Keeper_meta_contract.Compaction_runtime_decision "test"
       ; updated_at = "invalid"
       }
   in
@@ -369,13 +368,11 @@ let test_turn_delta_preserves_concurrent_compaction_observation () =
     reducer_ok
       (Reducer.apply_meta
          state
-         (Record_compaction
-            { count_delta = 1
+         (Record_compaction_commit
+            { trace_id = before.runtime.trace_id
+            ; generation = before.runtime.nonce
+            ; commit_count = 1
             ; at = 99.0
-            ; before_tokens = 1_000
-            ; after_tokens = 500
-            ; checked_at = 99.0
-            ; decision = Keeper_meta_contract.Compaction_runtime_decision "committed"
             ; updated_at = "compacted"
             }))
   in

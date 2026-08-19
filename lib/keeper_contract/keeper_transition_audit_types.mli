@@ -1,8 +1,7 @@
 (** Structured transition audit record types and JSON serializers. *)
 
 type transition_record =
-  { snapshot : Keeper_measurement.measurement_snapshot option
-  ; events_fired : Keeper_state_machine.event list
+  { events_fired : Keeper_state_machine.event list
   ; selected_event : Keeper_state_machine.event
   ; prev_phase : Keeper_state_machine.phase
   ; new_phase : Keeper_state_machine.phase

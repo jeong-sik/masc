@@ -869,7 +869,6 @@ let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
 let dispatch_keepalive_event_with_audit
       ~(ctx : _ context)
       ~(keeper_name : string)
-      ~snapshot
       ~events_fired
       ~selected_event
       event
@@ -877,7 +876,6 @@ let dispatch_keepalive_event_with_audit
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
     (match Keeper_registry.dispatch_event_with_audit_and_log
        ~base_path:ctx.config.base_path
-       ~snapshot
        ~events_fired
        ~selected_event
        keeper_name

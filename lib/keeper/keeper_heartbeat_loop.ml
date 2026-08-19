@@ -993,6 +993,7 @@ let run_keepalive_unified_turn
                      { trace_id = meta_after_triage.runtime.trace_id
                      ; generation = meta_after_triage.runtime.nonce
                      ; commit_count
+                     ; at = Unix.gettimeofday () (* NDT-OK: stamps when this commit landed; no branch reads it *)
                      ; updated_at = Masc_domain.now_iso ()
                      })
               with

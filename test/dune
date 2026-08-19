@@ -1723,6 +1723,8 @@
 
 (include stanzas/test_server_dashboard_runtime_observables.inc)
 
+(include stanzas/test_keeper_thinking_observation.inc)
+
 (include stanzas/test_otel_port_ssot.inc)
 
 (include stanzas/test_otel_zero_fill.inc)

@@ -49,8 +49,22 @@ REMAINING (re-audited 2026-08-19 against the tree — three of four were stale):
   `runtime-environment-editor.ts:498`. Browser re-verify only.
 - [x] mobile bottom tab bar: SHIPPED. `.v2-nav.is-mnav` + more-sheet in
   `nav-rail-v2.ts:124`, guarded by `mobile-bottom-reserve.test.ts`.
-- [ ] keepers chat thread/composer (KeeperConversationPanel, keeper-shared) still .kw-* —
-  the one real remaining rework (see Deferred polish; planned as v3-delta PR-6).
+- [x] keepers chat header: CLOSED as written — the audit found the item stale in four
+  places, so PR-6 pinned the divergences instead of executing it. Evidence:
+  - `chat-head` is already dual-emitted (`keeper-workspace-chat.ts:385`), so the vendored
+    skin already owns the header's shared properties.
+  - The `.sub` row it asked to retarget to is **deliberately absent**: the guard test
+    `keeps runtime scope/path out of the slim chat header`
+    (`keeper-workspace-chat.test.ts:322`) asserts `.chat-head .sub .sub-ns` is null.
+  - Adopting `.chat-id` would zero the desktop `min-width: 9rem` (prototype sets 0, and
+    keeper-v2 loads later), undoing the documented flex-wrap overflow fix. `.name-row`
+    is only defined as `.chat-id .name-row`, so it cannot be adopted independently.
+  - "drop search/archive/trash" describes buttons that do not exist: there is no trash
+    action, and Archive is the artifacts-panel *icon*. `search`/`turn`/`artifacts`/
+    `detail`/`config` are wired operator capability (`workspaceUtilityCommands`,
+    `keeper-workspace-chat.ts:98`); deleting them to match a static mock would be
+    capability loss, not a reskin.
+  Divergences now guarded by `styles/keeper-chat-header-divergence.test.ts`.
 
 ## Remaining deltas (adversarial, prioritized)
 - [ ] Keepers roster header: current = verbose stat grid (12/9/0/3) + chips;
@@ -84,7 +98,8 @@ evolution. Per-file disposition of the v2→v3 delta (base `2782405bc3`):
   operator actions (mark-don't-fake), so the dead selectors are not vendored.
 - Still queued (separate PRs): v2.css (PR-2), surfaces.css (PR-3),
   fusion/runtime/keeper-config (PR-4), prompt-book (PR-4b), fleet + monitor.css
-  vendoring + agent-roster ctx column (PR-5), chat .kw-* retarget (PR-6).
+  vendoring + agent-roster ctx column (PR-5). PR-6 closed the chat-header item by
+  guarding its divergences rather than retargeting — the instruction was stale.
 
 ## Notes
 - Live data gaps (mark, don't fake): schedule/cron (no signal), context window
@@ -92,9 +107,9 @@ evolution. Per-file disposition of the v2→v3 delta (base `2782405bc3`):
 - KeeperPhase live enum == prototype FSM_STATES + Zombie.
 
 ## Deferred polish (after far surfaces)
-- Keepers chat (keeper-workspace-chat.ts) still uses .kw-chat-* classes (styled by
-  keeper-workspace.css mimic, not SSOT). Retarget header → .chat-head/.name-row/.sub/
-  .chat-actions + Pill, and reduce actions to prototype FSM glyphs + ⚙ (drop
-  search/archive/trash) — needs WorkspaceCommandButtons changes too. Visually ~95% already.
+- Keepers chat header: settled 2026-08-19 (see REMAINING above). keeper-workspace.css is
+  not a mimic here — the surviving `.kw-chat-*` rules are the desktop min-width/flex-wrap
+  overflow fix and the warn/bad/busy pill states the prototype does not have. The header
+  already emits `chat-head` and already uses the shared Pill.
 - Final cleanup PR: remove legacy keeper-workspace.css / *-v2.css / v2-shell.css once all
   surfaces emit prototype classes; run tsc/lint/tests.

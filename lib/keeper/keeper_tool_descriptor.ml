@@ -580,6 +580,23 @@ let descriptor
       | Tool_masc_local_runtime_dispatch
       | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
   in
+  (* Fail-closed admission rule for parallel tool use: a descriptor may opt
+     into [Concurrent] batches only when its policy carries a static
+     read-only hint. The batch planner (Agent_core Agent_tool_batch_plan)
+     fans an ordinary [Concurrent] run out onto sibling Eio fibers, so an
+     effectful tool admitted by mistake would execute its side effect
+     concurrently with no ordering guarantee. The hint is the same typed
+     declaration the composition catalog uses for its Async admission
+     check (Async_tool_not_statically_read_only); no string heuristics. *)
+  (match execution, policy.readonly_hint with
+   | Ordinary Concurrent, Some true -> ()
+   | Ordinary Concurrent, (Some false | None) ->
+     invalid_arg
+       (Printf.sprintf
+          "descriptor %S declares Concurrent execution without a static \
+           read-only policy hint"
+          internal_name)
+   | Ordinary Serial, _ | Terminal, _ -> ());
   let receipt_labels =
     [ "descriptor_id", id
     ; "capability_id", capability_id
@@ -755,6 +772,10 @@ let public_descriptors =
          literal newline in `pattern` is rejected. To match across lines, run \
          `rg -U` through the Execute tool."
       ~input_schema:search_files_schema
+      (* Concurrent: each call spawns its own rg process through the sandbox
+         backend; the only shared write is the bash-history audit line, a
+         single O_APPEND write with no fiber yield inside it. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -785,6 +806,10 @@ let public_descriptors =
          Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read \
          never inherits Execute cwd."
       ~input_schema:read_file_schema
+      (* Concurrent: a pure read — containment check plus either a host
+         file read (Safe_ops.read_file_result) or a per-call backend read
+         runner process; no shared mutable state on the path. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -866,6 +891,10 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.web_search_schema.name
       ~description:Tool_schemas_misc.web_search_schema.description
       ~input_schema:Tool_schemas_misc.web_search_schema.input_schema
+      (* Concurrent: every call runs its own curl subprocess via
+         Tool_local_runtime_http; provider selection reads env only, so
+         there is no shared mutable state between sibling calls. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -886,6 +915,12 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.web_fetch_schema.name
       ~description:Tool_schemas_misc.web_fetch_schema.description
       ~input_schema:Tool_schemas_misc.web_fetch_schema.input_schema
+      (* Concurrent: per-call curl subprocess; the full-text offload writes
+         into the content-addressed Tool_blob_store (Atomic CAS cache, the
+         same store keeper_artifact_read already reads concurrently) and
+         appends the index row through Fs_compat.append_jsonl's per-path
+         mutex. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true

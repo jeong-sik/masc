@@ -1264,8 +1264,27 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "masc_task_history"
     ; "masc_tasks"
     ; "masc_tool_help"
+    ; "masc_web_fetch"
+    ; "masc_web_search"
+    ; "tool_read_file"
+    ; "tool_search_files"
     ]
     concurrent_internal_names
+
+let test_concurrent_opt_ins_are_statically_read_only () =
+  (* Property mirror of the fail-closed admission rule enforced by the
+     [Descriptor.descriptor] constructor: a Concurrent descriptor without a
+     static read-only hint cannot be constructed, so the registry must never
+     contain one. *)
+  all_descriptors ()
+  |> List.iter (fun (descriptor : Descriptor.t) ->
+    match descriptor.execution, Descriptor.readonly_static_hint descriptor with
+    | Descriptor.Ordinary Descriptor.Concurrent, Some true -> ()
+    | Descriptor.Ordinary Descriptor.Concurrent, (Some false | None) ->
+      Alcotest.fail
+        (descriptor.internal_name
+         ^ " opts into concurrent batches without a static read-only hint")
+    | Descriptor.Ordinary Descriptor.Serial, _ | Descriptor.Terminal, _ -> ())
 
 let test_readonly_policy_is_descriptor_input_aware () =
   let public_input =
@@ -1724,6 +1743,10 @@ let () =
             "concurrent execution opt-ins are exact"
             `Quick
             test_concurrent_execution_opt_ins_are_exact
+        ; test_case
+            "concurrent execution opt-ins are statically read-only"
+            `Quick
+            test_concurrent_opt_ins_are_statically_read_only
         ; test_case
             "descriptor owns the read-only metadata projection"
             `Quick

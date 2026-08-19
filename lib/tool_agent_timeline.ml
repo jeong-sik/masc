@@ -237,19 +237,6 @@ let message_events (config : Workspace.config) ~agent_name ~limit :
    exactly the recent events the tool contracts to surface (period.to = now)
    whenever a keeper exceeds the per-source cap. Mirrors [build_timeline]'s
    tail-keep on the merged list, and preserves the source's ascending order. *)
-let take_last n xs =
-  if n <= 0 then []
-  else
-    let len = List.length xs in
-    if len <= n then xs
-    else
-      let rec skip k = function
-        | [] -> []
-        | _ :: rest when k > 0 -> skip (k - 1) rest
-        | remaining -> remaining
-      in
-      skip (len - n) xs
-
 (* Collect tool call events from Activity Graph. Two producers feed this
    source: the external MCP dispatch path ([tool.called]) and the keeper
    in-turn execution hook ([keeper.tool_exec], #23540 — without it a keeper

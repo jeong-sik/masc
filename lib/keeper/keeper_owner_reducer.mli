@@ -67,16 +67,6 @@ type shutdown_latch =
   | Operator_stopped
   | Dead_tombstone
 
-type compaction_result =
-  { count_delta : int
-  ; at : float
-  ; before_tokens : int
-  ; after_tokens : int
-  ; checked_at : float
-  ; decision : Keeper_meta_contract.compaction_runtime_decision
-  ; updated_at : string
-  }
-
 type profile_update =
   { instructions : string
   ; autonomous_instructions : string option
@@ -146,11 +136,11 @@ type meta_command =
       { blocker : Keeper_meta_contract.blocker_info option
       ; updated_at : string
       }
-  | Record_compaction of compaction_result
   | Record_compaction_commit of
       { trace_id : Keeper_id.Trace_id.t
       ; generation : int
       ; commit_count : int
+      ; at : float
       ; updated_at : string
       }
   | Ack_message_scope of

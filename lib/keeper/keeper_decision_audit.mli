@@ -14,7 +14,6 @@ val make :
   cycle_id:string ->
   keeper_name:string ->
   generation:int ->
-  ?snapshot:Keeper_measurement.measurement_snapshot ->
   turn_verdict:Keeper_world_observation.turn_verdict ->
   wall_clock:float ->
   ?tool_diversity_entropy:float ->

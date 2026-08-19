@@ -107,46 +107,31 @@ let goal_owner_keeper ~config goal_id =
   | Some { Goal_store.owner = None; _ } | None -> None
 ;;
 
-(* Several keepers carry this goal. The declared owner settles it when it is one
-   of them; an owner outside the set, or none at all, still fails rather than
-   picking a keeper this Goal never named. Pure so the decision is testable
-   without a workspace. *)
-let resolve_ambiguous_assignment ~goal_id ~owner ~keeper_names =
+(* A wake is a message into a keeper's queue, not a contract, so several
+   recipients is an ordinary outcome rather than a condition to fail on.
+   Several keepers carrying one goal is what a collaboration mission looks
+   like, and every one of them wants to know its Task finished.
+
+   The declared owner narrows the wake when the Goal names one that is
+   actually working under it. Otherwise everyone carrying the goal hears,
+   which is the honest reading of the reverse index. Pure so the choice is
+   testable without a workspace. *)
+let resolve_assignment ~owner ~keeper_names =
   match owner with
-  | Some owner when List.mem owner keeper_names -> Ok owner
-  | Some owner ->
-    Error
-      (Printf.sprintf
-         "Goal owner is not among its active keepers goal_id=%s owner=%s \
-          keepers=%s"
-         goal_id
-         owner
-         (String.concat "," keeper_names))
-  | None ->
-    Error
-      (Printf.sprintf
-         "ambiguous active Goal assignment with no declared owner goal_id=%s \
-          keepers=%s"
-         goal_id
-         (String.concat "," keeper_names))
+  | Some owner when List.mem owner keeper_names -> [ owner ]
+  | Some _ | None -> keeper_names
 ;;
 
-let target_keeper_name ~config ~completing_agent_name ~goal_id =
+let target_keeper_names ~config ~completing_agent_name ~goal_id =
   match assigned_keeper_resolution ~config goal_id with
-  | Assigned_keeper keeper_name -> Ok (Some keeper_name)
+  | Assigned_keeper keeper_name -> Ok [ keeper_name ]
   | Ambiguous_assigned_keepers keeper_names ->
-    (match
-       resolve_ambiguous_assignment
-         ~goal_id
-         ~owner:(goal_owner_keeper ~config goal_id)
-         ~keeper_names
-     with
-     | Ok owner -> Ok (Some owner)
-     | Error detail -> Error detail)
+    Ok (resolve_assignment ~owner:(goal_owner_keeper ~config goal_id) ~keeper_names)
   | Assigned_keeper_lookup_failed detail -> Error detail
   | No_assigned_keeper ->
     (match exact_producer_keeper_name ~config ~completing_agent_name with
-     | Ok keeper_name -> Ok keeper_name
+     | Ok (Some keeper_name) -> Ok [ keeper_name ]
+     | Ok None -> Ok []
      | Error detail -> Error detail)
 
 let wake_keeper ~base_path keeper_name goal_id =
@@ -179,7 +164,7 @@ let wake_keeper ~base_path keeper_name goal_id =
 let enqueue_ready ?(wake_if_present = false) ~config ~completing_agent_name
       ({ Masc_task_handlers.Task_goal_reconciliation.goal_id; triggering_task_id } as ready_fact)
   =
-  match target_keeper_name ~config ~completing_agent_name ~goal_id with
+  match target_keeper_names ~config ~completing_agent_name ~goal_id with
      | Error detail ->
        Log.Keeper.error
          "goal reconciliation Keeper target lookup failed goal_id=%s \
@@ -189,15 +174,15 @@ let enqueue_ready ?(wake_if_present = false) ~config ~completing_agent_name
          completing_agent_name
          detail;
        Keeper_target_lookup_failed { goal_id; detail }
-     | Ok None ->
+     | Ok [] ->
        Log.Keeper.warn
-         "goal reconciliation ready but no unambiguous Keeper target goal_id=%s \
+         "goal reconciliation ready but nobody carries the Goal goal_id=%s \
           triggering_task_id=%s completing_agent=%s"
          goal_id
          triggering_task_id
          completing_agent_name;
        No_keeper_target { goal_id }
-     | Ok (Some keeper_name) ->
+     | Ok keeper_names ->
        let ready : Keeper_event_queue.goal_reconciliation_ready =
          { gr_goal_id = ready_fact.goal_id
          ; gr_triggering_task_id = ready_fact.triggering_task_id
@@ -210,28 +195,42 @@ let enqueue_ready ?(wake_if_present = false) ~config ~completing_agent_name
          ; payload = Keeper_event_queue.Goal_reconciliation_ready ready
          }
        in
-       match
-         Keeper_registry_event_queue.enqueue_stimulus_durable_result
-           ~base_path:config.base_path
-           keeper_name
-           stimulus
-       with
-       | Keeper_registry_event_queue.Stimulus_enqueued ->
-         wake_keeper ~base_path:config.base_path keeper_name goal_id;
-         Enqueued { goal_id; keeper_name }
-       | Keeper_registry_event_queue.Stimulus_already_present ->
-         if wake_if_present
-         then wake_keeper ~base_path:config.base_path keeper_name goal_id;
-         Already_present { goal_id; keeper_name }
-       | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-         Log.Keeper.error
-           "goal reconciliation durable enqueue failed keeper=%s goal_id=%s \
-            triggering_task_id=%s: %s"
-           keeper_name
-           goal_id
-           triggering_task_id
-           detail;
-         Enqueue_failed { goal_id; keeper_name; detail }
+       let enqueue_one keeper_name =
+         match
+           Keeper_registry_event_queue.enqueue_stimulus_durable_result
+             ~base_path:config.base_path
+             keeper_name
+             stimulus
+         with
+         | Keeper_registry_event_queue.Stimulus_enqueued ->
+           wake_keeper ~base_path:config.base_path keeper_name goal_id;
+           Enqueued { goal_id; keeper_name }
+         | Keeper_registry_event_queue.Stimulus_already_present ->
+           if wake_if_present
+           then wake_keeper ~base_path:config.base_path keeper_name goal_id;
+           Already_present { goal_id; keeper_name }
+         | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+           Log.Keeper.error
+             "goal reconciliation durable enqueue failed keeper=%s goal_id=%s \
+              triggering_task_id=%s: %s"
+             keeper_name
+             goal_id
+             triggering_task_id
+             detail;
+           Enqueue_failed { goal_id; keeper_name; detail }
+       in
+       let outcomes = List.map enqueue_one keeper_names in
+       (* Every recipient is enqueued; the caller's single outcome reports the
+          strongest one so a partial storage failure never reads as total
+          success. Enqueued outranks Already_present, which outranks a failure. *)
+       let rank = function
+         | Enqueued _ -> 0
+         | Already_present _ -> 1
+         | _ -> 2
+       in
+       (match List.stable_sort (fun a b -> Int.compare (rank a) (rank b)) outcomes with
+        | best :: _ -> best
+        | [] -> No_keeper_target { goal_id })
 ;;
 
 let enqueue_if_ready ~config ~completing_agent_name ~task_id =

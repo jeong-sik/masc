@@ -235,3 +235,27 @@ describe('deriveKeeperToolCallDossier outcome', () => {
     expect(dossier.tone).toBe('ok')
   })
 })
+
+describe('latest call tone', () => {
+  // The tone, the colour class and the glyph all read one resolver now.
+  // These pin the three outcomes it can return, plus the empty case, so a
+  // fourth outcome cannot land on one surface and miss the others.
+  const latestTone = (entries: Parameters<typeof deriveKeeperToolCallDossier>[0]) =>
+    deriveKeeperToolCallDossier(entries, null).cards.find(c => c.key === 'latest')?.tone
+
+  it('reads ok for a successful call', () => {
+    expect(latestTone([toolCall({ success: true })])).toBe('ok')
+  })
+
+  it('reads warn for a deferred call', () => {
+    expect(latestTone([toolCall({ success: false, disposition: 'deferred' })])).toBe('warn')
+  })
+
+  it('reads bad for a failed call', () => {
+    expect(latestTone([toolCall({ success: false })])).toBe('bad')
+  })
+
+  it('reads neutral when there is no call at all', () => {
+    expect(latestTone([])).toBe('neutral')
+  })
+})

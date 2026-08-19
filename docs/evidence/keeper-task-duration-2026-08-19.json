@@ -1,0 +1,43 @@
+{
+  "captured_at": "2026-08-19T06:20:00Z",
+  "purpose": "Task 행 duration 축 — task 수명(첫 전이 → done) 실측",
+  "source": "<base-path>/.masc/events/2026-0{7,8}/*.jsonl (type=task_transition)",
+  "population": {
+    "tasks_with_transitions": 376,
+    "reached_done": 78,
+    "duration_computable": 77
+  },
+  "distribution_minutes": {
+    "min": 0.1,
+    "median": 6.1,
+    "p90": 444.0,
+    "max": 5766.0
+  },
+  "ladder": {
+    "over_1h": 22,
+    "over_4h": 15,
+    "over_24h": 5
+  },
+  "longest_runs": [
+    { "task": "task-096", "hours": 96.1, "from": "2026-07-30T13:22Z", "to": "2026-08-03T13:30Z", "completed_by": "keeper-kidsnote-agent" },
+    { "task": "task-049", "hours": 74.9, "from": "2026-07-30T00:20Z", "to": "2026-08-02T03:15Z", "completed_by": "keeper-executor-agent" },
+    { "task": "task-053", "hours": 74.4, "from": "2026-07-30T00:52Z", "to": "2026-08-02T03:15Z", "completed_by": "keeper-executor-agent" },
+    { "task": "task-069", "hours": 73.5, "from": "2026-07-30T01:44Z", "to": "2026-08-02T03:15Z", "completed_by": "keeper-executor-agent" },
+    { "task": "task-007", "hours": 34.0, "from": "2026-07-28T01:49Z", "to": "2026-07-29T11:48Z", "completed_by": "keeper-verifier-agent" }
+  ],
+  "transition_flows": {
+    "claimed->in_progress": 667,
+    "in_progress->awaiting_verification": 516,
+    "in_progress->todo": 344,
+    "in_progress->done": 72,
+    "in_progress->cancelled": 48,
+    "todo->claimed": 38
+  },
+  "verdict": "duration 사다리 1h·4h·24h 칸이 실측으로 채워진다 — 완주 77건 중 1h+ 22건, 4h+ 15건, 24h+ 5건이고 최장은 96.1시간(task-096, 4일 관통). 중앙값은 6.1분이라 대부분은 짧고 소수가 길게 끌리는 분포.",
+  "caveats": {
+    "start_definition": "생성 시각이 아니라 이 스토어에 남은 첫 전이 시각을 시작으로 본다. 스토어 이전에 생성된 task는 수명이 과소 계상된다.",
+    "wall_clock_not_work": "벽시계 경과이지 실작업 시간이 아니다. in_progress->todo 반환이 344건 있어 중간 유휴가 포함된다.",
+    "ten_turn_axis": "10T 축은 이 집계로 채워지지 않는다 — task와 turn의 연결이 필요."
+  },
+  "method_note": "이벤트의 ts는 숫자가 아니라 ISO8601 문자열이다. 숫자로 가정해 세면 0건이라는 잘못된 결론이 나온다."
+}

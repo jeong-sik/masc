@@ -1660,6 +1660,7 @@
 (include stanzas/test_channel_gate.inc)
 
 (include stanzas/test_channel_gate_discord_state.inc)
+(include stanzas/test_channel_gate_slack_state.inc)
 
 (include stanzas/test_channel_gate_metrics.inc)
 

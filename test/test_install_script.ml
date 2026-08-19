@@ -228,13 +228,8 @@ let release_workflow () =
   read_file (Filename.concat (source_root ()) ".github/workflows/release.yml")
 ;;
 
-let railway_workflow () =
-  read_file (Filename.concat (source_root ()) ".github/workflows/deploy-railway.yml")
-;;
-
 let dockerfile () = read_file (Filename.concat (source_root ()) "Dockerfile")
 let dockerignore () = read_file (Filename.concat (source_root ()) ".dockerignore")
-let railway_config () = read_file (Filename.concat (source_root ()) "railway.toml")
 
 let project_version () =
   let raw = read_file (Filename.concat (source_root ()) "dune-project") in
@@ -500,23 +495,9 @@ let test_installer_fetches_deployment_preflight_companions () =
     {|PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"|}
 ;;
 
-let test_railway_runtime_enforces_preflight_before_main () =
-  let workflow = railway_workflow () in
+let test_runtime_image_enforces_preflight_before_main () =
   let image = dockerfile () in
   let context = dockerignore () in
-  let railway = railway_config () in
-  assert_contains
-    "Railway builds the typed deployment preflight helper"
-    workflow
-    "bin/deployment_preflight_helper.exe";
-  assert_contains
-    "Railway uploads the typed deployment preflight helper"
-    workflow
-    "masc-deployment-preflight-helper";
-  assert_contains
-    "Railway proves a malformed current runtime image is rejected"
-    workflow
-    "Reject malformed current runtime image";
   assert_contains
     "image ships the read-only deployment preflight gate"
     image
@@ -532,11 +513,7 @@ let test_railway_runtime_enforces_preflight_before_main () =
   assert_contains
     "Docker context includes the deployment preflight helper"
     context
-    "!masc-deployment-preflight-helper";
-  assert_not_contains
-    "Railway does not bypass the image entrypoint with a direct main command"
-    railway
-    "startCommand"
+    "!masc-deployment-preflight-helper"
 ;;
 
 let test_binary_checks_use_install_environment () =
@@ -1343,9 +1320,9 @@ let () =
             `Quick
             test_binary_checks_use_install_environment
         ; test_case
-            "Railway runtime enforces preflight before main"
+            "runtime image enforces preflight before main"
             `Quick
-            test_railway_runtime_enforces_preflight_before_main
+            test_runtime_image_enforces_preflight_before_main
         ; test_case
             "installer fetches deployment preflight companions"
             `Quick

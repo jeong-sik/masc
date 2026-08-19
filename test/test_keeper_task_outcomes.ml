@@ -525,7 +525,17 @@ let test_default_done_is_terminal () =
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+(* Without an Eio fs context the workspace backend falls back to Memory
+   (workspace_utils_backend_setup.ml), and three cases here reach past that
+   backend: two write a corrupt backlog file directly to drive the recovery
+   path, and one reads the persisted task back. Under the fallback the writes
+   land nowhere the reader looks, so recovery reported [primary] and the done
+   transition read as non-terminal. Bind the real filesystem once, here, so
+   every case sees the store it writes to. *)
 let () =
+  Eio_main.run
+  @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   run "keeper task outcomes"
     [ ( "outcomes"
       , [ test_case

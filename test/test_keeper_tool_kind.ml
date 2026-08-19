@@ -232,6 +232,9 @@ let test_cancel_result_payload_carries_tool_kind () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
+       (* cancel goes through the async run registry, whose lock is an
+          Eio.Mutex — it needs an Eio runtime context. *)
+       Eio_main.run @@ fun _env ->
        let config = Workspace.default_config dir in
        let meta = make_meta () in
        let result =

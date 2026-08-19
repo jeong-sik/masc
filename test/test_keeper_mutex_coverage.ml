@@ -122,6 +122,13 @@ let with_eio_env f =
   Eio_guard.enable ();
   Fun.protect
     ~finally:(fun () ->
+      (* Keeper_msg_async keeps seven process-wide tables (pending,
+         transition_locks, active_switches, store_transition_locks,
+         reserved_request_ids, keeper_submission_locks,
+         keeper_persistence_locks). Only 10 of the 39 msg_async cases used to
+         clear them, so the other 29 handed their leftovers to whatever ran
+         next. Clearing here covers every case, including ones added later. *)
+      Keeper_msg_async.For_testing.clear ();
       Fs_compat.clear_fs ();
       Eio_guard.disable ())
     (fun () -> f env)

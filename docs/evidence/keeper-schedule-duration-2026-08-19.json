@@ -1,0 +1,35 @@
+{
+  "captured_at": "2026-08-19T07:55:00Z",
+  "purpose": "Schedule Job 행 duration 축 — 반복 스케줄의 재예약 지속",
+  "source": "<base-path>/.masc/schedules.json",
+  "population": {
+    "schedules": 34,
+    "by_recurrence": { "one_shot": 21, "interval": 11, "daily": 2 },
+    "by_status": { "succeeded": 19, "scheduled": 8, "cancelled": 6, "expired": 1 }
+  },
+  "recurring_lifespan": {
+    "reading": "interval 스케줄 다섯 건이 08-04 17:12Z에 등록된 뒤 지금까지 재예약을 이어오고 있다. 요청 시각과 다음 due 사이가 351시간(14.6일)이고, 상태는 여전히 scheduled다.",
+    "samples": [
+      { "id": "sched-757df354...", "requested": "2026-08-04T17:12Z", "next_due": "2026-08-19T08:14Z", "span_hours": 351.0, "status": "scheduled", "kind": "interval" },
+      { "id": "sched-93fa48cb...", "requested": "2026-08-04T17:12Z", "next_due": "2026-08-19T08:15Z", "span_hours": 351.0, "status": "scheduled", "kind": "interval" },
+      { "id": "sched-0d91327b...", "requested": "2026-08-04T17:12Z", "next_due": "2026-08-19T08:17Z", "span_hours": 351.1, "status": "scheduled", "kind": "interval" }
+    ],
+    "counterexample": { "id": "sched-6dca0377...", "status": "cancelled", "span_hours": 82.1, "note": "취소로 끝난 것도 있어 전부가 무한 지속은 아니다." }
+  },
+  "pending_now": {
+    "count": 8,
+    "nearest": [
+      { "id": "sched-0d91327b...", "due": "2026-08-19T08:17Z", "kind": "interval" },
+      { "id": "sched-167d20eb...", "due": "2026-08-19T08:20Z", "kind": "interval" },
+      { "id": "sched-e7d60825...", "due": "2026-08-20T00:00Z", "kind": "daily" },
+      { "id": "sangsu-daily-movie-news", "due": "2026-08-20T07:29Z", "kind": "daily" }
+    ]
+  },
+  "request_window": "2026-08-04T17:09Z ~ 2026-08-18T06:52Z (325.7시간 폭)",
+  "verdict": "duration 축 충족 — interval 스케줄이 14.6일 연속 재예약을 유지하고 다음 발화가 캡처 20분 뒤로 잡혀 있다. 1h·4h·24h 사다리를 모두 관통하며 그 사이 여러 번의 서버 재시작을 가로지른다.",
+  "caveats": {
+    "not_execution_receipts": "이 수치는 스케줄 레코드의 재예약 지속이지 매 발화가 성공했다는 증거가 아니다. 발화별 결과는 러너 로그나 실행 영수증으로 따로 봐야 한다.",
+    "queue_side_gap": "스케줄이 발화해도 대상 keeper가 소비하지 않으면 큐에 쌓인다 — taskmaster에서 schedule_due 54건이 51시간 누적된 사례가 그것이다(#29071)."
+  },
+  "method_note": "schedules.json의 due_at/requested_at은 ISO 문자열이 아니라 Unix epoch 숫자다. ISO로 파싱하면 시간 범위가 통째로 비어 나온다."
+}

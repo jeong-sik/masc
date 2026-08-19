@@ -2260,6 +2260,12 @@ jobs:
         working-directory: dashboard
         run: pnpm run typecheck
 
+      # Nothing ran pnpm lint before this, which is how three
+      # no-nested-ternary errors reached main and stayed there (#29054).
+      - name: ESLint
+        working-directory: dashboard
+        run: pnpm lint
+
       - name: Run dashboard tests
         working-directory: dashboard
         run: pnpm test

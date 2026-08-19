@@ -239,7 +239,9 @@ let test_tasks_list_revision_covers_projected_contents () =
          | None -> fail "expected producer-owned snapshot"
        in
        let first = snapshot () in
-       let backlog_path = Filename.concat (Masc.Workspace.tasks_dir config) ".backlog" in
+       (* [.backlog] is the lock path ([Workspace_backlog.backlog_lock_path]),
+          not the store. Reading it as JSON never had a chance to work. *)
+       let backlog_path = Masc.Workspace.backlog_path config in
        let rewrite_title = function
          | `Assoc fields ->
            `Assoc
@@ -514,14 +516,49 @@ let test_default_done_is_terminal () =
         | Tool_result.Deferred () -> fail "default completion was deferred"
         | Tool_result.Failed _ ->
           fail ("default completion failed: " ^ execution.raw_output));
+       (* [keeper_task_done] submits evidence; it does not end the Task. The
+          handler picks [submit_for_verification] unconditionally
+          (keeper_tool_task_runtime.ml), with no strict/advisory branch, and
+          [Workspace_task_lifecycle] refuses to resolve an
+          [AwaitingVerification] obligation from any agent action. This case
+          used to assert the default path was terminal, which stopped being
+          true when the completion authority took over the verdict. *)
        match Masc.Workspace.get_tasks_raw config with
-       | [ { task_status = Masc_domain.Done _;
-             handoff_context = Some handoff; _ } ] ->
+       | [ { task_status =
+               Masc_domain.AwaitingVerification { verification_id; _ }
+           ; handoff_context = Some handoff
+           ; _
+           } ] ->
          check string "result preserved as summary"
            "implementation complete" handoff.summary;
          check (list string) "evidence preserved"
-           [ "note:commit abc123" ] handoff.evidence_refs
-       | [ _ ] -> fail "advisory/default completion was not terminal"
+           [ "note:commit abc123" ] handoff.evidence_refs;
+         (match
+            Masc.Workspace.commit_verdict_r
+              config
+              ~authority:
+                (Masc_domain.Human_operator { operator_id = "operator" })
+              ~verdict:Masc_domain.Verdict_approved
+              ~task_id:"task-001"
+              ~verification_id
+              ()
+          with
+          | Ok _ -> ()
+          | Error error ->
+            fail ("verdict failed: " ^ Masc_domain.masc_error_to_string error));
+         (match Masc.Workspace.get_tasks_raw config with
+          | [ { task_status = Masc_domain.Done _; _ } ] -> ()
+          | [ t ] ->
+            failf
+              "an approved obligation did not become Done: %s"
+              (Masc_domain.show_task_status t.task_status)
+          | tasks ->
+            failf "expected exactly one persisted task, got %d"
+              (List.length tasks))
+       | [ t ] ->
+         failf
+           "keeper_task_done did not submit for verification: %s"
+           (Masc_domain.show_task_status t.task_status)
        | tasks ->
          failf "expected exactly one persisted task, got %d" (List.length tasks))
 
@@ -568,7 +605,7 @@ let () =
             `Quick test_done_failed_transition_emits_typed_error
         ; test_case "strict done submits for verification"
             `Quick test_strict_done_submits_for_verification
-        ; test_case "default done is terminal"
+        ; test_case "default done submits for verification"
             `Quick test_default_done_is_terminal
         ] )
     ]

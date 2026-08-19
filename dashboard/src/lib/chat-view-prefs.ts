@@ -43,3 +43,9 @@ export const chatShowAutonomous = persistentSignal<boolean>({
   key: 'dashboard:chat:show-autonomous-v1',
   defaultValue: true,
 })
+
+/** When true, autonomous-turn groups are rendered unfolded (no folding into collapsed runs). */
+export const chatExpandAutonomousRuns = persistentSignal<boolean>({
+  key: 'dashboard:chat:expand-autonomous-runs-v1',
+  defaultValue: false,
+})

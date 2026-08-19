@@ -4137,9 +4137,11 @@ function renderChatTranscriptBody(opts: {
   // Since-last-seen cursor (unix seconds) for the unread divider; null on every
   // non-keeper chat surface so those transcripts render unchanged.
   unreadAfterTs: number | null
+  // When true, skip folding autonomous groups into collapsed runs.
+  expandAutonomousRuns?: boolean
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract, unreadAfterTs, action } = opts
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, toolOutputHydrationContract, unreadAfterTs, expandAutonomousRuns, action } = opts
   const ungroupedUnits = buildChatRenderUnits(entries, groupToolCalls)
   // Anchored on the unfolded list: folding must not move the unread line, only
   // avoid hiding it. foldAutonomousRuns cuts a run open at this key so the unit
@@ -4148,7 +4150,9 @@ function renderChatTranscriptBody(opts: {
     ungroupedUnits.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
     unreadAfterTs,
   )
-  const units = foldAutonomousRuns(ungroupedUnits, {
+  const units = expandAutonomousRuns
+    ? ungroupedUnits
+    : foldAutonomousRuns(ungroupedUnits, {
     startsNewRun: (unit) => unreadAnchorKey !== null && unitKey(unit) === unreadAnchorKey,
     // Day dividers are emitted per unit below, so a run that spanned midnight
     // would show only its first day. Cutting on the day key keeps every day
@@ -4260,6 +4264,7 @@ export function ChatTranscript({
   toolOutputsCoveredThroughMs = null,
   toolOutputHydrationContract = null,
   unreadAfterTs = null,
+  expandAutonomousRuns = false,
   onSeenBottom,
   action,
 }: {
@@ -4281,6 +4286,8 @@ export function ChatTranscript({
   // Since-last-seen cursor (unix seconds) driving the unread divider. Null on
   // non-keeper surfaces -> no divider.
   unreadAfterTs?: number | null
+  // When true, skip folding autonomous groups into collapsed runs.
+  expandAutonomousRuns?: boolean
   // Called when the operator has demonstrably caught up (scrolled/pinned to the
   // bottom, or a new row arrived while pinned, or the tab regained visibility
   // while pinned). The keeper panel uses it to advance the last-seen cursor.
@@ -4401,6 +4408,7 @@ export function ChatTranscript({
               toolOutputsCoveredThroughMs,
               toolOutputHydrationContract,
               unreadAfterTs,
+              expandAutonomousRuns,
               action,
             })}
       </div>

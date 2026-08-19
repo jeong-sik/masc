@@ -62,7 +62,11 @@ describe('ChatTranscript — folded autonomous runs', () => {
 
   const draw = (
     entries: KeeperConversationEntry[],
-    opts: { unreadAfterTs?: number | null; showDayDividers?: boolean } = {},
+    opts: {
+      unreadAfterTs?: number | null
+      showDayDividers?: boolean
+      expandAutonomousRuns?: boolean
+    } = {},
   ) => {
     render(
       html`<${ChatTranscript}
@@ -71,6 +75,7 @@ describe('ChatTranscript — folded autonomous runs', () => {
         showDayDividers=${opts.showDayDividers ?? true}
         groupToolCalls=${true}
         unreadAfterTs=${opts.unreadAfterTs ?? null}
+        expandAutonomousRuns=${opts.expandAutonomousRuns ?? false}
       />`,
       container,
     )
@@ -86,6 +91,12 @@ describe('ChatTranscript — folded autonomous runs', () => {
     draw([said('u1', DAY_ONE), ...wakesFrom('a', minutesAfter(DAY_ONE, 1), 6)])
     // One chip, not six reading "1개".
     expect(headerCounts()).toEqual(['6개'])
+  })
+
+  it('leaves every autonomous turn unfolded when the global preference is enabled', () => {
+    draw(wakesFrom('a', DAY_ONE, 6), { expandAutonomousRuns: true })
+    expect(container.querySelectorAll('.chat-auto-run').length).toBe(0)
+    expect(headerCounts()).toEqual(['1개', '1개', '1개', '1개', '1개', '1개'])
   })
 
   it('holds every turn as its own row inside, so the run is a container and not a merge', () => {

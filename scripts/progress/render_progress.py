@@ -121,26 +121,38 @@ def render_parity(payload: dict) -> str:
       </table>"""
 
 
+ROLE_LABEL = {
+    "operational": "운영",
+    "campaign_round": "캠페인 라운드",
+    "canary_sweep": "카나리아 스윕",
+    "admission_probe": "admission 프로브",
+}
+
+
 def render_keepers(payload: dict) -> str:
     census = payload["keepers"]
-    labels = {
-        "operational": "실운영",
-        "campaign_round": "캠페인 라운드 잔재",
-        "canary_sweep": "카나리아 스윕 잔재",
-        "race_test": "레이스 테스트 잔재",
-    }
     out = []
-    for key, label in labels.items():
-        names = census.get(key, [])
-        sample = ", ".join(names[:6]) + (" …" if len(names) > 6 else "")
-        tone = "green" if key == "operational" else "notrun"
-        out.append(
-            f"""        <tr>
-          <td class="row-name">{esc(label)}</td>
-          <td class="num"><span class="badge {tone}">{len(names)}</span></td>
-          <td class="muted small">{esc(sample)}</td>
+    for key, label, tone in (
+        ("live", "활동 중", "green"),
+        ("idle", "정지", "notrun"),
+    ):
+        rows = census.get(key, [])
+        for rec in sorted(rows, key=lambda r: (r["role"], r["name"])):
+            idle = rec["idle_hours"]
+            when = f"{idle:.1f}h 전" if isinstance(idle, (int, float)) else "턴 기록 없음"
+            flags = []
+            if rec.get("paused"):
+                flags.append("paused")
+            note = (" · ".join(flags)) if flags else ""
+            out.append(
+                f"""        <tr>
+          <td class="row-name">{esc(rec['name'])}</td>
+          <td><span class="badge {tone}">{esc(label)}</span></td>
+          <td class="muted">{esc(ROLE_LABEL.get(rec['role'], rec['role']))}</td>
+          <td class="num muted">{esc(when)}</td>
+          <td class="muted small">{esc(note)}</td>
         </tr>"""
-        )
+            )
     return "\n".join(out)
 
 
@@ -159,8 +171,8 @@ def build(payload: dict, mapping: dict, generated_at: str, live: dict) -> str:
     parity_rows = payload["parity"].get("rows", [])
     parity_done = sum(1 for r in parity_rows if r["status"] == "완료")
     census = payload["keepers"]
-    operational = len(census.get("operational", []))
-    residue = sum(len(v) for k, v in census.items() if k != "operational")
+    operational = len(census.get("live", []))
+    residue = len(census.get("idle", []))
     latest = payload["rounds"][-1] if payload["rounds"] else None
 
     metrics = "\n".join(
@@ -193,7 +205,7 @@ def build(payload: dict, mapping: dict, generated_at: str, live: dict) -> str:
                 operational,
                 operational + residue,
                 "keeper 위생",
-                f"실운영 {operational} · 잔재 {residue}. 잔재가 Drain Queue 판정을 오염시킨다.",
+                f"활동 {operational} · 정지 {residue}. 이름이 아니라 마지막 턴으로 가른다.",
             ),
         ]
     )
@@ -329,10 +341,10 @@ def build(payload: dict, mapping: dict, generated_at: str, live: dict) -> str:
   </div>
 
   <h2>keeper 위생</h2>
-  <p class="sub">잔재 keeper 의 큐가 Drain Queue 판정을 실제 배수 능력이 아니라 시체 수로 만든다.</p>
+  <p class="sub">이름이 아니라 마지막 턴으로 가른다 — adm-race 는 테스트 잔재처럼 읽히지만 실제로 계속 돌고 있었다.</p>
   <div class="scroll">
     <table>
-      <thead><tr><th>분류</th><th>수</th><th>예시</th></tr></thead>
+      <thead><tr><th>keeper</th><th>상태</th><th>역할</th><th>마지막 턴</th><th>비고</th></tr></thead>
       <tbody>
 {render_keepers(payload)}
       </tbody>

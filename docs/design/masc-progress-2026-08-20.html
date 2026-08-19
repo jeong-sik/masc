@@ -74,7 +74,7 @@
 <div class="wrap">
   <header>
     <h1>MASC 진행률</h1>
-    <p class="sub">생성 2026-08-20 00:42 KST · 최근 라운드 <strong>e0-campaign-20260818-r7</strong> — assertion 30/37 · 미션 11/19 · 라이브 0.23.0 e4ecfb942d7709954d81cb7259efee5ff4be1bdd <code></code></p>
+    <p class="sub">생성 2026-08-20 00:56 KST · 최근 라운드 <strong>e0-campaign-20260818-r7</strong> — assertion 30/37 · 미션 11/19 · 라이브 0.23.0 e4ecfb942d7709954d81cb7259efee5ff4be1bdd <code></code></p>
   </header>
 
   <section class="metrics">
@@ -99,9 +99,9 @@
         <p class="metric-detail">constitution-code parity matrix 의 완료 건수.</p>
       </div>
       <div class="metric">
-        <div class="metric-head"><span class="metric-label">keeper 위생</span><span class="metric-count">10 / 114</span></div>
-        <div class="track"><div class="fill partial" style="width:8.8%"></div></div>
-        <p class="metric-detail">실운영 10 · 잔재 104. 잔재가 Drain Queue 판정을 오염시킨다.</p>
+        <div class="metric-head"><span class="metric-label">keeper 위생</span><span class="metric-count">13 / 16</span></div>
+        <div class="track"><div class="fill partial" style="width:81.2%"></div></div>
+        <p class="metric-detail">활동 13 · 정지 3. 이름이 아니라 마지막 턴으로 가른다.</p>
       </div>
   </section>
 
@@ -439,30 +439,122 @@
   </div>
 
   <h2>keeper 위생</h2>
-  <p class="sub">잔재 keeper 의 큐가 Drain Queue 판정을 실제 배수 능력이 아니라 시체 수로 만든다.</p>
+  <p class="sub">이름이 아니라 마지막 턴으로 가른다 — adm-race 는 테스트 잔재처럼 읽히지만 실제로 계속 돌고 있었다.</p>
   <div class="scroll">
     <table>
-      <thead><tr><th>분류</th><th>수</th><th>예시</th></tr></thead>
+      <thead><tr><th>keeper</th><th>상태</th><th>역할</th><th>마지막 턴</th><th>비고</th></tr></thead>
       <tbody>
         <tr>
-          <td class="row-name">실운영</td>
-          <td class="num"><span class="badge green">10</span></td>
-          <td class="muted small">analyst, claude-probe, code-reviewer, kidsnote, lane-smith, polisher …</td>
+          <td class="row-name">adm-race-cf-000</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
         </tr>
         <tr>
-          <td class="row-name">캠페인 라운드 잔재</td>
-          <td class="num"><span class="badge notrun">30</span></td>
-          <td class="muted small">rw-e0-collab-202608-build-a, rw-e0-collab-202608-build-b, rw-e0-collab-202608-coord, rw-e0-collab-202608-research, rw-e0-collab-202608-review, rw-e0-r3-20260818-build-a …</td>
+          <td class="row-name">adm-race-cf-001</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
         </tr>
         <tr>
-          <td class="row-name">카나리아 스윕 잔재</td>
-          <td class="num"><span class="badge notrun">68</span></td>
-          <td class="muted small">canary-10t-agy-g31p-low-20260817, canary-10t-agy-g35f-low-20260817, canary-10t-agy-g35f-med-20260817, canary-10t-agy-g36f-low-20260817, canary-10t-agy-g36f-med-20260817, canary-10t-agy-gemini-20260816 …</td>
+          <td class="row-name">adm-race-cf-002</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
         </tr>
         <tr>
-          <td class="row-name">레이스 테스트 잔재</td>
-          <td class="num"><span class="badge notrun">6</span></td>
-          <td class="muted small">adm-race-cf-000, adm-race-cf-001, adm-race-cf-002, adm-race-sf-000, adm-race-sf-001, adm-race-sf-002</td>
+          <td class="row-name">adm-race-sf-000</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">adm-race-sf-001</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">adm-race-sf-002</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">admission 프로브</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">analyst</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">code-reviewer</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">kidsnote</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.1h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">lane-smith</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">polisher</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">0.0h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">rondo</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">3.7h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">sangsu</td>
+          <td><span class="badge green">활동 중</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">5.1h 전</td>
+          <td class="muted small">paused</td>
+        </tr>
+        <tr>
+          <td class="row-name">claude-probe</td>
+          <td><span class="badge notrun">정지</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">142.8h 전</td>
+          <td class="muted small">paused</td>
+        </tr>
+        <tr>
+          <td class="row-name">rtprobe</td>
+          <td><span class="badge notrun">정지</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">26.3h 전</td>
+          <td class="muted small"></td>
+        </tr>
+        <tr>
+          <td class="row-name">taskmaster</td>
+          <td><span class="badge notrun">정지</span></td>
+          <td class="muted">운영</td>
+          <td class="num muted">61.7h 전</td>
+          <td class="muted small">paused</td>
         </tr>
       </tbody>
     </table>

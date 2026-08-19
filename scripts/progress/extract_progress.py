@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field, asdict
 
 
@@ -157,26 +158,54 @@ def read_rounds(reports_dir: str) -> list:
     return rounds
 
 
-def classify_keeper(name: str) -> str:
+IDLE_HOURS = 12.0
+"""A keeper that has not taken a turn in this long is treated as stopped.
+
+Names do not decide this.  The adm-race keepers read like leftover test
+fixtures and were in fact turning every few minutes, so classifying by
+name prefix counted live work as residue.  Last turn is the fact; the
+name is a hint about why it exists.
+"""
+
+
+def keeper_role(name: str) -> str:
     if name.startswith("rw-e0-"):
         return "campaign_round"
     if name.startswith("canary-"):
         return "canary_sweep"
     if name.startswith("adm-race-"):
-        return "race_test"
+        return "admission_probe"
     return "operational"
 
 
-def read_keepers(masc_root: str) -> dict:
+def read_keepers(masc_root: str, now: float | None = None) -> dict:
     keeper_dir = os.path.join(masc_root, "keepers")
-    census = {"operational": [], "campaign_round": [], "canary_sweep": [], "race_test": []}
+    census = {"live": [], "idle": []}
     if not os.path.isdir(keeper_dir):
         return census
+    now = now if now is not None else time.time()
     for entry in sorted(os.listdir(keeper_dir)):
         if not entry.endswith(".json"):
             continue
         name = entry[: -len(".json")]
-        census[classify_keeper(name)].append(name)
+        try:
+            with open(os.path.join(keeper_dir, entry), encoding="utf-8") as handle:
+                state = json.load(handle)
+        except (OSError, ValueError):
+            state = {}
+        try:
+            last_turn = float(state.get("last_turn_ts") or 0)
+        except (TypeError, ValueError):
+            last_turn = 0.0
+        idle_h = (now - last_turn) / 3600 if last_turn else None
+        record = {
+            "name": name,
+            "role": keeper_role(name),
+            "idle_hours": round(idle_h, 1) if idle_h is not None else None,
+            "paused": bool(state.get("paused")),
+        }
+        stopped = idle_h is None or idle_h >= IDLE_HOURS
+        census["idle" if stopped else "live"].append(record)
     return census
 
 

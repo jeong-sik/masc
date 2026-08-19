@@ -1499,6 +1499,13 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/runtime-observables" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json =
+           Server_dashboard_http_runtime_observables.runtime_observables_http_json ()
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/gate" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in

@@ -97,6 +97,16 @@ val tool_name : entry -> string
 
 val execution_mode_to_string : execution_mode -> string
 
+(** Execution-semantics kind (RFC-0386) declared by the entry's execution
+    mode: [Inline] entries are [Composition_tool], [Async] entries are
+    [Async_composition_tool]. *)
+val tool_kind : entry -> Keeper_tool_descriptor.tool_kind
+
+(** The shared async request controls operate on async composition runs, so
+    both are [Keeper_tool_descriptor.Async_composition_tool]. *)
+val status_tool_kind : Keeper_tool_descriptor.tool_kind
+val cancel_tool_kind : Keeper_tool_descriptor.tool_kind
+
 val model_tool_names : t -> string list
 (** Exact model-visible composition surface, including the shared status and
     cancel controls when at least one async composition is declared. *)

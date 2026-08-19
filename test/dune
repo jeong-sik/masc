@@ -287,6 +287,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
@@ -592,6 +593,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script

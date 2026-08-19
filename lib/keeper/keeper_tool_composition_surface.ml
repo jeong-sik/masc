@@ -13,6 +13,8 @@ let empty_input_schema =
 
 let plan_execute_tool_name = "keeper_plan_execute"
 
+let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
+
 let plan_execute_input_schema =
   let node_schema =
     `Assoc

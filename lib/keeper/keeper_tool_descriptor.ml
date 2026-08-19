@@ -56,6 +56,27 @@ let execution_to_string = function
   | Terminal -> "terminal"
 ;;
 
+type tool_kind =
+  | Atomic_tool
+  | Composition_tool
+  | Async_composition_tool
+  | Batch_plan_tool
+
+let tool_kind_to_string = function
+  | Atomic_tool -> "atomic"
+  | Composition_tool -> "composition"
+  | Async_composition_tool -> "async_composition"
+  | Batch_plan_tool -> "batch_plan"
+;;
+
+let tool_kind_of_string = function
+  | "atomic" -> Ok Atomic_tool
+  | "composition" -> Ok Composition_tool
+  | "async_composition" -> Ok Async_composition_tool
+  | "batch_plan" -> Ok Batch_plan_tool
+  | unknown -> Error ("unknown tool kind: " ^ unknown)
+;;
+
 type composable_output =
   | Opaque_output
   | Json_output of { schema : Yojson.Safe.t }
@@ -146,6 +167,7 @@ type t =
   ; model_output_projection : Tool_output.model_projection
   ; composable_output : composable_output
   ; execution : execution
+  ; tool_kind : tool_kind
   ; policy : policy
   ; executor : executor
   ; backend : backend
@@ -529,6 +551,7 @@ let descriptor
       ?(model_output_projection = Tool_output.default_model_projection)
       ?(composable_output = Opaque_output)
       ?(ordinary_execution_mode = Serial)
+      ?(tool_kind = Atomic_tool)
       ~policy
       ~executor
       ~backend
@@ -615,6 +638,7 @@ let descriptor
   ; model_output_projection
   ; composable_output
   ; execution
+  ; tool_kind
   ; policy
   ; executor
   ; backend
@@ -2607,6 +2631,7 @@ let route_evidence_json d =
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "execution", `String (execution_to_string d.execution)
+     ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
      ; "composable_output", composable_output_to_json d.composable_output
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
@@ -2643,6 +2668,7 @@ let discovery_fields d =
    ; "sandbox", `String (sandbox_to_string d.sandbox)
    ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
    ; "execution", `String (execution_to_string d.execution)
+   ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
    ; "composable_output", composable_output_to_json d.composable_output
    ; "policy", discovery_policy_json d.policy
    ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema

@@ -347,6 +347,7 @@ normal_targets=(
   @test/fusion_core/runtest-test_fusion_harness
   @test/fusion_core/runtest-test_fusion_run_registry
   @test/fusion_core/runtest-test_fusion_config_json
+  @test/runtest-test_keeper_thinking_observation
   @test/runtest-test_keeper_external_attention
   @test/runtest-test_keeper_manual_compaction_preemption
   @test/runtest-test_keeper_compaction_unit

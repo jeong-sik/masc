@@ -421,7 +421,7 @@ let review
          }
      | Ok prompt ->
        (match generator_runtime with
-        | Some generator when List.exists (String.equal generator) slots ->
+        | Some generator when List.exists (String.equal generator) (first_slot :: rest_slots) ->
           task_warn
             "[task-completion-review] generator runtime %s is one of the verifier_exact lane slots"
             generator
@@ -526,7 +526,7 @@ let review
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
                 ; retryable
-                }))
+                })
        in
        attempt first_slot rest_slots)
 ;;

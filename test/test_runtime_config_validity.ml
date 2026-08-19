@@ -1053,14 +1053,8 @@ List.iter
         ~assignments
         ~cross_verifier_runtime_id:cross_verifier
         ~verifier_exact_slot_ids:
-          (match
-             List.find_opt
-               (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-                  String.equal lane.id Runtime.verifier_exact_lane_id)
-               config.exact_output_lane_decls
-           with
-           | Some lane -> lane.slot_ids
-           | None -> [])
+          (* pinned to the seed by the verifier_exact lane check above *)
+          [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ]
         ~media_failover
         ~lanes
     in

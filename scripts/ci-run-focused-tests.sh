@@ -127,6 +127,7 @@ normal_targets=(
   @test/runtest-test_channel_gate_discord_state
   @test/runtest-test_channel_gate_imessage_state
   @test/runtest-test_channel_gate_metrics
+  @test/runtest-test_channel_gate_slack_state
   @test/runtest-test_client_registry_eio
   @test/runtest-test_code_navigation_eio
   @test/runtest-test_common

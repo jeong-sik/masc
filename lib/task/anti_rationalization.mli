@@ -71,6 +71,7 @@ val review
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?few_shot_block:string
+  -> ?prompt_name:string
   -> ?sw:Eio.Switch.t option
   -> lookup:lookup_surface
   -> base_path:string
@@ -84,7 +85,12 @@ val review
     declaration order: a slot that fails or returns no valid verdict tool call
     yields to the next slot, and the terminal result describes the last
     attempt. An explicit [~evaluator_runtime] is a single-slot lane with no
-    failover. *)
+    failover.
+
+    [~prompt_name] selects the prompt-registry template rendered for the
+    review; it defaults to {!Prompt_names.verification} (the task completion
+    review). The goal verification lane (RFC-0387) passes its own templates —
+    provider selection, failover, and the verdict channel are unchanged. *)
 
 val verifier_exact_lane_id : string
 (** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
@@ -92,12 +98,15 @@ val verifier_exact_lane_id : string
     (RFC-0361 D7(a)). *)
 
 (** Render the single prompt-registry SSOT. There is no inline fallback prompt;
-    an error keeps the Task nonterminal. *)
+    an error keeps the Task nonterminal. [~prompt_name] defaults to
+    {!Prompt_names.verification}; other callers (RFC-0387 goal verification)
+    select their own registered template. *)
 val build_prompt
   :  ?few_shot_block:string
   -> ?completion_contract:string list
   -> ?required_evidence:string list
   -> ?verify_gate_evidence:string list
+  -> ?prompt_name:string
   -> lookup:lookup_surface
   -> review_request
   -> (string, string) result

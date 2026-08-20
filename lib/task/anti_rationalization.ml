@@ -187,6 +187,7 @@ let lookup_section = function
 
 let build_prompt ?(few_shot_block = "") ?completion_contract
       ?(required_evidence = []) ?(verify_gate_evidence = [])
+      ?(prompt_name = Prompt_names.verification)
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
   let desc = req.task_description in
@@ -215,7 +216,7 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
     ]
   in
   Prompt_registry.render_prompt_template
-    Prompt_names.verification
+    prompt_name
     vars
 ;;
 
@@ -341,6 +342,7 @@ let review
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
       ?(few_shot_block = "")
+      ?(prompt_name = Prompt_names.verification)
       ?(sw : Eio.Switch.t option = None)
       ~(lookup : lookup_surface)
       ~base_path
@@ -398,6 +400,7 @@ let review
          ?completion_contract
          ~required_evidence
          ~verify_gate_evidence
+         ~prompt_name
          ~lookup
          req
      with

@@ -164,15 +164,7 @@ val runtime_trace_public_json : Yojson.Safe.t -> Yojson.Safe.t
     records. Used by the runtime-lens response builders. *)
 
 val tool_call_output_text_opt : Yojson.Safe.t -> string option
-val parse_tool_output_json_opt : Yojson.Safe.t -> Yojson.Safe.t option
 val tool_call_runtime_contract : Yojson.Safe.t -> Yojson.Safe.t
-
-val tool_call_matches_trace :
-  ?turn_id:int ->
-  keeper_name:string ->
-  trace_id:string ->
-  Yojson.Safe.t ->
-  bool
 
 (** {1 Option list + string utilities} *)
 

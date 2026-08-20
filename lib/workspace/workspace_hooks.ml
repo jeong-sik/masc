@@ -349,6 +349,18 @@ let verification_submitted_fn
            verification_id
            assignee)
 
+(* RFC-0387 stage 2: the goal-side analogue of [verification_submitted_fn].
+   The uninstalled default is loud for the same reason — a durable pending
+   request with no lane draining it is exactly the gate-without-caller wedge
+   the stage was split to avoid. *)
+let goal_verification_pending_fn
+  : (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
+  = Atomic.make
+      (fun _config ~goal_id ->
+         Log.Misc.warn
+           "goal verification request committed without an installed goal verifier lane goal_id=%s"
+           goal_id)
+
 let verification_notify_verdict_fn
   : (task_id:string ->
      authority:Masc_domain.completion_authority ->

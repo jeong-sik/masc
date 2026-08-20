@@ -136,46 +136,6 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
        | _ :: _ :: _ -> Ok None)
 ;;
 
-let active_goal_scope_json
-      ?matched_goal_id
-      ?excluded_count
-      ?scope_excluded_count
-      ?explicit_excluded_count
-      ?claim_pool_candidate_count
-      ()
-  =
-  (* A keeper's goals no longer narrow which tasks it may claim, so this block
-     reports the one scope that exists. The goal-id lists it used to carry
-     described a filter that is gone; keeping them would state a constraint the
-     scheduler does not apply. *)
-  let mode =
-    Keeper_runtime_contract.claim_scope_mode_to_string
-      Keeper_runtime_contract.All_tasks
-  in
-  let fields =
-    [
-      ("mode", `String mode);
-      ("scoped", `Bool false);
-      ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);
-    ]
-  in
-  let fields =
-    match excluded_count with
-    | Some count -> fields @ [ ("excluded_count", `Int count) ]
-    | None -> fields
-  in
-  let int_fields =
-    [ "scope_excluded_count", scope_excluded_count
-    ; "explicit_excluded_count", explicit_excluded_count
-    ; "claim_pool_candidate_count", claim_pool_candidate_count
-    ]
-    |> List.filter_map (fun (name, value) ->
-      Option.map (fun count -> name, `Int count) value)
-  in
-  let fields = fields @ int_fields in
-  `Assoc fields
-;;
-
 let no_eligible_exclusion_summary =
   Masc_task_handlers.Tool_task_no_eligible.no_eligible_exclusion_summary
 ;;
@@ -696,44 +656,28 @@ let handle_keeper_task_tool_with_outcome
           (no_eligible_exclusion_summary ~scope_excluded_count)
       | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
-    let claim_scope, claimed_task_fields =
+    let claimed_task_fields =
       match result with
       | Workspace.Claim_next_claimed
           { task_id; title; priority; scope_widened; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
-          ( active_goal_scope_json ?matched_goal_id ()
-          , [
-              ( "claim_observation",
-                Task.Tool.build_claim_observation_payload
-                  ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
-                  ~task_id ~scope_widened );
-              ( "claimed_task",
-                `Assoc
-                  [
-                    ("task_id", `String task_id);
-                    ("title", `String title);
-                    ("priority", `Int priority);
-                    ( "goal_id",
-                      Json_util.string_opt_to_json matched_goal_id );
-                  ] );
-            ] )
-      | Workspace.Claim_next_no_eligible
-          { excluded_count
-          ; scope_excluded_count
-          ; explicit_excluded_count
-          ; claim_pool_candidate_count
-          } ->
-          ( active_goal_scope_json
-              ~excluded_count
-              ~scope_excluded_count
-              ~explicit_excluded_count
-              ~claim_pool_candidate_count
-              ()
-          , [] )
-      | Workspace.Claim_next_no_unclaimed | Workspace.Claim_next_error _ ->
-          ( active_goal_scope_json
-              ()
-          , [] )
+          [
+            ( "claim_observation",
+              Task.Tool.build_claim_observation_payload
+                ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
+                ~task_id ~scope_widened );
+            ( "claimed_task",
+              `Assoc
+                [
+                  ("task_id", `String task_id);
+                  ("title", `String title);
+                  ("priority", `Int priority);
+                  ("goal_id", Json_util.string_opt_to_json matched_goal_id);
+                ] );
+          ]
+      | Workspace.Claim_next_no_eligible _
+      | Workspace.Claim_next_no_unclaimed
+      | Workspace.Claim_next_error _ -> []
     in
     let typed_outcome_field =
       match result with
@@ -777,7 +721,6 @@ let handle_keeper_task_tool_with_outcome
         (`Assoc
            ([
               ("result", `String message);
-              ("claim_scope", claim_scope);
               ("auto_started", `Bool !auto_started_ok);
             ]
              @ (match typed_outcome_field with

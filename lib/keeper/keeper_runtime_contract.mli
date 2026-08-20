@@ -13,43 +13,6 @@ val backend_of_meta : Keeper_meta_contract.keeper_meta -> string
 val task_is_linked_to_keeper_goals :
   ?task_goal_index:(string, string list) Hashtbl.t -> string list -> Masc_domain.task -> bool
 
-type claim_scope_mode =
-  | All_tasks
-  | Active_goal_ids
-  | Empty_goal_scope_fallback_all_tasks
-
-val claim_scope_mode_to_string : claim_scope_mode -> string
-(** Wire label for a claim-scope mode (e.g. observation JSON). Closed variant
-    (#20674) so producers/consumers stay exhaustive instead of drifting on a
-    bare [string]. *)
-
-type claim_goal_scope = {
-  task_filter : Masc_domain.task -> bool;
-  mode : claim_scope_mode;
-  effective_goal_ids : string list;
-  fallback_reason : string option;
-}
-
-val resolve_claim_goal_scope :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  task_eligible:(Masc_domain.task -> bool) ->
-  unit ->
-  claim_goal_scope
-
-val resolve_claim_goal_scope_for_tasks :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  tasks:Masc_domain.task list ->
-  task_eligible:(Masc_domain.task -> bool) ->
-  unit ->
-  claim_goal_scope
-(** Backlog-aware claim scope for callers that already loaded tasks. This
-    avoids re-reading the backlog while preserving the empty-scope fallback.
-    [task_eligible] is the caller's hard eligibility boundary; an in-scope task
-    that this keeper cannot claim must not suppress fallback to eligible
-    out-of-scope work. *)
-
 val runtime_contract_json :
   config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Keeper-visible runtime contract. Backend implementation details such as

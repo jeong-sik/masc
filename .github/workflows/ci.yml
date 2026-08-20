@@ -1103,10 +1103,12 @@ jobs:
         # reason (#27117), and #26075 found the same shape by tripping over it.
         #
         # Every suite here was executed against origin/main before being added.
-        # Three more guards in this family are red today and are deliberately
+        # Two more guards in this family are red today and are deliberately
         # NOT listed, so this step cannot go green by ignoring them:
-        # test_keeper_runtime_contract, test_keeper_identity_drift_counter,
+        # test_keeper_identity_drift_counter,
         # test_keeper_supervisor_persona_drift_order (#26075 comment).
+        # test_keeper_runtime_contract left this list by deletion: it only
+        # covered the goal-scoped claim filter, which no longer exists.
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_assertion_kind_mirror \

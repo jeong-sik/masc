@@ -1401,14 +1401,29 @@ class MissionRun:
             "masc_keeper_down",
             {"name": self.roles["coordinator"], "remove_meta": False, "remove_session": False},
         )
+        # keepalive_running answers whether the fiber is up. It does not
+        # answer whether the shutdown operation reached a phase that admits a
+        # restart: the operation can still sit in Finalizing_tasks or
+        # Cleanup_ready, and masc_keeper_up is then refused with
+        # "shutdown operation is not an operator-supersedable blocked
+        # operation" (#29181). shutdown_admission_fence is the predicate the
+        # server's admission preflight consults, so wait on that.
+        #
+        # Only False admits. None means the status carried no operation
+        # record — either none exists yet or the read failed — and treating
+        # that as "no fence" is the same misread this replaces.
         down_deadline = time.monotonic() + 90.0
         while time.monotonic() < down_deadline:
             status = self.read_status("coordinator", "down-poll")
             if isinstance(status, dict) and not status.get("keepalive_running", False):
-                break
+                if status.get("shutdown_admission_fence") is False:
+                    break
             time.sleep(1.0)
         else:
-            raise AcceptanceError("coordinator did not stop within 90 seconds")
+            raise AcceptanceError(
+                "coordinator shutdown did not clear the admission fence within "
+                "90 seconds"
+            )
         arguments: dict[str, Any] = {"name": self.roles["coordinator"]}
         if self.runtime_id:
             arguments["runtime_id"] = self.runtime_id

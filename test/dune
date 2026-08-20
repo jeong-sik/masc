@@ -1820,6 +1820,8 @@
 
 (include stanzas/test_goal_verification_gate.inc)
 
+(include stanzas/test_goal_verification_agent.inc)
+
 
 
 

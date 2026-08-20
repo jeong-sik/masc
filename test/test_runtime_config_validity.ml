@@ -322,11 +322,25 @@ let assert_ollama_cloud_seed_runtime runtimes case =
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
+       (* [thinking] says the model reasons; it does not say the endpoint takes a
+          control on the wire. ollama.com /v1 serves reasoning inherently and
+          accepts no control field, so [reasoning-effort] there declares a
+          dialect that can never be encoded: the format carries no effort value,
+          runtime.toml has no key that supplies one, and runtime_adapter never
+          sets reasoning_effort. Every enable_thinking=true turn is then rejected
+          as Enable_not_encodable — measured 25/25 on the acceptance harness
+          before this list, 0/25 after. Deployed config dropped the same five on
+          2026-08-04; the audit is oas#2716 (2026-07-20). *)
+       let inherent_reasoning_no_control =
+         [ "ollama_cloud.ollama-cloud-qwen3-5-397b"
+         ; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+         ; "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+         ]
+       in
        let expected_reasoning_budget, expected_thinking_format =
-         match case.runtime_id with
-         | "ollama_cloud.ollama-cloud-qwen3-5-397b" ->
-           false, Runtime_schema.No_thinking_control
-         | _ ->
+         if List.mem case.runtime_id inherent_reasoning_no_control
+         then false, Runtime_schema.No_thinking_control
+         else
            ( case.thinking
            , if case.thinking
              then Runtime_schema.Reasoning_effort

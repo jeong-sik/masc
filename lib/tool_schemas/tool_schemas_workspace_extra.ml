@@ -38,7 +38,9 @@ let schemas : tool_schema list =
     }
   ; { name = "masc_goal_upsert"
     ; description =
-        "Create or update Goal metadata and parent linkage. Use masc_goal_transition for lifecycle changes."
+        "Create or update Goal metadata and parent linkage. Creation requires a \
+         measurable success condition: metric and target_value (RFC-0387 B1). Use \
+         masc_goal_transition for lifecycle changes."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -46,14 +48,35 @@ let schemas : tool_schema list =
             , `Assoc
                 [ "id", `Assoc [ "type", `String "string" ]
                 ; "title", `Assoc [ "type", `String "string" ]
-                ; "metric", `Assoc [ "type", `String "string" ]
-                ; "target_value", `Assoc [ "type", `String "string" ]
+                ; ( "metric"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Required (non-blank) when the upsert creates a new \
+                             goal (RFC-0387 B1); optional on update." )
+                      ] )
+                ; ( "target_value"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Required (non-blank) when the upsert creates a new \
+                             goal (RFC-0387 B1); optional on update." )
+                      ] )
                 ; "due_date", `Assoc [ "type", `String "string" ]
                 ; "priority", `Assoc [ "type", `String "integer" ]
                 ; "parent_goal_id", `Assoc [ "type", `String "string" ]
                 ] )
           ; "additionalProperties", `Bool false
           ]
+      (* B1 is NOT expressed in a schema-level [required] array on purpose:
+         this one tool serves both create and update, and JSON Schema
+         [required] is unconditional — listing metric/target_value there would
+         reject every metadata update of an existing goal. The create/update
+         split is only decidable against the store, so the handler enforces
+         the requirement on the creation branch (Goal_store.upsert_goal,
+         inside the write lock). *)
     }
   ; { name = "masc_goal_assign"
     ; description =

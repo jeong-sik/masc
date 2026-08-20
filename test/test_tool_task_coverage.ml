@@ -241,6 +241,8 @@ let create_executing_goal ctx ~goal_id =
       ctx.Task.Tool.config
       ~id:goal_id
       ~title:("Goal " ^ goal_id)
+      ~metric:"m"
+      ~target_value:"1"
       ~phase:Goal_phase.Executing
       ()
   with

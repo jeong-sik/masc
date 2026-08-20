@@ -77,6 +77,8 @@ let test_goal_upsert_and_list () =
       ~args:
         (`Assoc
             [ "title", `String "Ship Goal Surface"
+            ; "metric", `String "deploys shipped"
+            ; "target_value", `String "1"
             ; "priority", `Int 2
             ])
   in
@@ -134,7 +136,8 @@ let test_goal_list_filters_by_phase () =
       | Some phase -> phase
       | None -> fail ("invalid phase fixture: " ^ phase)
     in
-    match Goal_store.upsert_goal config ~title ~phase () with
+    match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
+            ~phase () with
     | Ok _ -> ()
     | Error msg -> fail msg
   in
@@ -162,7 +165,8 @@ let test_goal_list_filters_by_phase () =
 let test_goal_list_includes_rollup () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Executing goal" () with
+  (match Goal_store.upsert_goal config ~title:"Executing goal" ~metric:"m"
+           ~target_value:"1" () with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let listed =
@@ -183,7 +187,8 @@ let test_goal_list_includes_rollup () =
 let test_goal_list_ignores_blank_optional_filters () =
   with_workspace
   @@ fun config ->
-  (match Goal_store.upsert_goal config ~title:"Blank filter goal" () with
+  (match Goal_store.upsert_goal config ~title:"Blank filter goal" ~metric:"m"
+           ~target_value:"1" () with
    | Ok _ -> ()
    | Error msg -> fail msg);
   let listed =
@@ -254,7 +259,8 @@ let test_goal_upsert_rejects_lifecycle_fields () =
     true
     (String_util.contains_substring (Yojson.Safe.to_string phase_error) "masc_goal_transition");
   let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Existing goal" () with
+    match Goal_store.upsert_goal config ~title:"Existing goal" ~metric:"m"
+            ~target_value:"1" () with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
@@ -318,7 +324,10 @@ let test_goal_completion_accepts_goal_without_tasks () =
   with_workspace
   @@ fun config ->
   let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Direct completion" () with
+    match
+      Goal_store.upsert_goal config ~title:"Direct completion" ~metric:"m"
+        ~target_value:"1" ()
+    with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
@@ -330,7 +339,10 @@ let test_goal_completion_ignores_open_task_count () =
   with_workspace
   @@ fun config ->
   let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Open task completion" () with
+    match
+      Goal_store.upsert_goal config ~title:"Open task completion" ~metric:"m"
+        ~target_value:"1" ()
+    with
     | Ok payload -> payload
     | Error msg -> fail msg
   in
@@ -367,7 +379,8 @@ let test_goal_block_and_unblock_have_no_operator_hierarchy () =
   with_workspace
   @@ fun config ->
   let goal, _ =
-    match Goal_store.upsert_goal config ~title:"Explicitly blocked Goal" () with
+    match Goal_store.upsert_goal config ~title:"Explicitly blocked Goal"
+            ~metric:"m" ~target_value:"1" () with
     | Ok payload -> payload
     | Error msg -> fail msg
   in

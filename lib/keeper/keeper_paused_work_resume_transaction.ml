@@ -169,7 +169,71 @@ let validate_identity (receipt : Keeper_paused_work_disposition_receipt.t)
   else Ok ()
 ;;
 
-let paused_meta receipt (meta : Keeper_meta_contract.keeper_meta) =
+type transcript_recovery =
+  | Transcript_already_dispatchable
+  | Transcript_closed_open_tail of Agent_core.Types.message list
+  | Transcript_unrecoverable
+
+(* Downgrade to Operator_paused instead of clearing outright: the keeper stays
+   paused and the generic resume path below still owns that transition. Only the
+   classification changes, from "cannot replay" to "an operator stopped this". *)
+let downgraded_transcript_latch (meta : Keeper_meta_contract.keeper_meta) =
+  { meta with
+    Keeper_meta_contract.latched_reason =
+      Some
+        (Keeper_latched_reason.Operator_paused
+           { Keeper_latched_reason.operator_actor =
+               Keeper_latched_reason.operator_actor_grpc_directive
+           })
+  }
+;;
+
+(* The latch records that the transcript was broken when it was written, not
+   that it is broken now. A keeper whose checkpoint has since become
+   dispatchable is held by a stale record, so re-read the checkpoint and let its
+   current structure decide.
+
+   Two shapes clear it. A transcript that already validates needs nothing. A
+   transcript whose only defect is the open ToolUse tail that checkpoint
+   persistence preserves on purpose is closed by [close_open_tail], which
+   appends one typed ToolResult per unresolved id recording that the call was
+   issued and no result was observed. Anything that fails to parse keeps
+   latching — that is the contract [close_open_tail] documents, and this does
+   not override it. *)
+(* The decision, with no I/O in it: read the current messages and say what the
+   latch is still worth. Kept separate so the three outcomes are testable
+   without seeding a checkpoint on disk. *)
+let classify_transcript messages =
+  match Keeper_compaction_unit.validate_provider_transcript messages with
+  | Ok () -> Transcript_already_dispatchable
+  | Error _ ->
+    (match Keeper_compaction_unit.close_open_tail messages with
+     | Error _ -> Transcript_unrecoverable
+     | Ok closure -> Transcript_closed_open_tail closure.Keeper_compaction_unit.messages)
+;;
+
+let recover_transcript_latch config (meta : Keeper_meta_contract.keeper_meta) =
+  let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let session_dir = Keeper_fs.keeper_session_dir config session_id in
+  match Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id with
+  | Error _ -> Error Durable_owner_transcript_reset_required
+  | Ok (checkpoint, source_ref) ->
+    (match classify_transcript checkpoint.Agent_core.Checkpoint.messages with
+     | Transcript_unrecoverable -> Error Durable_owner_transcript_reset_required
+     | Transcript_already_dispatchable -> Ok (downgraded_transcript_latch meta)
+     | Transcript_closed_open_tail messages ->
+       (match
+          Keeper_checkpoint_store.save_agent_core_if_source
+            ~session_dir
+            ~expected_source_ref:source_ref
+            { checkpoint with Agent_core.Checkpoint.messages }
+        with
+        | Keeper_checkpoint_store.Not_installed _ ->
+          Error Durable_owner_transcript_reset_required
+        | Keeper_checkpoint_store.Installed _ -> Ok (downgraded_transcript_latch meta)))
+;;
+
+let paused_meta config receipt (meta : Keeper_meta_contract.keeper_meta) =
   match
     Keeper_lifecycle_admission.state
       ~paused:meta.paused
@@ -180,7 +244,9 @@ let paused_meta receipt (meta : Keeper_meta_contract.keeper_meta) =
   | Keeper_lifecycle_admission.Paused
       (Keeper_lifecycle_admission.Classified
         Keeper_latched_reason.Transcript_corruption_reset_required) ->
-    Error Durable_owner_transcript_reset_required
+    let* recovered = recover_transcript_latch config meta in
+    let* () = validate_identity receipt recovered in
+    Ok recovered
   | Keeper_lifecycle_admission.Paused _ ->
     let* () = validate_identity receipt meta in
     Ok meta
@@ -243,7 +309,7 @@ let project_receipt token config (receipt : Keeper_paused_work_disposition_recei
   let* committed =
     if current.paused
     then
-      let* _paused = paused_meta receipt current in
+      let* _paused = paused_meta config receipt current in
       let* committed =
         match
           Keeper_owner_registry.apply_meta
@@ -294,7 +360,7 @@ let create_receipt config ~keeper_name request =
     ; operation = Keeper_paused_work_disposition_receipt.Resume_owner
     }
   in
-  let* _ = paused_meta receipt current in
+  let* _ = paused_meta config receipt current in
   let* entry = registered_owner_opt config receipt in
   match entry with
   | None -> Ok receipt

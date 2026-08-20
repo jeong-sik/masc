@@ -24,14 +24,12 @@ type build_context = {
   goal_task_index : (string, string list) Hashtbl.t;
 }
 
-let rec build_tree context goals goal =
-  let child_goals =
-    List.filter
-      (fun (candidate : Goal_store.goal) ->
-        candidate.parent_goal_id = Some goal.Goal_store.id)
-      goals
-  in
-  let children = List.map (build_tree context goals) child_goals in
+(* Goals are flat: every goal is a root, so [children] is always empty. The
+   field stays on the node because the JSON shape and its consumers are
+   unchanged. *)
+let build_tree context goals goal =
+  ignore goals;
+  let children = [] in
   let linked_tasks =
     context.all_tasks
     |> List.filter_map (fun task ->

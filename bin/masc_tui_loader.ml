@@ -462,7 +462,6 @@ let decode_planning_goal json =
   let* pg_phase = required_string_field json "phase" in
   let* pg_priority = required_int_field json "priority" in
   let* pg_due_date = optional_string_field json "due_date" in
-  let* pg_parent_goal_id = optional_string_field json "parent_goal_id" in
   let* pg_metric = optional_string_field json "metric" in
   let* pg_target_value = optional_string_field json "target_value" in
   Ok
@@ -473,7 +472,6 @@ let decode_planning_goal json =
       pg_phase;
       pg_priority;
       pg_due_date;
-      pg_parent_goal_id;
       pg_metric;
       pg_target_value;
     }

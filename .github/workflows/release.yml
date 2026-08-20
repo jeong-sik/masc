@@ -54,7 +54,9 @@ jobs:
       - name: Install native dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install flock gmp libpq openssl@3 zstd
+          # ripgrep 은 evidence 번들의 Grep 도구 시나리오가 요구한다.
+          # Linux 는 별도 스텝에서 apt 로 넣는다.
+          brew install flock gmp libpq openssl@3 zstd ripgrep
 
           libpq_prefix="$(brew --prefix libpq)"
           openssl_prefix="$(brew --prefix openssl@3)"

@@ -399,6 +399,70 @@ let test_unmentioned_broadcast_reaches_the_delivery_handler () =
             [ "fleet announcement with no mention" ]
             !seen))
 
+(* [limit] must count the messages a caller asked FOR, not the messages the
+   store happened to read. When one agent's traffic fills the window, a caller
+   that filters afterwards gets nothing back however large a window it asks
+   for — every call site that filtered this way had grown its own multiplier
+   (200, 2000, limit*5, limit*10 capped at 1000) and each one fails at some
+   fleet size. The first assertion pins the behaviour that forced those
+   multipliers; the rest pin the filtered read that removes the need for them. *)
+let test_get_messages_matching_counts_matches_not_reads () =
+  with_test_env (fun config ->
+    let mine (m : Masc_domain.message) = String.equal m.from_agent "claude" in
+    let say from_agent content =
+      ignore
+        (Workspace.broadcast
+           ~audience:Workspace_broadcast.System_record
+           config
+           ~from_agent
+           ~content)
+    in
+    say "claude" "mine 1";
+    say "claude" "mine 2";
+    for i = 1 to 20 do
+      say "other" (Printf.sprintf "other %d" i)
+    done;
+    let unfiltered = Workspace.get_messages_raw config ~since_seq:0 ~limit:5 in
+    Alcotest.(check int)
+      "an unfiltered window of 5 holds none of this agent's messages"
+      0
+      (List.length (List.filter mine unfiltered));
+    let matched =
+      Workspace.get_messages_matching config ~since_seq:0 ~limit:5 ~keep:mine
+    in
+    Alcotest.(check int)
+      "the filtered read returns every match under the limit"
+      2
+      (List.length matched);
+    Alcotest.(check (list string))
+      "matches come back newest first"
+      [ "mine 2"; "mine 1" ]
+      (List.map (fun (m : Masc_domain.message) -> m.content) matched))
+
+let test_get_messages_matching_limit_bounds_matches () =
+  with_test_env (fun config ->
+    let mine (m : Masc_domain.message) = String.equal m.from_agent "claude" in
+    let say from_agent content =
+      ignore
+        (Workspace.broadcast
+           ~audience:Workspace_broadcast.System_record
+           config
+           ~from_agent
+           ~content)
+    in
+    for i = 1 to 8 do
+      say "claude" (Printf.sprintf "mine %d" i);
+      say "other" (Printf.sprintf "other %d" i)
+    done;
+    let matched =
+      Workspace.get_messages_matching config ~since_seq:0 ~limit:3 ~keep:mine
+    in
+    Alcotest.(check int) "limit bounds the matches" 3 (List.length matched);
+    Alcotest.(check (list string))
+      "and keeps the newest of them"
+      [ "mine 8"; "mine 7"; "mine 6" ]
+      (List.map (fun (m : Masc_domain.message) -> m.content) matched))
+
 let () =
   Alcotest.run "Workspace raw message regression" [
     ("messages_raw", [
@@ -420,5 +484,9 @@ let () =
         test_startup_schema_preflight_rejects_unpurged_message;
       Alcotest.test_case "unmentioned broadcast reaches the delivery handler" `Quick
         test_unmentioned_broadcast_reaches_the_delivery_handler;
+      Alcotest.test_case "filtered read counts matches not reads" `Quick
+        test_get_messages_matching_counts_matches_not_reads;
+      Alcotest.test_case "filtered read bounds matches by limit" `Quick
+        test_get_messages_matching_limit_bounds_matches;
     ]);
   ]

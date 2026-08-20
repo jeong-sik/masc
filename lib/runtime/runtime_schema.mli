@@ -223,9 +223,13 @@ type config =
   ; bindings : binding list
   ; default_runtime_id : string option
   ; cross_verifier_runtime_id : string option
-    (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
-        evaluator (cross-model task verification). [None] inherits
-        [\[runtime\].default]. Unknown ids are rejected at load. *)
+    (** [\[runtime\].cross_verifier] — legacy single-runtime binding for the
+        anti-rationalization evaluator. Since RFC-0361 D7(a) no judgement path
+        reads it: completion-authority provider selection resolves the
+        [verifier_exact] exact-output lane instead. Kept parseable for
+        preserved live configs; remaining readers are config surfaces
+        (dashboard runtime-defaults, eval-calibration CLI default). Unknown ids
+        are rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
         Sole SSOT for keeper-to-runtime assignment. A

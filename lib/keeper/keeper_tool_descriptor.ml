@@ -1527,8 +1527,10 @@ let agent_timeline_output_schema =
 ;;
 
 (* Producer: Workspace_goals.handle_goal_list over Goal_store.goal_to_yojson
-   and rollup_to_yojson. Option-carrying goal fields serialize as
-   string-or-null and stay undeclared. *)
+   and rollup_to_yojson, with the RFC-0387 verification ledger
+   (Goal_verification.record_to_yojson) joined per goal as [verification].
+   Option-carrying goal fields serialize as string-or-null and stay
+   undeclared; [verification] rides the items' additionalProperties:true. *)
 let goal_list_output_schema =
   object_output_schema
     ~properties:

@@ -114,6 +114,12 @@ rows written through idempotent operation paths. Plain append rows omit it.
 Consumers correlate accepted operations by exact `operation_id`; omission is
 a real domain case, not a value to backfill.
 
+Every history row — including autonomous-turn rows projected from typed turn
+records rather than the chat store — must carry a non-blank `id`. The schema
+(`keeper-chat-history.ts`) requires it and drops any row without one without
+an error surface. #29108 restored the autonomous projection's id after it was
+lost to a refactor that predated the required-id contract.
+
 ## Non-goals
 
 - OCaml-to-TypeScript schema code generation.

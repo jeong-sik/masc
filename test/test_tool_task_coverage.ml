@@ -98,6 +98,10 @@ let install_test_hooks () =
   Prompt_registry.set_markdown_dir
     (Filename.concat (repo_root ()) "config/prompts");
   Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
+  (* RFC-0361 D7(a): completion review resolves only the verifier_exact lane. *)
+  Atomic.set
+    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    (fun () -> Ok [ "test-evaluator-runtime" ]);
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
        Ok (Some Task.Anti_rationalization.Approve))
@@ -237,6 +241,8 @@ let create_executing_goal ctx ~goal_id =
       ctx.Task.Tool.config
       ~id:goal_id
       ~title:("Goal " ^ goal_id)
+      ~metric:"m"
+      ~target_value:"1"
       ~phase:Goal_phase.Executing
       ()
   with
@@ -3113,6 +3119,58 @@ let () =
          [ Masc_domain.Claimed { assignee = "worker"; claimed_at = "t" }
          ; Masc_domain.InProgress { assignee = "worker"; started_at = "t" }
          ])
+
+(* [limit] counts THIS task's events. Counting raw lines instead meant the
+   reader budgeted [min 500 (limit * 5)] lines and filtered afterwards, so a
+   task whose events sit behind a busier task's fell out of its own history:
+   at limit=5 the budget was 25 lines, and 30 later events from another task
+   consumed all of them. *)
+let () = test "task_history_counts_matches_not_lines" (fun () ->
+  let ctx = make_test_ctx () in
+  let rec mkdir_p path =
+    if path = "" || path = "." || path = "/" then ()
+    else if Sys.file_exists path then ()
+    else begin
+      mkdir_p (Filename.dirname path);
+      Unix.mkdir path 0o755
+    end
+  in
+  let open Unix in
+  let tm = gmtime (gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) in
+  let day = Printf.sprintf "%02d.jsonl" tm.tm_mday in
+  let events_dir = Filename.concat (Workspace.masc_dir ctx.config) "events" in
+  let month_dir = Filename.concat events_dir month in
+  let log_file = Filename.concat month_dir day in
+  mkdir_p month_dir;
+  let event task_id action =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ ("task_id", `String task_id)
+        ; ("action", `String action)
+        ; ("ts", `Float (gettimeofday ()))
+        ])
+  in
+  Fs_compat.append_file log_file (event "quiet-task" "claim" ^ "\n");
+  Fs_compat.append_file log_file (event "quiet-task" "done" ^ "\n");
+  for i = 1 to 30 do
+    Fs_compat.append_file log_file
+      (event "busy-task" (Printf.sprintf "step-%d" i) ^ "\n")
+  done;
+  let rows json =
+    match json with
+    | `List rows -> rows
+    | _ -> failwith "task history payload must be a JSON list"
+  in
+  let quiet =
+    rows (Task.Tool.task_history_events_json ctx.config ~task_id:"quiet-task" ~limit:5)
+  in
+  assert (List.length quiet = 2);
+  let busy =
+    rows (Task.Tool.task_history_events_json ctx.config ~task_id:"busy-task" ~limit:5)
+  in
+  assert (List.length busy = 5)
+)
 
 let () =
   ensure_test_runtime ();

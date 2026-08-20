@@ -11,10 +11,13 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
-# Anti-rationalization/cross-verifier work uses a typed verdict tool call.
+# Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
-# this explicit smart lane.
-cross_verifier = "deepseek.deepseek-v4-pro"
+# this explicit smart lane. Since RFC-0361 D7(a) the judgement call no longer
+# reads a single-runtime binding here: it runs on the verifier_exact
+# exact-output lane below, whose first slot absorbs the retired
+# cross_verifier = "deepseek.deepseek-v4-pro" binding. The [runtime].cross_verifier
+# key still parses for preserved live configs but selects nothing.
 
 # Existing workspaces are not overwritten by this seed. Copy the required lane
 # declarations into the live runtime.toml before enabling their consumers.
@@ -33,6 +36,13 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
+
+# Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
+# calls resolve only this lane and fail over in declared slot order, the same
+# frozen-order contract as the librarian/compaction lanes. Slot 1 is the
+# binding the retired [runtime].cross_verifier key used to carry.
+[runtime.exact_output_lanes.verifier_exact]
+slots = ["deepseek.deepseek-v4-pro", "glm-coding.glm-5-turbo"]
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
@@ -146,8 +156,8 @@ streaming = true
 max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -294,8 +304,8 @@ streaming = true
 max-output-tokens = 131072
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 # SSOT = agent-core models.toml per official MiniMax Chat documentation; Chat
 # tool_choice, response_format, and structured output are not documented.
 supports-response-format-json = false
@@ -347,8 +357,8 @@ streaming = true
 max-output-tokens = 32768
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 # SSOT = AGENT_CORE models.toml; Ollama Cloud Kimi rows do not currently advertise a
 # native schema/response_format guarantee.
 supports-response-format-json = false
@@ -436,8 +446,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-flash-0731.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -456,8 +466,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-pro.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 

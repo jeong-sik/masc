@@ -557,7 +557,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 # 545 -> 541: tightened to the measured count. The four counts of slack
 # predate the Keeper_compact_audit purge (main already measured 541 against
 # the stale 545 baseline); the purge itself did not change the count.
-DEAD_EXPORT_BASELINE = 540
+# 540 -> 539: tightened to the measured count on the RFC-0387 stage-1 tree
+# (measured 2026-08-20: 539). The one count of slack predates this change;
+# goal_verification's exports all have callers (dashboard joins + tests), so
+# the ledger added none.
+DEAD_EXPORT_BASELINE = 539
 
 
 def run_ratchet(count: int) -> int:

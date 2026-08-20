@@ -1818,6 +1818,8 @@
 
 (include stanzas/test_goal_phase_all.inc)
 
+(include stanzas/test_goal_verification_gate.inc)
+
 
 
 
@@ -2581,6 +2583,8 @@
 (include stanzas/test_dashboard_continuity_briefs.inc)
 
 (include stanzas/test_verification_run_registry.inc)
+
+(include stanzas/test_verifier_exact_lane.inc)
 
 (include stanzas/test_completion_authority_retry_policy.inc)
 

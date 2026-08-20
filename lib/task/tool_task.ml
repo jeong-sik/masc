@@ -464,7 +464,17 @@ let handle_tasks ~tool_name ~start_time ctx args =
        ~include_cancelled
        ?status)
 
-let read_event_lines config ~limit =
+(* Walks newest-first and stops once [limit] events satisfy [keep], so [limit]
+   counts the events a caller asked for. Counting raw lines instead made the
+   caller filter afterwards, and no line budget expresses "this task's newest
+   N": the budget fills with whatever the workspace last did, and a task whose
+   events sit further back drops out of its own history entirely.
+
+   Parsing happens here because [keep] asks about fields, and deciding on the
+   raw line would mean matching an id as a substring of unparsed JSON —
+   a different event's payload can carry that text. Malformed lines are skipped
+   rather than counted: they are not events the caller asked for. *)
+let read_matching_events config ~limit ~keep =
   let events_dir = Filename.concat (Workspace.masc_dir config) "events" in
   if not (Sys.file_exists events_dir) then []
   else
@@ -485,8 +495,12 @@ let read_event_lines config ~limit =
           | [] -> ()
           | line :: rest ->
             if !remaining > 0 then begin
-              collected := line :: !collected;
-              decr remaining;
+              (match Yojson.Safe.from_string line with
+               | json when keep json ->
+                 collected := json :: !collected;
+                 decr remaining
+               | _ -> ()
+               | exception Yojson.Json_error _ -> ());
               take rest
             end
         in
@@ -513,11 +527,6 @@ let read_event_lines config ~limit =
     List.rev !collected
 
 let task_history_events_json (config : Workspace.config) ~task_id ~limit =
-  let scan_limit = min 500 (limit * 5) in
-  let lines = read_event_lines config ~limit:scan_limit in
-  let (parsed, _malformed) =
-    Fs_compat.parse_jsonl_lines ~source:"task_events" lines
-  in
   let matches_task json =
     let task = Json_util.get_string json "task" in
     let task_id_field = Json_util.get_string json "task_id" in
@@ -526,14 +535,7 @@ let task_history_events_json (config : Workspace.config) ~task_id ~limit =
     | _, Some t when String.equal t task_id -> true
     | _ -> false
   in
-  let rec take n xs =
-    match xs with
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: rest -> x :: take (n - 1) rest
-  in
-  let events = parsed |> List.filter matches_task |> take limit in
-  `List events
+  `List (read_matching_events config ~limit ~keep:matches_task)
 
 let handle_task_history ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in

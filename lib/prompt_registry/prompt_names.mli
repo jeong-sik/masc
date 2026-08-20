@@ -18,5 +18,13 @@ val judge_catchup : string
 val verification : string
 (** Task completion review against the submitted evidence snapshot. *)
 
+val goal_verification_proof : string
+(** Goal completion proof review (RFC-0387 B3): does the linked-task rollup
+    prove the declared success criterion? *)
+
+val goal_verification_criterion : string
+(** Goal success-criterion viability review (RFC-0387 B2): is the declared
+    metric/target reachable in principle? *)
+
 val librarian : string
 (** Current-memory selection. *)

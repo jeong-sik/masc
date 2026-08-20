@@ -207,12 +207,15 @@ let task_events (config : Workspace.config) ~agent_name :
 (* Collect broadcast messages from agent *)
 let message_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
+  (* [limit] counts THIS agent's messages. Reading a global window and
+     filtering afterwards made it count everyone's, so a busy fleet crowded
+     this agent out of its own timeline before the filter ran. *)
   let messages =
-    Workspace.get_messages_raw config ~since_seq:0 ~limit
+    Workspace.get_messages_matching config ~since_seq:0 ~limit
+      ~keep:(fun (m : Masc_domain.message) ->
+        identity_matches ~agent_name m.from_agent)
   in
   messages
-  |> List.filter (fun (m : Masc_domain.message) ->
-         identity_matches ~agent_name m.from_agent)
   |> List.filter_map (fun (m : Masc_domain.message) ->
          match parse_iso_timestamp m.timestamp with
          | Some ts ->
@@ -448,7 +451,7 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
       if include_tasks then task_events config ~agent_name
       else []
     in
-    let msg_evts = message_events config ~agent_name ~limit:2000 in
+    let msg_evts = message_events config ~agent_name ~limit in
     let tool_evts =
       if include_tool_calls then tool_call_events config ~agent_name ~limit:200
       else []

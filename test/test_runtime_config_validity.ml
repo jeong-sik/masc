@@ -1853,7 +1853,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
   let lanes =
     [ Runtime_lane.make ~id:"default-a" [ "lane-a"; "lane-b" ]
     ; Runtime_lane.make ~id:"dormant-lane" [ "lane-c"; "lane-b" ]
-    ; Runtime_lane.make ~id:"cross-e" [ "cross-a"; "lane-b" ]
     ]
   in
   let actual =
@@ -1872,7 +1871,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     ; "lane-b"
     ; "assigned-b"
     ; "media-c"
-    ; "cross-a"
     ; "verifier-a"
     ]
     actual

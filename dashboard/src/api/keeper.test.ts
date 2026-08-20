@@ -44,6 +44,7 @@ import {
   fetchKeeperCheckpoints as fetchKeeperCheckpointsFromLifecycle,
   pauseKeeper as pauseKeeperFromLifecycle,
   previewKeeperCheckpointPurge as previewKeeperCheckpointPurgeFromLifecycle,
+  purgeKeeper as purgeKeeperFromLifecycle,
   resetKeeper as resetKeeperFromLifecycle,
   resumeKeeper as resumeKeeperFromLifecycle,
   shutdownKeeper as shutdownKeeperFromLifecycle,
@@ -1413,5 +1414,64 @@ describe('parseKeeperEventQueuePendingSnapshot workspace message fields', () => 
     expect(row).toBeDefined()
     expect(row?.messageRequestId).toBeUndefined()
     expect(row?.messageFrom).toBeUndefined()
+  })
+})
+
+describe('purgeKeeper', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('posts the keeper name to the dashboard purge route and returns the accepted operation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          accepted: true,
+          target_kind: 'keeper',
+          agent_name: 'keeper-canary-10t-agy3-agent',
+          keeper_name: 'canary-10t-agy3',
+          operation_id: 'op-1',
+        }),
+        { status: 202, headers: { 'Content-Type': 'application/json' } },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await purgeKeeperFromLifecycle('canary-10t-agy3')
+
+    expect(result.accepted).toBe(true)
+    expect(result.keeper_name).toBe('canary-10t-agy3')
+    expect(result.operation_id).toBe('op-1')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]! as [string, RequestInit]
+    expect(url).toBe('/api/v1/dashboard/agents/purge')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ agent_name: 'canary-10t-agy3' })
+  })
+
+  it('surfaces the server error text instead of a bare status code', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'keeper metadata unreadable' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(purgeKeeperFromLifecycle('canary-10t-agy3')).rejects.toThrow(
+      'keeper metadata unreadable',
+    )
+  })
+
+  it('falls back to a named error when the server body carries no error text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('', { status: 500 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(purgeKeeperFromLifecycle('canary-10t-agy3')).rejects.toThrow(
+      'canary-10t-agy3 제거 실패 (HTTP 500)',
+    )
   })
 })

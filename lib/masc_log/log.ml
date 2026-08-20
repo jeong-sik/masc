@@ -221,6 +221,16 @@ module Ring = struct
     category : category option;
   }
 
+  (** Live-window bounds of the ring: sequences in
+      [[start_seq, total)] are answerable; anything below [start_seq]
+      has been evicted ([dropped_before]) and lives only in the daily
+      JSONL sink. *)
+  type bounds = {
+    start_seq : int;
+    total : int;
+    dropped_before : bool;
+  }
+
   (* Dashboard operators commonly inspect tool-call history over hours, not
      minutes.  5k entries was too small for high-volume keeper/MCP traffic and
      made recent MCP calls appear to disappear despite JSONL persistence. *)
@@ -763,6 +773,19 @@ module Ring = struct
               | Some turn_id -> `Int turn_id
               | None -> `Null) );
           ]
+
+  (* The live ring can only answer for the last [capacity] sequences.
+     A query that returns nothing (or thin results) is ambiguous
+     without these bounds: "it never happened" and "it happened before
+     the window" look identical (2026-08-17 source audit,
+     feature-matrix Log row). The bounds ride on every logs query
+     response so the operator sees the cut, not silence. *)
+  let bounds () =
+    let t = Atomic.get total in
+    { start_seq = max 0 (t - capacity)
+    ; total = t
+    ; dropped_before = t > capacity
+    }
 
   let summary_json () =
     let total_entries = Atomic.get total in

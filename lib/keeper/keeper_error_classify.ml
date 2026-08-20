@@ -45,6 +45,7 @@ let is_transient_internal_runner_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Terminal_effect_failed _
       | Keeper_turn_driver.Provider_attempt_effect_fenced _
+      | Keeper_turn_driver.Tool_correction_lost _
       | Keeper_turn_driver.Receipt_persistence_failed _
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None -> false
@@ -163,7 +164,19 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
       message text is matched here — free-form provider bodies are not a
       classification source (see [is_provider_rejected_parse_error]).
     - ["Context overflow: empty completion"] — a context-overflow diagnostic,
-      already classified by [is_context_overflow] on the typed path. *)
+      already classified by [is_context_overflow] on the typed path.
+
+    Why a string prefix survives here (constitution exception, RFC-0371
+    §3.7): the typed [stop_reason] is deliberately flattened into [detail]
+    at the agent-core boundary (agent_core [Error.of_provider_failure],
+    [Empty_attributed] arm), so by the time the error reaches MASC the
+    prefix is the ONLY remaining discriminator between an empty-completion
+    [ProviderUnavailable] and the other [ProviderUnavailable] producers
+    (CLI startup failure, unknown provider failure). The marker is owned by
+    a single renderer ([error.ml]: ["empty completion (stop_reason=%s): %s"]),
+    not free-form provider prose. Re-typing requires a pinned Agent Core
+    error-variant change; that pin update — not this classifier — is where
+    the typed shape must be introduced. *)
 let is_empty_completion_error (err : Agent_core.Error.t) : bool =
   match err with
   | Agent_core.Error.Provider
@@ -241,6 +254,7 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
   | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
+  | Some (Keeper_turn_driver.Tool_correction_lost _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
@@ -264,6 +278,7 @@ let is_accept_no_usable_progress_error (err : Agent_core.Error.t) : bool =
       | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Terminal_effect_failed _
       | Keeper_turn_driver.Provider_attempt_effect_fenced _
+      | Keeper_turn_driver.Tool_correction_lost _
       | Keeper_turn_driver.Receipt_persistence_failed _
       | Keeper_turn_driver.Gate_replay_repair_required _ )
   | None ->
@@ -387,6 +402,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
     | Some (Keeper_turn_driver.Terminal_effect_failed _)
     | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
+    | Some (Keeper_turn_driver.Tool_correction_lost _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | Some (Keeper_turn_driver.Gate_replay_repair_required _)
     | None ->
@@ -429,6 +445,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
     | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
     | Some (Keeper_turn_driver.Terminal_effect_failed _)
     | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
+    | Some (Keeper_turn_driver.Tool_correction_lost _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | Some (Keeper_turn_driver.Gate_replay_repair_required _) ->
         None
@@ -754,6 +771,7 @@ let should_warn_keeper_cycle_failed (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
+  | Some (Keeper_turn_driver.Tool_correction_lost _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _)
   | None ->
@@ -810,6 +828,7 @@ let is_runtime_exhausted_error (err : Agent_core.Error.t) : bool =
   | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Terminal_effect_failed _)
   | Some (Keeper_turn_driver.Provider_attempt_effect_fenced _)
+  | Some (Keeper_turn_driver.Tool_correction_lost _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | Some (Keeper_turn_driver.Gate_replay_repair_required _) -> false
   | None -> false

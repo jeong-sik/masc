@@ -317,6 +317,10 @@ let parse_failure ~path json =
        let* fields = exact_assoc ~path [ "kind"; "http_status" ] json in
        let* http_status = int_field ~path fields "http_status" in
        Ok (Serialized_request_refused { http_status })
+     | Some (`String "rate_limited") ->
+       let* fields = exact_assoc ~path [ "kind"; "http_status" ] json in
+       let* http_status = int_field ~path fields "http_status" in
+       Ok (Rate_limited { http_status })
      | Some (`String "invalid_json_output") ->
        let* _ = exact_assoc ~path [ "kind" ] json in
        Ok Invalid_json_output

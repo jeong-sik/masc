@@ -2450,6 +2450,65 @@ let test_dashboard_purge_resolution_is_fail_closed () =
         | Error error -> fail (Dashboard_purge.resolve_error_to_string error)
       in
       check string "resolved exact Keeper name" persisted.name target.keeper_name;
+      (* A Keeper that can still execute a turn is refused here, not raced.
+         The dashboard hides the control in the same states, but a caller
+         reaching the endpoint directly bypassed that entirely — which is how a
+         live campaign Keeper was purged mid-run on 2026-08-20. *)
+      let executing_entry =
+        R.register_offline ~base_path:config.base_path persisted.name persisted
+      in
+      (match
+         R.put_entry
+           ~base_path:config.base_path
+           persisted.name
+           { executing_entry with phase = Keeper_state_machine.Running }
+       with
+       | Error _ -> fail "could not stage an executing lane for purge admission"
+       | Ok () ->
+         (match Dashboard_purge.resolve config persisted.name with
+          | Error (Dashboard_purge.Keeper_lane_executing { keeper_name; phase }) ->
+            check string "refused the executing Keeper" persisted.name keeper_name;
+            check
+              string
+              "reported the phase that refused it"
+              "running"
+              (String.lowercase_ascii phase)
+          | Error other ->
+            fail
+              ("executing lane produced the wrong refusal: "
+               ^ Dashboard_purge.resolve_error_to_string other)
+          | Ok _ -> fail "an executing Keeper must not be admitted for purge"));
+      (* The chat lane never changes phase: run_keeper_invocation_turn_admitted
+         calls mark_turn_started, which writes current_turn_observation and
+         leaves phase alone. A phase-only guard reads a Paused Keeper answering
+         a chat message as purgeable, so the refusal has to see the live turn
+         too. *)
+      (match
+         R.put_entry
+           ~base_path:config.base_path
+           persisted.name
+           { executing_entry with phase = Keeper_state_machine.Paused }
+       with
+       | Error _ -> fail "could not stage a paused lane for the chat-lane check"
+       | Ok () ->
+         R.mark_turn_started
+           ~base_path:config.base_path
+           ~wake:Masc.Keeper_registry_types.Chat_request
+           persisted.name;
+         (match Dashboard_purge.resolve config persisted.name with
+          | Error
+              (Dashboard_purge.Keeper_lane_executing
+                { keeper_name; live_turn_id = Some _; _ }) ->
+            check string "refused the Keeper mid chat turn" persisted.name keeper_name
+          | Error other ->
+            fail
+              ("a chat turn in flight produced the wrong refusal: "
+               ^ Dashboard_purge.resolve_error_to_string other)
+          | Ok _ ->
+            fail "a Keeper running a chat turn must not be admitted for purge"));
+      (* Drop the staged lane so the assertions below still describe a Keeper
+         that only has persisted metadata. *)
+      ignore (R.unregister_exact executing_entry);
       check bool
         "resolved exact metadata trace"
         true

@@ -38,16 +38,15 @@ type decision_record = {
   cycle_id : string;
   keeper_name : string;
   generation : int;
-  snapshot : Keeper_measurement.measurement_snapshot option;
   turn_verdict : Keeper_world_observation.turn_verdict;
   wall_clock : float;
   tool_diversity_entropy : float option;
 }
 
-let make ~cycle_id ~keeper_name ~generation ?snapshot
+let make ~cycle_id ~keeper_name ~generation
     ~turn_verdict ~wall_clock
     ?tool_diversity_entropy () =
-  { cycle_id; keeper_name; generation; snapshot;
+  { cycle_id; keeper_name; generation;
     turn_verdict; wall_clock;
     tool_diversity_entropy }
 
@@ -60,9 +59,6 @@ let to_json (r : decision_record) : Yojson.Safe.t =
     "cycle_id", `String r.cycle_id;
     "keeper_name", `String r.keeper_name;
     "generation", `Int r.generation;
-    "snapshot", (match r.snapshot with
-      | Some s -> Keeper_measurement.measurement_snapshot_to_json s
-      | None -> `Null);
     "turn_verdict", `String
       (match r.turn_verdict with
        | Keeper_world_observation.Run _ -> "run"

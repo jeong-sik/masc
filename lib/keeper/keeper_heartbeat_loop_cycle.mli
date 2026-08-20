@@ -24,6 +24,9 @@ type cycle_outcome =
       }
   | Manual_compaction_applied of
       { receipt : Keeper_manual_compaction.applied_receipt
+      ; evidence : Keeper_compaction_evidence.t
+        (** Checkpoint size on both sides of the compaction, carried so the
+            owner projection can record what a commit saved (#29109). *)
       ; followup : cycle_outcome
       }
 

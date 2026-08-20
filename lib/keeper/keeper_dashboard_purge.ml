@@ -37,8 +37,28 @@ type resolve_error =
       ; operation_id : Keeper_shutdown_types.Operation_id.t
       ; detail : string
       }
+  | Keeper_lane_executing of
+      { keeper_name : string
+      ; phase : string
+      ; live_turn_id : int option
+      }
 
 let resolve_error_to_string = function
+  | Keeper_lane_executing { keeper_name; phase; live_turn_id } ->
+    (match live_turn_id with
+     | None ->
+       Printf.sprintf
+         "dashboard Keeper purge refused while the lane is executing: \
+          keeper=%s phase=%s. Stop or pause the Keeper first."
+         keeper_name
+         phase
+     | Some turn_id ->
+       Printf.sprintf
+         "dashboard Keeper purge refused while a turn is in flight: keeper=%s \
+          phase=%s turn=%d. Let the turn finish, or stop the Keeper first."
+         keeper_name
+         phase
+         turn_id)
   | Empty_requested_name -> "dashboard Keeper purge requires a non-empty target name"
   | Invalid_requested_name { requested_name; detail } ->
     Printf.sprintf
@@ -110,7 +130,30 @@ let resolve (config : Workspace.config) requested_name =
            (Keeper_metadata_unreadable { keeper_name; metadata_path; detail })
        | Ok (Some meta) when String.equal meta.name keeper_name ->
          (match Workspace.validate_agent_name meta.agent_name with
-          | Ok _ -> Ok (Some { requested_name; keeper_name; meta })
+          | Ok _ ->
+            (* Two signals, because the two lanes admit turns differently. The
+               autonomous cycle only enters through a phase [can_execute_turn]
+               admits, but the chat lane runs
+               [run_keeper_invocation_turn_admitted] and never changes phase —
+               [mark_turn_started] writes [current_turn_observation] and leaves
+               [phase] alone. A phase-only guard therefore reads a Paused
+               Keeper answering a chat message as purgeable. *)
+            (match Keeper_registry.get ~base_path:config.base_path keeper_name with
+             | Some entry when Keeper_state_machine.can_execute_turn entry.phase ->
+               Error
+                 (Keeper_lane_executing
+                    { keeper_name
+                    ; phase = Keeper_state_machine.phase_to_string entry.phase
+                    ; live_turn_id = None
+                    })
+             | Some { current_turn_observation = Some observation; phase; _ } ->
+               Error
+                 (Keeper_lane_executing
+                    { keeper_name
+                    ; phase = Keeper_state_machine.phase_to_string phase
+                    ; live_turn_id = Some observation.turn_id
+                    })
+             | Some _ | None -> Ok (Some { requested_name; keeper_name; meta }))
           | Error detail ->
             Error
               (Keeper_agent_name_invalid

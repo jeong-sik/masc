@@ -143,7 +143,6 @@ type planning_goal = {
   pg_phase: string;
   pg_priority: int;
   pg_due_date: string option;
-  pg_parent_goal_id: string option;
   pg_metric: string option;
   pg_target_value: string option;
 }
@@ -173,10 +172,8 @@ type planning_snapshot = {
   pl_generated_at: string;
 }
 
-let planning_goal_depth (goals : planning_goal list) (goal : planning_goal) =
-  Tui_decode.bounded_parent_depth ~id_of:(fun g -> g.pg_id)
-    ~parent_id_of:(fun g -> g.pg_parent_goal_id)
-    goals goal
+(* Goals no longer nest, so every goal sits at depth 0. *)
+let planning_goal_depth (_goals : planning_goal list) (_goal : planning_goal) = 0
 
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
   goals

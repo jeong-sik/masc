@@ -331,13 +331,20 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_keeper_list";
-    description = "List known keepers from persisted keeper metadata.";
+    description =
+      "List known keepers from persisted keeper metadata. The response carries \
+       total (keepers known before limit), limit (the value applied) and \
+       truncated, so a short answer is distinguishable from a complete one.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         ("limit", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Max keepers to return (default: 50).");
+          ("description",
+           `String
+             "Max keepers to return (default: 50). Names are sorted and cut \
+              from the end, so a low limit hides whatever sorts last; check \
+              truncated in the response.");
         ]);
         ("detailed", `Assoc [
           ("type", `String "boolean");

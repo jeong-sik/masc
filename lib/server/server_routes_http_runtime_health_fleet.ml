@@ -299,6 +299,15 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
         source_status
         (Health_status.max_string storage_status work_status)
     in
+    (* A backlog reason carries how deep the backlog is. Without it every size
+       reads the same on screen: thirty paused keepers holding 560 stimuli look
+       exactly like one keeper holding one. The dashboard joins these strings as
+       they arrive and already shows key=value entries beside them
+       (status=…, operator_action_required=…), so the count travels without a
+       schema change. *)
+    let backlog_reason name count reasons =
+      if count > 0 then Printf.sprintf "%s=%d" name count :: reasons else reasons
+    in
     let status_reasons =
       []
       |> (fun reasons ->
@@ -309,24 +318,11 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
         if transition_outbox_count > 0
         then "transition_projection_pending" :: reasons
         else reasons)
-      |> (fun reasons ->
-        if runnable_backlog_count > 0 then "runnable_backlog" :: reasons else reasons)
-      |> (fun reasons ->
-        if recoverable_backlog_count > 0
-        then "recoverable_backlog" :: reasons
-        else reasons)
-      |> (fun reasons ->
-        if retained_disabled_backlog_count > 0
-        then "retained_disabled_backlog" :: reasons
-        else reasons)
-      |> (fun reasons ->
-        if paused_dead_backlog_count > 0
-        then "paused_dead_backlog" :: reasons
-        else reasons)
-      |> (fun reasons ->
-        if shutdown_fenced_backlog_count > 0
-        then "shutdown_fenced_backlog" :: reasons
-        else reasons)
+      |> backlog_reason "runnable_backlog" runnable_backlog_count
+      |> backlog_reason "recoverable_backlog" recoverable_backlog_count
+      |> backlog_reason "retained_disabled_backlog" retained_disabled_backlog_count
+      |> backlog_reason "paused_dead_backlog" paused_dead_backlog_count
+      |> backlog_reason "shutdown_fenced_backlog" shutdown_fenced_backlog_count
       |> (fun reasons ->
         if backlog_stale then "runnable_backlog_stale" :: reasons else reasons)
       |> List.rev

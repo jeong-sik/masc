@@ -63,6 +63,16 @@ const LogsQueryWireSchema = Schema.Struct({
   exclude_category: Schema.OptionFromNullOr(Schema.Array(LogCategorySchema)),
 })
 
+// Live-window bounds of the log ring (server #29011). `dropped_before` true
+// means entries below `start_seq` have already left the ring, so a thin or
+// empty result there is "outside the window — consult retention.durable_store",
+// not "did not happen".
+const LogsRingWireSchema = Schema.Struct({
+  start_seq: Schema.NonNegativeInt,
+  total: Schema.NonNegativeInt,
+  dropped_before: Schema.Boolean,
+})
+
 const LogsWireSchema = Schema.Struct({
   generated_at_iso: Schema.NonEmptyString,
   dashboard_surface: Schema.Literal('/api/v1/dashboard/logs'),
@@ -70,6 +80,7 @@ const LogsWireSchema = Schema.Struct({
   retention: LogsRetentionWireSchema,
   query: LogsQueryWireSchema,
   returned: Schema.NonNegativeInt,
+  ring: LogsRingWireSchema,
   latest_seq: Schema.OptionFromNullOr(Schema.NonNegativeInt),
   oldest_seq: Schema.OptionFromNullOr(Schema.NonNegativeInt),
   latest_ts_iso: Schema.OptionFromNullOr(Schema.NonEmptyString),
@@ -169,6 +180,11 @@ export interface LogsData {
     readonly scope: 'dashboard_logs'
     readonly durableStore: string
   }
+  readonly ring: {
+    readonly startSeq: number
+    readonly total: number
+    readonly droppedBefore: boolean
+  }
   readonly total: number
   readonly entries: readonly LogEntry[]
 }
@@ -221,6 +237,11 @@ function toLogsData(wire: LogsWire): LogsData {
     retention: {
       scope: wire.retention.scope,
       durableStore: wire.retention.durable_store,
+    },
+    ring: {
+      startSeq: wire.ring.start_seq,
+      total: wire.ring.total,
+      droppedBefore: wire.ring.dropped_before,
     },
     total: wire.total,
     entries: wire.entries.map(toLogEntry),

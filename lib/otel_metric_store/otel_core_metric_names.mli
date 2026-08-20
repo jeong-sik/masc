@@ -47,6 +47,14 @@ val metric_goal_attainment_measured : string
 val metric_sse_reconnects : string
 val metric_sse_idle_evictions : string
 val metric_sse_rejects : string
+
+(** Counter [masc_mcp_auth_rejects_total{endpoint,reason}] — MCP transport
+    requests rejected at the auth boundary. Before this counter every
+    rejected bearer produced only a client-visible 401 with no
+    server-side trace (2026-08-18 finding: every external MCP credential
+    was stale and the operator surface showed nothing). *)
+val metric_mcp_auth_rejects : string
+
 val metric_provider_prefix_cache_creation_tokens : string
 val metric_tool_input_validation : string
 val metric_llm_provider_http_status : string

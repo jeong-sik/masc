@@ -90,6 +90,7 @@ let roundtrip_corpus =
   ; Keeper_internal_error.capacity_backpressure_kind
   ; Keeper_internal_error.incomplete_tool_transcript_kind
   ; Keeper_internal_error.provider_attempt_effect_fenced_kind
+  ; Keeper_internal_error.tool_correction_lost_kind
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -184,6 +185,9 @@ let frozen_operator_disposition (receipt : R.t)
       terminal_reason
       Keeper_internal_error.provider_attempt_effect_fenced_kind
   then R.Disp_unknown, R.Reason_provider_attempt_effect_fenced
+  else if
+    String.equal terminal_reason Keeper_internal_error.tool_correction_lost_kind
+  then R.Disp_unknown, R.Reason_tool_correction_lost
   else if preflight_config_failure
   then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
   else if
@@ -348,6 +352,49 @@ let () =
   check
     "provider-attempt fence terminal wire round-trips byte-identically"
     (String.equal (Tr.to_wire (Tr.of_wire fenced_wire)) fenced_wire);
+  let lost_error =
+    Keeper_internal_error.Tool_correction_lost
+      { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
+      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+      ; reject_count = 2
+      ; diagnostic = "turn died after two corrective tool rejections"
+      }
+  in
+  let lost_json = Keeper_internal_error.masc_internal_error_to_json lost_error in
+  check
+    "tool-correction-lost codec emits the canonical kind"
+    (Json_util.get_string lost_json "kind"
+     = Some Keeper_internal_error.tool_correction_lost_kind);
+  check
+    "tool-correction-lost codec round-trips the typed evidence"
+    (Keeper_internal_error.parse_masc_internal_error_json lost_json
+     = Some lost_error);
+  let lost_wire = Keeper_internal_error.tool_correction_lost_kind in
+  check
+    "tool-correction-lost wire decodes to the closed terminal variant"
+    (match Tr.of_wire lost_wire with
+     | Tr.Tool_correction_lost wire -> String.equal wire lost_wire
+     | _ -> false);
+  check
+    "tool-correction-lost terminal wire round-trips byte-identically"
+    (String.equal (Tr.to_wire (Tr.of_wire lost_wire)) lost_wire);
+  let lost_disposition =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code = lost_wire
+      ; error_kind = Some (R.error_kind_of_string "internal")
+      ; outcome = `Error
+      ; runtime_outcome = R.Runtime_failed
+      }
+  in
+  check
+    "tool-correction-lost keeps operator attention with its own typed reason"
+    (lost_disposition = (R.Disp_unknown, R.Reason_tool_correction_lost));
+  check
+    "tool-correction-lost reason has the canonical dashboard wire"
+    (String.equal
+       (R.operator_disposition_reason_to_string (snd lost_disposition))
+       lost_wire);
   let unmapped_metric = Keeper_metrics.(to_string ReceiptUnmappedDisposition) in
   let unmapped_before = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
   let fenced_disposition =
@@ -1240,7 +1287,9 @@ let () =
   check
     "non-runnable actionable backlog carries an explicit reason"
     (match member "status_reasons" recoverable with
-     | `List reasons -> List.mem (`String "recoverable_backlog") reasons
+     (* The fixture above sets recoverable_backlog_count to 2, and the reason
+        now carries it so an operator can tell two from two hundred. *)
+     | `List reasons -> List.mem (`String "recoverable_backlog=2") reasons
      | _ -> false);
   check
     "non-runnable actionable backlog is never backlog-clean"

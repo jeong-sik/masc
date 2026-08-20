@@ -484,6 +484,41 @@ let test_wake_prompt_resolution_order () =
     (fun () -> ignore (resolve ()))
 ;;
 
+(* The dashboard history schema (keeper-chat-history.ts) requires [id] on every
+   row and silently drops any row without one. A projected autonomous turn
+   without [id] would therefore never reach the transcript. *)
+let test_dashboard_history_autonomous_rows_carry_id () =
+  with_workspace @@ fun config ->
+  let path = trace_path config "history-id" in
+  let worker_run_id = "run-history-id" in
+  write_lines path
+    (run_lines ~worker_run_id ~start_seq:1 ~base_ts:7000.
+       ~prompt:Keeper_unified_prompt.autonomous_wake_marker
+       ~final_text:"visible in history");
+  write_turn_record config ~absolute_turn:48 ~generation:9
+    ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id ~start_seq:1));
+  match
+    Server_dashboard_http_keeper_api.keeper_chat_history_json config keeper_name
+  with
+  | `List rows ->
+    Alcotest.(check int) "one autonomous row in history" 1 (List.length rows);
+    List.iter
+      (fun row ->
+        match row with
+        | `Assoc fields ->
+          (match List.assoc_opt "id" fields with
+           | Some (`String id) when String.length id > 0 ->
+             Alcotest.(check string) "id is namespaced off the turn ref"
+               "autonomous:trace-test-0000#48" id
+           | _ ->
+             Alcotest.fail
+               "autonomous history row without id is dropped by the dashboard schema")
+        | _ -> Alcotest.fail "history row is not an object")
+      rows
+  | _ -> Alcotest.fail "history body is not a list"
+;;
+
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
@@ -513,6 +548,10 @@ let () =
             test_session_identity_mismatch_is_rejected
         ; Alcotest.test_case "rejects an absent session identity" `Quick
             test_absent_session_identity_is_rejected
+        ] )
+    ; ( "dashboard_history"
+      , [ Alcotest.test_case "autonomous rows carry a schema-required id" `Quick
+            test_dashboard_history_autonomous_rows_carry_id
         ] )
     ; ( "wake_prompt"
       , [ Alcotest.test_case "rejects blank and over-bound values" `Quick

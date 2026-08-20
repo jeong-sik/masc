@@ -150,6 +150,20 @@ let inc_sse_reject ~reason =
   Otel_metric_store.inc_counter Otel_metric_store.metric_sse_rejects ~labels:[ "reason", reason ] ()
 ;;
 
+(* Silent-failure fix (2026-08-18 live finding): every external MCP
+   credential had gone stale after a token rotation and every client
+   request died at the auth boundary with a client-only 401 — zero
+   server-side trace, so mcp_transport_sessions.json staying empty was
+   indistinguishable from "no client ever tried".  [reason] carries the
+   typed [auth_error_code] ("invalid_token", "missing_token", ...), not
+   free-form message text, so the label set stays bounded. *)
+let inc_mcp_auth_reject ~endpoint ~reason =
+  Otel_metric_store.inc_counter
+    Otel_metric_store.metric_mcp_auth_rejects
+    ~labels:[ "endpoint", endpoint; "reason", reason ]
+    ()
+;;
+
 let inc_sse_reconnect () = Otel_metric_store.inc_counter Otel_metric_store.metric_sse_reconnects ()
 
 (** {1 gRPC Metrics} *)
@@ -610,6 +624,10 @@ let transport_health_json () =
           ; "presence_stream", `String "/events/presence"
           ; "supports_post", `Bool true
           ; "supports_sse_upgrade", `Bool true
+          ; ( "auth_rejects_total"
+            , `Int
+                (int_of_float
+                   (Otel_metric_store.metric_total Otel_metric_store.metric_mcp_auth_rejects)) )
           ] )
     ; ( "http2"
       , `Assoc

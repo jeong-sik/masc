@@ -1345,9 +1345,33 @@ let keeper_cycle_decision
   let proactive_gate_enabled =
     Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
   in
-  let event_queue_reactive_triggers =
+  (* A scheduler wake delivered through the event queue is a scheduled
+     stimulus, not a reactive one. Routing it through the reactive trigger
+     list ran the turn with [channel = Reactive], which applied the
+     reactive prompt/sleep semantics and dropped the wake from every
+     [channel = Scheduled_autonomous] reader (proactive evidence, decision
+     log proof). The due signal joins the scheduled-autonomous decision
+     below instead; a wake that coincides with a real reactive trigger
+     still attributes to that trigger. *)
+  let scheduled_due_from_queue, event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
+    |> List.partition (function
+      | Scheduled_automation_due -> true
+      | Mention_pending
+      | Board_event_pending
+      | Scope_message_pending
+      | Bootstrap_stimulus_pending
+      | Connector_attention_pending
+      | Hitl_resolved_pending
+      | Completion_authority_rejection_pending
+      | Task_cancellation_pending
+      | Manual_compaction_pending
+      | Workspace_message_pending
+      | Scheduled_autonomous_turn
+      | Task_backlog _
+      | Never_started -> false)
   in
+  let scheduled_due_from_queue = scheduled_due_from_queue <> [] in
   let manual_compaction_control =
     List.mem Manual_compaction_stimulus event_queue_triggers
   in
@@ -1440,6 +1464,7 @@ let keeper_cycle_decision
         in
         let has_actionable_schedule =
           observation.scheduled_automation.due_ready_count > 0
+          || scheduled_due_from_queue
         in
         let is_bootstrap = since_last_scheduled_autonomous = max_int in
         let run_reasons =

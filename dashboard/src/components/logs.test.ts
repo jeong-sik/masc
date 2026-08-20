@@ -40,6 +40,7 @@ function logData(
       scope: 'dashboard_logs',
       durableStore: '/Users/dancer/me/.masc/logs/system_log_2026-05-15.jsonl',
     },
+    ring: { startSeq: 0, total: entries.length, droppedBefore: false },
     total: entries.length,
     entries,
     ...overrides,

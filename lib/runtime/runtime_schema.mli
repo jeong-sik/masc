@@ -222,10 +222,6 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
-  ; cross_verifier_runtime_id : string option
-    (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
-        evaluator (cross-model task verification). [None] inherits
-        [\[runtime\].default]. Unknown ids are rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
         Sole SSOT for keeper-to-runtime assignment. A

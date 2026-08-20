@@ -184,7 +184,6 @@ val string_has_prefix : prefix:string -> string -> bool
 val claim_status_of_output : Yojson.Safe.t -> string
 (** Pure: classify a keeper_task_claim tool-call output JSON. *)
 
-val claim_scope_summary_absent : Yojson.Safe.t
 (** Pure constant: JSON record returned when no matching claim was
     observed. *)
 

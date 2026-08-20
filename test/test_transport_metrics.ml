@@ -431,6 +431,7 @@ let test_transport_health_json () =
     ; "presence_stream"
     ; "supports_post"
     ; "supports_sse_upgrade"
+    ; "auth_rejects_total"
     ]
     streamable_json;
   check_assoc_keys

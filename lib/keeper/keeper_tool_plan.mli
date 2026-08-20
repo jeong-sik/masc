@@ -218,6 +218,8 @@ type error =
       }
   | Dependency_cycle of Node_id.t list
 
+val error_to_string : error -> string
+
 type t
 
 val create

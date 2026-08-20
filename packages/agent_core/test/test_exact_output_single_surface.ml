@@ -1075,10 +1075,13 @@ let test_public_receipt_phase_matrix () =
     execute_once ~net (attempt (flow snapshot "rate-surface" EO.Json_syntax))
   in
   check int "429 observes one POST" 1 rate_posts;
+  (* The receipt always carried the status; the cause did not, and the cause is
+     what the keeper log and the advance table read. *)
   (match rate_result with
    | Error
        { EO.receipt
-       ; cause = EO.Completion_failed
+       ; cause =
+           EO.Provider_response_refused { http_status = 429; refusal = EO.Rate_limited }
        ; raw_response = Some { body = "rate limited"; _ }
        ; _
        } ->

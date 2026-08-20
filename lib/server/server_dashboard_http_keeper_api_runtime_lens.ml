@@ -23,13 +23,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       read_runtime_manifest_scan ~config ~keeper_name ~trace_id
         ~turn_id:selected_turn_id ~limit:scan.limit ()
   in
-  let claim_scope =
-    Server_dashboard_http_keeper_runtime_lens_summaries.claim_scope_summary_json
-      ~keeper_name
-      ~trace_id
-      ?turn_id
-      ()
-  in
   let config_drift =
     Server_dashboard_http_keeper_runtime_lens_summaries.config_drift_summary_json
       ~config
@@ -38,7 +31,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
   let gaps =
     Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
       ~terminal_event_present
-      ~claim_scope
       ~config_drift
       scan
   in
@@ -128,7 +120,6 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                          (fun row -> row.Keeper_runtime_manifest.status)
                          scan.provider_terminal_row) );
                 ] );
-            ("claim_scope", claim_scope);
             ("config_drift", config_drift);
             ( "context",
               `Assoc

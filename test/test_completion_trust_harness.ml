@@ -544,6 +544,10 @@ let () =
   Masc.Keeper_task_owner_backend.install_hooks ();
   Masc_test_deps.init_unified_tool_registry ();
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test-evaluator-runtime");
+  (* RFC-0361 D7(a): completion review resolves only the verifier_exact lane. *)
+  Atomic.set
+    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    (fun () -> Ok [ "test-evaluator-runtime" ]);
   Atomic.set AR.run_llm_reviewer_fn reviewer;
   run "Completion_trust_harness"
     [ ( "completion_trust_dispatch_oracle"

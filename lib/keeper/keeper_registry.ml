@@ -744,7 +744,6 @@ let rec dispatch_event_with_audit_internal
           ?lifecycle_token
           ?expected_lane
           ?(origin = Generic_dispatch)
-          ?snapshot
           ?events_fired
           ?selected_event
           name
@@ -871,7 +870,6 @@ let rec dispatch_event_with_audit_internal
             ?lifecycle_token
             ?expected_lane
             ~origin
-            ?snapshot
             ?events_fired
             ?selected_event
             name
@@ -913,8 +911,7 @@ let rec dispatch_event_with_audit_internal
           let audit_selected_event = Option.value selected_event ~default:event in
           Keeper_transition_audit.record_transition
             ~keeper_name:name
-            { snapshot
-            ; events_fired = audit_events_fired
+            { events_fired = audit_events_fired
             ; selected_event = audit_selected_event
             ; prev_phase = tr.prev_phase
             ; new_phase = tr.new_phase
@@ -1067,7 +1064,6 @@ let rec dispatch_event_with_audit_internal
             ?lifecycle_token
             ?expected_lane
             ~origin
-            ?snapshot
             ?events_fired
             ?selected_event
             name
@@ -1107,7 +1103,6 @@ let rec dispatch_event_with_audit_internal
 let dispatch_event_with_audit
       ~base_path
       ?(origin = Generic_dispatch)
-      ?snapshot
       ?events_fired
       ?selected_event
       name
@@ -1116,7 +1111,6 @@ let dispatch_event_with_audit
   dispatch_event_with_audit_internal
     ~base_path
     ~origin
-    ?snapshot
     ?events_fired
     ?selected_event
     name
@@ -1191,7 +1185,6 @@ let dispatch_event_unit ~base_path ?(origin = Generic_dispatch) name event =
 let dispatch_event_with_audit_and_log
       ~base_path
       ?(origin = Generic_dispatch)
-      ?snapshot
       ?events_fired
       ?selected_event
       name
@@ -1201,7 +1194,6 @@ let dispatch_event_with_audit_and_log
     dispatch_event_with_audit
       ~base_path
       ~origin
-      ?snapshot
       ?events_fired
       ?selected_event
       name

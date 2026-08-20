@@ -15,6 +15,7 @@ val dashboard_logs_json :
   before_seq:int option ->
   category_filter:string option ->
   exclude_category:string list option ->
+  ring_bounds:Log.Ring.bounds ->
   Log.Ring.entry list ->
   Yojson.Safe.t
 

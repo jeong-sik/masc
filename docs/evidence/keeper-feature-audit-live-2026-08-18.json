@@ -1,0 +1,100 @@
+{
+  "schema": "masc.keeper_feature_audit.live.v1",
+  "measured_at": "2026-08-18T13:00:00Z",
+  "measured_at_kst": "2026-08-18 22:00 KST",
+  "live_endpoint": "http://127.0.0.1:8935",
+  "server": {
+    "version": "0.23.0",
+    "commit": "03920433d0fb915e497a9100ec18dc758e7790bb",
+    "commit_equals_origin_main_head": true,
+    "started": "2026-08-18T09:35 KST (log masc-8935-202608181835.out.log)",
+    "uptime_at_capture": "3h 25m"
+  },
+  "findings": [
+    {
+      "id": "mcp-auth-orphaned-credentials",
+      "severity": "P1",
+      "summary": "외부 MCP 자격 전면 고아 — admin.token / codex-mcp-client.token / full-cycle-operator.token / ~/me/.mcp.json bearer 의 sha256 이 auth/agents 저장소의 어떤 레코드와도 불일치 (34개 raw 중 30개 유효, 외부 클라이언트용 4개만 전부 stale). 모든 외부 initialize 가 401 'Token mismatch'.",
+      "evidence": [
+        "sha256(raw) 대조 스크립트: 30/34 match, 미스매치 4종이 정확히 외부 클라이언트 자격",
+        "mcp_transport_sessions.json = {} (외부 세션 0건)",
+        "5개 자격 × initialize 재현 → 전부 HTTP 401 {auth_error_code: invalid_token}"
+      ],
+      "repair": {
+        "action": "masc login --agent codex-mcp-client --role worker --client-env MASC_MCP_TOKEN --no-expiry (제품 표면) + sb mcp sync (Claude/.mcp.json, Gemini, Codex 3-CLI 동기화)",
+        "verified": "재발급 자격으로 initialize → HTTP 200 + Mcp-Session-Id 발급 (22:13 KST)",
+        "untouched": "admin/full-cycle-operator 는 다른 세션의 의도 회전 가능성이 있어 보존"
+      }
+    },
+    {
+      "id": "mcp-auth-silent-401",
+      "severity": "P1",
+      "summary": "auth 401 이 어떤 관측면에도 남지 않음 — 서버 out.log, system_log jsonl, audit/2026-08/18.jsonl 모두 invalid_token 0건 (같은 시간대에 401 을 6회 이상 유발했는데도).",
+      "evidence": [
+        "rg invalid_token logs/masc-8935-202608181835.out.log → 0",
+        "rg invalid_token logs/system_log_2026-08-18.jsonl → 0",
+        "rg invalid_token audit/2026-08/18.jsonl → 0"
+      ],
+      "repair": {
+        "action": "PR #29002 — 8/8 MCP 거부 경계에 Log.Auth 이벤트 + masc_mcp_auth_rejects_total{endpoint,reason} + /health streamable_http.auth_rejects_total",
+        "state": "draft PR, CI 대기"
+      }
+    },
+    {
+      "id": "async-catalog-now-live",
+      "severity": "info",
+      "summary": "#28940 의 카탈로그 공백 해소 확인 — config/tool-compositions.toml 이 12:49 KST 생성(inline 1 + async 1), 18:35 재시작 서버가 로드, keeper 도구 표면에 keeper_compose_mission-snapshot / keeper_compose_background-snapshot / keeper_composition_status / keeper_composition_cancel 노출. 22:35 라이브 E4 실측: masc_keeper_msg(외부 MCP)로 rtprobe에 지시 → keeper 턴(deepseek-v4-flash, turn 248-249)이 keeper_compose_background-snapshot 호출(execution=async, request_id kmsg-e7ba1d0a…, status=queued, durability=durable) → keeper_composition_status 폴링(status=done, ok=true, 노드별 execution_id receipt) → 두 원문 JSON을 chat lane에 보고. accept→poll→terminal 체인 라이브 증명 완료.",
+      "evidence": [
+        "config/tool-compositions.toml mtime 2026-08-18 12:49, execution=inline(4행)+async(43행)",
+        "out.log 20:06:38 rondo available-tools 목록에 composition 4종 포함 (라인 5093)",
+        "out.log 22:35:21/22:35:23 tool_call 라인 (outcome=ok) + keeper_chat/rtprobe.jsonl 응답 원문 + delegate_status Succeeded"
+      ],
+      "next": "cancel 경로와 process-restart 회복 실측 잔여."
+    },
+    {
+      "id": "fusion-status-honest-rejection",
+      "severity": "info",
+      "summary": "#28963 의 외부 표면 거짓말('Unknown tool (registry inconsistency)')이 정직한 typed 거부로 교체 확인 — tools/call masc_fusion_status → \"tool 'masc_fusion_status' is keeper-internal; not available on this MCP endpoint\".",
+      "evidence": [
+        "tools/call 실측 22:07 KST, isError=true + keeper-internal 메시지"
+      ]
+    },
+    {
+      "id": "external-tools-list-44",
+      "severity": "info",
+      "summary": "외부 tools/list 커서 전수 44종 — #28964 의 4종(masc_board_search, masc_task_history, masc_keeper_delegate_status, masc_keeper_msg) 노출 확인.",
+      "evidence": [
+        "tools/list cursor walk, 44 tools, 22:05 KST"
+      ]
+    },
+    {
+      "id": "dashboard-render-healthy",
+      "severity": "info",
+      "summary": "대시보드 라이브 렌더 정상 — 콘솔 에러 0, 페이지 에러 0, WS Connected. 실행 중 19/129 keepers, 주의 50, GATE 0. Runtime health=degraded 의 신호 목록은 일시정지 canary 잔재 backlog 계열.",
+      "evidence": [
+        "playwright chromium 1440x1000, http://127.0.0.1:8935/dashboard, 22:08 KST",
+        "screenshot: dashboard-live-20260818.png (세션 산출물)"
+      ]
+    },
+    {
+      "id": "rondo-malformed-tool-name",
+      "severity": "P3-candidate",
+      "summary": "keeper rondo 가 'Execute[\"argv\"]' 라는 이름으로 도구 호출 → 'Tool not found'. 모델이 이름+인자를 결합해 낸 형태를 정규화 없이 그대로 조회 — #28885(인자 검증 거부로 턴 사망, failover 0회) 인접 클래스.",
+      "evidence": [
+        "out.log 20:06:38 라인 5093, agent_tools.find_and_execute_tool"
+      ]
+    },
+    {
+      "id": "wire-capture-day-cap-saturated",
+      "severity": "P3-candidate",
+      "summary": "keeper_wire_capture가 22:35에 연속 WARN — \"current day file would exceed 268435456 bytes\" — 오늘 일자 캡처가 상한 포화로 레코드 스킵 중. 경고는 남으나 스킵 규모의 집계 관측은 없음.",
+      "evidence": [
+        "out.log 22:35:18/21/23 WARN 3연속"
+      ]
+    }
+  ],
+  "board_write_ahead": {
+    "summary": "#28952 클래스 마감: comment(add_comment_with_audience)와 post(create_post_with_audience)를 vote(#28934)와 동일한 3단계 write-ahead 로 전환, rollback_fresh_* 삭제. sub_board 는 append 실패를 삼키는 별개 결함으로 #29004 분리.",
+    "state": "PR #29003 draft"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "captured_at": "2026-08-19T04:40:00Z",
+  "purpose": "Counterpart relationship 행 live 축 부분 실측 — 원천·프리픽스 주입은 증명, observation 고유 렌더는 미관측",
+  "sources": {
+    "chat_store": "<base-path>/.masc/keeper_chat/*.jsonl (128 files)",
+    "wire_capture": "<base-path>/.masc/wire-capture/2026-08/19*.jsonl (34MB, 당일)"
+  },
+  "origin_traffic": {
+    "user_rows_with_speaker_coordinates": 913,
+    "by_surface": {
+      "agent": { "count": 682, "latest": "2026-08-19T00:25Z", "sample_speaker": "codex-mcp-client" },
+      "discord": { "count": 211, "latest": "2026-08-17T12:02Z", "sample_speaker": "sleepers (keeper=sangsu)" },
+      "slack": { "count": 20, "latest": "2026-08-14T01:14Z", "sample_speaker": "Vincent (keeper=kidsnote)" }
+    },
+    "serialization_note": "chat store는 speaker를 flat 필드(speaker_id/speaker_name/speaker_authority + surface.kind)로 직렬화 — 최상위 'speaker' 키 검색은 위음성"
+  },
+  "prompt_injection_observed": {
+    "marker": "화자 프리픽스 렌더 — 'fleet codex-mcp-client:', 'local-admin:' 형태",
+    "hits_in_today_wire": 1120,
+    "verdict": "connector actor 좌표가 keeper 턴 프롬프트까지 도달함을 당일 wire로 증명"
+  },
+  "not_yet_observed": {
+    "counterpart_observation_render": "render_for_prompt JSON 키('origin'/'channel'/'authority'/'user_name') 당일 wire 0건 — Librarian·post-turn memory 경로의 라이브 발화 미확인",
+    "external_attention_fields": "'external_origin' 당일 wire 0건"
+  },
+  "verdict": "live 축 부분 충족: 원천 트래픽(3 surface)과 프리픽스 주입은 실측 PASS. counterpart observation 고유 경로(Librarian render_for_prompt, External_attention 필드)는 발화 미관측 — Librarian 실행 창 또는 Discord/Slack 재트래픽 시 재실측 필요."
+}

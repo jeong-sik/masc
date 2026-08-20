@@ -1,0 +1,54 @@
+{
+  "captured_at": "2026-08-19T06:50:00Z",
+  "purpose": "효과(efficacy) 실측 — 기존 축이 묻지 않는 '돌아서 무엇이 달라졌는가'",
+  "motivation": "source/test/ci/live/duration/browser 축은 전부 존재와 실행만 묻는다. 같은 스토어를 결과 기준으로 다시 세면 축이 채워진 기능들 사이에서 실질이 크게 갈린다.",
+  "librarian_write_efficacy": {
+    "source": "<base-path>/.masc/config/keepers/*.memory-journal.jsonl",
+    "writes_excluding_failed": 16924,
+    "added_something": 926,
+    "removed_something": 782,
+    "no_op_both_empty": 15216,
+    "no_op_ratio": 0.899,
+    "retained_median": 1,
+    "reading": "18.7일 연속 쓰기라는 duration 축은 사실이지만, 그 연속성의 90%는 '변화 없음'을 기록한 쓰기다. journal 증가와 저장 비용은 그대로 발생한다."
+  },
+  "task_completion_efficacy": {
+    "source": "<base-path>/.masc/events/*/*.jsonl (task_transition)",
+    "in_progress_to_done": 72,
+    "in_progress_to_todo": 344,
+    "in_progress_to_cancelled": 48,
+    "in_progress_to_awaiting_verification": 516,
+    "completion_ratio_of_terminal_attempts": 0.155,
+    "reading": "제출(516)은 활발한데 done(72)까지 도달하지 못한다. 앞서 잰 duration 중앙값 6.1분은 완주한 소수 표본만 본 값이다."
+  },
+  "board_conversation_efficacy": {
+    "source": "<base-path>/.masc/board_posts.jsonl",
+    "posts": 1566,
+    "by_kind": { "system": 1041, "automation": 510, "direct": 15 },
+    "posts_with_comments": 278,
+    "comment_ratio": 0.178,
+    "reading": "direct 게시가 15건으로 1% 미만이다. 게시 총량은 크지만 실체는 자동 로그 스트림에 가깝다."
+  },
+  "verification_efficacy": {
+    "source": "<base-path>/.masc/verification-runs.jsonl",
+    "approved": 34,
+    "rejected": 29,
+    "commit_failed": 1,
+    "rejection_ratio": 0.453,
+    "runs_with_zero_tools": 0,
+    "median_tools_per_run": 2,
+    "tools_used": { "tool_read_file": 66, "report_review_verdict": 64, "masc_web_fetch": 11 },
+    "median_elapsed_s": 7,
+    "reading": "거부율 45%로 통과 도장이 아니고, 도구 0개로 끝난 검증이 한 건도 없다 — 모든 판정이 실제로 근거를 읽은 뒤에 나온다. 중앙값 7초는 빠르지만 무근거는 아니다."
+  },
+  "tool_execution_efficacy": {
+    "source": "<base-path>/.masc/tool_calls/2026-08/*.jsonl",
+    "success": 118061,
+    "failure": 4178,
+    "failure_ratio": 0.034,
+    "top_failing": { "Execute": 1968, "Read": 1231, "Grep": 188, "keeper_task_claim": 177, "Edit": 101 },
+    "reading": "실패 3.4%이고 상위 실패는 탐색성(없는 경로 Read, 실패하는 Execute)에 가깝다."
+  },
+  "verdict": "축이 채워진 기능들 사이에서 실질이 갈린다. 검증과 도구 실행은 효과가 확인되고, Librarian 쓰기(no-op 90%)·Task 완주(15.5%)·Board 대화(direct 1% 미만)는 실행량과 결과가 크게 어긋난다.",
+  "proposal": "매트릭스에 효과 축을 추가한다. 기존 축은 회귀를 잡지만 효과 축은 기능이 조용히 무의미해지는 것을 잡는다."
+}

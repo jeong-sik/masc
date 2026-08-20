@@ -186,6 +186,8 @@ let failure_json = function
   | Serialized_request_refused { http_status } ->
     `Assoc
       [ "kind", `String "serialized_request_refused"; "http_status", `Int http_status ]
+  | Rate_limited { http_status } ->
+    `Assoc [ "kind", `String "rate_limited"; "http_status", `Int http_status ]
   | Invalid_json_output -> `Assoc [ "kind", `String "invalid_json_output" ]
 ;;
 

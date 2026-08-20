@@ -1,0 +1,72 @@
+{
+  "captured_at": "2026-08-19T12:25:29Z",
+  "purpose": "Discord·Slack 행의 live·browser 축 — 커넥터 화면 바인딩과 chat 스토어 왕복 대조",
+  "source": "<base-path>/.masc/keepers/*/chat-operations.sqlite3 (operations.source_json) + 대시보드 #connectors",
+  "discord": {
+    "operations": 87,
+    "window": "2026-08-11 13:35 ~ 2026-08-19 19:51 (198.3h)",
+    "keeper": "sangsu",
+    "state": {
+      "succeeded": 83,
+      "failed": 2,
+      "queued": 2
+    },
+    "failures": [
+      {
+        "at": "08-11 13:49",
+        "kind": "Turn_cancelled"
+      },
+      {
+        "at": "08-14 12:07",
+        "kind": "Turn_exception"
+      }
+    ],
+    "across_restart": {
+      "before_18:34:19": 78,
+      "after": 9
+    },
+    "last_24h": 9,
+    "continuation_channel_present": "87/87",
+    "channels": {
+      "1514831340082692116": 52,
+      "1537026702796922921": 18,
+      "1536593802146611351": 6,
+      "1539586298879279114": 5,
+      "1539574362611646515": 4
+    },
+    "screen_bindings": [
+      "1356818755795157113",
+      "1356818756755525815",
+      "1467140571524108300",
+      "1493253256019972230",
+      "1514831340082692116"
+    ],
+    "overlap": "스토어 최다 채널 1514831340082692116(52건)이 화면 바인딩 목록에 있고, 레코드의 parent_channel_id 1493253256019772230 계열도 같은 목록에 있다."
+  },
+  "slack": {
+    "operations": 9,
+    "window": "2026-08-12 17:52 ~ 2026-08-14 10:14 (40.4h)",
+    "keeper": "kidsnote",
+    "state": {
+      "succeeded": 9
+    },
+    "continuation_channel": {
+      "channel_id": "C09TK9L4DV4",
+      "kind": "slack",
+      "team_id": "T034NS1PP",
+      "thread_ts": "1786524720.554309"
+    },
+    "screen_binding": "C09TK9L4DV4 → kidsnote",
+    "note": "thread_ts가 있으므로 스레드 응답 경로가 실제로 돌았다. 다만 최신 왕복이 08-14라 현재 트래픽은 없다 — 커넥터는 CONNECTED이고 화면 last ready 59m ago."
+  },
+  "browser": {
+    "screen": "#connectors?section=connector-status",
+    "header": "외부 게이트 4개 · 2 active · gate healthy · binding source persisted",
+    "discord": "CONNECTED · bot 1489858300729172039 · PID 3390 · last ready 8m ago · 바인딩 5 전부 sangsu",
+    "slack": "CONNECTED · bot U060QL65V1V · last ready 59m ago · 바인딩 1 (C09TK9L4DV4 → kidsnote)",
+    "unconfigured": "iMessage·Telegram은 DOWN·바인딩 0·connector status file not found"
+  },
+  "verdict": "두 행 모두 live·browser 충족. 화면이 그린 바인딩과 스토어가 기록한 왕복이 같은 채널을 가리킨다.",
+  "stale_claim_corrected": "08-19 이전 기록의 'Discord/Slack live·browser는 커넥터 토큰 미구성으로 운영자 프로비저닝 대기' 판정은 더 이상 맞지 않는다. 두 커넥터 모두 CONNECTED이고 bot id와 바인딩이 화면에 있다.",
+  "method_note": "surface.kind는 source_json 안에 있고 테이블은 operations 하나다. Discord 87건은 sangsu 한 keeper에, Slack 9건은 kidsnote 한 keeper에 몰려 있어 keeper별로 나눠 세면 표본이 흩어진다."
+}

@@ -43,7 +43,6 @@ type goal = {
   due_date : string option;
   priority : int;
   phase : Goal_phase.t;
-  parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
   (** RFC-0362: the keeper responsible for turning this Goal into Tasks.
@@ -173,7 +172,6 @@ val upsert_goal :
   ?due_date:string ->
   ?priority:int ->
   ?phase:Goal_phase.t ->
-  ?parent_goal_id:string ->
   unit ->
   (goal * [ `created | `updated ], string) result
 (** Creates a new goal when [id] is omitted (mints
@@ -184,4 +182,11 @@ val upsert_goal :
 
     Errors:
     - [title] required for new goals (omit / empty string
-      on a new goal id). *)
+      on a new goal id).
+    - RFC-0387 B1: [metric] and [target_value] are both required
+      (non-blank) whenever the upsert creates a new row —
+      including an explicit previously-unknown [id].  The
+      create/update split is decided inside the write lock on
+      the freshly decoded state, so an undecodable store hits
+      the fail-closed persistence error, never this one.
+      Updating an existing row is not gated. *)

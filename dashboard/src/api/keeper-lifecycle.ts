@@ -544,3 +544,52 @@ export async function bulkKeeperDirective(
     }
   }
 }
+
+// --- Keeper purge (permanent removal) ---
+
+// The purge endpoint admits a keeper from its persisted metadata rather than
+// from a live registry lane, so a keeper that has already stopped is a valid
+// target. `masc_keeper_down` cannot reach those: it refuses a keeper whose
+// metadata exists without a live lane.
+export interface KeeperPurgeResponse {
+  ok: true
+  accepted: boolean
+  target_kind: 'keeper'
+  agent_name: string
+  keeper_name: string
+  operation_id: string
+}
+
+// What the server's purge plan removes, in the order it removes it
+// (Keeper_shutdown_types.dashboard_purge_artifact_plan). The confirmation UI
+// shows this list, so it must stay in step with that plan.
+export const KEEPER_PURGE_ARTIFACTS: readonly string[] = [
+  '메트릭 저장소',
+  '결정 로그',
+  '피드백 로그',
+  '런타임 디렉터리',
+  'Memory OS 스냅샷과 저널',
+  'TOML 설정',
+  '대화 기록',
+  '에이전트 파일과 인증 토큰',
+]
+
+export async function purgeKeeper(name: string): Promise<KeeperPurgeResponse> {
+  const resp = await fetchControlPlane('/api/v1/dashboard/agents/purge', {
+    method: 'POST',
+    headers: jsonHeaders(),
+    body: JSON.stringify({ agent_name: name }),
+  })
+  if (!resp.ok) {
+    const payload = await safeJsonResponse<{ error?: string }>(
+      resp,
+      `${name} 제거 실패`,
+    )
+    throw new Error(
+      typeof payload.error === 'string' && payload.error.trim() !== ''
+        ? payload.error
+        : `${name} 제거 실패 (HTTP ${resp.status})`,
+    )
+  }
+  return resp.json() as Promise<KeeperPurgeResponse>
+}

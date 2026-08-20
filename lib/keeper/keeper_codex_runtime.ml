@@ -386,7 +386,8 @@ let recovery_failure_of_client_error = function
     Keeper_official_client_session_store.Protocol_failed
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
+let run_without_lifecycle ~runtime_id ~keeper_name
+    ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted ~observe_successful_tool_completion
@@ -546,6 +547,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_effect_state
         ~terminal_error
+        ~pre_tool_rejects
         ~raw_trace_run:None
     in
     let dynamic_tools =
@@ -620,6 +622,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_effect_state
         ~terminal_error
+        ~pre_tool_rejects
         ~raw_trace_run
     in
     let dynamic_tools =
@@ -935,7 +938,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                recovery_detail))))
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
+let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -988,6 +991,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         run_without_lifecycle
           ~runtime_id
           ~keeper_name
+    ~pre_tool_rejects
           ~base_path
           ~goal
           ~goal_blocks

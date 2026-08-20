@@ -439,7 +439,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_task_done" ->
       (* The completion text intentionally contains the "follow-up"
          excuse pattern so the anti-rationalization gate fast-rejects
-         on Gate 2 (excuse pattern) without invoking the cross_verifier
+         on Gate 2 (excuse pattern) without invoking the completion-authority
          LLM runtime. The matrix runs in environments where the
          evaluator runtime is unreachable, and the LLM path's 180s
          timeout would always exceed the 25s per-case budget. The

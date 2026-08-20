@@ -69,6 +69,13 @@ const GateKeeperEntryWireSchema = Schema.Union(
 const GateKeepersWireSchema = Schema.Struct({
   count: Schema.NonNegativeInt,
   keepers: Schema.Array(GateKeeperEntryWireSchema),
+  // Listing truth: `total` counts keepers known before `limit` was applied, so
+  // a short page is distinguishable from a complete one. Decoding is strict
+  // (`onExcessProperty: 'error'`), so these are required, not optional —
+  // a server that stops sending them is drift, not a silent downgrade.
+  total: Schema.NonNegativeInt,
+  limit: Schema.NonNegativeInt,
+  truncated: Schema.Boolean,
 })
 
 type GateKeeperEntryWire = Schema.Schema.Type<
@@ -138,9 +145,22 @@ export interface GateKeeperDirectoryIssue {
   readonly message: string
 }
 
+/** What the server actually answered, as opposed to what it knows.
+    Kept as its own record so a consumer that renders a keeper count has to
+    reach for the page size and the total together. */
+export interface KeeperListing {
+  /** Keepers known to the server, counted before `limit` was applied. */
+  readonly total: number
+  /** The limit the server applied to this response. */
+  readonly limit: number
+  /** True when `limit` dropped keepers from the answer. */
+  readonly truncated: boolean
+}
+
 export interface GateKeepersData {
   readonly keepers: readonly GateKeeper[]
   readonly directoryIssues: readonly GateKeeperDirectoryIssue[]
+  readonly listing: KeeperListing
 }
 
 export class GateKeepersSchemaDriftError extends Data.TaggedError(
@@ -196,6 +216,11 @@ function toGateKeepersData(wire: GateKeepersWire): GateKeepersData {
   return {
     keepers,
     directoryIssues,
+    listing: {
+      total: wire.total,
+      limit: wire.limit,
+      truncated: wire.truncated,
+    },
   }
 }
 

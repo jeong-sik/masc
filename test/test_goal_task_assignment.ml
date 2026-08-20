@@ -40,7 +40,8 @@ let with_test_env f =
 ;;
 
 let make_goal config ~id =
-  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id) () with
+  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id)
+          ~metric:"m" ~target_value:"1" () with
   | Ok _ -> ()
   | Error msg -> failf "upsert_goal %s failed: %s" id msg
 ;;

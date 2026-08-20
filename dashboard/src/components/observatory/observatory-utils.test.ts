@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import type { TelemetryEntry } from '../../api/dashboard'
-import { bucketTelemetryEntries, isToolCall } from './observatory-utils'
+import { bucketTelemetryEntries, hourToMs, isToolCall } from './observatory-utils'
+
+describe('hourToMs', () => {
+  it('parses the hour-precision bucket the tool-quality API sends', () => {
+    // The exact shape of hourly_trend[].hour on /api/v1/dashboard/tool-quality.
+    // Left unparsed it returns null, every point is filtered out, and the
+    // success-rate track reads "hourly_trend 데이터 부족" against a store
+    // holding 122k tool calls.
+    expect(hourToMs('2026-08-18T07')).toBe(Date.parse('2026-08-18T07:00:00Z'))
+  })
+
+  it('passes a complete timestamp through unchanged', () => {
+    expect(hourToMs('2026-08-18T07:00:00Z')).toBe(Date.parse('2026-08-18T07:00:00Z'))
+  })
+
+  it('returns null for a string it cannot read', () => {
+    expect(hourToMs('not-a-time')).toBeNull()
+  })
+})
 
 describe('bucketTelemetryEntries', () => {
   it('keeps the latest entry as the representative inside each bucket', () => {

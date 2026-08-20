@@ -14,7 +14,6 @@ type goal = {
   due_date : string option;
   priority : int;
   phase : Goal_phase.t;
-  parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
   (* RFC-0362: the keeper responsible for turning this Goal into Tasks.
@@ -49,7 +48,6 @@ and goal_to_yojson (goal : goal) =
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
       ("phase", Goal_phase.to_yojson goal.phase);
-      ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
       ("owner", Json_util.string_opt_to_json goal.owner);
@@ -87,7 +85,6 @@ and goal_of_yojson = function
         ; "due_date"
         ; "priority"
         ; "phase"
-        ; "parent_goal_id"
         ; "last_review_note"
         ; "last_review_at"
         ; "owner"
@@ -144,7 +141,6 @@ and goal_of_yojson = function
                       | Some (`Int value) -> clamp_priority value
                       | _ -> 3);
                     phase;
-                    parent_goal_id = Json_util.get_string json "parent_goal_id";
                     last_review_note = Json_util.get_string json "last_review_note";
                     last_review_at = Json_util.get_string json "last_review_at";
                     owner = Json_util.get_string json "owner";
@@ -425,38 +421,12 @@ let list_goals config ?phase () =
          | Some phase -> goal.phase = phase)
   |> sort_goals
 
-let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
-  (* Cannot be own parent *)
-  if String.equal goal_id parent_goal_id then
-    Error "goal cannot be its own parent"
-  else
-    (* Parent must exist *)
-    match find_goal goals parent_goal_id with
-    | None -> Error (Printf.sprintf "parent goal %s not found" parent_goal_id)
-    | Some _ ->
-      (* Walk ancestor chain to detect cycles *)
-      let rec walk visited current_id =
-        if String.equal current_id goal_id then
-          true (* cycle detected *)
-        else
-          match find_goal goals current_id with
-          | None -> false (* orphan parent, already checked above *)
-          | Some g ->
-            match g.parent_goal_id with
-            | None -> false
-            | Some pid ->
-              if List.mem pid visited then
-                false (* existing cycle in ancestors, don't add to it *)
-              else
-                walk (pid :: visited) pid
-      in
-      if walk [parent_goal_id] parent_goal_id then
-        Error "parent_goal_id would create a cycle"
-      else
-        Ok ()
+let blank_opt = function
+  | None -> true
+  | Some raw -> String.trim raw = ""
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
-    ?priority ?phase ?parent_goal_id () =
+    ?priority ?phase () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error "title required for new goal"
@@ -466,35 +436,8 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
     let default_phase = Option.value phase ~default:Goal_phase.Executing in
     let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
-        (* Validate parent_goal_id before acquiring the write lock *)
-        let parent_validation =
-          let current_goals = (read_state config).goals in
-          match find_goal current_goals resolved_id with
-          | Some existing ->
-              (* Existing goal: validate only if parent is being changed *)
-              (match parent_goal_id with
-               | Some new_pid ->
-                   (match existing.parent_goal_id with
-                    | Some old_pid when String.equal old_pid new_pid ->
-                        Ok () (* no change, skip validation *)
-                    | _ ->
-                        validate_parent_goal_id current_goals
-                          ~goal_id:resolved_id
-                          ~parent_goal_id:new_pid)
-               | None -> Ok ())
-          | None ->
-              (* New goal: validate any provided parent_goal_id *)
-              (match parent_goal_id with
-               | Some pid ->
-                   validate_parent_goal_id current_goals
-                     ~goal_id:resolved_id
-                     ~parent_goal_id:pid
-               | None -> Ok ())
-        in
-        (match parent_validation with
-         | Error msg -> Error msg
-         | Ok () ->
         let was_created = ref false in
+        let refusal = ref None in
         let state_result =
           update_state config (fun state ->
               match find_goal state.goals resolved_id with
@@ -519,10 +462,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                           clamp_priority
                             (Option.value priority ~default:existing.priority);
                         phase = next_phase;
-                        parent_goal_id =
-                          (match parent_goal_id with
-                          | Some _ -> parent_goal_id
-                          | None -> existing.parent_goal_id);
                         updated_at = now;
                       }
                   in
@@ -532,6 +471,26 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     goals = replace_goal state.goals next_goal;
                   }
               | None ->
+                  (* RFC-0387 B1: a goal is created only with a declared
+                     measurable success condition — both [metric] and
+                     [target_value], non-blank. Updates (the arm above) are
+                     not gated: the obligation is declared at creation. The
+                     create/update split is decided HERE, inside the write
+                     lock on the freshly decoded state: an undecodable store
+                     is rejected by [update_state]'s fail-closed path before
+                     this closure runs, so the B1 refusal below can only ever
+                     fire against a store that was actually read and found
+                     not to hold the row. On refusal the closure returns the
+                     state unchanged and [update_state] rewrites the same
+                     bytes; the error is carried out via [refusal]. *)
+                  if blank_opt metric || blank_opt target_value then (
+                    refusal :=
+                      Some
+                        "metric and target_value are required for a new goal \
+                         (RFC-0387 B1: a goal must declare a measurable \
+                         success condition)";
+                    state)
+                  else (
                   let new_goal =
                       {
                         id = resolved_id;
@@ -541,7 +500,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
                         phase = default_phase;
-                        parent_goal_id;
                         last_review_note = None;
                         last_review_at = None;
                         owner = None;
@@ -554,16 +512,19 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     version = state.version + 1;
                     updated_at = now;
                     goals = state.goals @ [ new_goal ];
-                  })
+                  }))
         in
-        match state_result with
+        (match state_result with
         | Error msg -> Error msg
         | Ok state ->
-          match find_goal state.goals resolved_id with
+          (match !refusal with
+           | Some msg -> Error msg
+           | None ->
+          (match find_goal state.goals resolved_id with
           | Some goal ->
               Ok (goal, if !was_created then `created else `updated)
           | None ->
-              Error "failed to save goal")
+              Error "failed to save goal")))
 
 let compute_rollup goals =
   let count predicate =

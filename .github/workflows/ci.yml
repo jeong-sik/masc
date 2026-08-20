@@ -552,6 +552,13 @@ jobs:
       - name: Check CI test targets
         run: bash scripts/audit-ci-test-targets.sh
 
+      # A route that authorizes against a tool name the catalog never registered
+      # is closed to every credential, admin included, and the denial reads as a
+      # role problem. POST /api/v1/prompts shipped that way with a working
+      # dashboard editor in front of it (#29085).
+      - name: Check route tool catalog registration
+        run: bash scripts/audit-route-tool-catalog.sh
+
       - name: Check Keeper real-world secret boundary
         run: |
           python3 scripts/ci/check-keeper-realworld-secret-boundary.py
@@ -1096,10 +1103,12 @@ jobs:
         # reason (#27117), and #26075 found the same shape by tripping over it.
         #
         # Every suite here was executed against origin/main before being added.
-        # Three more guards in this family are red today and are deliberately
+        # Two more guards in this family are red today and are deliberately
         # NOT listed, so this step cannot go green by ignoring them:
-        # test_keeper_runtime_contract, test_keeper_identity_drift_counter,
+        # test_keeper_identity_drift_counter,
         # test_keeper_supervisor_persona_drift_order (#26075 comment).
+        # test_keeper_runtime_contract left this list by deletion: it only
+        # covered the goal-scoped claim filter, which no longer exists.
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_assertion_kind_mirror \
@@ -1163,9 +1172,15 @@ jobs:
         # exhaustive match proves every pair has an arm, not that the arm gives
         # the right answer -- so a matrix edit could change what the Goal FSM
         # admits without anything going red. The suite states all 35 pairs.
+        # test_goal_verification_gate pins the RFC-0387 stage-1 surface around
+        # the same lifecycle: B1 creation requires a declared success
+        # condition, the verification ledger is strict/fail-closed/fail-loud,
+        # and request_complete still completes a Goal directly (the gate is
+        # stage 2).
         run: |
           opam exec -- dune build --root . \
-            @test/runtest-test_goal_phase_all
+            @test/runtest-test_goal_phase_all \
+            @test/runtest-test_goal_verification_gate
 
       - name: Run metric zero-cell declaration suite
         # A counter emitted as a bare string still compiles and still counts;
@@ -2252,6 +2267,12 @@ jobs:
       - name: TypeScript typecheck
         working-directory: dashboard
         run: pnpm run typecheck
+
+      # Nothing ran pnpm lint before this, which is how three
+      # no-nested-ternary errors reached main and stayed there (#29054).
+      - name: ESLint
+        working-directory: dashboard
+        run: pnpm lint
 
       - name: Run dashboard tests
         working-directory: dashboard

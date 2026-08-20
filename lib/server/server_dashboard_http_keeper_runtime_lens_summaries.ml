@@ -3,60 +3,6 @@
     Split from {!Server_dashboard_http_keeper_api}; these summaries read
     keeper tool-call and config state but do not assemble HTTP responses. *)
 
-open Server_dashboard_http_keeper_api_types
-
-let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
-  let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:200 () in
-  let matching_claim =
-    entries
-    |> List.find_opt (fun json ->
-      String.equal
-        (Option.value ~default:"" (Json_util.get_string json "tool"))
-        "keeper_task_claim"
-      && tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json)
-  in
-  match matching_claim with
-  | None -> claim_scope_summary_absent
-  | Some call ->
-    let output =
-      match parse_tool_output_json_opt call with
-      | Some (`Assoc _ as output) -> output
-      | _ -> `Assoc []
-    in
-    let claim_scope =
-      match Json_util.assoc_member_opt "claim_scope" output with
-      | Some scope -> scope
-      | None -> `Assoc []
-    in
-    let claimed_task = Json_util.assoc_member_opt "claimed_task" output in
-    `Assoc
-      [ ("present", `Bool true)
-      ; ("source", `String "keeper_task_claim_tool_call")
-      ; ("status", `String (claim_status_of_output output))
-      ; ("result", Json_util.string_opt_to_json (Json_util.get_string output "result"))
-      ; ("mode", Json_util.string_opt_to_json (Json_util.get_string claim_scope "mode"))
-      ; ( "scoped", Json_util.bool_opt_to_json (Json_util.get_bool claim_scope "scoped") )
-      ; ( "active_goal_ids",
-          Json_util.json_string_list (Json_util.get_string_list claim_scope "active_goal_ids") )
-      ; ( "effective_goal_ids",
-          Json_util.json_string_list
-            (Json_util.get_string_list claim_scope "effective_goal_ids") )
-      ; ( "fallback_reason",
-          Json_util.string_opt_to_json (Json_util.get_string claim_scope "fallback_reason") )
-      ; ( "matched_goal_id",
-          Json_util.string_opt_to_json (Json_util.get_string claim_scope "matched_goal_id") )
-      ; ( "excluded_count", Json_util.int_opt_to_json (Json_util.get_int claim_scope "excluded_count") )
-      ; ( "claimed_task_id",
-          match claimed_task with
-          | Some task -> Json_util.string_opt_to_json (Json_util.get_string task "task_id")
-          | None -> `Null )
-      ; ( "claimed_goal_id",
-          match claimed_task with
-          | Some task -> Json_util.string_opt_to_json (Json_util.get_string task "goal_id")
-          | None -> `Null )
-      ; ("trace_id", Json_util.string_opt_to_json (Json_util.get_string call "trace_id"))
-      ; ( "keeper_turn_id", Json_util.int_opt_to_json (Json_util.get_int call "keeper_turn_id") )
-      ]
 
 let find_override_field_source field sources =
   match Json_util.assoc_member_opt "override_field_sources" sources with

@@ -102,6 +102,7 @@ normal_targets=(
   @test/runtest-test_keeper_shutdown_ownerless_admission_release
   @test/runtest-test_keeper_create_admission_transaction
   @test/runtest-test_keeper_task_create_typed_failure
+  @test/runtest-test_keeper_task_outcomes
   @test/runtest-test_keeper_toml_accessor_matrix
   @test/runtest-test_keeper_tool_execute_stream_close
   @test/runtest-test_keeper_turn_dispatch_authority
@@ -109,6 +110,7 @@ normal_targets=(
   @test/runtest-test_subsystem_health_state
   @test/runtest-test_trailing_slash_rules
   @test/runtest-test_verification_run_registry
+  @test/runtest-test_verifier_exact_lane
   @test/runtest-test_completion_authority_retry_policy
   @test/runtest-test_keeper_canary_facts
   @test/runtest-test_keeper_canary_evidence
@@ -127,6 +129,7 @@ normal_targets=(
   @test/runtest-test_channel_gate_discord_state
   @test/runtest-test_channel_gate_imessage_state
   @test/runtest-test_channel_gate_metrics
+  @test/runtest-test_channel_gate_slack_state
   @test/runtest-test_client_registry_eio
   @test/runtest-test_code_navigation_eio
   @test/runtest-test_common
@@ -161,8 +164,10 @@ normal_targets=(
   @test/runtest-test_dashboard_nav_event
   @test/runtest-test_dashboard_perf
   @test/runtest-test_dashboard_recent_terminal_tasks
+  @test/runtest-test_server_dashboard_runtime_observables
   @test/runtest-test_auth_ambiguous_lookup_9786
   @test/runtest-test_auth_credential_hash_collision
+  @test/runtest-test_mcp_auth_reject_observability
   @test/runtest-test_auth_load_credential_of
   @test/runtest-test_auth_token_uniqueness_audit
   @test/runtest-test_grpc_workspace
@@ -195,6 +200,7 @@ normal_targets=(
   @test/runtest-test_keeper_playground_checkout_discovery
   @test/runtest-test_keeper_autonomous_turn_source
   @test/runtest-test_keeper_autoboot_single_owner
+  @test/runtest-test_keeper_list_truncation
   @test/runtest-test_keeper_meta_current_schema
   @test/runtest-test_keeper_meta_invalid_recovery
   @test/runtest-dashboard-http-behavior-contracts
@@ -227,6 +233,7 @@ normal_targets=(
   @test/runtest-test_keeper_tool_execute_exit_result
   @test/runtest-test_goal_store
   @test/runtest-test_keeper_goal_phase_projection
+  @test/runtest-test_keeper_goal_reconciliation_target
   @test/runtest-test_keeper_tool_descriptor_registry_integrity
   @test/runtest-test_schedule_runner
   @test/runtest-test_schedule_store
@@ -249,6 +256,7 @@ normal_targets=(
   @test/runtest-test_keeper_tool_call_log
   @test/runtest-test_keeper_tool_plan
   @test/runtest-test_keeper_tool_composition_catalog
+  @test/runtest-test_keeper_tool_kind
   @test/runtest-test_keeper_tool_plan_executor
   @test/runtest-test_keeper_external_resource_lease
   @test/runtest-test_keeper_wire_capture
@@ -325,11 +333,27 @@ normal_targets=(
   @test/runtest-test_keeper_mutex_coverage
   @test/runtest-test_board_karma_ledger
   @test/runtest-test_board_vote_persistence
+  @test/runtest-test_log_ring_bounds
+  @test/runtest-test_board_comment_post_write_ahead
+  @test/runtest-test_board_sub_board_write_ahead
   @test/runtest-test_keeper_event_queue
   @test/runtest-test_keeper_event_queue_owner_lock
   @test/runtest-test_keeper_event_queue_persist_poison
   @test/runtest-test_keeper_event_queue_state_v2
   @test/runtest-test_keeper_connector_attention_wake
+  @test/runtest-test_keeper_scheduled_stimulus_channel
+  @test/runtest-test_fusion_delivery_obligation
+  @test/runtest-test_fusion_agent_core_error_detail
+  @test/runtest-test_fusion_status_tool
+  @test/runtest-test_fusion_judge_usage
+  @test/runtest-test_fusion_metrics
+  @test/runtest-test_fusion_sink_meta
+  @test/runtest-test_fusion_run_registry_persist
+  @test/fusion_core/runtest-test_fusion
+  @test/fusion_core/runtest-test_fusion_harness
+  @test/fusion_core/runtest-test_fusion_run_registry
+  @test/fusion_core/runtest-test_fusion_config_json
+  @test/runtest-test_keeper_thinking_observation
   @test/runtest-test_keeper_external_attention
   @test/runtest-test_keeper_manual_compaction_preemption
   @test/runtest-test_keeper_compaction_unit

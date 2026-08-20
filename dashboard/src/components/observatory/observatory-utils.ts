@@ -15,8 +15,12 @@ export function entryTimestampMs(entry: TelemetryEntry): number | null {
   return null
 }
 
+/** tool-quality's hourly_trend buckets arrive as "2026-08-18T07" — hour precision,
+    no minutes. The shortest date-time ECMAScript parses is YYYY-MM-DDTHH:mm, so
+    that string yields NaN and every point is dropped downstream. Fill the missing
+    minutes and seconds; anything already complete is passed through. */
 export function hourToMs(hour: string): number | null {
-  const parsed = Date.parse(hour.includes('T') ? hour : `${hour}:00:00Z`)
+  const parsed = Date.parse(/T\d{2}$/.test(hour) ? `${hour}:00:00Z` : hour)
   return Number.isNaN(parsed) ? null : parsed
 }
 

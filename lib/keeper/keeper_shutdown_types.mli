@@ -39,6 +39,7 @@ type dashboard_purge_artifact =
   | Keeper_memory_current_artifact
   | Keeper_memory_journal_artifact
   | Keeper_configuration_artifact
+  | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
 
 type completion_receipt =

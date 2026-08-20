@@ -42,7 +42,8 @@
     "masc_schedule_get",
     "keeper_compose_mission-snapshot",
     "keeper_compose_background-snapshot",
-    "keeper_composition_status"
+    "keeper_composition_status",
+    "tool_execute"
   ],
   "missions": [
     {
@@ -241,6 +242,36 @@
       "user_story": "Verification 화면이 격리된 5-Keeper fleet의 decision-log durable turn span을 1h, 2h, 4h, 24h tier별 pass, warn, fail 상태와 함께 실제 backend 응답 그대로 표시하며 이를 무중단 uptime으로 과장하지 않는다.",
       "assertions": ["persistence_tiers_dashboard_projection_observed"],
       "evidence": ["browser/keeper-persistence-proof.json", "browser/keeper-persistence-proof.png"]
+    },
+    {
+      "id": "RW20",
+      "phase": "delivery_proof",
+      "name": "poc_request_to_executed_artifact",
+      "actors": ["researcher", "builder-a", "reviewer"],
+      "capabilities": ["Keeper", "Board", "Sandbox", "Execute"],
+      "user_story": "게시된 PoC 요구가 구현으로 이어지고, 완성 주장은 파일 존재가 아니라 실제 실행 로그로 증명되며, 독립 리뷰가 그 실행 출력 토큰을 그대로 인용한다.",
+      "assertions": ["poc_execution_proof_observed", "poc_review_cites_execution"],
+      "evidence": ["observations/board-post.json", "observations/tool-calls-builder-a.json"]
+    },
+    {
+      "id": "RW21",
+      "phase": "adversarial_dialogue",
+      "name": "restate_then_rebut_debate",
+      "actors": ["builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Keeper", "Board"],
+      "user_story": "한 Keeper의 주장을 상대 Keeper가 board에서 직접 읽어 재진술로 이해를 증명한 뒤 반박하고, 제3 Keeper의 판정이 그 반박 토큰을 인용한다. 재진술·인용 토큰은 각 응답자의 prompt에 주어지지 않는다.",
+      "assertions": ["debate_restatement_faithful", "debate_verdict_cites_rebuttal"],
+      "evidence": ["observations/board-post.json", "turns/debate-rebut.json"]
+    },
+    {
+      "id": "RW22",
+      "phase": "coverage_proof",
+      "name": "declared_scope_full_coverage",
+      "actors": ["researcher", "builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Goal", "Task", "Verification", "Cross-Verification", "Sandbox", "Execute", "Log"],
+      "user_story": "선언한 대상 범위의 모든 케이스가 실제 동작으로 증명된다. 케이스는 서로 다른 변환이라 상수를 출력하는 스크립트는 아무것도 덮지 못한다. 구현자와 시험자가 각자 Task를 claim해 Goal에 연결하고 keeper_task_done으로 evidence를 제출하며, 독립 completion authority가 두 Task를 awaiting_verification에서 done으로 넘겨야 한다 — 제출은 완료가 아니다. 검증자는 선언된 범위와 실행이 낸 결과를 대조한다. 부분 실행은 통과하지 못한다.",
+      "assertions": ["qa_coverage_execution_observed", "qa_coverage_passes_verification", "qa_coverage_review_matches_spec"],
+      "evidence": ["observations/board-post.json", "observations/tool-calls-builder-b.json"]
     }
   ]
 }

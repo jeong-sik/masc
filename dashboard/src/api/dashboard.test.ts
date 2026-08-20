@@ -77,7 +77,6 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     metric: null,
     target_value: null,
     due_date: null,
-    parent_goal_id: null,
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -450,6 +449,201 @@ describe('keeper tool telemetry fetchers', () => {
     expect(entry?.composition_node_id).toBe('fetch_sources')
     expect(entry?.composition_execution).toBe('async')
     expect(entry?.parent_tool_use_id).toBe('outer-7')
+  })
+
+  it('decodes recorded execution evidence (runtime contract, action radius, route evidence)', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            // Field shapes mirror a recorded .masc/tool_calls row (2026-08-18),
+            // anonymized. Nested nullable fields arrive as explicit nulls.
+            ts: 1787024860.1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_time_now',
+            input: {},
+            output: '{"now_iso":"2026-08-18T05:00:00Z"}',
+            success: true,
+            duration_ms: 0.5,
+            thinking_enabled: true,
+            prompt_fingerprint: '464ce7b3280c24fe1cbdcd990a70db87',
+            runtime_contract: {
+              keeper_name: 'keeper-alpha',
+              agent_name: 'keeper-alpha-agent',
+              trace_id: 'trace-1',
+              session_id: 'trace-1',
+              generation: 1,
+              keeper_turn_id: 29567,
+              task_id: null,
+              goal_ids: [],
+              sandbox_profile: 'local',
+              sandbox_root: '/sandbox/keeper-alpha/',
+              allowed_paths: ['.masc/playground/keeper-alpha/'],
+              path_resolution: {
+                read_implicit_cwd: false,
+                read_explicit_cwd_supported: true,
+                read_basis: 'Read file_path resolves against explicit cwd when cwd is provided.',
+                discover_before_read: 'Inspect visible paths before Read.',
+                execute_path_basis: 'Execute path arguments resolve against cwd.',
+                masc_state_basis: '.masc runtime state is not a sandbox filesystem target.',
+              },
+              network_mode: 'inherit',
+              runtime_profile: 'ollama_cloud.example-model',
+            },
+            action_radius: {
+              tool_name: 'keeper_time_now',
+              action_key: 'keeper_time_now',
+              target_kind: 'tool',
+              target_path: null,
+              sandbox_target: 'local',
+              observed_paths: [],
+              success: true,
+              duration_ms: 0.5,
+              error: null,
+            },
+            route_evidence: {
+              descriptor_id: 'keeper.time.now',
+              capability_id: 'keeper_time_now',
+              keeper_model_projection: 'internal_name',
+              public_name: 'keeper_time_now',
+              canonical_name: 'keeper_time_now',
+              executor: 'in_process',
+              backend: 'ocaml_runtime',
+              sandbox: 'none',
+              runtime_handler: 'tool_time_now',
+              execution: 'concurrent',
+              composable_output: { kind: 'json' },
+              receipt_labels: {
+                descriptor_id: 'keeper.time.now',
+                executor: 'in_process',
+                keeper_tool_group: 'meta',
+                input_schema_source: 'descriptor_owned',
+              },
+              eval_tags: [],
+              readonly: true,
+              retryable: true,
+              cwd_scope: null,
+              polling_read: false,
+              tool_name: 'keeper_time_now',
+            },
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    expect(entry?.thinking_enabled).toBe(true)
+    expect(entry?.thinking_budget).toBeUndefined()
+    expect(entry?.tool_choice).toBeUndefined()
+    expect(entry?.prompt_fingerprint).toBe('464ce7b3280c24fe1cbdcd990a70db87')
+    expect(entry?.runtime_contract).toMatchObject({
+      agent_name: 'keeper-alpha-agent',
+      generation: 1,
+      sandbox_root: '/sandbox/keeper-alpha/',
+      allowed_paths: ['.masc/playground/keeper-alpha/'],
+      network_mode: 'inherit',
+      runtime_profile: 'ollama_cloud.example-model',
+    })
+    expect(entry?.runtime_contract?.path_resolution).toMatchObject({
+      read_implicit_cwd: false,
+      read_explicit_cwd_supported: true,
+    })
+    expect(entry?.action_radius).toMatchObject({
+      action_key: 'keeper_time_now',
+      target_kind: 'tool',
+      observed_paths: [],
+    })
+    // Explicit wire nulls decode to absent, not to empty strings.
+    expect(entry?.action_radius?.target_path).toBeUndefined()
+    expect(entry?.action_radius?.error).toBeUndefined()
+    expect(entry?.route_evidence).toMatchObject({
+      descriptor_id: 'keeper.time.now',
+      capability_id: 'keeper_time_now',
+      executor: 'in_process',
+      backend: 'ocaml_runtime',
+      runtime_handler: 'tool_time_now',
+      readonly: true,
+      retryable: true,
+    })
+    expect(entry?.route_evidence?.receipt_labels).toEqual({
+      descriptor_id: 'keeper.time.now',
+      executor: 'in_process',
+      keeper_tool_group: 'meta',
+      input_schema_source: 'descriptor_owned',
+    })
+  })
+
+  it('projects route_evidence.status from both wire shapes', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 2,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'WebSearch',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 5,
+            route_evidence: { descriptor_id: 'agent.search_web', status: 'ok' },
+          },
+          {
+            ts: 2,
+            keeper: 'keeper-alpha',
+            tool: 'Execute',
+            input: {},
+            output: 'done',
+            success: true,
+            duration_ms: 5,
+            route_evidence: { descriptor_id: 'agent.execute', status: { kind: 'exit', code: 0 } },
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+
+    expect(result.entries[0]?.route_evidence?.status).toBe('ok')
+    expect(result.entries[1]?.route_evidence?.status).toBe('exit 0')
+  })
+
+  it('leaves execution evidence absent on rows recorded before it was written', async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(
+      new Response(JSON.stringify({
+        keeper: 'keeper-alpha',
+        count: 1,
+        source: 'tool_call_io',
+        entries: [
+          {
+            ts: 1,
+            keeper: 'keeper-alpha',
+            tool: 'keeper_context_status',
+            input: {},
+            output: 'ok',
+            success: true,
+            duration_ms: 5,
+          },
+        ],
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchKeeperToolCalls('keeper-alpha')
+    const entry = result.entries[0]
+    expect(entry?.runtime_contract).toBeUndefined()
+    expect(entry?.action_radius).toBeUndefined()
+    expect(entry?.route_evidence).toBeUndefined()
+    expect(entry?.thinking_enabled).toBeUndefined()
+    expect(entry?.prompt_fingerprint).toBeUndefined()
   })
 
   it('keeps missing or malformed tool-call duration unmeasured', async () => {
@@ -3407,7 +3601,7 @@ describe('runtime.toml raw config API', () => {
   })
 
   it('posts runtime routing patches without client-side TOML text', async () => {
-    const sourceText = '[runtime]\ndefault = "openai.gpt"\ncross_verifier = "openai.gpt"\n'
+    const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
@@ -3423,14 +3617,14 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchRuntimeRouting('cross_verifier', 'openai.gpt')
+    const result = await patchRuntimeRouting('default', 'openai.gpt')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/routing')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      lane: 'cross_verifier',
+      lane: 'default',
       runtime_id: 'openai.gpt',
     })
     expect(result.source_text).toBe(sourceText)
@@ -3764,7 +3958,7 @@ describe('fetchRuntimeProviders', () => {
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
-            { route_name: 'runtime.cross_verifier', runtime_id: 'mimo.mimo-v2.5-pro' },
+            { route_name: 'runtime.default', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_media_failover: ['mimo.mimo-v2.5-pro'],
           dropped_lane_candidates: [
@@ -3867,7 +4061,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.cross_verifier')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.default')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
@@ -4235,7 +4429,6 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        cross_verifier_runtime_id: null,
         media_failover: [],
       },
     }
@@ -4253,7 +4446,6 @@ describe('fetchRuntimeDefaults', () => {
     expect(result.default_runtime_id).toBe('openai.gpt-4o')
     expect(result.default_model).toBe('gpt-4o')
     expect(result.runtimes[0]?.is_default).toBe(true)
-    expect(result.model_routing.cross_verifier_runtime_id).toBeNull()
   })
 })
 

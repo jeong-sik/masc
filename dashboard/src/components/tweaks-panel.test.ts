@@ -12,6 +12,7 @@ import {
   tweaksMotion,
   tweaksOpen,
 } from './tweaks-panel'
+import { chatShowAutonomous } from '../lib/chat-view-prefs'
 
 describe('TweaksPanel', () => {
   let container: HTMLDivElement
@@ -24,6 +25,7 @@ describe('TweaksPanel', () => {
     tweaksMotion.value = 'subtle'
     tweaksBubble.value = 'card'
     tweaksFontScale.value = 100
+    chatShowAutonomous.value = true
   })
 
   afterEach(() => {
@@ -124,6 +126,22 @@ describe('TweaksPanel', () => {
     await fireEvent.click(close)
 
     expect(tweaksOpen.value).toBe(false)
+  })
+
+  it('autonomous-turn toggle updates the chat view pref', async () => {
+    tweaksOpen.value = true
+    chatShowAutonomous.value = true
+    render(html`<${TweaksPanel} />`, container)
+
+    const row = Array.from(container.querySelectorAll('.twk-row')).find(
+      el => el.textContent?.includes('자율턴'),
+    ) as HTMLElement
+    expect(row).not.toBeUndefined()
+    const toggle = row.querySelector('button[role="switch"]') as HTMLButtonElement
+    expect(toggle.getAttribute('aria-checked')).toBe('true')
+
+    await fireEvent.click(toggle)
+    expect(chatShowAutonomous.value).toBe(false)
   })
 })
 // Keeper Agent v2 sync: coverage ratchet trigger

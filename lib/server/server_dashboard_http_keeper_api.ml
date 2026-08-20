@@ -1301,7 +1301,10 @@ let keeper_chat_history_freshness config name =
    AGENT_CORE checkpoint, not as duplicate chat-store rows. This read projection uses
    typed turn identity only for stable dashboard grouping and exact raw-trace
    lookup; it is not the Keeper's semantic continuity mechanism. Final text
-   and work trace come from the same exact AGENT_CORE run. *)
+   and work trace come from the same exact AGENT_CORE run. The [id] is required:
+   the dashboard history schema drops any row without one. Its value is a pure
+   schema satisfier -- the dashboard re-mints its entry id from
+   [autonomous_turn.turn_id] and never reads this field. *)
 let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
   let trace_fields =
     match turn.trace with
@@ -1312,7 +1315,8 @@ let autonomous_turn_json (turn : Keeper_autonomous_turn_source.turn) =
             [ Keeper_chat_blocks.Trace { trace; omitted = 0 } ] ) ]
   in
   `Assoc
-    ([ "role", `String "assistant"
+    ([ "id", `String ("autonomous:" ^ turn.turn_id)
+     ; "role", `String "assistant"
      ; "ts", `Float turn.started_at
      ; ( "content"
        , match turn.final_text with

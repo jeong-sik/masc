@@ -253,12 +253,15 @@ let get_default_runtime_id_fn
   : (unit -> string) Atomic.t
   = Atomic.make (fun () -> failwith "Workspace_hooks: get_default_runtime_id_fn not connected")
 
-(* Optional: [None] means "use the global default runtime". Defaults to a
-   None-returning thunk (not a failwith) so unconnected test contexts fall back
-   to the default instead of crashing. *)
-let get_cross_verifier_runtime_id_fn
-  : (unit -> string option) Atomic.t
-  = Atomic.make (fun () -> None)
+(* The completion-authority evaluator's runtime comes only from the published
+   [verifier_exact] exact-output lane (RFC-0361 D7(a)): admitted slot ids in
+   frozen declaration order. The unconnected default is an explicit [Error] so
+   an unwired process leaves the review visibly deferred instead of silently
+   picking a runtime. *)
+let get_verifier_exact_lane_slot_ids_fn
+  : (unit -> (string list, string) result) Atomic.t
+  = Atomic.make (fun () ->
+      Error "Workspace_hooks: get_verifier_exact_lane_slot_ids_fn not connected")
 
 let record_task_metric_fn
   : (Workspace_utils_backend_setup.config ->

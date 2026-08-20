@@ -869,6 +869,14 @@ function renderLogProvenance(data: LogData | undefined) {
         >store ${store}</${StatusChip}>
       ` : null}
       ${renderSummaryChip('at', generatedAt)}
+      ${data.ring.droppedBefore ? html`
+        <${StatusChip}
+          tone="warn"
+          uppercase=${false}
+          title=${`링 시작 seq ${data.ring.startSeq} · 이전 기록은 ${data.retention.durableStore}에 있습니다`}
+          data-testid="logs-ring-dropped"
+        >seq ${data.ring.startSeq} 이전은 창 밖</${StatusChip}>
+      ` : null}
     </div>
   `
 }

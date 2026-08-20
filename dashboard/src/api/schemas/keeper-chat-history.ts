@@ -269,7 +269,10 @@ const KeeperAutonomousTurnSchema = object({
 
 export const KeeperChatHistoryMessageSchema = object({
   // Current-record contract: keeper_chat_store mints a stable id on every
-  // append and rejects persisted rows whose id is absent or blank.
+  // append and rejects persisted rows whose id is absent or blank. Rows
+  // projected outside the chat store (autonomous turns via
+  // Keeper_autonomous_turn_source) must mint one too — safeParse drops any
+  // row without a non-blank id, with no error surface.
   id: string(),
   role: string(),
   // Autonomous turns can complete through tools without terminal prose. The

@@ -723,6 +723,9 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+    let previous_lane_slots =
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
     in
@@ -736,6 +739,9 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
         Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted;
@@ -745,6 +751,12 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
+        (* RFC-0361 D7(a): the completion-authority review resolves only the
+           verifier_exact lane; the default runtime hook above no longer
+           reaches it. *)
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          (fun () -> Ok [ "test-system-evaluator" ]);
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
@@ -970,6 +982,9 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+    let previous_lane_slots =
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
     in
@@ -980,12 +995,18 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
         Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          (fun () -> Ok [ "test-system-evaluator" ]);
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in

@@ -98,6 +98,10 @@ let install_test_hooks () =
   Prompt_registry.set_markdown_dir
     (Filename.concat (repo_root ()) "config/prompts");
   Atomic.set Workspace_hooks.get_default_runtime_id_fn Runtime.get_default_runtime_id;
+  (* RFC-0361 D7(a): completion review resolves only the verifier_exact lane. *)
+  Atomic.set
+    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    (fun () -> Ok [ "test-evaluator-runtime" ]);
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn
     (fun ~base_path:_ ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ ~lookup:_ ~on_tool_result:_ () ->
        Ok (Some Task.Anti_rationalization.Approve))

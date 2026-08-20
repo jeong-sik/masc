@@ -317,9 +317,11 @@ type config =
   ; bindings : binding list
   ; default_runtime_id : string option
   ; cross_verifier_runtime_id : string option
-    (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
-        evaluator. [None] inherits [\[runtime\].default]. Unknown ids are
-        rejected at load. *)
+    (** [\[runtime\].cross_verifier] — legacy single-runtime binding for the
+        anti-rationalization evaluator. Since RFC-0361 D7(a) no judgement path
+        reads it; the [verifier_exact] exact-output lane is the selector.
+        Kept parseable for preserved live configs. Unknown ids are rejected at
+        load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].
         runtime.toml is the sole SSOT for keeper-to-runtime assignment; keeper

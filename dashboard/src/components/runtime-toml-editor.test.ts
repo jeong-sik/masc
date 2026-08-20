@@ -158,11 +158,9 @@ describe('RuntimeTomlEditor', () => {
       reloaded: true,
     }))
     apiMocks.patchRuntimeRouting.mockImplementation(async (lane: string, runtimeId: string | null) => {
-      let sourceText = richConfig.source_text.replace(
+      const sourceText = richConfig.source_text.replace(
         'default = "runpod_mtp.qwen"',
         lane === 'default' && runtimeId ? `default = "${runtimeId}"` : 'default = "runpod_mtp.qwen"',
-      )
-      sourceText = sourceText.replace(
       )
       return {
         ...richConfig,

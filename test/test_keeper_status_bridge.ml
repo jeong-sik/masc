@@ -128,7 +128,7 @@ let test_admission_fence_is_any_not_latest () =
   let settled =
     shutdown_operation_with_phase
       (Keeper_shutdown_types.Superseded
-         Keeper_shutdown_types.Operator_metadata_update)
+         (Keeper_shutdown_types.Operator_metadata_update { actor = "test" }))
   in
   Alcotest.(check bool)
     "a settled record alone does not fence"

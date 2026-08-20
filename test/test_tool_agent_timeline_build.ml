@@ -211,15 +211,19 @@ let test_self_scoped_chat_reader_blocks_cross_keeper () =
       check (list string) "other keeper chat is hidden" []
         (chat_field "content" (build_for "otherkeeper")))
 
-(* Regression for the per-source take-oldest bug (task-1647): each active
-   timeline collector fetches the source's newest window in seq-ascending order
-   (oldest first) and then front-truncates to the per-source cap. Once a keeper
-   produces more matching events than the cap, the front-take can discard the
-   NEWEST matches — the opposite of the tool contract (period.to = now) and of
-   build_timeline's own tail-keep on the merged list. These tests emit more than
-   the cap and assert the newest event survives while the oldest is dropped. *)
+(* Regression for the per-source truncation bugs (task-1647, task-386).
+   task-1647: each active timeline collector fetched the source's newest window
+   in seq-ascending order (oldest first) and then front-truncated to the
+   per-source cap, which could discard the NEWEST matches. task-386: the
+   per-source cap itself (message/tool/turn = 200) dropped this agent's EARLY
+   events before the merge, so even a final result below the requested limit was
+   missing its oldest events. The per-source truncations are now removed
+   entirely; build_timeline's single tail-keep on the merged list enforces the
+   user's requested limit. These tests emit more than the old cap and assert
+   that BOTH the newest and the oldest event survive when the limit is above
+   the count — i.e. no per-source cap drops early events. *)
 
-(* Per-source cap pinned in build_timeline (message/tool/turn = 200). *)
+(* Old per-source cap pinned in build_timeline (message/tool/turn = 200). *)
 let source_cap = 200
 let overflow = 60
 
@@ -265,24 +269,27 @@ let events_blob json =
 let newest_marker = marker (source_cap + overflow)
 let oldest_marker = marker 1
 
-let check_keeps_newest ~label config =
+(* With the per-source truncations removed (task-386), a limit above the
+   event count must surface BOTH the newest and the oldest event — the old
+   per-source cap would have dropped the oldest. *)
+let check_keeps_all ~label config =
   let blob = events_blob (build_all config ~agent_name:"testkeeper") in
   check bool (label ^ ": newest event present") true
     (contains ~needle:newest_marker blob);
-  check bool (label ^ ": oldest event dropped") false
+  check bool (label ^ ": oldest event present (no per-source cap)") true
     (contains ~needle:oldest_marker blob)
 
-let test_tool_call_keeps_newest () =
+let test_tool_call_keeps_all () =
   with_config (fun config ->
       emit_capacity_series config ~kind:"tool.called"
         ~payload_of:(fun s -> `Assoc [ ("tool_name", `String s) ]);
-      check_keeps_newest ~label:"tool_call" config)
+      check_keeps_all ~label:"tool_call" config)
 
-let test_turn_completed_keeps_newest () =
+let test_turn_completed_keeps_all () =
   with_config (fun config ->
       emit_capacity_series config ~kind:"keeper.turn_completed"
         ~payload_of:(fun s -> `Assoc [ ("model_used", `String s) ]);
-      check_keeps_newest ~label:"turn_completed" config)
+      check_keeps_all ~label:"turn_completed" config)
 
 (* keeper.tool_exec producer -> read model (#23540): keeper in-turn tool
    executions were invisible to the timeline because only the external MCP
@@ -387,11 +394,11 @@ let () =
           test_case "self-scoped reader blocks cross-keeper chat" `Quick
             test_self_scoped_chat_reader_blocks_cross_keeper;
         ] );
-      ( "per-source-cap-keeps-newest",
+      ( "per-source-cap-keeps-all",
         [
-          test_case "tool_call keeps newest" `Quick test_tool_call_keeps_newest;
-          test_case "turn_completed keeps newest" `Quick
-            test_turn_completed_keeps_newest;
+          test_case "tool_call keeps all (no per-source cap)" `Quick test_tool_call_keeps_all;
+          test_case "turn_completed keeps all (no per-source cap)" `Quick
+            test_turn_completed_keeps_all;
         ] );
       ( "keeper-tool-exec-source",
         [

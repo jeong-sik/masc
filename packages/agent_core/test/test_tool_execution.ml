@@ -778,6 +778,76 @@ let test_unknown_tool_is_uniform_validation_with_full_diagnostics () =
     with_registered_tools.content
 ;;
 
+(* masc#29008: the model can fuse arguments into the name slot
+   ([Execute["argv"]], live rondo shape) or typo a name. Lookup stays
+   exact; the reject message must name the received shape and the
+   nearest registered name so the model can repair the call instead of
+   resending the same broken string. A bare unknown identifier with no
+   near miss keeps the exact legacy message (pinned above). *)
+let run_unknown_name ~tools name =
+  match
+    run_execute_with_tools
+      ~tools
+      ~hooks:Hooks.empty
+      [ ToolUse { id = "shape"; name; input = `Assoc [] } ]
+  with
+  | [ result ] -> result
+  | _ -> fail "expected one unknown-tool result"
+;;
+
+let check_unknown_validation label result =
+  match result.Agent_tools.outcome with
+  | Tool_failed
+      { failure_kind = Agent_tools.Validation_error
+      ; error_class = Some Types.Deterministic
+      } -> ()
+  | _ -> fail (label ^ " must be a deterministic validation failure")
+;;
+
+let test_fused_name_reject_names_the_registered_prefix () =
+  let result =
+    run_unknown_name ~tools:[ make_echo_tool "Execute" ] {|Execute["argv"]|}
+  in
+  check_unknown_validation "fused name" result;
+  check
+    string
+    "fused name reject quotes the registered prefix and the repair"
+    ("Tool not found: Execute[\"argv\"]. Available tools: Execute. "
+     ^ "The name carries extra characters after \"Execute\"; send the tool name "
+     ^ "alone and put arguments in the input object.")
+    result.content
+;;
+
+let test_typo_name_reject_suggests_closest_registered () =
+  let result =
+    run_unknown_name
+      ~tools:[ make_echo_tool "keeper_broadcast"; make_echo_tool "keeper_tasks_list" ]
+      "keeper_broadcst"
+  in
+  check_unknown_validation "typo name" result;
+  check
+    string
+    "typo reject suggests the closest registered name"
+    ("Tool not found: keeper_broadcst. Available tools: "
+     ^ "keeper_broadcast,keeper_tasks_list. Closest registered name: "
+     ^ "keeper_broadcast.")
+    result.content
+;;
+
+let test_fused_typo_prefix_reject_suggests_closest_registered () =
+  let result =
+    run_unknown_name ~tools:[ make_echo_tool "Execute" ] {|Exceute["x"]|}
+  in
+  check_unknown_validation "fused typo prefix" result;
+  check
+    string
+    "fused typo reject pairs the shape note with the closest name"
+    ("Tool not found: Exceute[\"x\"]. Available tools: Execute. "
+     ^ "The name is not a bare identifier (closest registered name: Execute); "
+     ^ "send the registered tool name alone and put arguments in the input object.")
+    result.content
+;;
+
 let test_non_tool_use_blocks_filtered () =
   (* Non-ToolUse blocks (Text, Thinking) must be filtered out, not produce
      bogus ("", "", false) triples. Regression test for issue #327. *)
@@ -1487,6 +1557,18 @@ let () =
             "unknown tools are uniform validation failures with full diagnostics"
             `Quick
             test_unknown_tool_is_uniform_validation_with_full_diagnostics
+        ; test_case
+            "fused name reject names the registered prefix"
+            `Quick
+            test_fused_name_reject_names_the_registered_prefix
+        ; test_case
+            "typo name reject suggests the closest registered name"
+            `Quick
+            test_typo_name_reject_suggests_closest_registered
+        ; test_case
+            "fused typo prefix reject suggests the closest registered name"
+            `Quick
+            test_fused_typo_prefix_reject_suggests_closest_registered
         ; test_case
             "dispatch passes exact tool invocation"
             `Quick

@@ -217,18 +217,55 @@ type raw_response =
   ; body_sha256 : string
   }
 
+(** The provider's own verdict on one dispatched request, projected from
+    {!Retry.api_error} onto the two facts an exact flow acts on: the status the
+    response carried, and which refusal it was. The full [api_error] is not
+    carried because its payloads (messages, serving constraints) would enter
+    flow evidence, which fingerprints and persists what it holds.
+
+    Every constructor of [Retry.api_error] maps to exactly one constructor here,
+    so a new provider failure kind cannot reach a flow as an unclassified one. *)
+type provider_refusal =
+  | Request_body_refused
+      (** The provider refused this request's size. A smaller input may succeed
+          and the frozen lane's successor may accept this one. *)
+  | Rate_limited
+      (** The provider's quota for this binding is spent. The request itself was
+          acceptable, so a successor binding with its own quota may serve it. *)
+  | Overloaded
+  | Server_error
+  | Auth_failed
+  | Authorization_refused
+  | Payment_required
+  | Invalid_request
+  | Not_found
+  | Context_overflow
+  | Input_capacity
+  | Network_error
+  | Timeout
+
 type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
   | Completion_failed
-  | Serialized_request_refused of { http_status : int }
+      (** No response was received: the failure landed before dispatch, or the
+          transport produced no HTTP status to classify. A failure that DID
+          carry a status is {!Provider_response_refused} — folding the two
+          together discards the status and the refusal kind. *)
+  | Provider_response_refused of
+      { http_status : int
+      ; refusal : provider_refusal
+      }
   | Incomplete_output
   | Missing_output
   | Ambiguous_output of int
   | Unexpected_output_content
   | Invalid_json_output
   | Internal_non_json_output
+
+(** Stable lowercase token for one refusal, for logs and evidence detail. *)
+val provider_refusal_to_string : provider_refusal -> string
 
 type execution_error =
   { call_id : call_id

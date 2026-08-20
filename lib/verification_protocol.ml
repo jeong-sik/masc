@@ -351,6 +351,63 @@ let notify_reject_verification
    authenticated operator or typed system-LLM judge commits a verdict. Long-waiting
    obligations are surfaced from the activity-event stream, not a poll-timer. *)
 
+let stalled_board_content ~task_id ~verification_id ~gate ~detail =
+  Printf.sprintf
+    "Stalled task %s (vrf:%s) — review will not retry. gate=%s: %s. Forward \
+     path: the assignee resubmits with submit_for_verification (supersedes \
+     this verification), or an operator commits a HITL verdict."
+    task_id
+    verification_id
+    gate
+    detail
+
+let stalled_metadata
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~gate
+      ~detail
+  =
+  `Assoc
+    ([ ("type", `String "verification_stalled")
+     ; ("task_id", `String task_id)
+     ; ("verification_id", `String verification_id)
+     ]
+     @ completion_authority_fields authority
+     @ [ ("gate", `String gate)
+       ; ("detail", `String detail)
+       ; ("timestamp", `Float (Time_compat.now ()))
+       ])
+
+let notify_stalled_verification
+      ~(authority : Masc_domain.completion_authority)
+      ~task_id
+      ~verification_id
+      ~gate
+      ~detail
+  =
+  match
+    Board_dispatch.create_post
+      ~author:(Masc_domain.completion_authority_actor authority)
+      ~content:(stalled_board_content ~task_id ~verification_id ~gate ~detail)
+      ~post_kind:Board.System_post
+      ~meta_json:
+        (stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail)
+      ~visibility:Board.Internal
+      ~hearth:"verification"
+      ()
+  with
+  | Ok _ -> ()
+  | Error e ->
+    Log.Task.error
+      ~keeper_name:task_id
+      "stalled-review board post failed (task=%s vrf=%s): %s"
+      task_id verification_id (Board_types.show_board_error e)
+
 module For_testing = struct
   let verdict_event_json = verdict_event_json
+  let stalled_board_content = stalled_board_content
+
+  let stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail =
+    stalled_metadata ~authority ~task_id ~verification_id ~gate ~detail
 end

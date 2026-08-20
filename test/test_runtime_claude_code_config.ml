@@ -37,7 +37,7 @@ let load content =
 let test_materializes_official_client_owner () =
   match load (runtime_toml ()) with
   | Error error -> failf "claude-code runtime should load: %s" error
-  | Ok (runtimes, default, _, _, _, _) ->
+  | Ok (runtimes, default, _, _, _) ->
     check int "one runtime" 1 (List.length runtimes);
     check string "default" "claude_code.claude-code-sonnet" default.id;
     (match default.execution with

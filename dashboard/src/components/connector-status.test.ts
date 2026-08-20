@@ -176,6 +176,9 @@ function sampleKeepersResponse(overrides?: Partial<Record<string, unknown>>) {
       },
     ],
     directoryIssues: [],
+    // The panel reads this to decide whether to warn that the keeper list is
+    // a page rather than the directory. masc#29077.
+    listing: { total: 2, limit: 200, truncated: false },
     ...overrides,
   }
 }
@@ -966,6 +969,7 @@ describe('ConnectorStatusPanel', () => {
     const fetchGateKeepers = vi.fn<() => Promise<unknown>>().mockResolvedValue({
       keepers: [],
       directoryIssues: [],
+      listing: { total: 0, limit: 200, truncated: false },
     })
 
     const { ConnectorStatusPanel } = await loadComponentWithApi({

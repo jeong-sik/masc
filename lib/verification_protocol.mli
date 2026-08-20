@@ -75,6 +75,24 @@ val notify_reject_verification :
     carry typed provenance.
     State-free. *)
 
+val notify_stalled_verification :
+  authority:Masc_domain.completion_authority ->
+  task_id:string ->
+  verification_id:string ->
+  gate:string ->
+  detail:string ->
+  unit
+(** Board projection for a review that completed [Not_reviewed] with
+    [retryable = false]: the completion authority will not schedule another
+    automatic attempt, so without this post the only surface is the bounded
+    run registry and the task waits invisibly. The post names the task, the
+    verification id, the gate, and the two forward paths that exist today —
+    the assignee resubmitting through [submit_for_verification] (a legal
+    transition from [AwaitingVerification] that supersedes this
+    verification), or an operator HITL verdict. Visibility only: no
+    scheduling state, no retry obligation. A board write failure is logged
+    and does not affect the review outcome. *)
+
 module For_testing : sig
   val verdict_event_json :
     authority:Masc_domain.completion_authority ->
@@ -83,5 +101,16 @@ module For_testing : sig
     verdict:Masc_domain.completion_verdict ->
     notes:string ->
     timestamp:float ->
+    Yojson.Safe.t
+
+  val stalled_board_content :
+    task_id:string -> verification_id:string -> gate:string -> detail:string -> string
+
+  val stalled_metadata :
+    authority:Masc_domain.completion_authority ->
+    task_id:string ->
+    verification_id:string ->
+    gate:string ->
+    detail:string ->
     Yojson.Safe.t
 end

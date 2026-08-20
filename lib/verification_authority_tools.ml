@@ -7,13 +7,15 @@
 type tool =
   | Read_file
   | Search_files
+  | Web_fetch
 
 let tool_name = function
   | Read_file -> "tool_read_file"
   | Search_files -> "tool_search_files"
+  | Web_fetch -> "masc_web_fetch"
 ;;
 
-let all_tools = [ Read_file; Search_files ]
+let all_tools = [ Read_file; Search_files; Web_fetch ]
 
 type t =
   { ownership_root : string
@@ -64,7 +66,7 @@ let create ~config ~producer =
     resolve_tools
       (match producer_scope with
        | Keeper_producer _ -> all_tools
-       | Workspace_producer -> [ Read_file ])
+       | Workspace_producer -> [ Read_file; Web_fetch ])
   in
   let* ownership_root =
     match producer_scope with
@@ -184,6 +186,22 @@ let run t tool ~args =
     |> result_of_execution
   | Workspace_producer, Search_files ->
     Error "workspace producers do not expose tool_search_files"
+  (* Evidence notes carry URLs (a PR, a CI run) the judge must be able to
+     dereference itself — a producer's claim about a URL is not inspection
+     (masc#28989: three genuinely-completed submissions rejected because the
+     PR URL arrived as "a note, not proof"). The shared web-fetch tool owns
+     the boundary guards: http/https only, private-network and localhost
+     targets refused, validated redirects, bounded extraction. It reads the
+     public internet, not the producer tree, so it is producer-scope
+     independent; it dispatches directly because the judge has no turn
+     continuation for a Gate to resume. *)
+  | (Keeper_producer _ | Workspace_producer), Web_fetch ->
+    Tool_misc_web_fetch.handle
+      ~tool_name:(tool_name Web_fetch)
+      ~start_time:(Time_compat.now ())
+      args
+    |> Keeper_tool_execution.of_tool_result
+    |> result_of_execution
 ;;
 
 let dispatch t ~name ~args =

@@ -216,6 +216,11 @@ type operator_disposition_reason =
   (** The provider attempt did not prove whether an effect occurred. Paired
       with [Disp_unknown] so operator attention remains required, while the
       receipt is no longer counted as an unmapped classifier regression. *)
+  | Reason_tool_correction_lost
+  (** The fenced turn also recorded typed pre_tool_use rejections
+      (masc#28885). Same [Disp_unknown] pairing as
+      [Reason_provider_attempt_effect_fenced]; the label separates a lost
+      correction from an ordinary fenced provider failure. *)
   | Reason_unmapped_runtime_state
 
 val operator_disposition_reason_to_string : operator_disposition_reason -> string

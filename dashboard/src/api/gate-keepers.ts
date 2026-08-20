@@ -14,6 +14,7 @@ export type {
   GateKeeper,
   GateKeeperDirectoryIssue,
   GateKeepersData,
+  KeeperListing,
 } from './schemas/gate-keepers'
 export {
   decodeGateKeepers,
@@ -24,7 +25,11 @@ export type GateKeepersError =
   | DashboardTransportError
   | GateKeepersSchemaDriftError
 
-const GATE_KEEPERS_PATH = '/api/v1/gate/keepers?limit=50&detailed=true'
+// No limit parameter: the route clamps to its own bound and reports `total` /
+// `truncated`, so asking for a number here only re-introduces a second cap the
+// UI would have to keep in sync. masc#29077 — the hardcoded 50 hid 79 of 129
+// keepers, including every keeper that had a live channel binding.
+const GATE_KEEPERS_PATH = '/api/v1/gate/keepers?detailed=true'
 
 export function fetchGateKeepers(): Effect.Effect<
   GateKeepersData,

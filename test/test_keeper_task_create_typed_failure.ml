@@ -59,7 +59,8 @@ let meta_with_active_goals goal_ids =
 
 let test_task_create_goal_link_write_failure_returns_typed_failure () =
   with_test_env (fun config ->
-    (match Goal_store.upsert_goal config ~id:"goal-a" ~title:"Goal A" () with
+    (match Goal_store.upsert_goal config ~id:"goal-a" ~title:"Goal A"
+             ~metric:"m" ~target_value:"1" () with
      | Ok _ -> ()
      | Error msg -> fail ("upsert_goal failed: " ^ msg));
     make_path_unwritable (Workspace_goal_index.goal_task_links_path config);

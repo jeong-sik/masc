@@ -1,5 +1,4 @@
 let clamp_limit limit = Server_utils.clamp ~min_v:1 ~max_v:200 limit
-let fetch_limit limit = Server_utils.clamp ~min_v:limit ~max_v:1000 (limit * 5)
 let workspace_id = "workspace"
 let workspace_name = "Workspace timeline"
 
@@ -195,9 +194,11 @@ let workspace_json ~config messages =
 let compute_json ~config ?me ~limit () =
   let limit = clamp_limit limit in
   let recent_desc =
-    Workspace.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
-    |> List.filter is_workspace_message
-    |> take limit
+    (* [limit] workspace messages, not [limit] messages of which some are
+       workspace ones. The old form asked for five times as many and hoped the
+       filter left enough; it left none whenever direct messages dominated. *)
+    Workspace.get_messages_matching config ~since_seq:0 ~limit
+      ~keep:is_workspace_message
   in
   let timeline = List.rev recent_desc in
   let messages_json = List.map message_json timeline in

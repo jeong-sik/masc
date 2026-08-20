@@ -876,6 +876,11 @@ let test_comment_persists_post_reply_count () =
    with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok _ -> ());
+  (* Write-ahead (#28952): the comment append is the durable WAL row;
+     the posts snapshot picks up the bumped reply_count on the next
+     flush, exactly like vote counts — not inline with the comment. *)
+  (match Board_dispatch.backend () with
+   | Board_dispatch.Jsonl store -> Board.flush_dirty store);
   let persisted_reply_count =
     Board.persist_path ()
     |> Fs_compat.load_jsonl
@@ -886,7 +891,7 @@ let test_comment_persists_post_reply_count () =
       | _ -> None)
   in
   Alcotest.(check (option int))
-    "post snapshot reply_count updated with comment append"
+    "post snapshot reply_count updated by the flush after a comment"
     (Some 1)
     persisted_reply_count;
   Board.reset_global_for_test ();

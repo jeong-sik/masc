@@ -581,6 +581,79 @@ let test_resume_owner_rejects_dead_tombstone_without_receipt () =
        | Error detail -> Alcotest.fail detail)
 ;;
 
+
+(* Why the recovery commits Pause and not Reset_latch. Both clear the
+   transcript latch; only one leaves the keeper in a state resume accepts.
+   Reset_latch drops the pause bit too, and resume then refuses the keeper as
+   Durable_owner_not_paused, so the caller trades one refusal for another. *)
+let test_pause_downgrade_keeps_the_keeper_resumable () =
+  with_seeded_owner
+    ~registered:false
+    ~latched_reason:Keeper_latched_reason.Transcript_corruption_reset_required
+    ~paused:true
+    ~generation:31
+    (fun config keeper_name _source ->
+       match
+         Keeper_owner_registry.apply_meta
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           (Keeper_owner_reducer.Pause
+              { reason =
+                  Keeper_latched_reason.Operator_paused
+                    { operator_actor =
+                        Keeper_latched_reason.operator_actor_grpc_directive
+                    }
+              ; updated_at = Keeper_meta_contract.now_iso ()
+              })
+       with
+       | Ok (Some meta) ->
+         Alcotest.(check bool) "still paused" true meta.Keeper_meta_contract.paused;
+         (match meta.Keeper_meta_contract.latched_reason with
+          | Some (Keeper_latched_reason.Operator_paused _) -> ()
+          | _ -> Alcotest.fail "latch must read as an operator pause after downgrade");
+         (match
+            Keeper_lifecycle_admission.state
+              ~paused:meta.Keeper_meta_contract.paused
+              ~latched_reason:meta.Keeper_meta_contract.latched_reason
+          with
+          | Keeper_lifecycle_admission.Paused
+              (Keeper_lifecycle_admission.Classified
+                Keeper_latched_reason.Transcript_corruption_reset_required) ->
+            Alcotest.fail "resume would still refuse this keeper"
+          | Keeper_lifecycle_admission.Paused _ -> ()
+          | _ -> Alcotest.fail "downgrade must leave the keeper paused")
+       | Ok None -> Alcotest.fail "owner metadata missing"
+       | Error _ -> Alcotest.fail "downgrade command rejected")
+
+let test_reset_latch_would_make_resume_refuse () =
+  with_seeded_owner
+    ~registered:false
+    ~latched_reason:Keeper_latched_reason.Transcript_corruption_reset_required
+    ~paused:true
+    ~generation:32
+    (fun config keeper_name _source ->
+       match
+         Keeper_owner_registry.apply_meta
+           ~base_path:config.Workspace.base_path
+           ~keeper_name
+           (Keeper_owner_reducer.Reset_latch
+              { updated_at = Keeper_meta_contract.now_iso () })
+       with
+       | Ok (Some meta) ->
+         Alcotest.(check bool)
+           "pause bit dropped"
+           false
+           meta.Keeper_meta_contract.paused;
+         (match
+            Keeper_lifecycle_admission.state
+              ~paused:meta.Keeper_meta_contract.paused
+              ~latched_reason:meta.Keeper_meta_contract.latched_reason
+          with
+          | Keeper_lifecycle_admission.Active -> ()
+          | _ -> Alcotest.fail "Reset_latch must leave the keeper active")
+       | Ok None -> Alcotest.fail "owner metadata missing"
+       | Error _ -> Alcotest.fail "reset command rejected")
+
 let test_resume_owner_rejects_transcript_reset_without_receipt () =
   with_seeded_owner
     ~registered:false
@@ -667,6 +740,14 @@ let () =
             "Resume_owner rejects transcript reset without receipt"
             `Quick
             test_resume_owner_rejects_transcript_reset_without_receipt
+        ; Alcotest.test_case
+            "Pause downgrade keeps the keeper resumable"
+            `Quick
+            test_pause_downgrade_keeps_the_keeper_resumable
+        ; Alcotest.test_case
+            "Reset_latch would make resume refuse"
+            `Quick
+            test_reset_latch_would_make_resume_refuse
         ] )
     ]
 ;;

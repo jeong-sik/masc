@@ -92,6 +92,8 @@ let one_dynamic_tool
       ?descriptor
       ?(terminal_effect_state = fun () ->
         Masc.Keeper_tools_agent_core.Terminal_effect_open)
+      ?(hooks = Agent_core.Hooks.empty)
+      ?(pre_tool_rejects = ref [])
       ~active
       handler
   =
@@ -110,12 +112,13 @@ let one_dynamic_tool
       ~keeper_name:"keeper-raw-authority"
       ~turn_count:1
       ~tools:[ tool ]
-      ~hooks:Agent_core.Hooks.empty
+      ~hooks
       ~event_bus:None
       ~context_injector:None
       ~context:(Some (Agent_core.Context.create_sync ()))
       ~terminal_effect_state
       ~terminal_error
+      ~pre_tool_rejects
       ~raw_trace_run:(Some active)
   in
   match projected with
@@ -966,6 +969,165 @@ let test_seed_reaches_the_provider_whole () =
      | [] -> fail "the seed must not be emptied")
 ;;
 
+(* masc#28885: the reject round-trip of a dead turn. The host records
+   every typed pre_tool_use Block, and the persistence helper appends
+   those round-trips to the replay checkpoint in the same shape a
+   surviving turn already persists. *)
+
+let () = Random.self_init ()
+
+let reject_detail = "Your call to \"effect\": errors (fix these and call again)"
+
+let test_pre_tool_reject_is_recorded () =
+  with_active_raw_trace (fun ~path:_ ~active ->
+    let pre_tool_rejects = ref [] in
+    let hooks =
+      { Agent_core.Hooks.empty with
+        pre_tool_use = Some (fun _ -> Agent_core.Hooks.Block reject_detail)
+      }
+    in
+    let executions = ref 0 in
+    let tool, _terminal_error =
+      one_dynamic_tool ~hooks ~pre_tool_rejects ~active (fun _input ->
+        incr executions;
+        Ok { Agent_core.Types.content = "never"; _meta = None })
+    in
+    let result = tool.call ~call_id:"call-reject-1" (`Assoc [ "k", `String "v" ]) in
+    check bool "reject surfaces as a failed tool result" false result.success;
+    check string "corrective text goes back to the CLI" reject_detail result.content;
+    check int "the tool body never ran" 0 !executions;
+    match !pre_tool_rejects with
+    | [ reject ] ->
+      check string "call id" "call-reject-1" reject.Host.call_id;
+      check string "tool name" "effect" reject.Host.tool_name;
+      check string "detail" reject_detail reject.Host.detail;
+      check string "input" {|{"k":"v"}|} (Yojson.Safe.to_string reject.Host.input)
+    | rejects ->
+      fail (Printf.sprintf "expected one recorded reject, got %d" (List.length rejects)))
+;;
+
+let persistence_checkpoint ~session_id =
+  Agent_core.Checkpoint.
+    { version = checkpoint_version
+    ; session_id
+    ; agent_name = "reject-persistence"
+    ; model = "test-model"
+    ; system_prompt = None
+    ; messages = [ Agent_core.Types.text_message Agent_core.Types.User "seed" ]
+    ; usage = Agent_core.Types.empty_usage
+    ; turn_count = 3
+    ; created_at = 1_700_000_000.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = None
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_core.Types.Off
+    ; thinking_budget = None
+    ; reasoning_effort = None
+    ; cache_system_prompt = false
+    ; context = Agent_core.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+;;
+
+let reject ~call_id ~detail =
+  { Host.call_id; tool_name = "keeper_broadcast"; input = `Assoc []; detail }
+;;
+
+let test_persist_appends_roundtrips_in_call_order () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let session_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "reject-persist-%06x" (Random.bits ()))
+  in
+  Fs_compat.mkdir_p session_dir;
+  let session_id = "trace-reject-persist" in
+  (match
+     Keeper_checkpoint_store.save_agent_core_classified
+       ~session_dir
+       (persistence_checkpoint ~session_id)
+   with
+   | Ok _ -> ()
+   | Error detail -> fail ("seed checkpoint save failed: " ^ detail));
+  (* The host records rejects newest-first; this list is exactly the
+     ref shape a dead turn hands over. *)
+  let rejects =
+    [ reject ~call_id:"call-2" ~detail:"second correction"
+    ; reject ~call_id:"call-1" ~detail:"first correction"
+    ]
+  in
+  (match Host.persist_pre_tool_rejects ~session_dir ~session_id rejects with
+   | Ok persisted -> check int "two rejects persisted" 2 persisted
+   | Error detail -> fail ("persist failed: " ^ detail));
+  match Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id with
+  | Error _ -> fail "checkpoint reload failed"
+  | Ok checkpoint ->
+    check int "seed + two round-trips" 5 (List.length checkpoint.messages);
+    (match List.filteri (fun i _ -> i >= 1) checkpoint.messages with
+     | [ use_1; result_1; use_2; result_2 ] ->
+       let tool_use label (message : Agent_core.Types.message) expected_id =
+         match message.content with
+         | [ Agent_core.Types.ToolUse { id; name; _ } ] ->
+           check string (label ^ " id") expected_id id;
+           check string (label ^ " name") "keeper_broadcast" name
+         | _ -> fail (label ^ " is not a single ToolUse block")
+       in
+       let tool_result
+             label
+             (message : Agent_core.Types.message)
+             expected_id
+             expected_detail
+         =
+         match message.content with
+         | [ Agent_core.Types.ToolResult { tool_use_id; content; outcome; _ } ] ->
+           check string (label ^ " tool_use_id") expected_id tool_use_id;
+           check string (label ^ " content") expected_detail content;
+           (match outcome with
+            | Agent_core.Types.Tool_failed
+                { failure_kind = Agent_core.Types.Validation_error
+                ; error_class = Some Agent_core.Types.Deterministic
+                } -> ()
+            | _ ->
+              fail (label ^ " outcome is not the deterministic validation failure"))
+         | _ -> fail (label ^ " is not a single ToolResult block")
+       in
+       tool_use "first round-trip use" use_1 "call-1";
+       tool_result "first round-trip result" result_1 "call-1" "first correction";
+       tool_use "second round-trip use" use_2 "call-2";
+       tool_result "second round-trip result" result_2 "call-2" "second correction"
+     | _ -> fail "appended message window has the wrong shape")
+;;
+
+let test_persist_skips_when_no_checkpoint_exists () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let session_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "reject-persist-empty-%06x" (Random.bits ()))
+  in
+  Fs_compat.mkdir_p session_dir;
+  match
+    Host.persist_pre_tool_rejects
+      ~session_dir
+      ~session_id:"trace-absent"
+      [ reject ~call_id:"call-x" ~detail:"lost" ]
+  with
+  | Ok persisted ->
+    check int "no replay exists to correct, so nothing persists" 0 persisted
+  | Error detail -> fail ("missing checkpoint must not be an error: " ^ detail)
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -1074,6 +1236,20 @@ let () =
             "seed reaches the provider whole"
             `Quick
             test_seed_reaches_the_provider_whole
+        ] )
+    ; ( "reject round-trip persistence (masc#28885)"
+      , [ test_case
+            "pre_tool_use Block is recorded with its call identity"
+            `Quick
+            test_pre_tool_reject_is_recorded
+        ; test_case
+            "dead-turn rejects append to the checkpoint in call order"
+            `Quick
+            test_persist_appends_roundtrips_in_call_order
+        ; test_case
+            "missing checkpoint skips persistence"
+            `Quick
+            test_persist_skips_when_no_checkpoint_exists
         ] )
     ]
 ;;

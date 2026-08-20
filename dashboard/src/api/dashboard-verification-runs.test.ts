@@ -43,7 +43,7 @@ function row(overrides: Record<string, unknown> = {}) {
     status: 'approved',
     elapsed_s: 2.5,
     tools: [],
-    evaluator_runtime: 'cross-verifier',
+    evaluator_runtime: 'judge-runtime',
     ...overrides,
   }
 }
@@ -64,7 +64,7 @@ describe('parseVerificationRunsResponse', () => {
       authorityActor: 'system-llm-agent-473b608e',
       status: 'approved',
       elapsedSeconds: 2.5,
-      evaluatorRuntime: 'cross-verifier',
+      evaluatorRuntime: 'judge-runtime',
     })
   })
 

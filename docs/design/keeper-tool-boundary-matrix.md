@@ -167,6 +167,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_surface_ops.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_plan.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_plan.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_plan_request.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_plan_request.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_composition_catalog.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_composition_catalog.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_agent_core_bundle.ml` - agent-core-tool-bridge

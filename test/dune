@@ -66,11 +66,13 @@
   test_exec_tap
   test_auth
   test_auth_credential_hash_collision
+  test_mcp_auth_reject_observability
   test_auth_credential_index_cache
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
   test_error_body_wire_shape
+  test_log_ring_bounds
   test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure
@@ -145,6 +147,7 @@
   test_sse_qw
   test_sse_stream
   test_health
+  test_keeper_event_queue_health_actionable
   test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
@@ -191,7 +194,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_keeper_runtime_contract
   test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
@@ -285,6 +287,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
@@ -367,11 +370,13 @@
   test_exec_tap
   test_auth
   test_auth_credential_hash_collision
+  test_mcp_auth_reject_observability
   test_auth_credential_index_cache
   test_auth_error_kind
   test_auth_error_kind_dashboard_fallback
   test_mcp_error_code
   test_error_body_wire_shape
+  test_log_ring_bounds
   test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure
@@ -448,6 +453,7 @@
   test_sse_qw
   test_sse_stream
   test_health
+  test_keeper_event_queue_health_actionable
   test_keeper_hooks_agent_core_log_shape
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
@@ -494,7 +500,6 @@
   test_ide_canonical_url_join
   test_ide_lsp_join_key
   test_ide_diagnostics
-  test_keeper_runtime_contract
   test_goal_scope_terminal_phase
   test_claimable_task_summaries
   test_schema_surface_index
@@ -588,6 +593,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
@@ -1061,6 +1067,8 @@
   test_board_dispatch
   test_board_sort
   test_board_vote_persistence
+  test_board_comment_post_write_ahead
+  test_board_sub_board_write_ahead
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle
@@ -1111,6 +1119,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
+  test_keeper_goal_reconciliation_target
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
@@ -1200,6 +1209,8 @@
   test_board_dispatch
   test_board_sort
   test_board_vote_persistence
+  test_board_comment_post_write_ahead
+  test_board_sub_board_write_ahead
   test_board_karma_ledger
   test_workspace_task_delete
   test_workspace_task_lifecycle
@@ -1250,6 +1261,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
+  test_keeper_goal_reconciliation_target
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
@@ -1601,6 +1613,7 @@
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
 
+(include stanzas/test_keeper_list_truncation.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)
@@ -1652,6 +1665,7 @@
 (include stanzas/test_channel_gate.inc)
 
 (include stanzas/test_channel_gate_discord_state.inc)
+(include stanzas/test_channel_gate_slack_state.inc)
 
 (include stanzas/test_channel_gate_metrics.inc)
 
@@ -1710,6 +1724,12 @@
 (include stanzas/test_context_max_observed_9953.inc)
 
 (include stanzas/test_otel_runtime_observables.inc)
+
+(include stanzas/test_keeper_scheduled_stimulus_channel.inc)
+
+(include stanzas/test_server_dashboard_runtime_observables.inc)
+
+(include stanzas/test_keeper_thinking_observation.inc)
 
 (include stanzas/test_otel_port_ssot.inc)
 
@@ -1797,6 +1817,8 @@
 (include stanzas/test_git_fetch_retry_script.inc)
 
 (include stanzas/test_goal_phase_all.inc)
+
+(include stanzas/test_goal_verification_gate.inc)
 
 
 
@@ -2561,6 +2583,8 @@
 (include stanzas/test_dashboard_continuity_briefs.inc)
 
 (include stanzas/test_verification_run_registry.inc)
+
+(include stanzas/test_verifier_exact_lane.inc)
 
 (include stanzas/test_completion_authority_retry_policy.inc)
 

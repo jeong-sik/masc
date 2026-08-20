@@ -49,12 +49,23 @@ let with_isolated_runtime_env f =
 
 let with_default_runtime_id_hook f =
   let previous = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+  let previous_lane_slots =
+    Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+  in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Workspace_hooks.get_default_runtime_id_fn previous)
+      Atomic.set Workspace_hooks.get_default_runtime_id_fn previous;
+      Atomic.set
+        Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+        previous_lane_slots)
     (fun () ->
       Atomic.set Workspace_hooks.get_default_runtime_id_fn
         (fun () -> "test-evaluator-runtime");
+      (* RFC-0361 D7(a): completion review resolves only the verifier_exact
+         lane, so the review-driving tests below must supply its slots. *)
+      Atomic.set
+        Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+        (fun () -> Ok [ "test-evaluator-runtime" ]);
       f ())
 
 let make_ctx base_path =
@@ -105,6 +116,9 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
   let previous_default_runtime =
     Atomic.get Workspace_hooks.get_default_runtime_id_fn
   in
+  let previous_lane_slots =
+    Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+  in
   let previous_observe_task_transition =
     Atomic.get Workspace_hooks.observe_task_transition_fn
   in
@@ -119,6 +133,9 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
       Ok (Some Task.Anti_rationalization.Approve));
   Atomic.set Workspace_hooks.get_default_runtime_id_fn
     (fun () -> "test-evaluator-runtime");
+  Atomic.set
+    Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    (fun () -> Ok [ "test-evaluator-runtime" ]);
   Atomic.set Workspace_hooks.observe_task_transition_fn
     (fun config ~agent_name ~task_id ~transition ~details:_ ->
       match transition with
@@ -132,6 +149,9 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_default_runtime;
+      Atomic.set
+        Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+        previous_lane_slots;
       Atomic.set Workspace_hooks.observe_task_transition_fn
         previous_observe_task_transition;
       Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer)

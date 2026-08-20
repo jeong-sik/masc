@@ -46,7 +46,6 @@ let make_goal id title =
     Goal_store.id; title;
     metric = None; target_value = None; due_date = None;
     priority = 3; phase = Goal_phase.Executing;
-    parent_goal_id = None;
     last_review_note = None; last_review_at = None; owner = None;
     created_at = ts; updated_at = ts;
   }
@@ -174,7 +173,6 @@ let test_status_field_no_longer_decodes () =
         ("priority", `Int 3);
         ("status", `String status);
         ("phase", `String phase);
-        ("parent_goal_id", `Null);
         ("last_review_note", `Null);
         ("last_review_at", `Null);
         ("created_at", `String (iso_now ()));
@@ -203,7 +201,8 @@ let test_status_field_no_longer_decodes () =
      the next upsert would overwrite goals.json AND its .last-good mirror with the
      empty state, turning one undecodable row into permanent loss. *)
   (match
-     Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+     Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
+       ~target_value:"1" ~phase:Goal_phase.Paused ()
    with
    | Ok _ -> fail "upsert_goal wrote over an undecodable store"
    | Error msg ->
@@ -220,7 +219,8 @@ let test_status_field_no_longer_decodes () =
 let test_serializer_omits_status () =
   with_workspace @@ fun config ->
   match
-    Goal_store.upsert_goal config ~title:"phase only" ~phase:Goal_phase.Paused ()
+    Goal_store.upsert_goal config ~title:"phase only" ~metric:"m"
+      ~target_value:"1" ~phase:Goal_phase.Paused ()
   with
   | Error msg -> fail msg
   | Ok (goal, _) -> (
@@ -253,8 +253,7 @@ let test_phaseless_row_no_longer_decodes () =
                   ("due_date", `Null);
                   ("priority", `Int 3);
                   ("status", `String "paused");
-                  ("parent_goal_id", `Null);
-                  ("last_review_note", `Null);
+                          ("last_review_note", `Null);
                   ("last_review_at", `Null);
                   ("created_at", `String (iso_now ()));
                   ("updated_at", `String (iso_now ()));
@@ -268,7 +267,7 @@ let test_blocked_phase_serializes_without_status () =
   with_workspace @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Blocked goal"
-            ~phase:Goal_phase.Blocked ()
+            ~metric:"m" ~target_value:"1" ~phase:Goal_phase.Blocked ()
     with
     | Ok payload -> payload
     | Error msg -> fail msg
@@ -282,7 +281,8 @@ let test_blocked_phase_serializes_without_status () =
 let test_list_goals_filters_by_phase () =
   with_workspace @@ fun config ->
   let make title phase =
-    match Goal_store.upsert_goal config ~title ~phase () with
+    match Goal_store.upsert_goal config ~title ~metric:"m" ~target_value:"1"
+            ~phase () with
     | Ok _ -> ()
     | Error msg -> fail msg
   in

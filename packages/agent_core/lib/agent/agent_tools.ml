@@ -70,10 +70,98 @@ let render_tool_names names =
   | _ -> String.concat "," names
 ;;
 
+(* A registered tool name is a bare identifier, so lookup is exact and
+   stays exact. What follows only enriches the reject MESSAGE: when the
+   model fuses arguments into the name slot (masc#29008 live shape:
+   [Execute["argv"]]) or typos a name, echoing the string back gives it
+   nothing to repair with, and the same broken call comes back on the
+   next turn. *)
+let is_tool_name_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | '-' -> true
+  | _ -> false
+;;
+
+(* [Some prefix] when [requested] starts as an identifier but carries
+   trailing non-identifier characters; [None] when it already is a bare
+   identifier. *)
+let identifier_prefix requested =
+  let length = String.length requested in
+  let rec scan i =
+    if i < length && is_tool_name_char requested.[i] then scan (i + 1) else i
+  in
+  let stop = scan 0 in
+  if stop = length then None else Some (String.sub requested 0 stop)
+;;
+
+let levenshtein a b =
+  let la = String.length a
+  and lb = String.length b in
+  let prev = Array.init (lb + 1) Fun.id in
+  let curr = Array.make (lb + 1) 0 in
+  for i = 1 to la do
+    curr.(0) <- i;
+    for j = 1 to lb do
+      let cost = if Char.equal a.[i - 1] b.[j - 1] then 0 else 1 in
+      curr.(j) <- min (min (prev.(j) + 1) (curr.(j - 1) + 1)) (prev.(j - 1) + cost)
+    done;
+    Array.blit curr 0 prev 0 (lb + 1)
+  done;
+  prev.(lb)
+;;
+
+(* Two edits covers the observed miss shapes (transposed or dropped
+   letters) without ever suggesting an unrelated tool for a genuinely
+   unknown name. *)
+let max_suggestion_distance = 2
+
+let closest_registered ~requested ~available =
+  List.fold_left
+    (fun best name ->
+       let distance = levenshtein requested name in
+       if distance > max_suggestion_distance
+       then best
+       else (
+         match best with
+         | Some (best_distance, _) when best_distance <= distance -> best
+         | Some _ | None -> Some (distance, name)))
+    None
+    available
+  |> Option.map snd
+;;
+
 let unknown_tool_failure ~requested ~available =
   let available_preview = render_tool_names available in
-  ( Printf.sprintf "Tool not found: %s. Available tools: %s" requested available_preview
-  , Validation_error )
+  let base =
+    Printf.sprintf "Tool not found: %s. Available tools: %s" requested available_preview
+  in
+  let extras =
+    match identifier_prefix requested with
+    | None ->
+      (match closest_registered ~requested ~available with
+       | None -> []
+       | Some name -> [ Printf.sprintf "Closest registered name: %s." name ])
+    | Some prefix when List.exists (String.equal prefix) available ->
+      [ Printf.sprintf
+          "The name carries extra characters after %S; send the tool name alone and \
+           put arguments in the input object."
+          prefix
+      ]
+    | Some prefix ->
+      (match closest_registered ~requested:prefix ~available with
+       | Some name ->
+         [ Printf.sprintf
+             "The name is not a bare identifier (closest registered name: %s); send \
+              the registered tool name alone and put arguments in the input object."
+             name
+         ]
+       | None ->
+         [ "The name is not a bare identifier; send the registered tool name alone \
+            and put arguments in the input object."
+         ])
+  in
+  (* [base] carries no trailing period, so the sentence join supplies
+     it; with no extras the legacy message stays byte-identical. *)
+  String.concat ". " (base :: extras), Validation_error
 ;;
 
 let resolve_tool_call tool_index name input = name, input, find_in_index tool_index name

@@ -520,6 +520,7 @@ let make_hooks
              ~success:(outcome = Tool_result.Ok) ~duration_ms
              ~model:(current_keeper_model !meta_ref)
              ?agent_name:tctx.agent_name
+             ?turn_kind:tctx.turn_kind
              ?lane:tctx.lane ?tool_choice:tctx.tool_choice
              ?thinking_enabled:tctx.thinking_enabled
              ?thinking_budget:tctx.thinking_budget
@@ -721,6 +722,7 @@ let make_hooks
                 ~success:false ~duration_ms
                 ~model:(current_keeper_model meta)
                 ?agent_name:tctx.agent_name
+                ?turn_kind:tctx.turn_kind
                 ?lane:tctx.lane
                 ~execution_id:(Ids.Execution_id.generate ())
                 ~tool_use_id:(Agent_core.Tool_contract.Invocation.tool_use_id invocation)

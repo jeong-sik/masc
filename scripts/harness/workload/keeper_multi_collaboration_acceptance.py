@@ -52,7 +52,10 @@ COMPOSITION_FIXTURE = (
 )
 SCHEMA = "masc.keeper_multi_collaboration_evidence.v1"
 EXPECTED_ROLES = {"coordinator", "builder-a", "builder-b", "reviewer", "researcher"}
-TOOL_ALIASES = {"tool_write_file": {"tool_write_file", "Write"}}
+TOOL_ALIASES = {
+    "tool_write_file": {"tool_write_file", "Write"},
+    "tool_execute": {"tool_execute", "Execute"},
+}
 
 KNOWN_ASSERTIONS = {
     "all_keepers_live",
@@ -92,6 +95,13 @@ KNOWN_ASSERTIONS = {
     "composition_turn_context_observed",
     "composition_dashboard_browser_observed",
     "persistence_tiers_dashboard_projection_observed",
+    "poc_execution_proof_observed",
+    "poc_review_cites_execution",
+    "debate_restatement_faithful",
+    "debate_verdict_cites_rebuttal",
+    "qa_coverage_execution_observed",
+    "qa_coverage_passes_verification",
+    "qa_coverage_review_matches_spec",
 }
 
 
@@ -519,12 +529,12 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
-    if not isinstance(missions, list) or len(missions) != 19:
-        raise AcceptanceError("mission catalog must contain exactly 19 missions")
+    if not isinstance(missions, list) or len(missions) != 22:
+        raise AcceptanceError("mission catalog must contain exactly 22 missions")
     ids = [mission.get("id") for mission in missions]
-    expected_ids = [f"RW{index:02d}" for index in range(1, 20)]
+    expected_ids = [f"RW{index:02d}" for index in range(1, 23)]
     if ids != expected_ids:
-        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW19")
+        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW22")
     roles = catalog.get("roles")
     if not isinstance(roles, list) or set(roles) != EXPECTED_ROLES:
         raise AcceptanceError("catalog must define the exact five collaboration roles")
@@ -733,6 +743,25 @@ class MissionRun:
         self.run_id = run_id
         self.slug = safe_slug(run_id, 16)
         self.marker = f"keeper-collab-{self.slug}"
+        # RW20/RW21 tokens. Deterministic per run so evaluators match them
+        # exactly; the debate tokens are handed only to their originator's
+        # prompt, so a responder can produce them only by reading the Board.
+        self.poc_output_token = f"POC_OUTPUT={self.marker}-executed"
+        self.debate_claim_token = f"{self.marker}-position-A"
+        self.debate_rebuttal_token = f"{self.marker}-counter-B"
+        # RW22 tokens. The declared scope is a fixed set of cases; the
+        # tester never receives them, so the only way its report can name
+        # all three is to have actually run the artifact.
+        # Each case is a distinct transform over its own input, and every
+        # result is emitted as "<case>=<value>". The prefix keeps a short
+        # result (the length case is a two-digit number) from matching by
+        # accident anywhere on the Board.
+        qa_inputs = tuple(f"{self.marker}-case-{index}" for index in (1, 2, 3))
+        self.qa_cases = (
+            ("upper", qa_inputs[0], f"upper={qa_inputs[0].upper()}"),
+            ("length", qa_inputs[1], f"length={len(qa_inputs[1])}"),
+            ("reverse", qa_inputs[2], f"reverse={qa_inputs[2][::-1]}"),
+        )
         self.runtime_id = runtime_id
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
@@ -875,6 +904,8 @@ class MissionRun:
             "reviewer": "Review the shared Board thread and task evidence",
             "contention": "Resolve a single-owner concurrent claim",
             "fallback": "Continue useful work after losing a concurrent claim",
+            "qa-implement": "Implement the declared coverage cases",
+            "qa-test": "Run every declared case and report the outputs",
         }
         for key, title in task_specs.items():
             observation = self.call(
@@ -1204,6 +1235,162 @@ class MissionRun:
             ),
         )
 
+    def run_poc_delivery(self, post_id: str) -> None:
+        # RW20: the completion claim must be an execution log, not a file's
+        # existence. The requester posts the requirement, the builder writes
+        # AND runs the artifact so the expected output token lands in a
+        # durable Execute tool row, and the reviewer quotes that token back.
+        # The reviewer's prompt does not carry the token wording as a fait
+        # accompli claim — but the token itself is deterministic so the
+        # evaluator can match it exactly without semantic classification.
+        output_token = self.poc_output_token
+        self.run_turn(
+            "researcher",
+            "poc-request",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 POC_REQUEST={self.marker}-poc comment를 남기세요. "
+                f"요구 내용: 실행하면 정확히 '{output_token}' 한 줄을 출력하는 스크립트."
+            ),
+        )
+        self.run_turn(
+            "builder-a",
+            "poc-implement",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Write(tool_write_file)로 playground의 artifacts/{self.marker}-poc.sh에 "
+                f"정확히 '{output_token}' 한 줄을 출력하는 셸 스크립트를 쓰세요. "
+                "그 다음 Execute(tool_execute)로 그 스크립트를 실제로 실행해 출력을 확인하고, "
+                f"Board post {post_id}에 실행에서 얻은 출력 그대로 POC_EXECUTED=<출력의 = 뒤 값> "
+                "comment를 남기세요. 실행 없이 완료를 주장하지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "poc-review",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 POC_REQUEST와 POC_EXECUTED comment를 읽고, "
+                "실행 출력이 요구와 일치하는지 확인한 뒤 POC_REVIEW_CONFIRMS=<POC_EXECUTED의 값 그대로> "
+                "comment를 남기세요. 값을 새로 만들지 말고 board에서 읽은 값만 인용하세요."
+            ),
+        )
+
+    def run_debate(self, post_id: str) -> None:
+        # RW21: the restatement and citation tokens are deliberately absent
+        # from the responder prompts — the only way to produce them is to
+        # read the opposing comment on the Board, which is what the mission
+        # verifies (the same mechanism context_secret_recalled uses).
+        claim_token = self.debate_claim_token
+        rebuttal_token = self.debate_rebuttal_token
+        self.run_turn(
+            "builder-a",
+            "debate-claim",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 DEBATE_CLAIM={claim_token} comment를 남기고, "
+                "같은 comment에 '실패한 source는 즉시 재시도해야 한다'는 입장을 한 문장으로 쓰세요."
+            ),
+        )
+        self.run_turn(
+            "builder-b",
+            "debate-rebut",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 DEBATE_CLAIM comment를 찾아 읽으세요. "
+                "하나의 comment 안에 먼저 DEBATE_RESTATE=<읽은 DEBATE_CLAIM의 = 뒤 값 그대로>로 "
+                f"상대 주장을 재진술한 뒤, DEBATE_REBUTTAL={rebuttal_token}과 함께 "
+                "그 입장에 반대하는 구체적 근거 한 문장을 쓰세요. 재진술 값을 추측하지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "debate-verdict",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 DEBATE_CLAIM과 DEBATE_REBUTTAL comment를 모두 읽고, "
+                "어느 쪽이 더 설득력 있는지 한 문장으로 판정한 뒤 "
+                "DEBATE_VERDICT_CITES=<읽은 DEBATE_REBUTTAL의 = 뒤 값 그대로> comment를 남기세요. "
+                "인용 값을 추측하지 마세요."
+            ),
+        )
+
+    def run_qa_coverage(self, post_id: str) -> None:
+        # RW22: coverage is a claim about a declared set, so the mission fixes
+        # the set first and then requires every member of it to appear in a
+        # real execution.
+        #
+        # Two things keep this from degenerating into the very anti-pattern it
+        # exists to catch. The cases carry different behaviours rather than
+        # echoing a token, so covering all three means three distinct
+        # transforms actually ran — a script that prints constants covers
+        # nothing. And the work enters the typed verification flow: each side
+        # claims its own Task on the shared Goal and submits evidence through
+        # keeper_task_done, so "done" is a submission for verification rather
+        # than a self-declaration.
+        #
+        # Neither builder nor tester receives the expected outputs. The builder
+        # is told the transform rule, the tester is told nothing but the path,
+        # and the evaluator computes the expected values independently.
+        rules = "; ".join(
+            f"{name}: 입력 '{source}' 을 "
+            + {
+                "upper": "전부 대문자로 바꿔",
+                "length": "그 길이(문자 수)를",
+                "reverse": "문자 순서를 뒤집어",
+            }[name]
+            + " 계산해 '<케이스이름>=<결과>' 한 줄로 출력"
+            for name, source, _ in self.qa_cases
+        )
+        self.run_turn(
+            "researcher",
+            "qa-spec",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 QA_SCOPE={rules} comment를 남기세요. "
+                "이 세 케이스가 이번 검증의 전체 대상 범위입니다."
+            ),
+        )
+        self.run_turn(
+            "builder-a",
+            "qa-implement",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"exact Task {self.task_ids['qa-implement']}를 claim하세요. "
+                f"Board post {post_id}의 QA_SCOPE를 읽고, Write(tool_write_file)로 "
+                f"playground의 artifacts/{self.marker}-qa.sh에 셸 스크립트를 쓰세요. "
+                "스크립트는 세 케이스를 각각 수행해 '<케이스이름>=<결과>' 형태로 "
+                "한 줄씩 출력해야 합니다. 값을 상수로 박지 말고 입력에서 실제로 변환하세요. "
+                f"작성 후 keeper_task_done으로 그 파일을 evidence로 제출하고 "
+                f"Board post {post_id}에 QA_IMPLEMENTED={self.marker}-qa.sh comment를 남기세요."
+            ),
+        )
+        self.run_turn(
+            "builder-b",
+            "qa-test",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"exact Task {self.task_ids['qa-test']}를 claim하세요. "
+                f"Execute(tool_execute)로 playground의 artifacts/{self.marker}-qa.sh를 "
+                "실제로 실행하고 출력된 줄을 그대로 모으세요. "
+                f"keeper_task_done으로 실행 결과를 evidence로 제출한 뒤 "
+                f"Board post {post_id}에 QA_COVERAGE_RAN=<출력된 값들을 쉼표로 이어서> "
+                "comment를 남기세요. 실행하지 않은 값을 적지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "qa-review",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 QA_SCOPE와 QA_COVERAGE_RAN을 읽고 "
+                "선언된 케이스 수와 실행이 낸 값의 수를 대조하세요. "
+                "전부 덮었으면 QA_COVERAGE_VERDICT=COMPLETE:<실행이 낸 값들 그대로>, "
+                "빠졌으면 QA_COVERAGE_VERDICT=MISSING:<빠진 케이스 이름> comment를 남기세요. "
+                "Board에서 읽은 값만 쓰고 새로 만들지 마세요."
+            ),
+        )
+
     def restart_and_recall(self, post_id: str) -> None:
         self.writer.write_json(
             "keeper-status/coordinator-before-restart.json",
@@ -1367,6 +1554,41 @@ class MissionRun:
                 {"tool": "masc_task_history", "text": observation.text, "data": observation.data},
             )
 
+    def _completion_verdict(self, key: str) -> tuple[bool, str]:
+        """Whether this task's own history shows it passed verification.
+
+        Submitting is not completing. keeper_task_done issues
+        submit_for_verification, and the completion authority then approves or
+        rejects — live records show 41 approvals against 35 rejections, so the
+        verdict is a real judgement rather than a rubber stamp. A mission that
+        only checked the submission tool call would pass on rejected work.
+
+        The detail distinguishes rejected from still-unjudged, because those
+        need different follow-up.
+        """
+        observation = self.observations.get(f"task-history-{key}")
+        entries = getattr(observation, "data", None)
+        verdicts = [
+            entry
+            for entry in (entries if isinstance(entries, list) else [])
+            if isinstance(entry, dict)
+            and entry.get("type") == "task_completion_verdict"
+        ]
+        for entry in verdicts:
+            if (
+                entry.get("from_status") == "awaiting_verification"
+                and entry.get("to_status") == "done"
+                and entry.get("verification_id")
+            ):
+                return True, f"{key}=approved({entry['verification_id']})"
+        if verdicts:
+            last = verdicts[-1]
+            return (
+                False,
+                f"{key}={last.get('from_status')}->{last.get('to_status')}",
+            )
+        return False, f"{key}=no_verdict"
+
     def _status_text(self, role: str) -> str:
         return json.dumps(self.statuses.get(role), ensure_ascii=False).lower()
 
@@ -1413,6 +1635,9 @@ class MissionRun:
         task_text = json.dumps(tasks, ensure_ascii=False)
         goal_text = json.dumps(goals, ensure_ascii=False)
         history_text = json.dumps(histories, ensure_ascii=False)
+        qa_verdicts = [
+            self._completion_verdict(key) for key in ("qa-implement", "qa-test")
+        ]
         parallel_turns = [
             turn for label, turn in self.turns.items() if label.startswith("parallel-")
         ]
@@ -1436,7 +1661,63 @@ class MissionRun:
                 if isinstance(row.get("ts"), (int, float))
                 and turn.started_epoch_seconds <= float(row["ts"])
                 <= turn.finished_epoch_seconds
+                and is_submitted_turn_row(row)
             ]
+
+        def is_submitted_turn_row(row: dict[str, Any]) -> bool:
+            # The mission prompt reaches a keeper only through a submitted
+            # turn. Its autonomous cycle receives "Continue." and calls the
+            # same tools with the same trace_id, so before rows carried
+            # turn_kind (masc#28977) the only available boundary was the
+            # submission's wall clock — and a keeper that started an
+            # autonomous turn while the harness was submitting had its own
+            # compose runs land outside every window, counted as an
+            # exactly-once violation it never committed. Rows without the
+            # field fail closed: no run is attributable, and the assertion
+            # says so rather than passing on an empty universe.
+            return row.get("turn_kind") == "direct"
+
+        def autonomous_composition_runs(composition_tool: str) -> set[tuple[str, str]]:
+            runs: set[tuple[str, str]] = set()
+            for role, rows in self.tool_call_rows.items():
+                for row in rows:
+                    if row.get("composition_tool") != composition_tool:
+                        continue
+                    if is_submitted_turn_row(row):
+                        continue
+                    run_id = row.get("composition_run_id")
+                    if isinstance(run_id, str) and run_id:
+                        runs.add((role, run_id))
+            return runs
+
+        def successful_windowed_tool(role: str, label: str, tool_name: str) -> bool:
+            # A durable, non-composition tool row of the given name that
+            # succeeded inside the labeled turn's wall-clock window.
+            turn = self.turns.get(label)
+            if turn is None:
+                return False
+            accepted_names = TOOL_ALIASES.get(tool_name, {tool_name})
+            return any(
+                row.get("tool") in accepted_names
+                and row.get("success") is True
+                and not row.get("composition_tool")
+                for row in rows_for_turn(role, turn)
+            )
+
+        def windowed_execute_output_contains(
+            role: str, label: str, needle: str
+        ) -> bool:
+            turn = self.turns.get(label)
+            if turn is None:
+                return False
+            return any(
+                row.get("tool") in TOOL_ALIASES["tool_execute"]
+                and row.get("success") is True
+                and not row.get("composition_tool")
+                and isinstance(row.get("output"), str)
+                and needle in row["output"]
+                for row in rows_for_turn(role, turn)
+            )
 
         def composition_runs(
             composition_tool: str,
@@ -1445,6 +1726,8 @@ class MissionRun:
             for role, rows in self.tool_call_rows.items():
                 for row in rows:
                     if row.get("composition_tool") != composition_tool:
+                        continue
+                    if not is_submitted_turn_row(row):
                         continue
                     run_id = row.get("composition_run_id")
                     if isinstance(run_id, str) and run_id:
@@ -1480,6 +1763,9 @@ class MissionRun:
 
         inline_runs = composition_runs("keeper_compose_mission-snapshot")
         async_runs = composition_runs("keeper_compose_background-snapshot")
+        autonomous_inline_runs = autonomous_composition_runs(
+            "keeper_compose_mission-snapshot"
+        )
         composition_rows = [row for rows in inline_runs.values() for row in rows]
         inline_turn_runs: dict[str, tuple[str, list[dict[str, Any]]]] = {}
         inline_turn_errors: list[str] = []
@@ -1995,7 +2281,8 @@ class MissionRun:
                 and inline_row_universe_exact
                 and inline_action_identities_globally_unique,
                 f"exact completed inline runs={len(inline_turn_runs)}/14 "
-                f"errors={inline_turn_errors} unattributed={sorted(unattributed_inline_runs)}",
+                f"errors={inline_turn_errors} unattributed={sorted(unattributed_inline_runs)} "
+                f"autonomous={sorted(autonomous_inline_runs)}",
             ),
             "composition_parallel_schedule_observed": (
                 parallel_schedule_observed,
@@ -2058,6 +2345,97 @@ class MissionRun:
                 persistence_projection_passed,
                 persistence_projection_detail,
             ),
+            "poc_execution_proof_observed": (
+                successful_windowed_tool("builder-a", "poc-implement", "tool_write_file")
+                and windowed_execute_output_contains(
+                    "builder-a", "poc-implement", self.poc_output_token
+                )
+                and text_contains(board, f"POC_EXECUTED={self.marker}-executed"),
+                "builder-a wrote the artifact, a durable Execute row carries the "
+                "expected output token, and the Board claim quotes that execution",
+            ),
+            "poc_review_cites_execution": (
+                text_contains(board, f"POC_REVIEW_CONFIRMS={self.marker}-executed")
+                and successful_windowed_tool(
+                    "reviewer", "poc-review", "masc_board_comment"
+                ),
+                "reviewer's own comment quotes the executed output token read "
+                "from the Board",
+            ),
+            "debate_restatement_faithful": (
+                text_contains(
+                    board, f"DEBATE_RESTATE={self.debate_claim_token}"
+                )
+                and successful_windowed_tool(
+                    "builder-b", "debate-rebut", "masc_board_comment"
+                )
+                and text_contains(
+                    board, f"DEBATE_REBUTTAL={self.debate_rebuttal_token}"
+                ),
+                "builder-b restated the exact claim token (absent from its "
+                "prompt, readable only on the Board) before rebutting",
+            ),
+            "qa_coverage_execution_observed": (
+                successful_windowed_tool(
+                    "builder-a", "qa-implement", "tool_write_file"
+                )
+                and all(
+                    windowed_execute_output_contains(
+                        "builder-b", "qa-test", expected
+                    )
+                    for _, _, expected in self.qa_cases
+                ),
+                "every declared case produced its transformed result in "
+                "builder-b's durable Execute output, not only in a claim: ran="
+                + ",".join(
+                    name
+                    for name, _, expected in self.qa_cases
+                    if windowed_execute_output_contains(
+                        "builder-b", "qa-test", expected
+                    )
+                )
+                + " declared="
+                + ",".join(name for name, _, _ in self.qa_cases),
+            ),
+            "qa_coverage_passes_verification": (
+                all(
+                    successful_windowed_tool(role, label, tool)
+                    for role, label in (
+                        ("builder-a", "qa-implement"),
+                        ("builder-b", "qa-test"),
+                    )
+                    for tool in ("keeper_task_claim", "keeper_task_done")
+                )
+                and all(passed for passed, _ in qa_verdicts),
+                "implementer and tester each claimed their own Task on the "
+                "shared Goal, submitted evidence through keeper_task_done, and "
+                "an independent completion authority carried both from "
+                "awaiting_verification to done: "
+                + " ".join(detail for _, detail in qa_verdicts),
+            ),
+            "qa_coverage_review_matches_spec": (
+                text_contains(board, "QA_COVERAGE_VERDICT=COMPLETE:")
+                and all(
+                    text_contains(board, expected)
+                    for _, _, expected in self.qa_cases
+                )
+                and successful_windowed_tool(
+                    "reviewer", "qa-review", "masc_board_comment"
+                ),
+                "reviewer compared the declared scope against the run and "
+                "reported COMPLETE quoting every transformed result read from "
+                "the Board",
+            ),
+            "debate_verdict_cites_rebuttal": (
+                text_contains(
+                    board, f"DEBATE_VERDICT_CITES={self.debate_rebuttal_token}"
+                )
+                and successful_windowed_tool(
+                    "reviewer", "debate-verdict", "masc_board_comment"
+                ),
+                "reviewer's verdict quotes the rebuttal token (absent from its "
+                "prompt, readable only on the Board)",
+            ),
         }
         malformed = [
             name
@@ -2078,6 +2456,9 @@ class MissionRun:
         self.run_parallel_wave(post_id)
         self.run_contention(post_id)
         self.run_failure_recovery(post_id)
+        self.run_poc_delivery(post_id)
+        self.run_debate(post_id)
+        self.run_qa_coverage(post_id)
         self.run_continuity_chain(post_id)
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()

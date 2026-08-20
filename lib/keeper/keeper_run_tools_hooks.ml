@@ -60,6 +60,7 @@ type ctx =
   ; keeper_tools_cleanup : unit -> unit
   ; terminal_effect_state : unit -> Keeper_tools_agent_core.terminal_effect_state
   ; keeper_turn_id : int
+  ; turn_kind : Turn_record.turn_kind
   ; meta : Keeper_meta_contract.keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
@@ -227,6 +228,7 @@ let assemble_hooks
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let terminal_effect_state = ctx.terminal_effect_state in
   let keeper_turn_id = ctx.keeper_turn_id in
+  let turn_kind = ctx.turn_kind in
   let meta = ctx.meta in
   let turn_ctx_cell = ctx.turn_ctx_cell in
   let final_agent_core_turn_ordinal_ref = ctx.final_agent_core_turn_ordinal_ref in
@@ -522,6 +524,7 @@ let assemble_hooks
                 Keeper_tool_call_log.set_turn_context
                   ~cell:turn_ctx_cell
                   ~agent_name:meta.agent_name
+                  ~turn_kind
                   ~lane:
                     (Keeper_agent_tool_surface.turn_lane_to_string lane)
                   ?tool_choice:

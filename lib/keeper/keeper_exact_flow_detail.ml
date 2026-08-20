@@ -8,8 +8,11 @@ let execution_cause_detail : Exact_output.execution_error_cause -> string = func
   | Clock_required_for_timeout -> "clock required for timeout"
   | Frozen_request_mismatch -> "frozen request mismatch"
   | Completion_failed -> "completion failed"
-  | Serialized_request_refused { http_status } ->
-    Printf.sprintf "serialized request refused (http_status=%d)" http_status
+  | Provider_response_refused { http_status; refusal } ->
+    Printf.sprintf
+      "provider refused (http_status=%d refusal=%s)"
+      http_status
+      (Exact_output.provider_refusal_to_string refusal)
   | Incomplete_output -> "incomplete output"
   | Missing_output -> "missing output"
   | Ambiguous_output count -> Printf.sprintf "ambiguous output (candidates=%d)" count

@@ -55,11 +55,17 @@ function expectDrift(value: unknown): GateKeepersSchemaDriftError {
   return error
 }
 
+// The listing half of the envelope. Present on every valid fixture so a
+// drift assertion below fails for the reason it names, not for a missing
+// field. masc#29077.
+const listingWire = (total: number) => ({ total, limit: 200, truncated: false })
+
 describe('decodeGateKeepers', () => {
   it('decodes the current detailed wire shape into concrete product values', () => {
     const data = Effect.runSync(decodeGateKeepers({
       count: 1,
       keepers: [keeperWire()],
+      ...listingWire(1),
     }))
 
     expect(data).toEqual({
@@ -69,6 +75,7 @@ describe('decodeGateKeepers', () => {
         status: 'running',
       }],
       directoryIssues: [],
+      listing: { total: 1, limit: 200, truncated: false },
     })
   })
 
@@ -76,6 +83,7 @@ describe('decodeGateKeepers', () => {
     const data = Effect.runSync(decodeGateKeepers({
       count: 2,
       keepers: [keeperWire(), issueWire()],
+      ...listingWire(2),
     }))
 
     expect(data.keepers.map(keeper => keeper.name)).toEqual(['planner'])
@@ -99,6 +107,7 @@ describe('decodeGateKeepers', () => {
         autoboot_enabled: false,
         proactive_enabled: false,
       }],
+      ...listingWire(1),
     }))
 
     expect(data).toEqual({
@@ -107,6 +116,7 @@ describe('decodeGateKeepers', () => {
         keeperName: 'broken',
         message: 'invalid keeper config',
       }],
+      listing: { total: 1, limit: 200, truncated: false },
     })
   })
 
@@ -115,30 +125,47 @@ describe('decodeGateKeepers', () => {
     const data = Effect.runSync(decodeGateKeepers({
       count: 1,
       keepers: [{ ...row, agent_name: row.name }],
+      ...listingWire(1),
     }))
 
     expect(data.keepers[0]?.runtimeLabel).toBe('')
   })
 
   it('accepts an explicit empty directory', () => {
-    expect(Effect.runSync(decodeGateKeepers({ count: 0, keepers: [] })))
-      .toEqual({ keepers: [], directoryIssues: [] })
+    expect(Effect.runSync(decodeGateKeepers({
+      count: 0,
+      keepers: [],
+      ...listingWire(0),
+    }))).toEqual({
+      keepers: [],
+      directoryIssues: [],
+      listing: { total: 0, limit: 200, truncated: false },
+    })
   })
 
   it.each([
     ['missing outer fields', {}],
     ['non-object payload', null],
-    ['malformed row', { count: 1, keepers: [{ name: 'orphan' }] }],
+    ['malformed row', { count: 1, keepers: [{ name: 'orphan' }], ...listingWire(1) }],
     ['excess row property', {
       count: 1,
       keepers: [{ ...keeperWire(), unexpected: true }],
+      ...listingWire(1),
+    }],
+    ['a response without the listing fields', {
+      count: 1,
+      keepers: [keeperWire()],
     }],
   ])('rejects %s instead of defaulting or dropping data', (_name, value) => {
     expectDrift(value)
   })
 
   it('rejects a count that disagrees with the returned rows', () => {
-    const error = expectDrift({ count: 2, keepers: [keeperWire()] })
+    const error = expectDrift({
+      count: 2,
+      keepers: [keeperWire()],
+      ...listingWire(2),
+    })
     expect(error.message).toContain('count')
     expect(error.message).toContain('keepers.length')
   })
@@ -148,6 +175,7 @@ describe('decodeGateKeepers', () => {
     const error = expectDrift({
       count: 1,
       keepers: [{ ...row, meta: { ...row.meta, name: 'other' } }],
+      ...listingWire(1),
     })
     expect(error.message).toContain('keepers.0.meta.name')
   })
@@ -163,6 +191,7 @@ describe('decodeGateKeepers', () => {
           keeper: 'other',
         },
       }],
+      ...listingWire(1),
     })
     expect(error.message).toContain('effective_meta_error.keeper')
   })

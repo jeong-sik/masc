@@ -690,6 +690,7 @@ let test_spawn_failure_is_pre_dispatch () =
                   in
                   let attempt =
                     Keeper_antigravity_runtime.run
+                      ~pre_tool_rejects:(ref [])
                       ~runtime_id:"antigravity.gemini"
                       ~keeper_name:"antigravity-pre-dispatch"
                       ~base_path

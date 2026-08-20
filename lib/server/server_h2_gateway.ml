@@ -517,6 +517,14 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
                 | Ok () ->
                     (match auth_result with
                      | Error failure ->
+                         Server_mcp_transport_http_respond
+                         .record_mcp_auth_reject
+                           ~endpoint:
+                             ("h2 POST "
+                             ^ Server_mcp_transport_http.profile_label profile)
+                           ~claimed_agent:(agent_from_request httpun_request)
+                           ~token_presented:(Option.is_some auth_token)
+                           ~session_id:(Some session_id) failure;
                          let body = mcp_auth_error_body failure in
                          h2_respond_json h2_reqd body ~status:`Unauthorized
                            ~extra_headers:
@@ -664,6 +672,14 @@ let make_request_handler ~trust_policy ~sw ~clock ~server_start_time:_ =
           in
           (match auth_result with
            | Error failure ->
+               Server_mcp_transport_http_respond.record_mcp_auth_reject
+                 ~endpoint:
+                   ("h2 DELETE "
+                   ^ Server_mcp_transport_http.profile_label profile)
+                 ~claimed_agent:(agent_from_request httpun_request)
+                 ~token_presented:
+                   (Option.is_some (auth_token_from_request httpun_request))
+                 ~session_id:session_id_opt failure;
                let body = mcp_auth_error_body failure in
                h2_respond_json h2_reqd body ~status:`Unauthorized
                  ~extra_headers:

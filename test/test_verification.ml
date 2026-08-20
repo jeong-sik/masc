@@ -107,6 +107,70 @@ let test_verdict_event_preserves_typed_authority () =
      | `Assoc fields -> List.mem_assoc "verifier" fields
      | _ -> Alcotest.fail "verdict event must be an object")
 
+(* The stalled-review board projection is the only surface that tells the
+   assignee a non-retryable deferral happened and how to move forward.
+   Pin the content naming both forward paths and the typed metadata. *)
+let test_stalled_projection_names_forward_paths () =
+  let content =
+    VP.For_testing.stalled_board_content
+      ~task_id:"task-101"
+      ~verification_id:"vrf-101"
+      ~gate:"artifact_unreadable"
+      ~detail:"evidence path escapes the playground"
+  in
+  let contains needle =
+    let nl = String.length needle and hl = String.length content in
+    let rec loop i =
+      i + nl <= hl
+      && (String.equal (String.sub content i nl) needle || loop (i + 1))
+    in
+    nl = 0 || loop 0
+  in
+  List.iter
+    (fun needle ->
+       Alcotest.(check bool)
+         (Printf.sprintf "content names %S" needle)
+         true
+         (contains needle))
+    [ "task-101"
+    ; "vrf:vrf-101"
+    ; "artifact_unreadable"
+    ; "evidence path escapes the playground"
+    ; "submit_for_verification"
+    ; "HITL"
+    ]
+
+let test_stalled_metadata_preserves_typed_authority () =
+  let metadata =
+    VP.For_testing.stalled_metadata
+      ~authority:(Masc_domain.System_llm_agent { agent_run_id = "agent_core-agent-run-9" })
+      ~task_id:"task-102"
+      ~verification_id:"vrf-102"
+      ~gate:"review_preparation"
+      ~detail:"required artifact list is empty"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "metadata type"
+    "verification_stalled"
+    (metadata |> member "type" |> to_string);
+  Alcotest.(check string)
+    "task id"
+    "task-102"
+    (metadata |> member "task_id" |> to_string);
+  Alcotest.(check string)
+    "authority kind"
+    "system_llm_agent"
+    (metadata |> member "authority_kind" |> to_string);
+  Alcotest.(check string)
+    "gate"
+    "review_preparation"
+    (metadata |> member "gate" |> to_string);
+  Alcotest.(check string)
+    "detail"
+    "required artifact list is empty"
+    (metadata |> member "detail" |> to_string)
+
 let test_rejected_verdict_event_preserves_wire_type () =
   let event =
     VP.For_testing.verdict_event_json
@@ -659,6 +723,9 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+    let previous_lane_slots =
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
     in
@@ -672,6 +739,9 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
         Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted;
@@ -681,6 +751,12 @@ let test_system_llm_agent_commits_without_a_keeper_verifier () =
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
+        (* RFC-0361 D7(a): the completion-authority review resolves only the
+           verifier_exact lane; the default runtime hook above no longer
+           reaches it. *)
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          (fun () -> Ok [ "test-system-evaluator" ]);
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
@@ -906,6 +982,9 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Prompt_registry.set_markdown_dir prompt_dir;
     Masc.Prompt_defaults.init ();
     let previous_runtime = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+    let previous_lane_slots =
+      Atomic.get Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+    in
     let previous_reviewer =
       Atomic.get Masc.Task.Anti_rationalization.run_llm_reviewer_fn
     in
@@ -916,12 +995,18 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_runtime;
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          previous_lane_slots;
         Atomic.set Masc.Task.Anti_rationalization.run_llm_reviewer_fn previous_reviewer;
         Atomic.set Workspace_hooks.verification_notify_verdict_fn previous_notification;
         Atomic.set Workspace_hooks.verification_submitted_fn previous_submitted)
       (fun () ->
         Atomic.set Workspace_hooks.get_default_runtime_id_fn
           (fun () -> "test-system-evaluator");
+        Atomic.set
+          Workspace_hooks.get_verifier_exact_lane_slot_ids_fn
+          (fun () -> Ok [ "test-system-evaluator" ]);
         Eio.Switch.run (fun sw ->
           let reviewer_called, resolve_reviewer_called = Eio.Promise.create () in
           let verdict_committed, resolve_verdict_committed = Eio.Promise.create () in
@@ -1114,10 +1199,11 @@ let test_rejected_verdict_audit_preserves_reason () =
         "system_llm_agent"
         (json |> member "authority_kind" |> to_string))
 
-(* The judging runtime is the only axis a verdict history can be grouped on:
-   [authority_actor] is minted fresh per review, so 74 verdicts carry 74 distinct
-   actors. The runtime was already computed and carried inside the review notes
-   blob, but every structured projection dropped it. *)
+(* The judging runtime is the axis a verdict history can be grouped on:
+   since RFC-0361 D7(b) [authority_actor] is the fixed [verifier_exact]
+   identity, so 74 verdicts carry one actor. The runtime was already computed
+   and carried inside the review notes blob, but every structured projection
+   dropped it. *)
 let test_verdict_audit_names_the_judging_runtime () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -1155,7 +1241,7 @@ let test_verdict_audit_names_the_judging_runtime () =
          ~verdict:Masc_domain.Verdict_approved
          ~task_id:"task-001"
          ~verification_id:"vrf-runtime-named"
-         ~evaluator_runtime:"cross-verifier-model"
+         ~evaluator_runtime:"judge-runtime-model"
          ()
      with
      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
@@ -1182,12 +1268,57 @@ let test_verdict_audit_names_the_judging_runtime () =
       let open Yojson.Safe.Util in
       Alcotest.(check string)
         "audit names the runtime that judged"
-        "cross-verifier-model"
+        "judge-runtime-model"
         (json |> member "evaluator_runtime" |> to_string);
       Alcotest.(check string)
         "audit still carries the run-scoped actor"
         "system-runtime-agent"
         (json |> member "authority_actor" |> to_string))
+;;
+
+(* RFC-0361 D7(b): the completion authority no longer mints a random actor
+   per judgement. N judgements registered with the agent's authority identity
+   must all record the same fixed [authority_actor] — the [verifier_exact]
+   lane id — so verdicts aggregate by actor; run identity stays with
+   [verification_id]. *)
+let test_judgements_share_fixed_authority_actor () =
+  let module R = Masc.Verification_run_registry in
+  let registry = R.create () in
+  let authority =
+    Masc_domain.System_llm_agent
+      { agent_run_id = CA.For_testing.authority_actor }
+  in
+  for i = 1 to 3 do
+    let verification_id = Printf.sprintf "vrf-fixed-actor-%d" i in
+    R.register_running
+      registry
+      ~verification_id
+      ~task_id:(Printf.sprintf "task-fixed-actor-%d" i)
+      ~producer:"keeper-producer-agent"
+      ~authority_kind:(Masc_domain.completion_authority_kind authority)
+      ~authority_actor:(Masc_domain.completion_authority_actor authority)
+      ~started_at:(100.0 +. Float.of_int i);
+    R.mark_completed
+      registry
+      ~verification_id
+      ~outcome:R.Approved
+      ~tools:[]
+      ~elapsed_s:1.0
+      ()
+  done;
+  let actors =
+    R.list_runs registry
+    |> List.map (fun (run : R.run) -> run.authority_actor)
+    |> List.sort_uniq String.compare
+  in
+  Alcotest.(check int)
+    "all three judgements were recorded"
+    3
+    (List.length (R.list_runs registry));
+  Alcotest.(check (list string))
+    "every judgement records the same fixed authority actor"
+    [ "verifier_exact" ]
+    actors
 ;;
 
 let test_raw_workspace_submission_notifies_once () =
@@ -2296,6 +2427,8 @@ let () =
         test_rejected_verdict_audit_preserves_reason;
       Alcotest.test_case "verdict audit names the judging runtime" `Quick
         test_verdict_audit_names_the_judging_runtime;
+      Alcotest.test_case "judgements share the fixed authority actor" `Quick
+        test_judgements_share_fixed_authority_actor;
     ];
     "workspace_boundary", [
       Alcotest.test_case "raw submit notifies once" `Quick
@@ -2310,6 +2443,10 @@ let () =
         test_verdict_event_preserves_typed_authority;
       Alcotest.test_case "rejected verdict keeps wire type" `Quick
         test_rejected_verdict_event_preserves_wire_type;
+      Alcotest.test_case "stalled projection names forward paths" `Quick
+        test_stalled_projection_names_forward_paths;
+      Alcotest.test_case "stalled metadata keeps typed authority" `Quick
+        test_stalled_metadata_preserves_typed_authority;
     ];
     "storage", [
       Alcotest.test_case "create and load" `Quick test_create_and_load;

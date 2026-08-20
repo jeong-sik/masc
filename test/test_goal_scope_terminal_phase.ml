@@ -51,7 +51,8 @@ let make_meta active_goal_ids =
 ;;
 
 let put_goal config ~id ~phase =
-  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id) ~phase () with
+  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id)
+          ~metric:"m" ~target_value:"1" ~phase () with
   | Ok _ -> ()
   | Error msg -> failf "upsert_goal %s failed: %s" id msg
 ;;
@@ -152,12 +153,31 @@ let test_surviving_ids_keep_declaration_order () =
         (surviving config [ "goal-first"; "goal-stale"; "goal-second" ]))
 ;;
 
+(* RFC-0387 stage 2: [Verifying] is NOT terminal and deliberately stays in
+   scope — the gate holds the phase while the proof is judged out-of-band, and
+   pruning it here would erase the goal from the keeper's view at exactly the
+   moment the gate took over (stage-2 review P0-1). *)
+let test_a_verifying_goal_stays_in_scope () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      put_goal config ~id:"goal-verifying" ~phase:Goal_phase.Verifying;
+      check
+        (list string)
+        "a goal under proof review stays in scope"
+        [ "goal-verifying" ]
+        (surviving config [ "goal-verifying" ]))
+;;
+
 let () =
   run
     "goal_scope_terminal_phase"
     [ ( "validate_active_goal_ids"
       , [ test_case "every terminal phase leaves scope" `Quick
             test_every_terminal_phase_leaves_scope
+        ; test_case "a verifying goal stays in scope" `Quick
+            test_a_verifying_goal_stays_in_scope
         ; test_case "a scope of only completed goals is empty" `Quick
             test_a_scope_of_only_completed_goals_is_empty
         ; test_case "reopening a goal returns it to scope" `Quick

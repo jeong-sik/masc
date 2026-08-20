@@ -131,6 +131,9 @@ type blocker_class =
     (** A terminal tool effect failed after the turn's terminal outcome. *)
   | Provider_attempt_effect_fenced
     (** A provider failure cannot be retried without risking a duplicate effect. *)
+  | Tool_correction_lost
+    (** The fenced turn also carried typed pre_tool_use rejections: the
+        model's correction round-trip was the casualty (masc#28885). *)
   | Receipt_persistence_failed
     (** Execution receipt persistence failed. *)
   | Gate_replay_repair_required
@@ -152,6 +155,7 @@ let blocker_class_to_string = function
   | Incomplete_tool_transcript -> "incomplete_tool_transcript"
   | Terminal_effect_failed -> "terminal_effect_failed"
   | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
+  | Tool_correction_lost -> "tool_correction_lost"
   | Receipt_persistence_failed -> "receipt_persistence_failed"
   | Gate_replay_repair_required -> "gate_replay_repair_required"
 ;;
@@ -172,6 +176,7 @@ let blocker_class_of_serialized_string = function
   | "incomplete_tool_transcript" -> Some Incomplete_tool_transcript
   | "terminal_effect_failed" -> Some Terminal_effect_failed
   | "provider_attempt_effect_fenced" -> Some Provider_attempt_effect_fenced
+  | "tool_correction_lost" -> Some Tool_correction_lost
   | "receipt_persistence_failed" -> Some Receipt_persistence_failed
   | "gate_replay_repair_required" -> Some Gate_replay_repair_required
   | _ -> None

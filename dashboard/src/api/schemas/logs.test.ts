@@ -51,6 +51,11 @@ function currentWire(entries: readonly Record<string, unknown>[] = []) {
     latest_seq: typeof newest?.seq === 'number' ? newest.seq : null,
     oldest_seq: typeof oldest?.seq === 'number' ? oldest.seq : null,
     latest_ts_iso: typeof newest?.ts === 'string' ? newest.ts : null,
+    ring: {
+      start_seq: typeof oldest?.seq === 'number' ? oldest.seq : 0,
+      total: entries.length,
+      dropped_before: false,
+    },
     total: entries.length,
     entries,
   }
@@ -144,5 +149,30 @@ describe('decodeLogsData', () => {
       latest_ts_iso: entries[0]?.ts,
     })
     expect(error.message).toContain('newest-seq-first')
+  })
+
+  // The ring bounds are the server's live-window truth (#29011). Decoding is
+  // strict (onExcessProperty: 'error'), so the server shipping this field
+  // without the schema took the whole logs surface down — the decode failed
+  // and the viewer rendered the drift message instead of any entries. These
+  // pin both directions of that contract.
+  it('carries the ring live-window bounds through to LogsData', () => {
+    const entries = [currentEntry({ seq: 81_225 })]
+    const data = Effect.runSync(decodeLogsData({
+      ...currentWire(entries),
+      ring: { start_seq: 31_225, total: 81_225, dropped_before: true },
+    }))
+    expect(data.ring).toEqual({
+      startSeq: 31_225,
+      total: 81_225,
+      droppedBefore: true,
+    })
+  })
+
+  it('rejects a response that omits the ring bounds', () => {
+    const wire = currentWire([currentEntry()]) as Record<string, unknown>
+    delete wire.ring
+    const error = expectDrift(wire)
+    expect(error.message).toContain('ring')
   })
 })

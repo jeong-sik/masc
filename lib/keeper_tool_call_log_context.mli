@@ -10,6 +10,13 @@
 
 type turn_context =
   { agent_name : string option
+  ; turn_kind : Turn_record.turn_kind option
+    (* Whether this run is an operator/agent submission or the keeper's own
+       autonomous cycle. Both kinds call the same tools with the same
+       trace_id, so without this field a reader asking which calls belong to
+       a submitted operation has only wall-clock overlap to go on, and a
+       concurrent autonomous turn's calls are indistinguishable from the
+       submission's (#28977). *)
   ; lane : string option
   ; tool_choice : string option
   ; thinking_enabled : bool option
@@ -38,6 +45,7 @@ val create_cell : unit -> cell
 val set_turn_context :
   cell:cell ->
   ?agent_name:string ->
+  ?turn_kind:Turn_record.turn_kind ->
   ?lane:string ->
   ?tool_choice:string ->
   ?thinking_enabled:bool ->

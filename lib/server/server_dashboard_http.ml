@@ -559,6 +559,33 @@ let dashboard_schedule_prune_http_json
 let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let rollup = Goal_store.compute_rollup goals in
+  (* RFC-0387 (stage 1): the verification ledger joins each goal at the API
+     boundary (goal_to_yojson is the persistence codec and stays untouched).
+     The ledger is loaded ONCE per request and joined in memory; a store that
+     does not decode renders the explicit [ledger_error] marker per goal —
+     never the pre-verification default, which would disguise corruption as
+     "not verified yet". *)
+  let records = Goal_verification.load_records config in
+  let goal_json (goal : Goal_store.goal) =
+    let verification =
+      match records with
+      | Error detail -> Goal_verification.ledger_error_to_yojson detail
+      | Ok records ->
+        (match
+           List.find_opt
+             (fun (record : Goal_verification.record) ->
+               String.equal record.goal_id goal.id)
+             records
+         with
+         | Some record -> record
+         | None -> Goal_verification.default_record ~goal_id:goal.id)
+        |> Goal_verification.record_to_yojson
+    in
+    match Goal_store.goal_to_yojson goal with
+    | `Assoc fields ->
+      `Assoc (fields @ [ "verification", verification ])
+    | json -> json
+  in
   let task_rollup =
     dashboard_tasks_safe config
     |> List.fold_left
@@ -577,7 +604,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())
-    ; "goals", `List (List.map Goal_store.goal_to_yojson goals)
+    ; "goals", `List (List.map goal_json goals)
     ; "rollup", Goal_store.rollup_to_yojson rollup
     ; ( "task_backlog"
       , `Assoc

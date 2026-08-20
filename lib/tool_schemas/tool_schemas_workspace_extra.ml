@@ -38,7 +38,9 @@ let schemas : tool_schema list =
     }
   ; { name = "masc_goal_upsert"
     ; description =
-        "Create or update Goal metadata and parent linkage. Use masc_goal_transition for lifecycle changes."
+        "Create or update Goal metadata and parent linkage. Creation requires a \
+         measurable success condition: metric and target_value (RFC-0387 B1). Use \
+         masc_goal_transition for lifecycle changes."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -46,14 +48,34 @@ let schemas : tool_schema list =
             , `Assoc
                 [ "id", `Assoc [ "type", `String "string" ]
                 ; "title", `Assoc [ "type", `String "string" ]
-                ; "metric", `Assoc [ "type", `String "string" ]
-                ; "target_value", `Assoc [ "type", `String "string" ]
+                ; ( "metric"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Required (non-blank) when the upsert creates a new \
+                             goal (RFC-0387 B1); optional on update." )
+                      ] )
+                ; ( "target_value"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Required (non-blank) when the upsert creates a new \
+                             goal (RFC-0387 B1); optional on update." )
+                      ] )
                 ; "due_date", `Assoc [ "type", `String "string" ]
                 ; "priority", `Assoc [ "type", `String "integer" ]
-                ; "parent_goal_id", `Assoc [ "type", `String "string" ]
                 ] )
           ; "additionalProperties", `Bool false
           ]
+      (* B1 is NOT expressed in a schema-level [required] array on purpose:
+         this one tool serves both create and update, and JSON Schema
+         [required] is unconditional — listing metric/target_value there would
+         reject every metadata update of an existing goal. The create/update
+         split is only decidable against the store, so the handler enforces
+         the requirement on the creation branch (Goal_store.upsert_goal,
+         inside the write lock). *)
     }
   ; { name = "masc_goal_assign"
     ; description =
@@ -84,7 +106,16 @@ let schemas : tool_schema list =
     }
   ; { name = "masc_goal_transition"
     ; description =
-        "Apply an explicit Goal lifecycle transition. request_complete completes the Goal directly."
+        "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate). \
+         request_complete no longer completes the Goal directly: it moves \
+         executing -> verifying and persists a durable proof request; only the \
+         verifier's record_proof_proven (with non-blank evidence) moves \
+         verifying -> completed, and record_proof_refuted returns the Goal to \
+         executing with the refutation preserved. record_criterion_viable / \
+         record_criterion_unreachable commit the creation-time criterion \
+         verdict without changing the phase. A Goal whose criterion was judged \
+         unreachable is refused on request_complete. All four record_* actions \
+         require non-blank evidence."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -93,6 +124,17 @@ let schemas : tool_schema list =
                 [ "goal_id", `Assoc [ "type", `String "string" ]
                 ; "action", enum_schema goal_transition_action_enum
                 ; "note", `Assoc [ "type", `String "string" ]
+                ; ( "evidence"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Required (non-blank) for the four record_* gate \
+                             actions: the observation the verdict stands on. \
+                             For record_proof_refuted and \
+                             record_criterion_unreachable, [note] carries the \
+                             refutation reason." )
+                      ] )
                 ] )
           ; "required", `List [ `String "goal_id"; `String "action" ]
           ; "additionalProperties", `Bool false

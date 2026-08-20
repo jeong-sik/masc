@@ -2,7 +2,14 @@
 
     MASC owns the channel event surface, but the upstream stream semantics come
     from AGENT_CORE' closed {!Agent_core.Types.sse_event} sum. This module is the
-    boundary adapter between those two domains. *)
+    boundary adapter between those two domains.
+
+    Text deltas are additionally reconciled against the per-block accumulated
+    text (exact byte-length/prefix identity, never similarity): cumulative
+    snapshot chunks are forwarded as their unseen suffix only, and exact
+    retransmissions are dropped, so a duplicated provider chunk never renders
+    twice.  Dedup occurrences bump
+    [masc_keeper_stream_text_delta_dedup_total]. *)
 
 type state
 (** Per-stream correlation state for AGENT_CORE content block indices. *)

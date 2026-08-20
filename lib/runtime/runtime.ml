@@ -283,20 +283,6 @@ let assignment_references (assignments : (string * string) list) =
     assignments
 ;;
 
-let route_references (routes : (string * string option) list) =
-  List.filter_map
-    (fun (route_name, route_id) ->
-      Option.map
-        (fun id ->
-          { site = Printf.sprintf "[runtime].%s" route_name
-          ; shape = Scalar
-          ; id
-          ; domain = Lane_then_runtime
-          })
-        route_id)
-    routes
-;;
-
 let media_failover_references (media_failover : string list) =
   List.map
     (fun id ->
@@ -704,8 +690,27 @@ let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
     runtimes
 ;;
 
+(* [runtime.exact_output_lanes.verifier_exact] (RFC-0361 D7(a)) is the single
+   selector for completion-authority judgement calls: admitted slots in frozen
+   declaration order, fail over in that order. *)
+let verifier_exact_lane_id = "verifier_exact"
+
+let verifier_exact_slot_ids_of_lane_decls
+      (decls : Runtime_schema.exact_output_lane_decl list)
+  =
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id verifier_exact_lane_id)
+      decls
+  with
+  | None -> []
+  | Some lane -> lane.slot_ids
+;;
+
 (* Keeper provider attempts originate at the configured default, an explicit
-   keeper assignment, an explicit media-failover runtime, or cross verifier. A lane is
+   keeper assignment, an explicit media-failover runtime, the verifier_exact
+   exact-output lane's slots, or cross verifier. A lane is
    reachable only when its id shadows one of the configured routes; a merely
    declared lane is dormant until a routed root names it.
    Expand each lane-capable route with the same lane-over-runtime precedence as
@@ -717,7 +722,7 @@ let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
 let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
-    ~(cross_verifier_runtime_id : string option)
+    ~(verifier_exact_slot_ids : string list)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
   =
@@ -743,16 +748,16 @@ let keeper_dispatch_runtime_ids
     []
     ( routed_roots
       @ media_failover
-      @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
+      @ List.concat_map expand verifier_exact_slot_ids )
 ;;
 
 (* TEL-OK: pure fail-closed validation; the load boundary surfaces its error. *)
 let validate_keeper_dispatch_request_caps
     ~(config_path : string)
+    ~(verifier_exact_slot_ids : string list)
     ( runtimes
     , (default_runtime : t)
     , assignments
-    , cross_verifier_runtime_id
     , media_failover
     , lanes )
   =
@@ -760,7 +765,7 @@ let validate_keeper_dispatch_request_caps
     keeper_dispatch_runtime_ids
       ~default_runtime_id:default_runtime.id
       ~assignments
-      ~cross_verifier_runtime_id
+      ~verifier_exact_slot_ids
       ~media_failover
       ~lanes
   in
@@ -906,18 +911,16 @@ let missing_reference_error
 
 let degrade_loaded_for_missing_catalog
     ( (runtimes, configured_default, assignments,
-       cross_verifier_id, media_failover, lanes) :
+       media_failover, lanes) :
       t list
       * t
       * (string * string) list
-      * string option
       * string list
       * Runtime_lane.t list )
     (report : missing_catalog_report)
   : ( ( t list
         * t
         * (string * string) list
-        * string option
         * string list
         * Runtime_lane.t list )
       * startup_degradation
@@ -981,34 +984,8 @@ let degrade_loaded_for_missing_catalog
       lanes
       ([], [], [])
   in
-  (* A route id may name a lane (#25394). A lane-targeted route stays live
-     while any candidate survives (the lane itself degrades), and drops only
-     when the whole lane dropped; a runtime-targeted route drops when that
-     runtime is missing. Mirrors [resolve_assignment]'s lane precedence. *)
-  let is_declared_lane id =
-    List.exists (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
-  in
-  let lane_fully_dropped id =
-    List.exists
-      (fun (entry : dropped_runtime_lane) -> String.equal entry.lane_id id)
-      dropped_lanes
-  in
-  let route_unavailable id =
-    if is_declared_lane id then lane_fully_dropped id else is_missing id
-  in
-  let drop_route route_name = function
-    | None -> None, None
-    | Some runtime_id when route_unavailable runtime_id ->
-      None, Some { route_name; runtime_id }
-    | Some _ as value -> value, None
-  in
-  let cross_verifier_id, cross_verifier_drop =
-    drop_route "[runtime].cross_verifier" cross_verifier_id
-  in
   let dropped_routes =
-    [ default_drop
-    ; cross_verifier_drop
-    ]
+    [ default_drop ]
     |> List.filter_map Fun.id
   in
   let kept_media_failover, dropped_media_failover =
@@ -1062,7 +1039,6 @@ let degrade_loaded_for_missing_catalog
       ( ( active_runtimes
         , configured_default
         , kept_assignments
-        , cross_verifier_id
         , kept_media_failover
         , kept_lanes )
       , degradation )
@@ -1075,7 +1051,6 @@ let materialize_config
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -1125,12 +1100,9 @@ let materialize_config
     lanes_of_decls ~config_path ~dropped_bindings ~default_runtime_id:rt.id runtimes
       cfg.lane_decls
   in
-  (* One list in the order the errors surface: the route, then media_failover. *)
   let* () =
     validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
-      (route_references
-         [ "cross_verifier", cfg.cross_verifier_runtime_id ]
-      @ media_failover_references cfg.media_failover)
+      (media_failover_references cfg.media_failover)
   in
   let* () =
     if validate_max_context
@@ -1145,7 +1117,6 @@ let materialize_config
     ( runtimes
     , rt
     , assignments
-    , cfg.cross_verifier_runtime_id
     , cfg.media_failover
     , lanes )
   in
@@ -1156,7 +1127,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -1196,7 +1166,6 @@ type loaded_state =
   { default_runtime : t option
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
   ; config_path : string option
@@ -1207,7 +1176,6 @@ let empty_loaded_state =
   { default_runtime = None
   ; runtimes = []
   ; keeper_assignments = []
-  ; cross_verifier_runtime_id = None
   ; media_failover = []
   ; lanes = []
   ; config_path = None
@@ -1224,14 +1192,12 @@ let set_loaded
     ( runtimes
     , rt
     , assignments
-    , cross_verifier_id
     , media_failover
     , lanes ) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
-    ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
     ; lanes
     ; config_path = Some config_path
@@ -1265,11 +1231,17 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       (match validate_keeper_dispatch_request_caps ~config_path loaded with
+       (match
+          validate_keeper_dispatch_request_caps
+            ~config_path
+            ~verifier_exact_slot_ids:
+              (verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
+            loaded
+        with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
           set_loaded ~config_path loaded;
@@ -1282,13 +1254,21 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
+    let verifier_exact_slot_ids =
+      verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls
+    in
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
-          (match validate_keeper_dispatch_request_caps ~config_path loaded with
+          (match
+             validate_keeper_dispatch_request_caps
+               ~config_path
+               ~verifier_exact_slot_ids
+               loaded
+           with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
              set_loaded ~config_path loaded;
@@ -1297,7 +1277,7 @@ let init_default_degraded_report ~config_path =
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok
-            (((active_runtimes, _, _, _, _, _) as degraded_loaded), degradation)
+            (((active_runtimes, _, _, _, _) as degraded_loaded), degradation)
           ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
@@ -1305,6 +1285,7 @@ let init_default_degraded_report ~config_path =
              (match
                 validate_keeper_dispatch_request_caps
                   ~config_path
+                  ~verifier_exact_slot_ids
                   degraded_loaded
               with
               | Error msg -> Error (Runtime_config_error msg)
@@ -1351,7 +1332,6 @@ let keeper_assignments () = (runtime_state ()).keeper_assignments
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }
@@ -1360,16 +1340,35 @@ let dashboard_runtime_defaults_snapshot () =
   let state = runtime_state () in
   { default_runtime = state.default_runtime
   ; runtimes = state.runtimes
-  ; cross_verifier_runtime_id = state.cross_verifier_runtime_id
   ; media_failover = state.media_failover
   ; config_path = state.config_path
   }
 ;;
 
-(* [runtime].cross_verifier routing for the anti-rationalization evaluator.
-   [None] = the evaluator inherits [runtime].default. Reads the Atomic ref set by
-   [init_default]. *)
-let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
+(* Admitted [verifier_exact] slot ids in frozen declaration order from the
+   published exact-output registry — the single provider-selection SSOT for
+   completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
+   lane cannot judge (registry not published, lane unconfigured, or no admitted
+   slots); there is no fallback to another route. *)
+let verifier_exact_lane_slot_ids () =
+  match Runtime_exact_output_registry.current () with
+  | Error error ->
+    Error (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match
+       Runtime_exact_output_registry.resolve_lane
+         registry
+         ~lane_id:verifier_exact_lane_id
+     with
+     | Ok { selected_slots } ->
+       Ok
+         (List.map
+            (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+               slot.slot_id)
+            selected_slots)
+     | Error error ->
+       Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
+;;
 
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
    reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
@@ -1902,7 +1901,13 @@ let parse_and_validate_config_text ~config_path content =
     materialize_runtime_config_text ~config_path content
   in
   (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
-  let* () = validate_keeper_dispatch_request_caps ~config_path loaded in
+  let* () =
+    validate_keeper_dispatch_request_caps
+      ~config_path
+      ~verifier_exact_slot_ids:
+        (verifier_exact_slot_ids_of_lane_decls exact_output_lanes)
+      loaded
+  in
   Ok (loaded, exact_output_lanes)
 ;;
 
@@ -2086,10 +2091,6 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
-;;
-
-let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
 ;;
 
 let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =

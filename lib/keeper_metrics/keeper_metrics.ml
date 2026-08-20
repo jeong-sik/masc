@@ -201,7 +201,8 @@ type t =
   | RawTraceRetentionUnlinkFailed (* counter: unreachable raw-trace files that could not be deleted *)
   | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
   | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
-  | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
+  | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
+  | StreamTextDeltaDedup        (* counter: streamed text delta dropped as an exact retransmission or reconciled to a cumulative-snapshot suffix *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -417,6 +418,7 @@ let to_string = function
     "masc_keeper_wire_capture_response_suppressed_total"
   | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
   | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
+  | StreamTextDeltaDedup -> "masc_keeper_stream_text_delta_dedup_total"
 ;;
 
 type collection =

@@ -45,16 +45,58 @@ let test_emit_and_list_events () =
            ());
       let events =
         Activity_graph.list_events config ~after_seq:0
-          ~limit:10 ()
+          ~limit:10 ~keep:(fun _ -> true) ()
       in
       check int "two events" 2 (List.length events);
       check string "latest kind is task.created" "task.created"
         ((List.hd (List.rev events)).kind);
       let task_only =
         Activity_graph.list_events config
-          ~kinds:[ "task.created" ] ~after_seq:0 ~limit:10 ()
+          ~kinds:[ "task.created" ] ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) ()
       in
       check int "task filter" 1 (List.length task_only))
+
+(* [limit] pages the events the caller asked for, so [keep] has to run before
+   the cut. Filtering afterwards leaves no value of [limit] that means "this
+   agent's newest N": the page fills with whatever the workspace was busy
+   doing, and the quiet agent's events fall out of it entirely. The first
+   check pins that behaviour; the second pins the filtered read. *)
+let test_keep_runs_before_the_page_is_cut () =
+  with_config (fun config ->
+      let emit_for agent subject =
+        ignore
+          (Activity_graph.emit config ~kind:"keeper.turn_completed"
+             ~actor:(Activity_graph.entity ~kind:"agent" agent)
+             ~subject:(Activity_graph.entity ~kind:"log" subject)
+             ~payload:(`Assoc [ ("keeper_name", `String agent) ])
+             ())
+      in
+      emit_for "quiet" "quiet-1";
+      emit_for "quiet" "quiet-2";
+      for i = 1 to 20 do
+        emit_for "busy" (Printf.sprintf "busy-%d" i)
+      done;
+      let is_quiet (e : Activity_graph.event) =
+        match e.actor with
+        | Some a -> String.equal a.id "quiet"
+        | None -> false
+      in
+      let unfiltered =
+        Activity_graph.list_events config ~after_seq:0 ~limit:5
+          ~keep:(fun _ -> true) ()
+      in
+      check int "an unfiltered page of 5 holds none of the quiet agent's events" 0
+        (List.length (List.filter is_quiet unfiltered));
+      let filtered =
+        Activity_graph.list_events config ~after_seq:0 ~limit:5 ~keep:is_quiet ()
+      in
+      check int "the filtered read returns every match under the limit" 2
+        (List.length filtered);
+      let bounded =
+        Activity_graph.list_events config ~after_seq:0 ~limit:3
+          ~keep:(fun e -> not (is_quiet e)) ()
+      in
+      check int "limit bounds the matches" 3 (List.length bounded))
 
 let test_events_json_derives_ide_context () =
   with_config (fun config ->
@@ -279,7 +321,7 @@ let test_emit_sanitizes_invalid_utf8_before_persisting () =
            ~payload:(`Assoc [ ("content", `String "bad\xffpayload") ])
            ());
       let events =
-        Activity_graph.list_events config ~after_seq:0 ~limit:10 ()
+        Activity_graph.list_events config ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) ()
       in
       let event =
         match events with
@@ -323,7 +365,7 @@ let test_read_self_heals_historic_invalid_utf8_event_file () =
       Fs_compat.save_file event_path raw_line;
       check bool "fixture starts invalid" false
         (String.is_valid_utf_8 (Fs_compat.load_file event_path));
-      let events = Activity_graph.list_events config ~after_seq:0 ~limit:10 () in
+      let events = Activity_graph.list_events config ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) () in
       let event =
         match events with
         | [ event ] -> event
@@ -340,7 +382,7 @@ let test_read_self_heals_historic_invalid_utf8_event_file () =
       check int "file repair counted once" 1 stats_after_first.repaired_reads;
       check bool "backing file rewritten valid" true
         (String.is_valid_utf_8 (Fs_compat.load_file event_path));
-      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:10 ());
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:10 ~keep:(fun _ -> true) ());
       let stats_after_second = Safe_ops.persistence_utf8_repair_stats () in
       check int "second read does not repair again" 1
         stats_after_second.repaired_reads)
@@ -640,12 +682,12 @@ let test_current_day_cache_reparses_only_appended_delta () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 10;
-      let first = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let first = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "first read sees 10 events" 10 (List.length first);
       check int "cold-miss full parse does not touch the delta counter" 0
         (Activity_graph.For_testing.current_day_parsed_line_count ());
       emit_n config 5;
-      let second = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let second = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "second read sees all 15 events" 15 (List.length second);
       check int "warm cache re-parses only the 5 appended lines" 5
         (Activity_graph.For_testing.current_day_parsed_line_count ()))
@@ -676,7 +718,7 @@ let test_current_day_cache_rescans_from_zero_on_truncation () =
   with_config (fun config ->
       Activity_graph.For_testing.reset_current_day_cache_for_testing ();
       emit_n config 6;
-      let baseline = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let baseline = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "baseline has 6 events" 6 (List.length baseline);
       (* Simulate rotation/truncation: rewrite the current-day file
          smaller than the cached boundary. *)
@@ -689,7 +731,7 @@ let test_current_day_cache_rescans_from_zero_on_truncation () =
           seq seq
       in
       Fs_compat.save_file path (raw_line 1 ^ raw_line 2);
-      let after_truncate = Activity_graph.list_events config ~after_seq:0 ~limit:100 () in
+      let after_truncate = Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) () in
       check int "truncated file rescanned from zero, not merged with stale cache"
         2 (List.length after_truncate))
 
@@ -706,12 +748,12 @@ let test_past_day_cache_evicts_entries_for_deleted_files () =
         "{\"seq\":1,\"ts_ms\":1,\"ts_iso\":\"2000-01-01T00:00:00Z\",\
          \"workspace_id\":\"default\",\"kind\":\"message.broadcast\",\
          \"payload\":{},\"tags\":[]}\n";
-      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ());
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) ());
       check bool "past-day file is now cached" true
         (Activity_graph.For_testing.past_day_cache_entry_count () > baseline_count);
       Sys.remove day_path;
       Unix.rmdir month_dir;
-      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ());
+      ignore (Activity_graph.list_events config ~after_seq:0 ~limit:100 ~keep:(fun _ -> true) ());
       check int "cache entry evicted once the backing file is gone"
         baseline_count (Activity_graph.For_testing.past_day_cache_entry_count ()))
 
@@ -827,6 +869,8 @@ let () =
             test_current_day_cache_rescans_from_zero_on_truncation;
           test_case "past-day cache evicts entries for deleted files" `Quick
             test_past_day_cache_evicts_entries_for_deleted_files;
+          test_case "keep runs before the page is cut" `Quick
+            test_keep_runs_before_the_page_is_cut;
         ] );
       ( "reducer",
         [

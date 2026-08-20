@@ -584,7 +584,6 @@ val dispatch_event_exact_for_lifecycle :
 val dispatch_event_with_audit :
   base_path:string ->
   ?origin:lifecycle_event_origin ->
-  ?snapshot:Keeper_measurement.measurement_snapshot ->
   ?events_fired:Keeper_state_machine.event list ->
   ?selected_event:Keeper_state_machine.event ->
   string -> Keeper_state_machine.event ->
@@ -602,7 +601,6 @@ val dispatch_event_unit :
 val dispatch_event_with_audit_and_log :
   base_path:string ->
   ?origin:lifecycle_event_origin ->
-  ?snapshot:Keeper_measurement.measurement_snapshot ->
   ?events_fired:Keeper_state_machine.event list ->
   ?selected_event:Keeper_state_machine.event ->
   string -> Keeper_state_machine.event ->

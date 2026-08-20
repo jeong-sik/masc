@@ -44,12 +44,6 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
 
 let build_forest ~(config : Workspace.config) ~goals ~tasks
     ~(pending_approvals : Yojson.Safe.t list) =
-  let goal_ids = List.map (fun (goal : Goal_store.goal) -> goal.id) goals in
-  let is_root (goal : Goal_store.goal) =
-    match goal.parent_goal_id with
-    | None -> true
-    | Some parent_id -> not (List.mem parent_id goal_ids)
-  in
   let keeper_metas =
     Keeper_meta_store.keeper_names config
     |> List.filter_map (fun keeper_name ->
@@ -78,9 +72,7 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks
       goal_task_index;
     }
   in
-  goals
-  |> List.filter is_root
-  |> List.map (build_tree context goals)
+  goals |> List.map (build_tree context goals)
 
 
 
@@ -141,7 +133,6 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
       ("metric", Json_util.string_opt_to_json goal.metric);
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
-      ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("owner", Json_util.string_opt_to_json goal.owner);
       ("attainment", attainment);
       ("tasks", `List (List.map task_to_tree_json node.tasks));
@@ -320,6 +311,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
                   ("executing", `Int (count_phase Goal_phase.Executing));
                   ("blocked", `Int (count_phase Goal_phase.Blocked));
                   ("paused", `Int (count_phase Goal_phase.Paused));
+                  ("verifying", `Int (count_phase Goal_phase.Verifying));
                   ("completed", `Int (count_phase Goal_phase.Completed));
                   ("dropped", `Int (count_phase Goal_phase.Dropped));
                 ] );

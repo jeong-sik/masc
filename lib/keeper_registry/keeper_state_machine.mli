@@ -11,7 +11,7 @@
     cross-checked by [scripts/audit-tla-phase-count.sh] (R-H-1.c #14874).
 
     Architecture:
-    - Layer 3 (NonDet Shell): measurements captured via [Keeper_measurement]
+    - Layer 3 (NonDet Shell): the caller supplies wall-clock and event inputs
     - Layer 2 (Det Core): THIS MODULE — events x conditions -> phase transitions
     - Layer 1 (Storage): [Keeper_registry] applies transitions atomically
 

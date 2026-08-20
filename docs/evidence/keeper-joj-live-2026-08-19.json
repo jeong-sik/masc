@@ -1,0 +1,19 @@
+{
+  "captured_at": "2026-08-19T04:05:00Z",
+  "purpose": "Judge of Judge 행 live 축 + Compaction 행 ci 축 정정 근거",
+  "judge_of_judge_live": {
+    "source": "<base-path>/.masc/fusion-runs.jsonl (라이브 store, 32 rows)",
+    "runs": [
+      { "id": "kmsg-b3e6fc07f4b6...", "topology": "judge_of_judges", "preset": "quorum", "keeper": "canary-fusion-feature-20260813-2138", "started_at_unix": 1786624899, "outcome": "succeeded" },
+      { "id": "kmsg-2433848dea7a...", "topology": "staged_judge_of_judges", "preset": "council", "keeper": "canary-fusion-feature-20260813-2138", "started_at_unix": 1786624980, "outcome": "succeeded" },
+      { "id": "kmsg-f696a1358b6a...", "topology": "judge_of_judges", "preset": "quorum", "keeper": "canary-fusion-feature-20260813-2138", "started_at_unix": 1786639171, "outcome": "succeeded" }
+    ],
+    "recency_note": "최신 fusion run은 08-18(rw-e0-r7-20260818-research, trio, succeeded) — store 자체는 살아 있는 라이브 경로",
+    "verdict": "JOJ 토폴로지 register→complete(succeeded)가 라이브 store에 기록 — 'network glue live' 갭 해소"
+  },
+  "compaction_ci_correction": {
+    "claim": "매트릭스 노트 자체가 '압축 스위트 6종 #28931 CI 등록'을 기록하나 ev축엔 ci 부재",
+    "verification": "scripts/ci-run-focused-tests.sh에 6종 실등재 확인: compaction_exact_output_entrypoint_clockless, compaction_llm_summarizer, compaction_exact_output_conformance, keeper_manual_compaction_preemption, keeper_compaction_unit, keeper_compaction_persist_gate",
+    "verdict": "stale 축 — ci 추가 정정"
+  }
+}

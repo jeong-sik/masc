@@ -95,6 +95,45 @@ export const messages = signal<Message[]>([])
 export const workspaceMessagesLoading = signal(false)
 export const workspaceMessagesError = signal<string | null>(null)
 export const keepers = signal<Keeper[]>([])
+
+// Names whose purge the server accepted but has not finished. Purge answers
+// 202 with an operation id and deletes asynchronously, so the refresh that
+// follows the submit still returns the keeper — without this the row redraws
+// unchanged and the operator sees nothing happen.
+//
+// A typed Purged lifecycle event does exist and is already projected: the
+// server publishes it at completion and the execution surface maps it to
+// phase="stopped" (server_dashboard_http_execution_surfaces.ml). What is
+// missing is a projection that REMOVES the row rather than patching it, and a
+// keeper-row field carrying the durable shutdown-operation phase so a purge
+// that blocks after acceptance becomes visible. Until then the name's
+// disappearance from a refresh is the signal available here — which is why the
+// button below stays clickable rather than gating on this marker.
+export const keeperPurgePending = signal<ReadonlySet<string>>(new Set<string>())
+
+export function markKeeperPurgePending(name: string): void {
+  const trimmed = name.trim()
+  if (trimmed === '' || keeperPurgePending.value.has(trimmed)) return
+  keeperPurgePending.value = new Set([...keeperPurgePending.value, trimmed])
+}
+
+/** A pending name survives a refresh only while the refresh still returns it.
+ *  Once the server has finished deleting, the keeper drops out of the payload
+ *  and the name leaves the set — that disappearance is the completion signal. */
+export function purgePendingAfterRefresh(
+  pending: ReadonlySet<string>,
+  rows: readonly { name: string }[],
+): ReadonlySet<string> {
+  if (pending.size === 0) return pending
+  const present = new Set(rows.map(row => row.name))
+  const survivors = [...pending].filter(name => present.has(name))
+  return survivors.length === pending.size ? pending : new Set(survivors)
+}
+
+function prunePurgePendingAgainst(rows: readonly Keeper[]): void {
+  const next = purgePendingAfterRefresh(keeperPurgePending.value, rows)
+  if (next !== keeperPurgePending.value) keeperPurgePending.value = next
+}
 export const serverStatus = signal<ServerStatus | null>(null)
 // Authoritative backlog size from the execution payload's `task_counts.total`.
 // The `tasks` signal holds only what the payload chose to send — active rows
@@ -850,7 +889,6 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
         phase,
-        parent_goal_id: asString(row.parent_goal_id) ?? null,
         last_review_note: asString(row.last_review_note) ?? null,
         last_review_at: asString(row.last_review_at) ?? null,
         created_at: createdAt,
@@ -1163,6 +1201,7 @@ export function hydrateExecutionSnapshot(
       : mergeMessages(messages.value, executionMessages)
   }
   keepers.value = reconcileKeepers(keepers.value, normalizeKeepers(data.keepers))
+  prunePurgePendingAgainst(keepers.value)
   const normalizedWorkerBriefs = (Array.isArray(data.worker_support_briefs) ? data.worker_support_briefs : Array.isArray(data.worker_briefs) ? data.worker_briefs : [])
     .map(normalizeExecutionWorkerSupportBrief)
     .filter((row): row is DashboardExecutionWorkerSupportBrief => row !== null)

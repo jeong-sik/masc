@@ -30,7 +30,6 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }
@@ -67,8 +66,7 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
     ; "runtimes", `List (List.map runtime_entry_json r.runtimes)
     ; ( "model_routing"
       , `Assoc
-          [ "cross_verifier_runtime_id", string_opt_json r.cross_verifier_runtime_id
-          ; "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
+          [ "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
           ] )
     ]
 ;;
@@ -89,7 +87,6 @@ let resolved_of_snapshot
   ; default_max_context =
       Option.map Runtime.max_context_of_runtime default
   ; runtimes = List.map entry snapshot.runtimes
-  ; cross_verifier_runtime_id = snapshot.cross_verifier_runtime_id
   ; media_failover = snapshot.media_failover
   ; config_path = snapshot.config_path
   }

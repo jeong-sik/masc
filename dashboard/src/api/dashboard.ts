@@ -337,7 +337,15 @@ export type { ToolStat, HourlyBucket, ToolStatsResponse } from './dashboard-keep
 export { fetchKeeperToolStats } from './dashboard-keeper-tool-stats'
 
 // ── Keeper tool call log (full I/O) ──────────────────────
-export type { ToolCallOutputBlob, ToolCallEntry, ToolCallsResponse } from './dashboard-keeper-tool-calls'
+export type {
+  ToolCallOutputBlob,
+  ToolCallEntry,
+  ToolCallsResponse,
+  ToolCallPathResolution,
+  ToolCallRuntimeContract,
+  ToolCallActionRadius,
+  ToolCallRouteEvidence,
+} from './dashboard-keeper-tool-calls'
 export { fetchKeeperToolCalls } from './dashboard-keeper-tool-calls'
 
 // ── Keeper turn records (RFC-0233 PR-4) ─────────────────

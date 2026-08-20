@@ -145,7 +145,10 @@ val record_crashed_cycle_failure :
 
 val compaction_outcomes_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome ->
-  [ `Manual_committed of int | `Failed ] list
+  [ `Manual_committed of int * int * int | `Failed ] list
+(** [`Manual_committed (commit_count, before_checkpoint_bytes,
+    after_checkpoint_bytes)] — the sizes come from the preparation's evidence
+    so the owner projection can record what a commit saved (#29109). *)
 (** Pure mapping from one possibly nested cycle to every compaction
     commit/failure observation it contains. Only committed outcomes mutate
     durable compaction state. *)

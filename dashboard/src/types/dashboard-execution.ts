@@ -744,7 +744,6 @@ export interface GoalTreeMetricProjection {
   metric: string | null
   target_value: string | null
   due_date: string | null
-  parent_goal_id: string | null
   owner: string | null
   attainment: GoalAttainmentProjection
 }

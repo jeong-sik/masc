@@ -29,6 +29,7 @@ type terminal_class =
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
   | Provider_attempt_effect_fenced
+  | Tool_correction_lost
   | Internal_opaque
 
 type failure_provenance =
@@ -155,6 +156,13 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
      | Keeper_provider_attempt_effect_core.Effect_attempted
      | Keeper_provider_attempt_effect_core.Observation_unavailable ->
        exhaust_failure Provider_attempt_effect_fenced)
+  | Keeper_internal_error.Tool_correction_lost { effect_disposition; _ } ->
+    (match effect_disposition with
+     | Keeper_provider_attempt_effect_core.No_effect_observed ->
+       exhaust_failure Contract_violation
+     | Keeper_provider_attempt_effect_core.Effect_attempted
+     | Keeper_provider_attempt_effect_core.Observation_unavailable ->
+       exhaust_failure Tool_correction_lost)
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     exhaust_failure Internal_opaque
@@ -283,6 +291,7 @@ let terminal_class_label = function
   | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
   | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
   | Provider_attempt_effect_fenced -> "provider_attempt_effect_fenced"
+  | Tool_correction_lost -> "tool_correction_lost"
   | Internal_opaque -> "internal_opaque"
 
 let route_class_label = function

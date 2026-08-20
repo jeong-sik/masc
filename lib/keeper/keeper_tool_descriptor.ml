@@ -56,6 +56,27 @@ let execution_to_string = function
   | Terminal -> "terminal"
 ;;
 
+type tool_kind =
+  | Atomic_tool
+  | Composition_tool
+  | Async_composition_tool
+  | Batch_plan_tool
+
+let tool_kind_to_string = function
+  | Atomic_tool -> "atomic"
+  | Composition_tool -> "composition"
+  | Async_composition_tool -> "async_composition"
+  | Batch_plan_tool -> "batch_plan"
+;;
+
+let tool_kind_of_string = function
+  | "atomic" -> Ok Atomic_tool
+  | "composition" -> Ok Composition_tool
+  | "async_composition" -> Ok Async_composition_tool
+  | "batch_plan" -> Ok Batch_plan_tool
+  | unknown -> Error ("unknown tool kind: " ^ unknown)
+;;
+
 type composable_output =
   | Opaque_output
   | Json_output of { schema : Yojson.Safe.t }
@@ -146,6 +167,7 @@ type t =
   ; model_output_projection : Tool_output.model_projection
   ; composable_output : composable_output
   ; execution : execution
+  ; tool_kind : tool_kind
   ; policy : policy
   ; executor : executor
   ; backend : backend
@@ -529,6 +551,7 @@ let descriptor
       ?(model_output_projection = Tool_output.default_model_projection)
       ?(composable_output = Opaque_output)
       ?(ordinary_execution_mode = Serial)
+      ?(tool_kind = Atomic_tool)
       ~policy
       ~executor
       ~backend
@@ -580,6 +603,23 @@ let descriptor
       | Tool_masc_local_runtime_dispatch
       | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
   in
+  (* Fail-closed admission rule for parallel tool use: a descriptor may opt
+     into [Concurrent] batches only when its policy carries a static
+     read-only hint. The batch planner (Agent_core Agent_tool_batch_plan)
+     fans an ordinary [Concurrent] run out onto sibling Eio fibers, so an
+     effectful tool admitted by mistake would execute its side effect
+     concurrently with no ordering guarantee. The hint is the same typed
+     declaration the composition catalog uses for its Async admission
+     check (Async_tool_not_statically_read_only); no string heuristics. *)
+  (match execution, policy.readonly_hint with
+   | Ordinary Concurrent, Some true -> ()
+   | Ordinary Concurrent, (Some false | None) ->
+     invalid_arg
+       (Printf.sprintf
+          "descriptor %S declares Concurrent execution without a static \
+           read-only policy hint"
+          internal_name)
+   | Ordinary Serial, _ | Terminal, _ -> ());
   let receipt_labels =
     [ "descriptor_id", id
     ; "capability_id", capability_id
@@ -615,6 +655,7 @@ let descriptor
   ; model_output_projection
   ; composable_output
   ; execution
+  ; tool_kind
   ; policy
   ; executor
   ; backend
@@ -755,6 +796,10 @@ let public_descriptors =
          literal newline in `pattern` is rejected. To match across lines, run \
          `rg -U` through the Execute tool."
       ~input_schema:search_files_schema
+      (* Concurrent: each call spawns its own rg process through the sandbox
+         backend; the only shared write is the bash-history audit line, a
+         single O_APPEND write with no fiber yield inside it. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -785,6 +830,10 @@ let public_descriptors =
          Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read \
          never inherits Execute cwd."
       ~input_schema:read_file_schema
+      (* Concurrent: a pure read — containment check plus either a host
+         file read (Safe_ops.read_file_result) or a per-call backend read
+         runner process; no shared mutable state on the path. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -866,6 +915,10 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.web_search_schema.name
       ~description:Tool_schemas_misc.web_search_schema.description
       ~input_schema:Tool_schemas_misc.web_search_schema.input_schema
+      (* Concurrent: every call runs its own curl subprocess via
+         Tool_local_runtime_http; provider selection reads env only, so
+         there is no shared mutable state between sibling calls. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -886,6 +939,12 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.web_fetch_schema.name
       ~description:Tool_schemas_misc.web_fetch_schema.description
       ~input_schema:Tool_schemas_misc.web_fetch_schema.input_schema
+      (* Concurrent: per-call curl subprocess; the full-text offload writes
+         into the content-addressed Tool_blob_store (Atomic CAS cache, the
+         same store keeper_artifact_read already reads concurrently) and
+         appends the index row through Fs_compat.append_jsonl's per-path
+         mutex. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -1211,6 +1270,7 @@ let cluster_policy ?(polling_read = false) ~readonly () =
 
 let cluster_descriptor_with_schema_source
       ?(polling_read = false)
+      ?ordinary_execution_mode
       ~capability_identity
       ~keeper_model_projection
       ~input_schema_source
@@ -1231,6 +1291,7 @@ let cluster_descriptor_with_schema_source
     ~name
     ~description
     ~input_schema
+    ?ordinary_execution_mode
     ~policy
     ~handler
     ()
@@ -1243,7 +1304,8 @@ let cluster_descriptor_with_schema_source
    in 57 — including every Goal tool and [masc_transition], whose canonical
    text is the only place [release] is named. Taking one field from the record
    and re-typing the other beside it is what allowed the drift. *)
-let cluster_descriptor ?(polling_read = false) ~capability_identity
+let cluster_descriptor ?(polling_read = false) ?ordinary_execution_mode
+      ~capability_identity
       ~keeper_model_projection ~id ~name
       ~handler ~readonly ()
   =
@@ -1254,6 +1316,7 @@ let cluster_descriptor ?(polling_read = false) ~capability_identity
   in
   cluster_descriptor_with_schema_source
     ~polling_read
+    ?ordinary_execution_mode
     ~capability_identity
     ~keeper_model_projection
     ~input_schema_source
@@ -1297,32 +1360,408 @@ let time_now_output_schema =
     ~required:[ "now_iso"; "now_unix" ]
 ;;
 
+(* Producer: Snapshot_protocol.to_yojson via dispatch_board_list
+   (keeper_tool_board_runtime.ml). [snapshot] carries the formatted post
+   listing as one string and is absent on the [unchanged] variant. *)
+let board_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "kind", `Assoc [ "type", `String "string" ]
+      ; "revision", `Assoc [ "type", `String "string" ]
+      ; "snapshot", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:[ "kind"; "revision" ]
+;;
+
+(* Producer: Masc_domain.task_to_yojson (lib/types/types_core.ml). Only the
+   unconditionally emitted fields are declared; status-variant and
+   presence-conditional fields pass through [additionalProperties]. *)
+let tasks_list_task_item_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "id", `Assoc [ "type", `String "string" ]
+          ; "title", `Assoc [ "type", `String "string" ]
+          ; "description", `Assoc [ "type", `String "string" ]
+          ; "priority", `Assoc [ "type", `String "integer" ]
+          ; ( "files"
+            , `Assoc
+                [ "type", `String "array"
+                ; "items", `Assoc [ "type", `String "string" ]
+                ] )
+          ; "created_at", `Assoc [ "type", `String "string" ]
+          ; "status", `Assoc [ "type", `String "string" ]
+          ] )
+    ; ( "required"
+      , `List
+          (List.map
+             (fun name -> `String name)
+             [ "id"
+             ; "title"
+             ; "description"
+             ; "priority"
+             ; "files"
+             ; "created_at"
+             ; "status"
+             ]) )
+    ; "additionalProperties", `Bool true
+    ]
+;;
+
+(* Producer: Tasks_list Ok branch (keeper_tool_task_runtime.ml) — the
+   Snapshot_protocol envelope prefixed with backlog provenance. [snapshot]
+   is absent on the [unchanged] variant. *)
+let tasks_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "backlog_authority", `Assoc [ "type", `String "string" ]
+      ; "degraded", `Assoc [ "type", `String "boolean" ]
+      ; "kind", `Assoc [ "type", `String "string" ]
+      ; "revision", `Assoc [ "type", `String "string" ]
+      ; ( "snapshot"
+        , `Assoc
+            [ "type", `String "array"; "items", tasks_list_task_item_schema ] )
+      ]
+    ~required:[ "backlog_authority"; "degraded"; "kind"; "revision" ]
+;;
+
+(* Producer: Keeper_artifact_read.page_to_json — the single success path. *)
+let artifact_read_output_schema =
+  object_output_schema
+    ~properties:
+      [ "ok", `Assoc [ "type", `String "boolean" ]
+      ; "sha256", `Assoc [ "type", `String "string" ]
+      ; "offset", `Assoc [ "type", `String "integer" ]
+      ; "next_offset", `Assoc [ "type", `String "integer" ]
+      ; "total_bytes", `Assoc [ "type", `String "integer" ]
+      ; "eof", `Assoc [ "type", `String "boolean" ]
+      ; "encoding", `Assoc [ "type", `String "string" ]
+      ; "content", `Assoc [ "type", `String "string" ]
+      ]
+    ~required:
+      [ "ok"
+      ; "sha256"
+      ; "offset"
+      ; "next_offset"
+      ; "total_bytes"
+      ; "eof"
+      ; "encoding"
+      ; "content"
+      ]
+;;
+
+(* Producer: Tool_agent_timeline.build_timeline. [detail] on an event and
+   the [retention] body are heterogeneous and stay undeclared. *)
+let agent_timeline_output_schema =
+  object_output_schema
+    ~properties:
+      [ "dashboard_surface", `Assoc [ "type", `String "string" ]
+      ; "source", `Assoc [ "type", `String "string" ]
+      ; "retention", `Assoc [ "type", `String "object" ]
+      ; "generated_at_iso", `Assoc [ "type", `String "string" ]
+      ; "agent", `Assoc [ "type", `String "string" ]
+      ; ( "period"
+        , object_output_schema
+            ~properties:
+              [ "from", `Assoc [ "type", `String "string" ]
+              ; "to", `Assoc [ "type", `String "string" ]
+              ]
+            ~required:[ "from"; "to" ] )
+      ; ( "events"
+        , `Assoc
+            [ "type", `String "array"
+            ; ( "items"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "properties"
+                    , `Assoc
+                        [ "ts", `Assoc [ "type", `String "string" ]
+                        ; "type", `Assoc [ "type", `String "string" ]
+                        ] )
+                  ; ( "required"
+                    , `List [ `String "ts"; `String "type" ] )
+                  ; "additionalProperties", `Bool true
+                  ] )
+            ] )
+      ; ( "summary"
+        , object_output_schema
+            ~properties:
+              [ "tasks_completed", `Assoc [ "type", `String "integer" ]
+              ; "tasks_claimed", `Assoc [ "type", `String "integer" ]
+              ; "messages_sent", `Assoc [ "type", `String "integer" ]
+              ; "tool_calls", `Assoc [ "type", `String "integer" ]
+              ; "chat_messages", `Assoc [ "type", `String "integer" ]
+              ; "turns_completed", `Assoc [ "type", `String "integer" ]
+              ; "total_input_tokens", `Assoc [ "type", `String "integer" ]
+              ; "total_output_tokens", `Assoc [ "type", `String "integer" ]
+              ; "total_cost_usd", `Assoc [ "type", `String "number" ]
+              ; ( "active_duration_minutes"
+                , `Assoc [ "type", `String "number" ] )
+              ; "total_events", `Assoc [ "type", `String "integer" ]
+              ]
+            ~required:
+              [ "tasks_completed"
+              ; "tasks_claimed"
+              ; "messages_sent"
+              ; "tool_calls"
+              ; "chat_messages"
+              ; "turns_completed"
+              ; "total_input_tokens"
+              ; "total_output_tokens"
+              ; "total_cost_usd"
+              ; "active_duration_minutes"
+              ; "total_events"
+              ] )
+      ]
+    ~required:
+      [ "dashboard_surface"
+      ; "source"
+      ; "retention"
+      ; "generated_at_iso"
+      ; "agent"
+      ; "period"
+      ; "events"
+      ; "summary"
+      ]
+;;
+
+(* Producer: Workspace_goals.handle_goal_list over Goal_store.goal_to_yojson
+   and rollup_to_yojson, with the RFC-0387 verification ledger
+   (Goal_verification.record_to_yojson) joined per goal as [verification].
+   Option-carrying goal fields serialize as string-or-null and stay
+   undeclared; [verification] rides the items' additionalProperties:true. *)
+let goal_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "status", `Assoc [ "type", `String "string" ]
+      ; "generated_at", `Assoc [ "type", `String "string" ]
+      ; "count", `Assoc [ "type", `String "integer" ]
+      ; ( "goals"
+        , `Assoc
+            [ "type", `String "array"
+            ; ( "items"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "properties"
+                    , `Assoc
+                        [ "id", `Assoc [ "type", `String "string" ]
+                        ; "title", `Assoc [ "type", `String "string" ]
+                        ; "priority", `Assoc [ "type", `String "integer" ]
+                        ; "phase", `Assoc [ "type", `String "string" ]
+                        ; "created_at", `Assoc [ "type", `String "string" ]
+                        ; "updated_at", `Assoc [ "type", `String "string" ]
+                        ] )
+                  ; ( "required"
+                    , `List
+                        (List.map
+                           (fun name -> `String name)
+                           [ "id"
+                           ; "title"
+                           ; "priority"
+                           ; "phase"
+                           ; "created_at"
+                           ; "updated_at"
+                           ]) )
+                  ; "additionalProperties", `Bool true
+                  ] )
+            ] )
+      ; ( "rollup"
+        , object_output_schema
+            ~properties:
+              [ "active_count", `Assoc [ "type", `String "integer" ]
+              ; "paused_count", `Assoc [ "type", `String "integer" ]
+              ; "verifying_count", `Assoc [ "type", `String "integer" ]
+              ; "done_count", `Assoc [ "type", `String "integer" ]
+              ; "dropped_count", `Assoc [ "type", `String "integer" ]
+              ]
+            ~required:
+              [ "active_count"; "paused_count"; "verifying_count"; "done_count"
+              ; "dropped_count" ] )
+      ]
+    ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
+;;
+
+(* Producer: Run_eio.list over run_record_to_json. [agent_name] serializes
+   as string-or-null and stays undeclared. *)
+let run_list_output_schema =
+  object_output_schema
+    ~properties:
+      [ "count", `Assoc [ "type", `String "integer" ]
+      ; ( "runs"
+        , `Assoc
+            [ "type", `String "array"
+            ; ( "items"
+              , `Assoc
+                  [ "type", `String "object"
+                  ; ( "properties"
+                    , `Assoc
+                        [ "task_id", `Assoc [ "type", `String "string" ]
+                        ; "plan", `Assoc [ "type", `String "string" ]
+                        ; "created_at", `Assoc [ "type", `String "string" ]
+                        ; "updated_at", `Assoc [ "type", `String "string" ]
+                        ] )
+                  ; ( "required"
+                    , `List
+                        (List.map
+                           (fun name -> `String name)
+                           [ "task_id"; "plan"; "created_at"; "updated_at" ]) )
+                  ; "additionalProperties", `Bool true
+                  ] )
+            ] )
+      ]
+    ~required:[ "count"; "runs" ]
+;;
+
+(* Producer: Metrics_store_eio.agent_metrics_to_yojson (ppx-derived over the
+   11-field record in metrics_store_eio.mli). *)
+let agent_metrics_output_properties =
+  [ "agent_id", `Assoc [ "type", `String "string" ]
+  ; "period_start", `Assoc [ "type", `String "number" ]
+  ; "period_end", `Assoc [ "type", `String "number" ]
+  ; "total_tasks", `Assoc [ "type", `String "integer" ]
+  ; "completed_tasks", `Assoc [ "type", `String "integer" ]
+  ; "failed_tasks", `Assoc [ "type", `String "integer" ]
+  ; "avg_completion_time_s", `Assoc [ "type", `String "number" ]
+  ; "task_completion_rate", `Assoc [ "type", `String "number" ]
+  ; "error_rate", `Assoc [ "type", `String "number" ]
+  ; "handoff_success_rate", `Assoc [ "type", `String "number" ]
+  ; ( "unique_collaborators"
+    , `Assoc
+        [ "type", `String "array"; "items", `Assoc [ "type", `String "string" ] ]
+    )
+  ]
+;;
+
+let agent_metrics_output_required =
+  [ "agent_id"
+  ; "period_start"
+  ; "period_end"
+  ; "total_tasks"
+  ; "completed_tasks"
+  ; "failed_tasks"
+  ; "avg_completion_time_s"
+  ; "task_completion_rate"
+  ; "error_rate"
+  ; "handoff_success_rate"
+  ; "unique_collaborators"
+  ]
+;;
+
+(* Producer: Tool_agent.handle_get_metrics. The two resolution fields are
+   appended by metrics_json_with_resolution only when the requested name
+   resolved to a different metric id. *)
+let get_metrics_output_schema =
+  object_output_schema
+    ~properties:
+      (agent_metrics_output_properties
+       @ [ "requested_agent_name", `Assoc [ "type", `String "string" ]
+         ; "resolved_agent_name", `Assoc [ "type", `String "string" ]
+         ])
+    ~required:agent_metrics_output_required
+;;
+
+(* Producer: Tool_agent.handle_agent_fitness — both the empty-pool and the
+   populated envelope. *)
+let agent_fitness_output_schema =
+  object_output_schema
+    ~properties:
+      [ "count", `Assoc [ "type", `String "integer" ]
+      ; ( "agents"
+        , `Assoc
+            [ "type", `String "array"
+            ; ( "items"
+              , object_output_schema
+                  ~properties:
+                    [ "agent_id", `Assoc [ "type", `String "string" ]
+                    ; ( "components"
+                      , object_output_schema
+                          ~properties:
+                            [ "completion", `Assoc [ "type", `String "number" ]
+                            ; "reliability", `Assoc [ "type", `String "number" ]
+                            ; "speed", `Assoc [ "type", `String "number" ]
+                            ; "handoff", `Assoc [ "type", `String "number" ]
+                            ]
+                          ~required:
+                            [ "completion"; "reliability"; "speed"; "handoff" ]
+                      )
+                    ; ( "metrics"
+                      , object_output_schema
+                          ~properties:agent_metrics_output_properties
+                          ~required:agent_metrics_output_required )
+                    ]
+                  ~required:[ "agent_id"; "components"; "metrics" ] )
+            ] )
+      ]
+    ~required:[ "count"; "agents" ]
+;;
+
+(* Producer: Tool_agent.handle_agent_card. [agent] is object-or-null and
+   stays undeclared, so the object keeps [additionalProperties] open. *)
+let agent_card_output_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc
+          [ "schema", `Assoc [ "type", `String "string" ]
+          ; "name", `Assoc [ "type", `String "string" ]
+          ; "description", `Assoc [ "type", `String "string" ]
+          ; "action", `Assoc [ "type", `String "string" ]
+          ; "requested_by", `Assoc [ "type", `String "string" ]
+          ; "base_path", `Assoc [ "type", `String "string" ]
+          ; "workspace_path", `Assoc [ "type", `String "string" ]
+          ; "agent_count", `Assoc [ "type", `String "integer" ]
+          ] )
+    ; ( "required"
+      , `List
+          (List.map
+             (fun name -> `String name)
+             [ "schema"
+             ; "name"
+             ; "description"
+             ; "action"
+             ; "requested_by"
+             ; "base_path"
+             ; "workspace_path"
+             ; "agent_count"
+             ]) )
+    ; "additionalProperties", `Bool true
+    ]
+;;
+
 let masc_board_descriptor board_name =
   let canonical_schema = Board_tool_registry.schema_for_board_name board_name in
   let name = Tool_name.Board_name.to_string board_name in
   let operation_policy = Board_tool_registry.operation_policy board_name in
   let readonly = operation_policy.readonly in
+  (* Concurrent rows are the store-read operations: each resolves through
+     [Board_dispatch] into [Board_core] reads that snapshot under
+     [store.mutex] (an [Eio.Mutex]; board_core.mli "Locking + cache
+     invalidation"), or into the [Atomic]-held curation snapshot
+     ([Board_curation.latest_snapshot]). The [maybe_sweep] hook on reads
+     reserves timestamps under the same mutex and hands the work to the
+     flusher fiber. Write operations stay [Serial]. *)
   let ordinary_execution_mode =
     match board_name with
-    | Tool_name.Board_name.Board_stats -> Concurrent
+    | Tool_name.Board_name.Board_stats
+    | Board_curation_read
+    | Board_hearths
+    | Board_list
+    | Board_post_get
+    | Board_profile
+    | Board_search
+    | Board_sub_board_get
+    | Board_sub_board_list -> Concurrent
     | ( Board_cleanup
       | Board_comment
       | Board_comment_vote
-      | Board_curation_read
       | Board_curation_submit
       | Board_delete
-      | Board_hearths
-      | Board_list
       | Board_post
-      | Board_post_get
       | Board_post_update
-      | Board_profile
       | Board_reaction
-      | Board_search
       | Board_sub_board_create
       | Board_sub_board_delete
-      | Board_sub_board_get
-      | Board_sub_board_list
       | Board_sub_board_update
       | Board_vote ) -> Serial
   in
@@ -1357,6 +1796,9 @@ let masc_board_descriptor board_name =
   | Tool_name.Board_name.Board_stats ->
     descriptor
     |> with_composable_output (Json_output { schema = board_stats_output_schema })
+  | Tool_name.Board_name.Board_list ->
+    descriptor
+    |> with_composable_output (Json_output { schema = board_list_output_schema })
   | ( Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -1364,7 +1806,6 @@ let masc_board_descriptor board_name =
     | Board_curation_submit
     | Board_delete
     | Board_hearths
-    | Board_list
     | Board_post
     | Board_post_get
     | Board_post_update
@@ -1395,8 +1836,9 @@ let voice_descriptor name ~readonly =
     ()
 ;;
 
-let task_descriptor ~capability_identity id name ~readonly =
+let task_descriptor ?ordinary_execution_mode ~capability_identity id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity
     ~keeper_model_projection:Internal_name
     ~id:("keeper.task." ^ id)
@@ -1413,8 +1855,9 @@ let task_descriptor ~capability_identity id name ~readonly =
    (Task.Tool / Tool_plan / Tool_run / Tool_agent / Tool_workspace) are not
    schema-registry-backed. The handler routes by descriptor.internal_name
    through the existing typed dispatcher. *)
-let masc_task_descriptor id name ~readonly =
+let masc_task_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.task." ^ id)
@@ -1424,8 +1867,9 @@ let masc_task_descriptor id name ~readonly =
     ()
 ;;
 
-let masc_task_transport_descriptor id name ~readonly =
+let masc_task_transport_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:
       (Transport_alias { projected_by = "keeper_tasks_list" })
@@ -1436,8 +1880,9 @@ let masc_task_transport_descriptor id name ~readonly =
     ()
 ;;
 
-let masc_plan_descriptor id name ~readonly =
+let masc_plan_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.plan." ^ id)
@@ -1447,8 +1892,9 @@ let masc_plan_descriptor id name ~readonly =
     ()
 ;;
 
-let masc_run_descriptor name ~readonly =
+let masc_run_descriptor ?ordinary_execution_mode name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.run." ^ String.sub name (String.length "masc_run_")
@@ -1459,8 +1905,9 @@ let masc_run_descriptor name ~readonly =
     ()
 ;;
 
-let masc_agent_descriptor id name ~readonly =
+let masc_agent_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.agent." ^ id)
@@ -1472,11 +1919,13 @@ let masc_agent_descriptor id name ~readonly =
 
 let masc_workspace_descriptor
     ?(keeper_model_projection = Internal_name)
+    ?ordinary_execution_mode
     id
     name
     ~readonly
   =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection
     ~id:("masc.workspace." ^ id)
@@ -1488,8 +1937,9 @@ let masc_workspace_descriptor
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
    misc / control / agent_timeline / local_runtime). *)
-let masc_misc_descriptor id name ~readonly =
+let masc_misc_descriptor ?ordinary_execution_mode id name ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:("masc.misc." ^ id)
@@ -1514,8 +1964,9 @@ let masc_control_descriptor operation =
     ()
 ;;
 
-let masc_agent_timeline_descriptor name description ~readonly =
+let masc_agent_timeline_descriptor ?ordinary_execution_mode name description ~readonly =
   cluster_descriptor
+    ?ordinary_execution_mode
     ~capability_identity:Internal_name_identity
     ~keeper_model_projection:Internal_name
     ~id:"masc.agent_timeline"
@@ -1664,6 +2115,9 @@ let internal_descriptors : t list =
           keeper_surface_read only for current conversation context. \
           No arguments."
        ~input_schema:empty_object_schema
+       (* Concurrent: pure projection over the boot-time descriptor
+          registry and registered schemas; no shared mutable state. *)
+       ~ordinary_execution_mode:Concurrent
        ~policy:(read_only_in_process_policy ())
        ~handler:Tool_tools_list
        ()
@@ -1689,10 +2143,14 @@ let internal_descriptors : t list =
       ~name:Keeper_tool_runtime_schemas.artifact_read.name
       ~description:Keeper_tool_runtime_schemas.artifact_read.description
       ~input_schema:Keeper_tool_runtime_schemas.artifact_read.input_schema
+      (* Concurrent: content-addressed blob reads; the validated-file
+         cache in Tool_blob_store is an Atomic CAS over an immutable map. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_artifact_read
       ()
-    |> with_model_output_projection Tool_output.bounded_inline_model_projection)
+    |> with_model_output_projection Tool_output.bounded_inline_model_projection
+    |> with_composable_output (Json_output { schema = artifact_read_output_schema }))
   ; in_process_descriptor_with_schema_source
       ~capability_identity:Internal_name_identity
       ~keeper_model_projection:Internal_name
@@ -1723,6 +2181,9 @@ let internal_descriptors : t list =
       ~name:"keeper_library_search"
       ~description:"Search the keeper library catalog."
       ~input_schema:library_search_schema
+      (* Concurrent: directory listing + whole-file reads in
+         Tool_library; no shared mutable state on the search path. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_search
       ()
@@ -1732,6 +2193,7 @@ let internal_descriptors : t list =
       ~name:"keeper_library_read"
       ~description:"Read a library entry by id."
       ~input_schema:library_read_schema
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_library_read
       ()
@@ -1808,6 +2270,10 @@ let internal_descriptors : t list =
       ~description:Keeper_tool_runtime_schemas.fusion_status.description
       ~input_schema:Keeper_tool_runtime_schemas.fusion_status.input_schema
       (* [Internal_name] is the model exposure authority. *)
+      (* Concurrent: projects an [Atomic.get] snapshot of the fusion run
+         registry (Run_registry_core); mutation goes through its own
+         cross-context mutex on the write side. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_masc_fusion_status
       ()
@@ -1844,12 +2310,18 @@ let internal_descriptors : t list =
       "keeper_voice_session_end"
       ~readonly:false
     (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
+  ; (task_descriptor
+       (* Concurrent: backlog reads go through the mtime/size-keyed cache in
+          Workspace_backlog, whose lookups and refreshes run under a
+          Stdlib.Mutex with no suspension inside the critical section. *)
+       ~ordinary_execution_mode:Concurrent
+       ~capability_identity:(Named_capability "masc_tasks")
+       "list"
+       "keeper_tasks_list"
+       ~readonly:true
+     |> with_composable_output (Json_output { schema = tasks_list_output_schema }))
   ; task_descriptor
-      ~capability_identity:(Named_capability "masc_tasks")
-      "list"
-      "keeper_tasks_list"
-      ~readonly:true
-  ; task_descriptor
+      ~ordinary_execution_mode:Concurrent
       ~capability_identity:Internal_name_identity
       "audit"
       "keeper_tasks_audit"
@@ -1882,9 +2354,11 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
        ~readonly:false
-  ; masc_task_descriptor "task_history" "masc_task_history"
+  ; masc_task_descriptor ~ordinary_execution_mode:Concurrent
+       "task_history" "masc_task_history"
        ~readonly:true
-  ; masc_task_transport_descriptor "tasks" "masc_tasks"
+  ; masc_task_transport_descriptor ~ordinary_execution_mode:Concurrent
+       "tasks" "masc_tasks"
        ~readonly:true
   ; masc_task_descriptor "transition" "masc_transition"
        ~readonly:false
@@ -1901,7 +2375,8 @@ let internal_descriptors : t list =
       ~readonly:false
   ; masc_plan_descriptor "set_task" "masc_plan_set_task"
        ~readonly:false
-  ; masc_plan_descriptor "get_task" "masc_plan_get_task"
+  ; masc_plan_descriptor ~ordinary_execution_mode:Concurrent
+       "get_task" "masc_plan_get_task"
        ~readonly:true
   ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
        ~readonly:false
@@ -1912,8 +2387,10 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_run_* cluster (4 entries) ──────────── *)
   ; masc_run_descriptor "masc_run_init"
        ~readonly:false
-  ; masc_run_descriptor "masc_run_list"
+  ; (masc_run_descriptor ~ordinary_execution_mode:Concurrent
+       "masc_run_list"
        ~readonly:true
+     |> with_composable_output (Json_output { schema = run_list_output_schema }))
   ; masc_run_descriptor "masc_run_get"
       ~readonly:false
   ; masc_run_descriptor "masc_run_plan"
@@ -1921,13 +2398,20 @@ let internal_descriptors : t list =
   (* ── RFC-0182 §3.1 — masc_agent_* cluster (3 entries; masc_agents +
        masc_agent_update removed 2026-06-09 with the dead agent-status
        surface) ────────── *)
-  ; (masc_agent_descriptor "card" "masc_agent_card"
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+        "card" "masc_agent_card"
         ~readonly:true
-     |> with_eval_tags [ "agent_profile_lookup" ])
-  ; masc_agent_descriptor "fitness" "masc_agent_fitness"
+     |> with_eval_tags [ "agent_profile_lookup" ]
+     |> with_composable_output (Json_output { schema = agent_card_output_schema }))
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+       "fitness" "masc_agent_fitness"
        ~readonly:true
-  ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
+     |> with_composable_output
+          (Json_output { schema = agent_fitness_output_schema }))
+  ; (masc_agent_descriptor ~ordinary_execution_mode:Concurrent
+       "get_metrics" "masc_get_metrics"
        ~readonly:true
+     |> with_composable_output (Json_output { schema = get_metrics_output_schema }))
   (* ── RFC-0182 §3.1 — masc_workspace_* cluster (8 entries) ────────── *)
   (* Operator-only: [masc_status] answers with the operator's status *screen*.
      Workspace_status renders it for a terminal — emoji, a box-drawing rule, a
@@ -1958,8 +2442,10 @@ let internal_descriptors : t list =
        ~readonly:false
   ; masc_workspace_descriptor "check" "masc_check"
        ~readonly:true
-  ; masc_workspace_descriptor "goal_list" "masc_goal_list"
+  ; (masc_workspace_descriptor ~ordinary_execution_mode:Concurrent
+       "goal_list" "masc_goal_list"
        ~readonly:true
+     |> with_composable_output (Json_output { schema = goal_list_output_schema }))
   ; masc_workspace_descriptor "goal_upsert" "masc_goal_upsert"
        ~readonly:false
   ; masc_workspace_descriptor "goal_assign" "masc_goal_assign"
@@ -1967,7 +2453,8 @@ let internal_descriptors : t list =
   ; masc_workspace_descriptor "goal_transition" "masc_goal_transition"
        ~readonly:false
   (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
-  ; masc_misc_descriptor "config" "masc_config"
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "config" "masc_config"
        ~readonly:true
   ; masc_misc_descriptor "dashboard" "masc_dashboard"
        ~readonly:true
@@ -1979,7 +2466,8 @@ let internal_descriptors : t list =
       ~handler:Tool_masc_misc_dispatch
       ~readonly:true
       ()
-  ; masc_misc_descriptor "tool_help" "masc_tool_help"
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "tool_help" "masc_tool_help"
        ~readonly:true
   ; masc_misc_descriptor "gc" "masc_gc"
       ~readonly:false
@@ -1991,8 +2479,11 @@ let internal_descriptors : t list =
   ; masc_control_descriptor Tool_schemas_misc.Pause
   ; masc_control_descriptor Tool_schemas_misc.Resume
   (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
-  ; masc_agent_timeline_descriptor "masc_agent_timeline"
-      "Read agent timeline events." ~readonly:true
+  ; (masc_agent_timeline_descriptor ~ordinary_execution_mode:Concurrent
+       "masc_agent_timeline"
+       "Read agent timeline events." ~readonly:true
+     |> with_composable_output
+          (Json_output { schema = agent_timeline_output_schema }))
   (* ── RFC-0234 — scheduled internal automation (6 entries) ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
@@ -2179,6 +2670,7 @@ let route_evidence_json d =
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "execution", `String (execution_to_string d.execution)
+     ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
      ; "composable_output", composable_output_to_json d.composable_output
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
@@ -2215,6 +2707,7 @@ let discovery_fields d =
    ; "sandbox", `String (sandbox_to_string d.sandbox)
    ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
    ; "execution", `String (execution_to_string d.execution)
+   ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
    ; "composable_output", composable_output_to_json d.composable_output
    ; "policy", discovery_policy_json d.policy
    ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema

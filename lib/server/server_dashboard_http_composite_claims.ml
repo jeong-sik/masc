@@ -55,11 +55,6 @@ let composite_claim_scope_absent =
     ; "source", `String "keeper_task_claim_tool_call"
     ; "status", `String "not_observed"
     ; "result", `Null
-    ; "mode", `Null
-    ; "scoped", `Null
-    ; "active_goal_ids", `List []
-    ; "effective_goal_ids", `List []
-    ; "excluded_count", `Null
     ; "claimed_task_id", `Null
     ; "claimed_goal_id", `Null
     ]
@@ -146,30 +141,12 @@ let composite_claim_scope_json ~claim_window ~keeper_name =
       | Some (`Assoc _ as output) -> output
       | _ -> `Assoc []
     in
-    let claim_scope =
-      match json_assoc "claim_scope" output with
-      | Some value -> value
-      | None -> `Assoc []
-    in
     let claimed_task = json_assoc "claimed_task" output in
     `Assoc
       [ "present", `Bool true
       ; "source", `String "keeper_task_claim_tool_call"
       ; "status", `String (claim_status_of_output output)
       ; "result", Json_util.string_opt_to_json (json_string "result" output)
-      ; "mode", Json_util.string_opt_to_json (json_string "mode" claim_scope)
-      ; ( "scoped",
-          match json_bool "scoped" claim_scope with
-          | Some value -> `Bool value
-          | None -> `Null )
-      ; ( "active_goal_ids",
-          Json_util.json_string_list
-            (Json_util.get_string_list claim_scope "active_goal_ids") )
-      ; ( "effective_goal_ids",
-          Json_util.json_string_list
-            (Json_util.get_string_list claim_scope "effective_goal_ids") )
-      ; ( "excluded_count",
-          Json_util.int_opt_to_json (json_int "excluded_count" claim_scope) )
       ; ( "claimed_task_id",
           match claimed_task with
           | Some task -> Json_util.string_opt_to_json (json_string "task_id" task)

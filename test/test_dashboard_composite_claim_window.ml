@@ -1,4 +1,4 @@
-(** The shared tool-call window behind a keeper's [claim_scope] (#28437).
+(** The shared tool-call window behind a keeper's claim projection (#28437).
 
     Two properties are under test, and they are the same change:
 
@@ -49,7 +49,6 @@ let eio_test name fn =
 let claim_output ~task_id ~goal_id =
   `Assoc
     [ "result", `String (Printf.sprintf "claimed %s" task_id)
-    ; "claim_scope", `Assoc [ "mode", `String "all_tasks"; "scoped", `Bool false ]
     ; "claimed_task", `Assoc [ "task_id", `String task_id; "goal_id", `String goal_id ]
     ]
   |> Yojson.Safe.to_string

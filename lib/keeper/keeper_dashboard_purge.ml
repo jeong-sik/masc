@@ -37,8 +37,18 @@ type resolve_error =
       ; operation_id : Keeper_shutdown_types.Operation_id.t
       ; detail : string
       }
+  | Keeper_lane_executing of
+      { keeper_name : string
+      ; phase : string
+      }
 
 let resolve_error_to_string = function
+  | Keeper_lane_executing { keeper_name; phase } ->
+    Printf.sprintf
+      "dashboard Keeper purge refused while the lane is executing: keeper=%s \
+       phase=%s. Stop or pause the Keeper first."
+      keeper_name
+      phase
   | Empty_requested_name -> "dashboard Keeper purge requires a non-empty target name"
   | Invalid_requested_name { requested_name; detail } ->
     Printf.sprintf
@@ -110,7 +120,17 @@ let resolve (config : Workspace.config) requested_name =
            (Keeper_metadata_unreadable { keeper_name; metadata_path; detail })
        | Ok (Some meta) when String.equal meta.name keeper_name ->
          (match Workspace.validate_agent_name meta.agent_name with
-          | Ok _ -> Ok (Some { requested_name; keeper_name; meta })
+          | Ok _ ->
+            (match
+               Keeper_registry.get_phase ~base_path:config.base_path keeper_name
+             with
+             | Some phase when Keeper_state_machine.can_execute_turn phase ->
+               Error
+                 (Keeper_lane_executing
+                    { keeper_name
+                    ; phase = Keeper_state_machine.phase_to_string phase
+                    })
+             | Some _ | None -> Ok (Some { requested_name; keeper_name; meta }))
           | Error detail ->
             Error
               (Keeper_agent_name_invalid

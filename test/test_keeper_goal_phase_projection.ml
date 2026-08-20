@@ -57,13 +57,16 @@ let goal_in phase id title =
 ;;
 
 (* One goal per phase, so a future phase added to [Goal_phase.t] shows up here
-   as an unclassified id rather than silently inheriting a neighbour's verdict. *)
+   as an unclassified id rather than silently inheriting a neighbour's verdict.
+   [Verifying] (RFC-0387 stage 2) admits self-directed progress — the gate
+   holds the phase, not the work — so it survives alongside Executing. *)
 let seed_all_phases config =
   Goal_store.write_state config
     { version = 1
     ; updated_at = Masc_domain.now_iso ()
     ; goals =
         [ goal_in Goal_phase.Executing "goal-executing" "still work"
+        ; goal_in Goal_phase.Verifying "goal-verifying" "proof pending"
         ; goal_in Goal_phase.Blocked "goal-blocked" "waiting on someone"
         ; goal_in Goal_phase.Paused "goal-paused" "set aside"
         ; goal_in Goal_phase.Completed "goal-completed" "already achieved"
@@ -87,6 +90,7 @@ let meta_with_goals ids =
 
 let all_ids =
   [ "goal-executing"
+  ; "goal-verifying"
   ; "goal-blocked"
   ; "goal-paused"
   ; "goal-completed"
@@ -94,16 +98,33 @@ let all_ids =
   ]
 ;;
 
+let summary_ids summaries =
+  List.map
+    (fun (s : Keeper_unified_prompt.goal_summary) -> s.summary_goal_id)
+    summaries
+;;
+
+let summary_title_opt goal_id summaries =
+  match
+    List.find_opt
+      (fun (s : Keeper_unified_prompt.goal_summary) ->
+        String.equal s.summary_goal_id goal_id)
+      summaries
+  with
+  | Some s -> Some s.summary_title
+  | None -> None
+;;
+
 let test_system_prompt_surface_drops_terminal_goals () =
   with_workspace @@ fun config ->
   seed_all_phases config;
   let meta = meta_with_goals all_ids in
   let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
-  let ids = List.map fst summaries in
-  check (list string) "only a progressable goal is offered" [ "goal-executing" ]
-    ids;
+  check (list string) "only progressable goals are offered"
+    [ "goal-executing"; "goal-verifying" ]
+    (summary_ids summaries);
   check (option string) "its title still resolves" (Some "still work")
-    (List.assoc_opt "goal-executing" summaries)
+    (summary_title_opt "goal-executing" summaries)
 ;;
 
 let test_world_observation_drops_terminal_goals () =
@@ -115,7 +136,8 @@ let test_world_observation_drops_terminal_goals () =
       ~meta
   in
   check (list string) "the per-turn frame agrees with the system prompt"
-    [ "goal-executing" ] observation.Keeper_world_observation.active_goals
+    [ "goal-executing"; "goal-verifying" ]
+    observation.Keeper_world_observation.active_goals
 ;;
 
 let test_unresolved_goal_id_stays_visible () =
@@ -127,9 +149,9 @@ let test_unresolved_goal_id_stays_visible () =
   let meta = meta_with_goals [ "goal-completed"; "goal-vanished" ] in
   let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
   check (list string) "the terminal goal goes, the unknown id stays"
-    [ "goal-vanished" ] (List.map fst summaries);
+    [ "goal-vanished" ] (summary_ids summaries);
   check (option string) "unknown id renders with no title" (Some "")
-    (List.assoc_opt "goal-vanished" summaries)
+    (summary_title_opt "goal-vanished" summaries)
 ;;
 
 let test_no_goals_surface_when_all_are_terminal () =
@@ -137,7 +159,7 @@ let test_no_goals_surface_when_all_are_terminal () =
   seed_all_phases config;
   let meta = meta_with_goals [ "goal-completed"; "goal-dropped" ] in
   check (list string) "no goal block rather than an empty-looking one" []
-    (List.map fst (Keeper_unified_prompt.active_goal_summaries ~config ~meta));
+    (summary_ids (Keeper_unified_prompt.active_goal_summaries ~config ~meta));
   let observation =
     Keeper_world_observation.observe ~pending_board_events:(Some []) ~config
       ~meta

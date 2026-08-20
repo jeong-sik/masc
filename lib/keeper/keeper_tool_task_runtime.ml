@@ -137,44 +137,25 @@ let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
 ;;
 
 let active_goal_scope_json
-      ~(meta : keeper_meta)
       ?matched_goal_id
       ?excluded_count
       ?scope_excluded_count
       ?explicit_excluded_count
       ?claim_pool_candidate_count
-      ?effective_mode
-      ?effective_goal_ids
-      ?fallback_reason
       ()
   =
-  let scoped = meta.active_goal_ids <> [] in
+  (* A keeper's goals no longer narrow which tasks it may claim, so this block
+     reports the one scope that exists. The goal-id lists it used to carry
+     described a filter that is gone; keeping them would state a constraint the
+     scheduler does not apply. *)
   let mode =
-    let scope_mode =
-      match effective_mode with
-      | Some mode -> mode
-      | None ->
-        if scoped then Keeper_runtime_contract.Active_goal_ids
-        else Keeper_runtime_contract.All_tasks
-    in
-    Keeper_runtime_contract.claim_scope_mode_to_string scope_mode
-  in
-  let effective_goal_ids =
-    match effective_goal_ids with
-    | Some goal_ids -> goal_ids
-    | None -> meta.active_goal_ids
+    Keeper_runtime_contract.claim_scope_mode_to_string
+      Keeper_runtime_contract.All_tasks
   in
   let fields =
     [
       ("mode", `String mode);
-      ("scoped", `Bool scoped);
-      ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-      );
-      ( "effective_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) effective_goal_ids)
-      );
-      ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
+      ("scoped", `Bool false);
       ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);
     ]
   in
@@ -193,47 +174,6 @@ let active_goal_scope_json
   in
   let fields = fields @ int_fields in
   `Assoc fields
-;;
-
-let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
-  match claim_goal_scope.Keeper_runtime_contract.mode with
-  | Keeper_runtime_contract.Active_goal_ids ->
-    (match meta.active_goal_ids with
-     | [] -> " in active goal scope"
-     | goal_ids ->
-       Printf.sprintf
-         " within active_goal_ids=[%s]"
-         (String.concat ", " goal_ids))
-  | Keeper_runtime_contract.All_tasks -> " across all tasks"
-  | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks ->
-    " after active-goal fallback to all tasks"
-;;
-
-let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
-  match claim_goal_scope.Keeper_runtime_contract.fallback_reason with
-  | Some _ ->
-    Printf.sprintf
-      "claim_scope.mode=%s already searched all tasks; blocked/excluded=%d."
-      (Keeper_runtime_contract.claim_scope_mode_to_string
-         claim_goal_scope.Keeper_runtime_contract.mode)
-      excluded_count
-  | None ->
-    let scope_hint =
-      match claim_goal_scope.Keeper_runtime_contract.mode with
-      | Keeper_runtime_contract.Active_goal_ids ->
-        (* Scope only stays in [active_goal_ids] mode when a claim-pool task is
-           linked to the goal (otherwise the resolver falls back to all_tasks).
-           A no-eligible result therefore means the remaining scoped candidates
-           were excluded by the explicit filter, not that a hidden gate owns
-           their admission. *)
-        " Scoped tasks exist but the explicit task filter excluded them."
-      | Keeper_runtime_contract.All_tasks
-      | Keeper_runtime_contract.Empty_goal_scope_fallback_all_tasks -> ""
-    in
-    Printf.sprintf
-      "blocked/excluded=%d.%s"
-      excluded_count
-      scope_hint
 ;;
 
 let no_eligible_exclusion_summary =
@@ -640,13 +580,6 @@ let handle_keeper_task_tool_with_outcome
            ~meta
            task)
     in
-    let claim_goal_scope =
-      Keeper_runtime_contract.resolve_claim_goal_scope
-        ~config
-        ~meta
-        ~task_eligible:auto_claim_eligible
-        ()
-    in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
@@ -694,9 +627,7 @@ let handle_keeper_task_tool_with_outcome
              into the fallback, drops the goal-scope filter, and claims its own
              task right back — exactly the case this is meant to prevent. *)
           Workspace.claim_next_r config ~agent_name:meta.agent_name
-            ~task_filter:claim_goal_scope.task_filter
             ~hard_filter:auto_claim_eligible
-            ~allow_scope_fallback:true
             ()
       in
       let result = claim_requested_task () in
@@ -759,13 +690,9 @@ let handle_keeper_task_tool_with_outcome
           ; scope_excluded_count
           ; _
           } ->
-        let action =
-          no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
-        in
         Printf.sprintf
-          "No eligible tasks%s. %s %s"
-          (claim_scope_context_suffix ~meta claim_goal_scope)
-          action
+          "No eligible tasks; searched all tasks, blocked/excluded=%d. %s"
+          excluded_count
           (no_eligible_exclusion_summary ~scope_excluded_count)
       | Workspace.Claim_next_error e -> Printf.sprintf "Error: %s" e
     in
@@ -774,10 +701,7 @@ let handle_keeper_task_tool_with_outcome
       | Workspace.Claim_next_claimed
           { task_id; title; priority; scope_widened; _ } ->
           let matched_goal_id = find_task_goal_id config task_id in
-          ( active_goal_scope_json ~meta ?matched_goal_id
-              ~effective_mode:claim_goal_scope.mode
-              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
+          ( active_goal_scope_json ?matched_goal_id ()
           , [
               ( "claim_observation",
                 Task.Tool.build_claim_observation_payload
@@ -800,19 +724,15 @@ let handle_keeper_task_tool_with_outcome
           ; claim_pool_candidate_count
           } ->
           ( active_goal_scope_json
-              ~meta
               ~excluded_count
               ~scope_excluded_count
               ~explicit_excluded_count
               ~claim_pool_candidate_count
-              ~effective_mode:claim_goal_scope.mode
-              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
+              ()
           , [] )
       | Workspace.Claim_next_no_unclaimed | Workspace.Claim_next_error _ ->
-          ( active_goal_scope_json ~meta ~effective_mode:claim_goal_scope.mode
-              ~effective_goal_ids:claim_goal_scope.effective_goal_ids
-              ?fallback_reason:claim_goal_scope.fallback_reason ()
+          ( active_goal_scope_json
+              ()
           , [] )
     in
     let typed_outcome_field =
@@ -821,11 +741,10 @@ let handle_keeper_task_tool_with_outcome
           { scope_excluded_count
           ; _
           } ->
-        let all_goals_excluded =
-          match claim_goal_scope.effective_goal_ids with
-          | [] -> true
-          | _ -> false
-        in
+        (* No goal narrows the claim pool any more, so nothing can have been
+           excluded for being outside one. The field stays until its readers
+           are retired with the rest of the scope surface. *)
+        let all_goals_excluded = false in
         Some
           ( "typed_outcome"
           , Keeper_tool_outcome.to_json

@@ -130,6 +130,7 @@ let status_summary_string
     ~(planning_state : planning_context_state)
     ~(attention_items : string list)
     ~(state : Masc_domain.workspace_state)
+    ~(task_goal_index : (string, string list) Hashtbl.t)
     ~(backlog : Masc_domain.backlog) =
   let max_agents_display = 40 in
   let max_active_tasks_display = 30 in
@@ -212,9 +213,6 @@ let status_summary_string
           (Printf.sprintf
              "  … and %d more agents\n"
              (agent_count - max_agents_display)));
-  let task_goal_index =
-    Workspace_goal_index.build_task_goal_index_for_config ctx.config
-  in
   Buffer.add_string buf "\nQuest Board:\n";
   List.iter
     (fun (task : Masc_domain.task) ->
@@ -222,7 +220,7 @@ let status_summary_string
       let status_icon, status_label = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
       let goal_ids =
-        Option.value (Hashtbl.find_opt task_goal_index task.id) ~default:[]
+        Workspace_goal_index.goals_for_task task_goal_index ~task_id:task.id
       in
       let goal_suffix =
         match goal_ids with

@@ -489,6 +489,26 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
+(* The other half of the contract: a task with no side-registry link renders
+   exactly as it did before goal links existed. Without this, a change that
+   suffixed every row — or one that suffixed an empty goal id — would still
+   pass the linked-task test above. *)
+let () =
+  test "dispatch_status_leaves_unlinked_task_unsuffixed" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    ignore
+      (Workspace.add_task ctx.config ~title:"Unlinked task" ~priority:2 ~description:"");
+    let args = `Assoc [] in
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      let msg = status_message result in
+      assert_contains msg "Unlinked task";
+      assert_not_contains msg "goal:"
+    | None -> failwith "dispatch returned None")
+;;
+
 (* Quest Board rendering surfaces a task's goal link from the RFC-0267
    goal_task_links side registry (the task record itself carries no goal_id). *)
 let () =

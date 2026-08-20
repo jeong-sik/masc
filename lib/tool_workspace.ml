@@ -203,6 +203,19 @@ let status_summary_string (ctx : context) =
   | Error error ->
     Error (Printf.sprintf "status snapshot unavailable: backlog read failed: %s" error)
   | Ok { Workspace.observed_backlog = backlog; recovered_from } ->
+  (* Read the goal-task registry through the Result reader so a damaged
+     registry surfaces here instead of rendering as "no task has a goal". The
+     renderer takes the built index as an argument — its contract says every
+     line is a deliberate operator surface, which a store read inside it
+     would quietly break. *)
+  match Workspace_goal_index.read_goal_task_links_r ctx.config with
+  | Error error ->
+    Error
+      (Printf.sprintf "status snapshot unavailable: goal link read failed: %s" error)
+  | Ok goal_task_links ->
+  let task_goal_index =
+    Workspace_goal_index.build_task_goal_index ~goal_task_links ()
+  in
   let session_bound =
     (* status_summary_string is read-only on the workspace file; a missing
        or malformed file is treated as "session not bound" because that's the
@@ -377,6 +390,7 @@ let status_summary_string (ctx : context) =
        ~done_count
        ~cancelled_count
        ~binding
+       ~task_goal_index
        ~planning_state
        ~attention_items
        ~state

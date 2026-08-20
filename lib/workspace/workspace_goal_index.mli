@@ -30,6 +30,14 @@ val tasks_for_goal
   -> goal_id:string
   -> Masc_domain.task list
 
+(** Goals linked to one task — the reverse of {!tasks_for_goal}, over the
+    index {!build_task_goal_index_for_config} returns. [[]] means the task
+    carries no goal link. *)
+val goals_for_task
+  :  (string, string list) Hashtbl.t
+  -> task_id:string
+  -> string list
+
 (** Count open (non-terminal) tasks for a goal using a pre-built index.
     O(k) where k = tasks linked to the goal, instead of O(n) full scan. *)
 val open_task_count_for_goal_indexed
@@ -51,6 +59,14 @@ val goal_task_links_path : Workspace_utils_backend_setup.config -> string
 
 (** Read the persistent goal-task link registry. Missing registry files are
     treated as an empty link set. *)
+(** Goal-task links, distinguishing an empty registry from an unreadable one.
+    {!read_goal_task_links} folds both into [[]], which makes a damaged
+    registry read as "nothing is linked". A caller that renders links must be
+    able to tell those apart. *)
+val read_goal_task_links_r :
+  Workspace_utils_backend_setup.config ->
+  ((string * string list) list, string) result
+
 val read_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list
 

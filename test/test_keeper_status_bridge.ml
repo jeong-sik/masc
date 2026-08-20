@@ -97,13 +97,17 @@ let shutdown_operation_with_phase phase =
   { Keeper_shutdown_types.schema_version =
       Keeper_shutdown_types.schema_version
   ; revision = 1
-  ; operation_id = Keeper_id.Operation_id.generate ()
+  ; operation_id = Keeper_shutdown_types.Operation_id.generate ()
   ; keeper_name = "verifier"
   ; lane_ownership = Keeper_shutdown_types.Dormant_meta
   ; trace_id
   ; generation = 1
   ; actor = "test"
-  ; cleanup_intent = Keeper_shutdown_types.Completion_not_requested
+  ; cleanup_intent =
+      { Keeper_shutdown_types.reason =
+          Keeper_shutdown_types.Operator_stop_remove_meta
+      ; remove_session = true
+      }
   ; turn_disposition = Keeper_shutdown_types.No_inflight_turn
   ; expected_backlog_version = 0
   ; owned_task_ids = []

@@ -1818,6 +1818,8 @@
 
 (include stanzas/test_goal_phase_all.inc)
 
+(include stanzas/test_goal_verification_gate.inc)
+
 
 
 

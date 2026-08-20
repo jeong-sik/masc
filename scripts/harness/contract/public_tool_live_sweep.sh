@@ -159,7 +159,7 @@ r_goal_list="$(call_tool 5008 "masc_goal_list" '{}')"
 expect_ok "masc_goal_list" "$r_goal_list"
 
 next_step "masc_goal_upsert"
-GOAL_SEED_PAYLOAD="$(call_tool 5009 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","priority":1}')"
+GOAL_SEED_PAYLOAD="$(call_tool 5009 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","metric":"sweep steps pass","target_value":"all steps","priority":1}')"
 GOAL_ID="$(printf '%s' "$GOAL_SEED_PAYLOAD" | extract_result | jq -r '.goal_id // empty')"
 if [ -z "$GOAL_ID" ]; then
   mcp_fail_with_context "could not create goal for public tool live sweep" "$GOAL_SEED_PAYLOAD"

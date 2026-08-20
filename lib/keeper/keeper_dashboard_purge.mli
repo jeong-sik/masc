@@ -53,6 +53,10 @@ type resolve_error =
   | Keeper_lane_executing of
       { keeper_name : string
       ; phase : string
+      ; live_turn_id : int option
+            (** [Some turn_id] when the refusal came from a turn in flight
+                rather than from the phase. The chat lane admits turns without
+                changing phase, so phase alone does not see it. *)
       }
 
 val resolve_error_to_string : resolve_error -> string

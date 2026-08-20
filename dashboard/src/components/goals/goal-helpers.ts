@@ -15,6 +15,7 @@ export type GoalPhaseFilter =
   | 'executing'
   | 'blocked'
   | 'paused'
+  | 'verifying'
   | 'completed'
   | 'dropped'
 
@@ -139,6 +140,7 @@ export function goalPhaseLabel(phase: string): string {
     case 'executing': return '실행 중'
     case 'blocked': return '차단됨'
     case 'paused': return '일시정지'
+    case 'verifying': return '검증 중'
     case 'completed': return '완료'
     case 'dropped': return '중단'
     default: return phase
@@ -150,6 +152,7 @@ export function goalPhaseStatus(phase: string): string {
     case 'completed': return 'completed'
     case 'blocked': return 'error'
     case 'paused': return 'paused'
+    case 'verifying': return 'awaiting_verification'
     case 'dropped': return 'offline'
     case 'executing':
     default:
@@ -178,6 +181,7 @@ export function phaseFilterLabel(value: GoalPhaseFilter): string {
     case 'executing':
     case 'blocked':
     case 'paused':
+    case 'verifying':
     case 'completed':
     case 'dropped':
       return goalPhaseLabel(value)

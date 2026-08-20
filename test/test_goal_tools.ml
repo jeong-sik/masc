@@ -169,6 +169,10 @@ let test_goal_list_includes_rollup () =
            ~target_value:"1" () with
    | Ok _ -> ()
    | Error msg -> fail msg);
+  (match Goal_store.upsert_goal config ~title:"Verifying goal" ~metric:"m"
+           ~target_value:"1" ~phase:Goal_phase.Verifying () with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
@@ -182,7 +186,9 @@ let test_goal_list_includes_rollup () =
   in
   let rollup = Yojson.Safe.Util.member "rollup" listed_json in
   check int "active goal is counted" 1
-    (Yojson.Safe.Util.member "active_count" rollup |> Yojson.Safe.Util.to_int)
+    (Yojson.Safe.Util.member "active_count" rollup |> Yojson.Safe.Util.to_int);
+  check int "verifying goal is counted" 1
+    (Yojson.Safe.Util.member "verifying_count" rollup |> Yojson.Safe.Util.to_int)
 ;;
 let test_goal_list_ignores_blank_optional_filters () =
   with_workspace

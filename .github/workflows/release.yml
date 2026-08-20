@@ -25,6 +25,12 @@ jobs:
           - os: ubuntu-latest
             arch: linux-x64
             may-fail: false
+          # aarch64 Linux 타깃. Raspberry Pi 5 / arm64 SBC 에 바이너리를 그대로
+          # 내려받아 실행하기 위한 것으로, 기기에서 직접 빌드하지 않는다.
+          # ubuntu-24.04-arm 은 public repo 에서 4vCPU 로 제공된다.
+          - os: ubuntu-24.04-arm
+            arch: linux-arm64
+            may-fail: false
 
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.may-fail }}
@@ -143,7 +149,7 @@ jobs:
 
       - name: Verify advertised release assets
         run: |
-          for arch in macos-arm64 linux-x64; do
+          for arch in macos-arm64 linux-x64 linux-arm64; do
             for asset in \
               "masc-$arch" \
               "masc-deployment-preflight-helper-$arch" \

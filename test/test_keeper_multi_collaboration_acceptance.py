@@ -76,13 +76,13 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             coverage["assertions"],
             [
                 "qa_coverage_execution_observed",
-                "qa_coverage_enters_verification_flow",
+                "qa_coverage_passes_verification",
                 "qa_coverage_review_matches_spec",
             ],
         )
         # The row exists to reject partial runs, so the tester must be able to
         # execute rather than only claim, and the work has to enter the typed
-        # verification flow instead of living in Board comments.
+        # verification flow and actually pass it — submitting is not completing.
         self.assertIn("tool_execute", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_claim", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_done", catalog["keeper_required_tools"])

@@ -100,7 +100,7 @@ KNOWN_ASSERTIONS = {
     "debate_restatement_faithful",
     "debate_verdict_cites_rebuttal",
     "qa_coverage_execution_observed",
-    "qa_coverage_enters_verification_flow",
+    "qa_coverage_passes_verification",
     "qa_coverage_review_matches_spec",
 }
 
@@ -1554,6 +1554,41 @@ class MissionRun:
                 {"tool": "masc_task_history", "text": observation.text, "data": observation.data},
             )
 
+    def _completion_verdict(self, key: str) -> tuple[bool, str]:
+        """Whether this task's own history shows it passed verification.
+
+        Submitting is not completing. keeper_task_done issues
+        submit_for_verification, and the completion authority then approves or
+        rejects — live records show 41 approvals against 35 rejections, so the
+        verdict is a real judgement rather than a rubber stamp. A mission that
+        only checked the submission tool call would pass on rejected work.
+
+        The detail distinguishes rejected from still-unjudged, because those
+        need different follow-up.
+        """
+        observation = self.observations.get(f"task-history-{key}")
+        entries = getattr(observation, "data", None)
+        verdicts = [
+            entry
+            for entry in (entries if isinstance(entries, list) else [])
+            if isinstance(entry, dict)
+            and entry.get("type") == "task_completion_verdict"
+        ]
+        for entry in verdicts:
+            if (
+                entry.get("from_status") == "awaiting_verification"
+                and entry.get("to_status") == "done"
+                and entry.get("verification_id")
+            ):
+                return True, f"{key}=approved({entry['verification_id']})"
+        if verdicts:
+            last = verdicts[-1]
+            return (
+                False,
+                f"{key}={last.get('from_status')}->{last.get('to_status')}",
+            )
+        return False, f"{key}=no_verdict"
+
     def _status_text(self, role: str) -> str:
         return json.dumps(self.statuses.get(role), ensure_ascii=False).lower()
 
@@ -1600,6 +1635,9 @@ class MissionRun:
         task_text = json.dumps(tasks, ensure_ascii=False)
         goal_text = json.dumps(goals, ensure_ascii=False)
         history_text = json.dumps(histories, ensure_ascii=False)
+        qa_verdicts = [
+            self._completion_verdict(key) for key in ("qa-implement", "qa-test")
+        ]
         parallel_turns = [
             turn for label, turn in self.turns.items() if label.startswith("parallel-")
         ]
@@ -2359,7 +2397,7 @@ class MissionRun:
                 + " declared="
                 + ",".join(name for name, _, _ in self.qa_cases),
             ),
-            "qa_coverage_enters_verification_flow": (
+            "qa_coverage_passes_verification": (
                 all(
                     successful_windowed_tool(role, label, tool)
                     for role, label in (
@@ -2367,11 +2405,13 @@ class MissionRun:
                         ("builder-b", "qa-test"),
                     )
                     for tool in ("keeper_task_claim", "keeper_task_done")
-                ),
+                )
+                and all(passed for passed, _ in qa_verdicts),
                 "implementer and tester each claimed their own Task on the "
-                "shared Goal and submitted evidence through keeper_task_done, "
-                "so completion is a submission for verification rather than a "
-                "self-declaration",
+                "shared Goal, submitted evidence through keeper_task_done, and "
+                "an independent completion authority carried both from "
+                "awaiting_verification to done: "
+                + " ".join(detail for _, detail in qa_verdicts),
             ),
             "qa_coverage_review_matches_spec": (
                 text_contains(board, "QA_COVERAGE_VERDICT=COMPLETE:")

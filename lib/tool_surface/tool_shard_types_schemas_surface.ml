@@ -1,12 +1,8 @@
 (** Tool_shard_types_schemas_surface — keeper_surface_* tool schemas
     (RFC-0223 P3). *)
 
-(* Slack's chat.postMessage caps top-level blocks at 50. The executor holds the
-   authority for this number ([Keeper_surface_post.max_rich_blocks]); this layer
-   cannot reference it, because RFC-0056 makes a tool_surface -> keeper edge a
-   dune cycle. Named here so the second copy is greppable rather than a bare
-   literal, and pinned equal to the authority by
-   test_keeper_tool_descriptor_registry_integrity. *)
+(* Slack's chat.postMessage caps top-level blocks at 50. This lower tool-surface
+   layer owns the wire limit; the Keeper executor consumes the public value. *)
 let max_rich_blocks = 50
 
 let keeper_surface_post_description =

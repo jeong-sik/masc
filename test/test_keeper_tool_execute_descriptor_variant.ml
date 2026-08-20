@@ -25,6 +25,20 @@ let property_names (input_schema : Yojson.Safe.t) =
   | _ -> Alcotest.failf "properties missing or wrong shape: %s" (pp_json input_schema)
 ;;
 
+let one_of_required_names (input_schema : Yojson.Safe.t) =
+  match assoc_field_opt input_schema "oneOf" with
+  | Some (`List branches) ->
+    List.map
+      (fun branch ->
+         match assoc_field_opt branch "required" with
+         | Some (`List names) ->
+           List.map (function `String s -> s | _ -> "<non-string>") names
+           |> String.concat ","
+         | _ -> "<no-required>")
+      branches
+  | _ -> Alcotest.failf "oneOf missing or wrong shape: %s" (pp_json input_schema)
+;;
+
 let top_level_required (input_schema : Yojson.Safe.t) =
   match assoc_field_opt input_schema "required" with
   | Some (`List names) ->
@@ -66,56 +80,18 @@ let test_descriptor_is_typed_only () =
     "stages absent from properties"
     false
     (List.mem "stages" props);
+  let branches = one_of_required_names execute_schema.input_schema in
+  Alcotest.(check int) "2 oneOf branches" 2 (List.length branches);
+  Alcotest.(check bool) "cmd branch absent" false (List.mem "cmd" branches);
   Alcotest.(check (option string))
-    "no top-level required; the parser owns branch selection"
+    "no top-level required; oneOf owns branch selection"
     None
-    (top_level_required execute_schema.input_schema);
-  Alcotest.(check (option string))
-    "no oneOf; a wire-level variant selector invites tool-name decoration"
-    None
-    (Option.map pp_json (assoc_field_opt execute_schema.input_schema "oneOf"));
+    (top_level_required execute_schema.input_schema)
+  ;
   Alcotest.(check (option bool))
     "unknown top-level fields rejected"
     (Some false)
     (bool_field execute_schema.input_schema "additionalProperties")
-;;
-
-let parse_execute = Keeper_tool_execute_typed_input.of_json
-
-(* The schema no longer carries oneOf, so this is where argv/pipeline exclusivity
-   is proven.  Measured motivation: Execute was the only descriptor exposing
-   oneOf and the only one whose calls arrived as Execute["argv"] / Execute"." /
-   Execute<float> — 445 rejected, 0 ever successful (system_log 2026-08-18..19). *)
-let test_parser_owns_branch_selection () =
-  let argv_only = `Assoc [ "argv", `List [ `String "true" ] ] in
-  let pipeline_only =
-    `Assoc
-      [ ( "pipeline"
-        , `List
-            [ `Assoc [ "argv", `List [ `String "true" ] ]
-            ; `Assoc [ "argv", `List [ `String "cat" ] ]
-            ] )
-      ]
-  in
-  let both =
-    `Assoc
-      [ "argv", `List [ `String "true" ]
-      ; "pipeline", `List [ `Assoc [ "argv", `List [ `String "true" ] ] ]
-      ]
-  in
-  Alcotest.(check bool) "argv alone parses" true (Result.is_ok (parse_execute argv_only));
-  Alcotest.(check bool)
-    "pipeline alone parses"
-    true
-    (Result.is_ok (parse_execute pipeline_only));
-  Alcotest.(check bool)
-    "argv and pipeline together are rejected"
-    true
-    (Result.is_error (parse_execute both));
-  Alcotest.(check bool)
-    "neither argv nor pipeline is rejected"
-    true
-    (Result.is_error (parse_execute (`Assoc [])))
 ;;
 
 let test_description_does_not_advertise_cmd () =
@@ -172,10 +148,6 @@ let () =
             "descriptor is typed only"
             `Quick
             test_descriptor_is_typed_only
-        ; Alcotest.test_case
-            "parser owns argv/pipeline branch selection"
-            `Quick
-            test_parser_owns_branch_selection
         ; Alcotest.test_case
             "description does not advertise cmd"
             `Quick

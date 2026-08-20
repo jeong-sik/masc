@@ -214,18 +214,34 @@ let tool_execute_schema : Masc_domain.tool_schema =
         [ "type", `String "object"
         ; "properties", `Assoc properties
         ; "additionalProperties", `Bool false
-        (* oneOf/not is deliberately absent. Keeper_tool_execute_typed_input.of_json
-           already rejects argv+pipeline together ("$.argv and $.pipeline are
-           mutually exclusive") and rejects neither-present ("$.argv or
-           $.pipeline is required"), so the keyword carried no extra guarantee.
-
-           It did carry a cost. Execute was the only descriptor exposing oneOf,
-           and it is the only descriptor whose calls arrived with the variant
-           selector fused into the tool name: Execute["argv"], Execute".",
-           Execute<float>. Measured 2026-08-18..19 in system_log: 445 such calls
-           rejected as "Tool not found", 0 successful Execute calls ever. A small
-           model expressing "the argv branch" has nowhere to put that choice on
-           the wire, so it decorates the name. *)
+          (* The [not] clauses are gone. oneOf already means "exactly one
+             branch", so forbidding the other branch inside each one restated
+             the keyword rather than adding to it, and
+             Tool_input_validation.validated_one_of_required_names reads only
+             [required] — the clauses were never consulted. Execute is the only
+             descriptor carrying oneOf and the only one whose calls arrive with
+             the branch selector fused into the tool name (Execute["argv"],
+             Execute".", Execute<float>: 445 rejected as "Tool not found" over
+             2026-08-18..19, against 0 successful Execute calls ever). Halving
+             what a small model must reconcile is the cheapest thing to try
+             that changes no validation behaviour. *)
+        ; ( "oneOf"
+          , `List
+              [ `Assoc
+                  [ "required", `List [ `String "argv" ]
+                  ; ( "description"
+                    , `String
+                        "Single-process form: include one non-empty 'argv' and \
+                         no 'pipeline'." )
+                  ]
+              ; `Assoc
+                  [ "required", `List [ `String "pipeline" ]
+                  ; ( "description"
+                    , `String
+                        "Pipeline form: include 'pipeline' array of exec \
+                         stages and no top-level 'argv'." )
+                  ]
+              ] )
         ]
   }
 ;;

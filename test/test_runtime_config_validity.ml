@@ -1868,13 +1868,12 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     (list string)
     "routed lane candidates, special routes, verifier_exact slots, and media \
      failover are deduplicated without admitting a dormant lane"
-    [ "lane-a"
-    ; "lane-b"
-    ; "assigned-b"
-    ; "media-c"
-    ; "cross-a"
-    ; "verifier-a"
-    ]
+    (* [cross-e] is declared but nothing routes to it: no assignment, no
+       verifier_exact slot, no media failover entry names it. #29197 removed
+       the cross_verifier route that used to pull it in, so its member
+       [cross-a] is no longer enumerated — same reason [dormant-lane] never
+       was. *)
+    [ "lane-a"; "lane-b"; "assigned-b"; "media-c"; "verifier-a" ]
     actual
 ;;
 

@@ -249,11 +249,28 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
     let shutdown_fenced_backlog_count =
       queue_assoc_int "shutdown_fenced_backlog_count" fields
     in
+    (* Only part of the non-runnable backlog is something an operator can act
+       on.  [recoverable] clears once the owner fiber is restored and
+       [shutdown_fenced] clears once the shutdown completes, so both warrant a
+       prompt.  [retained_disabled] and [paused_dead] are the operator's own
+       standing decision -- a keeper deliberately paused, or autoboot /
+       proactive turned off.  Counting those as actionable pinned
+       [operator_action_required] to true for as long as the decision held, so
+       one deliberately paused keeper produced a permanent alarm that buried
+       the ones that do need an answer.  Both counts still travel in
+       [status_reasons], so the backlog stays visible without demanding
+       action. *)
+    let actionable_backlog_count =
+      recoverable_backlog_count + shutdown_fenced_backlog_count
+    in
+    (* [backlog_clean] answers a different question than [work_action_required]:
+       it reports whether the queue holds anything at all, so an operator-paused
+       entry does count against it. Keep the total separate from the actionable
+       subset. *)
     let non_runnable_backlog_count =
-      recoverable_backlog_count
+      actionable_backlog_count
       + retained_disabled_backlog_count
       + paused_dead_backlog_count
-      + shutdown_fenced_backlog_count
     in
     let runnable_oldest_age_seconds =
       queue_assoc_float_opt "runnable_oldest_age_seconds" fields
@@ -281,7 +298,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       then "degraded", "stalled"
       else if runnable_backlog_count > 0
       then "warning", "backlogged"
-      else if non_runnable_backlog_count > 0
+      else if actionable_backlog_count > 0
       then "warning", "blocked"
       else "ok", "idle"
     in
@@ -289,7 +306,7 @@ let keeper_event_queue_health_dimensions ~stale_after_sec = function
       queue_assoc_bool "operator_action_required" ~default:false fields
     in
     let work_action_required =
-      backlog_stale || non_runnable_backlog_count > 0
+      backlog_stale || actionable_backlog_count > 0
     in
     let operator_action_required =
       source_action_required || storage_degraded || work_action_required

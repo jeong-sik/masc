@@ -574,7 +574,12 @@ let test_goal_summaries_render_titles () =
   let observation = { base_observation with active_goals = [ "goal-x" ] } in
   let with_titles =
     user_message
-      ~active_goal_summaries:[ ("goal-x", "Improve wake context") ]
+      ~active_goal_summaries:
+        [ { Prompt.summary_goal_id = "goal-x"
+          ; summary_title = "Improve wake context"
+          ; summary_phase = None
+          }
+        ]
       observation
   in
   check bool "id and title" true
@@ -590,7 +595,12 @@ let test_partial_goal_summaries_preserve_missing_ids () =
   in
   let user =
     user_message
-      ~active_goal_summaries:[ ("goal-a", "Improve wake context") ]
+      ~active_goal_summaries:
+        [ { Prompt.summary_goal_id = "goal-a"
+          ; summary_title = "Improve wake context"
+          ; summary_phase = None
+          }
+        ]
       observation
   in
   check bool "header keeps full active-goal count" true

@@ -72,6 +72,7 @@ type state = {
 type rollup = {
   active_count : int;
   paused_count : int;
+  verifying_count : int;
   done_count : int;
   dropped_count : int;
 }
@@ -84,7 +85,8 @@ val rollup_to_yojson : rollup -> Yojson.Safe.t
 val compute_rollup : goal list -> rollup
 (** Field-wise count of goals per lifecycle bucket
     ([Executing] → active, [Paused]/[Blocked] → paused,
-    [Completed] → done, [Dropped] → dropped).  Single
+    [Verifying] → verifying, [Completed] → done,
+    [Dropped] → dropped).  Single
     pass; no allocation beyond the result record. *)
 
 (** {1 Persistence paths} *)

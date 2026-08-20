@@ -72,6 +72,22 @@ let defaults_with_prompt_fields =
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
 ;;
 
+let test_shutdown_phase_names_are_pinned () =
+  (* These strings go on the wire in keeper_status. A consumer waits for a
+     terminal by comparing against them, so renaming one silently breaks that
+     wait — the compiler cannot see a string comparison in a Python runner
+     (#29181). Exhaustiveness is the compiler's job; this pins the values. *)
+  let check expected phase =
+    Alcotest.(check string)
+      expected
+      expected
+      (Keeper_shutdown_types.phase_to_string phase)
+  in
+  check "prepared" Keeper_shutdown_types.Prepared;
+  check "joining_lanes" Keeper_shutdown_types.Joining_lanes;
+  check "joined_idle" Keeper_shutdown_types.Joined_idle
+;;
+
 let test_nonempty_live_meta_still_reports_profile_override () =
   init_runtime_default_for_tests ();
   let meta =
@@ -304,6 +320,13 @@ let () =
             "non-empty live identity still reports override"
             `Quick
             test_nonempty_live_meta_still_reports_profile_override;
+        ] );
+      ( "shutdown operation phase projection",
+        [
+          Alcotest.test_case
+            "phase names are pinned for wire consumers"
+            `Quick
+            test_shutdown_phase_names_are_pinned;
         ] );
     ]
 ;;

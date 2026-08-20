@@ -217,5 +217,14 @@ val immutable_fields_equal : t -> t -> bool
     evidence, phase, and [updated_at]) are intentionally excluded. *)
 val admission_lane_to_string : admission_lane -> string
 val admission_lane_of_string : string -> (admission_lane, string) result
+val phase_to_string : phase -> string
+(** Phase name only, for status surfaces. [keepalive_running] answers whether
+    the Keeper fiber is up, which is a different question from whether its
+    shutdown operation reached a terminal: a Keeper can read as stopped while
+    the operation still sits in [Finalizing_tasks] or [Cleanup_ready], and
+    those phases are outside the supersedable set, so a restart is refused
+    (#29181). *)
+
+
 val failure_stage_to_string : failure_stage -> string
 val failure_stage_of_string : string -> (failure_stage, string) result

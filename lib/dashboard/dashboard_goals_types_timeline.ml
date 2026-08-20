@@ -18,6 +18,9 @@ let goal_phase_color = function
   | Goal_phase.Executing -> "#4ade80"
   | Goal_phase.Blocked -> "#ef4444"
   | Goal_phase.Paused -> "#94a3b8"
+  (* RFC-0387 stage 2: the proof-pending hue matches the Task domain's
+     [AwaitingVerification] so the gate reads as the same shape of wait. *)
+  | Goal_phase.Verifying -> "#a78bfa"
   | Goal_phase.Completed -> "#60a5fa"
   | Goal_phase.Dropped -> "#6b7280"
 

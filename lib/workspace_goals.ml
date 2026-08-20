@@ -283,12 +283,28 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `created -> "created"
             | `updated -> "updated"
           in
+          (* RFC-0387 §3.2 (B2): creation records the durable criterion-check
+             request BEFORE any verifier model call consumes it. The goal is
+             already committed, so a failed write does not fail the creation
+             (the cross-file best-effort precedent of [delete_goal]) — it is
+             reported in [criterion_check] instead. Updates carry no hook:
+             the declaration obligation is creation-time only. *)
+          let criterion_check =
+            match action with
+            | `updated -> `String "not_applicable_update"
+            | `created ->
+              (match Goal_verification.mark_criterion_pending ctx.config ~goal_id:goal.id with
+               | Ok _ -> `String "criterion_pending"
+               | Error msg -> `Assoc [ "state", `String "criterion_check_failed"
+                                     ; "detail", `String msg ])
+          in
           ok_result
             ~tool_name
             ~start_time
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
+            ; "criterion_check", criterion_check
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf
@@ -411,6 +427,159 @@ let handle_goal_assign ~tool_name ~start_time (ctx : context) args
              ]))
 ;;
 
+(* RFC-0387 stage 2 — the completion gate.
+
+   Ordering for every gated action: [Goal_phase.decide_transition] first (the
+   FSM is the ONLY transition decider), then the ledger commit, then the phase
+   write, then the event. The ledger never judges a transition — it records
+   durable requests ([mark_*_pending]) and verdicts, and its commit failure
+   vetoes the phase write (persist-before-model-call), which is what keeps a
+   crashed write reconcilable instead of wedged (stage-2 review P0-2). *)
+
+(* The four gate actions carry a verdict; a verdict without evidence is not a
+   judgment, so [evidence] is required non-blank (RFC-0387 §3.3/§4). *)
+let gate_action_requires_evidence = function
+  | Goal_phase.Record_proof_proven
+  | Goal_phase.Record_proof_refuted
+  | Goal_phase.Record_criterion_viable
+  | Goal_phase.Record_criterion_unreachable -> true
+  | Goal_phase.Request_complete
+  | Goal_phase.Pause
+  | Goal_phase.Resume
+  | Goal_phase.Block
+  | Goal_phase.Unblock
+  | Goal_phase.Drop
+  | Goal_phase.Reopen -> false
+;;
+
+let validate_gate_evidence args action =
+  if not (gate_action_requires_evidence action)
+  then Ok ""
+  else
+    match get_string_opt args "evidence" with
+    | Some evidence when String.trim evidence <> "" -> Ok evidence
+    | received ->
+      Error
+        [ { field = "evidence"
+          ; constraint_violated = Required
+          ; message =
+              Printf.sprintf
+                "%s requires non-blank evidence — a verdict without evidence \
+                 is not a judgment (RFC-0387)"
+                (Goal_phase.action_to_string action)
+          ; expected = Some "non-blank string"
+          ; received
+          }
+        ]
+;;
+
+(* The MCP surface does not authenticate the caller, so the commit authority is
+   the caller's session name in the system-agent slot (RFC-0387 §4.3); the
+   authenticated binding is the B7 follow-up this slot is typed for. *)
+let gate_verdict
+      (ctx : context)
+      (outcome : Goal_verification.verdict_outcome)
+      ~evidence
+    : Goal_verification.verdict
+  =
+  { Goal_verification.outcome
+  ; authority = Masc_domain.System_llm_agent { agent_run_id = ctx.agent_name }
+  ; evidence
+  ; recorded_at = Masc_domain.now_iso ()
+  }
+;;
+
+(* A refutation carries a reason; the caller's [note] is it, and the evidence
+   stands in when no note was given — a blank reason is never written. *)
+let refuted_outcome ~evidence ~note : Goal_verification.verdict_outcome =
+  match note with
+  | Some reason when String.trim reason <> "" ->
+    Goal_verification.Refuted { reason }
+  | _ -> Goal_verification.Refuted { reason = evidence }
+;;
+
+let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =
+  let outcome_fields =
+    match verdict.outcome with
+    | Goal_verification.Proven -> [ "outcome", `String "proven" ]
+    | Goal_verification.Refuted { reason } ->
+      [ "outcome", `String "refuted"; "reason", `String reason ]
+  in
+  `Assoc
+    ([ "phase", Goal_phase.to_yojson phase
+     ; "actor", `String ctx.agent_name
+     ; "evidence", `String verdict.evidence
+     ]
+     @ outcome_fields)
+;;
+
+let already_goal_response ~tool_name ~start_time ~goal_id ~action ~phase goal verification =
+  ok_result
+    ~tool_name
+    ~start_time
+    ([ "goal_id", `String goal_id
+     ; "action", `String (Goal_phase.action_to_string action)
+     ; "noop", `Bool true
+     ; "phase", Goal_phase.to_yojson phase
+     ; "goal", Goal_store.goal_to_yojson goal
+     ]
+     @
+     match verification with
+     | Some (record : Goal_verification.record) ->
+       [ "verification", Goal_verification.record_to_yojson record ]
+     | None -> [])
+;;
+
+(* Phase-neutral criterion commit (RFC-0387 §3.3): the FSM answered [Already]
+   for a non-terminal phase, so there is no phase write and no phase event —
+   the ledger is the whole effect. *)
+let commit_criterion_verdict_response
+      ~tool_name ~start_time (ctx : context) ~goal_id ~action ~phase goal verdict
+  =
+  match Goal_verification.record_criterion_verdict ctx.config ~goal_id verdict with
+  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
+  | Ok record ->
+    already_goal_response
+      ~tool_name ~start_time ~goal_id ~action ~phase goal (Some record)
+;;
+
+(* A repeated [request_complete] on [Verifying] is the explicit retry that
+   replaces wall-clock expiry (RFC-0387 §5). It answers [Already] carrying the
+   ledger state as the retry hint — and when the ledger lost the durable proof
+   request (the phase=Verifying + ledger=idle wedge of the rejected first
+   gate, P0-2), it RE-ARMS [mark_proof_pending] before answering, so the gate
+   always has a pending request for the verifier to drain. *)
+let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~action goal =
+  match Goal_verification.get_record ctx.config ~goal_id with
+  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+  | Ok record ->
+    (match record with
+     | Some
+         { Goal_verification.completion =
+             ( Goal_verification.Proof_pending _
+             | Goal_verification.Proof_proven _
+             | Goal_verification.Human_confirmed _ )
+         ; _
+         } ->
+       (* The durable request stands, or the verdict committed but the phase
+          write did not (crash-between-writes) — nothing to re-arm; the
+          retried [record_proof_*] re-commits the identical outcome and moves
+          the phase. *)
+       already_goal_response
+         ~tool_name ~start_time ~goal_id ~action ~phase:Goal_phase.Verifying goal
+         record
+     | Some { Goal_verification.completion = Goal_verification.Completion_idle; _ }
+     | Some { Goal_verification.completion = Goal_verification.Proof_refuted _; _ }
+     | None ->
+       (match Goal_verification.mark_proof_pending ctx.config ~goal_id with
+        | Error msg ->
+          error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+        | Ok record ->
+          already_goal_response
+            ~tool_name ~start_time ~goal_id ~action ~phase:Goal_phase.Verifying goal
+            (Some record)))
+;;
+
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
   match
@@ -420,49 +589,183 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
   | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some action) ->
-    let note = get_string_opt args "note" in
-    (match Goal_store.get_goal ctx.config ~goal_id with
-     | None ->
-       error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-     | Some goal ->
-       (match Goal_phase.decide_transition ~phase:goal.phase ~action with
-        | Error msg ->
-          error_result_typed ~tool_name ~start_time ~code:Conflict msg
-        (* The goal already occupies the phase this action targets. Writing it
-           and emitting a phase event would turn a repeated report — a duplicate
-           reconciliation, a stale racing event — into repeated history, so the
-           request is answered from the goal as it stands. *)
-        | Ok (Goal_phase.Already phase) ->
-          ok_result
-            ~tool_name
-            ~start_time
-            [ "goal_id", `String goal_id
-            ; "action", `String (Goal_phase.action_to_string action)
-            ; "noop", `Bool true
-            ; "phase", Goal_phase.to_yojson phase
-            ; "goal", Goal_store.goal_to_yojson goal
-            ]
-        | Ok (Goal_phase.Move_to phase) ->
-          (match update_goal_phase ctx goal ~phase ?note () with
+    (match validate_gate_evidence args action with
+     | Error errs -> validation_error_result ~tool_name ~start_time errs
+     | Ok evidence ->
+       let note = get_string_opt args "note" in
+       (match Goal_store.get_goal ctx.config ~goal_id with
+        | None ->
+          error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
+        | Some goal ->
+          (match Goal_phase.decide_transition ~phase:goal.phase ~action with
            | Error msg ->
-             error_result_typed ~tool_name ~start_time ~code:Internal_error msg
-           | Ok updated_goal ->
-             emit_goal_event
-               ctx
-               ~goal_id
-               ~event_type:"goal_phase"
-               ~payload:
-                 (`Assoc
-                    [ "phase", Goal_phase.to_yojson updated_goal.phase
-                    ; "actor", `String ctx.agent_name
-                    ]);
-             ok_result
-               ~tool_name
-               ~start_time
-               [ "goal_id", `String goal_id
-               ; "action", `String (Goal_phase.action_to_string action)
-               ; "goal", Goal_store.goal_to_yojson updated_goal
-               ])))
+             error_result_typed ~tool_name ~start_time ~code:Conflict msg
+           (* The goal already occupies the phase this action targets. Writing it
+              and emitting a phase event would turn a repeated report — a duplicate
+              reconciliation, a stale racing event — into repeated history, so the
+              request is answered from the goal as it stands. The gate exceptions
+              that still work the ledger are the criterion commits and the
+              [Verifying] repeat; see the helpers above. *)
+           | Ok (Goal_phase.Already phase) ->
+             (match action with
+              | Goal_phase.Record_criterion_viable ->
+                commit_criterion_verdict_response
+                  ~tool_name ~start_time ctx ~goal_id ~action ~phase goal
+                  (gate_verdict ctx Goal_verification.Proven ~evidence)
+              | Goal_phase.Record_criterion_unreachable ->
+                commit_criterion_verdict_response
+                  ~tool_name ~start_time ctx ~goal_id ~action ~phase goal
+                  (gate_verdict ctx (refuted_outcome ~evidence ~note) ~evidence)
+              | Goal_phase.Request_complete ->
+                (match phase with
+                 | Goal_phase.Verifying ->
+                   answer_verifying_repeat
+                     ~tool_name ~start_time ctx ~goal_id ~action goal
+                 | Goal_phase.Executing
+                 | Goal_phase.Blocked
+                 | Goal_phase.Paused
+                 | Goal_phase.Completed
+                 | Goal_phase.Dropped ->
+                   already_goal_response
+                     ~tool_name ~start_time ~goal_id ~action ~phase goal None)
+              | Goal_phase.Record_proof_proven
+              | Goal_phase.Record_proof_refuted
+              | Goal_phase.Pause
+              | Goal_phase.Resume
+              | Goal_phase.Block
+              | Goal_phase.Unblock
+              | Goal_phase.Drop
+              | Goal_phase.Reopen ->
+                already_goal_response
+                  ~tool_name ~start_time ~goal_id ~action ~phase goal None)
+           | Ok (Goal_phase.Move_to phase) ->
+             (match action with
+              | Goal_phase.Request_complete ->
+                (* Executing -> Verifying (RFC-0387 §4): gate on the criterion
+                   verdict, then persist the proof request BEFORE the phase
+                   write — if the ledger write fails the phase does not move.
+                   A ledger that does not decode is a typed error, never read
+                   as "not unreachable" (P1-1). *)
+                (match Goal_verification.get_record ctx.config ~goal_id with
+                 | Error msg ->
+                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                 | Ok
+                     (Some
+                       { Goal_verification.criterion =
+                           Goal_verification.Criterion_unreachable _
+                       ; _
+                       }) ->
+                   error_result_typed
+                     ~tool_name
+                     ~start_time
+                     ~code:Conflict
+                     (Printf.sprintf
+                        "goal %s criterion was judged unreachable; \
+                         request_complete is refused (RFC-0387 B2)"
+                        goal_id)
+                 | Ok _ ->
+                   (match
+                      Goal_verification.mark_proof_pending ctx.config ~goal_id
+                    with
+                    | Error msg ->
+                      error_result_typed
+                        ~tool_name ~start_time ~code:Internal_error msg
+                    | Ok record ->
+                      (match update_goal_phase ctx goal ~phase ?note () with
+                       | Error msg ->
+                         error_result_typed
+                           ~tool_name ~start_time ~code:Internal_error msg
+                       | Ok updated_goal ->
+                         emit_goal_event
+                           ctx
+                           ~goal_id
+                           ~event_type:"goal_phase"
+                           ~payload:
+                             (`Assoc
+                                [ "phase", Goal_phase.to_yojson updated_goal.phase
+                                ; "actor", `String ctx.agent_name
+                                ]);
+                         ok_result
+                           ~tool_name
+                           ~start_time
+                           [ "goal_id", `String goal_id
+                           ; "action", `String (Goal_phase.action_to_string action)
+                           ; "goal", Goal_store.goal_to_yojson updated_goal
+                           ; ( "verification"
+                             , Goal_verification.record_to_yojson record )
+                           ])))
+              | Goal_phase.Record_proof_proven
+              | Goal_phase.Record_proof_refuted ->
+                (* Verifying -> Completed|Executing: the ledger commit is the
+                   verdict of record and runs BEFORE the phase write, so a
+                   stale verifier answer (no pending proof) vetoes the move. *)
+                let verdict =
+                  match action with
+                  | Goal_phase.Record_proof_proven ->
+                    gate_verdict ctx Goal_verification.Proven ~evidence
+                  | _ -> gate_verdict ctx (refuted_outcome ~evidence ~note) ~evidence
+                in
+                (match
+                   Goal_verification.record_proof_verdict
+                     ctx.config ~goal_id verdict
+                 with
+                 | Error msg ->
+                   error_result_typed ~tool_name ~start_time ~code:Conflict msg
+                 | Ok record ->
+                   (match update_goal_phase ctx goal ~phase ?note () with
+                    | Error msg ->
+                      error_result_typed
+                        ~tool_name ~start_time ~code:Internal_error msg
+                    | Ok updated_goal ->
+                      emit_goal_event
+                        ctx
+                        ~goal_id
+                        ~event_type:"goal_phase"
+                        ~payload:(gate_event_payload ctx ~phase verdict);
+                      ok_result
+                        ~tool_name
+                        ~start_time
+                        [ "goal_id", `String goal_id
+                        ; "action", `String (Goal_phase.action_to_string action)
+                        ; "goal", Goal_store.goal_to_yojson updated_goal
+                        ; "verification", Goal_verification.record_to_yojson record
+                        ]))
+              | Goal_phase.Record_criterion_viable
+              | Goal_phase.Record_criterion_unreachable ->
+                (* Criterion verdicts are phase-neutral: the FSM only answers
+                   [Already] for them, so [Move_to] here is unreachable. *)
+                error_result_typed
+                  ~tool_name
+                  ~start_time
+                  ~code:Internal_error
+                  "criterion verdicts are phase-neutral; decide_transition \
+                   never moves for them"
+              | Goal_phase.Pause
+              | Goal_phase.Resume
+              | Goal_phase.Block
+              | Goal_phase.Unblock
+              | Goal_phase.Drop
+              | Goal_phase.Reopen ->
+                (match update_goal_phase ctx goal ~phase ?note () with
+                 | Error msg ->
+                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                 | Ok updated_goal ->
+                   emit_goal_event
+                     ctx
+                     ~goal_id
+                     ~event_type:"goal_phase"
+                     ~payload:
+                       (`Assoc
+                          [ "phase", Goal_phase.to_yojson updated_goal.phase
+                          ; "actor", `String ctx.agent_name
+                          ]);
+                   ok_result
+                     ~tool_name
+                     ~start_time
+                     [ "goal_id", `String goal_id
+                     ; "action", `String (Goal_phase.action_to_string action)
+                     ; "goal", Goal_store.goal_to_yojson updated_goal
+                     ])))))
   | Ok _, Ok None ->
     validation_error_result
       ~tool_name

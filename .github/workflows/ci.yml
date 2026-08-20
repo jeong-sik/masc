@@ -1168,15 +1168,16 @@ jobs:
             @test/runtest-test_claimable_task_summaries
 
       - name: Run goal phase suite
-        # decide_transition is a 5x7 matrix that had no behavioural test. Its
-        # exhaustive match proves every pair has an arm, not that the arm gives
-        # the right answer -- so a matrix edit could change what the Goal FSM
-        # admits without anything going red. The suite states all 35 pairs.
-        # test_goal_verification_gate pins the RFC-0387 stage-1 surface around
-        # the same lifecycle: B1 creation requires a declared success
-        # condition, the verification ledger is strict/fail-closed/fail-loud,
-        # and request_complete still completes a Goal directly (the gate is
-        # stage 2).
+        # decide_transition is a 6x11 matrix (RFC-0387 stage 2 added Verifying
+        # and the four gate actions). Its exhaustive match proves every pair
+        # has an arm, not that the arm gives the right answer -- so a matrix
+        # edit could change what the Goal FSM admits without anything going
+        # red. The suite states all 66 pairs.
+        # test_goal_verification_gate pins the RFC-0387 surface around the
+        # same lifecycle: B1 creation requires a declared success condition,
+        # the verification ledger is strict/fail-closed/fail-loud, and the
+        # stage-2 gate routes request_complete through Verifying with the
+        # durable proof request persisted before the phase write.
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_goal_phase_all \

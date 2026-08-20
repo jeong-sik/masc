@@ -224,7 +224,7 @@ let recover_transcript_latch config (meta : Keeper_meta_contract.keeper_meta) =
           Keeper_checkpoint_store.save_agent_core_if_source
             ~session_dir
             ~expected_source_ref:source_ref
-            { checkpoint with Agent_core.Checkpoint.messages }
+            { checkpoint with Agent_core.Checkpoint.messages = messages }
         with
         | Keeper_checkpoint_store.Not_installed _ ->
           Error Durable_owner_transcript_reset_required

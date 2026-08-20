@@ -1178,10 +1178,15 @@ jobs:
         # the verification ledger is strict/fail-closed/fail-loud, and the
         # stage-2 gate routes request_complete through Verifying with the
         # durable proof request persisted before the phase write.
+        # test_goal_verification_agent drains the ledger's pending rows via
+        # the verifier_exact lane: verdicts commit through the transition
+        # handler, failures leave the row durable, and a wedged
+        # Verifying/idle pair is re-armed before review.
         run: |
           opam exec -- dune build --root . \
             @test/runtest-test_goal_phase_all \
-            @test/runtest-test_goal_verification_gate
+            @test/runtest-test_goal_verification_gate \
+            @test/runtest-test_goal_verification_agent
 
       - name: Run metric zero-cell declaration suite
         # A counter emitted as a bare string still compiles and still counts;

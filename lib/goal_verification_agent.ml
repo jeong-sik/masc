@@ -451,6 +451,7 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, string) result
          (* RFC-0387: per-row outcomes are logged at the point of decision
             (commit/defer) and drive retry only inside the daemon's
             [process_work]; the synchronous drain discards them. *)
+         (* fire-and-forget: per-row results are durable in the ledger. *)
          ignore (process_pending_work ~sw config item))
       work;
     Ok ()

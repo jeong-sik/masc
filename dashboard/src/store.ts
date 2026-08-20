@@ -99,9 +99,16 @@ export const keepers = signal<Keeper[]>([])
 // Names whose purge the server accepted but has not finished. Purge answers
 // 202 with an operation id and deletes asynchronously, so the refresh that
 // follows the submit still returns the keeper — without this the row redraws
-// unchanged and the operator sees nothing happen. A name leaves the set when a
-// refresh stops returning it, which is the only signal the server offers today
-// (there is no completion event and no operation-status route).
+// unchanged and the operator sees nothing happen.
+//
+// A typed Purged lifecycle event does exist and is already projected: the
+// server publishes it at completion and the execution surface maps it to
+// phase="stopped" (server_dashboard_http_execution_surfaces.ml). What is
+// missing is a projection that REMOVES the row rather than patching it, and a
+// keeper-row field carrying the durable shutdown-operation phase so a purge
+// that blocks after acceptance becomes visible. Until then the name's
+// disappearance from a refresh is the signal available here — which is why the
+// button below stays clickable rather than gating on this marker.
 export const keeperPurgePending = signal<ReadonlySet<string>>(new Set<string>())
 
 export function markKeeperPurgePending(name: string): void {

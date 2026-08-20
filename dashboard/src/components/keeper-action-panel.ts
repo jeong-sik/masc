@@ -128,6 +128,15 @@ export const KEEPER_ACTION_LABELS: Record<KeeperActionKey, KeeperActionLabel> = 
   },
 }
 
+/** Shown while the server has accepted a purge but has not finished it. The
+ *  button stays clickable: the endpoint is idempotent (a repeat call returns
+ *  the existing operation), and a purge that fails after acceptance would
+ *  otherwise leave the only control for that keeper disabled for good. */
+export const KEEPER_PURGE_PENDING_LABEL = {
+  compact: '제거 중',
+  title: '제거 요청이 접수됐고 서버가 삭제하는 중입니다. 완료되면 목록에서 사라집니다. 멈춘 것 같으면 다시 눌러 상태를 확인할 수 있습니다.',
+} as const
+
 /** Execute a lifecycle action for a single keeper with toast feedback.
  *  The shutdown confirm lives HERE, not in individual button surfaces —
  *  chat header, composer palette, roster context menu, and fleet rows all
@@ -236,7 +245,7 @@ export function KeeperActionButtons({
 }) {
   const busy = useSignal(false)
   const vis = keeperActionVisibility(keeper)
-  const purgePending = keeperPurgePending.value.has(keeper.name)
+  const purgePending = keeperPurgePending.value.has(keeper.name.trim())
 
   async function handle(e: Event, action: KeeperActionKey) {
     if (stopPropagation) e.stopPropagation()
@@ -313,13 +322,13 @@ export function KeeperActionButtons({
         ? html`<${ActionButton}
             variant="danger"
             size=${size}
-            disabled=${busy.value || purgePending}
+            disabled=${busy.value}
             onClick=${(e: Event) => handle(e, 'purge')}
             title=${purgePending
-              ? '제거 요청이 접수됐고 서버가 삭제하는 중입니다. 완료되면 목록에서 사라집니다.'
+              ? KEEPER_PURGE_PENDING_LABEL.title
               : KEEPER_ACTION_LABELS.purge.title}
             testId="keeper-action-purge"
-          >${purgePending ? '제거 중' : text('purge')}<//>`
+          >${purgePending ? KEEPER_PURGE_PENDING_LABEL.compact : text('purge')}<//>`
         : null}
     </div>
   `

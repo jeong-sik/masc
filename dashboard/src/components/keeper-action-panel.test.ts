@@ -281,3 +281,18 @@ describe('purge action', () => {
     expect(refreshKeeperRuntimeStatus).not.toHaveBeenCalled()
   })
 })
+
+describe('purge pending never locks the control', () => {
+  // A purge the server accepts and then fails to finish would otherwise leave
+  // the row's only control disabled for good. The endpoint is idempotent, so a
+  // repeat submit is safe and lets the operator re-check a stalled operation.
+  it('keeps submitting possible while a purge is pending', async () => {
+    vi.clearAllMocks()
+    vi.mocked(requestConfirm).mockResolvedValue(true)
+
+    await runKeeperAction('test', 'purge')
+    await runKeeperAction('test', 'purge')
+
+    expect(purgeKeeper).toHaveBeenCalledTimes(2)
+  })
+})

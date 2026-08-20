@@ -81,10 +81,17 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/ci/apt-refresh.sh
 
+      # release-evidence.sh 의 도구 표면 시나리오가 Grep 도구를 통해 rg 를
+      # 호출한다. ci.yml 은 잡마다 설치하지만 release.yml 에는 없었고,
+      # 러너 이미지에 rg 가 없으면 "rg executable not found" 로 번들이 깨진다.
+      - name: Install ripgrep
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y -qq ripgrep
+
       - name: Install dependencies
         run: |
           for attempt in 1 2 3; do
-            opam install . --deps-only -y && break
+            opam install . --deps-only --with-test -y && break
             if [ "$attempt" -eq 3 ]; then
               echo "opam install failed after ${attempt} attempts"
               exit 1

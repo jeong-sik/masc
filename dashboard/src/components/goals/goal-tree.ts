@@ -389,6 +389,10 @@ function TreeSummary({
         <div class="mt-1 ${DECK_LABEL}">Blocked phase</div>
       </div>
       <div class="${CARD_BOX} text-center">
+        <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.phase_counts.verifying ?? 0}</div>
+        <div class="mt-1 ${DECK_LABEL}">검증 중</div>
+      </div>
+      <div class="${CARD_BOX} text-center">
         <div class="font-mono text-xl font-semibold text-[var(--color-fg-primary)] tabular-nums">${summary.pending_approvals}</div>
         <div class="mt-1 ${DECK_LABEL}">승인 대기</div>
       </div>
@@ -1240,6 +1244,7 @@ export function GoalTree() {
       executing: 0,
       blocked: 0,
       paused: 0,
+      verifying: 0,
       completed: 0,
       dropped: 0,
     }
@@ -1298,6 +1303,7 @@ export function GoalTree() {
                 'executing',
                 'blocked',
                 'paused',
+                'verifying',
                 'completed',
                 'dropped',
               ] as GoalPhaseFilter[]).map(filter => ({

@@ -90,6 +90,13 @@ let json_state json path =
   |> Yojson.Safe.Util.to_string
 ;;
 
+let json_bool json path =
+  List.fold_left
+    (fun acc key -> Yojson.Safe.Util.member key acc)
+    json path
+  |> Yojson.Safe.Util.to_bool
+;;
+
 let verdict ?(evidence = "observed by the verifier") outcome : Goal_verification.verdict =
   { Goal_verification.outcome
   ; authority = Masc_domain.System_llm_agent { agent_run_id = "test-verifier" }
@@ -647,8 +654,8 @@ let test_verifying_repeat_rearms_a_missing_proof_request () =
     must_succeed "repeated request_complete"
       (transition ctx goal_id "request_complete")
   in
-  check string "answered as Already (noop)" "true"
-    (json_state answered [ "noop" ]);
+  check bool "answered as Already (noop)" true
+    (json_bool answered [ "noop" ]);
   check string "still verifying" "verifying" (json_state answered [ "phase" ]);
   check string "the proof request is re-armed" "proof_pending"
     (json_state answered [ "verification"; "completion"; "state" ]);

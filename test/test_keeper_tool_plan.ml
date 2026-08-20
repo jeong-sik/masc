@@ -621,6 +621,7 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
          , `Assoc
              [ "active_count", `Int 1
              ; "paused_count", `Int 0
+             ; "verifying_count", `Int 0
              ; "done_count", `Int 0
              ; "dropped_count", `Int 0
              ] )

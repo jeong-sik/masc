@@ -99,6 +99,8 @@ KNOWN_ASSERTIONS = {
     "poc_review_cites_execution",
     "debate_restatement_faithful",
     "debate_verdict_cites_rebuttal",
+    "qa_coverage_execution_observed",
+    "qa_coverage_review_matches_spec",
 }
 
 
@@ -526,12 +528,12 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
-    if not isinstance(missions, list) or len(missions) != 21:
-        raise AcceptanceError("mission catalog must contain exactly 21 missions")
+    if not isinstance(missions, list) or len(missions) != 22:
+        raise AcceptanceError("mission catalog must contain exactly 22 missions")
     ids = [mission.get("id") for mission in missions]
-    expected_ids = [f"RW{index:02d}" for index in range(1, 22)]
+    expected_ids = [f"RW{index:02d}" for index in range(1, 23)]
     if ids != expected_ids:
-        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW21")
+        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW22")
     roles = catalog.get("roles")
     if not isinstance(roles, list) or set(roles) != EXPECTED_ROLES:
         raise AcceptanceError("catalog must define the exact five collaboration roles")
@@ -746,6 +748,12 @@ class MissionRun:
         self.poc_output_token = f"POC_OUTPUT={self.marker}-executed"
         self.debate_claim_token = f"{self.marker}-position-A"
         self.debate_rebuttal_token = f"{self.marker}-counter-B"
+        # RW22 tokens. The declared scope is a fixed set of cases; the
+        # tester never receives them, so the only way its report can name
+        # all three is to have actually run the artifact.
+        self.qa_case_tokens = tuple(
+            f"{self.marker}-case-{index}" for index in (1, 2, 3)
+        )
         self.runtime_id = runtime_id
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
@@ -1294,6 +1302,59 @@ class MissionRun:
                 "어느 쪽이 더 설득력 있는지 한 문장으로 판정한 뒤 "
                 "DEBATE_VERDICT_CITES=<읽은 DEBATE_REBUTTAL의 = 뒤 값 그대로> comment를 남기세요. "
                 "인용 값을 추측하지 마세요."
+            ),
+        )
+
+    def run_qa_coverage(self, post_id: str) -> None:
+        # RW22: coverage is a claim about a declared set, so the mission fixes
+        # the set on the Board first and then requires every member of it to
+        # appear in a real execution. The tester's prompt never carries the
+        # case tokens; naming all three is possible only by running what the
+        # builder wrote. A partial run fails the mission rather than scoring
+        # lower — "most cases ran" is the failure this row exists to catch.
+        scope = ", ".join(self.qa_case_tokens)
+        self.run_turn(
+            "researcher",
+            "qa-spec",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 QA_SCOPE={scope} comment를 남기세요. "
+                "이 세 값이 이번 검증의 전체 대상 범위입니다."
+            ),
+        )
+        self.run_turn(
+            "builder-a",
+            "qa-implement",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 QA_SCOPE comment를 읽으세요. "
+                f"Write(tool_write_file)로 playground의 artifacts/{self.marker}-qa.sh에 "
+                "셸 스크립트를 쓰되, QA_SCOPE의 각 값마다 그 값을 정확히 한 줄로 출력하는 "
+                "케이스를 하나씩 두세요. 값을 새로 만들지 말고 Board에서 읽은 값을 그대로 쓰세요. "
+                f"작성 후 Board post {post_id}에 QA_IMPLEMENTED={self.marker}-qa.sh comment를 남기세요."
+            ),
+        )
+        self.run_turn(
+            "builder-b",
+            "qa-test",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Execute(tool_execute)로 playground의 artifacts/{self.marker}-qa.sh를 "
+                "실제로 실행하고, 출력된 줄을 그대로 모으세요. "
+                f"그 다음 Board post {post_id}에 QA_COVERAGE_RAN=<출력된 값들을 쉼표로 이어서> "
+                "comment를 남기세요. 실행하지 않은 값을 적지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "qa-review",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 QA_SCOPE와 QA_COVERAGE_RAN comment를 읽고 "
+                "두 집합을 대조하세요. 실행이 범위를 전부 덮었으면 "
+                "QA_COVERAGE_VERDICT=COMPLETE:<QA_SCOPE의 값들을 쉼표로 이어서> comment를, "
+                "빠진 값이 있으면 QA_COVERAGE_VERDICT=MISSING:<빠진 값들> comment를 남기세요. "
+                "Board에서 읽은 값만 쓰고 새로 만들지 마세요."
             ),
         )
 
@@ -2243,6 +2304,38 @@ class MissionRun:
                 "builder-b restated the exact claim token (absent from its "
                 "prompt, readable only on the Board) before rebutting",
             ),
+            "qa_coverage_execution_observed": (
+                successful_windowed_tool(
+                    "builder-a", "qa-implement", "tool_write_file"
+                )
+                and all(
+                    windowed_execute_output_contains("builder-b", "qa-test", token)
+                    for token in self.qa_case_tokens
+                )
+                and all(
+                    text_contains(board, token) for token in self.qa_case_tokens
+                ),
+                "every declared case appears in builder-b's durable Execute "
+                "output, not only in a claim: ran="
+                + ",".join(
+                    token
+                    for token in self.qa_case_tokens
+                    if windowed_execute_output_contains("builder-b", "qa-test", token)
+                )
+                + " declared="
+                + ",".join(self.qa_case_tokens),
+            ),
+            "qa_coverage_review_matches_spec": (
+                text_contains(board, "QA_COVERAGE_VERDICT=COMPLETE:")
+                and all(
+                    text_contains(board, token) for token in self.qa_case_tokens
+                )
+                and successful_windowed_tool(
+                    "reviewer", "qa-review", "masc_board_comment"
+                ),
+                "reviewer compared the declared scope against the run and "
+                "reported COMPLETE naming every case read from the Board",
+            ),
             "debate_verdict_cites_rebuttal": (
                 text_contains(
                     board, f"DEBATE_VERDICT_CITES={self.debate_rebuttal_token}"
@@ -2275,6 +2368,7 @@ class MissionRun:
         self.run_failure_recovery(post_id)
         self.run_poc_delivery(post_id)
         self.run_debate(post_id)
+        self.run_qa_coverage(post_id)
         self.run_continuity_chain(post_id)
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()

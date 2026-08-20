@@ -262,6 +262,16 @@
       "user_story": "한 Keeper의 주장을 상대 Keeper가 board에서 직접 읽어 재진술로 이해를 증명한 뒤 반박하고, 제3 Keeper의 판정이 그 반박 토큰을 인용한다. 재진술·인용 토큰은 각 응답자의 prompt에 주어지지 않는다.",
       "assertions": ["debate_restatement_faithful", "debate_verdict_cites_rebuttal"],
       "evidence": ["observations/board-post.json", "turns/debate-rebut.json"]
+    },
+    {
+      "id": "RW22",
+      "phase": "coverage_proof",
+      "name": "declared_scope_full_coverage",
+      "actors": ["researcher", "builder-a", "builder-b", "reviewer"],
+      "capabilities": ["Task", "Log", "Cross-Verification", "Sandbox", "Execute"],
+      "user_story": "선언한 대상 범위의 모든 케이스가 실행으로 증명된다. 구현자와 시험자가 나뉘고, 시험 실행이 케이스별 고유 토큰을 durable Execute row에 남기며, 검증자는 명세의 케이스 집합과 실행이 낸 토큰 집합을 대조한다. 부분 실행은 통과하지 못한다 — 한 케이스라도 빠지면 미션이 실패한다.",
+      "assertions": ["qa_coverage_execution_observed", "qa_coverage_review_matches_spec"],
+      "evidence": ["observations/board-post.json", "observations/tool-calls-builder-b.json"]
     }
   ]
 }

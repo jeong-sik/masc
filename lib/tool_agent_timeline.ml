@@ -237,19 +237,6 @@ let message_events (config : Workspace.config) ~agent_name ~limit :
    exactly the recent events the tool contracts to surface (period.to = now)
    whenever a keeper exceeds the per-source cap. Mirrors [build_timeline]'s
    tail-keep on the merged list, and preserves the source's ascending order. *)
-let take_last n xs =
-  if n <= 0 then []
-  else
-    let len = List.length xs in
-    if len <= n then xs
-    else
-      let rec skip k = function
-        | [] -> []
-        | _ :: rest when k > 0 -> skip (k - 1) rest
-        | remaining -> remaining
-      in
-      skip (len - n) xs
-
 (* Collect tool call events from Activity Graph. Two producers feed this
    source: the external MCP dispatch path ([tool.called]) and the keeper
    in-turn execution hook ([keeper.tool_exec], #23540 — without it a keeper
@@ -315,7 +302,6 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("typed_outcome", typed_outcome);
                ];
          })
-  |> take_last limit
 
 (* Collect turn-completed events from Activity Graph *)
 let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
@@ -404,7 +390,6 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
                ] @ optional_fields);
          })
-  |> take_last limit
 
 (* Neutral projection of one keeper chat line for the timeline. The chat
    store (.masc/keeper_chat/<keeper>.jsonl) lives in the keeper subsystem,
@@ -463,7 +448,7 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
       if include_tasks then task_events config ~agent_name
       else []
     in
-    let msg_evts = message_events config ~agent_name ~limit:200 in
+    let msg_evts = message_events config ~agent_name ~limit:2000 in
     let tool_evts =
       if include_tool_calls then tool_call_events config ~agent_name ~limit:200
       else []

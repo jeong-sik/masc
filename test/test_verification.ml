@@ -1199,10 +1199,11 @@ let test_rejected_verdict_audit_preserves_reason () =
         "system_llm_agent"
         (json |> member "authority_kind" |> to_string))
 
-(* The judging runtime is the only axis a verdict history can be grouped on:
-   [authority_actor] is minted fresh per review, so 74 verdicts carry 74 distinct
-   actors. The runtime was already computed and carried inside the review notes
-   blob, but every structured projection dropped it. *)
+(* The judging runtime is the axis a verdict history can be grouped on:
+   since RFC-0361 D7(b) [authority_actor] is the fixed [verifier_exact]
+   identity, so 74 verdicts carry one actor. The runtime was already computed
+   and carried inside the review notes blob, but every structured projection
+   dropped it. *)
 let test_verdict_audit_names_the_judging_runtime () =
   with_eio_temp_dir (fun base_path ->
     let config = W.default_config base_path in
@@ -1273,6 +1274,51 @@ let test_verdict_audit_names_the_judging_runtime () =
         "audit still carries the run-scoped actor"
         "system-runtime-agent"
         (json |> member "authority_actor" |> to_string))
+;;
+
+(* RFC-0361 D7(b): the completion authority no longer mints a random actor
+   per judgement. N judgements registered with the agent's authority identity
+   must all record the same fixed [authority_actor] — the [verifier_exact]
+   lane id — so verdicts aggregate by actor; run identity stays with
+   [verification_id]. *)
+let test_judgements_share_fixed_authority_actor () =
+  let module R = Masc.Verification_run_registry in
+  let registry = R.create () in
+  let authority =
+    Masc_domain.System_llm_agent
+      { agent_run_id = CA.For_testing.authority_actor }
+  in
+  for i = 1 to 3 do
+    let verification_id = Printf.sprintf "vrf-fixed-actor-%d" i in
+    R.register_running
+      registry
+      ~verification_id
+      ~task_id:(Printf.sprintf "task-fixed-actor-%d" i)
+      ~producer:"keeper-producer-agent"
+      ~authority_kind:(Masc_domain.completion_authority_kind authority)
+      ~authority_actor:(Masc_domain.completion_authority_actor authority)
+      ~started_at:(100.0 +. Float.of_int i);
+    R.mark_completed
+      registry
+      ~verification_id
+      ~outcome:R.Approved
+      ~tools:[]
+      ~elapsed_s:1.0
+      ()
+  done;
+  let actors =
+    R.list_runs registry
+    |> List.map (fun (run : R.run) -> run.authority_actor)
+    |> List.sort_uniq String.compare
+  in
+  Alcotest.(check int)
+    "all three judgements were recorded"
+    3
+    (List.length (R.list_runs registry));
+  Alcotest.(check (list string))
+    "every judgement records the same fixed authority actor"
+    [ "verifier_exact" ]
+    actors
 ;;
 
 let test_raw_workspace_submission_notifies_once () =
@@ -2381,6 +2427,8 @@ let () =
         test_rejected_verdict_audit_preserves_reason;
       Alcotest.test_case "verdict audit names the judging runtime" `Quick
         test_verdict_audit_names_the_judging_runtime;
+      Alcotest.test_case "judgements share the fixed authority actor" `Quick
+        test_judgements_share_fixed_authority_actor;
     ];
     "workspace_boundary", [
       Alcotest.test_case "raw submit notifies once" `Quick

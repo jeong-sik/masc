@@ -15,7 +15,7 @@
 | A5 | Fusion 구현 확장: `Bridge_error`/`Invalid_max_output_tokens`/`Invalid_timeout_s` variant, `web_tools` 필드, topology 확장(RFC-0283/0284) | `fusion_types.ml:64-71,329-338` | PR #29140 |
 | A6 | RFC 경로 표기: `docs/rfc/` (설계서의 `docs/rfcs`는 오기) | — | PR #29140 |
 | A7 | keeper.env는 OCaml 런타임이 읽지 않음. `scripts/deploy.sh` 전용 API 키 env 파일 | `deploy.sh:125`, lib/ 참조 0건 | PR #29140 |
-| A8 | 명칭 매핑 정리: Cross-Verification→`cross_verifier` lane, GithubCredential→`keeper_github_identity`, CoT→thinking trajectory, MultiTurn→stream bridge | `runtime_toml.ml:1314`, `keeper_github_identity.ml` | PR #29140 |
+| A8 | 명칭 매핑 정리: Cross-Verification→`verifier_exact` exact-output lane, GithubCredential→`keeper_github_identity`, CoT→thinking trajectory, MultiTurn→stream bridge | `runtime_toml.ml:1314`, `keeper_github_identity.ml` | PR #29140 |
 | A9 | Goal drop 사유는 전용 필드 없이 공용 `note` | `workspace_goals.ml:399` | PR #29140 |
 | A10 | visibility 시맨틱은 타입 강제가 아니라 docstring 선언 ("enforced by callers") | `board_types.mli:7,72-76` | PR #29140 |
 

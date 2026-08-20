@@ -13,11 +13,9 @@
 default = "ollama_cloud.deepseek-v4-flash"
 # Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
-# this explicit smart lane. Since RFC-0361 D7(a) the judgement call no longer
-# reads a single-runtime binding here: it runs on the verifier_exact
-# exact-output lane below, whose first slot absorbs the retired
-# cross_verifier = "deepseek.deepseek-v4-pro" binding. The [runtime].cross_verifier
-# key still parses for preserved live configs but selects nothing.
+# this explicit smart lane. The judgement call resolves the verifier_exact
+# exact-output lane below (RFC-0361 D7(a)) — [runtime] carries no scalar
+# binding for it.
 
 # Existing workspaces are not overwritten by this seed. Copy the required lane
 # declarations into the live runtime.toml before enabling their consumers.
@@ -39,8 +37,7 @@ slots = ["glm-coding.glm-5-turbo", "glm-coding.glm-4-7-coding"]
 
 # Verifier/completion-authority judgement lane (RFC-0361 D7(a)). Judgement
 # calls resolve only this lane and fail over in declared slot order, the same
-# frozen-order contract as the librarian/compaction lanes. Slot 1 is the
-# binding the retired [runtime].cross_verifier key used to carry.
+# frozen-order contract as the librarian/compaction lanes.
 [runtime.exact_output_lanes.verifier_exact]
 slots = ["deepseek.deepseek-v4-pro", "glm-coding.glm-5-turbo"]
 
@@ -1042,7 +1039,8 @@ candidates = [
 # config, not here (enforced by test_runtime_config_validity "public seed
 # has no keeper assignments").
 # Do not assign general keeper lanes to Pro here. Pro is reserved for explicit
-# judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
+# judge/evaluator lanes ([runtime.exact_output_lanes.verifier_exact] and
+# [fusion].judge).
 #
 # Assignment targets must be runtime ids (<provider>.<model>); a lane id here
 # is rejected at load. A keeper reaches a [runtime.lanes] failover group only

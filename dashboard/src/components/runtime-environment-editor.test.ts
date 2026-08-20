@@ -202,7 +202,6 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
 
 const sourceWithCapabilities = `[runtime]
 default = "ollama_cloud.minimax-m3"
-cross_verifier = "ollama_cloud.flash-nojson"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"

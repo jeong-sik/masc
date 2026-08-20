@@ -79,7 +79,6 @@ const baseConfig = {
 
 const richSourceText = `[runtime]
 default = "runpod_mtp.qwen"
-cross_verifier = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
@@ -164,10 +163,6 @@ describe('RuntimeTomlEditor', () => {
         lane === 'default' && runtimeId ? `default = "${runtimeId}"` : 'default = "runpod_mtp.qwen"',
       )
       sourceText = sourceText.replace(
-        'cross_verifier = "runpod_mtp.qwen"',
-        lane === 'cross_verifier' && runtimeId
-          ? `cross_verifier = "${runtimeId}"`
-          : 'cross_verifier = "runpod_mtp.qwen"',
       )
       return {
         ...richConfig,
@@ -460,28 +455,6 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
-    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
-  })
-
-  it('switches the cross verifier runtime through the typed backend routing patch', async () => {
-    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
-    render(html`<${RuntimeTomlEditor} />`, container)
-
-    await waitFor(() => {
-      expect((container.querySelector('[aria-label="cross_verifier runtime"]') as HTMLSelectElement | null)?.value)
-        .toBe('runpod_mtp.qwen')
-    })
-
-    fireEvent.change(container.querySelector('[aria-label="cross_verifier runtime"]') as HTMLSelectElement, {
-      target: { value: 'openai.gpt' },
-    })
-
-    await waitFor(() => {
-      expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledWith('cross_verifier', 'openai.gpt')
-      expect((container.querySelector('textarea') as HTMLTextAreaElement).value)
-        .toContain('cross_verifier = "openai.gpt"')
-    })
-    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
   })
 
@@ -928,7 +901,6 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('default = "openai.gpt"')
-      expect(source).not.toContain('cross_verifier = "runpod_mtp.qwen"')
       expect(source).not.toContain('[providers.runpod_mtp]')
       expect(source).not.toContain('[providers.runpod_mtp.credentials]')
       expect(source).not.toContain('[runpod_mtp.qwen]')

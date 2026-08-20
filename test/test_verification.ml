@@ -1240,7 +1240,7 @@ let test_verdict_audit_names_the_judging_runtime () =
          ~verdict:Masc_domain.Verdict_approved
          ~task_id:"task-001"
          ~verification_id:"vrf-runtime-named"
-         ~evaluator_runtime:"cross-verifier-model"
+         ~evaluator_runtime:"judge-runtime-model"
          ()
      with
      | Error error -> Alcotest.fail (Masc_domain.masc_error_to_string error)
@@ -1267,7 +1267,7 @@ let test_verdict_audit_names_the_judging_runtime () =
       let open Yojson.Safe.Util in
       Alcotest.(check string)
         "audit names the runtime that judged"
-        "cross-verifier-model"
+        "judge-runtime-model"
         (json |> member "evaluator_runtime" |> to_string);
       Alcotest.(check string)
         "audit still carries the run-scoped actor"

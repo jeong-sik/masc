@@ -69,24 +69,6 @@ let task_is_self_authored_todo ~(meta : keeper_meta) (task : Masc_domain.task) =
     false
 ;;
 
-let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
-    ~(tasks : Masc_domain.task list) () =
-  (* The backlog snapshot already loaded [tasks]. Reuse them to get the same
-     empty-scope fallback as the claim path without a second backlog read.
-     Self-authored Todo work is a hard exclusion, so it cannot keep the scope
-     artificially nonempty and hide eligible peer work. *)
-  let task_eligible task = not (task_is_self_authored_todo ~meta task) in
-  let scope =
-    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks
-      ~config
-      ~meta
-      ~tasks
-      ~task_eligible
-      ()
-  in
-  scope.task_filter
-;;
-
 (** Read one authoritative backlog snapshot. Counts, claimable rows, and
     revision are projected from the same primary read. *)
 let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
@@ -138,15 +120,11 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
            tasks_with_ids
        in
        let unclaimed = List.length unclaimed_tasks in
-       let claim_scope_filter =
-         claim_goal_scope_filter ~config ~meta ~tasks:backlog.tasks ()
-       in
        let claimable_tasks =
          unclaimed_tasks
          |> List.filter_map (fun (task, task_id) ->
               if
                 Workspace_task_schedule.task_is_claim_pool_candidate task
-                && claim_scope_filter task
                 (* Self-authored tasks stay in [unclaimed] (the count stays an
                    honest view of the backlog) but are not offered back to their
                    author as claimable work — that edge is the feedback loop. *)
@@ -163,7 +141,6 @@ let read_backlog_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
          Workspace.audit_orphan_tasks_in_tasks config backlog.tasks
          |> List.filter (fun (_, assignee) -> assignee <> meta.agent_name)
          |> List.map fst
-         |> List.filter claim_scope_filter
          |> List.length
        in
        { unclaimed_count = unclaimed

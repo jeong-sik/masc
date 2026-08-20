@@ -312,7 +312,6 @@ function goalFromGoalTreeNode(node: GoalTreeNode): Goal {
     due_date: node.due_date,
     priority: node.priority,
     phase: node.phase,
-    parent_goal_id: node.parent_goal_id,
     last_review_note: null,
     created_at: node.created_at,
     updated_at: node.updated_at,

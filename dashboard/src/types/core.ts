@@ -561,7 +561,6 @@ export interface Goal {
   due_date?: string | null
   priority: number
   phase: string
-  parent_goal_id?: string | null
   last_review_note?: string | null
   last_review_at?: string | null
   created_at: string

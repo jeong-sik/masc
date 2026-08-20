@@ -77,7 +77,6 @@ function makeRawGoalNode(overrides: Record<string, unknown> = {}) {
     metric: null,
     target_value: null,
     due_date: null,
-    parent_goal_id: null,
     tasks: [],
     task_count: 0,
     task_done_count: 0,
@@ -3602,7 +3601,7 @@ describe('runtime.toml raw config API', () => {
   })
 
   it('posts runtime routing patches without client-side TOML text', async () => {
-    const sourceText = '[runtime]\ndefault = "openai.gpt"\ncross_verifier = "openai.gpt"\n'
+    const sourceText = '[runtime]\ndefault = "openai.gpt"\n'
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         ok: true,
@@ -3618,14 +3617,14 @@ describe('runtime.toml raw config API', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    const result = await patchRuntimeRouting('cross_verifier', 'openai.gpt')
+    const result = await patchRuntimeRouting('default', 'openai.gpt')
 
     expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toBe('/api/v1/runtime/config/routing')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      lane: 'cross_verifier',
+      lane: 'default',
       runtime_id: 'openai.gpt',
     })
     expect(result.source_text).toBe(sourceText)
@@ -3959,7 +3958,7 @@ describe('fetchRuntimeProviders', () => {
             { keeper_name: 'budgettest', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_routes: [
-            { route_name: 'runtime.cross_verifier', runtime_id: 'mimo.mimo-v2.5-pro' },
+            { route_name: 'runtime.default', runtime_id: 'mimo.mimo-v2.5-pro' },
           ],
           dropped_media_failover: ['mimo.mimo-v2.5-pro'],
           dropped_lane_candidates: [
@@ -4062,7 +4061,7 @@ describe('fetchRuntimeProviders', () => {
     expect(result.startup_degradation?.missing_catalog_models[0]?.provider_label).toBe('openai_compat')
     expect(result.startup_degradation?.disabled_runtime_ids).toEqual(['mimo.mimo-v2.5-pro'])
     expect(result.startup_degradation?.dropped_assignments[0]?.keeper_name).toBe('budgettest')
-    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.cross_verifier')
+    expect(result.startup_degradation?.dropped_routes[0]?.route_name).toBe('runtime.default')
     expect(result.startup_degradation?.dropped_lane_candidates[0]?.lane_id).toBe('coding')
   })
 
@@ -4430,7 +4429,6 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        cross_verifier_runtime_id: null,
         media_failover: [],
       },
     }
@@ -4448,7 +4446,6 @@ describe('fetchRuntimeDefaults', () => {
     expect(result.default_runtime_id).toBe('openai.gpt-4o')
     expect(result.default_model).toBe('gpt-4o')
     expect(result.runtimes[0]?.is_default).toBe(true)
-    expect(result.model_routing.cross_verifier_runtime_id).toBeNull()
   })
 })
 

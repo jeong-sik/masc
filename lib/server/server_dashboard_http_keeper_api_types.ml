@@ -345,25 +345,6 @@ let claim_status_of_output output =
   | None when result = "" -> "unknown"
   | None -> "observed"
 
-let claim_scope_summary_absent =
-  `Assoc
-    [ ("present", `Bool false)
-    ; ("source", `String "keeper_task_claim_tool_call")
-    ; ("status", `String "not_observed")
-    ; ("result", `Null)
-    ; ("mode", `Null)
-    ; ("scoped", `Null)
-    ; ("active_goal_ids", `List [])
-    ; ("effective_goal_ids", `List [])
-    ; ("fallback_reason", `Null)
-    ; ("matched_goal_id", `Null)
-    ; ("excluded_count", `Null)
-    ; ("claimed_task_id", `Null)
-    ; ("claimed_goal_id", `Null)
-    ; ("trace_id", `Null)
-    ; ("keeper_turn_id", `Null)
-    ]
-
 let runtime_manifest_public_json row =
   Keeper_runtime_manifest.public_to_json row
 

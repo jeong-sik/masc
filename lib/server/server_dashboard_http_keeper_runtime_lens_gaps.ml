@@ -6,7 +6,7 @@
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
+let runtime_lens_gaps ~terminal_event_present ~config_drift scan =
   let has_provider_lane =
     runtime_manifest_scan_event_count scan
       Keeper_runtime_manifest.Provider_lane_resolved
@@ -17,9 +17,6 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
     || scan.context_compacted_event_count > 0
     || scan.event_bus_count > 0
   in
-  let claim_status = Json_util.get_string claim_scope "status" in
-  let claim_mode = Json_util.get_string claim_scope "mode" in
-  let claim_excluded_count = Json_util.get_int claim_scope "excluded_count" in
   let runtime_override =
     Option.value
       (Json_util.get_bool config_drift "runtime_override")
@@ -37,37 +34,7 @@ let runtime_lens_gaps ~terminal_event_present ~claim_scope ~config_drift scan =
            }
            gaps
        else gaps)
-  |> (fun gaps ->
-       match claim_status with
-       | Some "no_eligible" ->
-         add
-           { code = "claim_scope_no_eligible"
-           ; severity = "warn"
-           ; lane = "keeper"
-           ; detail =
-               Some
-                 (Printf.sprintf
-                    "keeper_task_claim found no eligible tasks in mode=%s excluded=%s"
-                    (Option.value claim_mode ~default:"unknown")
-                    (match claim_excluded_count with
-                     | Some value -> string_of_int value
-                     | None -> "unknown"))
-           }
-           gaps
-       | _ -> gaps)
-  |> (fun gaps ->
-       match claim_status, claim_mode with
-       | Some "no_eligible", Some "active_goal_ids" ->
-         add
-           { code = "claim_scope_global_backlog_outside_keeper"
-           ; severity = "warn"
-           ; lane = "keeper"
-           ; detail =
-               Some
-                 "active_goal_ids scope found no eligible work; global backlog may be outside this keeper or blocked by policy"
-           }
-           gaps
-       | _ -> gaps)
+
   |> (fun gaps ->
        if runtime_override then
          add

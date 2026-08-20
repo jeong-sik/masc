@@ -182,9 +182,7 @@ let downgraded_transcript_latch (meta : Keeper_meta_contract.keeper_meta) =
     Keeper_meta_contract.latched_reason =
       Some
         (Keeper_latched_reason.Operator_paused
-           { Keeper_latched_reason.operator_actor =
-               Keeper_latched_reason.operator_actor_grpc_directive
-           })
+           { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
   }
 ;;
 

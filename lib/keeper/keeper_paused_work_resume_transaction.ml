@@ -368,7 +368,7 @@ let create_receipt config ~keeper_name request =
       (match refreshed with
        | None -> Error Durable_meta_missing
        | Some refreshed -> Ok refreshed)
-    | Some (Keeper_latched_reason.Operator_paused _ | Keeper_latched_reason.Dead_tombstone)
+    | Some (Keeper_latched_reason.Operator_paused _)
     | None -> Ok current
   in
   let receipt : Keeper_paused_work_disposition_receipt.t =

@@ -64,8 +64,6 @@ val of_meta : Keeper_meta_contract.keeper_meta -> t
 
 val ready_for_unclaimed_backlog : Keeper_meta_contract.keeper_meta -> bool
 
-val autonomous_check_value : autonomous_activation -> string
-
 val autonomous_blocker_to_wire : autonomous_blocker -> string
 
 val owner_runtime_of_registry_entry :

@@ -1,10 +1,3 @@
-(** Submit exact-lane cleanup finalization without blocking the
-    supervisor sweep. *)
-val cleanup_absent_keeper :
-  'a Keeper_types_profile.context ->
-  Keeper_registry.registry_entry ->
-  unit
-
 (** Deliver the typed post-finalization event/hook. Registered by server boot
     before shutdown recovery starts. *)
 val handle_completion :

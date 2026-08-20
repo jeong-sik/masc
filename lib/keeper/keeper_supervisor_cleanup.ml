@@ -1,53 +1,11 @@
-(** Dead-tombstone cleanup admission and completion delivery.
+(** Cleanup completion delivery.
 
-    The supervisor only submits an exact-lane durable shutdown operation.
     Meta mutation, lane join, registry removal, and accumulator removal are
     owned by [Keeper_shutdown_finalize]. [Dead_cleaned] and
     [Supervisor_cleaned] are delivered from the durable completion receipt after
     finalization, never from the sweep that observed the old entry. *)
 
 open Keeper_shutdown_types
-
-let cleanup_intent : Keeper_shutdown_types.cleanup_intent =
-  { reason = Supervisor_cleanup
-  ; remove_session = false
-  }
-;;
-
-let record_submission_failure keeper_name =
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string SupervisorCleanupFailures)
-    ~labels:
-      [ "keeper", keeper_name
-      ; ( "site"
-        , Keeper_supervisor_cleanup_failure_site.(
-            to_label Supervisor_cleanup_submission) )
-      ]
-    ()
-;;
-
-let cleanup_absent_keeper
-    (ctx : _ Keeper_types_profile.context)
-    (entry : Keeper_registry.registry_entry)
-  =
-  let request : Keeper_shutdown_prepare_join.request =
-    { actor = ctx.agent_name
-    ; cleanup_intent
-    }
-  in
-  match Keeper_shutdown_runtime.submit ~config:ctx.config ~entry ~request with
-  | Ok operation ->
-    Log.Keeper.info
-      "%s: dead tombstone finalization accepted operation=%s"
-      entry.name
-      (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-  | Error error ->
-    record_submission_failure entry.name;
-    Log.Keeper.error
-      "%s: dead tombstone finalization submission failed: %s"
-      entry.name
-      (Keeper_shutdown_runtime.submit_error_to_string error)
-;;
 
 let completion_meta_for_coverage config operation =
   match Keeper_meta_store.read_meta config operation.Keeper_shutdown_types.keeper_name with

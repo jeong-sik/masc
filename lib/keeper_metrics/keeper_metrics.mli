@@ -192,6 +192,7 @@ type t =
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
+  | StreamTextDeltaDedup
 
 val to_string : t -> string
 

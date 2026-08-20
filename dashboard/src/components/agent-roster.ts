@@ -126,7 +126,7 @@ function rosterContextMeta(
     context_tokens?: number | null
     context_max?: number | null
   } | null | undefined,
-): { pct: number; detail: string | null } | null {
+): { pct: number; detail: string | null; win: string | null } | null {
   const ratio = source?.context_ratio
   if (ratio == null || !Number.isFinite(ratio)) return null
 
@@ -140,7 +140,10 @@ function rosterContextMeta(
         ? formatTokens(tokens)
         : null
 
-  return { pct, detail }
+  // win = the observed context window size, rendered as the .fl-ctx-win
+  // annotation next to the percentage. Only present when context_max was
+  // actually received — never derived (mark, don't fake).
+  return { pct, detail, win: max != null ? formatTokens(max) : null }
 }
 
 /**
@@ -1217,13 +1220,19 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             : null}
         </div>
 
-        <div class="fl-ctx" aria-label=${`컨텍스트 ${ctxPct != null ? `${ctxPct}%` : '없음'}`}>
+        <div class="fl-ctx" aria-label=${`컨텍스트 ${ctxPct != null ? `${ctxPct}%` : '미관측'}`}>
           ${ctxPct != null
             ? html`
                 <div class="fl-ctx-bar"><span class=${ctxHot ? 'hot' : ''} style="width:${ctxPct}%"></span></div>
-                <span class="fl-ctx-val ${ctxHot ? 'hot' : ctxPct === 0 ? 'zero' : ''}">${ctxPct}%</span>
+                <span class="fl-ctx-val ${ctxHot ? 'hot' : ctxPct === 0 ? 'zero' : ''}">${ctxPct}%${row.contextMeta?.win
+                  ? html` <i class="fl-ctx-win">/ ${row.contextMeta.win}</i>`
+                  : null}</span>
               `
-            : html`<span class="fl-ctx-val zero" data-stub="no context_ratio">—</span>`}
+            : html`<span
+                class="fl-ctx-val zero"
+                data-stub="no context_ratio"
+                title="현재 점유율 미관측 · 마지막 턴 usage와 분리"
+              >—</span>`}
         </div>
 
         <div
@@ -1480,9 +1489,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ${selectedCtxPct == null && selectedContextUnavailable?.kind === 'not_observed' ? html`
               <div class="fl-as-sec" data-testid="fleet-context-not-observed">
                 <h4>컨텍스트</h4>
-                <div class="text-xs text-[var(--color-fg-muted)]">
-                  현재 점유율 미관측 · usage와 분리
-                </div>
+                <div class="fl-notobs">현재 점유율 <b>미관측</b> · usage와 분리</div>
               </div>
             ` : null}
 

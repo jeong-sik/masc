@@ -2252,6 +2252,23 @@ let test_transcript_absent_returns_empty () =
       Alcotest.(check bool) "found=false when no rows match" true
         (String_util.contains_substring (Yojson.Safe.to_string json) "\"found\":false"))
 
+(* The chat store is a top-level per-keeper file, outside the runtime
+   directory the purge plan removes, so it needs its own entry. Without one a
+   purged keeper leaves its conversation on disk and a later keeper with the
+   same name reads it back as its own history — the same failure the memory
+   sidecars already hit. *)
+let test_purge_plan_removes_chat_store () =
+  let module Shutdown = Masc.Keeper_shutdown_types in
+  let context =
+    { Shutdown.requested_name = "keeper"; agent_name = "keeper" }
+  in
+  let plan = Shutdown.dashboard_purge_artifact_plan ~keeper_name:"keeper" context in
+  Alcotest.(check bool)
+    "plan removes the chat store"
+    true
+    (List.exists (fun entry -> entry = Shutdown.Keeper_chat_store_artifact) plan)
+;;
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -2396,5 +2413,7 @@ let () =
           Alcotest.test_case
             "transcript absent returns empty + found=false (RFC-0233 §7)"
             `Quick test_transcript_absent_returns_empty;
+          Alcotest.test_case "purge plan removes the chat store" `Quick
+            test_purge_plan_removes_chat_store;
         ] );
     ]

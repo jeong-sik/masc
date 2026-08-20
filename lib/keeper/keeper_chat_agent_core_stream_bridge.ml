@@ -22,6 +22,13 @@ type state =
   ; current_message_has_text : bool
   ; last_completed_message_has_text : bool
   ; message_open : bool
+  ; text_by_index : (int * string) list
+        (* Raw (pre-redaction) text accumulated per block index in the current
+           provider message.  Drives the deterministic text-delta dedup below;
+           cleared at [MessageStop] because block indices restart per message. *)
+  ; text_dedup_logged : bool
+        (* One warn log per stream is enough; every occurrence still bumps the
+           [masc_keeper_stream_text_delta_dedup_total] counter. *)
   }
 
 type translated_event = {
@@ -34,6 +41,8 @@ let empty_state =
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
   ; message_open = false
+  ; text_by_index = []
+  ; text_dedup_logged = false
   }
 
 let terminal_message_had_text state =
@@ -145,6 +154,45 @@ let content_block_start_event ~index ~content_type ~tool_id ~tool_name =
 let content_block_stop_event ~index =
   Keeper_chat_events.Agent_core_content_block_stop { index }
 
+(* B5 ("no duplicate streaming strings"): some OpenAI-compatible providers send
+   each chunk's [content] as the cumulative text so far instead of an
+   incremental delta, and a reconnecting transport can re-send a chunk that was
+   already delivered.  Both surface here as a [TextDelta] whose bytes the user
+   has already seen.  The reconciliation below is decided by exact byte length
+   and exact prefix identity against the per-block accumulated text — a
+   deterministic retransmission/snapshot check, not a heuristic string
+   similarity judgement, so it stays inside the constitution's "no logic by
+   string comparison" rule (same exact-prefix discipline as the
+   claude_code/codex [Turn_finished] reconciliations). *)
+type text_delta_action =
+  | Append_delta
+  | Snapshot_reconcile of string (* emit only the not-yet-seen suffix *)
+  | Duplicate_retransmission (* emit nothing *)
+
+let classify_text_delta ~accumulated text =
+  let acc_len = String.length accumulated in
+  let text_len = String.length text in
+  if acc_len = 0 || text_len = 0 then Append_delta
+  else if text_len > acc_len && String.starts_with ~prefix:accumulated text then
+    Snapshot_reconcile (String.sub text acc_len (text_len - acc_len))
+  else if text_len <= acc_len && String.starts_with ~prefix:text accumulated then
+    Duplicate_retransmission
+  else Append_delta
+
+let stream_text_dedup_metric = Keeper_metrics.(to_string StreamTextDeltaDedup)
+
+let observe_text_dedup ~already_logged ~action ~index ~accumulated_bytes
+    ~delta_bytes =
+  Otel_metric_store.inc_counter stream_text_dedup_metric
+    ~labels:[ "action", action ]
+    ();
+  if not already_logged then
+    Log.Keeper.warn
+      "keeper stream text delta dedup engaged: action=%s index=%d \
+       accumulated_bytes=%d delta_bytes=%d (later occurrences in this stream \
+       are counted metric-only)"
+      action index accumulated_bytes delta_bytes
+
 let tool_args_event ~redact_text ~snapshot bridge_state index args =
   let open Keeper_chat_events in
   match stream_block_for_index bridge_state index with
@@ -241,6 +289,8 @@ let translate ~redact_text ~base_dir bridge_state
           ; last_completed_message_has_text =
               bridge_state.current_message_has_text
           ; message_open = false
+          ; text_by_index = []
+          ; text_dedup_logged = bridge_state.text_dedup_logged
           }
       ;
         chat_events = block_ends @ [ Agent_core_stream_message_stop ]
@@ -252,14 +302,49 @@ let translate ~redact_text ~base_dir bridge_state
         chat_events =
           [ Event_error { message = redact_text ("Timeout: " ^ reason) } ]
       }
-  | ContentBlockDelta { delta = TextDelta text; _ } ->
-      { bridge_state =
-          { bridge_state with
-            current_message_has_text =
-              bridge_state.current_message_has_text || not (String.equal text "")
+  | ContentBlockDelta { index; delta = TextDelta text } -> (
+      let accumulated =
+        (* [text_by_index] is deterministic local bridge state keyed by
+           content-block index; absent key = no prior text. DET-OK *)
+        Option.value ~default:"" (List.assoc_opt index bridge_state.text_by_index)
+      in
+      match classify_text_delta ~accumulated text with
+      | Append_delta ->
+          { bridge_state =
+              { bridge_state with
+                current_message_has_text =
+                  bridge_state.current_message_has_text || not (String.equal text "")
+              ; text_by_index =
+                  (index, accumulated ^ text)
+                  :: List.remove_assoc index bridge_state.text_by_index
+              }
+          ; chat_events = [ Text_delta (redact_text text) ]
           }
-      ; chat_events = [ Text_delta (redact_text text) ]
-      }
+      | Snapshot_reconcile suffix ->
+          (* Cumulative snapshot: the provider re-sent the accumulated text and
+             then some.  Forward only the suffix; [suffix] is non-empty by
+             construction. *)
+          observe_text_dedup ~already_logged:bridge_state.text_dedup_logged
+            ~action:"reconcile" ~index ~accumulated_bytes:(String.length accumulated)
+            ~delta_bytes:(String.length text);
+          { bridge_state =
+              { bridge_state with
+                current_message_has_text = true
+              ; text_by_index =
+                  (index, text) :: List.remove_assoc index bridge_state.text_by_index
+              ; text_dedup_logged = true
+              }
+          ; chat_events = [ Text_delta (redact_text suffix) ]
+          }
+      | Duplicate_retransmission ->
+          (* Exact retransmission of bytes already delivered for this block:
+             drop so the user never sees the same string twice. *)
+          observe_text_dedup ~already_logged:bridge_state.text_dedup_logged
+            ~action:"drop" ~index ~accumulated_bytes:(String.length accumulated)
+            ~delta_bytes:(String.length text);
+          { bridge_state = { bridge_state with text_dedup_logged = true }
+          ; chat_events = []
+          })
   | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       { bridge_state;
         chat_events =

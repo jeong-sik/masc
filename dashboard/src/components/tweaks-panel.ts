@@ -3,7 +3,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useRef } from 'preact/hooks'
 import { persistentSignal } from '../lib/persistent-signal'
-import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+import { chatShowAutonomous, chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 import { ringFocusClasses } from './common/ring'
 import { Settings2, X } from 'lucide-preact'
 
@@ -622,6 +622,11 @@ export function TweaksPanel() {
           label="내부 메시지"
           value=${chatShowInternal.value}
           onChange=${(v: boolean) => { chatShowInternal.value = v }}
+        />
+        <${TweakToggle}
+          label="자율턴"
+          value=${chatShowAutonomous.value}
+          onChange=${(v: boolean) => { chatShowAutonomous.value = v }}
         />
 
         <${TweakSection} label="타이포" />

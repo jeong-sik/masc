@@ -1287,7 +1287,9 @@ let () =
   check
     "non-runnable actionable backlog carries an explicit reason"
     (match member "status_reasons" recoverable with
-     | `List reasons -> List.mem (`String "recoverable_backlog") reasons
+     (* The fixture above sets recoverable_backlog_count to 2, and the reason
+        now carries it so an operator can tell two from two hundred. *)
+     | `List reasons -> List.mem (`String "recoverable_backlog=2") reasons
      | _ -> false);
   check
     "non-runnable actionable backlog is never backlog-clean"

@@ -40,7 +40,7 @@ import {
   keeperThreads,
   setRecordValue,
 } from '../keeper-state'
-import { isDefaultVisibleConversationEntry } from '../keeper-state'
+import { isAutonomousTurnEntry, isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
   getKeeperLastSeen,
   advanceKeeperLastSeen,
@@ -68,7 +68,7 @@ import {
   subscribeKeeperWaitingInventory,
 } from '../keeper-waiting-inventory-store'
 import { registerKeeperWaitingInventoryRefresh } from '../sse-store'
-import { chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+import { chatShowAutonomous, chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
 import {
   cancelKeeperChatOperation,
   editQueuedKeeperChatOperation,
@@ -751,6 +751,7 @@ export function KeeperConversationPanel({
   // subscribes this component, so a Tweaks flip re-renders every mounted panel.
   const showMetadata = chatShowMetadata.value
   const showInternal = chatShowInternal.value
+  const showAutonomous = chatShowAutonomous.value
 
   const [historyExpanded, setHistoryExpanded] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -794,15 +795,23 @@ export function KeeperConversationPanel({
 
   const rawThread = keeperThreads.value[keeperName] ?? []
   // thread / visibleThread / transcriptEntries form a derivation chain over
-  // rawThread + UI state (showInternal toggle, sending flag, searchQuery
-  // keystrokes). The parent re-renders on every search keystroke and other
-  // unrelated signals; memoizing each stage on its stable upstream skips the
-  // refilter when rawThread and the relevant UI flag are unchanged.
-  const thread = useMemo(
+  // rawThread + UI state (showInternal/showAutonomous toggles, sending flag,
+  // searchQuery keystrokes). The parent re-renders on every search keystroke
+  // and other unrelated signals; memoizing each stage on its stable upstream
+  // skips the refilter when rawThread and the relevant UI flag are unchanged.
+  // hiddenCount stays internal-only: the "숨겨진 내부 메시지" banner must not
+  // count autonomous entries the operator chose to hide with their own toggle.
+  const internalFilteredThread = useMemo(
     () => showInternal ? rawThread : rawThread.filter(isDefaultVisibleConversationEntry),
     [rawThread, showInternal],
   )
-  const hiddenCount = rawThread.length - thread.length
+  const hiddenCount = rawThread.length - internalFilteredThread.length
+  const thread = useMemo(
+    () => showAutonomous
+      ? internalFilteredThread
+      : internalFilteredThread.filter(entry => !isAutonomousTurnEntry(entry)),
+    [internalFilteredThread, showAutonomous],
+  )
   const sending = keeperSending.value[keeperName] ?? false
   const serverBusy = inventoryEntry?.state === 'busy'
   const isKeeperBusy = Boolean(serverBusy && !sending)

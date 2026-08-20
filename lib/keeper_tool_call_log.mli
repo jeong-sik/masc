@@ -101,6 +101,8 @@ val route_evidence_json_of_tool_io :
     [backend], [sandbox], evaluation-only [eval_tags], and policy labels.
     Runtime route/status fields such as [via], [sandbox_profile],
     [network_mode], [status], and redacted command/cwd/path are added when
+    present. Composition surface tools are not descriptor-backed; their
+    RFC-0386 [tool_kind] is picked up from the tool's own result payload when
     present. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
@@ -162,6 +164,7 @@ val log_call :
   ?composition_run_id:string ->
   ?composition_node_id:string ->
   ?composition_execution:Keeper_tool_composition_catalog.execution_mode ->
+  ?composition_tool_kind:Keeper_tool_descriptor.tool_kind ->
   ?parent_tool_use_id:string ->
   ?trace_id:string ->
   ?session_id:string ->

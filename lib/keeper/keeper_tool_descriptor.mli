@@ -68,6 +68,20 @@ type execution =
     imply concurrency safety, and terminal concurrent execution is not
     representable. *)
 
+(** Closed execution-semantics classification of one tool call: whether the
+    call is itself a multi-call execution unit (RFC-0386). [Atomic_tool] runs
+    one capability per call. [Composition_tool] runs one fixed, validated
+    catalog plan inline. [Async_composition_tool] covers durable async
+    composition submissions and their status/cancel controls.
+    [Batch_plan_tool] runs one model-defined plan as a dependency DAG. This
+    axis is orthogonal to {!execution}: kind classifies what a call contains,
+    execution classifies how that call runs. *)
+type tool_kind =
+  | Atomic_tool
+  | Composition_tool
+  | Async_composition_tool
+  | Batch_plan_tool
+
 (** Descriptor-owned output contract for typed composition. [Opaque_output]
     cannot be referenced by another plan node. [Json_output] carries a schema
     in the closed composable-output subset checked by [Keeper_tool_plan.create]:
@@ -157,6 +171,7 @@ type t =
   ; model_output_projection : Tool_output.model_projection
   ; composable_output : composable_output
   ; execution : execution
+  ; tool_kind : tool_kind
   ; policy : policy
   ; executor : executor
   ; backend : backend
@@ -177,6 +192,11 @@ val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val keeper_tool_group_to_string : keeper_tool_group -> string
 val runtime_handler_to_string : runtime_handler -> string
+val tool_kind_to_string : tool_kind -> string
+
+(** Strict parse of {!tool_kind_to_string} output. Unknown strings are an
+    error, never a fallback classification. *)
+val tool_kind_of_string : string -> (tool_kind, string) result
 
 (** [public_descriptors] is the LLM-native public surface. Each descriptor has
     exactly one [public_name]. *)

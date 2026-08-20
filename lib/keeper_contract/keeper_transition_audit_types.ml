@@ -6,8 +6,7 @@
 (* tla-lint: file-scope: structured audit trail types for FSM transitions. *)
 
 type transition_record =
-  { snapshot : Keeper_measurement.measurement_snapshot option
-  ; events_fired : Keeper_state_machine.event list
+  { events_fired : Keeper_state_machine.event list
   ; selected_event : Keeper_state_machine.event
   ; prev_phase : Keeper_state_machine.phase
   ; new_phase : Keeper_state_machine.phase
@@ -27,11 +26,7 @@ let event_type_of_event event =
 let to_json (r : transition_record) : Yojson.Safe.t =
   let event_type = event_type_of_event r.selected_event in
   `Assoc
-    [ ( "snapshot"
-      , match r.snapshot with
-        | Some s -> Keeper_measurement.measurement_snapshot_to_json s
-        | None -> `Null )
-    ; "events_fired", `List (List.map Keeper_state_machine_json.event_to_json r.events_fired)
+    [ "events_fired", `List (List.map Keeper_state_machine_json.event_to_json r.events_fired)
     ; "selected_event", Keeper_state_machine_json.event_to_json r.selected_event
     ; "event_type", `String event_type
     ; "prev_phase", Keeper_state_machine_json.phase_to_json r.prev_phase

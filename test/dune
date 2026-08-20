@@ -287,6 +287,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
@@ -592,6 +593,7 @@
   test_keeper_tool_descriptor_registry_integrity
   test_keeper_tool_plan
   test_keeper_tool_composition_catalog
+  test_keeper_tool_kind
   test_voice_command_descriptor_parity
   test_disk_hygiene_script
   test_run_local_script
@@ -1117,6 +1119,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
+  test_keeper_goal_reconciliation_target
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
@@ -1258,6 +1261,7 @@
   test_goal_upsert_fsm_bypass_10247
   test_goal_store
   test_keeper_goal_phase_projection
+  test_keeper_goal_reconciliation_target
   test_goal_metric_unevaluated
   test_string_util
   test_prompt_asset_sync
@@ -1609,6 +1613,7 @@
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
 
+(include stanzas/test_keeper_list_truncation.inc)
 (include stanzas/test_keeper_wire_terminal.inc)
 (include stanzas/test_agent_transport_vocabulary.inc)
 (include stanzas/test_agent_api_query_params.inc)
@@ -1660,6 +1665,7 @@
 (include stanzas/test_channel_gate.inc)
 
 (include stanzas/test_channel_gate_discord_state.inc)
+(include stanzas/test_channel_gate_slack_state.inc)
 
 (include stanzas/test_channel_gate_metrics.inc)
 
@@ -1718,6 +1724,12 @@
 (include stanzas/test_context_max_observed_9953.inc)
 
 (include stanzas/test_otel_runtime_observables.inc)
+
+(include stanzas/test_keeper_scheduled_stimulus_channel.inc)
+
+(include stanzas/test_server_dashboard_runtime_observables.inc)
+
+(include stanzas/test_keeper_thinking_observation.inc)
 
 (include stanzas/test_otel_port_ssot.inc)
 

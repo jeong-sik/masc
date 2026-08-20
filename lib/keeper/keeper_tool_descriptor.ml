@@ -56,6 +56,27 @@ let execution_to_string = function
   | Terminal -> "terminal"
 ;;
 
+type tool_kind =
+  | Atomic_tool
+  | Composition_tool
+  | Async_composition_tool
+  | Batch_plan_tool
+
+let tool_kind_to_string = function
+  | Atomic_tool -> "atomic"
+  | Composition_tool -> "composition"
+  | Async_composition_tool -> "async_composition"
+  | Batch_plan_tool -> "batch_plan"
+;;
+
+let tool_kind_of_string = function
+  | "atomic" -> Ok Atomic_tool
+  | "composition" -> Ok Composition_tool
+  | "async_composition" -> Ok Async_composition_tool
+  | "batch_plan" -> Ok Batch_plan_tool
+  | unknown -> Error ("unknown tool kind: " ^ unknown)
+;;
+
 type composable_output =
   | Opaque_output
   | Json_output of { schema : Yojson.Safe.t }
@@ -146,6 +167,7 @@ type t =
   ; model_output_projection : Tool_output.model_projection
   ; composable_output : composable_output
   ; execution : execution
+  ; tool_kind : tool_kind
   ; policy : policy
   ; executor : executor
   ; backend : backend
@@ -529,6 +551,7 @@ let descriptor
       ?(model_output_projection = Tool_output.default_model_projection)
       ?(composable_output = Opaque_output)
       ?(ordinary_execution_mode = Serial)
+      ?(tool_kind = Atomic_tool)
       ~policy
       ~executor
       ~backend
@@ -580,6 +603,23 @@ let descriptor
       | Tool_masc_local_runtime_dispatch
       | Tool_analyze_image ) -> Ordinary ordinary_execution_mode
   in
+  (* Fail-closed admission rule for parallel tool use: a descriptor may opt
+     into [Concurrent] batches only when its policy carries a static
+     read-only hint. The batch planner (Agent_core Agent_tool_batch_plan)
+     fans an ordinary [Concurrent] run out onto sibling Eio fibers, so an
+     effectful tool admitted by mistake would execute its side effect
+     concurrently with no ordering guarantee. The hint is the same typed
+     declaration the composition catalog uses for its Async admission
+     check (Async_tool_not_statically_read_only); no string heuristics. *)
+  (match execution, policy.readonly_hint with
+   | Ordinary Concurrent, Some true -> ()
+   | Ordinary Concurrent, (Some false | None) ->
+     invalid_arg
+       (Printf.sprintf
+          "descriptor %S declares Concurrent execution without a static \
+           read-only policy hint"
+          internal_name)
+   | Ordinary Serial, _ | Terminal, _ -> ());
   let receipt_labels =
     [ "descriptor_id", id
     ; "capability_id", capability_id
@@ -615,6 +655,7 @@ let descriptor
   ; model_output_projection
   ; composable_output
   ; execution
+  ; tool_kind
   ; policy
   ; executor
   ; backend
@@ -755,6 +796,10 @@ let public_descriptors =
          literal newline in `pattern` is rejected. To match across lines, run \
          `rg -U` through the Execute tool."
       ~input_schema:search_files_schema
+      (* Concurrent: each call spawns its own rg process through the sandbox
+         backend; the only shared write is the bash-history audit line, a
+         single O_APPEND write with no fiber yield inside it. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -785,6 +830,10 @@ let public_descriptors =
          Execute tool with ls. Pass cwd explicitly for repo-relative reads. Read \
          never inherits Execute cwd."
       ~input_schema:read_file_schema
+      (* Concurrent: a pure read — containment check plus either a host
+         file read (Safe_ops.read_file_result) or a per-call backend read
+         runner process; no shared mutable state on the path. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -866,6 +915,10 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.web_search_schema.name
       ~description:Tool_schemas_misc.web_search_schema.description
       ~input_schema:Tool_schemas_misc.web_search_schema.input_schema
+      (* Concurrent: every call runs its own curl subprocess via
+         Tool_local_runtime_http; provider selection reads env only, so
+         there is no shared mutable state between sibling calls. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -886,6 +939,12 @@ let public_descriptors =
       ~internal_name:Tool_schemas_misc.web_fetch_schema.name
       ~description:Tool_schemas_misc.web_fetch_schema.description
       ~input_schema:Tool_schemas_misc.web_fetch_schema.input_schema
+      (* Concurrent: per-call curl subprocess; the full-text offload writes
+         into the content-addressed Tool_blob_store (Atomic CAS cache, the
+         same store keeper_artifact_read already reads concurrently) and
+         appends the index row through Fs_compat.append_jsonl's per-path
+         mutex. *)
+      ~ordinary_execution_mode:Concurrent
       ~policy:
         (policy
            ~readonly:true
@@ -2607,6 +2666,7 @@ let route_evidence_json d =
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "execution", `String (execution_to_string d.execution)
+     ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
      ; "composable_output", composable_output_to_json d.composable_output
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
@@ -2643,6 +2703,7 @@ let discovery_fields d =
    ; "sandbox", `String (sandbox_to_string d.sandbox)
    ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
    ; "execution", `String (execution_to_string d.execution)
+   ; "tool_kind", `String (tool_kind_to_string d.tool_kind)
    ; "composable_output", composable_output_to_json d.composable_output
    ; "policy", discovery_policy_json d.policy
    ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema

@@ -56,6 +56,7 @@ type dashboard_purge_artifact =
   | Keeper_memory_current_artifact
   | Keeper_memory_journal_artifact
   | Keeper_configuration_artifact
+  | Keeper_chat_store_artifact
   | Agent_artifact_bundle of string list
 
 type completion_receipt =
@@ -463,6 +464,12 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ; Keeper_memory_current_artifact
   ; Keeper_memory_journal_artifact
   ; Keeper_configuration_artifact
+    (* The chat store is a top-level per-keeper file
+       (.masc/keeper_chat/<name>.jsonl), so it sits outside the runtime
+       directory removed above. Without an explicit entry a purged keeper
+       leaves its conversation behind and a later keeper with the same name
+       reads it as its own history. *)
+  ; Keeper_chat_store_artifact
   ; Agent_artifact_bundle agent_aliases
   ]
 ;;

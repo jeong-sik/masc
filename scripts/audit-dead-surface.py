@@ -117,7 +117,15 @@ ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOTS = ("lib", "bin", "test")
 
 # Directories that never contain authored source.
-SKIP_PARTS = frozenset({"_build", "node_modules", ".git", "_opam", ".worktrees"})
+#
+# `.claude` holds tool state, and `.claude/worktrees` under it holds whole
+# copies of this tree. Those copies made every export look referenced by its
+# own duplicate: measured 2026-08-20 at the same commit, a checkout carrying
+# 14,298 files there reported 21 dead exports where a clean one reported 539.
+# `.worktrees` was already listed but does not match this path -- the name is
+# `worktrees`, without the leading dot -- so the audit walked 25,507 files
+# locally against CI's 9,491 and then advised lowering the baseline by 518.
+SKIP_PARTS = frozenset({"_build", "node_modules", ".git", "_opam", ".worktrees", ".claude"})
 
 # Short names collide with unrelated identifiers often enough that a token
 # scan says little about them, so `--exports` skips them by default.

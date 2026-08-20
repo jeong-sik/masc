@@ -26,32 +26,53 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
-        let names =
+        let all_names =
           registry_names @ keeper_names config
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
-          |> take limit
         in
+        (* [total] is measured before [limit] is applied, so a caller can tell
+           a short answer from a complete one. Without it [count] reports the
+           post-truncation size and reads as "that is all of them" — the shape
+           behind masc#29077, where a 129-keeper workspace answered 50 and the
+           operational keepers, sorting after ~90 benchmark ones, all fell off
+           the end. *)
+        let total = List.length all_names in
+        let names = take limit all_names in
+        let truncated = List.length names < total in
         let rows =
           names
           |> List.filter_map (fun name ->
                keeper_list_row_json ~runtime_class:"keeper" config name)
         in
+        (* [truncated] answers "did [limit] drop names", nothing else. [count]
+           can still be below [min total limit] in the detailed shape when a
+           listed name has no readable metadata and [keeper_list_row_json]
+           yields no row. *)
+        let listing =
+          [
+            ("total", `Int total);
+            ("limit", `Int limit);
+            ("truncated", `Bool truncated);
+          ]
+        in
         let json =
           if not detailed then
             `Assoc
-              [
-                ("count", `Int (List.length names));
-                ("keepers", `List (List.map (fun name -> `String name) names));
-                ("items", `List rows);
-              ]
+              ([
+                 ("count", `Int (List.length names));
+                 ("keepers", `List (List.map (fun name -> `String name) names));
+                 ("items", `List rows);
+               ]
+              @ listing)
           else
             `Assoc
-              [
-                ("count", `Int (List.length rows));
-                ("keepers", `List rows);
-              ]
+              ([
+                 ("count", `Int (List.length rows));
+                 ("keepers", `List rows);
+               ]
+              @ listing)
         in
         json)
   in

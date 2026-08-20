@@ -156,6 +156,7 @@ function makeLogsData(entries: readonly LogEntry[]): LogsData {
       scope: 'dashboard_logs',
       durableStore: '/workspace/.masc/logs/system_log_2026-06-21.jsonl',
     },
+    ring: { startSeq: 0, total: entries.length, droppedBefore: false },
     total: entries.length,
     entries,
   }
@@ -583,6 +584,12 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
     expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
       .toContain('browser shell only')
+    // The ledger reads and never writes, so it ships collapsed: open above the
+    // real controls it looked like one of them that refused to work.
+    const ledger = container.querySelector('[data-testid="settings-control-ledger"]')
+    expect(ledger?.tagName.toLowerCase()).toBe('details')
+    expect((ledger as HTMLDetailsElement | null)?.open).toBe(false)
+    expect(ledger?.querySelector('summary')?.textContent).toContain('읽기 전용')
     expect(container.querySelector('[data-control-id="settings-theme-density"]')?.getAttribute('data-control-kind'))
       .toBe('browser-local')
     expect(container.querySelector('[data-control-id="settings-display-locale"]')?.getAttribute('data-control-kind'))

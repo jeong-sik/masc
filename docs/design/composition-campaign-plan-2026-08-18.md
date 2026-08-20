@@ -17,7 +17,7 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | ③ Keeper 간 소통 | 닫힘 | RW02 goal 공유, RW04 board comment 핸드오프 pass |
 | ④ 맥락 기반 표면 선택 | 부분 | Connector 라우팅의 live/browser 증거 축 결손 |
 
-핵심 수치: E0 대표 실측 r6 15/19 (r7 11/19은 표본 분산 — 재실행으로 점수를 쫓지 않는다) · 시나리오 12행 중 실측 1행 · composable 출력 도구 3개 · Concurrent 도구 2개 · evidence 축 결손 37/46행 · 10T 런타임 스윕 31/49.
+핵심 수치: E0 대표 실측 r6 15/19 (r7 11/19은 표본 분산 — 재실행으로 점수를 쫓지 않는다) · 시나리오 12행 중 실측 1행 · composable 출력 도구 12개 · Concurrent 도구 28개(08-20 재실측) · evidence 축 결손 37/46행 · 10T 런타임 스윕 31/49.
 
 핵심 판단: **합성 인프라는 신규 개발이 아니라 개봉 대상이다.** typed DAG 플랜(`keeper_tool_plan`), 실행기(`keeper_tool_plan_executor`), TOML 카탈로그, async 브로커(`keeper_msg_async`)까지 프로덕션에 살아 있고, 당일 `keeper_compose_mission-snapshot` 호출 65건이 스토어에 기록되어 있다. 막는 것은 아래 세 병목이다.
 
@@ -28,8 +28,8 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 | 갭 | 심각도 | 액션 | 케이스 |
 |---|---|---|---|
 | 합성 실행 도구가 정적·무인자 — 모델 입력 스키마가 빈 closed object (`keeper_tool_composition_surface.ml:4-11`; status/cancel 제어 도구는 request_id 인자를 받으므로 해당 없음) | HIGH | 턴 타임 플랜 정의/파라미터화 경로 개설 | A1 |
-| composable 출력 3개뿐 (Execute·time_now·board_stats, `keeper_tool_descriptor.ml:742,1359,1656`) — 나머지 Opaque라 체인 불가 | HIGH | 출력 스키마 커버리지 전면 확대 | A2 |
-| Concurrent 선언 2개뿐 (기본 Serial `:531`) — 병렬이 사실상 공집합 | HIGH | readonly 서술자 Concurrent 승격 | A3 |
+| ~~composable 출력 3개뿐~~ → **A2-1 착륙 (#29012), 08-20 실측 12개**. 남은 병목은 개수가 아니라 대상: `web_search`·`web_fetch`·`keeper_memory_search`가 여전히 Opaque라 검색·회상 결과를 다음 노드로 흘릴 수 없다 | HIGH | 시나리오가 요구하는 도구부터 스키마 부여 | A2 |
+| ~~Concurrent 선언 2개뿐~~ → **A3-1 착륙 (#29017), 08-20 실측 28개**(명시 19 + board read 자동 9). 남은 미해결은 선언과 실행의 불일치 — 런타임이 Serial 선언 도구를 배치하는 이유가 미판정(#29068 본문, #26516) | MED | 원인 진단 후 결정 | A3 후속 |
 | Tool Group은 표시 메타데이터일 뿐 실행 문법에 없음 (`keeper_tool_plan.mli:1-4`) | MED | A1 플랜 경로에 흡수 | A1·A4 |
 | 합성 중첩 불가, async 플랜 전 노드 read-only 강제, deferred 노드가 플랜 종료 | MED | A1 안착 후 단계 해제 (measure-first) | A1 후속 |
 | CLI 런타임(Claude Code·Codex)은 vendor 루프가 도구 반복 소유 — 배치 의미론 미적용. 합성 도구는 콜백 1회라 통함 | LOW | 합성이 CLI 런타임의 병렬화 우회로임을 실측 | A1 |
@@ -150,11 +150,11 @@ Keeper 연속성 캠페인의 다음 단계와 Tool 합성 도약의 실행 계�
 
 | Wave | PR | 내용 | 의존 |
 |---|---|---|---|
-| W1 | PR-1 | A2-1: read-only 핵심 서술자 Json_output 수기 부여 + 검증 테스트 | — |
-| W1 | PR-2 | A3: readonly 서술자 Concurrent 승격 + 승격 심사 기준 | PR-1 (Stacked) |
+| W1 | PR-1 | ~~A2-1: read-only 핵심 서술자 Json_output 수기 부여~~ — **착륙 #29012** (3→12) | — |
+| W1 | PR-2 | ~~A3: readonly 서술자 Concurrent 승격~~ — **착륙 #29017** (2→28, 심사 근거는 커밋 본문) | PR-1 (Stacked) |
 | W1 | PR-3 | A5-1: 대시보드 디코더 복원 + 합성 트리 렌더 | — |
 | W1 | PR-4 | B3: RW17 무귀속 원인 확정 + 수리 | — |
-| W2 | PR-5 | A1-2: masc_plan_execute (ReWOO-flat, input_examples 동반) | PR-1 |
+| W2 | PR-5 | ~~A1-2: 모델 정의 플랜 도구~~ — **착륙 #29021** (`keeper_plan_execute`). 단 08-20 기준 `tool_calls` 전 파일에서 호출 0건 — 출하됐으나 아무도 쓰지 않는다 | PR-1 |
 | W2 | PR-6 | ~~A4-1: policy-before-schema~~ → 전제 감사로 기각, 본 문서 정정으로 대체 (A4-1 항목 참조) | — |
 | W2 | PR-7 | C1·C2·C3 위생 소형 PR 3~4건 | — |
 | W3 | PR-8 | B1-1: RW20(PoC)·RW21(상호 반론) 미션 + acceptance 확장 | PR-5 권장 |

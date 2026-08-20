@@ -93,6 +93,15 @@ let execution_mode_to_string = function
   | Async -> "async"
 ;;
 
+let tool_kind (entry : entry) =
+  match entry.execution with
+  | Inline -> Keeper_tool_descriptor.Composition_tool
+  | Async -> Keeper_tool_descriptor.Async_composition_tool
+;;
+
+let status_tool_kind = Keeper_tool_descriptor.Async_composition_tool
+let cancel_tool_kind = Keeper_tool_descriptor.Async_composition_tool
+
 let path ~config_root = Filename.concat config_root "tool-compositions.toml"
 
 let entries catalog = catalog
@@ -478,59 +487,6 @@ let parse content =
 
 let node_id_to_string = Keeper_tool_plan.Node_id.to_string
 
-let plan_error_to_string = function
-  | Keeper_tool_plan.Empty_plan -> "plan has no nodes"
-  | Keeper_tool_plan.Unknown_descriptor_id id ->
-    Printf.sprintf "descriptor id %S is not canonical" id
-  | Keeper_tool_plan.Duplicate_node_id node_id ->
-    Printf.sprintf "duplicate node id %S" (node_id_to_string node_id)
-  | Keeper_tool_plan.Duplicate_tool_name tool_name ->
-    Printf.sprintf "descriptor tool name %S is ambiguous" tool_name
-  | Keeper_tool_plan.Unknown_tool { node_id; tool_name } ->
-    Printf.sprintf
-      "node %S names unknown tool %S"
-      (node_id_to_string node_id)
-      tool_name
-  | Keeper_tool_plan.Missing_dependency { node_id; dependency } ->
-    Printf.sprintf
-      "node %S depends on missing node %S"
-      (node_id_to_string node_id)
-      (node_id_to_string dependency)
-  | Keeper_tool_plan.Opaque_output_reference
-      { node_id; source_node_id; source_tool_name } ->
-    Printf.sprintf
-      "node %S references opaque output from node %S (%s)"
-      (node_id_to_string node_id)
-      (node_id_to_string source_node_id)
-      source_tool_name
-  | Keeper_tool_plan.Invalid_output_pointer
-      { node_id; source_node_id; pointer; _ } ->
-    Printf.sprintf
-      "node %S has invalid output pointer /%s for node %S"
-      (node_id_to_string node_id)
-      (String.concat "/" (Keeper_tool_plan.Json_pointer.segments pointer))
-      (node_id_to_string source_node_id)
-  | Keeper_tool_plan.Invalid_output_schema { node_id; tool_name; _ } ->
-    Printf.sprintf
-      "node %S tool %S declares an invalid composable output schema"
-      (node_id_to_string node_id)
-      tool_name
-  | Keeper_tool_plan.Multiple_terminal_nodes node_ids ->
-    Printf.sprintf
-      "plan has multiple terminal nodes: %s"
-      (node_ids |> List.map node_id_to_string |> String.concat ", ")
-  | Keeper_tool_plan.Terminal_node_missing_dependency
-      { terminal_node_id; node_id } ->
-    Printf.sprintf
-      "terminal node %S does not depend on node %S"
-      (node_id_to_string terminal_node_id)
-      (node_id_to_string node_id)
-  | Keeper_tool_plan.Dependency_cycle node_ids ->
-    Printf.sprintf
-      "plan dependency cycle: %s"
-      (node_ids |> List.map node_id_to_string |> String.concat " -> ")
-;;
-
 let error_to_string = function
   | Toml_syntax detail -> "invalid TOML: " ^ detail
   | Empty_catalog -> "catalog must declare at least one composition"
@@ -573,5 +529,5 @@ let error_to_string = function
       field
       (String.concat "." path)
   | Plan_rejected { name; error } ->
-    Printf.sprintf "composition %S rejected: %s" name (plan_error_to_string error)
+    Printf.sprintf "composition %S rejected: %s" name (Keeper_tool_plan.error_to_string error)
 ;;

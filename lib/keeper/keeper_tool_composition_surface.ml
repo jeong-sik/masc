@@ -10,6 +10,72 @@ let empty_input_schema =
     ]
 ;;
 
+
+let plan_execute_tool_name = "keeper_plan_execute"
+
+let plan_execute_tool_kind = Keeper_tool_descriptor.Batch_plan_tool
+
+(* Composition tools are materialized Agent_core tools outside the Keeper
+   descriptor registry, so their tool kind is observable through their own
+   result payloads and node telemetry — never through descriptor route
+   evidence. *)
+let tool_kind_field kind =
+  "tool_kind", `String (Keeper_tool_descriptor.tool_kind_to_string kind)
+;;
+
+let with_tool_kind_field kind = function
+  | `Assoc fields -> `Assoc (tool_kind_field kind :: fields)
+  | json -> json
+;;
+
+let plan_execute_input_schema =
+  let node_schema =
+    `Assoc
+      [ "type", `String "object"
+      ; ( "properties"
+        , `Assoc
+            [ "id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ; "tool", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+            ; ( "after"
+              , `Assoc
+                  [ "type", `String "array"
+                  ; "items", `Assoc [ "type", `String "string" ]
+                  ] )
+            ; "input", `Assoc [ "type", `String "object" ]
+            ] )
+      ; "required", `List [ `String "id"; `String "tool" ]
+      ; "additionalProperties", `Bool false
+      ]
+  in
+  `Assoc
+    [ "type", `String "object"
+    ; ( "properties"
+      , `Assoc [ "nodes", `Assoc [ "type", `String "array"; "items", node_schema ] ] )
+    ; "required", `List [ `String "nodes" ]
+    ; "additionalProperties", `Bool false
+    ]
+;;
+
+let plan_execute_description =
+  String.concat
+    ""
+    [ "Execute a plan you define in this turn: a list of tool nodes run as one "
+    ; "dependency DAG (independent nodes overlap when their tools allow "
+    ; "concurrent execution; \"after\" edges and output references order the "
+    ; "rest). Only tools that declare a composable JSON output can feed a "
+    ; "downstream node; reference one with "
+    ; "{\"kind\":\"output\",\"node\":\"<id>\",\"pointer\":\"/field\"}. Input "
+    ; "templates: {\"kind\":\"literal\",\"value\":...} | output | "
+    ; "{\"kind\":\"object\",\"fields\":[{\"name\":...,\"value\":<template>}]} | "
+    ; "{\"kind\":\"array\",\"items\":[...]}. A node without \"input\" receives "
+    ; "{}. Terminal tools are rejected. Example: "
+    ; "{\"nodes\":[{\"id\":\"clock\",\"tool\":\"keeper_time_now\"},"
+    ; "{\"id\":\"memory\",\"tool\":\"keeper_memory_search\",\"after\":[\"clock\"],"
+    ; "\"input\":{\"kind\":\"object\",\"fields\":[{\"name\":\"query\","
+    ; "\"value\":{\"kind\":\"output\",\"node\":\"clock\",\"pointer\":\"/now_iso\"}}]}}]}"
+    ]
+;;
+
 let request_id_input_schema =
   `Assoc
     [ "type", `String "object"
@@ -75,6 +141,7 @@ let node_result_to_json (result : Executor.node_result) =
 let observe_node_result
       ~composition_tool
       ~composition_execution
+      ~composition_tool_kind
       ~composition_run_id
       ~parent_invocation
       ~meta
@@ -114,6 +181,7 @@ let observe_node_result
         (Keeper_tool_plan.Composition_run_id.to_string composition_run_id)
       ~composition_node_id:(Keeper_tool_plan.Node_id.to_string result.node_id)
       ~composition_execution
+      ~composition_tool_kind
       ~parent_tool_use_id:
         (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation)
       ?trace_id:context.trace_id
@@ -146,6 +214,9 @@ let observe_node_result
         , `String
             (Keeper_tool_composition_catalog.execution_mode_to_string
                composition_execution) )
+      ; ( "composition_tool_kind"
+        , `String
+            (Keeper_tool_descriptor.tool_kind_to_string composition_tool_kind) )
       ; ( "parent_tool_use_id"
         , `String
             (Agent_core.Tool_contract.Invocation.tool_use_id parent_invocation) )
@@ -326,9 +397,10 @@ let cause_to_json = function
       ]
 ;;
 
-let failure_data ~tool_name (failure : Executor.failure) =
+let failure_data ~tool_name ~tool_kind (failure : Executor.failure) =
   `Assoc
     [ "composition_tool", `String tool_name
+    ; tool_kind_field tool_kind
     ; "settled", `List (List.map node_result_to_json failure.settled)
     ; "cause", cause_to_json failure.cause
     ; ( "effect_disposition"
@@ -350,7 +422,7 @@ let failure_class (failure : Executor.failure) =
     Tool_result.Runtime_failure
 ;;
 
-let result_of_execution ~tool_name ~start_time = function
+let result_of_execution ~tool_name ~tool_kind ~start_time = function
   | Ok settled ->
     Tool_result.make_ok
       ~tool_name
@@ -358,13 +430,14 @@ let result_of_execution ~tool_name ~start_time = function
       ~data:
         (`Assoc
             [ "composition_tool", `String tool_name
+            ; tool_kind_field tool_kind
             ; "actions", `List (List.map node_result_to_json settled)
             ])
       ()
   | Error
       ({ Executor.cause = Executor.Tool_did_not_complete result; _ } as failure :
         Executor.failure) ->
-    let data = failure_data ~tool_name failure in
+    let data = failure_data ~tool_name ~tool_kind failure in
     (match result.result with
      | Tool_result.Deferred payload ->
        Tool_result.make_deferred
@@ -389,7 +462,7 @@ let result_of_execution ~tool_name ~start_time = function
          ~data
          "composition executor reported a completed result as incomplete")
   | Error failure ->
-    let data = failure_data ~tool_name failure in
+    let data = failure_data ~tool_name ~tool_kind failure in
     Tool_result.make_err
       ~tool_name
       ~class_:Tool_result.Runtime_failure
@@ -445,6 +518,7 @@ let async_worker_result
             observe_node_result
               ~composition_tool:tool_name
               ~composition_execution:entry.execution
+              ~composition_tool_kind:(Catalog.tool_kind entry)
               ~composition_run_id
               ~parent_invocation:source_invocation
               ~meta
@@ -452,7 +526,7 @@ let async_worker_result
          turn_context)
     ?clock
     ()
-  |> result_of_execution ~tool_name ~start_time
+  |> result_of_execution ~tool_name ~tool_kind:(Catalog.tool_kind entry) ~start_time
 ;;
 
 let result_from_json ~tool_name ~start_time ~class_ ~ok data =
@@ -480,9 +554,12 @@ let async_submission_result
       ()
   =
   let start_time = Time_compat.now () in
+  let tool_kind = Catalog.tool_kind entry in
   match Keeper_msg_async.server_background_switch () with
   | Error error ->
-    let data = Keeper_msg_async.submit_error_to_json error in
+    let data =
+      with_tool_kind_field tool_kind (Keeper_msg_async.submit_error_to_json error)
+    in
     result_from_json
       ~tool_name
       ~start_time
@@ -513,7 +590,11 @@ let async_submission_result
          ()
      with
      | Error error ->
-       let data = Keeper_msg_async.submit_error_to_json error in
+       let data =
+         with_tool_kind_field
+           tool_kind
+           (Keeper_msg_async.submit_error_to_json error)
+       in
        result_from_json
          ~tool_name
          ~start_time
@@ -527,6 +608,7 @@ let async_submission_result
        let data =
          `Assoc
            [ "composition_tool", `String tool_name
+           ; tool_kind_field tool_kind
            ; "execution", `String "async"
            ; "request_id", `String request_id
            ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
@@ -546,6 +628,7 @@ let async_submission_result
        let data =
          `Assoc
            [ "composition_tool", `String tool_name
+           ; tool_kind_field tool_kind
            ; "execution", `String "async"
            ; "submission", Keeper_msg_async.submit_outcome_to_json outcome
            ]
@@ -565,6 +648,7 @@ let status_result
   =
   let tool_name = Catalog.status_tool_name in
   let start_time = Time_compat.now () in
+  let with_kind = with_tool_kind_field Catalog.status_tool_kind in
   match
     Keeper_msg_async.poll
       ~base_path:config.base_path
@@ -578,7 +662,7 @@ let status_result
         ~start_time
         ~class_:Tool_result.Runtime_failure
         ~ok:true
-        (Keeper_msg_async.entry_to_json entry)
+        (with_kind (Keeper_msg_async.entry_to_json entry))
     in
     (match Tool_bridge.attach_artifact_manifest ~base_path:config.base_path result with
      | Ok result -> result
@@ -594,37 +678,36 @@ let status_result
       ~start_time
       ~class_:Tool_result.Workflow_rejection
       ~ok:false
-      (`Assoc
-          [ "error", `String "request_id_not_found"
-          ; "request_id", `String request_id
-          ])
+      (with_kind
+         (`Assoc
+             [ "error", `String "request_id_not_found"
+             ; "request_id", `String request_id
+             ]))
   | Keeper_msg_async.Unreadable reason ->
     result_from_json
       ~tool_name
       ~start_time
       ~class_:Tool_result.Runtime_failure
       ~ok:false
-      (`Assoc
-          [ "error", `String "request_record_unreadable"
-          ; "request_id", `String request_id
-          ; "reason", `String reason
-          ])
+      (with_kind
+         (`Assoc
+             [ "error", `String "request_record_unreadable"
+             ; "request_id", `String request_id
+             ; "reason", `String reason
+             ]))
   | Keeper_msg_async.Rejected rejection ->
     result_from_json
       ~tool_name
       ~start_time
       ~class_:Tool_result.Policy_rejection
       ~ok:false
-      (`Assoc
-          [ "error", `String "request_access_rejected"
-          ; "request_id", `String request_id
-          ; "reason", Keeper_msg_async.access_rejection_to_json rejection
-          ])
+      (with_kind
+         (`Assoc
+             [ "error", `String "request_access_rejected"
+             ; "request_id", `String request_id
+             ; "reason", Keeper_msg_async.access_rejection_to_json rejection
+             ]))
 ;;
-
-module For_testing = struct
-  let status_result = status_result
-end
 
 let cancel_result
       ~(config : Workspace.config)
@@ -639,7 +722,11 @@ let cancel_result
       ~caller:meta.name
       request_id
   in
-  let data = Keeper_msg_async.cancel_result_to_json ~request_id result in
+  let data =
+    with_tool_kind_field
+      Catalog.cancel_tool_kind
+      (Keeper_msg_async.cancel_result_to_json ~request_id result)
+  in
   match result with
   | Keeper_msg_async.Cancellation_requested _ ->
     result_from_json
@@ -676,6 +763,11 @@ let cancel_result
       data
 ;;
 
+module For_testing = struct
+  let status_result = status_result
+  let cancel_result = cancel_result
+end
+
 let make_request_control_tool
       ~(config : Workspace.config)
       ~name
@@ -710,7 +802,7 @@ let make_request_control_tool
 ;;
 
 let make_tools
-      ~catalog
+      ?catalog
       ~(config : Workspace.config)
       ~meta
       ~publication_recovery
@@ -730,8 +822,11 @@ let make_tools
       ()
   =
   let composition_tools =
-    Catalog.entries catalog
-    |> List.map (fun (entry : Catalog.entry) ->
+    match catalog with
+    | None -> []
+    | Some catalog ->
+      Catalog.entries catalog
+      |> List.map (fun (entry : Catalog.entry) ->
     let tool_name = Catalog.tool_name entry in
     let completion = Executor.outer_completion entry.plan in
     let descriptor =
@@ -835,6 +930,7 @@ let make_tools
                          observe_node_result
                            ~composition_tool:tool_name
                            ~composition_execution:entry.execution
+                           ~composition_tool_kind:(Catalog.tool_kind entry)
                            ~composition_run_id
                            ~parent_invocation
                            ~meta
@@ -858,7 +954,11 @@ let make_tools
                 Option.iter
                   (fun mark_failed ->
                      let diagnostic =
-                       failure_data ~tool_name failure |> Yojson.Safe.to_string
+                       failure_data
+                         ~tool_name
+                         ~tool_kind:(Catalog.tool_kind entry)
+                         failure
+                       |> Yojson.Safe.to_string
                      in
                      mark_failed
                        { Keeper_tools_agent_core.failure_class =
@@ -874,7 +974,11 @@ let make_tools
                   } ->
                 ());
              let result =
-               result_of_execution ~tool_name ~start_time execution
+               result_of_execution
+                 ~tool_name
+                 ~tool_kind:(Catalog.tool_kind entry)
+                 ~start_time
+                 execution
              in
              (match
                 Tool_bridge.attach_artifact_manifest
@@ -901,10 +1005,182 @@ let make_tools
                   ~start_time
                   "composition result manifest persistence failed")))))
   in
-  let has_async =
-    Catalog.entries catalog
-    |> List.exists (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+  let plan_execute_tool =
+    let tool_name = plan_execute_tool_name in
+    Tool_bridge.agent_core_tool_of_masc_with_execution_env
+      ~descriptor:
+        (Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Serial)
+      ~base_path:config.base_path
+      ?on_externalization_error
+      ~externalization_error_recoverable:false
+      ~name:tool_name
+      ~description:plan_execute_description
+      ~input_schema:plan_execute_input_schema
+      (fun execution_env input ->
+        let start_time = Time_compat.now () in
+        match
+          Tool_input_validation.validate_args
+            ~schema:plan_execute_input_schema
+            ~name:tool_name
+            ~args:input
+            ()
+        with
+        | Error rejection -> rejection
+        | Ok _ ->
+          (match Agent_core.Tool.Execution_env.invocation execution_env with
+           | None ->
+             Tool_result.runtime_err
+               ~tool_name
+               ~start_time
+               "composition execution requires Agent-Core invocation identity"
+           | Some parent_invocation ->
+             let descriptors = Keeper_tool_descriptor.all_descriptors () in
+             (match Keeper_tool_plan_request.plan_of_json ~descriptors input with
+              | Error error ->
+                let data =
+                  `Assoc
+                    [ "composition_tool", `String tool_name
+                    ; tool_kind_field plan_execute_tool_kind
+                    ; "error", Keeper_tool_plan_request.error_to_json error
+                    ; ( "composable_tools"
+                      , Json_util.json_string_list
+                          (Keeper_tool_plan_request.composable_tool_names
+                             ~descriptors) )
+                    ]
+                in
+                Tool_result.make_err
+                  ~tool_name
+                  ~class_:Tool_result.Policy_rejection
+                  ~start_time
+                  ~data
+                  (Keeper_tool_plan_request.error_message error)
+              | Ok plan ->
+                (match Executor.outer_completion plan with
+                 | Agent_core.Tool_contract.Terminal_after_success _ ->
+                   Tool_result.make_err
+                     ~tool_name
+                     ~class_:Tool_result.Policy_rejection
+                     ~start_time
+                     "a model-defined plan cannot contain a terminal tool; call the terminal tool as its own action"
+                 | Agent_core.Tool_contract.Continue_after_success ->
+                   let turn_context =
+                     Option.map
+                       (fun cell ->
+                          Keeper_tool_call_log_context.get_turn_context_record
+                            ~cell
+                            ())
+                       turn_ctx_cell
+                   in
+                   let run_id = Keeper_tool_plan.Run_id.fresh () in
+                   let composition_run_id =
+                     Keeper_tool_plan.Composition_run_id.fresh ()
+                   in
+                   let execution =
+                     Executor.execute_keeper
+                       ~plan
+                       ~run_id
+                       ~composition_run_id
+                       ~parent_invocation
+                       ~config
+                       ~meta
+                       ~publication_recovery
+                       ~ctx_snapshot
+                       ?turn_sandbox_factory
+                       ?clock
+                       ?continuation_channel
+                       ?gate_context
+                       ?gate_grant
+                       ?record_gate_result
+                       ?on_completed
+                       ?on_deferred
+                       ?on_external_effect_deferred
+                       ?on_failed
+                       ?observe_node_result:
+                         (Option.map
+                            (fun turn_context ->
+                               observe_node_result
+                                 ~composition_tool:tool_name
+                                 ~composition_execution:Catalog.Inline
+                                 ~composition_tool_kind:plan_execute_tool_kind
+                                 ~composition_run_id
+                                 ~parent_invocation
+                                 ~meta
+                                 ~turn_context)
+                            turn_context)
+                       ()
+                   in
+                   (match execution with
+                    | Error
+                        ({ Executor.effect_disposition =
+                             ( Tool_result.Proven_post_effect
+                             | Tool_result.Effect_outcome_unknown )
+                         ; _
+                         } as failure) ->
+                      Option.iter
+                        (fun mark_failed ->
+                           let diagnostic =
+                             failure_data
+                               ~tool_name
+                               ~tool_kind:plan_execute_tool_kind
+                               failure
+                             |> Yojson.Safe.to_string
+                           in
+                           mark_failed
+                             { Keeper_tools_agent_core.failure_class =
+                                 failure_class failure
+                             ; effect_disposition = failure.effect_disposition
+                             ; diagnostic
+                             })
+                        on_failed
+                    | Ok _
+                    | Error
+                        { Executor.effect_disposition =
+                            Tool_result.Proven_pre_effect
+                        ; _
+                        } ->
+                      ());
+                   let result =
+                     result_of_execution
+                       ~tool_name
+                       ~tool_kind:plan_execute_tool_kind
+                       ~start_time
+                       execution
+                   in
+                   (match
+                      Tool_bridge.attach_artifact_manifest
+                        ~base_path:config.base_path
+                        result
+                    with
+                    | Ok result -> result
+                    | Error { message; _ } ->
+                      let diagnostic =
+                        "composition result manifest persistence failed: "
+                        ^ message
+                      in
+                      Option.iter
+                        (fun mark_failed ->
+                           mark_failed
+                             { Keeper_tools_agent_core.failure_class =
+                                 Tool_result.Runtime_failure
+                             ; effect_disposition =
+                                 Tool_result.Effect_outcome_unknown
+                             ; diagnostic
+                             })
+                        on_failed;
+                      Tool_result.make_err
+                        ~tool_name
+                        ~class_:Tool_result.Runtime_failure
+                        ~start_time
+                        "composition result manifest persistence failed")))))
   in
+  let has_async =
+    match catalog with
+    | None -> false
+    | Some catalog ->
+      Catalog.entries catalog
+      |> List.exists (fun (entry : Catalog.entry) -> entry.execution = Catalog.Async)
+  in
+  let composition_tools = composition_tools @ [ plan_execute_tool ] in
   if not has_async
   then composition_tools
   else

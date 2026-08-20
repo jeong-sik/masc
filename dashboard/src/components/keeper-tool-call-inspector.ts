@@ -361,6 +361,34 @@ function toolCallStatusLabel(entry: ToolCallEntry): string {
   return entry.disposition ?? (toolCallSucceeded(entry) ? 'completed' : 'failed')
 }
 
+/** succeeded / deferred / neither, resolved once so the three places that
+    branch on it (tone, colour, glyph) cannot drift apart. */
+type ToolCallOutcome = 'ok' | 'deferred' | 'failed'
+
+function toolCallOutcome(entry: ToolCallEntry): ToolCallOutcome {
+  if (toolCallSucceeded(entry)) return 'ok'
+  if (toolCallDeferred(entry)) return 'deferred'
+  return 'failed'
+}
+
+const TOOL_CALL_OUTCOME_TONE: Record<ToolCallOutcome, StatusChipTone> = {
+  ok: 'ok',
+  deferred: 'warn',
+  failed: 'bad',
+}
+
+const TOOL_CALL_OUTCOME_COLOR: Record<ToolCallOutcome, string> = {
+  ok: 'text-[var(--color-status-ok)]',
+  deferred: 'text-[var(--color-status-warn)]',
+  failed: 'text-[var(--color-status-err)]',
+}
+
+const TOOL_CALL_OUTCOME_GLYPH: Record<ToolCallOutcome, string> = {
+  ok: 'O',
+  deferred: 'D',
+  failed: 'X',
+}
+
 export function deriveKeeperToolCallDossier(
   entries: readonly ToolCallEntry[],
   response: TelemetryFreshnessMetadata | null | undefined,
@@ -378,10 +406,8 @@ export function deriveKeeperToolCallDossier(
   const totalCalls = entries.length
   const failedCount = failed.length
   const deferredCount = deferred.length
-  let latestTone: StatusChipTone = 'neutral'
-  if (latest !== null) {
-    latestTone = toolCallSucceeded(latest) ? 'ok' : toolCallDeferred(latest) ? 'warn' : 'bad'
-  }
+  const latestTone: StatusChipTone =
+    latest === null ? 'neutral' : TOOL_CALL_OUTCOME_TONE[toolCallOutcome(latest)]
 
   let headline = 'no calls'
   if (totalCalls > 0 && failedCount > 0) {
@@ -745,14 +771,10 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           ${entry.duration_ms != null ? formatMsCompact(entry.duration_ms) : NO_DURATION_LABEL}
         </span>
         <span
-          class=${`flex-shrink-0 w-5 text-center ${toolCallSucceeded(entry)
-            ? 'text-[var(--color-status-ok)]'
-            : toolCallDeferred(entry)
-              ? 'text-[var(--color-status-warn)]'
-              : 'text-[var(--color-status-err)]'}`}
+          class=${`flex-shrink-0 w-5 text-center ${TOOL_CALL_OUTCOME_COLOR[toolCallOutcome(entry)]}`}
           title=${toolCallStatusLabel(entry)}
         >
-          ${toolCallSucceeded(entry) ? 'O' : toolCallDeferred(entry) ? 'D' : 'X'}
+          ${TOOL_CALL_OUTCOME_GLYPH[toolCallOutcome(entry)]}
         </span>
         <span class="flex-shrink-0 w-4 text-[var(--color-fg-muted)] text-center">
           ${expanded.value ? '-' : '+'}

@@ -322,13 +322,23 @@ let respond_keeper_tool_json ~sw ~clock state request reqd ~tool_name ~args =
       respond_json_value_with_cors ~status:`Service_unavailable request reqd
         (Channel_gate.error_json "keeper dispatch unavailable")
 
-(** GET /api/v1/gate/keepers?limit=100&detailed=true
+(* Upper bound on rows in one keeper-list response, and the default. One
+   constant so the two cannot drift: before masc#29077 the default was 100
+   while the clamp was 200, so an unparameterised caller was capped below what
+   the route was willing to serve, and neither number appeared in the answer.
+   The response carries [total] and [truncated], so a workspace that outgrows
+   this bound says so instead of returning a short list that looks complete. *)
+let keeper_list_max_limit = 200
 
-    Authenticated keeper discovery for channel-side connectors. *)
+(** GET /api/v1/gate/keepers?limit=200&detailed=true
+
+    Authenticated keeper discovery for channel-side connectors. [limit] only
+    narrows: it is clamped to [1, keeper_list_max_limit] and defaults to the
+    bound. *)
 let handle_gate_keepers ~sw ~clock state request reqd =
   let limit =
-    int_query_param request "limit" ~default:100
-    |> fun value -> max 1 (min 200 value)
+    int_query_param request "limit" ~default:keeper_list_max_limit
+    |> fun value -> max 1 (min keeper_list_max_limit value)
   in
   let detailed = bool_query_param request "detailed" ~default:true in
   let args =

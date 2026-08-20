@@ -705,11 +705,165 @@ let test_composition_run_id_is_uuid_v7_identity () =
     [ first; second ]
 ;;
 
+module Request = Masc.Keeper_tool_plan_request
+
+let parse_request json =
+  Request.plan_of_json ~descriptors:(Descriptor.all_descriptors ()) json
+;;
+
+let request_of_string text = Yojson.Safe.from_string text
+
+let test_request_parses_reference_chain () =
+  let json =
+    request_of_string
+      {|{"nodes":[
+          {"id":"clock","tool":"keeper_time_now"},
+          {"id":"memory","tool":"keeper_memory_search","after":["clock"],
+           "input":{"kind":"object","fields":[
+             {"name":"query",
+              "value":{"kind":"output","node":"clock","pointer":"/now_iso"}}]}}]}|}
+  in
+  match parse_request json with
+  | Ok plan ->
+    let names =
+      Plan.nodes plan |> List.map (fun node -> Plan.Node_id.to_string node.Plan.id)
+    in
+    check (list string) "node order preserved" [ "clock"; "memory" ] names;
+    (match Plan.nodes plan with
+     | [ clock; _memory ] ->
+       check
+         (list string)
+         "clock has no dependencies"
+         []
+         (Plan.dependencies clock |> List.map Plan.Node_id.to_string)
+     | _ -> fail "expected exactly two nodes")
+  | Error error -> failf "reference chain rejected: %s" (Request.error_message error)
+;;
+
+let test_request_defaults_missing_input_to_empty_object () =
+  let json = request_of_string {|{"nodes":[{"id":"clock","tool":"keeper_time_now"}]}|} in
+  match parse_request json with
+  | Ok plan ->
+    (match Plan.nodes plan with
+     | [ clock ] ->
+       (match clock.Plan.input with
+        | Plan.Json_template.Literal (`Assoc []) -> ()
+        | _ -> fail "missing input did not default to the empty literal object")
+     | _ -> fail "expected exactly one node")
+  | Error error -> failf "single node rejected: %s" (Request.error_message error)
+;;
+
+let test_request_rejects_unknown_tool () =
+  let json = request_of_string {|{"nodes":[{"id":"a","tool":"no_such_tool"}]}|} in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Unknown_tool _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "unknown tool was accepted"
+;;
+
+let test_request_rejects_opaque_reference () =
+  let json =
+    request_of_string
+      {|{"nodes":[
+          {"id":"help","tool":"masc_tool_help"},
+          {"id":"reader","tool":"keeper_memory_search","after":["help"],
+           "input":{"kind":"object","fields":[
+             {"name":"query",
+              "value":{"kind":"output","node":"help","pointer":"/anything"}}]}}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Opaque_output_reference _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "opaque output reference was accepted"
+;;
+
+let test_request_rejects_dependency_cycle () =
+  let json =
+    request_of_string
+      {|{"nodes":[
+          {"id":"a","tool":"keeper_time_now","after":["b"]},
+          {"id":"b","tool":"keeper_time_now","after":["a"]}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Dependency_cycle _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "dependency cycle was accepted"
+;;
+
+let test_request_rejects_missing_dependency () =
+  let json =
+    request_of_string
+      {|{"nodes":[{"id":"a","tool":"keeper_time_now","after":["ghost"]}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Missing_dependency _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "missing dependency was accepted"
+;;
+
+let test_request_rejects_malformed_template () =
+  let json =
+    request_of_string
+      {|{"nodes":[{"id":"a","tool":"keeper_time_now",
+                   "input":{"kind":"teleport"}}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Node_template_error { error = Request.Template_unknown_kind _; _ })
+    -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "unknown template kind was accepted"
+;;
+
+let test_request_rejects_unknown_request_field () =
+  let json = request_of_string {|{"nodes":[],"mode":"fast"}|} in
+  match parse_request json with
+  | Error (Request.Unknown_request_field { field = "mode" }) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "unknown request field was accepted"
+;;
+
+let test_request_rejects_empty_plan () =
+  let json = request_of_string {|{"nodes":[]}|} in
+  match parse_request json with
+  | Error (Request.Plan_rejected Plan.Empty_plan) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "empty plan was accepted"
+;;
+
+let test_request_composable_names_match_registry () =
+  let names =
+    Request.composable_tool_names ~descriptors:(Descriptor.all_descriptors ())
+  in
+  check bool "keeper_time_now is composable" true (List.mem "keeper_time_now" names);
+  check bool "masc_tool_help stays opaque" false (List.mem "masc_tool_help" names)
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
     "keeper_tool_plan"
-    [ ( "typed-values"
+    [ ( "request"
+      , [ test_case "reference chain" `Quick test_request_parses_reference_chain
+        ; test_case
+            "missing input defaults"
+            `Quick
+            test_request_defaults_missing_input_to_empty_object
+        ; test_case "unknown tool" `Quick test_request_rejects_unknown_tool
+        ; test_case "opaque reference" `Quick test_request_rejects_opaque_reference
+        ; test_case "dependency cycle" `Quick test_request_rejects_dependency_cycle
+        ; test_case "missing dependency" `Quick test_request_rejects_missing_dependency
+        ; test_case "malformed template" `Quick test_request_rejects_malformed_template
+        ; test_case
+            "unknown request field"
+            `Quick
+            test_request_rejects_unknown_request_field
+        ; test_case "empty plan" `Quick test_request_rejects_empty_plan
+        ; test_case
+            "composable names"
+            `Quick
+            test_request_composable_names_match_registry
+        ] )
+    ; ( "typed-values"
       , [ test_case "node id" `Quick test_node_id_rejects_empty
         ; test_case "composition run UUID" `Quick test_composition_run_id_is_uuid_v7_identity
         ; test_case "JSON pointer" `Quick test_json_pointer_is_exact_rfc6901_navigation

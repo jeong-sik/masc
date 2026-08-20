@@ -614,6 +614,52 @@ type error =
       }
   | Dependency_cycle of Node_id.t list
 
+let error_to_string = function
+  | Empty_plan -> "plan has no nodes"
+  | Unknown_descriptor_id id -> Printf.sprintf "descriptor id %S is not canonical" id
+  | Duplicate_node_id node_id ->
+    Printf.sprintf "duplicate node id %S" (Node_id.to_string node_id)
+  | Duplicate_tool_name tool_name ->
+    Printf.sprintf "descriptor tool name %S is ambiguous" tool_name
+  | Unknown_tool { node_id; tool_name } ->
+    Printf.sprintf "node %S names unknown tool %S" (Node_id.to_string node_id) tool_name
+  | Missing_dependency { node_id; dependency } ->
+    Printf.sprintf
+      "node %S depends on missing node %S"
+      (Node_id.to_string node_id)
+      (Node_id.to_string dependency)
+  | Opaque_output_reference { node_id; source_node_id; source_tool_name } ->
+    Printf.sprintf
+      "node %S references opaque output from node %S (%s)"
+      (Node_id.to_string node_id)
+      (Node_id.to_string source_node_id)
+      source_tool_name
+  | Invalid_output_pointer { node_id; source_node_id; pointer; _ } ->
+    Printf.sprintf
+      "node %S has invalid output pointer /%s for node %S"
+      (Node_id.to_string node_id)
+      (String.concat "/" (Json_pointer.segments pointer))
+      (Node_id.to_string source_node_id)
+  | Invalid_output_schema { node_id; tool_name; _ } ->
+    Printf.sprintf
+      "node %S tool %S declares an invalid composable output schema"
+      (Node_id.to_string node_id)
+      tool_name
+  | Multiple_terminal_nodes node_ids ->
+    Printf.sprintf
+      "plan has multiple terminal nodes: %s"
+      (node_ids |> List.map Node_id.to_string |> String.concat ", ")
+  | Terminal_node_missing_dependency { terminal_node_id; node_id } ->
+    Printf.sprintf
+      "terminal node %S does not depend on node %S"
+      (Node_id.to_string terminal_node_id)
+      (Node_id.to_string node_id)
+  | Dependency_cycle node_ids ->
+    Printf.sprintf
+      "plan dependency cycle: %s"
+      (node_ids |> List.map Node_id.to_string |> String.concat " -> ")
+;;
+
 type t =
   { identity : int
   ; nodes : node list

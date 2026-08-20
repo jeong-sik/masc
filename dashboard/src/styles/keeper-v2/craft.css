@@ -29,26 +29,26 @@
    them per density, then top up the spots that still carry literals.
    ══════════════════════════════════════════════════════════════ */
 .v2-app[data-density="spacious"] {
-  --pad-surface: 32px 42px 60px;
+  --pad-surface: 32px 30px 60px;
   --pad-card:    16px 18px;
   --gap-card:    18px;
   --gap-row:     11px;
 }
 .v2-app[data-density="regular"] {
-  --pad-surface: 22px 26px 40px;
+  --pad-surface: 22px 18px 40px;
   --pad-card:    12px 14px;
   --gap-card:    14px;
   --gap-row:     8px;
 }
 .v2-app[data-density="compact"] {
-  --pad-surface: 15px 18px 30px;
+  --pad-surface: 15px 14px 30px;
   --pad-card:    9px 11px;
   --gap-card:    10px;
   --gap-row:     6px;
 }
 
 /* Mobile (single-column shell, ≤900px — same breakpoint the bottom tab bar
-   uses): the desktop surface padding (up to 42px each side on spacious)
+   uses): the desktop surface padding (up to 30px each side on spacious)
    eats ~27% of a 406px viewport once the 12px shell pad is added. Compress
    the horizontal pad per density tier; keep the vertical rhythm. Only
    `--pad-surface` is touched, so every surface on `.ov-scroll`/`.surf-scroll`/

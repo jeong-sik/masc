@@ -22,6 +22,7 @@ import {
 import {
   fetchGateKeepers,
   type GateKeeper,
+  type KeeperListing,
 } from '../api/gate-keepers'
 import { dashboardRuntime } from '../api/effect-http'
 import {
@@ -189,15 +190,24 @@ type ConnectorStatusSnapshot = {
   gate: GateStatusData | null
   connectors: GateConnectorsData | null
   keepers: readonly GateKeeper[]
+  // How much of the directory `keepers` is. Carried next to the rows so the
+  // surfaces that render a keeper count cannot report the page size as the
+  // whole set — masc#29077.
+  keeperListing: KeeperListing
   gateError: string | null
   connectorError: string | null
   keeperError: string | null
 }
 
+// Nothing fetched yet: zero known, zero served, nothing dropped. `truncated`
+// false here is honest — an empty answer is not a cut-off one.
+const EMPTY_KEEPER_LISTING: KeeperListing = { total: 0, limit: 0, truncated: false }
+
 const EMPTY_SNAPSHOT: ConnectorStatusSnapshot = {
   gate: null,
   connectors: null,
   keepers: [],
+  keeperListing: EMPTY_KEEPER_LISTING,
   gateError: null,
   connectorError: null,
   keeperError: null,
@@ -211,6 +221,7 @@ async function refresh() {
       gate: previous?.gate ?? null,
       connectors: previous?.connectors ?? null,
       keepers: previous?.keepers ?? [],
+      keeperListing: previous?.keeperListing ?? EMPTY_KEEPER_LISTING,
       gateError: null,
       connectorError: null,
       keeperError: null,
@@ -236,6 +247,7 @@ async function refresh() {
 
     if (keeperResult.status === 'fulfilled') {
       next.keepers = keeperResult.value.keepers
+      next.keeperListing = keeperResult.value.listing
       next.keeperError = keeperResult.value.directoryIssues.length === 0
         ? null
         : keeperResult.value.directoryIssues
@@ -243,6 +255,7 @@ async function refresh() {
             .join('; ')
     } else {
       next.keepers = []
+      next.keeperListing = EMPTY_KEEPER_LISTING
       next.keeperError = keeperResult.reason instanceof Error ? keeperResult.reason.message : 'fetch failed'
     }
 
@@ -582,6 +595,7 @@ function ConnectorLivePanel({
   connector,
   gate,
   keepers,
+  keeperListing,
   connectorError,
   keeperDirectoryError,
   loading,
@@ -589,6 +603,7 @@ function ConnectorLivePanel({
   connector: GateConnectorInfo | null
   gate: GateStatusData | null
   keepers: readonly GateKeeper[]
+  keeperListing: KeeperListing
   connectorError: string | null
   keeperDirectoryError: string | null
   loading: boolean
@@ -828,7 +843,7 @@ function ConnectorLivePanel({
       <${StartupCheckBanner} connectorId=${connectorId} sidecarUp=${connector?.available === true} />
 
       ${connector?.available === true && keepers.length > 0
-        ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} />`
+        ? html`<${QuickBindForm} connectorId=${connectorId} keepers=${keepers} listing=${keeperListing} />`
         : null}
 
       <${ConnectorFlowSection} connector=${connector} gate=${gate} />
@@ -2234,6 +2249,7 @@ export function ConnectorStatusPanel() {
                     connector=${focusedConnector}
                     gate=${d}
                     keepers=${snapshot.keepers}
+                    keeperListing=${snapshot.keeperListing}
                     connectorError=${snapshot.connectorError}
                     keeperDirectoryError=${snapshot.keeperError}
                     loading=${loading}
@@ -2241,10 +2257,10 @@ export function ConnectorStatusPanel() {
                 </${SurfaceCard}>
                 <${DisclosurePanel}
                   title="키퍼 매트릭스"
-                  badge=${html`<span>키퍼 ${snapshot.keepers.length}</span>`}
+                  badge=${html`<span>키퍼 ${snapshot.keepers.length}${snapshot.keeperListing.truncated ? ` / ${snapshot.keeperListing.total}` : ''}</span>`}
                   testId="connector-matrix-disclosure"
                 >
-                  <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers)} />
+                  <${ConnectorKeeperMatrix} matrix=${deriveMatrix(allConnectors, snapshot.keepers, snapshot.keeperListing)} />
                 <//>
                 <${ConnectorPathsStrip} />
                 <${GateAnalyticsSection} gate=${d} gateError=${snapshot.gateError} />
@@ -2259,6 +2275,7 @@ export function ConnectorStatusPanel() {
               connector=${focusedConnector}
               gate=${d}
               keepers=${snapshot.keepers}
+              keeperListing=${snapshot.keeperListing}
               connectorError=${snapshot.connectorError}
               keeperDirectoryError=${snapshot.keeperError}
               loading=${loading}

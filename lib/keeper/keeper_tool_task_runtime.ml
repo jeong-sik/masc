@@ -416,13 +416,20 @@ let handle_keeper_task_tool_with_outcome
            (include_done || not (Masc_domain.task_status_is_done task.task_status))
            && not is_cancelled
        in
-       let tasks =
+       let matching =
          backlog.tasks
          |> List.filter visible
          |> List.sort (fun (left : Masc_domain.task) right ->
            Int.compare left.priority right.priority)
-         |> List.filteri (fun index _ -> index < limit)
        in
+       let matching_count = List.length matching in
+       (* The sort is stable and keys on priority alone, so within one priority
+          the oldest task stays in front and the newest falls off the end of
+          [limit]. A keeper that saw only the first page had no way to know more
+          existed: eight tasks registered at priority 2 and 3 stayed invisible
+          across nineteen todo listings while the caller read the page as the
+          whole backlog (#29101). *)
+       let tasks = matching |> List.filteri (fun index _ -> index < limit) in
        let tasks_json = `List (List.map Masc_domain.task_to_yojson tasks) in
        let revision =
          Snapshot_protocol.revision_of_json
@@ -454,6 +461,9 @@ let handle_keeper_task_tool_with_outcome
                    then "primary"
                    else "recovery_non_authoritative") )
               :: ("degraded", `Bool (Option.is_some recovered_from))
+              :: ("matching_count", `Int matching_count)
+              :: ("returned_count", `Int (List.length tasks))
+              :: ("truncated", `Bool (matching_count > limit))
               :: fields)
          | payload -> payload
        in

@@ -37,6 +37,7 @@ const currentWire = {
   latest_seq: null,
   oldest_seq: null,
   latest_ts_iso: null,
+  ring: { start_seq: 0, total: 0, dropped_before: false },
   total: 0,
   entries: [],
 } as const

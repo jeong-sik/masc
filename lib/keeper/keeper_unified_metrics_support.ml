@@ -344,7 +344,6 @@ let turn_mode_of_result (result : Keeper_agent_run.run_result) : turn_mode =
   let text = String.trim result.response_text in
   if has_visible_tool_signal result then Tool_use
   else if text = "" then Noop
-  else if String.starts_with ~prefix:"SKIP:" text then Skip_text
   else Text_response
 
 let turn_mode_of_json = Turn_mode_codec.turn_mode_of_json

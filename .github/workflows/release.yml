@@ -75,7 +75,10 @@ jobs:
       - name: Pin private dependencies
         run: |
           chmod +x scripts/opam-pin-external-deps.sh
-          scripts/opam-pin-external-deps.sh --with-compact-protocol
+          # --with-bisect 는 --with-test 와 짝이다. bisect_ppx 의 opam 제약이
+          # ocaml < 5.0 이라, pin 없이 테스트 의존성을 풀면 solver 가
+          # OCaml 5.5.0 아래에서 해를 못 찾는다.
+          scripts/opam-pin-external-deps.sh --with-compact-protocol --with-bisect
 
       - name: Refresh apt index
         if: runner.os == 'Linux'

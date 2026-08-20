@@ -312,10 +312,32 @@ let runtime_surface_json config (meta : keeper_meta) =
     | Some entry -> Some (Keeper_state_machine.phase_to_string entry.phase)
     | None -> None
   in
+  (* [phase] above is the Keeper lifecycle; this is the shutdown operation's
+     own phase, a different axis. A Keeper can read Stopped while its
+     operation still sits in Finalizing_tasks or Cleanup_ready, and those are
+     outside the supersedable set, so a restart is refused there (#29181).
+     Latest revision wins: earlier records are superseded history. *)
+  let shutdown_operation_phase =
+    match
+      Keeper_shutdown_store.list_for_keeper ~config ~keeper_name:meta.name
+    with
+    | Error _ | Ok [] -> None
+    | Ok (first :: rest) ->
+      let latest =
+        List.fold_left
+          (fun (acc : Keeper_shutdown_types.t) (candidate : Keeper_shutdown_types.t) ->
+             if candidate.revision > acc.revision then candidate else acc)
+          first
+          rest
+      in
+      Some (Keeper_shutdown_types.phase_to_string latest.phase)
+  in
   `Assoc
     ([ "paused", `Bool meta.paused
      ; "keepalive_running", `Bool keepalive_running
      ; ( "phase", Json_util.string_opt_to_json phase )
+     ; ( "shutdown_operation_phase"
+       , Json_util.string_opt_to_json shutdown_operation_phase )
      ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
      ; "last_runtime_attempt", last_runtime_attempt_json meta
      ]

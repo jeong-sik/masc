@@ -146,8 +146,8 @@ streaming = true
 max-output-tokens = 384000
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -294,8 +294,8 @@ streaming = true
 max-output-tokens = 131072
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 # SSOT = agent-core models.toml per official MiniMax Chat documentation; Chat
 # tool_choice, response_format, and structured output are not documented.
 supports-response-format-json = false
@@ -347,8 +347,8 @@ streaming = true
 max-output-tokens = 32768
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 # SSOT = AGENT_CORE models.toml; Ollama Cloud Kimi rows do not currently advertise a
 # native schema/response_format guarantee.
 supports-response-format-json = false
@@ -436,8 +436,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-flash-0731.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -456,8 +456,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-pro.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 

@@ -12,6 +12,10 @@ val start :
   unit
 
 module For_testing : sig
+  val authority_actor : string
+  (** The fixed authority identity (RFC-0361 D7(b)): the [verifier_exact]
+      lane id, shared by every judgement so verdicts aggregate by actor. *)
+
   val evidence_refs_of_output :
     Yojson.Safe.t -> (string list, string) result
 

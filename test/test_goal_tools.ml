@@ -320,6 +320,20 @@ let request_complete config goal_id =
          ])
 ;;
 
+(* RFC-0387 stage 2: [request_complete] enters [Verifying]; [Completed] is
+   reached only through the verifier's proof. *)
+let prove_complete config goal_id =
+  Tool_workspace.dispatch
+    (workspace_ctx config)
+    ~name:"masc_goal_transition"
+    ~args:
+      (`Assoc
+         [ "goal_id", `String goal_id
+         ; "action", `String "record_proof_proven"
+         ; "evidence", `String "observed by the test verifier"
+         ])
+;;
+
 let test_goal_completion_accepts_goal_without_tasks () =
   with_workspace
   @@ fun config ->
@@ -331,8 +345,10 @@ let test_goal_completion_accepts_goal_without_tasks () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "completed directly" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "completion request enters verifying" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 
 let test_goal_completion_ignores_open_task_count () =
@@ -353,8 +369,10 @@ let test_goal_completion_ignores_open_task_count () =
        ~title:"Still open"
        ~priority:3
        ~description:"open");
-  check string "open task does not gate Goal completion" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "open task does not gate the completion request" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 
 let test_goal_completion_ignores_metric_text () =
@@ -372,8 +390,10 @@ let test_goal_completion_ignores_metric_text () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "metric text does not gate Goal completion" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "metric text does not gate the completion request" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 let test_goal_block_and_unblock_have_no_operator_hierarchy () =
   with_workspace

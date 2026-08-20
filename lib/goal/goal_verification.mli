@@ -6,10 +6,10 @@
     the [Goal_store.goal] record is constructed by literal in external callers,
     so verification state gets its own store.
 
-    RFC-0387 stage 1 ships this module as a RECORD-ONLY evidence store: the
-    dashboard read paths render it, but no workflow reads it for control and
-    no caller writes it yet. Stage 2 (the verifier gate) adds the writers —
-    the durable [*_pending] requests and the verifier-lane verdict commits.
+    RFC-0387 stage 1 shipped this module as a RECORD-ONLY evidence store;
+    stage 2 (the verifier gate) wires the writers — the durable
+    [mark_*_pending] requests and the verdict commits — and the reader that
+    gates [request_complete] on [Criterion_unreachable].
 
     Two state machines per goal, both closed sum types:
 
@@ -103,8 +103,29 @@ val ledger_error_to_yojson : string -> Yojson.Safe.t
 (** {1 Mutations}
 
     All are locked read-modify-writes that refuse an undecodable store.
-    Stage 1 wires no caller; these are the surface the stage-2 verifier gate
-    commits through. *)
+    Stage 2 wires them: [mark_*_pending] are the durable requests the gate
+    persists before any model call, and the verdict commits are what the
+    verifier lane (or a manual [masc_goal_transition] with evidence) writes. *)
+
+val mark_criterion_pending :
+  Workspace_utils.config ->
+  goal_id:string ->
+  (record, string) result
+(** Records the durable creation-time criterion check (RFC-0387 §3.2, B2):
+    [Criterion_unchecked -> Criterion_pending]. Idempotent when already
+    pending; refuses to overwrite a committed [Criterion_viable] /
+    [Criterion_unreachable] verdict. *)
+
+val mark_proof_pending :
+  Workspace_utils.config ->
+  goal_id:string ->
+  (record, string) result
+(** Records the durable completion-proof request (RFC-0387 §4.1, B3):
+    [Completion_idle -> Proof_pending], persisted BEFORE the phase enters
+    [Verifying] (persist-before-model-call). Idempotent when already pending —
+    a repeated [request_complete] re-arms the request. A standing
+    [Proof_refuted] is superseded by the new request; a committed
+    [Proof_proven] / [Human_confirmed] verdict is never overwritten. *)
 
 val record_criterion_verdict :
   Workspace_utils.config ->

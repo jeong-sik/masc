@@ -20,7 +20,7 @@ let test_phase_roundtrip () =
 
 let test_phase_set () =
   let strs = List.map GP.to_string GP.all in
-  check int "phase count" 5 (List.length GP.all);
+  check int "phase count" 6 (List.length GP.all);
   check int "no duplicate phase strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
@@ -29,6 +29,7 @@ let test_phase_set () =
       "executing";
       "blocked";
       "paused";
+      "verifying";
       "completed";
       "dropped";
     ]
@@ -45,7 +46,7 @@ let test_action_roundtrip () =
 
 let test_action_set () =
   let strs = List.map GP.action_to_string GP.all_actions in
-  check int "action count" 7 (List.length GP.all_actions);
+  check int "action count" 11 (List.length GP.all_actions);
   check int "no duplicate action strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
@@ -58,10 +59,14 @@ let test_action_set () =
       "unblock";
       "drop";
       "reopen";
+      "record_proof_proven";
+      "record_proof_refuted";
+      "record_criterion_viable";
+      "record_criterion_unreachable";
     ]
     strs
 
-(* The 5x7 matrix in [decide_transition] had no behavioural test. Its comment
+(* The 6x11 matrix in [decide_transition] had no behavioural test. Its comment
    says the compiler "refuses a matrix with a hole in it", and that is true --
    but exhaustiveness proves each pair has an arm, not that the arm gives the
    right answer. Every pair is stated here as a literal, so a matrix edit shows
@@ -73,16 +78,23 @@ let outcome_label = function
   | Error _ -> "invalid"
 
 (* phase, action, expected outcome. Read down a column to see one action across
-   all phases; the diagonal (target phase = current phase) is "already:*". *)
+   all phases; the diagonal (target phase = current phase) is "already:*".
+   RFC-0387 stage 2: request_complete moves executing -> verifying; only
+   record_proof_proven reaches completed; the criterion actions are
+   phase-neutral (already:<same>) outside the terminal phases. *)
 let matrix =
   [
-    (GP.Executing, GP.Request_complete, "move_to:completed");
+    (GP.Executing, GP.Request_complete, "move_to:verifying");
     (GP.Executing, GP.Pause, "move_to:paused");
     (GP.Executing, GP.Resume, "already:executing");
     (GP.Executing, GP.Block, "move_to:blocked");
     (GP.Executing, GP.Unblock, "already:executing");
     (GP.Executing, GP.Drop, "move_to:dropped");
     (GP.Executing, GP.Reopen, "already:executing");
+    (GP.Executing, GP.Record_proof_proven, "invalid");
+    (GP.Executing, GP.Record_proof_refuted, "invalid");
+    (GP.Executing, GP.Record_criterion_viable, "already:executing");
+    (GP.Executing, GP.Record_criterion_unreachable, "already:executing");
     (GP.Blocked, GP.Request_complete, "invalid");
     (GP.Blocked, GP.Pause, "invalid");
     (GP.Blocked, GP.Resume, "invalid");
@@ -90,6 +102,10 @@ let matrix =
     (GP.Blocked, GP.Unblock, "move_to:executing");
     (GP.Blocked, GP.Drop, "move_to:dropped");
     (GP.Blocked, GP.Reopen, "invalid");
+    (GP.Blocked, GP.Record_proof_proven, "invalid");
+    (GP.Blocked, GP.Record_proof_refuted, "invalid");
+    (GP.Blocked, GP.Record_criterion_viable, "already:blocked");
+    (GP.Blocked, GP.Record_criterion_unreachable, "already:blocked");
     (GP.Paused, GP.Request_complete, "invalid");
     (GP.Paused, GP.Pause, "already:paused");
     (GP.Paused, GP.Resume, "move_to:executing");
@@ -97,6 +113,21 @@ let matrix =
     (GP.Paused, GP.Unblock, "invalid");
     (GP.Paused, GP.Drop, "move_to:dropped");
     (GP.Paused, GP.Reopen, "invalid");
+    (GP.Paused, GP.Record_proof_proven, "invalid");
+    (GP.Paused, GP.Record_proof_refuted, "invalid");
+    (GP.Paused, GP.Record_criterion_viable, "already:paused");
+    (GP.Paused, GP.Record_criterion_unreachable, "already:paused");
+    (GP.Verifying, GP.Request_complete, "already:verifying");
+    (GP.Verifying, GP.Pause, "invalid");
+    (GP.Verifying, GP.Resume, "invalid");
+    (GP.Verifying, GP.Block, "invalid");
+    (GP.Verifying, GP.Unblock, "invalid");
+    (GP.Verifying, GP.Drop, "invalid");
+    (GP.Verifying, GP.Reopen, "invalid");
+    (GP.Verifying, GP.Record_proof_proven, "move_to:completed");
+    (GP.Verifying, GP.Record_proof_refuted, "move_to:executing");
+    (GP.Verifying, GP.Record_criterion_viable, "already:verifying");
+    (GP.Verifying, GP.Record_criterion_unreachable, "already:verifying");
     (GP.Completed, GP.Request_complete, "already:completed");
     (GP.Completed, GP.Pause, "invalid");
     (GP.Completed, GP.Resume, "invalid");
@@ -104,6 +135,10 @@ let matrix =
     (GP.Completed, GP.Unblock, "invalid");
     (GP.Completed, GP.Drop, "move_to:dropped");
     (GP.Completed, GP.Reopen, "move_to:executing");
+    (GP.Completed, GP.Record_proof_proven, "invalid");
+    (GP.Completed, GP.Record_proof_refuted, "invalid");
+    (GP.Completed, GP.Record_criterion_viable, "invalid");
+    (GP.Completed, GP.Record_criterion_unreachable, "invalid");
     (GP.Dropped, GP.Request_complete, "invalid");
     (GP.Dropped, GP.Pause, "invalid");
     (GP.Dropped, GP.Resume, "invalid");
@@ -111,6 +146,10 @@ let matrix =
     (GP.Dropped, GP.Unblock, "invalid");
     (GP.Dropped, GP.Drop, "already:dropped");
     (GP.Dropped, GP.Reopen, "move_to:executing");
+    (GP.Dropped, GP.Record_proof_proven, "invalid");
+    (GP.Dropped, GP.Record_proof_refuted, "invalid");
+    (GP.Dropped, GP.Record_criterion_viable, "invalid");
+    (GP.Dropped, GP.Record_criterion_unreachable, "invalid");
   ]
 
 let test_matrix_is_total () =

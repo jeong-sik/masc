@@ -279,7 +279,8 @@ let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainm
   let ready_to_request_completion =
     match goal.phase with
     | Goal_phase.Executing -> true
-    | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Completed | Goal_phase.Dropped ->
+    | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Verifying
+    | Goal_phase.Completed | Goal_phase.Dropped ->
         false
   in
   let state =
@@ -288,12 +289,17 @@ let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainm
     | Goal_phase.Dropped -> "dropped"
     | Goal_phase.Blocked -> "blocked"
     | Goal_phase.Paused -> "paused"
+    (* RFC-0387 stage 2: completion was already requested; the proof verdict
+       is pending. Distinct from [ready_for_completion] so the dashboard does
+       not invite a second request. *)
+    | Goal_phase.Verifying -> "verifying"
     | Goal_phase.Executing -> "ready_for_completion"
   in
   let is_terminal =
     match goal.phase with
     | Goal_phase.Completed | Goal_phase.Dropped -> true
-    | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused ->
+    | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused
+    | Goal_phase.Verifying ->
         false
   in
   `Assoc

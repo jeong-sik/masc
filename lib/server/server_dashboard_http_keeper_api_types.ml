@@ -280,52 +280,6 @@ let rec runtime_trace_public_json = function
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
       value
 
-let tool_call_output_text_opt json =
-  match Json_util.assoc_member_opt "output" json with
-  | Some (`String value) -> Some value
-  | Some (`Assoc _ as output) -> (
-    match Json_util.assoc_member_opt "_blob" output with
-    | Some blob -> Json_util.get_string blob "preview"
-    | None -> None)
-  | None | Some _ -> None
-
-let parse_tool_output_json_opt json =
-  match tool_call_output_text_opt json with
-  | None -> None
-  | Some output -> (
-    match Safe_ops.parse_json_safe ~context:"runtime_lens.tool_output" output with
-    | Ok parsed -> Some parsed
-    | Error _ -> None)
-
-let tool_call_runtime_contract json =
-  match Json_util.assoc_member_opt "runtime_contract" json with
-  | Some contract -> contract
-  | None -> `Assoc []
-
-let tool_call_matches_trace ?turn_id ~keeper_name ~trace_id json =
-  let contract = tool_call_runtime_contract json in
-  let keeper_matches =
-    match Json_util.get_string json "keeper" with
-    | Some keeper -> String.equal keeper keeper_name
-    | None -> true
-  in
-  let trace_matches =
-    match
-      ( Json_util.get_string json "trace_id",
-        Json_util.get_string contract "trace_id" )
-    with
-    | Some value, _ | _, Some value -> String.equal value trace_id
-    | None, None -> false
-  in
-  let turn_matches =
-    match turn_id with
-    | None -> true
-    | Some wanted ->
-      Json_util.assoc_int_opt "keeper_turn_id" json = Some wanted
-      || Json_util.assoc_int_opt "keeper_turn_id" contract = Some wanted
-  in
-  keeper_matches && trace_matches && turn_matches
-
 let first_string_opt values =
   List.find_map (fun value -> value) values
 

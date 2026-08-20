@@ -168,6 +168,17 @@ name is a hint about why it exists.
 """
 
 
+def default_masc_root() -> str | None:
+    """Runtime store root from the environment, or nothing.
+
+    The store lives under whatever base path the deployment chose, so this
+    returns None rather than guessing a home directory; the caller then has to
+    pass --masc-root explicitly.
+    """
+    base = os.environ.get("MASC_BASE_PATH")
+    return os.path.join(base, ".masc") if base else None
+
+
 def keeper_role(name: str) -> str:
     if name.startswith("rw-e0-"):
         return "campaign_round"
@@ -230,7 +241,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", default=".")
     parser.add_argument("--reports-dir")
-    parser.add_argument("--masc-root", default=os.path.expanduser("~/me/.masc"))
+    parser.add_argument(
+        "--masc-root",
+        default=default_masc_root(),
+        help=(
+            "runtime store root; defaults to <MASC_BASE_PATH>/.masc when that "
+            "is set. There is no built-in path — this tool is not tied to one "
+            "person's home directory."
+        ),
+    )
     parser.add_argument(
         "--parity-path",
         help="constitution/code parity matrix; defaults to the copy under --repo-root",
@@ -245,6 +264,12 @@ def main() -> None:
     )
     with open(matrix_path, encoding="utf-8") as handle:
         matrix_html = handle.read()
+
+    if not args.masc_root:
+        parser.error(
+            "--masc-root is required (or set MASC_BASE_PATH); the keeper store "
+            "path is deployment-specific"
+        )
 
     payload = {
         "feature_rows": [asdict(r) for r in read_feature_rows(matrix_html)],

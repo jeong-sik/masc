@@ -535,6 +535,34 @@ let () =
     | None -> failwith "dispatch returned None")
 ;;
 
+(* Status is fed back into Keeper prompts. A task linked to many goals must not
+   make every prompt grow with the entire side registry. *)
+let () =
+  test "dispatch_status_bounds_task_goal_links" (fun () ->
+    let ctx = make_test_ctx () in
+    let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
+    ignore
+      (Workspace.add_task ctx.config ~title:"Many-goal task" ~priority:2 ~description:"");
+    List.iter
+      (fun goal_id ->
+        match
+          Workspace_goal_index.link_task_to_goal_result
+            ctx.config
+            ~goal_id
+            ~task_id:"task-001"
+        with
+        | Ok () -> ()
+        | Error msg -> failwith ("goal link failed: " ^ msg))
+      [ "g-1"; "g-2"; "g-3" ];
+    match Tool_workspace.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
+    | Some result ->
+      assert (Tool_result.is_success result);
+      let msg = status_message result in
+      assert_contains msg "goal:g-1,g-2 (+1 more)";
+      assert_not_contains msg "g-3"
+    | None -> failwith "dispatch returned None")
+;;
+
 let () =
   test "dispatch_status_surfaces_awaiting_verification_assignment" (fun () ->
     (

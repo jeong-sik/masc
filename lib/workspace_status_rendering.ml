@@ -17,6 +17,19 @@ let take_items limit items =
   in
   loop limit [] items
 
+let max_goal_ids_per_task = 2
+
+let task_goal_suffix goal_ids =
+  match goal_ids with
+  | [] -> ""
+  | ids ->
+    let shown = take_items max_goal_ids_per_task ids in
+    let omitted = List.length ids - List.length shown in
+    let omission_suffix =
+      if omitted = 0 then "" else Printf.sprintf " (+%d more)" omitted
+    in
+    " goal:" ^ String.concat "," shown ^ omission_suffix
+
 let task_status_badge = function
   | Masc_domain.Todo -> ("📋", "todo")
   | Masc_domain.Claimed _ -> ("🟡", "claimed")
@@ -222,11 +235,7 @@ let status_summary_string
       let goal_ids =
         Workspace_goal_index.goals_for_task task_goal_index ~task_id:task.id
       in
-      let goal_suffix =
-        match goal_ids with
-        | [] -> ""
-        | ids -> " goal:" ^ String.concat "," ids
-      in
+      let goal_suffix = task_goal_suffix goal_ids in
       Buffer.add_string buf
         (Printf.sprintf "  %s %s P%d [%s] %s (%s)%s\n" status_icon task.id
            task.priority status_label task.title assignee goal_suffix))

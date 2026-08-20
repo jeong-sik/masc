@@ -388,7 +388,7 @@ let ensure_goal fixture =
       let goal =
         match
           Goal_store.upsert_goal (Mcp_server.workspace_config fixture.state)
-            ~title:"Tool Matrix Goal" ()
+            ~title:"Tool Matrix Goal" ~metric:"m" ~target_value:"1" ()
         with
         | Ok (goal, _status) -> goal
         | Error err -> failwith ("failed to seed tool matrix goal: " ^ err)

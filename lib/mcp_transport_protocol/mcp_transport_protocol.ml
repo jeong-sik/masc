@@ -136,7 +136,24 @@ let validate_initialize_params params =
 
 (* ── JSON-RPC response builders ──────────────────────────── *)
 
+(* SEP-2322 (protocol revision 2026-07-28): every result carries a
+   [resultType] -- ["complete"] for an ordinary result, ["input_required"]
+   for a Multi Round-Trip interim result.  Clients reject a result that
+   omits it when the negotiated revision is 2026-07-28 or later.
+
+   The field is added here rather than at each of the 22 call sites so a
+   new handler cannot forget it.  Handlers that already set [resultType]
+   (server/discover, and any future ["input_required"] responder) keep
+   their own value.  Adding the field unconditionally is safe for earlier
+   revisions: they treat an unknown result member as ignorable, and the
+   negotiated version is not threaded down to this builder. *)
 let make_response ~id result =
+  let result =
+    match result with
+    | `Assoc fields when not (List.mem_assoc "resultType" fields) ->
+      `Assoc (("resultType", `String "complete") :: fields)
+    | other -> other
+  in
   `Assoc [
     ("jsonrpc", `String "2.0");
     ("id", id);

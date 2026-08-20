@@ -38,9 +38,14 @@ runs:
         path: |
           ~/.opam
           ~/.local/share/opam
-        key: opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v2
+        # runner.arch 가 키에 들어가야 한다. 없으면 arm64 러너가 x86_64 러너의
+        # ~/.opam 을 복원하고, opam switch list 는 switch 가 있다고 답하는데
+        # 그 안의 ocamlc 는 x86_64 ELF 라 실행되지 않는다. 그 결과
+        # `ocamlc -version` 이 빈 문자열이 되어 opam-pin-external-deps.sh 가
+        # "OCaml unknown detected" 로 거부한다 (run 32332266041).
+        key: opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-${{ hashFiles('*.opam', 'dune-project', 'scripts/opam-pin-external-deps.sh') }}-v2
         restore-keys: |
-          opam-linux-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
+          opam-linux-${{ runner.arch }}-${{ inputs.cache-prefix }}-${{ inputs.ocaml-compiler }}-
 
     - name: Bootstrap local opam switch (Linux)
       if: runner.os == 'Linux'

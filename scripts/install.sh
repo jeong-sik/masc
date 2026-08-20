@@ -689,7 +689,7 @@ detect_asset() {
     Darwin/arm64)  echo "masc-macos-arm64" ;;
     Linux/x86_64)  echo "masc-linux-x64"   ;;
     Darwin/x86_64) die "macOS x86_64 release asset not built. Build from source per README." ;;
-    Linux/aarch64) die "Linux arm64 release asset not built yet. Track .github/workflows/release.yml." ;;
+    Linux/aarch64) echo "masc-linux-arm64" ;;
     *) die "unsupported platform: $os/$arch" ;;
   esac
 }

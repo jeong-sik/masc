@@ -455,6 +455,10 @@ let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
       else
         Ok ()
 
+let blank_opt = function
+  | None -> true
+  | Some raw -> String.trim raw = ""
+
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
     ?priority ?phase ?parent_goal_id () =
   let is_new_goal = id = None in
@@ -495,6 +499,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
          | Error msg -> Error msg
          | Ok () ->
         let was_created = ref false in
+        let refusal = ref None in
         let state_result =
           update_state config (fun state ->
               match find_goal state.goals resolved_id with
@@ -532,6 +537,26 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     goals = replace_goal state.goals next_goal;
                   }
               | None ->
+                  (* RFC-0387 B1: a goal is created only with a declared
+                     measurable success condition — both [metric] and
+                     [target_value], non-blank. Updates (the arm above) are
+                     not gated: the obligation is declared at creation. The
+                     create/update split is decided HERE, inside the write
+                     lock on the freshly decoded state: an undecodable store
+                     is rejected by [update_state]'s fail-closed path before
+                     this closure runs, so the B1 refusal below can only ever
+                     fire against a store that was actually read and found
+                     not to hold the row. On refusal the closure returns the
+                     state unchanged and [update_state] rewrites the same
+                     bytes; the error is carried out via [refusal]. *)
+                  if blank_opt metric || blank_opt target_value then (
+                    refusal :=
+                      Some
+                        "metric and target_value are required for a new goal \
+                         (RFC-0387 B1: a goal must declare a measurable \
+                         success condition)";
+                    state)
+                  else (
                   let new_goal =
                       {
                         id = resolved_id;
@@ -554,16 +579,19 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     version = state.version + 1;
                     updated_at = now;
                     goals = state.goals @ [ new_goal ];
-                  })
+                  }))
         in
-        match state_result with
+        (match state_result with
         | Error msg -> Error msg
         | Ok state ->
-          match find_goal state.goals resolved_id with
+          (match !refusal with
+           | Some msg -> Error msg
+           | None ->
+          (match find_goal state.goals resolved_id with
           | Some goal ->
               Ok (goal, if !was_created then `created else `updated)
           | None ->
-              Error "failed to save goal")
+              Error "failed to save goal"))))
 
 let compute_rollup goals =
   let count predicate =

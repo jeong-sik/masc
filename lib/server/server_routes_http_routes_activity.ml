@@ -700,15 +700,19 @@ let add_routes ~sw ~clock router =
            query_param req "until"
            |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
          in
-         let fetch_limit = match actor_filter, kind_filter, severity_filter with
-           | None, None, None -> limit
-           | _ -> min 5000 (limit * 20)
+         (* The filters decide the read, so [limit] counts entries the
+            caller asked for. Reading a multiple and filtering afterwards
+            only moved the write rate at which the answer came back short:
+            the store holds every agent's actions. *)
+         let matches =
+           Audit_log.audit_entry_matches ?actor:actor_filter ?kind:kind_filter
+             ?severity:severity_filter ?since:since_filter ?until:until_filter
          in
-         let all_entries = Audit_log.read_entries ~n:fetch_limit config in
+         let all_entries =
+           Audit_log.read_entries_matching ~n:limit ~keep:matches config
+         in
          let json =
-           Audit_log.audit_events_response_json ?actor:actor_filter
-             ?kind:kind_filter ?severity:severity_filter ?since:since_filter
-             ?until:until_filter ~limit all_entries
+           Audit_log.audit_events_response_json ~limit all_entries
          in
          Http.Response.json_value ~compress:true ~request:req
            json reqd

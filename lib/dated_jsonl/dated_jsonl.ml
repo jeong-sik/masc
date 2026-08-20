@@ -953,6 +953,59 @@ let filter_map_recent ?(offset=0) t n ~f =
     !collected
   end
 
+(* [n] counts the values [f] produced, where [filter_map_recent]'s [n] counts
+   the rows it read. A caller that filters after that function cannot express
+   "the newest [n] rows that match": its budget fills with whatever was written
+   last, and the caller's filter thins the page to an unpredictable number —
+   zero once unrelated writes outpace the budget. Call sites compensated with a
+   multiplier over the row budget, and every multiplier is wrong at some write
+   rate.
+
+   Day files are walked newest-first and read whole, because how far back the
+   [n]-th match sits cannot be derived from [n]. The walk stops at the first
+   file that completes the count, so a caller whose matches are recent reads no
+   more than [filter_map_recent] would. *)
+let collect_matching ?(offset = 0) t n ~f =
+  if n <= 0 then []
+  else begin
+    let skip = ref offset in
+    let collected = ref [] in
+    let count = ref 0 in
+    let months = list_month_dirs t.base_dir in
+    let exception Done in
+    (try
+       List.iter (fun m ->
+         let month_path = Filename.concat t.base_dir m in
+         let days = list_day_files month_path in
+         List.iter (fun d ->
+           if !count >= n then raise_notrace Done;
+           let path = Filename.concat month_path d in
+           let lines = load_tail_lines path ~max_lines:max_int in
+           let rev_lines = List.rev lines in
+           List.iter (fun line ->
+             if !count >= n then raise_notrace Done;
+             let parsed =
+               try Some (Yojson.Safe.from_string line)
+               with Yojson.Json_error _ -> None
+             in
+             match parsed with
+             | None -> ()
+             | Some json ->
+               (match f json with
+                | None -> ()
+                | Some value ->
+                  if !skip > 0 then decr skip
+                  else begin
+                    collected := value :: !collected;
+                    incr count
+                  end)
+           ) rev_lines
+         ) days
+       ) months
+     with Done -> ());
+    !collected
+  end
+
 let read_recent ?offset t n =
   filter_map_recent ?offset t n ~f:(fun json -> Some json)
 

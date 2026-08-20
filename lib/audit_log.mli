@@ -101,6 +101,25 @@ val entry_of_json : Yojson.Safe.t -> audit_entry option
 
 (** {1 Storage} *)
 
+val audit_entry_matches :
+  ?actor:string ->
+  ?kind:string ->
+  ?severity:string ->
+  ?since:float ->
+  ?until:float ->
+  audit_entry ->
+  bool
+(** The audit query filters as one predicate, so a reader and a
+    projection cannot disagree about what was asked for. *)
+
+val read_entries_matching :
+  ?n:int -> keep:(audit_entry -> bool) -> config -> audit_entry list
+(** Most-recent [n] entries satisfying [keep]. [n] counts matches,
+    where {!read_entries} counts rows read: the store holds every
+    agent's actions, so a caller that filters afterwards has no
+    window size that means "the newest [n] of mine". Corrupt rows are
+    reported but do not consume the budget. *)
+
 val read_entries : ?n:int -> config -> audit_entry list
 (** Most-recent [n] (default 10000) parsed entries from the
     date-split store. Malformed lines are logged (capped) and

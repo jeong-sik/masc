@@ -415,6 +415,48 @@ let test_runtime_config_write_routing_list_projection () =
   check string "target" "/x/config/runtime.toml" (field "target");
   check string "severity" "warn" (field "severity")
 
+(* [read_entries ~n] counts rows, so a caller that filters afterwards cannot
+   ask for "the newest n of mine": the audit store holds every agent's actions
+   and one busy agent fills any window. The first check pins that; the rest pin
+   the filtered read that replaces it. *)
+let test_matching_read_counts_matches_not_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let say agent_id tool =
+        Audit_log.log_non_public_tool_call config ~agent_id ~tool_name:tool
+          ~success:true ~error_msg:None ()
+      in
+      say "quiet" "masc_status";
+      say "quiet" "masc_tasks";
+      for i = 1 to 20 do
+        say "busy" (Printf.sprintf "masc_tool_%d" i)
+      done;
+      let is_quiet (e : Audit_log.audit_entry) = String.equal e.agent_id "quiet" in
+      let unfiltered = Audit_log.read_entries ~n:5 config in
+      check int "an unfiltered window of 5 holds none of the quiet agent's rows" 0
+        (List.length (List.filter is_quiet unfiltered));
+      let matched = Audit_log.read_entries_matching ~n:5 ~keep:is_quiet config in
+      check int "the filtered read returns every match under the limit" 2
+        (List.length matched);
+      let bounded =
+        Audit_log.read_entries_matching ~n:3
+          ~keep:(fun e -> not (is_quiet e))
+          config
+      in
+      check int "n bounds the matches" 3 (List.length bounded);
+      let by_actor =
+        Audit_log.read_entries_matching ~n:5
+          ~keep:(Audit_log.audit_entry_matches ~actor:"quiet")
+          config
+      in
+      check int "the shared predicate selects the same rows" 2
+        (List.length by_actor))
+
 let () =
   run "Audit_log"
     [
@@ -449,5 +491,7 @@ let () =
             test_runtime_config_write_assignment_projection;
           test_case "runtime_config_write routing list projection" `Quick
             test_runtime_config_write_routing_list_projection;
+          test_case "matching read counts matches not rows" `Quick
+            test_matching_read_counts_matches_not_rows;
         ] );
     ]

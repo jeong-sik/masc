@@ -122,6 +122,28 @@ val set_append_guard : ((unit -> unit) -> unit) -> unit
     runtimes can install resource accounting/backpressure without making this
     low-level storage library depend on those policy modules. *)
 
+val collect_matching :
+  ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
+(** [collect_matching ?offset t n ~f] returns the newest [n] values [f]
+    produced. Where {!filter_map_recent} counts rows read, this counts values
+    selected, so [n] means what a filtering caller intended by it.
+
+    Use it whenever [f] rejects rows. With {!filter_map_recent} such a caller
+    has no value of [n] that means "the newest [n] matches": the budget fills
+    with whatever was written last, and unrelated writes can consume all of it.
+    Multiplying [n] to compensate only moves the write rate at which the answer
+    goes empty.
+
+    The cost is the wider read that guarantee requires: day files are walked
+    newest-first and each is read whole, because how far back the [n]-th match
+    sits cannot be derived from [n]. The walk stops at the first file that
+    completes the count, so a caller whose matches are recent reads no more
+    than {!filter_map_recent} would.
+
+    [offset] skips selected values, not rows. Ordering and malformed-row
+    skipping match {!filter_map_recent}, including that {b [f] is called
+    newest-first}. *)
+
 val filter_map_recent :
   ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
 (** [filter_map_recent ?offset t n ~f] is [List.filter_map f (read_recent

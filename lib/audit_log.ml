@@ -301,6 +301,29 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
     Some (entry_of_json_r json))
   |> collect_entries
 
+(* [n] counts entries that satisfy [keep]. {!read_entries} counts rows read, so
+   a caller that filters afterwards has to guess how wide a window its matches
+   need — the audit store carries every agent's actions, and one busy agent
+   fills any fixed guess. *)
+let read_entries_matching ?(n = 10_000) ~keep (config : config) : audit_entry list
+  =
+  let store = get_audit_store config in
+  (* Corrupt rows are collected but not counted: they are not entries the
+     caller asked for, and letting them consume the budget would make [n] mean
+     "matches, unless the store is damaged". They still reach
+     [collect_entries] so corruption keeps being reported. *)
+  let malformed = ref [] in
+  let matched =
+    Dated_jsonl.collect_matching store n ~f:(fun json ->
+      match entry_of_json_r json with
+      | Ok entry when keep entry -> Some (Ok entry)
+      | Ok _ -> None
+      | Error _ as corrupt ->
+        malformed := corrupt :: !malformed;
+        None)
+  in
+  collect_entries (List.rev !malformed @ matched)
+
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : config) (entry : audit_entry) =
   let store = get_audit_store config in
@@ -504,33 +527,31 @@ let audit_event_json (entry : audit_entry) =
   in
   `Assoc fields
 
+(* One predicate for the query filters, so the read and the projection cannot
+   disagree about what the caller asked for. A reader that counts matches needs
+   this decision before it pages; leaving it inside the projection is what made
+   the endpoint read a multiple of [limit] and hope. *)
+let audit_entry_matches ?actor ?kind ?severity ?since ?until (entry : audit_entry)
+  =
+  (match actor with
+   | None -> true
+   | Some value -> String.equal entry.agent_id (String.trim value))
+  && (match kind with
+      | None -> true
+      | Some value ->
+        String.starts_with ~prefix:(String.trim value)
+          (action_to_string entry.action))
+  && (match since with None -> true | Some value -> entry.timestamp >= value)
+  && (match until with None -> true | Some value -> entry.timestamp <= value)
+  && (match severity with
+      | None -> true
+      | Some value ->
+        String.equal (audit_event_severity entry) (String.trim value))
+
 let audit_events_response_json ?actor ?kind ?severity ?since ?until ~limit
     (entries : audit_entry list) =
   let filtered =
-    entries
-    |> (match actor with
-        | None -> Fun.id
-        | Some value ->
-            let actor = String.trim value in
-            List.filter (fun entry -> String.equal entry.agent_id actor))
-    |> (match kind with
-        | None -> Fun.id
-        | Some value ->
-            let kind = String.trim value in
-            List.filter (fun entry ->
-                String.starts_with ~prefix:kind (action_to_string entry.action)))
-    |> (match since with
-        | None -> Fun.id
-        | Some value -> List.filter (fun entry -> entry.timestamp >= value))
-    |> (match until with
-        | None -> Fun.id
-        | Some value -> List.filter (fun entry -> entry.timestamp <= value))
-    |> (match severity with
-        | None -> Fun.id
-        | Some value ->
-            let severity = String.trim value in
-            List.filter (fun entry ->
-                String.equal (audit_event_severity entry) severity))
+    List.filter (audit_entry_matches ?actor ?kind ?severity ?since ?until) entries
   in
   let total = List.length filtered in
   let drop_n = max 0 (total - limit) in

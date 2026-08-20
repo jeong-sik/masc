@@ -1868,11 +1868,15 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     (list string)
     "routed lane candidates, special routes, verifier_exact slots, and media \
      failover are deduplicated without admitting a dormant lane"
+    (* cross-a is absent on purpose. [cross-e] used to be a routed root via the
+       [runtime].cross_verifier key; #29197 purged that key, so nothing names
+       [cross-e] any more and it is dormant exactly like [dormant-lane]. A
+       dormant lane's candidates must not enter the dispatch set — which is what
+       this case is named for. *)
     [ "lane-a"
     ; "lane-b"
     ; "assigned-b"
     ; "media-c"
-    ; "cross-a"
     ; "verifier-a"
     ]
     actual

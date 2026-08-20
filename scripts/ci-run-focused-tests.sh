@@ -110,6 +110,7 @@ normal_targets=(
   @test/runtest-test_subsystem_health_state
   @test/runtest-test_trailing_slash_rules
   @test/runtest-test_verification_run_registry
+  @test/runtest-test_verifier_exact_lane
   @test/runtest-test_completion_authority_retry_policy
   @test/runtest-test_keeper_canary_facts
   @test/runtest-test_keeper_canary_evidence

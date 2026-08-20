@@ -100,6 +100,20 @@ val is_agent_session_bound : config -> agent_name:string -> bool
 val get_messages_raw :
   config -> since_seq:int -> limit:int -> Masc_domain.message list
 
+(** Return the newest [limit] messages for which [keep] holds, newest first.
+
+    [limit] counts MATCHES, not messages read. A caller that filters after
+    calling {!get_messages_raw} cannot say that: the store fills the window with
+    every agent's messages and the caller's filter thins it to whatever is left,
+    reaching zero once other agents are busier. Each such call site compensated
+    with its own multiplier, and every multiplier is wrong at some fleet size. *)
+val get_messages_matching :
+  config ->
+  since_seq:int ->
+  limit:int ->
+  keep:(Masc_domain.message -> bool) ->
+  Masc_domain.message list
+
 (** Return all raw messages after [since_seq], ordered
     from oldest unseen to newest unseen. *)
 val get_all_messages_raw :
@@ -135,8 +149,15 @@ val safe_yield : unit -> unit
 (** [take_first n xs] returns the first [n] elements of [xs]. *)
 val take_first : int -> 'a list -> 'a list
 
+(** How far back a message read walks. [Newest_window] stops at [limit] names
+    because each one is an answer; [Matching] keeps walking until [limit]
+    messages satisfy the predicate. *)
+type message_scan =
+  | Newest_window
+  | Matching of (Masc_domain.message -> bool)
+
 (** Read most-recent messages from filesystem or PG backend without
     parsing the entire history directory. *)
 val collect_recent_messages :
   config -> msgs_path:string -> since_seq:int -> limit:int ->
-  warn_label:string -> Masc_domain.message list
+  scan:message_scan -> warn_label:string -> Masc_domain.message list

@@ -322,11 +322,25 @@ let assert_ollama_cloud_seed_runtime runtimes case =
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
+       (* [thinking] says the model reasons; it does not say the endpoint takes a
+          control on the wire. ollama.com /v1 serves reasoning inherently and
+          accepts no control field, so [reasoning-effort] there declares a
+          dialect that can never be encoded: the format carries no effort value,
+          runtime.toml has no key that supplies one, and runtime_adapter never
+          sets reasoning_effort. Every enable_thinking=true turn is then rejected
+          as Enable_not_encodable — measured 25/25 on the acceptance harness
+          before this list, 0/25 after. Deployed config dropped the same five on
+          2026-08-04; the audit is oas#2716 (2026-07-20). *)
+       let inherent_reasoning_no_control =
+         [ "ollama_cloud.ollama-cloud-qwen3-5-397b"
+         ; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
+         ; "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+         ]
+       in
        let expected_reasoning_budget, expected_thinking_format =
-         match case.runtime_id with
-         | "ollama_cloud.ollama-cloud-qwen3-5-397b" ->
-           false, Runtime_schema.No_thinking_control
-         | _ ->
+         if List.mem case.runtime_id inherent_reasoning_no_control
+         then false, Runtime_schema.No_thinking_control
+         else
            ( case.thinking
            , if case.thinking
              then Runtime_schema.Reasoning_effort
@@ -1000,6 +1014,7 @@ check
   ; "compaction_exact"
   ; "hitl_auto_judge"
   ; "librarian_exact"
+  ; "verifier_exact"
   ]
   (List.map fst lane_signatures);
 check
@@ -1015,6 +1030,25 @@ check
        String.equal lane_id "board_attention_exact"
        || String.equal lane_id "hitl_auto_judge")
      lane_signatures);
+(* RFC-0361 D7(a): the completion-authority judgement lane is the single
+   provider-selection SSOT; slot 1 absorbs the retired [runtime].cross_verifier
+   binding and failover follows declaration order. *)
+check
+  (option (list string))
+  "verifier_exact absorbs cross_verifier as its first slot"
+  (Some [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ])
+  (match
+     List.find_opt
+       (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
+       lane_signatures
+   with
+   | Some (_, slot_ids) -> Some slot_ids
+   | None -> None);
+check
+  (option string)
+  "cross_verifier is absorbed into the verifier_exact lane"
+  None
+  cross_verifier;
 List.iter
   (fun (lane : Runtime_schema.exact_output_lane_decl) ->
      check bool
@@ -1032,6 +1066,9 @@ List.iter
         ~default_runtime_id:default.id
         ~assignments
         ~cross_verifier_runtime_id:cross_verifier
+        ~verifier_exact_slot_ids:
+          (* pinned to the seed by the verifier_exact lane check above *)
+          [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ]
         ~media_failover
         ~lanes
     in
@@ -1176,10 +1213,13 @@ List.iter
           check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
           check bool "Kimi K2.7 Code multimodal input" true
             caps.supports_multimodal_inputs;
-          check bool "Kimi K2.7 Code reasoning effort" true
+          (* ollama.com /v1 reasons inherently and takes no control field, so
+             this model declares no thinking control. See the comment on
+             [inherent_reasoning_no_control] above for the measurement. *)
+          check bool "Kimi K2.7 Code thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
-               Runtime_schema.Reasoning_effort)
+               Runtime_schema.No_thinking_control)
         | None -> fail "expected Kimi K2.7 Code capabilities"))
 
 (* The lane-resolution test below iterates the lanes a config declares, so it
@@ -1830,18 +1870,20 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
       ~cross_verifier_runtime_id:(Some "cross-e")
+      ~verifier_exact_slot_ids:[ "verifier-a"; "lane-b" ]
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
   in
   check
     (list string)
-    "routed lane candidates, special routes, and media failover are deduplicated \
-     without admitting a dormant lane"
+    "routed lane candidates, special routes, verifier_exact slots, and media \
+     failover are deduplicated without admitting a dormant lane"
     [ "lane-a"
     ; "lane-b"
     ; "assigned-b"
     ; "media-c"
     ; "cross-a"
+    ; "verifier-a"
     ]
     actual
 ;;

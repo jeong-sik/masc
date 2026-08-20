@@ -97,7 +97,14 @@ let string_field json field =
 ;;
 
 let create_goal_id config ~title =
-  let body = dispatch_upsert_must_succeed (workspace_ctx config) [ "title", `String title ] in
+  let body =
+    dispatch_upsert_must_succeed
+      (workspace_ctx config)
+      [ "title", `String title
+      ; "metric", `String "m"
+      ; "target_value", `String "1"
+      ]
+  in
   string_field body "goal_id"
 ;;
 
@@ -178,7 +185,11 @@ let test_no_lifecycle_field_still_round_trips () =
   let body =
     dispatch_upsert_must_succeed
       (workspace_ctx config)
-      [ "title", `String "Default goal"; "priority", `Int 2 ]
+      [ "title", `String "Default goal"
+      ; "metric", `String "m"
+      ; "target_value", `String "1"
+      ; "priority", `Int 2
+      ]
   in
   check
     bool

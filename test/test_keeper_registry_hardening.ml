@@ -660,6 +660,8 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
              config
              ~id:"goal-reconciliation-test"
              ~title:"Reconcile after terminal tasks"
+             ~metric:"m"
+             ~target_value:"1"
              ()
          with
          | Ok result -> result
@@ -764,6 +766,8 @@ let test_goal_reconciliation_prefers_authoritative_assignment
              config
              ~id:"goal-reconciliation-assignment"
              ~title:"Use the assigned Keeper"
+             ~metric:"m"
+             ~target_value:"1"
              ()
          with
          | Ok result -> result
@@ -909,6 +913,8 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
              config
              ~id:"goal-reconciliation-restart"
              ~title:"Recover a missed terminal hook"
+             ~metric:"m"
+             ~target_value:"1"
              ()
          with
          | Ok result -> result
@@ -995,7 +1001,8 @@ let test_goal_reconciliation_restart_scan_retries_missed_delivery () =
 
 let add_and_cancel_goal_task ~config ~goal_id ~title ~agent_name =
   let goal, _ =
-    match Goal_store.upsert_goal config ~id:goal_id ~title () with
+    match Goal_store.upsert_goal config ~id:goal_id ~title ~metric:"m"
+            ~target_value:"1" () with
     | Ok result -> result
     | Error detail -> fail detail
   in

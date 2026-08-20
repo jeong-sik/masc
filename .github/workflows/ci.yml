@@ -1170,9 +1170,15 @@ jobs:
         # exhaustive match proves every pair has an arm, not that the arm gives
         # the right answer -- so a matrix edit could change what the Goal FSM
         # admits without anything going red. The suite states all 35 pairs.
+        # test_goal_verification_gate pins the RFC-0387 stage-1 surface around
+        # the same lifecycle: B1 creation requires a declared success
+        # condition, the verification ledger is strict/fail-closed/fail-loud,
+        # and request_complete still completes a Goal directly (the gate is
+        # stage 2).
         run: |
           opam exec -- dune build --root . \
-            @test/runtest-test_goal_phase_all
+            @test/runtest-test_goal_phase_all \
+            @test/runtest-test_goal_verification_gate
 
       - name: Run metric zero-cell declaration suite
         # A counter emitted as a bare string still compiles and still counts;

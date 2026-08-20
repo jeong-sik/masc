@@ -704,8 +704,30 @@ let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
     runtimes
 ;;
 
+(* [runtime.exact_output_lanes.verifier_exact] (RFC-0361 D7(a)) is the single
+   selector for completion-authority judgement calls: admitted slots in frozen
+   declaration order, fail over in that order. The retired
+   [runtime].cross_verifier single-runtime binding is absorbed into this lane's
+   first slot; the key still parses for preserved live configs but no judgement
+   path reads it. *)
+let verifier_exact_lane_id = "verifier_exact"
+
+let verifier_exact_slot_ids_of_lane_decls
+      (decls : Runtime_schema.exact_output_lane_decl list)
+  =
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id verifier_exact_lane_id)
+      decls
+  with
+  | None -> []
+  | Some lane -> lane.slot_ids
+;;
+
 (* Keeper provider attempts originate at the configured default, an explicit
-   keeper assignment, an explicit media-failover runtime, or cross verifier. A lane is
+   keeper assignment, an explicit media-failover runtime, the verifier_exact
+   exact-output lane's slots, or cross verifier. A lane is
    reachable only when its id shadows one of the configured routes; a merely
    declared lane is dormant until a routed root names it.
    Expand each lane-capable route with the same lane-over-runtime precedence as
@@ -718,6 +740,7 @@ let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
     ~(cross_verifier_runtime_id : string option)
+    ~(verifier_exact_slot_ids : string list)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
   =
@@ -743,12 +766,14 @@ let keeper_dispatch_runtime_ids
     []
     ( routed_roots
       @ media_failover
-      @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand) )
+      @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand)
+      @ List.concat_map expand verifier_exact_slot_ids )
 ;;
 
 (* TEL-OK: pure fail-closed validation; the load boundary surfaces its error. *)
 let validate_keeper_dispatch_request_caps
     ~(config_path : string)
+    ~(verifier_exact_slot_ids : string list)
     ( runtimes
     , (default_runtime : t)
     , assignments
@@ -761,6 +786,7 @@ let validate_keeper_dispatch_request_caps
       ~default_runtime_id:default_runtime.id
       ~assignments
       ~cross_verifier_runtime_id
+      ~verifier_exact_slot_ids
       ~media_failover
       ~lanes
   in
@@ -1265,11 +1291,17 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
-       (match validate_keeper_dispatch_request_caps ~config_path loaded with
+       (match
+          validate_keeper_dispatch_request_caps
+            ~config_path
+            ~verifier_exact_slot_ids:
+              (verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls)
+            loaded
+        with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
           set_loaded ~config_path loaded;
@@ -1282,13 +1314,21 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
+    let verifier_exact_slot_ids =
+      verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls
+    in
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok () ->
-          (match validate_keeper_dispatch_request_caps ~config_path loaded with
+          (match
+             validate_keeper_dispatch_request_caps
+               ~config_path
+               ~verifier_exact_slot_ids
+               loaded
+           with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
              set_loaded ~config_path loaded;
@@ -1305,6 +1345,7 @@ let init_default_degraded_report ~config_path =
              (match
                 validate_keeper_dispatch_request_caps
                   ~config_path
+                  ~verifier_exact_slot_ids
                   degraded_loaded
               with
               | Error msg -> Error (Runtime_config_error msg)
@@ -1366,10 +1407,39 @@ let dashboard_runtime_defaults_snapshot () =
   }
 ;;
 
-(* [runtime].cross_verifier routing for the anti-rationalization evaluator.
-   [None] = the evaluator inherits [runtime].default. Reads the Atomic ref set by
-   [init_default]. *)
+(* [runtime].cross_verifier, kept parseable for preserved live configs. Since
+   RFC-0361 D7(a) no judgement path reads it — completion-authority provider
+   selection resolves the [verifier_exact] exact-output lane (see
+   {!verifier_exact_lane_slot_ids}); the lane's first slot absorbs the binding
+   this key used to carry. Remaining readers are config surfaces only: the
+   dashboard runtime-defaults display/route and the eval-calibration CLI's
+   evaluator default. *)
 let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
+
+(* Admitted [verifier_exact] slot ids in frozen declaration order from the
+   published exact-output registry — the single provider-selection SSOT for
+   completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
+   lane cannot judge (registry not published, lane unconfigured, or no admitted
+   slots); there is no fallback to another route. *)
+let verifier_exact_lane_slot_ids () =
+  match Runtime_exact_output_registry.current () with
+  | Error error ->
+    Error (Runtime_exact_output_registry.publication_error_to_string error)
+  | Ok registry ->
+    (match
+       Runtime_exact_output_registry.resolve_lane
+         registry
+         ~lane_id:verifier_exact_lane_id
+     with
+     | Ok { selected_slots } ->
+       Ok
+         (List.map
+            (fun (slot : Runtime_exact_output_registry.selected_slot) ->
+               slot.slot_id)
+            selected_slots)
+     | Error error ->
+       Error (Runtime_exact_output_registry.lane_resolution_error_to_string error))
+;;
 
 (* [runtime].media_failover ordered runtime ids for RFC-0265 modality-gated
    reroute. [[]] = derive capable runtimes from declared capabilities. Reads the
@@ -1902,7 +1972,13 @@ let parse_and_validate_config_text ~config_path content =
     materialize_runtime_config_text ~config_path content
   in
   (* TEL-OK: validation is pure; config commit owns visible failure reporting. *)
-  let* () = validate_keeper_dispatch_request_caps ~config_path loaded in
+  let* () =
+    validate_keeper_dispatch_request_caps
+      ~config_path
+      ~verifier_exact_slot_ids:
+        (verifier_exact_slot_ids_of_lane_decls exact_output_lanes)
+      loaded
+  in
   Ok (loaded, exact_output_lanes)
 ;;
 

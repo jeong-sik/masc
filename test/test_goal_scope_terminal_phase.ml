@@ -51,7 +51,8 @@ let make_meta active_goal_ids =
 ;;
 
 let put_goal config ~id ~phase =
-  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id) ~phase () with
+  match Goal_store.upsert_goal config ~id ~title:("Goal " ^ id)
+          ~metric:"m" ~target_value:"1" ~phase () with
   | Ok _ -> ()
   | Error msg -> failf "upsert_goal %s failed: %s" id msg
 ;;

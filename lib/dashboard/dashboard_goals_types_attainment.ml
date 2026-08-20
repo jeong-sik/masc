@@ -183,59 +183,52 @@ let goal_attainment_to_json (goal : Goal_store.goal) (node : tree_node) =
       ~task_done_count ~task_count ~target_parse_status ~unit
       ~observed_value:None ~target_numeric ~attainment_pct:None ~note goal
   in
-  match goal.phase with
-  | Goal_phase.Completed ->
-      build_attainment_json ~state:"attained" ~basis:"goal_phase"
-        ~task_done_count ~task_count
-        ~target_parse_status:
-          (match goal.target_value with
-          | Some raw when parse_first_float raw <> None -> "parseable"
-          | Some _ -> "unparseable"
-          | None -> "absent")
-        ~unit:Percent ~observed_value:(Some 100.0) ~target_numeric:(Some 100.0)
-        ~attainment_pct:(Some 100)
-        ~note:"Goal lifecycle phase is completed." goal
-  | _ -> (
-      match goal.target_value with
-      | Some raw -> (
-          match parse_first_float raw with
-          | None ->
-              unmeasured "unparseable"
-                "Target value is not numeric enough for dashboard attainment."
-          | Some target_numeric when target_numeric <= 0.0 ->
-              unmeasured "invalid_target"
-                "Target value must be greater than zero."
-          | Some target_numeric -> (
-              let unit = parsed_target_unit raw in
-              match unit with
-              | Percent -> (
-                  match task_completion_pct with
-                  | Some observed_value ->
-                      measured ~basis:"metric_target_percent" ~unit
-                        ~observed_value ~target_numeric
-                        ~target_parse_status:"parseable"
-                  | None ->
-                      unmeasured ~unit ~target_numeric "no_linked_tasks"
-                        "Percent target needs linked task evidence." )
-              | Count ->
-                  if task_count > 0 then
-                    measured ~basis:"metric_target_count" ~unit
-                      ~observed_value:(float_of_int task_done_count)
-                      ~target_numeric ~target_parse_status:"parseable"
-                  else
-                    unmeasured ~unit ~target_numeric "no_linked_tasks"
-                      "Count target needs linked task evidence."
-              | Unknown ->
-                  unmeasured "unsupported_metric"
-                    "Target unit is unknown." ))
-      | None -> (
-          match task_completion_pct with
-          | Some observed_value ->
-              measured ~basis:"linked_tasks" ~unit:Percent ~observed_value
-                ~target_numeric:100.0 ~target_parse_status:"absent"
-          | None ->
-              unmeasured "absent"
-                "No target value or linked task evidence is available." ))
+  (* #29117: the lifecycle phase is not a measurement. A [Completed] goal
+     used to report [basis "goal_phase"] with a fabricated 100%, so
+     completing a goal produced the number that justified completing it.
+     Phase is already projected separately by [goal_completion_to_json]
+     ("state", "is_complete"), so every phase now reports only the
+     attainment its linked evidence supports. *)
+  match goal.target_value with
+  | Some raw -> (
+      match parse_first_float raw with
+      | None ->
+          unmeasured "unparseable"
+            "Target value is not numeric enough for dashboard attainment."
+      | Some target_numeric when target_numeric <= 0.0 ->
+          unmeasured "invalid_target"
+            "Target value must be greater than zero."
+      | Some target_numeric -> (
+          let unit = parsed_target_unit raw in
+          match unit with
+          | Percent -> (
+              match task_completion_pct with
+              | Some observed_value ->
+                  measured ~basis:"metric_target_percent" ~unit
+                    ~observed_value ~target_numeric
+                    ~target_parse_status:"parseable"
+              | None ->
+                  unmeasured ~unit ~target_numeric "no_linked_tasks"
+                    "Percent target needs linked task evidence." )
+          | Count ->
+              if task_count > 0 then
+                measured ~basis:"metric_target_count" ~unit
+                  ~observed_value:(float_of_int task_done_count)
+                  ~target_numeric ~target_parse_status:"parseable"
+              else
+                unmeasured ~unit ~target_numeric "no_linked_tasks"
+                  "Count target needs linked task evidence."
+          | Unknown ->
+              unmeasured "unsupported_metric"
+                "Target unit is unknown." ))
+  | None -> (
+      match task_completion_pct with
+      | Some observed_value ->
+          measured ~basis:"linked_tasks" ~unit:Percent ~observed_value
+            ~target_numeric:100.0 ~target_parse_status:"absent"
+      | None ->
+          unmeasured "absent"
+            "No target value or linked task evidence is available." )
 
 let assoc_string_opt = Json_util.assoc_string_opt
 

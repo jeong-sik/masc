@@ -99,6 +99,9 @@ KNOWN_ASSERTIONS = {
     "poc_review_cites_execution",
     "debate_restatement_faithful",
     "debate_verdict_cites_rebuttal",
+    "qa_coverage_execution_observed",
+    "qa_coverage_passes_verification",
+    "qa_coverage_review_matches_spec",
 }
 
 
@@ -526,12 +529,12 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     if catalog.get("schema") != "masc.keeper_multi_collaboration_missions.v1":
         raise AcceptanceError("mission catalog schema mismatch")
     missions = catalog.get("missions")
-    if not isinstance(missions, list) or len(missions) != 21:
-        raise AcceptanceError("mission catalog must contain exactly 21 missions")
+    if not isinstance(missions, list) or len(missions) != 22:
+        raise AcceptanceError("mission catalog must contain exactly 22 missions")
     ids = [mission.get("id") for mission in missions]
-    expected_ids = [f"RW{index:02d}" for index in range(1, 22)]
+    expected_ids = [f"RW{index:02d}" for index in range(1, 23)]
     if ids != expected_ids:
-        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW21")
+        raise AcceptanceError("mission ids must be ordered exactly RW01 through RW22")
     roles = catalog.get("roles")
     if not isinstance(roles, list) or set(roles) != EXPECTED_ROLES:
         raise AcceptanceError("catalog must define the exact five collaboration roles")
@@ -746,6 +749,19 @@ class MissionRun:
         self.poc_output_token = f"POC_OUTPUT={self.marker}-executed"
         self.debate_claim_token = f"{self.marker}-position-A"
         self.debate_rebuttal_token = f"{self.marker}-counter-B"
+        # RW22 tokens. The declared scope is a fixed set of cases; the
+        # tester never receives them, so the only way its report can name
+        # all three is to have actually run the artifact.
+        # Each case is a distinct transform over its own input, and every
+        # result is emitted as "<case>=<value>". The prefix keeps a short
+        # result (the length case is a two-digit number) from matching by
+        # accident anywhere on the Board.
+        qa_inputs = tuple(f"{self.marker}-case-{index}" for index in (1, 2, 3))
+        self.qa_cases = (
+            ("upper", qa_inputs[0], f"upper={qa_inputs[0].upper()}"),
+            ("length", qa_inputs[1], f"length={len(qa_inputs[1])}"),
+            ("reverse", qa_inputs[2], f"reverse={qa_inputs[2][::-1]}"),
+        )
         self.runtime_id = runtime_id
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
@@ -888,6 +904,8 @@ class MissionRun:
             "reviewer": "Review the shared Board thread and task evidence",
             "contention": "Resolve a single-owner concurrent claim",
             "fallback": "Continue useful work after losing a concurrent claim",
+            "qa-implement": "Implement the declared coverage cases",
+            "qa-test": "Run every declared case and report the outputs",
         }
         for key, title in task_specs.items():
             observation = self.call(
@@ -1297,6 +1315,82 @@ class MissionRun:
             ),
         )
 
+    def run_qa_coverage(self, post_id: str) -> None:
+        # RW22: coverage is a claim about a declared set, so the mission fixes
+        # the set first and then requires every member of it to appear in a
+        # real execution.
+        #
+        # Two things keep this from degenerating into the very anti-pattern it
+        # exists to catch. The cases carry different behaviours rather than
+        # echoing a token, so covering all three means three distinct
+        # transforms actually ran — a script that prints constants covers
+        # nothing. And the work enters the typed verification flow: each side
+        # claims its own Task on the shared Goal and submits evidence through
+        # keeper_task_done, so "done" is a submission for verification rather
+        # than a self-declaration.
+        #
+        # Neither builder nor tester receives the expected outputs. The builder
+        # is told the transform rule, the tester is told nothing but the path,
+        # and the evaluator computes the expected values independently.
+        rules = "; ".join(
+            f"{name}: 입력 '{source}' 을 "
+            + {
+                "upper": "전부 대문자로 바꿔",
+                "length": "그 길이(문자 수)를",
+                "reverse": "문자 순서를 뒤집어",
+            }[name]
+            + " 계산해 '<케이스이름>=<결과>' 한 줄로 출력"
+            for name, source, _ in self.qa_cases
+        )
+        self.run_turn(
+            "researcher",
+            "qa-spec",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에 QA_SCOPE={rules} comment를 남기세요. "
+                "이 세 케이스가 이번 검증의 전체 대상 범위입니다."
+            ),
+        )
+        self.run_turn(
+            "builder-a",
+            "qa-implement",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"exact Task {self.task_ids['qa-implement']}를 claim하세요. "
+                f"Board post {post_id}의 QA_SCOPE를 읽고, Write(tool_write_file)로 "
+                f"playground의 artifacts/{self.marker}-qa.sh에 셸 스크립트를 쓰세요. "
+                "스크립트는 세 케이스를 각각 수행해 '<케이스이름>=<결과>' 형태로 "
+                "한 줄씩 출력해야 합니다. 값을 상수로 박지 말고 입력에서 실제로 변환하세요. "
+                f"작성 후 keeper_task_done으로 그 파일을 evidence로 제출하고 "
+                f"Board post {post_id}에 QA_IMPLEMENTED={self.marker}-qa.sh comment를 남기세요."
+            ),
+        )
+        self.run_turn(
+            "builder-b",
+            "qa-test",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"exact Task {self.task_ids['qa-test']}를 claim하세요. "
+                f"Execute(tool_execute)로 playground의 artifacts/{self.marker}-qa.sh를 "
+                "실제로 실행하고 출력된 줄을 그대로 모으세요. "
+                f"keeper_task_done으로 실행 결과를 evidence로 제출한 뒤 "
+                f"Board post {post_id}에 QA_COVERAGE_RAN=<출력된 값들을 쉼표로 이어서> "
+                "comment를 남기세요. 실행하지 않은 값을 적지 마세요."
+            ),
+        )
+        self.run_turn(
+            "reviewer",
+            "qa-review",
+            (
+                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"Board post {post_id}에서 QA_SCOPE와 QA_COVERAGE_RAN을 읽고 "
+                "선언된 케이스 수와 실행이 낸 값의 수를 대조하세요. "
+                "전부 덮었으면 QA_COVERAGE_VERDICT=COMPLETE:<실행이 낸 값들 그대로>, "
+                "빠졌으면 QA_COVERAGE_VERDICT=MISSING:<빠진 케이스 이름> comment를 남기세요. "
+                "Board에서 읽은 값만 쓰고 새로 만들지 마세요."
+            ),
+        )
+
     def restart_and_recall(self, post_id: str) -> None:
         self.writer.write_json(
             "keeper-status/coordinator-before-restart.json",
@@ -1460,6 +1554,41 @@ class MissionRun:
                 {"tool": "masc_task_history", "text": observation.text, "data": observation.data},
             )
 
+    def _completion_verdict(self, key: str) -> tuple[bool, str]:
+        """Whether this task's own history shows it passed verification.
+
+        Submitting is not completing. keeper_task_done issues
+        submit_for_verification, and the completion authority then approves or
+        rejects — live records show 41 approvals against 35 rejections, so the
+        verdict is a real judgement rather than a rubber stamp. A mission that
+        only checked the submission tool call would pass on rejected work.
+
+        The detail distinguishes rejected from still-unjudged, because those
+        need different follow-up.
+        """
+        observation = self.observations.get(f"task-history-{key}")
+        entries = getattr(observation, "data", None)
+        verdicts = [
+            entry
+            for entry in (entries if isinstance(entries, list) else [])
+            if isinstance(entry, dict)
+            and entry.get("type") == "task_completion_verdict"
+        ]
+        for entry in verdicts:
+            if (
+                entry.get("from_status") == "awaiting_verification"
+                and entry.get("to_status") == "done"
+                and entry.get("verification_id")
+            ):
+                return True, f"{key}=approved({entry['verification_id']})"
+        if verdicts:
+            last = verdicts[-1]
+            return (
+                False,
+                f"{key}={last.get('from_status')}->{last.get('to_status')}",
+            )
+        return False, f"{key}=no_verdict"
+
     def _status_text(self, role: str) -> str:
         return json.dumps(self.statuses.get(role), ensure_ascii=False).lower()
 
@@ -1506,6 +1635,9 @@ class MissionRun:
         task_text = json.dumps(tasks, ensure_ascii=False)
         goal_text = json.dumps(goals, ensure_ascii=False)
         history_text = json.dumps(histories, ensure_ascii=False)
+        qa_verdicts = [
+            self._completion_verdict(key) for key in ("qa-implement", "qa-test")
+        ]
         parallel_turns = [
             turn for label, turn in self.turns.items() if label.startswith("parallel-")
         ]
@@ -2243,6 +2375,57 @@ class MissionRun:
                 "builder-b restated the exact claim token (absent from its "
                 "prompt, readable only on the Board) before rebutting",
             ),
+            "qa_coverage_execution_observed": (
+                successful_windowed_tool(
+                    "builder-a", "qa-implement", "tool_write_file"
+                )
+                and all(
+                    windowed_execute_output_contains(
+                        "builder-b", "qa-test", expected
+                    )
+                    for _, _, expected in self.qa_cases
+                ),
+                "every declared case produced its transformed result in "
+                "builder-b's durable Execute output, not only in a claim: ran="
+                + ",".join(
+                    name
+                    for name, _, expected in self.qa_cases
+                    if windowed_execute_output_contains(
+                        "builder-b", "qa-test", expected
+                    )
+                )
+                + " declared="
+                + ",".join(name for name, _, _ in self.qa_cases),
+            ),
+            "qa_coverage_passes_verification": (
+                all(
+                    successful_windowed_tool(role, label, tool)
+                    for role, label in (
+                        ("builder-a", "qa-implement"),
+                        ("builder-b", "qa-test"),
+                    )
+                    for tool in ("keeper_task_claim", "keeper_task_done")
+                )
+                and all(passed for passed, _ in qa_verdicts),
+                "implementer and tester each claimed their own Task on the "
+                "shared Goal, submitted evidence through keeper_task_done, and "
+                "an independent completion authority carried both from "
+                "awaiting_verification to done: "
+                + " ".join(detail for _, detail in qa_verdicts),
+            ),
+            "qa_coverage_review_matches_spec": (
+                text_contains(board, "QA_COVERAGE_VERDICT=COMPLETE:")
+                and all(
+                    text_contains(board, expected)
+                    for _, _, expected in self.qa_cases
+                )
+                and successful_windowed_tool(
+                    "reviewer", "qa-review", "masc_board_comment"
+                ),
+                "reviewer compared the declared scope against the run and "
+                "reported COMPLETE quoting every transformed result read from "
+                "the Board",
+            ),
             "debate_verdict_cites_rebuttal": (
                 text_contains(
                     board, f"DEBATE_VERDICT_CITES={self.debate_rebuttal_token}"
@@ -2275,6 +2458,7 @@ class MissionRun:
         self.run_failure_recovery(post_id)
         self.run_poc_delivery(post_id)
         self.run_debate(post_id)
+        self.run_qa_coverage(post_id)
         self.run_continuity_chain(post_id)
         self.restart_and_recall(post_id)
         self.wait_for_async_sources()

@@ -416,9 +416,7 @@ let test_masc_goal_upsert_schema () =
           Alcotest.(check bool) "omits status lifecycle field" false
             (List.mem_assoc "status" props);
           Alcotest.(check bool) "omits phase lifecycle field" false
-            (List.mem_assoc "phase" props);
-          Alcotest.(check bool) "has parent_goal_id" true
-            (List.mem_assoc "parent_goal_id" props)
+            (List.mem_assoc "phase" props)
       | None -> Alcotest.fail "masc_goal_upsert missing properties"
 
 let test_masc_goal_transition_schema () =

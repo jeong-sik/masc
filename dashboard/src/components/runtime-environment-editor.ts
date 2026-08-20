@@ -79,7 +79,7 @@ interface RuntimeEnvironmentEditorProps {
   draftDirty?: boolean
   saving?: boolean
   onRoutingChange: (
-    lane: 'default' | 'cross_verifier',
+    lane: 'default',
     runtimeId: string | null,
   ) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
@@ -318,7 +318,6 @@ export function RuntimeEnvironmentEditor({
   const runtimeIds = runtimeOptions(environment)
   const isDisabled = disabled === true || saving === true
 
-  const crossVerifierLane = environment.crossVerifierRuntimeId
   const assignments = environment.assignments
   const keeperList = keepers.value
   const typedPatchDisabled = isDisabled || draftDirty === true
@@ -337,10 +336,6 @@ export function RuntimeEnvironmentEditor({
 
   function updateDefault(runtimeId: string) {
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
-  }
-
-  function updateRoutingLane(lane: 'cross_verifier', runtimeId: string) {
-    onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
   function updateAssignment(keeperName: string, runtimeId: string) {
@@ -499,7 +494,7 @@ export function RuntimeEnvironmentEditor({
   // so the narrow Settings embed can wrap labels and controls.
 
   function laneRow(
-    lane: 'default' | 'cross_verifier',
+    lane: 'default',
     label: string,
     hint: string,
     value: string,
@@ -611,8 +606,8 @@ export function RuntimeEnvironmentEditor({
         </div>
       ` : null}
 
-      <!-- routing — runtime-editor.jsx:135-141. default and cross_verifier are
-           read from [runtime] and written back. -->
+      <!-- routing — runtime-editor.jsx:135-141. [runtime].default is read and
+           written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
         <div class="rt-note">
           런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
@@ -623,13 +618,6 @@ export function RuntimeEnvironmentEditor({
           '[runtime].default — 배정 없는 keeper가 사용',
           environment.defaultRuntimeId || runtimeIds[0] || '',
           updateDefault,
-        )}
-        ${laneRow(
-          'cross_verifier',
-          'cross-verifier',
-          '[runtime].cross_verifier — 반-합리화 평가자',
-          crossVerifierLane,
-          runtimeId => updateRoutingLane('cross_verifier', runtimeId),
         )}
       </div>
 

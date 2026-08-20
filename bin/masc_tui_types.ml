@@ -172,7 +172,6 @@ type planning_snapshot = {
   pl_generated_at: string;
 }
 
-(* Goals no longer nest, so every goal sits at depth 0. *)
 let planning_goal_depth (_goals : planning_goal list) (_goal : planning_goal) = 0
 
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =

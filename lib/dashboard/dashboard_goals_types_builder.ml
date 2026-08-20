@@ -24,9 +24,8 @@ type build_context = {
   goal_task_index : (string, string list) Hashtbl.t;
 }
 
-(* Goals are flat: every goal is a root, so [children] is always empty. The
-   field stays on the node because the JSON shape and its consumers are
-   unchanged. *)
+(* [children] is always empty; the field stays on the node because the JSON
+   shape and its consumers are unchanged. *)
 let build_tree context goals goal =
   ignore goals;
   let children = [] in

@@ -1017,8 +1017,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
                      goals)))
       in
       (* RFC-0362 §6 Q2. An unowned executing Goal is addressed to whoever reads
-         it, so it is the same fact for every Keeper and rendered to each.
-         Goals no longer nest, so the list is flat. *)
+         it, so it is the same fact for every Keeper and rendered to each. *)
       let unowned_block =
         match unowned_executing_goals_without_tasks ~config with
         | [] -> None

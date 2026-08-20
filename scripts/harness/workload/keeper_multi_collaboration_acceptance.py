@@ -100,6 +100,7 @@ KNOWN_ASSERTIONS = {
     "debate_restatement_faithful",
     "debate_verdict_cites_rebuttal",
     "qa_coverage_execution_observed",
+    "qa_coverage_enters_verification_flow",
     "qa_coverage_review_matches_spec",
 }
 
@@ -751,8 +752,15 @@ class MissionRun:
         # RW22 tokens. The declared scope is a fixed set of cases; the
         # tester never receives them, so the only way its report can name
         # all three is to have actually run the artifact.
-        self.qa_case_tokens = tuple(
-            f"{self.marker}-case-{index}" for index in (1, 2, 3)
+        # Each case is a distinct transform over its own input, and every
+        # result is emitted as "<case>=<value>". The prefix keeps a short
+        # result (the length case is a two-digit number) from matching by
+        # accident anywhere on the Board.
+        qa_inputs = tuple(f"{self.marker}-case-{index}" for index in (1, 2, 3))
+        self.qa_cases = (
+            ("upper", qa_inputs[0], f"upper={qa_inputs[0].upper()}"),
+            ("length", qa_inputs[1], f"length={len(qa_inputs[1])}"),
+            ("reverse", qa_inputs[2], f"reverse={qa_inputs[2][::-1]}"),
         )
         self.runtime_id = runtime_id
         self.token_file = token_file
@@ -896,6 +904,8 @@ class MissionRun:
             "reviewer": "Review the shared Board thread and task evidence",
             "contention": "Resolve a single-owner concurrent claim",
             "fallback": "Continue useful work after losing a concurrent claim",
+            "qa-implement": "Implement the declared coverage cases",
+            "qa-test": "Run every declared case and report the outputs",
         }
         for key, title in task_specs.items():
             observation = self.call(
@@ -1307,19 +1317,38 @@ class MissionRun:
 
     def run_qa_coverage(self, post_id: str) -> None:
         # RW22: coverage is a claim about a declared set, so the mission fixes
-        # the set on the Board first and then requires every member of it to
-        # appear in a real execution. The tester's prompt never carries the
-        # case tokens; naming all three is possible only by running what the
-        # builder wrote. A partial run fails the mission rather than scoring
-        # lower — "most cases ran" is the failure this row exists to catch.
-        scope = ", ".join(self.qa_case_tokens)
+        # the set first and then requires every member of it to appear in a
+        # real execution.
+        #
+        # Two things keep this from degenerating into the very anti-pattern it
+        # exists to catch. The cases carry different behaviours rather than
+        # echoing a token, so covering all three means three distinct
+        # transforms actually ran — a script that prints constants covers
+        # nothing. And the work enters the typed verification flow: each side
+        # claims its own Task on the shared Goal and submits evidence through
+        # keeper_task_done, so "done" is a submission for verification rather
+        # than a self-declaration.
+        #
+        # Neither builder nor tester receives the expected outputs. The builder
+        # is told the transform rule, the tester is told nothing but the path,
+        # and the evaluator computes the expected values independently.
+        rules = "; ".join(
+            f"{name}: 입력 '{source}' 을 "
+            + {
+                "upper": "전부 대문자로 바꿔",
+                "length": "그 길이(문자 수)를",
+                "reverse": "문자 순서를 뒤집어",
+            }[name]
+            + " 계산해 '<케이스이름>=<결과>' 한 줄로 출력"
+            for name, source, _ in self.qa_cases
+        )
         self.run_turn(
             "researcher",
             "qa-spec",
             (
                 f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"Board post {post_id}에 QA_SCOPE={scope} comment를 남기세요. "
-                "이 세 값이 이번 검증의 전체 대상 범위입니다."
+                f"Board post {post_id}에 QA_SCOPE={rules} comment를 남기세요. "
+                "이 세 케이스가 이번 검증의 전체 대상 범위입니다."
             ),
         )
         self.run_turn(
@@ -1327,11 +1356,13 @@ class MissionRun:
             "qa-implement",
             (
                 f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"Board post {post_id}에서 QA_SCOPE comment를 읽으세요. "
-                f"Write(tool_write_file)로 playground의 artifacts/{self.marker}-qa.sh에 "
-                "셸 스크립트를 쓰되, QA_SCOPE의 각 값마다 그 값을 정확히 한 줄로 출력하는 "
-                "케이스를 하나씩 두세요. 값을 새로 만들지 말고 Board에서 읽은 값을 그대로 쓰세요. "
-                f"작성 후 Board post {post_id}에 QA_IMPLEMENTED={self.marker}-qa.sh comment를 남기세요."
+                f"exact Task {self.task_ids['qa-implement']}를 claim하세요. "
+                f"Board post {post_id}의 QA_SCOPE를 읽고, Write(tool_write_file)로 "
+                f"playground의 artifacts/{self.marker}-qa.sh에 셸 스크립트를 쓰세요. "
+                "스크립트는 세 케이스를 각각 수행해 '<케이스이름>=<결과>' 형태로 "
+                "한 줄씩 출력해야 합니다. 값을 상수로 박지 말고 입력에서 실제로 변환하세요. "
+                f"작성 후 keeper_task_done으로 그 파일을 evidence로 제출하고 "
+                f"Board post {post_id}에 QA_IMPLEMENTED={self.marker}-qa.sh comment를 남기세요."
             ),
         )
         self.run_turn(
@@ -1339,9 +1370,11 @@ class MissionRun:
             "qa-test",
             (
                 f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+                f"exact Task {self.task_ids['qa-test']}를 claim하세요. "
                 f"Execute(tool_execute)로 playground의 artifacts/{self.marker}-qa.sh를 "
-                "실제로 실행하고, 출력된 줄을 그대로 모으세요. "
-                f"그 다음 Board post {post_id}에 QA_COVERAGE_RAN=<출력된 값들을 쉼표로 이어서> "
+                "실제로 실행하고 출력된 줄을 그대로 모으세요. "
+                f"keeper_task_done으로 실행 결과를 evidence로 제출한 뒤 "
+                f"Board post {post_id}에 QA_COVERAGE_RAN=<출력된 값들을 쉼표로 이어서> "
                 "comment를 남기세요. 실행하지 않은 값을 적지 마세요."
             ),
         )
@@ -1350,10 +1383,10 @@ class MissionRun:
             "qa-review",
             (
                 f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"Board post {post_id}에서 QA_SCOPE와 QA_COVERAGE_RAN comment를 읽고 "
-                "두 집합을 대조하세요. 실행이 범위를 전부 덮었으면 "
-                "QA_COVERAGE_VERDICT=COMPLETE:<QA_SCOPE의 값들을 쉼표로 이어서> comment를, "
-                "빠진 값이 있으면 QA_COVERAGE_VERDICT=MISSING:<빠진 값들> comment를 남기세요. "
+                f"Board post {post_id}에서 QA_SCOPE와 QA_COVERAGE_RAN을 읽고 "
+                "선언된 케이스 수와 실행이 낸 값의 수를 대조하세요. "
+                "전부 덮었으면 QA_COVERAGE_VERDICT=COMPLETE:<실행이 낸 값들 그대로>, "
+                "빠졌으면 QA_COVERAGE_VERDICT=MISSING:<빠진 케이스 이름> comment를 남기세요. "
                 "Board에서 읽은 값만 쓰고 새로 만들지 마세요."
             ),
         )
@@ -2309,32 +2342,49 @@ class MissionRun:
                     "builder-a", "qa-implement", "tool_write_file"
                 )
                 and all(
-                    windowed_execute_output_contains("builder-b", "qa-test", token)
-                    for token in self.qa_case_tokens
-                )
-                and all(
-                    text_contains(board, token) for token in self.qa_case_tokens
+                    windowed_execute_output_contains(
+                        "builder-b", "qa-test", expected
+                    )
+                    for _, _, expected in self.qa_cases
                 ),
-                "every declared case appears in builder-b's durable Execute "
-                "output, not only in a claim: ran="
+                "every declared case produced its transformed result in "
+                "builder-b's durable Execute output, not only in a claim: ran="
                 + ",".join(
-                    token
-                    for token in self.qa_case_tokens
-                    if windowed_execute_output_contains("builder-b", "qa-test", token)
+                    name
+                    for name, _, expected in self.qa_cases
+                    if windowed_execute_output_contains(
+                        "builder-b", "qa-test", expected
+                    )
                 )
                 + " declared="
-                + ",".join(self.qa_case_tokens),
+                + ",".join(name for name, _, _ in self.qa_cases),
+            ),
+            "qa_coverage_enters_verification_flow": (
+                all(
+                    successful_windowed_tool(role, label, tool)
+                    for role, label in (
+                        ("builder-a", "qa-implement"),
+                        ("builder-b", "qa-test"),
+                    )
+                    for tool in ("keeper_task_claim", "keeper_task_done")
+                ),
+                "implementer and tester each claimed their own Task on the "
+                "shared Goal and submitted evidence through keeper_task_done, "
+                "so completion is a submission for verification rather than a "
+                "self-declaration",
             ),
             "qa_coverage_review_matches_spec": (
                 text_contains(board, "QA_COVERAGE_VERDICT=COMPLETE:")
                 and all(
-                    text_contains(board, token) for token in self.qa_case_tokens
+                    text_contains(board, expected)
+                    for _, _, expected in self.qa_cases
                 )
                 and successful_windowed_tool(
                     "reviewer", "qa-review", "masc_board_comment"
                 ),
                 "reviewer compared the declared scope against the run and "
-                "reported COMPLETE naming every case read from the Board",
+                "reported COMPLETE quoting every transformed result read from "
+                "the Board",
             ),
             "debate_verdict_cites_rebuttal": (
                 text_contains(

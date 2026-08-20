@@ -74,11 +74,18 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertEqual(coverage["id"], "RW22")
         self.assertEqual(
             coverage["assertions"],
-            ["qa_coverage_execution_observed", "qa_coverage_review_matches_spec"],
+            [
+                "qa_coverage_execution_observed",
+                "qa_coverage_enters_verification_flow",
+                "qa_coverage_review_matches_spec",
+            ],
         )
         # The row exists to reject partial runs, so the tester must be able to
-        # execute rather than only claim.
+        # execute rather than only claim, and the work has to enter the typed
+        # verification flow instead of living in Board comments.
         self.assertIn("tool_execute", catalog["keeper_required_tools"])
+        self.assertIn("keeper_task_claim", catalog["keeper_required_tools"])
+        self.assertIn("keeper_task_done", catalog["keeper_required_tools"])
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}

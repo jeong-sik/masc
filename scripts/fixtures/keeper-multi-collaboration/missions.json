@@ -268,9 +268,9 @@
       "phase": "coverage_proof",
       "name": "declared_scope_full_coverage",
       "actors": ["researcher", "builder-a", "builder-b", "reviewer"],
-      "capabilities": ["Task", "Log", "Cross-Verification", "Sandbox", "Execute"],
-      "user_story": "선언한 대상 범위의 모든 케이스가 실행으로 증명된다. 구현자와 시험자가 나뉘고, 시험 실행이 케이스별 고유 토큰을 durable Execute row에 남기며, 검증자는 명세의 케이스 집합과 실행이 낸 토큰 집합을 대조한다. 부분 실행은 통과하지 못한다 — 한 케이스라도 빠지면 미션이 실패한다.",
-      "assertions": ["qa_coverage_execution_observed", "qa_coverage_review_matches_spec"],
+      "capabilities": ["Goal", "Task", "Verification", "Cross-Verification", "Sandbox", "Execute", "Log"],
+      "user_story": "선언한 대상 범위의 모든 케이스가 실제 동작으로 증명된다. 케이스는 서로 다른 변환이라 상수를 출력하는 스크립트는 아무것도 덮지 못한다. 구현자와 시험자가 각자 Task를 claim해 Goal에 연결하고 keeper_task_done으로 evidence를 제출하므로 완료는 자기 선언이 아니라 검증 제출이며, 검증자가 선언된 범위와 실행이 낸 결과를 대조한다. 부분 실행은 통과하지 못한다.",
+      "assertions": ["qa_coverage_execution_observed", "qa_coverage_enters_verification_flow", "qa_coverage_review_matches_spec"],
       "evidence": ["observations/board-post.json", "observations/tool-calls-builder-b.json"]
     }
   ]

@@ -49,7 +49,7 @@ ensure_contract_goal() {
   local goal_payload
   local goal_json
 
-  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","priority":1}')"
+  goal_payload="$(call_tool 1000 "masc_goal_upsert" '{"title":"GP1 contract goal","metric":"contract steps pass","target_value":"all steps","priority":1}')"
   goal_json="$(printf '%s' "$goal_payload" | extract_result)"
   GOAL_ID="$(printf '%s' "$goal_json" | jq -r '.goal_id // empty')"
   if [ -z "$GOAL_ID" ]; then

@@ -733,7 +733,6 @@ const mocks = vi.hoisted(() => {
           metric: null,
           target_value: null,
           due_date: null,
-          parent_goal_id: null,
           tasks: [],
           task_count: 0,
           task_done_count: 0,

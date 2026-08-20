@@ -43,7 +43,6 @@ type goal = {
   due_date : string option;
   priority : int;
   phase : Goal_phase.t;
-  parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
   (** RFC-0362: the keeper responsible for turning this Goal into Tasks.
@@ -173,7 +172,6 @@ val upsert_goal :
   ?due_date:string ->
   ?priority:int ->
   ?phase:Goal_phase.t ->
-  ?parent_goal_id:string ->
   unit ->
   (goal * [ `created | `updated ], string) result
 (** Creates a new goal when [id] is omitted (mints

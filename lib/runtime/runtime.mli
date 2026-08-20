@@ -126,18 +126,15 @@ val load_list :
   -> ( t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments, cross_verifier_runtime_id, media_failover, lanes)].
+    keeper_assignments, media_failover, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
-    [\[runtime.assignments\]] target does not resolve to a configured runtime, if
-    [\[runtime\].cross_verifier] is set to an
-    unresolved id, if any
+    [\[runtime.assignments\]] target does not resolve to a configured runtime, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
@@ -236,14 +233,13 @@ module For_testing : sig
   val keeper_dispatch_runtime_ids :
     default_runtime_id:string ->
     assignments:(string * string) list ->
-    cross_verifier_runtime_id:string option ->
     verifier_exact_slot_ids:string list ->
     media_failover:string list ->
     lanes:Runtime_lane.t list ->
     string list
   (** Ordered, deduplicated runtime ids reachable by Keeper default/assignment
       roots (including a same-named lane's candidates), the explicit
-      cross-verifier runtime, the [verifier_exact] exact-output lane's declared
+      the [verifier_exact] exact-output lane's declared
       slots (the completion-authority judgement route, RFC-0361 D7(a)), and
       explicit runtime-only media failover routing. Dormant declared lanes are
       excluded. *)
@@ -286,7 +282,6 @@ val keeper_assignments : unit -> (string * string) list
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }
@@ -294,16 +289,6 @@ type dashboard_runtime_defaults_snapshot =
 val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_snapshot
 (** Capture every value consumed by the dashboard runtime-defaults endpoint from
     one immutable loaded-state snapshot. *)
-
-val cross_verifier_runtime_id : unit -> string option
-(** [\[runtime\].cross_verifier] runtime id, or [None] when unset. Since
-    RFC-0361 D7(a) no judgement path reads this: completion-authority provider
-    selection resolves the [verifier_exact] exact-output lane
-    ({!verifier_exact_lane_slot_ids}), whose first slot absorbs the binding this
-    key used to carry. The key stays parseable for preserved live configs;
-    remaining readers are config surfaces (dashboard runtime-defaults
-    display/route, eval-calibration CLI default). Validated at load so a [Some]
-    always resolves to a configured runtime. *)
 
 val verifier_exact_lane_id : string
 (** ["verifier_exact"] — the [\[runtime.exact_output_lanes.verifier_exact\]]
@@ -536,12 +521,6 @@ val set_runtime_default :
   ?runtime_config_path:string -> runtime_id:string -> unit -> (unit, string) result
 (** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
     validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
-
-val set_runtime_cross_verifier :
-  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].cross_verifier through the runtime.toml SSOT
-    writer, validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
 
 val set_runtime_media_failover :

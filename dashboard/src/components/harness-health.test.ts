@@ -222,7 +222,7 @@ describe('HarnessHealth', () => {
         agent_name: 'codex',
         gate: 'fallback',
         verdict: 'reject:vague notes',
-        evaluator_runtime: 'cross_verifier',
+        evaluator_runtime: 'judge-runtime',
         generator_runtime: 'generator_runtime',
         cross_runtime: true,
         fallback_reason: 'judge timeout',

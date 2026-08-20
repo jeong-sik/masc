@@ -3,11 +3,15 @@
 type replay_suffix_prune_reason =
   | Canonical_success_replay
   | Suppressed_terminal_effect_response
+  | Internal_thought_not_replayed
+  | Internal_turn_not_replayed
 
 let replay_suffix_prune_reason_to_string = function
   | Canonical_success_replay -> "canonical_success_replay"
   | Suppressed_terminal_effect_response ->
     "suppressed_terminal_effect_response"
+  | Internal_thought_not_replayed -> "internal_thought_not_replayed"
+  | Internal_turn_not_replayed -> "internal_turn_not_replayed"
 ;;
 
 let replay_response_text_for_persistence ~suppress_visible_response ~response_text =
@@ -87,6 +91,21 @@ let drop_trailing_blank_assistants messages =
   drop false (List.rev messages)
 ;;
 
+(* An internal turn earns a place in replay by what it did, not by what it
+   said. A ToolUse/ToolResult anywhere in the suffix is that record; its
+   absence means the turn produced only the wake cue and its own note. Reads
+   the typed block, never the text. *)
+let suffix_records_tool_activity (messages : Agent_core.Types.message list) =
+  List.exists
+    (fun (message : Agent_core.Types.message) ->
+       List.exists
+         (function
+           | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ -> true
+           | _ -> false)
+         message.Agent_core.Types.content)
+    messages
+;;
+
 let drop_trailing_assistants messages =
   let rec drop dropped = function
     | ({ Agent_core.Types.role = Agent_core.Types.Assistant; _ } :
@@ -103,6 +122,7 @@ let canonical_success_replay_checkpoint
       ~(session_id : string)
       ~(response_text : string)
       ~suppress_visible_response
+      ~exclude_thought_from_replay
       (checkpoint : Agent_core.Checkpoint.t)
   =
   match
@@ -117,8 +137,12 @@ let canonical_success_replay_checkpoint
           completion removes only an inert trailing Assistant shell. A typed
           terminal-effect receipt is stronger: the external post is already the
           visible result, so its trailing provider Assistant response is not
-          durable conversation. Both paths preserve every preceding typed
-          replay node. *)
+          durable conversation. An internal turn reaches the same place from
+          the other side: RFC-0385 gives its wake cue and final text no place
+          in conversation, so a turn that called a tool keeps the call and its
+          result while the note is dropped, and a turn that called nothing
+          leaves the replay exactly as it found it. Every path preserves the
+          preceding typed replay nodes. *)
        let current_suffix, replay_suffix_pruned =
          if suppress_visible_response
          then
@@ -129,6 +153,22 @@ let canonical_success_replay_checkpoint
            , if assistant_dropped
              then Some Suppressed_terminal_effect_response
              else None )
+         else if exclude_thought_from_replay
+         then
+           if suffix_records_tool_activity current_suffix
+           then
+             let current_suffix, assistant_dropped =
+               drop_trailing_assistants current_suffix
+             in
+             ( current_suffix
+             , if assistant_dropped
+               then Some Internal_thought_not_replayed
+               else None )
+           else
+             ( []
+             , match current_suffix with
+               | [] -> None
+               | _ :: _ -> Some Internal_turn_not_replayed )
          else if String.trim response_text = ""
          then
            let current_suffix, blank_assistant_dropped =
@@ -140,8 +180,13 @@ let canonical_success_replay_checkpoint
              else None )
          else current_suffix, None
        in
+       let replay_omits_response =
+         suppress_visible_response
+         || exclude_thought_from_replay
+         || String.trim response_text = ""
+       in
        let checkpoint =
-         if suppress_visible_response || String.trim response_text = ""
+         if replay_omits_response
          then
            { checkpoint with
              Agent_core.Checkpoint.session_id
@@ -209,6 +254,7 @@ let checkpoint_for_replay_persistence
       ~(response_text : string)
       ?(suppress_visible_response = false)
       ?(stop_reason = Runtime_agent.Completed)
+      ~exclude_thought_from_replay
       (checkpoint : Agent_core.Checkpoint.t)
   =
   match stop_reason with
@@ -248,6 +294,7 @@ let checkpoint_for_replay_persistence
       ~session_id
       ~response_text
       ~suppress_visible_response
+      ~exclude_thought_from_replay
       checkpoint
 ;;
 

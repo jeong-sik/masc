@@ -1,4 +1,4 @@
-# MASC MCP – Linux systemd unit, parity with infrastructure/launchd/com.jeong-sik.masc.plist.
+# MASC MCP – Linux systemd unit, parity with infrastructure/launchd/com.example.masc.plist.template.
 #
 # Why this exists:
 #   The launchd plist covers macOS dev/prod, but production Linux hosts
@@ -34,7 +34,21 @@ Environment=MASC_PORT=8080
 Environment=MASC_SHUTDOWN_CLEANUP_TIMEOUT=10
 Environment=MASC_SHUTDOWN_FORCE_TIMEOUT=60
 
-ExecStart=/opt/masc/bin/masc --http --port 8080 --base-path /var/lib/masc
+# 프로바이더 자격증명은 unit 파일에 넣지 않는다. 키가 없으면 서버는 뜨지만
+# keeper 턴이 프로바이더 호출에서 실패한다. 선행 '-' 는 파일이 없어도
+# 기동을 막지 않는다는 뜻이다.
+#   sudo install -d -m 0700 -o masc -g masc /etc/masc
+#   sudo install -m 0600 -o masc -g masc /dev/null /etc/masc/masc.env
+# 형식은 KEY=VALUE 한 줄씩이며 셸 확장은 일어나지 않는다.
+EnvironmentFile=-/etc/masc/masc.env
+
+# --http 는 바이너리 플래그가 아니라 start-masc.sh 래퍼의 플래그다
+# (start-masc.sh:733). launchd 는 그 래퍼를 거치지만 systemd 는 바이너리를
+# 직접 실행하므로, 래퍼 인자를 그대로 옮기면
+#   masc: unknown option '--http'
+# 로 즉시 종료하고 Restart=on-failure + RestartSec=30s 아래에서
+# 30 초 주기 재시작 루프가 된다. 서버 기동은 start 서브커맨드다.
+ExecStart=/opt/masc/bin/masc start --base-path=/var/lib/masc --host=0.0.0.0 --port=8080
 
 # Graceful shutdown contract — TimeoutStopSec is set a few seconds
 # larger than the server's force timeout (MASC_SHUTDOWN_FORCE_TIMEOUT=60)

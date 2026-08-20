@@ -264,7 +264,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
     let metric = get_string_opt args "metric" in
     let target_value = get_string_opt args "target_value" in
     let due_date = get_string_opt args "due_date" in
-    let parent_goal_id = get_string_opt args "parent_goal_id" in
     (match
           Goal_store.upsert_goal
             ctx.config
@@ -274,7 +273,6 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ?target_value
             ?due_date
             ?priority
-            ?parent_goal_id
             ()
         with
         | Error msg ->

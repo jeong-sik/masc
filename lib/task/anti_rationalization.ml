@@ -293,9 +293,7 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
 (** [\[runtime.exact_output_lanes.verifier_exact\]] — the dedicated exact-output
     lane every completion-authority judgement call runs on. The lane's admitted
     slots, in frozen declaration order, are the single provider-selection SSOT:
-    the retired [\[runtime\].cross_verifier] single-runtime binding is absorbed
-    into the lane's first slot, and there is no second selector path (no
-    cross_verifier read, no [\[runtime\].default] fallback).
+    there is no second selector path and no [\[runtime\].default] fallback.
 
     Cross-model evaluation is more effective than same-model different-role
     because different model architectures have different blindspots.

@@ -857,17 +857,12 @@ let owned_executing_goals_without_tasks
    renders nothing when there is nothing to name. It does not pick an owner
    (RFC-0362 §5) and asks for no action.
 
-   [parent_goal_id] rides along because the flat list without it misreads. On
-   the live store, seven of the ten unowned Goals are children of the eighth,
-   and rendered as peers "take one" cannot distinguish taking the umbrella from
-   taking one service under it -- two Keepers could take both and do the same
-   work twice. The relation is already in the store; only the render dropped
-   it. *)
+   (RFC-0362 §5) and asks for no action. *)
 let unowned_executing_goals_without_tasks ~(config : Workspace.config) =
   executing_goals_without_tasks ~config ~owner_matches:(function
     | Some _ -> false
     | None -> true)
-  |> List.map (fun (g : Goal_store.goal) -> g.id, g.title, g.parent_goal_id)
+  |> List.map (fun (g : Goal_store.goal) -> g.id, g.title)
 ;;
 
 let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
@@ -1023,65 +1018,22 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
       in
       (* RFC-0362 §6 Q2. An unowned executing Goal is addressed to whoever reads
          it, so it is the same fact for every Keeper and rendered to each.
-
-         A child is indented under its parent when the parent is in this same
-         list, because there taking the parent and taking the child are not two
-         independent moves. A child whose parent is absent -- owned, terminal,
-         or already served by a Task -- is its own invitation and stays at the
-         top level. Goal_store permits arbitrary parent depth, so the projection
-         follows the whole chain rather than dropping descendants. *)
+         Goals no longer nest, so the list is flat. *)
       let unowned_block =
         match unowned_executing_goals_without_tasks ~config with
         | [] -> None
         | goals ->
-          let present = List.map (fun (goal_id, _, _) -> goal_id) goals in
-          let line ~indent (goal_id, title, _) =
+          let line (goal_id, title) =
             if String.trim title = ""
-            then Printf.sprintf "%s- %s" indent goal_id
-            else Printf.sprintf "%s- %s — %s" indent goal_id title
-          in
-          let children_of parent_id =
-            List.filter
-              (fun (_, _, parent) ->
-                 match parent with
-                 | Some p -> String.equal p parent_id
-                 | None -> false)
-              goals
-          in
-          let stands_alone (_, _, parent) =
-            match parent with
-            | None -> true
-            | Some p -> not (List.exists (String.equal p) present)
-          in
-          let rendered_ids = ref [] in
-          let rec render_subtree ~depth ((goal_id, _, _) as goal) =
-            if List.exists (String.equal goal_id) !rendered_ids
-            then []
-            else (
-              rendered_ids := goal_id :: !rendered_ids;
-              let indent = String.make (depth * 2) ' ' in
-              line ~indent goal
-              :: List.concat_map
-                   (render_subtree ~depth:(depth + 1))
-                   (children_of goal_id))
-          in
-          let rendered_roots =
-            goals
-            |> List.filter stands_alone
-            |> List.concat_map (render_subtree ~depth:0)
-          in
-          let rendered =
-            rendered_roots
-            @ (goals
-               |> List.filter (fun (goal_id, _, _) ->
-                    not (List.exists (String.equal goal_id) !rendered_ids))
-               |> List.concat_map (render_subtree ~depth:0))
+            then Printf.sprintf "- %s" goal_id
+            else Printf.sprintf "- %s — %s" goal_id title
           in
           Some
             (Printf.sprintf
-               "### Unowned Goals, no Task yet — taking one is a move you can make (%d)\n%s\n\n"
+               "### Unowned Goals, no Task yet — taking one is a move you can \
+                make (%d)\n%s\n\n"
                (List.length goals)
-               (String.concat "\n" rendered))
+               (String.concat "\n" (List.map line goals)))
       in
       (match List.filter_map Fun.id [ active_block; owned_block; unowned_block ] with
        | [] -> None

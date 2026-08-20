@@ -1462,6 +1462,9 @@ function autonomousTurnEntry(
     ?.flatMap(block => block.t === 'trace' ? block.trace : [])
   const blocks = normalizedBlocks?.filter(block => block.t !== 'trace')
   return {
+    // Re-minted from turn_id, NOT the raw row's `autonomous:<turn_id>` id:
+    // that backend field exists only to satisfy the history schema's
+    // required-id check (keeper-chat-history.ts) and is never read here.
     id: `autonomous-${turnId}`,
     role: 'assistant',
     source: 'autonomous_turn',

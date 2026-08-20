@@ -45,6 +45,19 @@ type resolve_error =
       ; operation_id : Keeper_shutdown_types.Operation_id.t
       ; detail : string
       }
+      (** The lane is still taking turns. Purge deletes the Keeper and every
+          store it owns, so a Keeper that can still execute is refused here
+          rather than raced: stop or pause it first. The dashboard hides the
+          control in the same states, but that is a rendering choice — this is
+          the rule. *)
+  | Keeper_lane_executing of
+      { keeper_name : string
+      ; phase : string
+      ; live_turn_id : int option
+            (** [Some turn_id] when the refusal came from a turn in flight
+                rather than from the phase. The chat lane admits turns without
+                changing phase, so phase alone does not see it. *)
+      }
 
 val resolve_error_to_string : resolve_error -> string
 

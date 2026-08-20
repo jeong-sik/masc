@@ -283,20 +283,6 @@ let assignment_references (assignments : (string * string) list) =
     assignments
 ;;
 
-let route_references (routes : (string * string option) list) =
-  List.filter_map
-    (fun (route_name, route_id) ->
-      Option.map
-        (fun id ->
-          { site = Printf.sprintf "[runtime].%s" route_name
-          ; shape = Scalar
-          ; id
-          ; domain = Lane_then_runtime
-          })
-        route_id)
-    routes
-;;
-
 let media_failover_references (media_failover : string list) =
   List.map
     (fun id ->
@@ -935,7 +921,6 @@ let degrade_loaded_for_missing_catalog
   : ( ( t list
         * t
         * (string * string) list
-        * string option
         * string list
         * Runtime_lane.t list )
       * startup_degradation
@@ -998,27 +983,6 @@ let degrade_loaded_for_missing_catalog
            , dropped_lanes ))
       lanes
       ([], [], [])
-  in
-  (* A route id may name a lane (#25394). A lane-targeted route stays live
-     while any candidate survives (the lane itself degrades), and drops only
-     when the whole lane dropped; a runtime-targeted route drops when that
-     runtime is missing. Mirrors [resolve_assignment]'s lane precedence. *)
-  let is_declared_lane id =
-    List.exists (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
-  in
-  let lane_fully_dropped id =
-    List.exists
-      (fun (entry : dropped_runtime_lane) -> String.equal entry.lane_id id)
-      dropped_lanes
-  in
-  let route_unavailable id =
-    if is_declared_lane id then lane_fully_dropped id else is_missing id
-  in
-  let drop_route route_name = function
-    | None -> None, None
-    | Some runtime_id when route_unavailable runtime_id ->
-      None, Some { route_name; runtime_id }
-    | Some _ as value -> value, None
   in
   let dropped_routes =
     [ default_drop ]
@@ -1087,7 +1051,6 @@ let materialize_config
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -1164,7 +1127,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
-       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -1269,7 +1231,7 @@ let publish_exact_output_registry ?required_lane_ids ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1292,7 +1254,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _) as loaded), exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _) as loaded), exact_output_lane_decls) ->
     let verifier_exact_slot_ids =
       verifier_exact_slot_ids_of_lane_decls exact_output_lane_decls
     in
@@ -1315,7 +1277,7 @@ let init_default_degraded_report ~config_path =
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
         | Ok
-            (((active_runtimes, _, _, _, _, _) as degraded_loaded), degradation)
+            (((active_runtimes, _, _, _, _) as degraded_loaded), degradation)
           ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)

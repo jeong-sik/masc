@@ -66,7 +66,7 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
     ; "runtimes", `List (List.map runtime_entry_json r.runtimes)
     ; ( "model_routing"
       , `Assoc
-          [           ; "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
+          [ "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
           ] )
     ]
 ;;

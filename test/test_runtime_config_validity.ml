@@ -2404,7 +2404,7 @@ let test_runtime_provider_disable_excludes_its_bindings () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "disabled provider should not block active runtime: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "active.sample" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
 ;;
@@ -2433,7 +2433,7 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "disabled binding should not block active runtime: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "local.good" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes));
   let referenced_runtime_toml =
@@ -2485,7 +2485,7 @@ let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
     match Runtime.load_list ~config_path:path with
     | Error msg ->
       failf "an unassigned uncapped runtime must not fail the load: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "both runtimes materialize"
         [ "local.sample"; "local.dormant" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes);
@@ -2549,7 +2549,7 @@ let test_official_client_runtime_is_dispatchable_without_a_body_cap () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "official-client runtime should load: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "no runtime is reported blocked" []
         (List.map
            (fun ((runtime : Runtime.t), _) -> runtime.id)
@@ -2581,7 +2581,7 @@ let test_binding_naming_an_undeclared_model_fails_the_load () =
   in
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       failf
         "binding naming an undeclared model must fail the load; got runtimes [%s]"
         (String.concat "; " (List.map (fun (r : Runtime.t) -> r.id) runtimes))
@@ -2624,7 +2624,7 @@ let test_non_provider_namespaces_are_not_bindings () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "non-provider namespaces must not be bindings: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "only the declared provider binds a runtime"
         [ "local.good" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
@@ -2664,7 +2664,7 @@ let test_deliberate_disable_is_still_a_tolerated_drop () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "deliberate disables must not fail the load: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "disabled binding and disabled provider are excluded"
         [ "local.good" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
@@ -2792,6 +2792,7 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
     (String_util.contains_substring media "[runtime].media_failover entry \"local.typo\"")
 
 let test_routing_reference_domains_stay_distinct () =
+  let lane = "\n[runtime.lanes.safe]\nstrategy = \"ordered\"\ncandidates = [\"local.good\"]\n" in
   (* An assignment resolves among runtimes only. runtime.mli documents the
      assignment snapshot as ids that resolve to a configured runtime, so admitting
      a lane here would load a config the assignment consumer cannot look up. *)
@@ -3763,7 +3764,7 @@ let test_codex_app_server_materializes_as_turn_runtime () =
   with_temp_runtime_toml (codex_app_server_runtime_toml ()) (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error error -> failf "codex-app-server runtime should load: %s" error
-    | Ok (runtimes, default, _, _, _, _) ->
+    | Ok (runtimes, default, _, _, _) ->
       check int "one runtime" 1 (List.length runtimes);
       check string "default id" "codex.codex" default.id;
       (match default.execution with
@@ -3818,7 +3819,7 @@ let test_antigravity_cli_materializes_typed_process_options () =
     (fun path ->
        match Runtime.load_list ~config_path:path with
        | Error error -> failf "antigravity-cli runtime should load: %s" error
-       | Ok (runtimes, default, _, _, _, _) ->
+       | Ok (runtimes, default, _, _, _) ->
          check int "one runtime" 1 (List.length runtimes);
          check string "default id" "antigravity.gemini" default.id;
          (match default.execution with

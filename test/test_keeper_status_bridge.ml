@@ -88,6 +88,56 @@ let test_shutdown_phase_names_are_pinned () =
   check "joined_idle" Keeper_shutdown_types.Joined_idle
 ;;
 
+let shutdown_operation_with_phase phase =
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "trace-status-bridge-fence-test" with
+    | Ok trace_id -> trace_id
+    | Error detail -> Alcotest.failf "trace id rejected: %s" detail
+  in
+  { Keeper_shutdown_types.schema_version =
+      Keeper_shutdown_types.schema_version
+  ; revision = 1
+  ; operation_id = Keeper_id.Operation_id.generate ()
+  ; keeper_name = "verifier"
+  ; lane_ownership = Keeper_shutdown_types.Dormant_meta
+  ; trace_id
+  ; generation = 1
+  ; actor = "test"
+  ; cleanup_intent = Keeper_shutdown_types.Completion_not_requested
+  ; turn_disposition = Keeper_shutdown_types.No_inflight_turn
+  ; expected_backlog_version = 0
+  ; owned_task_ids = []
+  ; join_evidence = None
+  ; phase
+  ; created_at = Masc_domain.now_iso ()
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+let test_admission_fence_is_any_not_latest () =
+  (* keeper_status projects List.exists over the records, not the newest one:
+     admission is refused while any record still fences, so a consumer that
+     read only the latest phase would restart into a fence (#29181). *)
+  let fencing =
+    shutdown_operation_with_phase Keeper_shutdown_types.Joined_idle
+  in
+  let settled =
+    shutdown_operation_with_phase
+      (Keeper_shutdown_types.Superseded
+         Keeper_shutdown_types.Operator_metadata_update)
+  in
+  Alcotest.(check bool)
+    "a settled record alone does not fence"
+    false
+    (List.exists Keeper_shutdown_types.requires_admission_fence [ settled ]);
+  Alcotest.(check bool)
+    "one fencing record fences the whole set"
+    true
+    (List.exists
+       Keeper_shutdown_types.requires_admission_fence
+       [ settled; fencing ])
+;;
+
 let test_nonempty_live_meta_still_reports_profile_override () =
   init_runtime_default_for_tests ();
   let meta =
@@ -327,6 +377,10 @@ let () =
             "phase names are pinned for wire consumers"
             `Quick
             test_shutdown_phase_names_are_pinned;
+          Alcotest.test_case
+            "admission fence is any-record, not latest"
+            `Quick
+            test_admission_fence_is_any_not_latest;
         ] );
     ]
 ;;

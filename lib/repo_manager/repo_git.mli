@@ -72,6 +72,26 @@ val worktree_root : local_path:string -> (string, string) result
     [local_path]. It is read-only and bounded; callers use it to avoid treating
     an arbitrary file's dirname as a repository root. *)
 
+type checkout_identity = {
+  toplevel : string;
+      (** Git's [--show-toplevel] for the queried path: the root of the
+          checkout (main tree or linked worktree) that holds it. *)
+  git_common_dir : string;
+      (** Git's [--git-common-dir]: the shared [.git] directory of the
+          repository the checkout belongs to. For a linked worktree
+          this is the {e main} checkout's [.git]; for a nested foreign
+          clone it is that clone's own [.git]. The pair lets a caller
+          decide "worktree of THIS repo" without any path convention
+          or remote-URL parsing. *)
+}
+
+val checkout_identity :
+  local_path:string -> (checkout_identity, string) result
+(** [checkout_identity ~local_path] answers both questions in one
+    read-only, bounded git invocation ([--path-format=absolute]).
+    Errors mirror {!worktree_root}: not a repository, timeout, or
+    unexpected output shape. *)
+
 val origin_head_branch : local_path:string -> (string, string) result
 (** [origin_head_branch ~local_path] returns the branch named by
     [refs/remotes/origin/HEAD]. It does not fall back to guessed branch names;

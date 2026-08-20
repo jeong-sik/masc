@@ -197,6 +197,13 @@ let body_with_canonical_http_actor ~base_path ~auth_token request body_str =
   let actor = Server_auth.dashboard_actor_for_request ~base_path request in
   Server_mcp_actor_injection.reduce ~actor ~auth_token body_str
 
+(* Auth-reject metric/log endpoint labels. Built on [profile_label]
+   so the label vocabulary cannot drift from the session module's
+   profile naming. *)
+let post_endpoint_label profile = "POST " ^ profile_label profile
+let get_endpoint_label profile = "GET " ^ profile_label profile
+let delete_endpoint_label profile = "DELETE " ^ profile_label profile
+
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   let request_authority = Server_request_authority.current_exn () in
   (* Readiness gate: reject before session/auth if server state is not ready *)
@@ -272,16 +279,15 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       match auth_result with
       | Ok () -> Ok ()
       | Error failure ->
-          respond_mcp_error
-            ?data:(auth_failure_data failure)
-            ~code:Mcp_error_code.Auth_error
+          respond_mcp_auth_error
             ~deps
             ~request_authority
+            ~endpoint:(post_endpoint_label profile)
             request
             reqd
             ~session_id
             ~protocol_version
-            failure.message;
+            failure;
           Error ()
     in
     let otel_transport_context =
@@ -603,16 +609,15 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       | Ok () ->
       (match auth_result with
       | Error failure ->
-          respond_mcp_error
-            ?data:(auth_failure_data failure)
-            ~code:Mcp_error_code.Auth_error
+          respond_mcp_auth_error
             ~deps
             ~request_authority
+            ~endpoint:(get_endpoint_label profile)
             request
             reqd
             ~session_id
             ~protocol_version
-            failure.message
+            failure
       | Ok () ->
           (match last_event_id with
           | Error error ->
@@ -767,16 +772,15 @@ let handle_get_operator_mcp ~deps request reqd =
   let base_path = deps.get_base_path () in
   match deps.verify_operator_mcp_auth ~base_path request with
   | Error failure ->
-      respond_mcp_error
-        ?data:(auth_failure_data failure)
-        ~code:Mcp_error_code.Auth_error
+      respond_mcp_auth_error
         ~deps
         ~request_authority
+        ~endpoint:(get_endpoint_label Operator_remote)
         request
         reqd
         ~session_id
         ~protocol_version
-        failure.message
+        failure
   | Ok () ->
       handle_get_mcp ~deps ~profile:Operator_remote request reqd
 
@@ -797,16 +801,15 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
   | Error failure ->
       let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
       let protocol_version = get_protocol_version_for_session ~session_id request in
-      respond_mcp_error
-        ?data:(auth_failure_data failure)
-        ~code:Mcp_error_code.Auth_error
+      respond_mcp_auth_error
         ~deps
         ~request_authority
+        ~endpoint:(delete_endpoint_label profile)
         request
         reqd
         ~session_id
         ~protocol_version
-        failure.message
+        failure
   | Ok () -> (
       match get_session_id_any request with
       | Some session_id -> (

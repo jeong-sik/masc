@@ -85,13 +85,36 @@ val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
 
-val append_if_current_file_fits :
-  t -> max_current_file_bytes:int -> Yojson.Safe.t -> bool
-(** Append [json] only when today's current [DD.jsonl] would remain at or
-    below [max_current_file_bytes] after the row is added. Returns [true] when
-    appended and [false] when skipped. The size check and append share the
-    same internal mutex as {!append}. Retention and completed-file byte pruning
-    still run after a successful append. *)
+type append_outcome =
+  | Appended_to_current
+      (** The row landed in today's current [DD.jsonl]. *)
+  | Appended_after_rotation of { segment : string }
+      (** Today's file reached the cap and was renamed to the completed
+          segment [DD.NNN.jsonl] named here; the row landed in a fresh
+          current file. *)
+  | Skipped_rotation_exhausted of { sequence_limit : int }
+      (** The day already holds [sequence_limit] rotated segments — the
+          [NNN] name space is spent — so the row was dropped. *)
+  | Skipped_by_append_guard
+      (** The installed {!set_append_guard} declined to run the append. *)
+
+val append_rotating :
+  t -> max_current_file_bytes:int -> Yojson.Safe.t -> append_outcome
+(** Append [json] to today's current [DD.jsonl], rotating the file to a
+    completed [DD.NNN.jsonl] segment first when the row would push it
+    over [max_current_file_bytes] (a non-positive cap never rotates).
+    Rotated segments are ordinary completed files: readers include them
+    in day order, and the [?max_bytes] byte-budget prune from {!create}
+    removes the oldest of them first while the current file survives —
+    so a capped store keeps the newest records and sheds the oldest,
+    instead of dropping new rows for the rest of the day.
+
+    A single row larger than the cap lands in an empty current file
+    anyway (the segment runs oversized once) — rotating an empty file
+    out would spin without ever accepting the row. The size check,
+    rename, and append share the same internal mutex as {!append};
+    retention and byte-budget pruning still run after a successful
+    append. *)
 
 val set_append_guard : ((unit -> unit) -> unit) -> unit
 (** [set_append_guard guard] installs a process-wide wrapper around

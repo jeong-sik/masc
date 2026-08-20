@@ -1105,6 +1105,7 @@ let run_direct_attempt ?hooks ~base_path ~cli_path ~goal ~tools () =
                     | Some _ | None -> fail "Claude runtime fixture did not resolve"
                   in
                   Keeper_claude_code_runtime.run
+                    ~pre_tool_rejects:(ref [])
                     ~runtime_id:"claude.claude"
                     ~keeper_name:"claude-pre-dispatch"
                     ~base_path

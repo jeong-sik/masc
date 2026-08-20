@@ -41,7 +41,13 @@ let describe_pruned_goal = function
     "doesn't catch goal property changes (status, phase)", which is the residue
     this closes. Measured 2026-08-07: sangsu carried goal-request-menu-zero for
     5,362 tool calls across 2.5 days after it completed, stamped goal-bound the
-    whole time, with an empty Active goals section in every one of those turns. *)
+    whole time, with an empty Active goals section in every one of those turns.
+
+    RFC-0387 stage 2: [Verifying] deliberately SURVIVES this cross-check —
+    [Goal_phase.admits_self_directed_progress] admits it, because the gate
+    holds the phase while the proof is judged out-of-band and the keeper keeps
+    working the linked tasks. Pruning a Verifying goal here would erase it from
+    the keeper's scope at exactly the moment the gate took over (review P0-1). *)
 let validate_active_goal_ids ~(config : Workspace.config) ~(meta : keeper_meta) () =
   let valid_goal_ids, pruned =
     List.partition_map
@@ -91,92 +97,6 @@ let task_is_linked_to_keeper_goals ?(task_goal_index = Hashtbl.create 0) goal_id
    force a consumer to handle a new mode, and a dropped producer left a dead
    [empty_goal_scope_fallback_all_tasks] arm frozen in the consumer. A closed
    variant makes every producer/consumer exhaustive at compile time. *)
-type claim_scope_mode =
-  | All_tasks
-  | Active_goal_ids
-  | Empty_goal_scope_fallback_all_tasks
-
-let claim_scope_mode_to_string = function
-  | All_tasks -> "all_tasks"
-  | Active_goal_ids -> "active_goal_ids"
-  | Empty_goal_scope_fallback_all_tasks -> "empty_goal_scope_fallback_all_tasks"
-
-type claim_goal_scope = {
-  task_filter : Masc_domain.task -> bool;
-  mode : claim_scope_mode;
-  effective_goal_ids : string list;
-  fallback_reason : string option;
-}
-
-(* Pure in-memory scope derived from [meta] alone — no disk read. The
-   [active_goal_ids] hard filter; an empty scope means all_tasks. *)
-let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
-  match meta.active_goal_ids with
-  | [] ->
-      {
-        task_filter = (fun (_task : Masc_domain.task) -> true);
-        mode = All_tasks;
-        effective_goal_ids = [];
-        fallback_reason = None;
-      }
-  | goal_ids ->
-      {
-        task_filter = task_is_linked_to_keeper_goals ?task_goal_index goal_ids;
-        mode = Active_goal_ids;
-        effective_goal_ids = goal_ids;
-        fallback_reason = None;
-      }
-
-(* Resolve the claim filter for a keeper's [active_goal_ids].
-
-   Goal-scope is a *priority hint*, not a hard gate: a keeper must never sit idle
-   while the backlog holds claimable work. When the keeper's active goals have no
-   claim-pool candidate linked to them, widen the filter back to all_tasks and
-   record [fallback_reason] so the widening is visible. Claim-pool membership
-   is owned by [Workspace_task_schedule]; this resolver must not maintain a
-   narrower copy that omits verification work.
-
-   Restores the [allow_empty_goal_scope_fallback] stopgap (RFC-0067 §1, PR
-   #13673) that was dropped when the resolver was simplified to a pure in-memory
-   match. Without it, a keeper whose goal carries no live task — or whose backlog
-   tasks are all goal_id=None — is starved indefinitely (the observed
-   "scope-blocked deadlock"). Note RFC-0067 §3's proposed *atomicity* design
-   (scope-version tokens) is a separate, unimplemented direction; this is the
-   stopgap, reinstated by operator decision, not that design.
-
-   [resolve_claim_goal_scope] reads the backlog ([get_tasks_safe], a disk read)
-   to test for a claimable scoped task. Call
-   [resolve_claim_goal_scope_for_tasks] when the caller already loaded the
-   backlog. *)
-let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
-    ~(meta : keeper_meta) ~(tasks : Masc_domain.task list) ~task_eligible () =
-  match meta.active_goal_ids with
-  | [] -> meta_only_claim_goal_scope meta
-  | goal_ids ->
-    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
-    let scoped_claimable_exists =
-      List.exists (fun task ->
-             Workspace_task_schedule.task_is_claim_pool_candidate task
-             && task_eligible task
-             && task_is_linked_to_keeper_goals ~task_goal_index goal_ids task)
-        tasks
-    in
-    if scoped_claimable_exists then meta_only_claim_goal_scope ~task_goal_index meta
-    else
-      {
-        task_filter = (fun (_task : Masc_domain.task) -> true);
-        (* [Keeper_tool_task_runtime.claim_scope_context_suffix] exhaustively
-           matches this constructor; the variant keeps the two sites in sync. *)
-        mode = Empty_goal_scope_fallback_all_tasks;
-        effective_goal_ids = goal_ids;
-        fallback_reason = Some "no_scoped_claimable_tasks";
-      }
-
-let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta)
-    ~task_eligible () =
-  let tasks = Workspace.get_tasks_safe config in
-  resolve_claim_goal_scope_for_tasks ~config ~meta ~tasks ~task_eligible ()
-
 let task_is_blocked (task : Masc_domain.task) =
   (* Enumerate every [task_status] variant so the compiler flags any new
      constructor here. The old [_ -> false] silently extended "not blocked"

@@ -314,7 +314,8 @@ let stream_projection ~turn_count on_event =
     }
 ;;
 
-let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
+let run_without_lifecycle ~runtime_id ~keeper_name
+    ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~initial_messages ~model_input_projection ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
     ~observe_effect_attempted
@@ -447,6 +448,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_effect_state
         ~terminal_error
+        ~pre_tool_rejects
         ~raw_trace_run:None
     in
     let runtime_root = Common.masc_dir_from_base_path ~base_path in
@@ -514,6 +516,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
         ~context
         ~terminal_effect_state
         ~terminal_error
+        ~pre_tool_rejects
         ~raw_trace_run
     in
     let dynamic_tools =
@@ -890,7 +893,7 @@ let run_without_lifecycle ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks
                   recovery_detail))))
 ;;
 
-let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
+let run ~runtime_id ~keeper_name ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~initial_messages ~model_input_projection ~hooks ~context_injector
     ~context
     ?(terminal_effect_state = fun () -> Keeper_tools_agent_core.Terminal_effect_open)
@@ -906,6 +909,7 @@ let run ~runtime_id ~keeper_name ~base_path ~goal ~goal_blocks ~system_prompt
       run_without_lifecycle
         ~runtime_id
         ~keeper_name
+    ~pre_tool_rejects
         ~base_path
         ~goal
         ~goal_blocks

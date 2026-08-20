@@ -5240,6 +5240,7 @@ let test_direct_execute_post_effect_artifact_failure_closes_official_client_loop
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
                   ~turn_count:1
@@ -5326,6 +5327,7 @@ let test_direct_pre_effect_and_readonly_failures_remain_correction_capable () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
                   ~turn_count:1
@@ -5726,6 +5728,7 @@ let test_terminal_composition_post_effect_failure_closes_official_client_loop ()
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
                   ~turn_count:7
@@ -5838,6 +5841,7 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
                   ~turn_count:8
@@ -5965,6 +5969,7 @@ let test_terminal_composition_post_effect_defer_closes_without_resume () =
             let projected =
               match
                 Masc.Keeper_official_client_host.dynamic_tools
+                  ~pre_tool_rejects:(ref [])
                   ~runtime_label:"test-official-client"
                   ~keeper_name:meta.name
                   ~turn_count:9

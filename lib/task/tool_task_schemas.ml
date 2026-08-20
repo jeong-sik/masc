@@ -12,9 +12,10 @@ let handoff_context_description =
      actions (submit_for_verification / done / release / cancel). On \
      action='submit_for_verification', every 'evidence_refs' entry must use \
      'artifact:<producer-root-relative-path>' for a bounded file snapshot or \
-     'note:<text>' for narrative evidence. URLs, commits, and traces are not \
-     fetched by the system LLM lane; materialize their relevant contents as an \
-     artifact when they are required proof. Bare relative paths \
+     'note:<text>' for narrative evidence. A public URL inside a note (a PR, \
+     a CI run) can be fetched live by the verifier itself; materialize \
+     volatile contents as an artifact when they must be pinned at submit \
+     time. Commits and traces are not fetched. Bare relative paths \
      and absolute host paths are persisted as typed invalid references. The \
      list itself is optional. Example: {\"summary\": \"tests green, local proof saved\", \
      \"evidence_refs\": [\"artifact:artifacts/proof.json\"]}."

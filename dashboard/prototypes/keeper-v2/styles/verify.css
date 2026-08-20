@@ -1,0 +1,238 @@
+/* MASC v2 — Verification queue (검증 대기 큐).
+   Third Work-surface view: tasks a keeper submitted to awaiting_verification.
+   Operator reviews the completion-contract gate evidence and 승인/반려/보류/재배정.
+   Three layouts (vq-lay-*): stack(검토 스택) · split(분할 검토) · triage(트리아지 보드). */
+
+.vq { display: flex; flex-direction: column; gap: 14px; }
+
+/* task-tree trigger: 진행 중 task → 검증 요청, and 반려 note */
+.wk-reqverify {
+  appearance: none; cursor: pointer; align-self: flex-start; margin-top: 2px;
+  padding: 6px 12px; border-radius: var(--radius-xs, 6px);
+  border: 1px solid var(--volt-dim); background: var(--volt-wash, color-mix(in oklab, var(--volt) 10%, transparent));
+  color: var(--volt-strong); font-family: var(--font-body); font-size: 12px;
+  display: inline-flex; align-items: center; gap: 6px; transition: all 0.14s ease;
+}
+.wk-reqverify:hover { background: var(--volt); color: var(--volt-ink); }
+.wk-rejected {
+  padding: 8px 12px; border-radius: var(--radius-xs, 6px); font-size: 12.5px;
+  border: 1px solid color-mix(in oklab, var(--status-bad) 42%, transparent);
+  background: color-mix(in oklab, var(--status-bad) 9%, transparent); color: var(--status-bad);
+}
+
+/* ── layout switcher + summary strip ─────────────────────────── */
+.vq-bar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 2px;
+  background: var(--bg-panel); border: 1px solid var(--border-main);
+  border-radius: var(--radius-sm, 8px);
+}
+.vq-bar-t { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--volt-strong); }
+.vq-bar-lane { font-size: 9.5px; letter-spacing: 0.04em; color: var(--text-dim); border: 1px solid var(--border-main); border-radius: var(--radius-pill); padding: 2px 9px; margin-left: 2px; }
+.vq-bar-stats { display: flex; gap: 16px; margin-left: 4px; }
+.vq-bar-stat { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.vq-bar-stat b { font-family: var(--font-display); font-size: 15px; color: var(--text-bright); }
+.vq-bar-stat.volt b { color: var(--volt-strong); }
+.vq-bar-stat.bad b { color: var(--status-bad); }
+.vq-bar-spacer { flex: 1; }
+.vq-layseg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-pill, 999px); overflow: hidden; background: var(--bg-panel-alt); }
+.vq-layseg button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  padding: 6px 13px; font-family: var(--font-body); font-size: 12px; color: var(--text-dim);
+  transition: color 0.14s ease, background 0.14s ease;
+}
+.vq-layseg button + button { border-left: 1px solid var(--border-main); }
+.vq-layseg button:hover { color: var(--text-primary); }
+.vq-layseg button.on { background: var(--volt); color: var(--volt-ink); }
+
+/* ── shared review pieces ────────────────────────────────────── */
+.vq-req-head { display: flex; align-items: flex-start; gap: 10px; }
+.vq-req-id { font-family: var(--font-display); font-size: 11px; color: var(--text-dim); letter-spacing: 0.06em; }
+.vq-req-title { font-size: 15px; color: var(--text-bright); line-height: 1.35; font-weight: 500; }
+.vq-req-goal {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 3px;
+  font-size: 11px; color: var(--text-dim); background: none; border: 0; padding: 0; cursor: pointer;
+}
+.vq-req-goal:hover { color: var(--volt-strong); }
+.vq-req-prio { font-family: var(--font-display); font-size: 11px; color: var(--text-dim); }
+
+.vq-sub {
+  display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 4px;
+  border: 1px solid var(--border-main); border-radius: var(--radius-pill, 999px);
+  background: var(--bg-panel-alt); font-size: 11px; color: var(--text-primary); cursor: pointer;
+}
+.vq-sub:hover { border-color: var(--volt-dim); color: var(--text-bright); }
+.vq-sub .mono { font-size: 11px; }
+.vq-submitted { font-family: var(--font-display); font-size: 11px; color: var(--text-dim); }
+
+/* gate checklist — operator confirms each evidence item */
+.vq-gate { border: 1px solid var(--border-main); border-radius: var(--radius-sm, 8px); overflow: hidden; background: color-mix(in oklab, var(--bg-card) 60%, transparent); }
+.vq-gate-h {
+  display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+  background: var(--bg-panel-alt); border-bottom: 1px solid var(--border-main);
+  font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim);
+}
+.vq-gate-h .n { margin-left: auto; font-family: var(--font-display); }
+.vq-gate-h .n.ok { color: var(--status-ok); }
+.vq-gate-h .n.open { color: var(--status-warn); }
+.vq-gate-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer;
+  border-top: 1px solid color-mix(in oklab, var(--border-main) 55%, transparent);
+  transition: background 0.12s ease;
+}
+.vq-gate-row:first-of-type { border-top: 0; }
+.vq-gate-row:hover { background: var(--bg-card-hover); }
+.vq-gate-box {
+  flex: none; width: 18px; height: 18px; border-radius: 5px;
+  border: 1.5px solid var(--border-highlight); display: grid; place-items: center;
+  font-size: 12px; color: transparent; transition: all 0.14s ease;
+}
+.vq-gate-row.confirmed .vq-gate-box { background: var(--status-ok); border-color: var(--status-ok); color: #fff; }
+.vq-gate-row.auto .vq-gate-box { border-style: dashed; }
+.vq-gate-ev { flex: 1; font-size: 13px; color: var(--text-primary); }
+.vq-gate-row.confirmed .vq-gate-ev { color: var(--text-bright); }
+.vq-gate-out { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 999px; border: 1px solid; }
+.vq-gate-out.satisfied { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 42%, transparent); }
+.vq-gate-out.missing { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 42%, transparent); }
+.vq-gate-out.failed { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 42%, transparent); }
+.vq-gate-out.unsupported { color: var(--text-dim); border-color: var(--border-main); }
+
+.vq-note { font-size: 12px; color: var(--text-dim); line-height: 1.5; padding: 2px 2px; }
+.vq-note b { color: var(--text-primary); font-weight: 500; }
+.vq-note.rerun { color: var(--volt-strong); }
+.vq-note.rerun b { color: var(--volt-strong); font-weight: 600; }
+
+/* verifier chip */
+.vq-verifier { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
+.vq-verifier-chip {
+  display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px;
+  border: 1px solid var(--volt-dim); border-radius: var(--radius-pill, 999px);
+  background: var(--volt-wash, color-mix(in oklab, var(--volt) 10%, transparent)); color: var(--volt-strong); font-size: 11px;
+}
+
+/* action bar */
+.vq-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vq-act {
+  appearance: none; cursor: pointer; font-family: var(--font-body); font-size: 12.5px;
+  padding: 8px 14px; border-radius: var(--radius-xs, 6px); border: 1px solid var(--border-main);
+  background: var(--bg-panel-alt); color: var(--text-primary);
+  transition: all 0.14s ease; display: inline-flex; align-items: center; gap: 6px;
+}
+.vq-act:hover { background: var(--bg-card-hover); color: var(--text-bright); }
+.vq-act.approve { border-color: color-mix(in oklab, var(--status-ok) 55%, transparent); color: var(--status-ok); }
+.vq-act.approve:hover:not(:disabled) { background: var(--status-ok); color: #fff; }
+.vq-act.approve:disabled { opacity: 0.4; cursor: not-allowed; }
+.vq-act.reject { border-color: color-mix(in oklab, var(--status-bad) 50%, transparent); color: var(--status-bad); }
+.vq-act.reject:hover { background: var(--status-bad); color: #fff; }
+.vq-act.defer:hover { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 50%, transparent); }
+.vq-act-spacer { flex: 1; }
+.vq-act.mini { padding: 6px 11px; font-size: 12px; }
+
+/* inline forms (reject reason / reassign) */
+.vq-form { border-top: 1px dashed var(--border-main); margin-top: 10px; padding-top: 12px; display: flex; flex-direction: column; gap: 9px; }
+.vq-form-h { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
+.vq-form textarea {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 58px;
+  background: var(--bg-panel); border: 1px solid var(--border-main); border-radius: var(--radius-xs, 6px);
+  color: var(--text-primary); font-family: var(--font-body); font-size: 13px; padding: 9px 11px; line-height: 1.5;
+}
+.vq-form textarea:focus { outline: none; border-color: var(--volt-dim); }
+.vq-form-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.vq-reasons { display: flex; gap: 6px; flex-wrap: wrap; }
+.vq-reason-chip {
+  appearance: none; cursor: pointer; font-size: 11.5px; padding: 4px 10px;
+  border: 1px solid var(--border-main); border-radius: var(--radius-pill, 999px);
+  background: var(--bg-panel-alt); color: var(--text-dim); transition: all 0.13s ease;
+}
+.vq-reason-chip:hover { color: var(--text-primary); border-color: var(--volt-dim); }
+
+/* keeper picker (reassign verifier) */
+.vq-kpick { display: flex; flex-wrap: wrap; gap: 6px; }
+.vq-kpick-b {
+  appearance: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 5px; border: 1px solid var(--border-main); border-radius: var(--radius-pill, 999px);
+  background: var(--bg-panel-alt); color: var(--text-primary); font-size: 12px; transition: all 0.13s ease;
+}
+.vq-kpick-b:hover { border-color: var(--volt-dim); background: var(--bg-card-hover); }
+.vq-kpick-b.on { border-color: var(--volt); color: var(--volt-strong); }
+.vq-kpick-b .mono { font-size: 11px; }
+
+/* verdict banner (resolved-this-session) */
+.vq-verdict {
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+  border-radius: var(--radius-sm, 8px); border: 1px solid; font-size: 13px;
+}
+.vq-verdict.approved { border-color: color-mix(in oklab, var(--status-ok) 45%, transparent); background: color-mix(in oklab, var(--status-ok) 9%, transparent); color: var(--status-ok); }
+.vq-verdict.rejected { border-color: color-mix(in oklab, var(--status-bad) 45%, transparent); background: color-mix(in oklab, var(--status-bad) 9%, transparent); color: var(--status-bad); }
+.vq-verdict.deferred { border-color: color-mix(in oklab, var(--status-warn) 45%, transparent); background: color-mix(in oklab, var(--status-warn) 9%, transparent); color: var(--status-warn); }
+.vq-verdict-mark { font-family: var(--font-display); }
+.vq-verdict-body { flex: 1; color: var(--text-primary); }
+.vq-verdict-body b { color: inherit; }
+.vq-verdict-undo { appearance: none; cursor: pointer; background: transparent; border: 1px solid currentColor; color: inherit; border-radius: var(--radius-xs, 6px); padding: 4px 10px; font-size: 11.5px; opacity: 0.85; }
+.vq-verdict-undo:hover { opacity: 1; }
+
+/* empty state */
+.vq-clear { text-align: center; padding: 64px 24px; color: var(--text-dim); }
+.vq-clear .ico { font-size: 34px; color: var(--status-ok); margin-bottom: 12px; }
+.vq-clear h3 { color: var(--text-bright); margin: 0 0 6px; }
+.vq-clear-sub { font-size: 13px; }
+
+/* ── LAYOUT A: stack (검토 스택) ──────────────────────────────── */
+.vq-lay-stack .vq-list { display: flex; flex-direction: column; gap: 14px; }
+.vq-card {
+  border: 1px solid var(--border-main); border-radius: var(--radius-sm, 10px);
+  background: var(--bg-card); padding: 16px 18px; display: flex; flex-direction: column; gap: 14px;
+}
+.vq-card.pinned { border-color: var(--volt-dim); }
+.vq-card-top { display: flex; align-items: flex-start; gap: 12px; }
+.vq-card-top .grow { flex: 1; }
+.vq-card-meta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 2px; }
+
+/* ── LAYOUT B: split (분할 검토) ─────────────────────────────── */
+.vq-lay-split .vq-split { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
+.vq-splitlist { display: flex; flex-direction: column; gap: 7px; }
+.vq-splitrow {
+  appearance: none; cursor: pointer; text-align: left; width: 100%;
+  border: 1px solid var(--border-main); border-radius: var(--radius-sm, 8px);
+  background: var(--bg-card); padding: 11px 13px; display: flex; flex-direction: column; gap: 6px;
+  transition: all 0.14s ease;
+}
+.vq-splitrow:hover { background: var(--bg-card-hover); border-color: var(--border-highlight); }
+.vq-splitrow.on { border-color: var(--volt); background: var(--volt-wash, color-mix(in oklab, var(--volt) 8%, transparent)); }
+.vq-splitrow-t { font-size: 13px; color: var(--text-bright); line-height: 1.35; }
+.vq-splitrow-b { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+.vq-splitrow-g { display: inline-flex; align-items: center; gap: 5px; }
+.vq-mini-prog { flex: 1; height: 4px; border-radius: 2px; background: var(--bg-panel-alt); overflow: hidden; min-width: 40px; }
+.vq-mini-prog span { display: block; height: 100%; background: var(--status-ok); }
+.vq-splitrow.resolved { opacity: 0.55; }
+.vq-detail { border: 1px solid var(--border-main); border-radius: var(--radius-sm, 10px); background: var(--bg-card); padding: 18px 20px; display: flex; flex-direction: column; gap: 15px; }
+.vq-detail-empty { display: grid; place-items: center; min-height: 260px; color: var(--text-dim); font-size: 13px; }
+
+/* ── LAYOUT C: triage (트리아지 보드) ────────────────────────── */
+.vq-lay-triage .vq-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; align-items: start; }
+.vq-tri {
+  border: 1px solid var(--border-main); border-radius: var(--radius-sm, 8px);
+  background: var(--bg-card); padding: 13px 14px; display: flex; flex-direction: column; gap: 10px;
+}
+.vq-tri-top { display: flex; align-items: center; gap: 8px; }
+.vq-tri-title { font-size: 13.5px; color: var(--text-bright); line-height: 1.35; cursor: pointer; }
+.vq-tri-title:hover { color: var(--volt-strong); }
+.vq-tri-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-dim); }
+.vq-tri-gate { display: flex; align-items: center; gap: 8px; }
+.vq-tri-gate-bar { flex: 1; height: 5px; border-radius: 3px; background: var(--bg-panel-alt); overflow: hidden; }
+.vq-tri-gate-bar span { display: block; height: 100%; background: var(--status-ok); }
+.vq-tri-gate-n { font-family: var(--font-display); font-size: 10px; color: var(--text-dim); }
+.vq-tri-gate-n.open { color: var(--status-warn); }
+.vq-tri-actions { display: flex; gap: 6px; }
+.vq-tri-actions .vq-act { flex: 1; justify-content: center; padding: 7px 8px; }
+.vq-tri-more { appearance: none; cursor: pointer; background: transparent; border: 0; color: var(--text-dim); font-size: 11px; text-align: left; padding: 0; }
+.vq-tri-more:hover { color: var(--volt-strong); }
+.vq-tri.resolved { opacity: 0.55; }
+
+/* compact density trims */
+.v2-app[data-density="compact"] .vq-card { padding: 12px 14px; gap: 11px; }
+.v2-app[data-density="compact"] .vq-gate-row { padding: 7px 11px; }
+
+@media (max-width: 900px) {
+  .vq-lay-split .vq-split { grid-template-columns: 1fr; }
+}

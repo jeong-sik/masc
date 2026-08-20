@@ -95,8 +95,7 @@ let keeper_meta name =
 let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
     ?(selected_event = KSM.Operator_pause) () : Audit.transition_record =
   {
-    Audit.snapshot = None;
-    events_fired = [ selected_event ];
+    Audit.events_fired = [ selected_event ];
     selected_event;
     prev_phase;
     new_phase;
@@ -294,7 +293,7 @@ let test_transition_json_preserves_observation_only () =
   check string "new phase" "paused" (json |> member "new_phase" |> to_string);
   check string "outcome" "applied"
     (json |> member "transition_outcome" |> to_string);
-  check int "transition JSON has only observed fields" 8
+  check int "transition JSON has only observed fields" 7
     (match json with `Assoc fields -> List.length fields | _ -> 0)
 
 let test_runtime_trust_timeline_carries_transition_observation () =

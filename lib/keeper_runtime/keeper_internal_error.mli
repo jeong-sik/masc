@@ -12,6 +12,12 @@ val incomplete_tool_transcript_kind : string
     forbids same-turn replay. *)
 val provider_attempt_effect_fenced_kind : string
 
+(** Canonical wire kind for a fenced provider-attempt failure whose turn also
+    carried typed pre_tool_use rejections: the model's correction round-trip
+    was the visible casualty (masc#28885). Fence semantics are identical to
+    {!provider_attempt_effect_fenced_kind}; only the label differs. *)
+val tool_correction_lost_kind : string
+
 type provider_rejection = {
   provider_label : string;
   reason : string;
@@ -166,6 +172,18 @@ type masc_internal_error =
       (** A provider attempt failed after an effect was attempted or after the
           runtime lost complete effect observation. The exact source must be
           terminalized as failed, never replayed automatically. *)
+  | Tool_correction_lost of {
+      runtime_id : string;
+      effect_disposition : Keeper_provider_attempt_effect_core.t;
+      reject_count : int;
+      diagnostic : string;
+    }
+      (** The same fence, on a turn that also recorded typed pre_tool_use
+          rejections: the runtime escalated a corrective tool error into the
+          turn's death (masc#28885). Disposition is identical to
+          {!Provider_attempt_effect_fenced} — never replayed in-turn — the
+          label exists so operators can tell a lost correction from an
+          ordinary fenced provider failure. *)
   | Receipt_persistence_failed of { detail : string }
   | Gate_replay_repair_required of {
       approval_id : string;

@@ -43,12 +43,49 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
     def test_catalog_has_exact_rw19_persistence_projection_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        self.assertEqual(len(catalog["missions"]), 19)
-        self.assertEqual(catalog["missions"][-1]["id"], "RW19")
+        self.assertEqual(len(catalog["missions"]), 22)
+        self.assertEqual(catalog["missions"][18]["id"], "RW19")
         self.assertEqual(
-            catalog["missions"][-1]["assertions"],
+            catalog["missions"][18]["assertions"],
             ["persistence_tiers_dashboard_projection_observed"],
         )
+
+    def test_catalog_has_exact_rw20_rw21_delivery_and_debate_missions(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+
+        poc = catalog["missions"][19]
+        self.assertEqual(poc["id"], "RW20")
+        self.assertEqual(
+            poc["assertions"],
+            ["poc_execution_proof_observed", "poc_review_cites_execution"],
+        )
+        debate = catalog["missions"][20]
+        self.assertEqual(debate["id"], "RW21")
+        self.assertEqual(
+            debate["assertions"],
+            ["debate_restatement_faithful", "debate_verdict_cites_rebuttal"],
+        )
+        self.assertIn("tool_execute", catalog["keeper_required_tools"])
+
+    def test_catalog_has_exact_rw22_coverage_mission(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+
+        coverage = catalog["missions"][21]
+        self.assertEqual(coverage["id"], "RW22")
+        self.assertEqual(
+            coverage["assertions"],
+            [
+                "qa_coverage_execution_observed",
+                "qa_coverage_passes_verification",
+                "qa_coverage_review_matches_spec",
+            ],
+        )
+        # The row exists to reject partial runs, so the tester must be able to
+        # execute rather than only claim, and the work has to enter the typed
+        # verification flow and actually pass it — submitting is not completing.
+        self.assertIn("tool_execute", catalog["keeper_required_tools"])
+        self.assertIn("keeper_task_claim", catalog["keeper_required_tools"])
+        self.assertIn("keeper_task_done", catalog["keeper_required_tools"])
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}

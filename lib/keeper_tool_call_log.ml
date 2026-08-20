@@ -423,6 +423,7 @@ let log_call
       ~(duration_ms : float)
       ?(model : string = "")
       ?agent_name
+      ?turn_kind
       ?lane
       ?tool_choice
       ?thinking_enabled
@@ -439,6 +440,7 @@ let log_call
       ?composition_run_id
       ?composition_node_id
       ?composition_execution
+      ?composition_tool_kind
       ?parent_tool_use_id
       ?trace_id
       ?session_id
@@ -501,6 +503,16 @@ let log_call
       let lane_field =
         match lane with
         | Some value -> [ "lane", `String value ]
+        | None -> []
+      in
+      (* Names the turn that made the call: a submitted operation's turn or
+         the keeper's own autonomous cycle. Both produce identical rows
+         otherwise, so a reader joining calls to a submission had to guess
+         from timestamps (#28977). *)
+      let turn_kind_field =
+        match turn_kind with
+        | Some value ->
+          [ "turn_kind", `String (Turn_record.turn_kind_to_string value) ]
         | None -> []
       in
       let tool_choice_field =
@@ -592,6 +604,14 @@ let log_call
           [ ( "composition_execution"
             , `String
                 (Keeper_tool_composition_catalog.execution_mode_to_string value) )
+          ]
+        | None -> []
+      in
+      let composition_tool_kind_field =
+        match composition_tool_kind with
+        | Some value ->
+          [ ( "composition_tool_kind"
+            , `String (Keeper_tool_descriptor.tool_kind_to_string value) )
           ]
         | None -> []
       in
@@ -691,6 +711,7 @@ let log_call
            @ route_evidence_field
            @ model_field
            @ runtime_profile_field
+           @ turn_kind_field
            @ lane_field
            @ tool_choice_field
            @ thinking_enabled_field
@@ -705,6 +726,7 @@ let log_call
            @ typed_result_fields
            @ composition_fields
            @ composition_execution_field
+           @ composition_tool_kind_field
            @ trace_id_field
            @ session_id_field
            @ generation_field

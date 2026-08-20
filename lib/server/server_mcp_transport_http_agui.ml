@@ -40,16 +40,15 @@ let handle_ag_ui_events ~deps request reqd =
   let last_event_id = Server_mcp_transport_http_headers.get_last_event_id request in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
   | Error failure ->
-      respond_mcp_error
-        ?data:(auth_failure_data failure)
-        ~code:Mcp_error_code.Auth_error
+      respond_mcp_auth_error
         ~deps
         ~request_authority
+        ~endpoint:"GET /ag-ui/events"
         request
         reqd
         ~session_id
         ~protocol_version
-        failure.message
+        failure
   | Ok () ->
       (match last_event_id with
       | Error error ->
@@ -190,16 +189,15 @@ let handle_presence_events ~deps request reqd =
   let base_path = deps.get_base_path () in
   match deps.verify_mcp_observer_stream_auth ~base_path request with
   | Error failure ->
-      respond_mcp_error
-        ?data:(auth_failure_data failure)
-        ~code:Mcp_error_code.Auth_error
+      respond_mcp_auth_error
         ~deps
         ~request_authority
+        ~endpoint:"GET /events/presence"
         request
         reqd
         ~session_id:raw_session_id
         ~protocol_version
-        failure.message
+        failure
   | Ok () ->
       let token = Server_auth.observer_sse_auth_token_from_request request in
       let auth = { Sse.config = base_path; token } in

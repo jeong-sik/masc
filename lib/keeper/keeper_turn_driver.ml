@@ -205,6 +205,7 @@ let lane_should_retry
     | None -> false
 
 let attempt_runtime_candidates
+    ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
     ?(allow_accept_no_progress_retry = fun ~runtime_id:_ ~attempt:_ _error ->
       true)
@@ -350,12 +351,26 @@ let attempt_runtime_candidates
            | Keeper_provider_attempt_effect.No_effect_observed -> error
            | Keeper_provider_attempt_effect.Effect_attempted
            | Keeper_provider_attempt_effect.Observation_unavailable ->
-             core_error_of_masc_internal_error
-               (Provider_attempt_effect_fenced
-                  { runtime_id = attempt_runtime_id
-                  ; effect_disposition
-                  ; diagnostic = Agent_core.Error.to_string error
-                  })
+             (* masc#28885: a fence on a turn that also recorded typed
+                pre_tool_use rejections gets its own terminal label — the
+                model's correction round-trip was the visible casualty.
+                Disposition is identical to the plain fence. *)
+             (match !pre_tool_rejects with
+              | [] ->
+                core_error_of_masc_internal_error
+                  (Provider_attempt_effect_fenced
+                     { runtime_id = attempt_runtime_id
+                     ; effect_disposition
+                     ; diagnostic = Agent_core.Error.to_string error
+                     })
+              | rejects ->
+                core_error_of_masc_internal_error
+                  (Tool_correction_lost
+                     { runtime_id = attempt_runtime_id
+                     ; effect_disposition
+                     ; reject_count = List.length rejects
+                     ; diagnostic = Agent_core.Error.to_string error
+                     }))
          in
          let allow_accept_no_progress_retry =
            if
@@ -522,6 +537,7 @@ let attempt_inference_policy
 let run_named
     ~runtime_id
     ?(keeper_name = "")
+    ?pre_tool_rejects
     ~base_path
     ~goal
     ?goal_blocks
@@ -621,6 +637,11 @@ let run_named
      selecting a fresh lane walk. A deferred suffix was already frozen before
      pre-dispatch shaping, so re-reading wall-clock quota state here could make
      the actual provider differ from the runtime used to shape the request. *)
+  let pre_tool_rejects =
+    match pre_tool_rejects with
+    | Some rejects -> rejects
+    | None -> ref []
+  in
   let demote_quota_exhausted candidates =
     quota_ordered_runtime_ids
       (* NDT-OK: scheduling intentionally compares the stored expiry with
@@ -818,6 +839,7 @@ let run_named
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
   attempt_runtime_candidates
+    ~pre_tool_rejects
     ?lane_id:lane_id_opt
     ?on_retry_deferred:on_runtime_retry_deferred
     ~allow_retry:(fun ~runtime_id:attempt_runtime_id ~attempt error ->
@@ -874,6 +896,7 @@ let run_named
           Keeper_codex_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~pre_tool_rejects
             ~base_path
             ~goal
             ~goal_blocks
@@ -973,6 +996,7 @@ let run_named
           Keeper_antigravity_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~pre_tool_rejects
             ~base_path
             ~goal
             ~goal_blocks
@@ -1052,6 +1076,7 @@ let run_named
           Keeper_claude_code_runtime.run
             ~runtime_id:attempt_runtime_id
             ~keeper_name
+            ~pre_tool_rejects
             ~base_path
             ~goal
             ~goal_blocks

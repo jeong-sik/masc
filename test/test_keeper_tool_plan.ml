@@ -425,8 +425,273 @@ let test_composable_output_registry_is_closed () =
   check
     (list string)
     "explicit JSON-producing tools"
-    [ "Execute"; "keeper_time_now"; "masc_board_stats" ]
+    [ "Execute"
+    ; "keeper_artifact_read"
+    ; "keeper_tasks_list"
+    ; "keeper_time_now"
+    ; "masc_agent_card"
+    ; "masc_agent_fitness"
+    ; "masc_agent_timeline"
+    ; "masc_board_list"
+    ; "masc_board_stats"
+    ; "masc_get_metrics"
+    ; "masc_goal_list"
+    ; "masc_run_list"
+    ]
     json_names
+;;
+
+let test_declared_output_schemas_satisfy_the_contract () =
+  Descriptor.all_descriptors ()
+  |> List.iter (fun descriptor ->
+    match descriptor.Descriptor.composable_output with
+    | Descriptor.Opaque_output -> ()
+    | Descriptor.Json_output { schema } ->
+      (match Plan.validate_composable_schema schema with
+       | Ok () -> ()
+       | Error _ ->
+         failf
+           "declared composable schema violates the schema contract: %s"
+           descriptor.Descriptor.id))
+;;
+
+(* Producer-shaped samples mirror the single JSON construction site of each
+   tool; the file:line for each lives in the schema comments in
+   keeper_tool_descriptor.ml. *)
+let test_new_declared_output_schemas_admit_producer_shapes () =
+  let validate tool_name value =
+    let single = node ~id:"n" ~tool_name literal_object in
+    match Plan.create ~descriptors:(descriptors ()) [ single ] with
+    | Error _ -> failf "single-node plan was rejected for %s" tool_name
+    | Ok plan ->
+      Plan.validate_output plan ~run_id:(Plan.Run_id.fresh ()) ~node_id:(node_id "n") value
+  in
+  let accepts tool_name value =
+    match validate tool_name value with
+    | Ok _ -> ()
+    | Error _ -> failf "producer-shaped output was rejected for %s" tool_name
+  in
+  let rejects tool_name value =
+    match validate tool_name value with
+    | Error (Plan.Output_validation_failed _) -> ()
+    | Error _ | Ok _ -> failf "malformed output was accepted for %s" tool_name
+  in
+  let metrics_value =
+    Masc.Metrics_store_eio.agent_metrics_to_yojson
+      { Masc.Metrics_store_eio.agent_id = "albini"
+      ; period_start = 1755400000.0
+      ; period_end = 1755500000.0
+      ; total_tasks = 3
+      ; completed_tasks = 2
+      ; failed_tasks = 1
+      ; avg_completion_time_s = 42.5
+      ; task_completion_rate = 0.66
+      ; error_rate = 0.33
+      ; handoff_success_rate = 1.0
+      ; unique_collaborators = [ "gemini" ]
+      }
+  in
+  accepts
+    "masc_board_list"
+    (Masc.Snapshot_protocol.to_yojson
+       (Masc.Snapshot_protocol.Snapshot
+          { revision = "board:r1"; value = `String "posts" }));
+  accepts
+    "masc_board_list"
+    (Masc.Snapshot_protocol.to_yojson
+       (Masc.Snapshot_protocol.Unchanged { revision = "board:r1" }));
+  let task_item =
+    `Assoc
+      [ "id", `String "task-1"
+      ; "title", `String "t"
+      ; "description", `String "d"
+      ; "priority", `Int 3
+      ; "files", `List [ `String "lib/a.ml" ]
+      ; "created_at", `String "2026-08-18T00:00:00Z"
+      ; "status", `String "claimed"
+      ; "assignee", `String "albini"
+      ; "claimed_at", `String "2026-08-18T00:00:01Z"
+      ]
+  in
+  accepts
+    "keeper_tasks_list"
+    (`Assoc
+       [ "backlog_authority", `String "primary"
+       ; "degraded", `Bool false
+       ; "kind", `String "snapshot"
+       ; "revision", `String "tasks:r1"
+       ; "snapshot", `List [ task_item ]
+       ]);
+  accepts
+    "keeper_tasks_list"
+    (`Assoc
+       [ "backlog_authority", `String "primary"
+       ; "degraded", `Bool false
+       ; "kind", `String "unchanged"
+       ; "revision", `String "tasks:r1"
+       ]);
+  rejects
+    "keeper_tasks_list"
+    (`Assoc
+       [ "backlog_authority", `String "primary"
+       ; "degraded", `Bool false
+       ; "kind", `String "snapshot"
+       ]);
+  accepts
+    "keeper_artifact_read"
+    (`Assoc
+       [ "ok", `Bool true
+       ; "sha256", `String (String.make 64 'a')
+       ; "offset", `Int 0
+       ; "next_offset", `Int 512
+       ; "total_bytes", `Int 1024
+       ; "eof", `Bool false
+       ; "encoding", `String "utf-8"
+       ; "content", `String "chunk"
+       ]);
+  rejects
+    "keeper_artifact_read"
+    (`Assoc
+       [ "ok", `Bool true
+       ; "sha256", `String (String.make 64 'a')
+       ; "offset", `Int 0
+       ; "next_offset", `Int 512
+       ; "total_bytes", `Int 1024
+       ; "eof", `Bool false
+       ; "encoding", `String "utf-8"
+       ; "content", `String "chunk"
+       ; "_unexpected", `Bool true
+       ]);
+  accepts
+    "masc_agent_timeline"
+    (`Assoc
+       [ "dashboard_surface", `String "/api/v1/agent-timeline"
+       ; "source", `String "agent_timeline_read_model"
+       ; "retention", `Assoc [ "scope", `String "multi_source_tail" ]
+       ; "generated_at_iso", `String "2026-08-18T00:00:00Z"
+       ; "agent", `String "albini"
+       ; ( "period"
+         , `Assoc
+             [ "from", `String "2026-08-17T00:00:00Z"
+             ; "to", `String "2026-08-18T00:00:00Z"
+             ] )
+       ; ( "events"
+         , `List
+             [ `Assoc
+                 [ "ts", `String "2026-08-17T01:00:00Z"
+                 ; "type", `String "tool_call"
+                 ; "detail", `Assoc [ "tool", `String "masc_board_stats" ]
+                 ]
+             ] )
+       ; ( "summary"
+         , `Assoc
+             [ "tasks_completed", `Int 1
+             ; "tasks_claimed", `Int 1
+             ; "messages_sent", `Int 0
+             ; "tool_calls", `Int 1
+             ; "chat_messages", `Int 0
+             ; "turns_completed", `Int 2
+             ; "total_input_tokens", `Int 100
+             ; "total_output_tokens", `Int 50
+             ; "total_cost_usd", `Float 0.01
+             ; "active_duration_minutes", `Float 60.0
+             ; "total_events", `Int 1
+             ] )
+       ]);
+  accepts
+    "masc_goal_list"
+    (`Assoc
+       [ "status", `String "ok"
+       ; "generated_at", `String "2026-08-18T00:00:00Z"
+       ; "count", `Int 1
+       ; ( "goals"
+         , `List
+             [ `Assoc
+                 [ "id", `String "goal-1"
+                 ; "title", `String "g"
+                 ; "metric", `Null
+                 ; "priority", `Int 2
+                 ; "phase", `String "executing"
+                 ; "owner", `Null
+                 ; "created_at", `String "2026-08-01T00:00:00Z"
+                 ; "updated_at", `String "2026-08-18T00:00:00Z"
+                 ]
+             ] )
+       ; ( "rollup"
+         , `Assoc
+             [ "active_count", `Int 1
+             ; "paused_count", `Int 0
+             ; "verifying_count", `Int 0
+             ; "done_count", `Int 0
+             ; "dropped_count", `Int 0
+             ] )
+       ]);
+  accepts
+    "masc_run_list"
+    (`Assoc
+       [ "count", `Int 1
+       ; ( "runs"
+         , `List
+             [ Masc.Run_eio.run_record_to_json
+                 { Masc.Run_eio.task_id = "task-1"
+                 ; agent_name = None
+                 ; plan = "plan body"
+                 ; created_at = "2026-08-18T00:00:00Z"
+                 ; updated_at = "2026-08-18T00:00:00Z"
+                 }
+             ] )
+       ]);
+  accepts "masc_get_metrics" metrics_value;
+  accepts
+    "masc_get_metrics"
+    (match metrics_value with
+     | `Assoc fields ->
+       `Assoc
+         (fields
+          @ [ "requested_agent_name", `String "albini"
+            ; "resolved_agent_name", `String "keeper-albini-agent"
+            ])
+     | other -> other);
+  rejects
+    "masc_get_metrics"
+    (match metrics_value with
+     | `Assoc fields -> `Assoc (("_unexpected", `Bool true) :: fields)
+     | other -> other);
+  accepts
+    "masc_agent_fitness"
+    (`Assoc [ "count", `Int 0; "agents", `List [] ]);
+  accepts
+    "masc_agent_fitness"
+    (`Assoc
+       [ "count", `Int 1
+       ; ( "agents"
+         , `List
+             [ `Assoc
+                 [ "agent_id", `String "albini"
+                 ; ( "components"
+                   , `Assoc
+                       [ "completion", `Float 0.66
+                       ; "reliability", `Float 0.67
+                       ; "speed", `Float 1.0
+                       ; "handoff", `Float 1.0
+                       ] )
+                 ; "metrics", metrics_value
+                 ]
+             ] )
+       ]);
+  accepts
+    "masc_agent_card"
+    (`Assoc
+       [ "schema", `String "masc.agent_card.v1"
+       ; "name", `String "MASC"
+       ; "description", `String "MASC multi-agent workspace MCP server"
+       ; "action", `String "get"
+       ; "requested_by", `String "albini"
+       ; "base_path", `String "/tmp/masc"
+       ; "workspace_path", `String "/tmp/masc/ws"
+       ; "agent_count", `Int 2
+       ; "agent", `Null
+       ])
 ;;
 
 let test_composition_run_id_is_uuid_v7_identity () =
@@ -441,11 +706,165 @@ let test_composition_run_id_is_uuid_v7_identity () =
     [ first; second ]
 ;;
 
+module Request = Masc.Keeper_tool_plan_request
+
+let parse_request json =
+  Request.plan_of_json ~descriptors:(Descriptor.all_descriptors ()) json
+;;
+
+let request_of_string text = Yojson.Safe.from_string text
+
+let test_request_parses_reference_chain () =
+  let json =
+    request_of_string
+      {|{"nodes":[
+          {"id":"clock","tool":"keeper_time_now"},
+          {"id":"memory","tool":"keeper_memory_search","after":["clock"],
+           "input":{"kind":"object","fields":[
+             {"name":"query",
+              "value":{"kind":"output","node":"clock","pointer":"/now_iso"}}]}}]}|}
+  in
+  match parse_request json with
+  | Ok plan ->
+    let names =
+      Plan.nodes plan |> List.map (fun node -> Plan.Node_id.to_string node.Plan.id)
+    in
+    check (list string) "node order preserved" [ "clock"; "memory" ] names;
+    (match Plan.nodes plan with
+     | [ clock; _memory ] ->
+       check
+         (list string)
+         "clock has no dependencies"
+         []
+         (Plan.dependencies clock |> List.map Plan.Node_id.to_string)
+     | _ -> fail "expected exactly two nodes")
+  | Error error -> failf "reference chain rejected: %s" (Request.error_message error)
+;;
+
+let test_request_defaults_missing_input_to_empty_object () =
+  let json = request_of_string {|{"nodes":[{"id":"clock","tool":"keeper_time_now"}]}|} in
+  match parse_request json with
+  | Ok plan ->
+    (match Plan.nodes plan with
+     | [ clock ] ->
+       (match clock.Plan.input with
+        | Plan.Json_template.Literal (`Assoc []) -> ()
+        | _ -> fail "missing input did not default to the empty literal object")
+     | _ -> fail "expected exactly one node")
+  | Error error -> failf "single node rejected: %s" (Request.error_message error)
+;;
+
+let test_request_rejects_unknown_tool () =
+  let json = request_of_string {|{"nodes":[{"id":"a","tool":"no_such_tool"}]}|} in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Unknown_tool _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "unknown tool was accepted"
+;;
+
+let test_request_rejects_opaque_reference () =
+  let json =
+    request_of_string
+      {|{"nodes":[
+          {"id":"help","tool":"masc_tool_help"},
+          {"id":"reader","tool":"keeper_memory_search","after":["help"],
+           "input":{"kind":"object","fields":[
+             {"name":"query",
+              "value":{"kind":"output","node":"help","pointer":"/anything"}}]}}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Opaque_output_reference _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "opaque output reference was accepted"
+;;
+
+let test_request_rejects_dependency_cycle () =
+  let json =
+    request_of_string
+      {|{"nodes":[
+          {"id":"a","tool":"keeper_time_now","after":["b"]},
+          {"id":"b","tool":"keeper_time_now","after":["a"]}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Dependency_cycle _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "dependency cycle was accepted"
+;;
+
+let test_request_rejects_missing_dependency () =
+  let json =
+    request_of_string
+      {|{"nodes":[{"id":"a","tool":"keeper_time_now","after":["ghost"]}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Plan_rejected (Plan.Missing_dependency _)) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "missing dependency was accepted"
+;;
+
+let test_request_rejects_malformed_template () =
+  let json =
+    request_of_string
+      {|{"nodes":[{"id":"a","tool":"keeper_time_now",
+                   "input":{"kind":"teleport"}}]}|}
+  in
+  match parse_request json with
+  | Error (Request.Node_template_error { error = Request.Template_unknown_kind _; _ })
+    -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "unknown template kind was accepted"
+;;
+
+let test_request_rejects_unknown_request_field () =
+  let json = request_of_string {|{"nodes":[],"mode":"fast"}|} in
+  match parse_request json with
+  | Error (Request.Unknown_request_field { field = "mode" }) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "unknown request field was accepted"
+;;
+
+let test_request_rejects_empty_plan () =
+  let json = request_of_string {|{"nodes":[]}|} in
+  match parse_request json with
+  | Error (Request.Plan_rejected Plan.Empty_plan) -> ()
+  | Error error -> failf "wrong rejection: %s" (Request.error_message error)
+  | Ok _ -> fail "empty plan was accepted"
+;;
+
+let test_request_composable_names_match_registry () =
+  let names =
+    Request.composable_tool_names ~descriptors:(Descriptor.all_descriptors ())
+  in
+  check bool "keeper_time_now is composable" true (List.mem "keeper_time_now" names);
+  check bool "masc_tool_help stays opaque" false (List.mem "masc_tool_help" names)
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   run
     "keeper_tool_plan"
-    [ ( "typed-values"
+    [ ( "request"
+      , [ test_case "reference chain" `Quick test_request_parses_reference_chain
+        ; test_case
+            "missing input defaults"
+            `Quick
+            test_request_defaults_missing_input_to_empty_object
+        ; test_case "unknown tool" `Quick test_request_rejects_unknown_tool
+        ; test_case "opaque reference" `Quick test_request_rejects_opaque_reference
+        ; test_case "dependency cycle" `Quick test_request_rejects_dependency_cycle
+        ; test_case "missing dependency" `Quick test_request_rejects_missing_dependency
+        ; test_case "malformed template" `Quick test_request_rejects_malformed_template
+        ; test_case
+            "unknown request field"
+            `Quick
+            test_request_rejects_unknown_request_field
+        ; test_case "empty plan" `Quick test_request_rejects_empty_plan
+        ; test_case
+            "composable names"
+            `Quick
+            test_request_composable_names_match_registry
+        ] )
+    ; ( "typed-values"
       , [ test_case "node id" `Quick test_node_id_rejects_empty
         ; test_case "composition run UUID" `Quick test_composition_run_id_is_uuid_v7_identity
         ; test_case "JSON pointer" `Quick test_json_pointer_is_exact_rfc6901_navigation
@@ -468,6 +887,14 @@ let () =
             "closed composable output registry"
             `Quick
             test_composable_output_registry_is_closed
+        ; test_case
+            "declared schemas satisfy the contract"
+            `Quick
+            test_declared_output_schemas_satisfy_the_contract
+        ; test_case
+            "declared schemas admit producer shapes"
+            `Quick
+            test_new_declared_output_schemas_admit_producer_shapes
         ; test_case
             "unsupported output schema keywords"
             `Quick

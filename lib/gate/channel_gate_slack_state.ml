@@ -57,6 +57,18 @@ let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 let stale_after_sec () =
   Env_config_core.get_int ~default:30 "MASC_SLACK_STATUS_STALE_SEC"
 
+(* The one definition of "the transport is live", used both by [status_json]
+   and by the [Channel_gate_connector.S] registry export [connected]. Keeping
+   them as one function is the point: they used to disagree, because
+   [status_json] folded startup and binding-store health into the same boolean
+   while the registry read the socket alone. Those two facts have their own
+   fields ([error], [binding_store_read_ok]) and their own effect on
+   [available]. *)
+let transport_connected () =
+  match Slack_socket_client.connection_state () with
+  | Slack_gateway_state.Connected -> true
+  | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
+
 (* Trigger policy registry — set once at gateway startup, read for dashboard. *)
 let trigger_policy_ref : Slack_gateway_state.trigger_policy option ref =
   ref None
@@ -118,30 +130,43 @@ let status_json ?(audit_limit = 10) () =
     | Ok bindings -> bindings, ""
     | Error error -> [], Store.binding_store_error_to_string error
   in
-  let available = app_present && startup_ok && binding_store_read_ok in
-  let connected =
-    startup_ok
-    && binding_store_read_ok
-    && match gateway_state with
-       | Connected -> true
-       | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
+  (* Slack needs both credentials to do its job, and they fail differently:
+     without SLACK_APP_TOKEN the Socket Mode gateway never starts, and without
+     SLACK_BOT_TOKEN it starts and receives but every reply fails
+     ([send_message] returns [Missing_token]). A connector that cannot answer
+     is not available, so both are part of the verdict. *)
+  let credential_error =
+    if not app_present then "SLACK_APP_TOKEN is unset or empty"
+    else if not bot_present then
+      "SLACK_BOT_TOKEN is unset or empty: inbound connects but every outbound \
+       chat.postMessage fails"
+    else ""
   in
+  let available =
+    app_present && bot_present && startup_ok && binding_store_read_ok
+  in
+  let connected = transport_connected () in
   let stale = false in
   (* NDT-OK: status_json is a dashboard observation boundary; this timestamp
      reports gateway freshness and is not used for control flow. *)
   let updated_at = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ()) in
-  let transport_error =
+  (* A recorded startup error is why the gateway is not running; the rest is
+     downstream of it, so it stays the whole message. Otherwise report every
+     independent reason at once rather than letting one mask the others. *)
+  let error =
     match startup_error with
     | Some message -> message
     | None ->
-      (match gateway_state with
-       | Disconnected ->
-         if app_present then "" else "SLACK_APP_TOKEN is unset or empty"
-       | Failed msg -> msg
-       | Awaiting_hello | Connected | Reconnect_pending _ -> "")
-  in
-  let error =
-    if not binding_store_read_ok then binding_store_error else transport_error
+      [ (if binding_store_read_ok then None else Some binding_store_error)
+      ; (match gateway_state with
+         | Failed msg -> Some msg
+         | Disconnected | Awaiting_hello | Connected | Reconnect_pending _ ->
+           None)
+      ; (if String.equal credential_error "" then None
+         else Some credential_error)
+      ]
+      |> List.filter_map Fun.id
+      |> String.concat "; "
   in
   let recent_audit = read_recent_audit ~limit:audit_limit in
   let configured_binding_json = List.map binding_json configured_bindings in
@@ -333,10 +358,9 @@ let bound_channels ~keeper_name =
 
 let connected () =
   (* The in-process gateway (RFC-0317) is the only Slack transport; its run
-     loop publishes the typed connection state. *)
-  match Slack_socket_client.connection_state () with
-  | Slack_gateway_state.Connected -> true
-  | Disconnected | Awaiting_hello | Reconnect_pending _ | Failed _ -> false
+     loop publishes the typed connection state. Same definition [status_json]
+     reports — see [transport_connected]. *)
+  transport_connected ()
 
 (* ---- Outbound REST (delegates to Slack_rest_client with the bot token) ---- *)
 

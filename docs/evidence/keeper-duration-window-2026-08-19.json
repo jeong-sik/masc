@@ -1,0 +1,18 @@
+{
+  "captured_at": "2026-08-19T10:05+09:00",
+  "window": { "t0": "2026-08-19T05:50+09:00", "t4": "2026-08-19T10:03+09:00", "minutes": 253 },
+  "server_axis": {
+    "t1_63min": { "status": "ok", "schedule_runner_ticks": 2304, "failures": 0 },
+    "t2_123min": { "status": "ok", "schedule_runner_ticks": 2543, "failures": 0 },
+    "restart_between_t2_t4": "tick_count 2543→166 리셋으로 감지 — 새 바이너리 3bd64d9548(=#29043 포함 main) 재배포",
+    "t4_253min": { "status": "ok", "schedule_runner_ticks": 166, "failures": 0 },
+    "verdict": "연속 2h는 무실패 실측; 4h 칸의 서버 축은 재배포로 분절(정직 표기)"
+  },
+  "keeper_axis": {
+    "turns_in_window": 497,
+    "keepers": 13,
+    "top": { "adm-race-cf-000": 50, "adm-race-cf-002": 48, "adm-race-sf-000": 48 },
+    "verdict": "keeper 자율 턴은 재시작을 가로질러 253분 연속 — Autonomous duration 증거이자 재시작 내구성 실측"
+  },
+  "live_binary": "3bd64d9548 — 08-19 착륙 15건(write-ahead 3종·인증관측·회전·fold·lane예산·도구명진단·#28885 3단·store-writer·문서 4건) 전량 라이브"
+}

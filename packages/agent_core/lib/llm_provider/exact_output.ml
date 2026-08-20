@@ -88,12 +88,46 @@ type raw_response = Trace.raw_response =
   ; body_sha256 : string
   }
 
+type provider_refusal =
+  | Request_body_refused
+  | Rate_limited
+  | Overloaded
+  | Server_error
+  | Auth_failed
+  | Authorization_refused
+  | Payment_required
+  | Invalid_request
+  | Not_found
+  | Context_overflow
+  | Input_capacity
+  | Network_error
+  | Timeout
+
+let provider_refusal_to_string = function
+  | Request_body_refused -> "request_body_refused"
+  | Rate_limited -> "rate_limited"
+  | Overloaded -> "overloaded"
+  | Server_error -> "server_error"
+  | Auth_failed -> "auth_failed"
+  | Authorization_refused -> "authorization_refused"
+  | Payment_required -> "payment_required"
+  | Invalid_request -> "invalid_request"
+  | Not_found -> "not_found"
+  | Context_overflow -> "context_overflow"
+  | Input_capacity -> "input_capacity"
+  | Network_error -> "network_error"
+  | Timeout -> "timeout"
+;;
+
 type execution_error_cause =
   | Attempt_already_started
   | Clock_required_for_timeout
   | Frozen_request_mismatch
   | Completion_failed
-  | Serialized_request_refused of { http_status : int }
+  | Provider_response_refused of
+      { http_status : int
+      ; refusal : provider_refusal
+      }
   | Incomplete_output
   | Missing_output
   | Ambiguous_output of int
@@ -1070,10 +1104,19 @@ let evidence_transport_failure ~ordinal = function
   | Flow_advance_execution_failed { cause = Completion_failed; raw_response_sha256; _ } ->
     Ok (Validated_flow_evidence.Completion_failed_before_dispatch, raw_response_sha256)
   | Flow_advance_execution_failed
-      { cause = Serialized_request_refused { http_status }; raw_response_sha256; _ } ->
+      { cause = Provider_response_refused { http_status; refusal = Request_body_refused }
+      ; raw_response_sha256
+      ; _
+      } ->
     Ok
       ( Validated_flow_evidence.Serialized_request_refused { http_status }
       , raw_response_sha256 )
+  | Flow_advance_execution_failed
+      { cause = Provider_response_refused { http_status; refusal = Rate_limited }
+      ; raw_response_sha256
+      ; _
+      } ->
+    Ok (Validated_flow_evidence.Rate_limited { http_status }, raw_response_sha256)
   | Flow_advance_execution_failed { cause = Invalid_json_output; raw_response_sha256; _ }
     -> Ok (Validated_flow_evidence.Invalid_json_output, raw_response_sha256)
   | Flow_advance_execution_failed { cause; _ } ->
@@ -1083,7 +1126,11 @@ let evidence_transport_failure ~ordinal = function
       | Clock_required_for_timeout -> "clock_required_for_timeout"
       | Frozen_request_mismatch -> "frozen_request_mismatch"
       | Completion_failed -> "completion_failed"
-      | Serialized_request_refused _ -> "serialized_request_refused"
+      | Provider_response_refused { http_status; refusal } ->
+        Printf.sprintf
+          "provider_response_refused:%s:%d"
+          (provider_refusal_to_string refusal)
+          http_status
       | Incomplete_output -> "incomplete_output"
       | Missing_output -> "missing_output"
       | Ambiguous_output _ -> "ambiguous_output"
@@ -1536,31 +1583,40 @@ let synchronize_receipt = Generation_receipt.synchronize
 let raw_response = Trace.raw_response
 let record_provider_trace = Generation_receipt.record_provider_trace
 
-let serialized_request_refusal_of_http_error ~code ~body ~retry_after_header =
-  match Retry.classify_error ~retry_after_header ~status:code ~body with
-  | Retry.InvalidRequest { reason = Retry.Request_body_refused_by_provider { status }; _ }
-    -> Some status
-  | Retry.RateLimited _
-  | Retry.Overloaded _
-  | Retry.ServerError _
-  | Retry.AuthError _
-  | Retry.AuthorizationError _
-  | Retry.PaymentRequired _
-  | Retry.InvalidRequest _
-  | Retry.NotFound _
-  | Retry.ContextOverflow _
-  | Retry.InputCapacity _
-  | Retry.NetworkError _
-  | Retry.Timeout _ -> None
+(* [Retry] already classifies a provider response; this projects that verdict
+   onto the flow's vocabulary WITHOUT collapsing it. The previous form answered
+   one question ("was this a body refusal?") and returned [None] for the other
+   twelve, and the caller read that [None] as "no status to report" — which is
+   how a 429 reached the keeper log as a bare "completion failed" with neither
+   its status nor its kind, and why the lane could not advance off it. *)
+let provider_refusal_of_api_error : Retry.api_error -> provider_refusal = function
+  | Retry.InvalidRequest { reason = Retry.Request_body_refused_by_provider _; _ } ->
+    Request_body_refused
+  | Retry.InvalidRequest _ -> Invalid_request
+  | Retry.RateLimited _ -> Rate_limited
+  | Retry.Overloaded _ -> Overloaded
+  | Retry.ServerError _ -> Server_error
+  | Retry.AuthError _ -> Auth_failed
+  | Retry.AuthorizationError _ -> Authorization_refused
+  | Retry.PaymentRequired _ -> Payment_required
+  | Retry.NotFound _ -> Not_found
+  | Retry.ContextOverflow _ -> Context_overflow
+  | Retry.InputCapacity _ -> Input_capacity
+  | Retry.NetworkError _ -> Network_error
+  | Retry.Timeout _ -> Timeout
 ;;
 
 let execution_error_cause = function
   | Exec.Clock_required_for_timeout -> Clock_required_for_timeout
   | Exec.Frozen_request_mismatch -> Frozen_request_mismatch
   | Exec.Provider_error (Http_client.HttpError { code; body; retry_after_header }) ->
-    (match serialized_request_refusal_of_http_error ~code ~body ~retry_after_header with
-     | Some http_status -> Serialized_request_refused { http_status }
-     | None -> Completion_failed)
+    Provider_response_refused
+      { http_status = code
+      ; refusal =
+          provider_refusal_of_api_error
+            (Retry.classify_error ~retry_after_header ~status:code ~body)
+      }
+  (* No HTTP status was produced, so there is no response to classify. *)
   | Exec.Provider_error _ -> Completion_failed
   | Exec.Output_normalization_failed (Exec.Incomplete_structured_response _) ->
     Incomplete_output
@@ -1661,15 +1717,43 @@ let execute_once_with_publication ~publish ~net ?clock (attempt : attempt) =
 let execution_failure_may_advance (error : execution_error) =
   match error.cause, receipt_phase error.receipt with
   | Completion_failed, Before_dispatch -> receipt_dispatch_count error.receipt = 0
-  | Serialized_request_refused _, Response_received ->
+  (* A refusal admits the successor only when the response proves the refusal
+     belongs to THIS binding and not to the input itself — otherwise the
+     successor replays a request that is already known to fail. *)
+  | Provider_response_refused { refusal = Request_body_refused; _ }, Response_received ->
     (* The response contract proves that the provider rejected this input before
        generation. Keep the honest one-dispatch receipt, but allow the frozen
        lane to try its predetermined successor. *)
     receipt_dispatch_count error.receipt = 1
+  | Provider_response_refused { refusal = Rate_limited; _ }, Response_received ->
+    (* Quota is a property of the binding, not of the request: the successor
+       carries its own. This is what an ordered lane of candidates is for, and
+       until the refusal kind survived classification the lane could not reach
+       it — a 429 arrived here as [Completion_failed] and ended the flow. *)
+    receipt_dispatch_count error.receipt = 1
   | Invalid_json_output, (Response_received | Terminal) ->
     receipt_dispatch_count error.receipt = 1
+  (* The remaining refusals do not advance, as before this classification
+     existed. Promoting any one of them needs its own argument about whether the
+     successor can serve the same input, which this change does not make. *)
+  | ( Provider_response_refused
+        { refusal =
+            ( Overloaded
+            | Server_error
+            | Auth_failed
+            | Authorization_refused
+            | Payment_required
+            | Invalid_request
+            | Not_found
+            | Context_overflow
+            | Input_capacity
+            | Network_error
+            | Timeout )
+        ; _
+        }
+    , (Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal) )
   | Completion_failed, (Not_started | Dispatch_started | Response_received | Terminal)
-  | ( Serialized_request_refused _
+  | ( Provider_response_refused { refusal = Request_body_refused | Rate_limited; _ }
     , (Not_started | Before_dispatch | Dispatch_started | Terminal) )
   | Invalid_json_output, (Not_started | Before_dispatch | Dispatch_started)
   | ( ( Attempt_already_started

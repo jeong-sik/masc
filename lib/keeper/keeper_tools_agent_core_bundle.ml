@@ -362,11 +362,8 @@ let make_tool_bundle_for_descriptors
       descriptors
   in
   let composition_tools =
-    match composition_catalog with
-    | None -> []
-    | Some catalog ->
-      Keeper_tool_composition_surface.make_tools
-        ~catalog
+    Keeper_tool_composition_surface.make_tools
+        ?catalog:composition_catalog
         ~config
         ~meta
         ~publication_recovery

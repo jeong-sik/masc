@@ -53,6 +53,17 @@ type dynamic_tool = Runtime_official_client_tool.dynamic_tool =
   ; call : call_id:string -> Yojson.Safe.t -> dynamic_tool_result
   }
 
+(** One pre_tool_use rejection (typed [Block]) recorded during a turn.
+    The official-client CLI owns the live conversation; when it
+    escalates the reject to a dead turn this record is the only
+    surviving copy of the corrective round-trip (masc#28885). *)
+type rejected_tool_call =
+  { call_id : string
+  ; tool_name : string
+  ; input : Yojson.Safe.t
+  ; detail : string
+  }
+
 type raw_trace_stage =
   | Run_start
   | Assistant_block
@@ -168,6 +179,7 @@ val dynamic_tools :
   context:Agent_core.Context.t option ->
   terminal_effect_state:(unit -> Keeper_tools_agent_core.terminal_effect_state) ->
   terminal_error:string option ref ->
+  pre_tool_rejects:rejected_tool_call list ref ->
   raw_trace_run:Agent_core.Raw_trace.active_run option ->
   (dynamic_tool list, Agent_core.Error.t) result
 (** Project Agent Core tools onto one official-client turn. Three consecutive
@@ -175,6 +187,23 @@ val dynamic_tools :
     [abort_turn]; this is the official-client equivalent of Agent Core's
     repeated exact tool boundary and prevents a vendor-owned loop from holding
     one Keeper and host resources indefinitely. *)
+
+val persist_pre_tool_rejects :
+  session_dir:string ->
+  session_id:string ->
+  rejected_tool_call list ->
+  (int, string) result
+(** Append a dead turn's reject round-trips to the canonical checkpoint
+    so the next turn's replay carries the corrective text (masc#28885:
+    every escalated turn lost its correction and the model resent the
+    same broken call). Each reject becomes the pair a surviving turn
+    already persists — an assistant [ToolUse] block answered by a
+    tool-role [ToolResult] with the deterministic validation failure —
+    appended in call order. Returns how many rejects were persisted; an
+    empty list and a missing checkpoint (no replay exists to correct)
+    are both [Ok 0]. Callers flush only on a failed turn: a surviving
+    turn's round-trips reach the checkpoint through the next turn's
+    history, and appending them here too would duplicate them. *)
 
 val with_run_lifecycle_events :
   event_bus:Agent_core.Event_bus.t option ->

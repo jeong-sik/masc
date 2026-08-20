@@ -921,12 +921,172 @@ let test_empty_store () =
 
 (* ── Test Suite ───────────────────────────────────────── *)
 
+(* ── append_rotating: size-capped ring over intra-day segments ────
+   (#29009) The previous cap contract dropped every row for the rest of
+   the day once the current file was full. These pin the replacement:
+   the full file rotates to [DD.NNN.jsonl], new rows keep landing, the
+   store byte budget sheds the oldest segment first, and every reader
+   sees segments as ordinary day files. *)
+
+(* Fixed-size row: {"i":N} + newline = 8 bytes for single-digit N, so
+   the caps below are exact row multiples. *)
+let tiny_json i = `Assoc [ ("i", `Int i) ]
+let tiny_row_bytes = String.length (Yojson.Safe.to_string (tiny_json 1)) + 1
+
+let today_parts () =
+  let tm = Unix.gmtime (Unix.gettimeofday ()) in
+  let month = Printf.sprintf "%04d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) in
+  let day = Printf.sprintf "%02d" tm.Unix.tm_mday in
+  (month, day)
+
+let segment_path dir ~sequence =
+  let month, day = today_parts () in
+  Filename.concat (Filename.concat dir month)
+    (Printf.sprintf "%s.%03d.jsonl" day sequence)
+
+let current_path dir =
+  let month, day = today_parts () in
+  Filename.concat (Filename.concat dir month) (day ^ ".jsonl")
+
+let non_empty_lines file =
+  Fs_compat.load_file file
+  |> String.split_on_char '\n'
+  |> List.filter (fun l -> String.trim l <> "")
+
+let test_append_rotating_rotates_at_cap () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_rotate" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  (match
+     Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+       (tiny_json 1)
+   with
+   | Dated_jsonl.Appended_to_current -> ()
+   | _ -> fail "first row must land in the current file");
+  (match
+     Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+       (tiny_json 2)
+   with
+   | Dated_jsonl.Appended_after_rotation { segment } ->
+     let _, day = today_parts () in
+     check string "segment name" (Printf.sprintf "%s.001.jsonl" day) segment
+   | _ -> fail "second row must rotate the full current file");
+  check int "segment holds the first row" 1
+    (List.length (non_empty_lines (segment_path dir ~sequence:1)));
+  check int "current holds the second row" 1
+    (List.length (non_empty_lines (current_path dir)));
+  let values = List.map json_i (Dated_jsonl.read_recent store 10) in
+  check (list int) "readers see both rows across the rotation" [ 1; 2 ] values
+
+let test_append_rotating_range_reads_cross_segments () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_rotate_range" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  for i = 1 to 3 do
+    ignore
+      (Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+         (tiny_json i)
+        : Dated_jsonl.append_outcome)
+  done;
+  let month, day = today_parts () in
+  let today = month ^ "-" ^ day in
+  let values =
+    Dated_jsonl.read_range store ~since:today ~until:today |> List.map json_i
+  in
+  check (list int) "range read includes rotated segments" [ 1; 2; 3 ] values
+
+let test_append_rotating_ring_prunes_oldest_segment () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_rotate_ring" in
+  let store =
+    Dated_jsonl.create ~base_dir:dir ~max_bytes:(2 * tiny_row_bytes) ()
+  in
+  for i = 1 to 3 do
+    ignore
+      (Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+         (tiny_json i)
+        : Dated_jsonl.append_outcome)
+  done;
+  (* Three rows at a two-row budget: the oldest completed segment is
+     shed, the newest segment and the current file survive. *)
+  check bool "oldest segment pruned" false
+    (Sys.file_exists (segment_path dir ~sequence:1));
+  check bool "newest segment survives" true
+    (Sys.file_exists (segment_path dir ~sequence:2));
+  let values = List.map json_i (Dated_jsonl.read_recent store 10) in
+  check (list int) "ring keeps the newest rows" [ 2; 3 ] values
+
+let test_append_rotating_oversized_row_lands_in_empty_current () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_rotate_oversized" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let oversized = `Assoc [ ("i", `Int 1); ("pad", `String (String.make 64 'x')) ] in
+  (match
+     Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+       oversized
+   with
+   | Dated_jsonl.Appended_to_current -> ()
+   | _ -> fail "an oversized row must land in an empty current file");
+  (match
+     Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+       (tiny_json 2)
+   with
+   | Dated_jsonl.Appended_after_rotation { segment = _ } -> ()
+   | _ -> fail "the next row must rotate the oversized file out");
+  let values = List.map json_i (Dated_jsonl.read_recent store 10) in
+  check (list int) "both rows readable" [ 1; 2 ] values
+
+let test_append_rotating_sequence_survives_restart () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "dated_jsonl_rotate_restart" in
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  ignore
+    (Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+       (tiny_json 1)
+      : Dated_jsonl.append_outcome);
+  ignore
+    (Dated_jsonl.append_rotating store ~max_current_file_bytes:tiny_row_bytes
+       (tiny_json 2)
+      : Dated_jsonl.append_outcome);
+  (* A fresh handle over the same directory derives the next sequence
+     from the names on disk, not from in-process state. *)
+  let reopened = Dated_jsonl.create ~base_dir:dir () in
+  (match
+     Dated_jsonl.append_rotating reopened ~max_current_file_bytes:tiny_row_bytes
+       (tiny_json 3)
+   with
+   | Dated_jsonl.Appended_after_rotation { segment } ->
+     let _, day = today_parts () in
+     check string "sequence continues after reopen"
+       (Printf.sprintf "%s.002.jsonl" day) segment
+   | _ -> fail "reopened store must rotate with the next sequence");
+  check bool "first segment still present" true
+    (Sys.file_exists (segment_path dir ~sequence:1))
+
 let () =
   run "Dated_jsonl"
     [
       ( "append",
         [
           test_case "creates dated file" `Quick test_append_creates_dated_file;
+        ] );
+      ( "append_rotating",
+        [
+          test_case "rotates the full current file at the cap" `Quick
+            test_append_rotating_rotates_at_cap;
+          test_case "range reads cross rotated segments" `Quick
+            test_append_rotating_range_reads_cross_segments;
+          test_case "byte budget sheds the oldest segment first" `Quick
+            test_append_rotating_ring_prunes_oldest_segment;
+          test_case "oversized single row lands in an empty file" `Quick
+            test_append_rotating_oversized_row_lands_in_empty_current;
+          test_case "rotation sequence survives a reopen" `Quick
+            test_append_rotating_sequence_survives_restart;
         ] );
       ( "read_recent",
         [

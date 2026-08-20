@@ -7,7 +7,13 @@
     durable store holds: the AGENT_CORE checkpoint keeps [system_prompt] and the
     replayed messages, but nothing else keeps the per-turn injected context.
     Tool schemas use the same {!Agent_core.Tool.schema_to_json} projection AGENT_CORE
-    prepares for the provider. String content is passed through
+    prepares for the provider; the redacted schema array is stored once in the
+    shared {!Tool_blob_store} under its content address and each request row
+    carries a [tools_ref] normalized artifact reference instead of the inline
+    array (measured 2026-08-18 on a live root: 2,702 rows held 2 unique
+    ~80KB arrays — 99.3% of all capture bytes were copies). Blob maintenance
+    already lists wire-capture as a durable consumer, so the blob expires with
+    the last retained row that references it. String content is passed through
     {!Llm_provider.Secret_redactor} and the exact {!Keeper_secret_redaction}
     projection snapshot before it is written.
 
@@ -23,11 +29,15 @@
 
     Writes are best-effort and dated under
     [<masc_root>/wire-capture/YYYY-MM/DD.jsonl] (same [Dated_jsonl] per-day
-    store the cost ledger uses). The active day file and completed-file
-    retention are bounded by
-    [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS] and
-    [MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES]. A write failure is logged and never
-    interrupts the turn.
+    store the cost ledger uses). [MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES] is
+    the store byte budget: the current day file rotates to a completed
+    [DD.NNN.jsonl] segment at an eighth of the budget and capture
+    continues in a fresh file, while the budget prunes the oldest
+    completed files — so a busy day keeps a ring of its newest segments
+    and sheds its oldest instead of going dark after the cap
+    ([Dated_jsonl.append_rotating]). Retention is bounded by
+    [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS]. A write failure is
+    logged and never interrupts the turn.
 
     Motivation: the request boundary is the primary suspect for
     self-reinforcing repetition — the keeper's own prior visible text is
@@ -87,8 +97,9 @@ val capture_request :
     correlation. [base_path] selects the exact Keeper secret projection
     snapshot; [masc_root] must already be the effective cluster-aware MASC
     root. [tool_schema_bytes] records the byte length of the exact unredacted
-    compact JSON schema array while [tools] stores its recursively redacted
-    content. [history_messages] is consumed for [history_message_count] and
+    compact JSON schema array while [tools_ref] points at its recursively
+    redacted content in the shared blob store (see the module header).
+    [history_messages] is consumed for [history_message_count] and
     [history_messages_digest] only; the messages themselves are not written
     (see the module header). *)
 

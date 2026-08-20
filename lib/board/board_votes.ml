@@ -336,8 +336,11 @@ let comment_of_yojson = Board_votes_json.comment_of_yojson
 let load_persisted_posts = Board_votes_json.load_persisted_posts
 let load_persisted_comments = Board_votes_json.load_persisted_comments
 
-(** Recalculate reply_count for all posts based on actual comments.
-    This ensures data consistency after loading from disk. *)
+(** Recalculate reply_count for all posts based on actual comments, and
+    restore each post's [updated_at] high-water mark from its comments'
+    [created_at]. This ensures data consistency after loading from disk:
+    the posts snapshot can predate comment WAL rows appended after the
+    last flush, so both the count and the timestamp are re-derived. *)
 let recalculate_reply_counts store =
   (* First, reset all reply_counts to 0 *)
   Hashtbl.iter (fun key (p : post) ->
@@ -348,7 +351,10 @@ let recalculate_reply_counts store =
     let post_key = Post_id.to_string c.post_id in
     match Hashtbl.find_opt store.posts post_key with
     | Some p ->
-        Hashtbl.replace store.posts post_key { p with reply_count = p.reply_count + 1 }
+        Hashtbl.replace store.posts post_key
+          { p with
+            reply_count = p.reply_count + 1
+          ; updated_at = Stdlib.Float.max p.updated_at c.created_at }
     | None -> ()
   ) store.comments;
   let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in

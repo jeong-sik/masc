@@ -149,6 +149,7 @@ type blocker_class =
   | Incomplete_tool_transcript
   | Terminal_effect_failed
   | Provider_attempt_effect_fenced
+  | Tool_correction_lost
   | Receipt_persistence_failed
   | Gate_replay_repair_required
 

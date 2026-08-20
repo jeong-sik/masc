@@ -536,8 +536,6 @@ let read_journal_tail ~keepers_dir ~keeper_id ~limit =
           Error (Printf.sprintf "journal line is not valid JSON: %s" message)))
 ;;
 
-let lock_path snapshot_path = snapshot_path ^ ".lock"
-
 let update_locked
       ?clock
       ?dropped_statements
@@ -547,7 +545,9 @@ let update_locked
   =
   Fs_compat.mkdir_p keepers_dir;
   let snapshot_path = path_for_keepers_dir ~keepers_dir ~keeper_id in
-  File_lock_eio.with_lock ?clock (lock_path snapshot_path) (fun () ->
+  (* File_lock_eio.with_lock appends ".lock" itself; a pre-suffixed path
+     locked "<snapshot>.lock.lock" and left a stray file per keeper. *)
+  File_lock_eio.with_lock ?clock snapshot_path (fun () ->
     let* previous =
       match Fs_compat.load_file_opt snapshot_path with
       | None -> Ok None

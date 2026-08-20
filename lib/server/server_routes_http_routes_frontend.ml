@@ -129,7 +129,17 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
       (match
          websocket_upgrade_authorized ~base_path ~request_authority request
        with
-       | Error err -> respond_auth_error request reqd err
+       | Error err ->
+         (* Reject-boundary contract: every client-visible auth reject
+            leaves a metric + log trace (see [record_mcp_auth_reject]).
+            The response shape is unchanged. *)
+         Server_mcp_transport_http_respond.record_mcp_auth_reject
+           ~endpoint:"GET /ws upgrade"
+           ~claimed_agent:(agent_from_request request)
+           ~token_presented:(Option.is_some (auth_token_from_request request))
+           ~session_id:None
+           (Server_mcp_transport_http_types.auth_failure_of_masc_error err);
+         respond_auth_error request reqd err
        | Ok () ->
          (match
             Server_mcp_transport_ws.upgrade_connection

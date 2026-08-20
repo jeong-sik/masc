@@ -35,3 +35,11 @@ export const chatShowInternal = persistentSignal<boolean>({
   key: 'dashboard:chat:show-internal-v1',
   defaultValue: legacyBool(LEGACY_INTERNAL_KEY) ?? true,
 })
+
+/** Show autonomous-turn entries in transcripts. They are visible by default
+ *  but not part of the direct conversation, so they get their own switch
+ *  rather than riding the internal-message toggle. */
+export const chatShowAutonomous = persistentSignal<boolean>({
+  key: 'dashboard:chat:show-autonomous-v1',
+  defaultValue: true,
+})

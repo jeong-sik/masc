@@ -92,6 +92,7 @@ val prepare_agent_setup
   -> start_turn_count:int
   -> generation:int
   -> keeper_turn_id:int
+  -> turn_kind:Turn_record.turn_kind
   -> runtime_id:string
   -> is_retry:bool
   -> config_root:string

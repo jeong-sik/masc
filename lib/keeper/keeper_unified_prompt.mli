@@ -98,10 +98,10 @@ val owned_executing_goals_without_tasks :
     decoration and should be removed. *)
 
 val unowned_executing_goals_without_tasks :
-  config:Workspace.config -> (string * string * string option) list
-(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves, each
-    with its [parent_goal_id]. The same list for every keeper, because an
-    unowned Goal is addressed to whoever reads it.
+  config:Workspace.config -> (string * string) list
+(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves, as
+    [(id, title)]. The same list for every keeper, because an unowned Goal is
+    addressed to whoever reads it.
 
     The prompt already states that taking one is a move a keeper can make, and
     [handle_goal_assign] carries no ownership check. What was missing was the
@@ -112,10 +112,21 @@ val unowned_executing_goals_without_tasks :
     store seven of the ten are children of the eighth, and as peers "take one"
     cannot distinguish taking the umbrella from taking one service under it. *)
 
+(** What the prompt knows about one active goal: id, title, and the stored
+    phase. [summary_phase] is [None] only for an id the store cannot resolve
+    (a dangling assignment, kept visible). RFC-0387 stage 2 carries the phase
+    so a [Verifying] goal renders annotated in the Active Goals layer — the
+    gate must not make the goal disappear from the keeper (review P0-1). *)
+type goal_summary = {
+  summary_goal_id : string;
+  summary_title : string;
+  summary_phase : Goal_phase.t option;
+}
+
 val active_goal_summaries :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  (string * string) list
+  goal_summary list
 (** Resolve the active goal ids a keeper can still progress, for the stable
     prompt contract. [meta.active_goal_ids] records assignment and is never
     cleared when a goal reaches a terminal phase, so ids whose stored phase
@@ -129,7 +140,7 @@ val build_system_prompt :
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
-  ?active_goal_summaries:(string * string) list ->
+  ?active_goal_summaries:goal_summary list ->
   unit ->
   string
 (** Build the model-facing stable Keeper contract shared by direct and
@@ -150,7 +161,7 @@ val build_prompt :
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   turn_decision:Keeper_world_observation.keeper_cycle_decision ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
-  ?active_goal_summaries:(string * string) list ->
+  ?active_goal_summaries:goal_summary list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts
@@ -164,14 +175,15 @@ val build_prompt :
     - [current_task] renders the held task or its explicit missing/unavailable
       state. [No_current_task] omits the layer.
     - [?active_goal_summaries]: renders goal titles next to ids in the Active
-      Goals layer. Omitted or empty: bare ids. *)
+      Goals layer, with a proof-pending annotation on [Verifying] goals
+      (RFC-0387 stage 2). Omitted or empty: bare ids. *)
 
 val build_prompt_preview :
   meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   ?profile_defaults:Keeper_types_profile.keeper_profile_defaults ->
   current_task:Keeper_world_observation_inputs.current_task_observation ->
-  ?active_goal_summaries:(string * string) list ->
+  ?active_goal_summaries:goal_summary list ->
   observation:Keeper_world_observation.world_observation ->
   unit ->
   turn_prompt_parts

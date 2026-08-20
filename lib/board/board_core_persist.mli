@@ -27,6 +27,12 @@ val flusher_schedule_dropped_count : unit -> int
 val persist_error_count : unit -> int
 val record_persist_error : where:string -> string -> unit
 
+(** [persist_io_error ~where msg] records the failure via
+    {!record_persist_error} and returns the typed
+    [Error (Io_error "<where>: <msg>")] the append paths surface to
+    their callers. *)
+val persist_io_error : where:string -> string -> ('a, board_error) result
+
 val create_store : unit -> store
 
 val invalidate_post_caches : store -> unit
@@ -54,10 +60,6 @@ val ensure_masc_dir : unit -> unit
 val max_jsonl_bytes : int
 val rotate_if_needed : string -> unit
 
-val posts_jsonl_unlocked : store -> string
-(* [save_posts_jsonl_result] is the result-returning inner form of
-   [save_posts_jsonl] below, which is the door callers use. *)
-val save_posts_jsonl : string -> unit
 val rewrite_posts : store -> unit
 val rewrite_comments : store -> unit
 val reactions_jsonl_unlocked : store -> string

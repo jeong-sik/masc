@@ -377,21 +377,31 @@ let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)
 ;;
-let rewrite_comments store =
+let comments_jsonl_unlocked store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun _ (cmt : comment) ->
+       Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
+       Buffer.add_char buf '\n')
+    store.comments;
+  Buffer.contents buf
+;;
+let save_comments_jsonl content =
   try
     ensure_masc_dir ();
-    let path = comments_path () in
-    let buf = Buffer.create 4096 in
-    Hashtbl.iter
-      (fun _ (cmt : comment) ->
-         Buffer.add_string buf (Yojson.Safe.to_string (comment_to_yojson cmt));
-         Buffer.add_char buf '\n')
-      store.comments;
-    match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+    match Fs_compat.save_file_atomic (comments_path ()) content with
     | Ok () -> ()
     | Error msg -> record_persist_error ~where:"rewrite_comments" msg
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
+;;
+(* Mirrors [rewrite_posts]: snapshot under [store.mutex], disk I/O under
+   the persist lock after releasing the state lock. The previous body
+   iterated [store.comments] and wrote the file with no lock at all,
+   contradicting the interface doc; callers must not hold [store.mutex]. *)
+let rewrite_comments store =
+  let content = with_lock store (fun () -> comments_jsonl_unlocked store) in
+  with_persist_lock store (fun () -> save_comments_jsonl content)
 ;;
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
@@ -433,21 +443,6 @@ let append_comment (c : comment) =
     Ok ()
   with
   | Sys_error msg -> persist_io_error ~where:"append_comment" msg
-;;
-
-let rollback_fresh_post store (post : post) =
-  with_lock store (fun () ->
-    let key = Post_id.to_string post.id in
-    match Hashtbl.find_opt store.posts key with
-    | None -> ()
-    | Some current
-      when Stdlib.Float.equal current.created_at post.created_at
-           && Stdlib.Float.equal current.updated_at post.updated_at ->
-      Hashtbl.remove store.posts key;
-      unindex_post_origin store post;
-      store.post_count := max 0 (!(store.post_count) - 1);
-      invalidate_post_caches store
-    | Some _ -> ())
 ;;
 
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
@@ -557,47 +552,76 @@ let create_post_with_audience
       with
       | Error _ as error -> error
       | Ok audience ->
-      let board_result =
+      (* Write-ahead (PR #28934 class, #28952): validate under
+         [with_lock] with no mutation, durably append outside any lock,
+         then commit under [with_lock]. The previous shape mutated
+         first and appended second, so a racing [flush_dirty] could
+         snapshot-write a post whose durable append was about to fail
+         and be rolled back — reviving it from the snapshot on restart.
+         If staging rejects or the append fails, nothing was mutated. *)
+      let staged =
         with_lock store (fun () ->
           match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
             | Error e -> Error e
             | Ok () ->
               let now = Time_compat.now () in
-              let post =
-                    { id = Post_id.generate ()
-                    ; author = author_id
-                    ; title = normalized_title
-                    ; body = normalized_body
-                    ; content = normalized_body
-                    ; post_kind = normalized_kind
-                    ; meta_json = normalized_meta
-                    ; visibility
-                    ; created_at = now
-                    ; updated_at = now
-                    ; expires_at
-                    ; votes_up = 0
-                    ; votes_down = 0
-                    ; reply_count = 0
-                    ; pinned = false
-                    ; hearth
-                    ; thread_id
-                    ; origin
-                    }
-                  in
-                  Hashtbl.add store.posts (Post_id.to_string post.id) post;
-                  index_post_origin store post;
-                  Stdlib.incr store.post_count;
-                  invalidate_post_caches store;
-              Ok post)
+              Ok
+                { id = Post_id.generate ()
+                ; author = author_id
+                ; title = normalized_title
+                ; body = normalized_body
+                ; content = normalized_body
+                ; post_kind = normalized_kind
+                ; meta_json = normalized_meta
+                ; visibility
+                ; created_at = now
+                ; updated_at = now
+                ; expires_at
+                ; votes_up = 0
+                ; votes_down = 0
+                ; reply_count = 0
+                ; pinned = false
+                ; hearth
+                ; thread_id
+                ; origin
+                })
       in
-      match board_result with
+      match staged with
+      | Error _ as e -> e
       | Ok post ->
         (match with_persist_lock store (fun () -> append_post post) with
-         | Ok () -> Ok { post; audience }
-         | Error e ->
-           rollback_fresh_post store post;
-           Error e)
-      | Error _ as e -> e
+         | Error _ as e -> e
+         | Ok () ->
+           let committed =
+             with_lock store (fun () ->
+               (* Commit re-checks the policy: staging validated it, but
+                  it can flip while the append is in flight, and commit
+                  is the authoritative gate — a durable row without a
+                  commit stays provisional. *)
+               match
+                 validate_sub_board_post_policy_unlocked store ~author_id ~hearth
+               with
+               | Error _ as e -> e
+               | Ok () ->
+                 Hashtbl.add store.posts (Post_id.to_string post.id) post;
+                 index_post_origin store post;
+                 Stdlib.incr store.post_count;
+                 invalidate_post_caches store;
+                 Ok ())
+           in
+           (match committed with
+            | Ok () -> Ok { post; audience }
+            | Error e ->
+              (* The appended row is an orphan on disk (the policy
+                 flipped mid-append; the post never reached memory).
+                 Rewrite the posts snapshot to dispose of it — the
+                 snapshot cannot contain the orphan. If the rewrite
+                 itself fails, the next successful snapshot rewrite
+                 disposes of the row; a restart before that would
+                 revive the post, because a post row is self-contained
+                 and the loader cannot tell it was never committed. *)
+              rewrite_posts store;
+              Error e))
 ;;
 
 let create_post store ~author ~content ?title ?body ~post_kind ?meta_json

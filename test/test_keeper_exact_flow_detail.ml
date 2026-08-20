@@ -6,9 +6,19 @@ module Exact_output = Agent_core.Exact_output
 let test_execution_cause_detail () =
   Alcotest.(check string)
     "refused"
-    "serialized request refused (http_status=413)"
+    "provider refused (http_status=413 refusal=request_body_refused)"
     (Detail.execution_cause_detail
-       (Exact_output.Serialized_request_refused { http_status = 413 }));
+       (Exact_output.Provider_response_refused
+          { http_status = 413; refusal = Exact_output.Request_body_refused }));
+  (* The line an operator reads when a lane dies on quota. It carried neither
+     the status nor the kind while a 429 was classified as a bare
+     [Completion_failed]. *)
+  Alcotest.(check string)
+    "rate limited"
+    "provider refused (http_status=429 refusal=rate_limited)"
+    (Detail.execution_cause_detail
+       (Exact_output.Provider_response_refused
+          { http_status = 429; refusal = Exact_output.Rate_limited }));
   Alcotest.(check string)
     "completion"
     "completion failed"
@@ -103,7 +113,19 @@ let test_every_execution_cause_renders_distinctly () =
     ; Clock_required_for_timeout
     ; Frozen_request_mismatch
     ; Completion_failed
-    ; Serialized_request_refused { http_status = 429 }
+    ; Provider_response_refused { http_status = 413; refusal = Request_body_refused }
+    ; Provider_response_refused { http_status = 429; refusal = Rate_limited }
+    ; Provider_response_refused { http_status = 529; refusal = Overloaded }
+    ; Provider_response_refused { http_status = 500; refusal = Server_error }
+    ; Provider_response_refused { http_status = 401; refusal = Auth_failed }
+    ; Provider_response_refused { http_status = 403; refusal = Authorization_refused }
+    ; Provider_response_refused { http_status = 402; refusal = Payment_required }
+    ; Provider_response_refused { http_status = 400; refusal = Invalid_request }
+    ; Provider_response_refused { http_status = 404; refusal = Not_found }
+    ; Provider_response_refused { http_status = 400; refusal = Context_overflow }
+    ; Provider_response_refused { http_status = 400; refusal = Input_capacity }
+    ; Provider_response_refused { http_status = 400; refusal = Network_error }
+    ; Provider_response_refused { http_status = 408; refusal = Timeout }
     ; Incomplete_output
     ; Missing_output
     ; Ambiguous_output 3

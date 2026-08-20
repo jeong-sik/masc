@@ -343,6 +343,10 @@ let explicit_metadata : (string * metadata) list =
     ("masc_board_cleanup", admin_tool);
     ("masc_board_delete", admin_tool);
     ("masc_gc", admin_tool);
+    (* POST /api/v1/prompts. An override replaces a prompt for every keeper the
+       runtime serves, so it carries the same admin permission as the other
+       fleet-wide mutations here. *)
+    ("masc_prompt_override", admin_tool);
     ("masc_pause", broadcast_tool);
     ("masc_resume", broadcast_tool);
     ("masc_pause_status", read_state_tool);

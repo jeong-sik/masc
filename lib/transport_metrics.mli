@@ -112,6 +112,18 @@ val inc_sse_idle_evicted : unit -> unit
     logs. *)
 val inc_sse_reject : reason:string -> unit
 
+(** [inc_mcp_auth_reject ~endpoint ~reason] increments
+    [masc_mcp_auth_rejects_total{endpoint,reason}] when an MCP
+    transport request is rejected at the auth boundary (HTTP 401).
+    [endpoint] is the fixed route label (e.g. ["POST /mcp"]),
+    [reason] the typed [auth_error_code] ("invalid_token",
+    "missing_token", ...) — never free-form message text, so the
+    label set stays bounded.  Paired with the [Log.Auth] reject
+    event emitted at the same boundary; before this pair a stale
+    bearer produced only a client-visible 401 (2026-08-18 live
+    finding: all external MCP credentials stale, zero trace). *)
+val inc_mcp_auth_reject : endpoint:string -> reason:string -> unit
+
 (** Increments [masc_sse_reconnects_total] whenever an SSE client
     arrives with a [Last-Event-Id] header, i.e. is asking the
     server to replay events from a prior connection.  Distinct

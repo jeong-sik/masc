@@ -121,12 +121,12 @@ val active_agents_change_fn : ([ `Inc | `Dec ] -> unit) Atomic.t
 val telemetry_observe_failure_fn : (string -> unit) Atomic.t
 val get_default_runtime_id_fn : (unit -> string) Atomic.t
 
-(** [\[runtime\].cross_verifier] runtime id for the anti-rationalization
-    evaluator, or [None] to use {!get_default_runtime_id_fn}. Wired to
-    [Runtime.cross_verifier_runtime_id] at startup; defaults to [fun () -> None]
-    (use the global default) when not connected, so callers in test contexts
-    fall back rather than crash. *)
-val get_cross_verifier_runtime_id_fn : (unit -> string option) Atomic.t
+(** Admitted [\[runtime.exact_output_lanes.verifier_exact\]] slot ids in frozen
+    declaration order for the completion-authority evaluator (RFC-0361 D7(a)).
+    Wired to [Runtime.verifier_exact_lane_slot_ids] at startup; the unconnected
+    default is an explicit [Error], so test contexts that drive a review must
+    install their own slot list rather than inherit a silent runtime default. *)
+val get_verifier_exact_lane_slot_ids_fn : (unit -> (string list, string) result) Atomic.t
 
 val record_task_metric_fn :
   (Workspace_utils_backend_setup.config ->

@@ -48,7 +48,6 @@ describe('runtime TOML dashboard editing helpers', () => {
     const environment = parseRuntimeTomlEnvironment(sourceText)
 
     expect(environment.defaultRuntimeId).toBe('runpod_mtp.qwen')
-    expect(environment.crossVerifierRuntimeId).toBe('')
     expect(environment.assignments).toEqual({})
     expect(environment.providers[0]).toMatchObject({
       id: 'runpod_mtp',
@@ -118,7 +117,7 @@ max-context = 131072
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
     const withRouting = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',
-      'default = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"',
     )}
 
 [runtime.assignments]
@@ -128,7 +127,6 @@ mad-improver = "runpod_mtp.qwen"
 
     const environment = parseRuntimeTomlEnvironment(withRouting)
 
-    expect(environment.crossVerifierRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.assignments).toEqual({
       sangsu: 'runpod_mtp.qwen',
       'mad-improver': 'runpod_mtp.qwen',
@@ -374,7 +372,7 @@ sangsu = "runpod_mtp.qwen"
   it('retargets default and clears the dependent route when deleting a provider with a fallback binding', () => {
     const withFallback = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',
-      'default = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"',
     )}
 
 [providers.openai]
@@ -398,7 +396,6 @@ sangsu = "runpod_mtp.qwen"
     const env = parseRuntimeTomlEnvironment(next)
 
     expect(env.defaultRuntimeId).toBe('openai.gpt')
-    expect(env.crossVerifierRuntimeId).toBe('')
     expect(env.assignments).toEqual({})
     expect(env.providers.map(p => p.id)).toEqual(['openai'])
     expect(env.bindings.map(b => b.id)).toEqual(['openai.gpt'])

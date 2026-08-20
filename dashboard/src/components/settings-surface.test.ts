@@ -156,6 +156,7 @@ function makeLogsData(entries: readonly LogEntry[]): LogsData {
       scope: 'dashboard_logs',
       durableStore: '/workspace/.masc/logs/system_log_2026-06-21.jsonl',
     },
+    ring: { startSeq: 0, total: entries.length, droppedBefore: false },
     total: entries.length,
     entries,
   }
@@ -180,12 +181,10 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
 
 function makeModelRouting(
   overrides: {
-    cross_verifier_runtime_id?: string | null
     media_failover?: string[]
   } = {},
 ): RuntimeDefaultsResponse['model_routing'] {
   return {
-    cross_verifier_runtime_id: null,
     media_failover: [],
     ...overrides,
   }
@@ -583,6 +582,12 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
     expect(container.querySelector('[data-testid="settings-control-ledger"]')?.textContent)
       .toContain('browser shell only')
+    // The ledger reads and never writes, so it ships collapsed: open above the
+    // real controls it looked like one of them that refused to work.
+    const ledger = container.querySelector('[data-testid="settings-control-ledger"]')
+    expect(ledger?.tagName.toLowerCase()).toBe('details')
+    expect((ledger as HTMLDetailsElement | null)?.open).toBe(false)
+    expect(ledger?.querySelector('summary')?.textContent).toContain('읽기 전용')
     expect(container.querySelector('[data-control-id="settings-theme-density"]')?.getAttribute('data-control-kind'))
       .toBe('browser-local')
     expect(container.querySelector('[data-control-id="settings-display-locale"]')?.getAttribute('data-control-kind'))
@@ -1322,7 +1327,6 @@ describe('SettingsSurface', () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
         }),
       }),
@@ -1341,41 +1345,8 @@ describe('SettingsSurface', () => {
         .toContain('수동 reroute')
       expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
         .toContain('provider 실패 자동 전환이 아니라')
-      expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
     })
-  })
-
-  it('patches scalar model routing lanes from settings and refreshes the projection', async () => {
-    apiMock.fetchRuntimeDefaults.mockReset()
-    apiMock.fetchRuntimeDefaults
-      .mockResolvedValueOnce(makeRuntimeDefaults())
-      .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: makeModelRouting({
-          cross_verifier_runtime_id: 'rt-b',
-          media_failover: [],
-        }),
-      }))
-    render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
-    await waitFor(() => {
-      const select = container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement | null
-      expect(select).not.toBeNull()
-      expect(select?.disabled).toBe(false)
-      expect(select?.options.length).toBeGreaterThan(1)
-    })
-
-    const crossVerifier = container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement
-    await fireEvent.input(crossVerifier, { target: { value: 'rt-b' } })
-
-    await waitFor(() => {
-      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('cross_verifier', 'rt-b')
-      expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
-      expect((container.querySelector('[data-testid="runtime-routing-cross-verifier"]') as HTMLSelectElement).value)
-        .toBe('rt-b')
-    })
-    expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
   })
 
   it('routing section exposes a required default lane without an empty option and patches it', async () => {
@@ -1438,13 +1409,11 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          cross_verifier_runtime_id: null,
           media_failover: ['rt-b'],
         }),
       }))
       .mockResolvedValueOnce(makeRuntimeDefaults({
         model_routing: makeModelRouting({
-          cross_verifier_runtime_id: null,
           media_failover: ['rt-b', 'rt-c'],
         }),
       }))

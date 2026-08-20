@@ -280,6 +280,36 @@ let worktree_root ~local_path =
   | Ok [] -> Stdlib.Error "git rev-parse --show-toplevel returned no output"
   | Error msg -> Stdlib.Error msg
 
+type checkout_identity = {
+  toplevel : string;
+  git_common_dir : string;
+}
+
+let checkout_identity ~local_path =
+  (* Outputs arrive in argument order; [--path-format=absolute] pins
+     both lines to absolute paths regardless of the cwd (git >= 2.31,
+     far below any environment this runs in). *)
+  match
+    run_git
+      ~cwd:local_path
+      ~env:read_only_git_env
+      ~timeout_sec:inspection_timeout_sec
+      [ "rev-parse"
+      ; "--path-format=absolute"
+      ; "--show-toplevel"
+      ; "--git-common-dir"
+      ]
+  with
+  | Ok (toplevel :: git_common_dir :: _) ->
+    let toplevel = String.trim toplevel in
+    let git_common_dir = String.trim git_common_dir in
+    if String.equal toplevel "" || String.equal git_common_dir ""
+    then Stdlib.Error "git rev-parse checkout identity returned blank output"
+    else Stdlib.Ok { toplevel; git_common_dir }
+  | Ok _ ->
+    Stdlib.Error "git rev-parse checkout identity returned too few lines"
+  | Error msg -> Stdlib.Error msg
+
 let branch_of_origin_head_ref refname =
   let refname = String.trim refname in
   let prefix = "refs/remotes/origin/" in

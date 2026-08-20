@@ -114,6 +114,7 @@ vi.mock('../keeper-state', async () => {
           && entry.source !== 'tool_result'
           && entry.source !== 'system'),
     ),
+    isAutonomousTurnEntry: (entry: { source?: string }) => entry.source === 'autonomous_turn',
   }
 })
 
@@ -170,6 +171,7 @@ import {
   resetToolCallOutputs,
 } from '../tool-call-output-store'
 import { shellAuthSummary } from '../store'
+import { chatShowAutonomous, chatShowInternal } from '../lib/chat-view-prefs'
 import type { KeeperConversationEntry } from '../types'
 import {
   KeeperConversationPanel,
@@ -245,6 +247,8 @@ describe('KeeperConversationPanel', () => {
     })
     keeperThreads.value = {}
     keeperSending.value = {}
+    chatShowAutonomous.value = true
+    chatShowInternal.value = true
     keeperHydrating.value = {}
     keeperStatusDetails.value = {}
     keeperActionErrors.value = {}
@@ -339,6 +343,112 @@ describe('KeeperConversationPanel', () => {
     expect(container.querySelector('[data-chat-variant="messenger"]')).not.toBeNull()
     expect(container.querySelector('textarea')?.getAttribute('placeholder')).toBe('메시지 입력...')
     expect(hydrateKeeperStatus).not.toHaveBeenCalled()
+  })
+
+  it('hides autonomous turns when the autonomous view pref is off', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '직접 질문',
+          rawText: '직접 질문',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'autonomous-1',
+          role: 'assistant',
+          source: 'autonomous_turn',
+          label: 'sangsu',
+          text: '자율 작업 결과',
+          rawText: '자율 작업 결과',
+          timestamp: '2026-03-24T00:02:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+    expect(container.textContent).toContain('자율턴')
+
+    chatShowAutonomous.value = false
+    await waitFor(() => {
+      expect(container.textContent).not.toContain('자율턴')
+    })
+    expect(container.textContent).toContain('직접 질문')
+  })
+
+  it('internal-message banner count excludes autonomously hidden turns', async () => {
+    keeperThreads.value = {
+      sangsu: [
+        {
+          id: 'world',
+          role: 'user',
+          source: 'world_state_prompt',
+          label: 'system',
+          text: '## Current World State',
+          rawText: '## Current World State',
+          timestamp: '2026-03-24T00:00:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'direct-user',
+          role: 'user',
+          source: 'direct_user',
+          label: '사용자',
+          text: '직접 질문',
+          rawText: '직접 질문',
+          timestamp: '2026-03-24T00:01:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+        {
+          id: 'autonomous-1',
+          role: 'assistant',
+          source: 'autonomous_turn',
+          label: 'sangsu',
+          text: '자율 작업 결과',
+          rawText: '자율 작업 결과',
+          timestamp: '2026-03-24T00:02:00.000Z',
+          delivery: 'history',
+          streamState: null,
+          details: null,
+          error: null,
+        },
+      ],
+    }
+    chatShowInternal.value = false
+    chatShowAutonomous.value = false
+
+    render(
+      html`<${KeeperConversationPanel} keeperName="sangsu" placeholder="메시지 입력..." />`,
+      container,
+    )
+    await Promise.resolve()
+
+    // Only the world-state prompt counts as a hidden internal message; the
+    // autonomous turn was hidden by its own toggle and must not inflate it.
+    expect(container.textContent).toContain('1개의 내부 메시지가 숨겨져 있습니다')
+    expect(container.textContent).not.toContain('자율턴')
+    expect(container.textContent).toContain('직접 질문')
   })
 
   it('renders the primary conversation layout as an airy canvas', async () => {

@@ -56,7 +56,21 @@ type resolve_error =
       ; live_turn_id : int option
             (** [Some turn_id] when the refusal came from a turn in flight
                 rather than from the phase. The chat lane admits turns without
-                changing phase, so phase alone does not see it. *)
+                changing phase, so phase alone does not see it.
+
+                The phase arm is checked first, and an autonomous turn sets
+                both signals at once, so [None] here means "the phase refused
+                it", not "no turn is running".
+
+                [current_turn_observation] is in-memory only and is cleared by
+                [mark_turn_finished]. The chat lane swallows
+                [Eio.Cancel.Cancelled] around that call
+                ([keeper_turn.ml:861-865]), so a cancelled chat turn can leave
+                the marker set and keep refusing purges. Recovery is a server
+                restart, which re-registers every Keeper with the field unset,
+                or the supervisor sweep that unregisters an exited lane. There
+                is no per-Keeper reset: [register_restarting] would do it but
+                has no production caller. *)
       }
 
 val resolve_error_to_string : resolve_error -> string

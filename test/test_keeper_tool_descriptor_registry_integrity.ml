@@ -1575,10 +1575,134 @@ let test_public_mcp_membership_matches_surface_ssot () =
     Masc.Config.raw_all_tool_schemas
 ;;
 
+(* keeper_surface_post is described in three places: the MCP tool schema
+   (tool_surface layer), the keeper descriptor's input schema, and the executor
+   that validates the call. Nothing made them agree, and two descriptions had
+   already drifted into saying a dashboard/discord target is "ignored" when the
+   executor rejects it. RFC-0056 forbids the tool_surface layer from importing
+   keeper, so the block cap exists as two constants; this pins them equal and
+   pins the parameter sets equal, which is the check that was missing. *)
+let surface_post_schema_properties (schema : Yojson.Safe.t) =
+  match schema with
+  | `Assoc fields -> (
+    match List.assoc_opt "properties" fields with
+    | Some (`Assoc props) -> List.map fst props |> List.sort String.compare
+    | Some _ | None -> Alcotest.fail "keeper_surface_post schema has no properties")
+  | _ -> Alcotest.fail "keeper_surface_post schema is not an object"
+;;
+
+let surface_post_block_cap (schema : Yojson.Safe.t) =
+  match schema with
+  | `Assoc fields -> (
+    match List.assoc_opt "properties" fields with
+    | Some (`Assoc props) -> (
+      match List.assoc_opt "blocks" props with
+      | Some (`Assoc block_fields) -> List.assoc_opt "maxItems" block_fields
+      | Some _ | None -> None)
+    | Some _ | None -> None)
+  | _ -> None
+;;
+
+let tool_schema_for name =
+  match
+    List.find_opt
+      (fun (t : Masc_domain.tool_schema) -> String.equal t.name name)
+      Tool_shard_types.surface_tools
+  with
+  | Some tool -> tool.input_schema
+  | None -> Alcotest.failf "tool schema %s is not registered" name
+;;
+
+let descriptor_schema_for name =
+  (* Registered with [~keeper_model_projection:Internal_name], so
+     [public_input_schema] does not resolve it. *)
+  match Descriptor.descriptors_for_internal name with
+  | descriptor :: _ -> descriptor.Descriptor.input_schema
+  | [] -> Alcotest.failf "descriptor %s is not registered" name
+;;
+
+let test_surface_post_schema_copies_agree () =
+  let tool_schema = tool_schema_for "keeper_surface_post" in
+  let descriptor_schema = descriptor_schema_for "keeper_surface_post" in
+  check
+    (list string)
+    "the two keeper_surface_post schemas declare the same parameters"
+    (surface_post_schema_properties descriptor_schema)
+    (surface_post_schema_properties tool_schema);
+  let expected = `Int Masc.Keeper_surface_post.max_rich_blocks in
+  check
+    bool
+    "the tool schema's block cap equals the executor's"
+    true
+    (surface_post_block_cap tool_schema = Some expected);
+  check
+    bool
+    "the descriptor's block cap equals the executor's"
+    true
+    (surface_post_block_cap descriptor_schema = Some expected)
+;;
+
+(* The executor refuses these two parameters outside Slack. A description that
+   says "ignored" sends the model into a call that fails. *)
+let test_surface_post_descriptions_do_not_promise_ignoring () =
+  let contains needle haystack =
+    let n = String.length needle in
+    let rec scan i =
+      i + n <= String.length haystack
+      && (String.equal (String.sub haystack i n) needle || scan (i + 1))
+    in
+    n > 0 && scan 0
+  in
+  let descriptions schema =
+    match schema with
+    | `Assoc fields -> (
+      match List.assoc_opt "properties" fields with
+      | Some (`Assoc props) ->
+        List.filter_map
+          (fun (name, value) ->
+             match value with
+             | `Assoc value_fields -> (
+               match List.assoc_opt "description" value_fields with
+               | Some (`String text) -> Some (name, text)
+               | Some _ | None -> None)
+             | _ -> None)
+          props
+      | Some _ | None -> [])
+    | _ -> []
+  in
+  List.iter
+    (fun schema ->
+       List.iter
+         (fun (name, text) ->
+            match name with
+            | "thread_ts" | "blocks" ->
+              check
+                bool
+                (name ^ " does not describe a rejected target as ignored")
+                false
+                (contains "ignored for dashboard" text
+                 || contains "ignored for discord" text)
+            | _ -> ())
+         (descriptions schema))
+    [ tool_schema_for "keeper_surface_post"
+    ; descriptor_schema_for "keeper_surface_post"
+    ]
+;;
+
 let () =
   Alcotest.run
     "keeper_tool_descriptor_registry_integrity"
-    [ ( "uniqueness"
+    [ ( "surface_post schema parity"
+      , [ test_case
+            "both keeper_surface_post schemas agree with the executor"
+            `Quick
+            test_surface_post_schema_copies_agree
+        ; test_case
+            "slack-only parameters are not described as ignored"
+            `Quick
+            test_surface_post_descriptions_do_not_promise_ignoring
+        ] )
+    ; ( "uniqueness"
       , [ test_case "registry not empty" `Quick test_registry_not_empty
         ; test_case "public_name is unique" `Quick test_public_name_uniqueness
         ; test_case "internal_name is unique" `Quick test_internal_name_uniqueness

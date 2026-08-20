@@ -59,55 +59,57 @@ let wait_for_active_switch_count clock expected =
   loop 100
 ;;
 
-(* #29024: [wait_for_running] / [wait_for_lost] / [wait_for_cancelled] used to
-   spin on [Eio.Fiber.yield], which only reschedules fibers already runnable in
-   this domain. The transition they wait for is produced on a separate OS
-   thread ([Eio_guard.run_in_systhread] in keeper_msg_async.ml), so a yield
-   handed it no time at all and the whole 200-step budget could burn through in
-   microseconds. On an idle machine the thread happened to land first; under CI
-   load it did not, which is why the failing case moved between runs (14, then
-   16 and 17, then 15). Wait on the clock, the way every other waiter in this
-   file already does. *)
-let wait_poll_interval_seconds = 0.01
-let wait_poll_steps = 200
+(* #29024: these waits used to sample the store in a loop -- originally
+   spinning on [Eio.Fiber.yield], which only reschedules fibers already
+   runnable in this domain and so handed no time at all to the separate OS
+   thread that produces the transition ([Eio_guard.run_in_systhread] in
+   keeper_msg_async.ml). Sampling on a clock instead would only widen the
+   window; the transition still has to be guessed at from outside.
 
-let wait_for_running_with_clock clock ~base_path request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll ~base_path ~caller request_id with
-    | Keeper_msg_async.Found ({ status = Running; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not start" request_id)
-    | _ ->
-      Eio.Time.sleep clock wait_poll_interval_seconds;
-      loop (remaining - 1)
-  in
-  loop wait_poll_steps
+   Both transitions announce themselves, so wait on the announcement:
+
+   - worker start -- [f] is invoked after the Running status is committed and
+     after the request switch is registered, so entering [f] IS the signal.
+   - terminal settlement -- every abort path calls [notify_settled], which is
+     what [~on_worker_settled] receives. The .mli calls it "the single
+     projection boundary for SSE or other live terminal notifications".
+
+   The deadline below is a failure detector, not the wait: without it a signal
+   that never arrives would hang the run instead of failing it. *)
+let signal_deadline_seconds = 10.0
+
+let await_signal clock ~what promise =
+  match
+    Eio.Time.with_timeout clock signal_deadline_seconds (fun () ->
+      Ok (Eio.Promise.await promise))
+  with
+  | Ok value -> value
+  | Error `Timeout ->
+    failwith
+      (Printf.sprintf "%s did not signal within %.0fs" what signal_deadline_seconds)
 ;;
 
-let wait_for_lost_with_clock clock ~base_path request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll ~base_path ~caller request_id with
-    | Keeper_msg_async.Found ({ status = Lost _; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not become lost" request_id)
-    | _ ->
-      Eio.Time.sleep clock wait_poll_interval_seconds;
-      loop (remaining - 1)
-  in
-  loop wait_poll_steps
+(* [notify_settled] can project more than one settlement for a request; only
+   the first Cancelled one resolves the promise. *)
+let resolve_once flag resolver value =
+  if not (Atomic.exchange flag true) then Eio.Promise.resolve resolver value
 ;;
 
-let wait_for_cancelled_with_clock clock ~base_path request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll ~base_path ~caller request_id with
-    | Keeper_msg_async.Found ({ status = Cancelled _; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not become cancelled" request_id)
-    | _ ->
-      Eio.Time.sleep clock wait_poll_interval_seconds;
-      loop (remaining - 1)
+(* Resolves on the first settlement carrying a Cancelled status. Every abort
+   path in keeper_msg_async.ml commits the status and then calls
+   [notify_settled], so this fires after the transition is durable. *)
+let cancelled_signal () =
+  let seen = Atomic.make false in
+  let promise, resolver = Eio.Promise.create () in
+  let observe settlement =
+    match settlement with
+    | Keeper_msg_async.Status_settlement
+        { entry = { Keeper_msg_async.status = Cancelled _; _ } as entry; _ } ->
+      resolve_once seen resolver entry
+    | Keeper_msg_async.Status_settlement _
+    | Keeper_msg_async.Settlement_projection_error _ -> ()
   in
-  loop wait_poll_steps
+  promise, observe
 ;;
 
 
@@ -784,6 +786,7 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-lost-" in
   let promise, _resolver = Eio.Promise.create () in
   let request_id =
@@ -793,12 +796,13 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
       ~caller
       ~keeper_name:"gamma"
       ~f:(fun _request_sw ->
+        Eio.Promise.resolve notify_entered_worker ();
         Eio.Promise.await promise;
         tr_ok "{}")
       ()
     |> accepted_request_id
   in
-  ignore (wait_for_running_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+  await_signal clock ~what:"worker start" entered_worker;
   (match
      Keeper_msg_async.cancel ~base_path ~caller:"different-caller" request_id
    with
@@ -845,6 +849,7 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-recover-sweep-" in
   let promise, _resolver = Eio.Promise.create () in
   let request_id =
@@ -854,12 +859,13 @@ let test_keeper_msg_async_recovery_sweep_marks_only_disk_only_inflight_lost () =
       ~caller
       ~keeper_name:"sweep"
       ~f:(fun _request_sw ->
+        Eio.Promise.resolve notify_entered_worker ();
         Eio.Promise.await promise;
         tr_ok "{}")
       ()
     |> accepted_request_id
   in
-  ignore (wait_for_running_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+  await_signal clock ~what:"worker start" entered_worker;
   Alcotest.(check int)
     "live in-memory worker is not recovered as lost"
     0
@@ -911,27 +917,33 @@ let test_keeper_msg_async_marks_cancelled_worker_cancelled () =
   with_eio_env
   @@ fun env ->
   let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-cancel-" in
-  let request_id =
+  (* The switch teardown at the end of this block is what cancels the worker.
+     [accepted_request_id] still runs: it asserts the submission was durably
+     accepted. Nothing needs the id any more now that both waits are signals. *)
+  let () =
     Eio.Switch.run
     @@ fun sw ->
     let never, _resolver = Eio.Promise.create () in
-    let request_id =
-      Keeper_msg_async.submit
-        ~background_sw:sw
-        ~base_path
-        ~caller
-        ~keeper_name:"cancelled"
-        ~f:(fun _request_sw ->
-          Eio.Promise.await never;
-          tr_ok "{}")
-        ()
-      |> accepted_request_id
-    in
-    ignore (wait_for_running_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
-    request_id
+    ignore
+      (Keeper_msg_async.submit
+         ~on_worker_settled:observe_cancelled
+         ~background_sw:sw
+         ~base_path
+         ~caller
+         ~keeper_name:"cancelled"
+         ~f:(fun _request_sw ->
+           Eio.Promise.resolve notify_entered_worker ();
+           Eio.Promise.await never;
+           tr_ok "{}")
+         ()
+       |> accepted_request_id
+        : string);
+    await_signal clock ~what:"worker start" entered_worker
   in
-  match wait_for_cancelled_with_clock clock ~base_path request_id with
+  match await_signal clock ~what:"cancellation settlement" cancelled_settlement with
   | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
     Alcotest.(check string) "cancelled_by runtime" "runtime" cancelled_by;
     Alcotest.(check bool) "cancelled reason mentions cancellation" true
@@ -950,21 +962,25 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-async-operator-cancel-" in
   let never, _resolver = Eio.Promise.create () in
   let request_id =
     Keeper_msg_async.submit
+      ~on_worker_settled:observe_cancelled
       ~background_sw:sw
       ~base_path
       ~caller
       ~keeper_name:"operator-cancelled"
       ~f:(fun _request_sw ->
+        Eio.Promise.resolve notify_entered_worker ();
         Eio.Promise.await never;
         tr_ok "{}")
       ()
     |> accepted_request_id
   in
-  ignore (wait_for_running_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+  await_signal clock ~what:"worker start" entered_worker;
   Alcotest.(check bool)
     "cancel returns true"
     true
@@ -972,7 +988,7 @@ let test_keeper_msg_async_operator_cancel_is_terminal_cancelled () =
      | Keeper_msg_async.Cancellation_requested
          Keeper_msg_async.Durably_committed -> true
      | _ -> false);
-  (match wait_for_cancelled_with_clock clock ~base_path request_id with
+  (match await_signal clock ~what:"cancellation settlement" cancelled_settlement with
    | { Keeper_msg_async.status = Cancelled { reason; cancelled_by }; completed_at = Some _; _ } ->
      Alcotest.(check string) "cancelled_by operator" "operator" cancelled_by;
      Alcotest.(check bool) "reason mentions operator" true
@@ -1009,6 +1025,8 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-live-cancel-volatile-" in
   let never, _resolver = Eio.Promise.create () in
   Fun.protect
@@ -1031,17 +1049,19 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
        let request_id =
          Keeper_msg_async.For_testing.submit
            request_ops
+           ~on_worker_settled:observe_cancelled
            ~background_sw:sw
            ~base_path
            ~caller
            ~keeper_name:"live-cancel-volatile"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await never;
              tr_ok "{}")
            ()
          |> accepted_request_id
        in
-       ignore (wait_for_running_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+       await_signal clock ~what:"worker start" entered_worker;
        Atomic.set fail_cancel_persistence true;
        let result =
          Keeper_msg_async.For_testing.cancel
@@ -1058,7 +1078,7 @@ let test_keeper_msg_async_live_cancel_signals_after_post_publish_failure () =
             "post-publish cancellation did not preserve volatility: %s"
             (Keeper_msg_async.cancel_result_to_json ~request_id other
              |> Yojson.Safe.to_string));
-       ignore (wait_for_cancelled_with_clock clock ~base_path request_id : Keeper_msg_async.entry))
+       ignore (await_signal clock ~what:"cancellation settlement" cancelled_settlement : Keeper_msg_async.entry))
 ;;
 
 let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
@@ -1067,6 +1087,8 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
+  let cancelled_settlement, observe_cancelled = cancelled_signal () in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-cancel-signal-retry-" in
   let never, _resolver = Eio.Promise.create () in
   Fun.protect
@@ -1093,18 +1115,20 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
              aborts := reason :: !aborts;
              Ok ())
            ~on_worker_settled:(fun settlement ->
-             settlements := settlement :: !settlements)
+             settlements := settlement :: !settlements;
+             observe_cancelled settlement)
            ~background_sw:sw
            ~base_path
            ~caller
            ~keeper_name:"cancel-signal-retry"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await never;
              tr_ok "{}")
            ()
          |> accepted_request_id
        in
-       ignore (wait_for_running_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+       await_signal clock ~what:"worker start" entered_worker;
        wait_for_active_switch_count (Eio.Stdenv.clock env) 1;
        (match
           Keeper_msg_async.For_testing.cancel
@@ -1141,7 +1165,7 @@ let test_keeper_msg_async_explicit_cancel_retries_failed_worker_signal () =
             "explicit retry did not signal the owned worker: %s"
             (Keeper_msg_async.cancel_result_to_json ~request_id other
              |> Yojson.Safe.to_string));
-       ignore (wait_for_cancelled_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+       ignore (await_signal clock ~what:"cancellation settlement" cancelled_settlement : Keeper_msg_async.entry);
        Alcotest.(check int) "worker signal attempted twice" 2
          (Atomic.get signal_attempts);
        Alcotest.(check int) "abort callback projected once" 1
@@ -1507,6 +1531,7 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-canonical-integrity-settlement-" in
   let release, resolve_release = Eio.Promise.create () in
   Fun.protect
@@ -1553,13 +1578,19 @@ let test_keeper_msg_async_integrity_conflict_projects_canonical_terminal () =
            ~caller
            ~keeper_name:"canonical-integrity-settlement"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await release;
              tr_ok {|{"worker":"result"}|})
            ()
          |> accepted_request_id
        in
        let running : Keeper_msg_async.entry =
-         wait_for_running_with_clock clock ~base_path request_id
+         (* The signal fires from inside [f], which runs only after the Running
+            status is committed, so this is a single read rather than a retry. *)
+         await_signal clock ~what:"worker start" entered_worker;
+         match Keeper_msg_async.poll ~base_path ~caller request_id with
+         | Keeper_msg_async.Found entry -> entry
+         | _ -> Alcotest.fail "worker signalled start but no record was readable"
        in
        Atomic.set injection (Some (running, request_id));
        Eio.Promise.resolve resolve_release ();
@@ -1612,6 +1643,7 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
   Eio.Switch.run
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
+  let entered_worker, notify_entered_worker = Eio.Promise.create () in
   let base_path = temp_dir "keeper-msg-integrity-projection-error-" in
   let release, resolve_release = Eio.Promise.create () in
   Fun.protect
@@ -1629,12 +1661,13 @@ let test_keeper_msg_async_integrity_ambiguity_projects_exact_poll_error () =
            ~caller
            ~keeper_name:"integrity-projection-error"
            ~f:(fun _request_sw ->
+             Eio.Promise.resolve notify_entered_worker ();
              Eio.Promise.await release;
              tr_ok "{}")
            ()
          |> accepted_request_id
        in
-       ignore (wait_for_running_with_clock clock ~base_path request_id : Keeper_msg_async.entry);
+       await_signal clock ~what:"worker start" entered_worker;
        write_request_record
          ~location:Terminal_record
          ~keeper_name:"different-terminal-owner"

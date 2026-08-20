@@ -233,6 +233,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0384 | In-process Telegram connector (long polling) | Proposed | - |
 | 0385 | 자율턴은 대화가 아니다 | Draft | - |
 | 0386 | 툴 종류(tool kind)는 닫힌 합타입으로 선언한다 | Draft | - |
+| 0387 | Goal verifier 게이트 — 성공조건 필수화, 생성 시 실재성 검증, 완료의 2단계 증명 | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |

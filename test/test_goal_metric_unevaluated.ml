@@ -463,6 +463,106 @@ let test_goal_owner_timeline_names_unassigned_sides () =
     "owner: dancer -> <unassigned> by operator"
     (json_str cleared "summary")
 
+
+(* #29117 — the lifecycle phase is not a measurement.
+
+   [goal_attainment_to_json] used to special-case [Completed] with
+   [basis "goal_phase"], a hardcoded observed 100.0 and [attainment_pct]
+   100. Since [request_complete] requires no judgment and no evidence,
+   completing a goal produced the very number that justified completing it,
+   and the OTel gauges reported [measured = 1] for a goal nobody measured.
+
+   The phase is already projected on its own axis by
+   [goal_completion_to_json] ("state", "is_complete"), so attainment now
+   answers only from linked evidence, whatever the phase. *)
+
+let make_todo_task id : MD.task =
+  { (make_done_task id) with task_status = MD.Todo }
+
+let json_int_opt j key =
+  match Yojson.Safe.Util.member key j with
+  | `Int n -> Some n
+  | _ -> None
+
+let completed (goal : Goal_store.goal) : Goal_store.goal =
+  { goal with phase = Goal_phase.Completed }
+
+(* A completed goal whose only linked task never finished reports the
+   evidence, not the phase. Before the fix this answered 100%. *)
+let test_completed_goal_does_not_fabricate_attainment () =
+  let g = completed (make_goal "g-29117-a" "completed with unfinished work") in
+  let node = make_node ~tasks:[ make_todo_task "t1" ] g in
+  let json = A.goal_attainment_to_json g node in
+  check (option int) "0 of 1 done is 0%, not 100%" (Some 0)
+    (json_int_opt json "attainment_pct");
+  check string "basis names the evidence, not the phase" "linked_tasks"
+    (json_str json "basis");
+  check string "state follows the evidence" "not_started" (json_str json "state")
+
+(* Partial evidence survives completion instead of being rounded up. *)
+let test_completed_goal_reports_partial_evidence () =
+  let g = completed (make_goal "g-29117-b" "completed at 3 of 4") in
+  let node =
+    make_node
+      ~tasks:
+        [ make_done_task "t1"; make_done_task "t2"; make_done_task "t3"
+        ; make_todo_task "t4" ]
+      g
+  in
+  let json = A.goal_attainment_to_json g node in
+  check (option int) "3 of 4 done is 75%" (Some 75)
+    (json_int_opt json "attainment_pct");
+  check string "state is in_progress even though the goal is completed"
+    "in_progress" (json_str json "state")
+
+(* No linked evidence and no target is "unmeasured". This is what keeps the
+   OTel [goal_attainment_measured] gauge at 0 rather than claiming a
+   measurement that never happened. *)
+let test_completed_goal_without_evidence_is_unmeasured () =
+  let g = completed (make_goal "g-29117-c" "completed with no evidence") in
+  let json = A.goal_attainment_to_json g (make_node g) in
+  check (option int) "no evidence yields no percentage" None
+    (json_int_opt json "attainment_pct");
+  check string "state is unmeasured" "unmeasured" (json_str json "state");
+  check string "basis is unmeasured" "unmeasured" (json_str json "basis")
+
+(* Completion is still visible — on the axis that owns it. *)
+let test_completion_summary_still_reports_the_phase () =
+  let g = completed (make_goal "g-29117-d" "completed with unfinished work") in
+  let node = make_node ~tasks:[ make_todo_task "t1" ] g in
+  let attainment = A.goal_attainment_to_json g node in
+  let json = A.goal_completion_to_json g node ~attainment in
+  check string "lifecycle state is still completed" "completed"
+    (json_str json "state");
+  check bool "is_complete is still true" true (json_bool json "is_complete");
+  check string "and the attainment axis disagrees, which is the point"
+    "not_started"
+    (json_str json "attainment_state")
+
+(* Regression guard: no phase may reintroduce a phase-derived basis. *)
+let test_no_phase_derived_basis () =
+  List.iter
+    (fun phase ->
+      let g : Goal_store.goal =
+        { (make_goal "g-29117-e" "phase sweep") with phase }
+      in
+      let node = make_node ~tasks:[ make_todo_task "t1" ] g in
+      let basis = json_str (A.goal_attainment_to_json g node) "basis" in
+      check bool
+        (Printf.sprintf "%s does not derive attainment from the phase"
+           (Goal_phase.to_string phase))
+        false
+        (String.equal basis "goal_phase"))
+    Goal_phase.all
+
+(* An executing goal with complete evidence is unchanged. *)
+let test_executing_goal_with_full_evidence_is_attained () =
+  let g = make_goal "g-29117-f" "executing and done" in
+  let node = make_node ~tasks:[ make_done_task "t1"; make_done_task "t2" ] g in
+  let json = A.goal_attainment_to_json g node in
+  check (option int) "2 of 2 done is 100%" (Some 100)
+    (json_int_opt json "attainment_pct");
+  check string "state is attained" "attained" (json_str json "state")
 let () =
   run "goal metric unevaluated"
     [
@@ -508,5 +608,20 @@ let () =
             test_korean_count_metric_is_measured;
           test_case "metric wording does not select percent" `Quick
             test_metric_word_does_not_select_percent;
+        ] );
+      ( "phase is not a measurement (#29117)",
+        [
+          test_case "completed goal does not fabricate attainment" `Quick
+            test_completed_goal_does_not_fabricate_attainment;
+          test_case "completed goal reports partial evidence" `Quick
+            test_completed_goal_reports_partial_evidence;
+          test_case "completed goal without evidence is unmeasured" `Quick
+            test_completed_goal_without_evidence_is_unmeasured;
+          test_case "completion summary still reports the phase" `Quick
+            test_completion_summary_still_reports_the_phase;
+          test_case "no phase derives attainment from itself" `Quick
+            test_no_phase_derived_basis;
+          test_case "executing goal with full evidence is attained" `Quick
+            test_executing_goal_with_full_evidence_is_attained;
         ] );
     ]

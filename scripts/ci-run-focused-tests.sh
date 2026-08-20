@@ -82,6 +82,7 @@ paused_targets=(
   @test/runtest-test_keeper_paused_work_transfer_transaction
   @test/runtest-test_keeper_paused_work_source_terminal_transaction
   @test/runtest-test_keeper_paused_work_operator
+  @test/runtest-test_keeper_event_queue_health_actionable
 )
 
 normal_targets=(

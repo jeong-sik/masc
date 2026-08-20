@@ -124,18 +124,6 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
               ${TaskRouteLinks(currentTask, summary.currentGoalId, summary.displayName)}
             </div>
           `
-          : summary.currentTaskId
-            ? html`
-              <div class="ide-keeper-work-card v2-ide-card">
-                <div class="ide-keeper-work-card-top">
-                  <span>${summary.currentTaskId}</span>
-                  <span>runtime</span>
-                </div>
-                <strong>keeper runtime current task</strong>
-                <span>task row not present in execution projection</span>
-                ${RuntimeTaskRouteLinks(summary.currentTaskId, summary.currentGoalId, summary.displayName)}
-              </div>
-            `
           : html`<div class="ide-keeper-work-empty">no active keeper task in dashboard state</div>`}
         ${QueuedTaskCards(queuedTasks, summary.currentGoalId, summary.displayName)}
         ${currentGoal
@@ -247,14 +235,6 @@ function TaskRouteLinks(task: Task, fallbackGoalId: string | null, keeperId: str
   }), 'Keeper task operational links')
 }
 
-function RuntimeTaskRouteLinks(taskId: string, goalId: string | null, keeperId: string) {
-  return KeeperWorkRouteLinks(routeLinksForContext({
-    goalId: goalId ?? undefined,
-    taskId,
-    keeperId,
-  }), 'Keeper runtime task links')
-}
-
 function KeeperWorkRouteLinks(
   links: ReadonlyArray<IdeContextRouteLink>,
   label: string,
@@ -354,18 +334,11 @@ export function keeperWorkSummary(
 ): KeeperWorkSummary {
   const displayName = normalizedKeeperName(keeperName)
   const keeper = findKeeper(displayName, keeperList)
-  const explicitCurrentTaskId = null
   const assigneeTasks = taskList
     .filter(task => taskMatchesKeeper(task, displayName, keeper))
     .filter(task => task.status !== 'done' && task.status !== 'cancelled')
-  const currentTaskById = explicitCurrentTaskId
-    ? taskList.find(task => task.id === explicitCurrentTaskId) ?? null
-    : null
-  const activeTasks = uniqTasks(currentTaskById ? [currentTaskById, ...assigneeTasks] : assigneeTasks)
-  const currentTaskId = firstNonEmptyString(
-    explicitCurrentTaskId,
-    activeTasks[0]?.id,
-  )
+  const activeTasks = uniqTasks(assigneeTasks)
+  const currentTaskId = firstNonEmptyString(activeTasks[0]?.id)
   const currentTask = currentTaskId
     ? activeTasks.find(task => task.id === currentTaskId) ?? null
     : activeTasks[0] ?? null

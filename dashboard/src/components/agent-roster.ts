@@ -223,10 +223,6 @@ export function rosterStateNote(
     }
   }
 
-  if (state.kind === 'offline') {
-    return { label: '작업 중단', text: `할당된 작업이 있으나 keeper가 ${state.cause} 상태입니다` }
-  }
-
   const diagnosticError = keeper.diagnostic?.last_error?.trim()
   if (diagnosticError) {
     return { label: state.kind === 'running' ? '이전 오류' : '최근 오류', text: diagnosticError }

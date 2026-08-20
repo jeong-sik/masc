@@ -25,7 +25,6 @@ import {
   KeeperSecretProjectionPanel,
   filterSignalGroups,
   deriveKeeperLiveTruth,
-  resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
 import {
   resolveKeeperObservedToolAudit,
@@ -211,29 +210,6 @@ describe('resolveKeeperObservedToolAudit', () => {
   })
 })
 
-describe('resolveKeeperCurrentTaskLabel', () => {
-  it('returns not_collected for online keepers (agent block removed)', () => {
-    const keeper: Keeper = {
-      name: 'config-provenance',
-      status: 'busy',
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
-  })
-
-  it('returns unlinked when no keeper payload is available', () => {
-    expect(resolveKeeperCurrentTaskLabel(null)).toBe('unlinked')
-  })
-
-  it('keeps not_collected for online keepers without linked agent payload', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
-  })
-})
 
 describe('RuntimeSignals', () => {
   it('renders metrics_window top lists as visual distributions', () => {

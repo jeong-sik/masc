@@ -251,7 +251,7 @@
                          괄호 안은 코드상 실제 명칭/위치 매핑이다.">
     <group name="domain">Task, Board, Goal, Comment</group>
     <group name="judgement">Fusion, Judge, Judge of Judge, Karma,
-          Cross-Verification (코드명: cross_verifier 런타임 lane)</group>
+          Cross-Verification (코드명: verifier_exact exact-output lane)</group>
     <group name="cognition">Thinking (keeper_agent_run_thinking_trajectory),
           CoT (전용 모듈 없음 — thinking trajectory 가 역할),
           MultiTurn (전용 모듈 없음 — chat stream bridge 멀티턴 툴 루프),

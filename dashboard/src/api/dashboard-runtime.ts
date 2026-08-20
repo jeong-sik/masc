@@ -1866,7 +1866,6 @@ export async function previewRuntimeTomlConfig(sourceText: string): Promise<Runt
 
 export type RuntimeRoutingLane =
   | 'default'
-  | 'cross_verifier'
 
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,

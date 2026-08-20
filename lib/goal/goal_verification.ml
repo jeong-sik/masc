@@ -6,10 +6,10 @@
    criterion/completion verification state gets its own store, the same way
    [Workspace_goal_index] keeps goal-task links out of goals.json.
 
-   RFC-0387 stage 1 ships this as a RECORD-ONLY evidence store: no workflow
-   reads it for control and no caller writes it yet — the stage-2 verifier
-   gate adds the writers ([mark_*_pending] durable requests, verdict commits
-   from the verifier lane) and the readers that gate transitions.
+   RFC-0387 stage 1 shipped this as a RECORD-ONLY evidence store; stage 2
+   (the verifier gate) wires the writers: [mark_*_pending] durable requests
+   (creation hook, and before the phase enters [Verifying]) and verdict
+   commits from the verifier lane via [masc_goal_transition].
 
    Invariants carried here:
 
@@ -494,6 +494,57 @@ let record_criterion_verdict config ~goal_id (verdict : verdict) =
       in
       Ok { current with criterion })
 
+(* {1 Stage-2 durable requests (RFC-0387 §3.2 / §4.1)}
+
+   These are the writers the verifier gate persists BEFORE any model call:
+   [mark_criterion_pending] runs at goal creation, [mark_proof_pending] runs
+   before the phase enters [Verifying]. Both are locked read-modify-writes via
+   [update_record], idempotent on an already-pending state (a repeated
+   [request_complete] re-arms rather than failing), and refuse to overwrite a
+   committed verdict — except that a new proof request supersedes a standing
+   [Proof_refuted], per this module's header: a refuted verdict stays on the
+   record until the next request supersedes it, and the refuted goal returns
+   to [Executing] where re-requesting completion is the way forward. *)
+
+let mark_criterion_pending config ~goal_id =
+  update_record config ~goal_id (fun current ->
+      match current.criterion with
+      | Criterion_pending _ -> Ok current
+      | Criterion_unchecked ->
+          Ok
+            { current with
+              criterion = Criterion_pending { requested_at = current.updated_at }
+            }
+      | Criterion_viable _ | Criterion_unreachable _ ->
+          Error
+            (Printf.sprintf
+               "goal_verification: criterion verdict for %s is already \
+                committed; refusing to overwrite it with a pending request"
+               goal_id))
+
+let mark_proof_pending config ~goal_id =
+  update_record config ~goal_id (fun current ->
+      match current.completion with
+      | Proof_pending _ -> Ok current
+      | Completion_idle ->
+          Ok
+            { current with
+              completion = Proof_pending { requested_at = current.updated_at }
+            }
+      | Proof_refuted _ ->
+          (* The next request supersedes the standing refutation; the verdict
+             itself remains readable in the state history until this write. *)
+          Ok
+            { current with
+              completion = Proof_pending { requested_at = current.updated_at }
+            }
+      | Proof_proven _ | Human_confirmed _ ->
+          Error
+            (Printf.sprintf
+               "goal_verification: proof for %s is already proven; refusing \
+                to overwrite the verdict with a pending request"
+               goal_id))
+
 (* A proof verdict is only committable against a pending proof — or against
    the same outcome already committed. The latter is the crash-between-writes
    case the stage-2 gate needs: the ledger write landed but the phase write
@@ -501,8 +552,7 @@ let record_criterion_verdict config ~goal_id (verdict : verdict) =
    identical outcome rather than wedge the goal. A commit in the OPPOSITE
    direction of a standing verdict is a stale verifier answer and stays an
    [Error]. The [Proof_pending] rows this matches against are written by the
-   stage-2 gate ([mark_proof_pending], persist-before-model-call); stage 1
-   has no writer, so until then this only ever answers the error. *)
+   stage-2 gate ([mark_proof_pending], persist-before-model-call). *)
 let record_proof_verdict config ~goal_id (verdict : verdict) =
   update_record config ~goal_id (fun current ->
       let committable =

@@ -1190,10 +1190,13 @@ List.iter
           check bool "Kimi K2.7 Code image input" true caps.supports_image_input;
           check bool "Kimi K2.7 Code multimodal input" true
             caps.supports_multimodal_inputs;
-          check bool "Kimi K2.7 Code reasoning effort" true
+          (* ollama.com /v1 reasons inherently and takes no control field, so
+             this model declares no thinking control. See the comment on
+             [inherent_reasoning_no_control] above for the measurement. *)
+          check bool "Kimi K2.7 Code thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
-               Runtime_schema.Reasoning_effort)
+               Runtime_schema.No_thinking_control)
         | None -> fail "expected Kimi K2.7 Code capabilities"))
 
 (* The lane-resolution test below iterates the lanes a config declares, so it

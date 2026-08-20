@@ -107,7 +107,7 @@ let test_outcome_detail_reaches_the_surface () =
          ~verification_id:"vrf-detail"
          ~outcome
          ~tools:[]
-         ~evaluator_runtime:"cross-verifier"
+         ~evaluator_runtime:"judge-runtime"
          ~elapsed_s:2.5
          ();
        match R.get t ~verification_id:"vrf-detail" with
@@ -118,7 +118,7 @@ let test_outcome_detail_reaches_the_surface () =
          check
            (option string)
            ("evaluator_runtime " ^ label)
-           (Some "cross-verifier")
+           (Some "judge-runtime")
            (str json "evaluator_runtime");
          (* Approved is the only outcome with nothing to explain; every failure
             shape must carry an operator-readable cause, never a bare label. *)

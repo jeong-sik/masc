@@ -323,17 +323,14 @@ let parse_runtime_config_raw_body body_str =
 
 type runtime_route_lane =
   | Runtime_default
-  | Runtime_cross_verifier
   | Runtime_media_failover
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
-  | Runtime_cross_verifier -> "cross_verifier"
   | Runtime_media_failover -> "media_failover"
 
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
-  | "cross_verifier" -> Ok Runtime_cross_verifier
   | "media_failover" -> Ok Runtime_media_failover
   | lane -> Error (Printf.sprintf "unknown runtime routing lane: %s" lane)
 
@@ -1201,20 +1198,6 @@ let add_routes ~sw ~clock router =
              | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "default runtime_id required"
-             | Ok (Runtime_route_runtime_id (Runtime_cross_verifier, runtime_id)) ->
-               (match Runtime.set_runtime_cross_verifier ~runtime_id () with
-                | Error msg ->
-                  audit_runtime_config_write state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_cross_verifier, runtime_id))
-                    ~text:body_str
-                    ~outcome:(Audit_log.Failure msg) ();
-                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  respond_runtime_config_reload state agent_name
-                    ~operation:
-                      (Runtime_config_routing (Runtime_cross_verifier, runtime_id))
-                    req reqd)
              | Ok (Runtime_route_runtime_id (Runtime_media_failover, _)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "media_failover runtime_ids required"

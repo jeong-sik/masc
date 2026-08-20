@@ -179,7 +179,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     label: 'Model routing lanes',
     kind: 'live-write',
     source: 'GET /api/v1/dashboard/runtime-defaults',
-    action: 'PATCH /api/v1/runtime/routing for default/cross_verifier',
+    action: 'PATCH /api/v1/runtime/routing for default',
   },
   {
     id: 'runtime-media-failover',
@@ -1379,7 +1379,6 @@ export function SettingsSurface() {
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
-  const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   const runtimeSelectOptions = runtimeSelectOptionsFromResolved(runtimeResolved?.runtimes ?? [])
   const runtimeRoutingDisabled = runtimeRoutingStatus === 'saving' || runtimeResolvedStatus !== 'ready'
@@ -1626,16 +1625,6 @@ export function SettingsSurface() {
                       onChange=${(runtimeId: string | null) => {
                         if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
                       }}
-                    />
-                    <${RuntimeRoutingSelect}
-                      label="Cross verifier"
-                      hint="[runtime].cross_verifier · 반-합리화 평가자"
-                      value=${crossVerifierRuntime}
-                      fallbackLabel="default runtime"
-                      options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingDisabled}
-                      testId="runtime-routing-cross-verifier"
-                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('cross_verifier', runtimeId)}
                     />
                     <${RuntimeMediaFailoverEditor}
                       value=${mediaFailover}

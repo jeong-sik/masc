@@ -706,10 +706,7 @@ let keeper_dispatch_blocked (runtimes : t list) : (t * string) list =
 
 (* [runtime.exact_output_lanes.verifier_exact] (RFC-0361 D7(a)) is the single
    selector for completion-authority judgement calls: admitted slots in frozen
-   declaration order, fail over in that order. The retired
-   [runtime].cross_verifier single-runtime binding is absorbed into this lane's
-   first slot; the key still parses for preserved live configs but no judgement
-   path reads it. *)
+   declaration order, fail over in that order. *)
 let verifier_exact_lane_id = "verifier_exact"
 
 let verifier_exact_slot_ids_of_lane_decls
@@ -739,7 +736,6 @@ let verifier_exact_slot_ids_of_lane_decls
 let keeper_dispatch_runtime_ids
     ~(default_runtime_id : string)
     ~(assignments : (string * string) list)
-    ~(cross_verifier_runtime_id : string option)
     ~(verifier_exact_slot_ids : string list)
     ~(media_failover : string list)
     ~(lanes : Runtime_lane.t list)
@@ -766,7 +762,6 @@ let keeper_dispatch_runtime_ids
     []
     ( routed_roots
       @ media_failover
-      @ (cross_verifier_runtime_id |> Option.to_list |> List.concat_map expand)
       @ List.concat_map expand verifier_exact_slot_ids )
 ;;
 
@@ -777,7 +772,6 @@ let validate_keeper_dispatch_request_caps
     ( runtimes
     , (default_runtime : t)
     , assignments
-    , cross_verifier_runtime_id
     , media_failover
     , lanes )
   =
@@ -785,7 +779,6 @@ let validate_keeper_dispatch_request_caps
     keeper_dispatch_runtime_ids
       ~default_runtime_id:default_runtime.id
       ~assignments
-      ~cross_verifier_runtime_id
       ~verifier_exact_slot_ids
       ~media_failover
       ~lanes
@@ -932,11 +925,10 @@ let missing_reference_error
 
 let degrade_loaded_for_missing_catalog
     ( (runtimes, configured_default, assignments,
-       cross_verifier_id, media_failover, lanes) :
+       media_failover, lanes) :
       t list
       * t
       * (string * string) list
-      * string option
       * string list
       * Runtime_lane.t list )
     (report : missing_catalog_report)
@@ -1028,13 +1020,8 @@ let degrade_loaded_for_missing_catalog
       None, Some { route_name; runtime_id }
     | Some _ as value -> value, None
   in
-  let cross_verifier_id, cross_verifier_drop =
-    drop_route "[runtime].cross_verifier" cross_verifier_id
-  in
   let dropped_routes =
-    [ default_drop
-    ; cross_verifier_drop
-    ]
+    [ default_drop ]
     |> List.filter_map Fun.id
   in
   let kept_media_failover, dropped_media_failover =
@@ -1088,7 +1075,6 @@ let degrade_loaded_for_missing_catalog
       ( ( active_runtimes
         , configured_default
         , kept_assignments
-        , cross_verifier_id
         , kept_media_failover
         , kept_lanes )
       , degradation )
@@ -1151,12 +1137,9 @@ let materialize_config
     lanes_of_decls ~config_path ~dropped_bindings ~default_runtime_id:rt.id runtimes
       cfg.lane_decls
   in
-  (* One list in the order the errors surface: the route, then media_failover. *)
   let* () =
     validate_runtime_references ~config_path ~dropped_bindings runtimes lanes
-      (route_references
-         [ "cross_verifier", cfg.cross_verifier_runtime_id ]
-      @ media_failover_references cfg.media_failover)
+      (media_failover_references cfg.media_failover)
   in
   let* () =
     if validate_max_context
@@ -1171,7 +1154,6 @@ let materialize_config
     ( runtimes
     , rt
     , assignments
-    , cfg.cross_verifier_runtime_id
     , cfg.media_failover
     , lanes )
   in
@@ -1222,7 +1204,6 @@ type loaded_state =
   { default_runtime : t option
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; lanes : Runtime_lane.t list
   ; config_path : string option
@@ -1233,7 +1214,6 @@ let empty_loaded_state =
   { default_runtime = None
   ; runtimes = []
   ; keeper_assignments = []
-  ; cross_verifier_runtime_id = None
   ; media_failover = []
   ; lanes = []
   ; config_path = None
@@ -1250,14 +1230,12 @@ let set_loaded
     ( runtimes
     , rt
     , assignments
-    , cross_verifier_id
     , media_failover
     , lanes ) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
-    ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
     ; lanes
     ; config_path = Some config_path
@@ -1392,7 +1370,6 @@ let keeper_assignments () = (runtime_state ()).keeper_assignments
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }
@@ -1401,20 +1378,10 @@ let dashboard_runtime_defaults_snapshot () =
   let state = runtime_state () in
   { default_runtime = state.default_runtime
   ; runtimes = state.runtimes
-  ; cross_verifier_runtime_id = state.cross_verifier_runtime_id
   ; media_failover = state.media_failover
   ; config_path = state.config_path
   }
 ;;
-
-(* [runtime].cross_verifier, kept parseable for preserved live configs. Since
-   RFC-0361 D7(a) no judgement path reads it — completion-authority provider
-   selection resolves the [verifier_exact] exact-output lane (see
-   {!verifier_exact_lane_slot_ids}); the lane's first slot absorbs the binding
-   this key used to carry. Remaining readers are config surfaces only: the
-   dashboard runtime-defaults display/route and the eval-calibration CLI's
-   evaluator default. *)
-let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
 
 (* Admitted [verifier_exact] slot ids in frozen declaration order from the
    published exact-output registry — the single provider-selection SSOT for
@@ -2162,10 +2129,6 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
-;;
-
-let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
 ;;
 
 let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =

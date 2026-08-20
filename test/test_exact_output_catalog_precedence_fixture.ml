@@ -136,14 +136,15 @@ let runtime_toml
       ?(include_hitl_auto_judge = true)
       lane_target
   =
-  let runtime_route, runtime_lane =
+  (* The lane declaration alone is what this fixture exercises; no [runtime]
+     scalar key points at it. *)
+  let runtime_lane =
     match runtime_lane_candidates with
-    | None -> "", ""
+    | None -> ""
     | Some candidates ->
-      ( "cross_verifier = \"verifiers\"\n"
-      , Printf.sprintf
-          "\n[runtime.lanes.verifiers]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
-          (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ") )
+      Printf.sprintf
+        "\n[runtime.lanes.verifiers]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
+        (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ")
   in
   let board_attention_lane =
     if include_board_attention
@@ -193,12 +194,10 @@ max-request-body-bytes = 65536
 
 [runtime]
 default = "replacement_provider.replacement"
-%s
 
 [runtime.exact_output_lanes.compaction_exact]
 slots = [%s]
 |}
-       runtime_route
        (compaction_slots |> List.map (Printf.sprintf "%S") |> String.concat ", "))
     ^ board_attention_lane
     ^ runtime_lane

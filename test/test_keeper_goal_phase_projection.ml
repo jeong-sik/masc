@@ -48,7 +48,6 @@ let goal_in phase id title =
   ; due_date = None
   ; priority = 3
   ; phase
-  ; parent_goal_id = None
   ; last_review_note = None
   ; last_review_at = None
   ; owner = None
@@ -232,7 +231,7 @@ let test_another_keepers_goal_is_not_surfaced () =
 
 let unowned config =
   List.map
-    (fun (goal_id, _, _) -> goal_id)
+    (fun (goal_id, _) -> goal_id)
     (Keeper_unified_prompt.unowned_executing_goals_without_tasks ~config)
 
 let test_unowned_executing_goal_without_task_surfaces () =
@@ -352,71 +351,6 @@ let test_unowned_goals_reach_the_rendered_turn () =
   check bool "a completed goal is not offered" false (contains_in world "goal-done")
 ;;
 
-let goal_child_of parent phase id title =
-  { (goal_in phase id title) with Goal_store.parent_goal_id = Some parent }
-;;
-
-(* Seven of the ten unowned Goals on the live store are children of the eighth.
-   Rendered as peers, "taking one is a move you can make" cannot distinguish
-   taking the umbrella from taking one service under it, and two Keepers could
-   take both and do the same work twice. The relation is in the store; the flat
-   render dropped it. *)
-let test_a_child_renders_under_its_parent () =
-  with_workspace @@ fun config ->
-  Goal_store.write_state config
-    { version = 1
-    ; updated_at = Masc_domain.now_iso ()
-    ; goals =
-        [ goal_in Goal_phase.Executing "goal-umbrella" "all services to zero"
-        ; goal_child_of "goal-umbrella" Goal_phase.Executing "goal-one" "service one"
-        ; goal_in Goal_phase.Executing "goal-standalone" "unrelated"
-        ]
-    };
-  let world = rendered_world_state config in
-  check bool "the child is indented under its parent" true
-    (contains_in world "- goal-umbrella — all services to zero\n  - goal-one — service one");
-  check bool "an unrelated goal stays at the top level" true
-    (contains_in world "\n- goal-standalone — unrelated");
-  check bool "the count is still every goal, not just the roots" true
-    (contains_in world "taking one is a move you can make (3)")
-;;
-
-let test_all_descendants_render_at_their_full_depth () =
-  with_workspace @@ fun config ->
-  Goal_store.write_state config
-    { version = 1
-    ; updated_at = Masc_domain.now_iso ()
-    ; goals =
-        [ goal_in Goal_phase.Executing "goal-root" "root"
-        ; goal_child_of "goal-root" Goal_phase.Executing "goal-child" "child"
-        ; goal_child_of "goal-child" Goal_phase.Executing "goal-grandchild" "grandchild"
-        ]
-    };
-  let world = rendered_world_state config in
-  check bool "the complete parent chain is visible" true
-    (contains_in world
-       "- goal-root — root\n  - goal-child — child\n    - goal-grandchild — grandchild")
-;;
-
-(* A child whose parent is not in this list -- owned, terminal, or already served
-   by a Task -- is its own invitation, so it must not be hidden by the nesting. *)
-let test_a_child_whose_parent_is_absent_stands_alone () =
-  with_workspace @@ fun config ->
-  Goal_store.write_state config
-    { version = 1
-    ; updated_at = Masc_domain.now_iso ()
-    ; goals =
-        [ goal_owned_by "someone" Goal_phase.Executing "goal-taken" "already owned"
-        ; goal_child_of "goal-taken" Goal_phase.Executing "goal-orphan" "still free"
-        ]
-    };
-  let world = rendered_world_state config in
-  check bool "the orphaned child is offered at the top level" true
-    (contains_in world "\n- goal-orphan — still free");
-  check bool "it is not indented under a parent nobody can see" false
-    (contains_in world "  - goal-orphan")
-;;
-
 let () =
   run "keeper_goal_phase_projection"
     [ ( "prompt surfaces"
@@ -448,12 +382,6 @@ let () =
             test_unowned_goal_with_a_linked_task_is_not_surfaced
         ; test_case "unowned goals reach the rendered turn" `Quick
             test_unowned_goals_reach_the_rendered_turn
-        ; test_case "a child renders under its parent" `Quick
-            test_a_child_renders_under_its_parent
-        ; test_case "all descendants render at their full depth" `Quick
-            test_all_descendants_render_at_their_full_depth
-        ; test_case "a child whose parent is absent stands alone" `Quick
-            test_a_child_whose_parent_is_absent_stands_alone
         ] )
     ]
 ;;

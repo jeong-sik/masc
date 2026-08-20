@@ -98,10 +98,10 @@ val owned_executing_goals_without_tasks :
     decoration and should be removed. *)
 
 val unowned_executing_goals_without_tasks :
-  config:Workspace.config -> (string * string * string option) list
-(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves, each
-    with its [parent_goal_id]. The same list for every keeper, because an
-    unowned Goal is addressed to whoever reads it.
+  config:Workspace.config -> (string * string) list
+(** RFC-0362 §6 Q2 — the executing Goals nobody owns and no Task serves, as
+    [(id, title)]. The same list for every keeper, because an unowned Goal is
+    addressed to whoever reads it.
 
     The prompt already states that taking one is a move a keeper can make, and
     [handle_goal_assign] carries no ownership check. What was missing was the

@@ -66,7 +66,6 @@ let schemas : tool_schema list =
                       ] )
                 ; "due_date", `Assoc [ "type", `String "string" ]
                 ; "priority", `Assoc [ "type", `String "integer" ]
-                ; "parent_goal_id", `Assoc [ "type", `String "string" ]
                 ] )
           ; "additionalProperties", `Bool false
           ]

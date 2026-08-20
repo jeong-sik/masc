@@ -702,9 +702,7 @@ let render_planning_detail (state : state) (goal : planning_goal) =
        let target = match goal.pg_target_value with Some t -> " = " ^ t | None -> "" in
        box_line buf cols (Printf.sprintf "  Metric: %s%s" m target)
    | None -> box_empty buf cols);
-  (match goal.pg_parent_goal_id with
-   | Some pid -> box_line buf cols (Printf.sprintf "  Parent: %s" pid)
-   | None -> box_empty buf cols);
+  box_empty buf cols;
   box_divider buf cols;
 
   for _ = 1 to rows - 14 do

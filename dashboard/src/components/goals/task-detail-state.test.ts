@@ -113,7 +113,6 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
     due_date: null,
     priority: 3,
     phase: 'executing',
-    parent_goal_id: null,
     last_review_note: null,
     last_review_at: null,
     created_at: '2026-04-17T00:00:00Z',

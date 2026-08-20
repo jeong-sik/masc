@@ -357,7 +357,7 @@ const PERSONAS = {
 };
 const DEFAULT_PERSONA = { persona: '기본 keeper 성격. 작업에 충실하고 trace를 남긴다.', instructions: '담당 namespace의 작업을 수행하고 모든 행동을 trace로 기록한다.', traits: ['기본'] };
 
-// Goal store — core.ts Goal{horizon,priority(num),status,phase,parent_goal_id,
+// Goal store — core.ts Goal{horizon,priority(num),status,phase,
 //   require_completion_approval,verifier_policy} → Task{status(6-state),assignee,
 //   goal_id,contract,gate,handoff_context}. Task.status ∈ todo|claimed|in_progress|
 //   awaiting_verification|done|cancelled. todo + no assignee = claimable backlog.

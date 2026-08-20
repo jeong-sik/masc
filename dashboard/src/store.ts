@@ -889,7 +889,6 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
         phase,
-        parent_goal_id: asString(row.parent_goal_id) ?? null,
         last_review_note: asString(row.last_review_note) ?? null,
         last_review_at: asString(row.last_review_at) ?? null,
         created_at: createdAt,

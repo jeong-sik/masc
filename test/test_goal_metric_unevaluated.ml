@@ -24,7 +24,6 @@ let make_goal ?metric ?target_value id title =
     due_date = None;
     priority = 3;
     phase = Goal_phase.Executing;
-    parent_goal_id = None;
     last_review_note = None;
     last_review_at = None;
     owner = None;
@@ -98,23 +97,6 @@ let empty_build_context ?(pending_approvals = []) now_ts : B.build_context =
     latest_runtime_trusts = [];
     goal_task_index = Hashtbl.create 0;
   }
-
-let test_goal_projection_does_not_promote_child_approvals () =
-  let parent = make_goal "parent" "Parent" in
-  let child =
-    { (make_goal "child" "Child") with parent_goal_id = Some parent.id }
-  in
-  let approval =
-    `Assoc [ ("goal_id", `String child.id); ("requested_at", `Float 1.0) ]
-  in
-  let context = empty_build_context ~pending_approvals:[ approval ] 2.0 in
-  let node = B.build_tree context [ parent; child ] parent in
-  check int "parent only reports direct approvals" 0 node.pending_approval_count;
-  match node.children with
-  | [ child_node ] ->
-      check int "child reports its direct approval" 1
-        child_node.pending_approval_count
-  | _ -> fail "expected one child Goal"
 
 let test_goal_projection_surfaces_invalid_activity_time () =
   let goal =
@@ -580,8 +562,6 @@ let () =
             test_unevaluated_metric_is_display_only_for_completion;
           test_case "receipt timeline does not fabricate runtime" `Quick
             test_keeper_receipt_timeline_missing_runtime_stays_missing;
-          test_case "child approvals stay on the child Goal" `Quick
-            test_goal_projection_does_not_promote_child_approvals;
           test_case "invalid activity time stays unavailable" `Quick
             test_goal_projection_surfaces_invalid_activity_time;
           test_case "queue failure remains typed unavailable" `Quick

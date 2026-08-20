@@ -65,7 +65,6 @@ export type {
   KeeperRuntimeLensProviderAttemptAxis,
   KeeperRuntimeLensPayloadRoleAxis,
   KeeperRuntimeLensSourceClockAxis,
-  KeeperRuntimeLensClaimScopeAxis,
   KeeperRuntimeLensConfigDriftAxis,
   KeeperRuntimeLensContextAxis,
   KeeperRuntimeLensMemoryAxis,

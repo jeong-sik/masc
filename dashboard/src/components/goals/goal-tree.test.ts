@@ -294,6 +294,39 @@ describe('GoalTree', () => {
       .not.toBeNull()
   })
 
+  it('renders a verifying goal with phase label, filter chip, and summary count', async () => {
+    const goal = { ...makeGoal('goal-verifying', 'Verifying goal'), phase: 'verifying' }
+    const treePayload: DashboardGoalsTreeResponse = {
+      approval_queue_state: { state: 'ready' },
+      tree: [goal],
+      summary: {
+        ...emptySummary(),
+        total_goals: 1,
+        active_goals: 1,
+        phase_counts: { verifying: 1 },
+      },
+    }
+    const detailPayload: DashboardGoalDetailResponse = {
+      goal,
+      linked_tasks: [],
+      linked_keepers: [],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(treePayload)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
+
+    render(html`<${GoalTree} />`)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id'))
+        .toBe('goal-verifying')
+    })
+    // Tree node badge and the phase filter chip both render the Korean label.
+    expect(screen.getAllByText('검증 중').length).toBeGreaterThanOrEqual(2)
+  })
+
   it('renders a loading indicator while the goal tree is refreshing', async () => {
     const goal = makeGoal('goal-loading', 'Loading goal')
     const treePayload: DashboardGoalsTreeResponse = {

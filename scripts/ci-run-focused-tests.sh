@@ -82,11 +82,13 @@ paused_targets=(
   @test/runtest-test_keeper_paused_work_transfer_transaction
   @test/runtest-test_keeper_paused_work_source_terminal_transaction
   @test/runtest-test_keeper_paused_work_operator
+  @test/runtest-test_keeper_event_queue_health_actionable
 )
 
 normal_targets=(
   @test/runtest-test_board_dispatch
   @test/runtest-test_keeper_latched_reason_wiring
+  @test/runtest-test_keeper_status_bridge
   @test/runtest-test_dedup_rules
   @test/runtest-test_exec_command_gate_log_sink
   @test/runtest-test_file_kind_vocabulary

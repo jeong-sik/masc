@@ -5,6 +5,8 @@ import { describe, it, expect } from 'vitest'
 import {
   priorityStars,
   priorityLabel,
+  goalPhaseLabel,
+  goalPhaseStatus,
   phaseFilterLabel,
   matchesGoalPhaseFilter,
   sortByPriority,
@@ -75,6 +77,22 @@ describe('priorityLabel', () => {
 })
 
 // ================================================================
+// goalPhaseLabel / goalPhaseStatus
+// ================================================================
+
+describe('goalPhaseLabel', () => {
+  it('returns 검증 중 for verifying (RFC-0387 stage 2)', () => {
+    expect(goalPhaseLabel('verifying')).toBe('검증 중')
+  })
+})
+
+describe('goalPhaseStatus', () => {
+  it('maps verifying to the awaiting_verification info tone', () => {
+    expect(goalPhaseStatus('verifying')).toBe('awaiting_verification')
+  })
+})
+
+// ================================================================
 // phaseFilterLabel
 // ================================================================
 
@@ -93,6 +111,10 @@ describe('phaseFilterLabel', () => {
 
   it('returns 일시정지 for paused', () => {
     expect(phaseFilterLabel('paused')).toBe('일시정지')
+  })
+
+  it('returns 검증 중 for verifying', () => {
+    expect(phaseFilterLabel('verifying')).toBe('검증 중')
   })
 
   it('returns 완료 for completed', () => {
@@ -121,6 +143,12 @@ describe('matchesGoalPhaseFilter', () => {
   it('matches only the requested phase', () => {
     expect(matchesGoalPhaseFilter('blocked', 'blocked')).toBe(true)
     expect(matchesGoalPhaseFilter('executing', 'blocked')).toBe(false)
+  })
+
+  it('matches verifying goals against the verifying filter', () => {
+    expect(matchesGoalPhaseFilter('verifying', 'verifying')).toBe(true)
+    expect(matchesGoalPhaseFilter('executing', 'verifying')).toBe(false)
+    expect(matchesGoalPhaseFilter('verifying', 'all')).toBe(true)
   })
 })
 

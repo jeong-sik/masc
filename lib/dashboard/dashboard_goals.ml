@@ -311,6 +311,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
                   ("executing", `Int (count_phase Goal_phase.Executing));
                   ("blocked", `Int (count_phase Goal_phase.Blocked));
                   ("paused", `Int (count_phase Goal_phase.Paused));
+                  ("verifying", `Int (count_phase Goal_phase.Verifying));
                   ("completed", `Int (count_phase Goal_phase.Completed));
                   ("dropped", `Int (count_phase Goal_phase.Dropped));
                 ] );

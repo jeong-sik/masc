@@ -512,6 +512,22 @@ let admission_lane_of_string = function
   | value -> Error (Printf.sprintf "unknown Keeper shutdown admission lane: %S" value)
 ;;
 
+(* Projection for status surfaces: the phase name only, no payload. A
+   consumer waiting for the operation to reach a terminal reads this; the
+   evidence carried by [Finalized]/[Cleanup_ready] stays in the record. *)
+let phase_to_string = function
+  | Prepared -> "prepared"
+  | Joining_lanes -> "joining_lanes"
+  | Joined_idle -> "joined_idle"
+  | Finalizing_tasks _ -> "finalizing_tasks"
+  | Cleanup_ready _ -> "cleanup_ready"
+  | Reconciliation_required _ -> "reconciliation_required"
+  | Finalized _ -> "finalized"
+  | Blocked _ -> "blocked"
+  | Superseded _ -> "superseded"
+;;
+
+
 let failure_stage_to_string = function
   | Task_discovery -> "task_discovery"
   | Record_persist -> "record_persist"

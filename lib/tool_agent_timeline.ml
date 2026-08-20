@@ -247,13 +247,9 @@ let message_events (config : Workspace.config) ~agent_name ~limit :
    tool_name/success/duration_ms payload contract projected below. *)
 let tool_call_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
-  (* `list_events` limits globally before we filter by actor, so fetch a
-     wider bounded window to reduce the chance that busy-workspace activity from
-     other agents crowds out this agent's tool events. *)
-  let scan_limit =
-    let expanded = if limit <= 0 then 0 else limit * 10 in
-    min 1000 (max limit expanded)
-  in
+  (* [keep] runs inside the read, so [limit] counts THIS agent's tool events.
+     The multiplied window this replaced could only reduce the chance that a
+     busy workspace crowded them out, never remove it. *)
   let all_events =
     Activity_graph.list_events config
       ~kinds:
@@ -261,11 +257,11 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
            Activity_graph.tool_execution_event_kind_to_string
            Activity_graph.all_tool_execution_event_kinds)
       ~after_seq:0
-      ~limit:scan_limit
+      ~limit
+      ~keep:(activity_event_matches_agent ~agent_name)
       ()
   in
   all_events
-  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        let tool_name =
@@ -309,16 +305,12 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
 (* Collect turn-completed events from Activity Graph *)
 let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
-  let scan_limit =
-    let expanded = if limit <= 0 then 0 else limit * 10 in
-    min 1000 (max limit expanded)
-  in
   let all_events =
     Activity_graph.list_events config
-      ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit:scan_limit ()
+      ~kinds:["keeper.turn_completed"] ~after_seq:0 ~limit
+      ~keep:(activity_event_matches_agent ~agent_name) ()
   in
   all_events
-  |> List.filter (activity_event_matches_agent ~agent_name)
   |> List.filter_map (fun (e : Activity_graph.event) ->
        let ts = Float.of_int e.ts_ms /. 1000.0 in
        (* Pure-shape JSON access via Safe_ops: no exception swallow, no
@@ -453,11 +445,11 @@ let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
     in
     let msg_evts = message_events config ~agent_name ~limit in
     let tool_evts =
-      if include_tool_calls then tool_call_events config ~agent_name ~limit:200
+      if include_tool_calls then tool_call_events config ~agent_name ~limit
       else []
     in
     let turn_evts =
-      turn_completed_events config ~agent_name ~limit:200
+      turn_completed_events config ~agent_name ~limit
     in
     let chat_evts = chat_events (load_chat ~agent_name) in
     agent_evts @ task_evts @ msg_evts @ tool_evts @ turn_evts

@@ -183,7 +183,10 @@ let recording_reviewer calls behaviors =
         (AR.Reject reason)
     | Some Stub_malformed -> Ok None
     | Some Stub_unavailable ->
-      Error (Agent_core.Error.Internal "test evaluator unavailable")
+      Error
+        (Agent_core.Error.Api
+           (Agent_core.Retry.ServerError
+              { status = 503; message = "test evaluator unavailable" }))
     | None ->
       Error (Agent_core.Error.Internal ("unexpected evaluator slot " ^ evaluator_runtime))
 ;;
@@ -366,7 +369,9 @@ let test_all_slots_failed_keeps_the_pending_row () =
          calls
          [ "verifier-a", Stub_malformed; "verifier-b", Stub_malformed ])
     (fun () -> drain config);
-  check (list string) "every slot was tried" [ "verifier-a"; "verifier-b" ] !calls;
+  check (list string) "every slot was tried for criterion and proof"
+    [ "verifier-a"; "verifier-b"; "verifier-a"; "verifier-b" ]
+    !calls;
   check string "the phase never left verifying" "verifying"
     (stored_phase config goal_id);
   match (ledger_record config goal_id).completion with

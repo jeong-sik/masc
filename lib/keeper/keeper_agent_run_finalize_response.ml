@@ -57,6 +57,13 @@ let finalize
     | Keeper_turn_outcome.External_effect_pending
     | Keeper_turn_outcome.No_visible_reply -> false
   in
+  (* RFC-0385: an internal turn's wake cue and final text are not conversation.
+     The history source label is what the turn already carries, so the decision
+     comes from it and not from the text. Direct turns keep [direct_assistant]
+     and are unaffected (RFC-0376 4.3). *)
+  let exclude_thought_from_replay =
+    Keeper_types_support.is_internal_history_source history_assistant_source
+  in
   let suppression_reasons =
     Keeper_replay_checkpoint.wire_capture_response_suppression_reasons
       ~control_checkpoint
@@ -109,6 +116,7 @@ let finalize
           ~response_text
           ~suppress_visible_response
           ~stop_reason:result.stop_reason
+          ~exclude_thought_from_replay
           checkpoint
       in
       (match checkpoint_for_save_result with

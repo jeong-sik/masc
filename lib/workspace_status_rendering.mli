@@ -61,6 +61,7 @@ val status_summary_string :
   planning_state:Workspace_types.planning_context_state ->
   attention_items:string list ->
   state:Masc_domain.workspace_state ->
+  task_goal_index:(string, string list) Hashtbl.t ->
   backlog:Masc_domain.backlog ->
   string
 (** [status_summary_string] renders the full [masc_status]

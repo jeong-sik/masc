@@ -41,7 +41,13 @@ let describe_pruned_goal = function
     "doesn't catch goal property changes (status, phase)", which is the residue
     this closes. Measured 2026-08-07: sangsu carried goal-request-menu-zero for
     5,362 tool calls across 2.5 days after it completed, stamped goal-bound the
-    whole time, with an empty Active goals section in every one of those turns. *)
+    whole time, with an empty Active goals section in every one of those turns.
+
+    RFC-0387 stage 2: [Verifying] deliberately SURVIVES this cross-check —
+    [Goal_phase.admits_self_directed_progress] admits it, because the gate
+    holds the phase while the proof is judged out-of-band and the keeper keeps
+    working the linked tasks. Pruning a Verifying goal here would erase it from
+    the keeper's scope at exactly the moment the gate took over (review P0-1). *)
 let validate_active_goal_ids ~(config : Workspace.config) ~(meta : keeper_meta) () =
   let valid_goal_ids, pruned =
     List.partition_map

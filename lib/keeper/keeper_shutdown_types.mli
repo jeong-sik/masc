@@ -13,7 +13,6 @@ end
 
 type meta_disposition =
   | Retain_operator_pause
-  | Retain_dead_tombstone
   | Remove_meta
 
 type dashboard_purge_context =
@@ -24,11 +23,11 @@ type dashboard_purge_context =
 type cleanup_reason =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup
+  | Supervisor_cleanup
   | Dashboard_keeper_purge of dashboard_purge_context
 
 type completion_action =
-  | Dead_tombstone_reaped
+  | Supervisor_cleaned
   | Dashboard_keeper_purged
 
 type dashboard_purge_artifact =

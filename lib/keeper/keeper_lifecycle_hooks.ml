@@ -5,7 +5,7 @@ type event =
       from_phase : Keeper_state_machine.phase;
       to_phase   : Keeper_state_machine.phase;
     }
-  | Tombstone_reaped
+  | Supervisor_cleaned
 
 type hook = keeper_id:string -> event -> unit
 

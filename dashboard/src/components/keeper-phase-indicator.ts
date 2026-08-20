@@ -70,7 +70,6 @@ export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Stopped:    { label: PHASE_LABEL_KO.stopped,     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '■' },
   Crashed:    { label: PHASE_LABEL_KO.crashed,   color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '✕' },
   Restarting: { label: PHASE_LABEL_KO.restarting,     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
-  Dead:       { label: PHASE_LABEL_KO.dead,     color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: 'none',        icon: '✦' },
 }
 
 const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
@@ -85,7 +84,6 @@ const PIPELINE_STAGE_DETAIL_LABELS: Record<string, string> = {
   operator_or_policy_paused: '일시정지',
   clean_stop_terminal: '정상 정지',
   crashed_restart_candidate: '재시작 후보',
-  dead_tombstone_terminal: 'Dead tombstone',
   structural_failure_terminal: '구조 실패',
 }
 

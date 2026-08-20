@@ -675,8 +675,7 @@ let start_supervisor_sweep ctx =
               | Keeper_state_machine.Paused
               | Keeper_state_machine.Stopped
               | Keeper_state_machine.Crashed
-              | Keeper_state_machine.Restarting
-              | Keeper_state_machine.Dead -> ())
+              | Keeper_state_machine.Restarting -> ())
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string TomlReconcileSweepFailures)

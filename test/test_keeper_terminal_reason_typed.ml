@@ -497,9 +497,7 @@ let () =
       "transcript corruption persists typed reset-required latch"
       (match paused.latched_reason with
        | Some Keeper_latched_reason.Transcript_corruption_reset_required -> true
-       | Some
-           ( Keeper_latched_reason.Operator_paused _
-           | Keeper_latched_reason.Dead_tombstone )
+       | Some (Keeper_latched_reason.Operator_paused _)
        | None ->
          false);
     let generic_resume = KMC.mark_resumed paused in

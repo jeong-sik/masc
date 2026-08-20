@@ -67,7 +67,6 @@ export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
  *  here at once. */
 const CRASHED_PHASES: ReadonlySet<string> = new Set<string>([
   'Crashed',
-  'Dead',
 ])
 
 export function isKeeperCrashed(keeper: Keeper): boolean {

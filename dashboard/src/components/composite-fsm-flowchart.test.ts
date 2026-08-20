@@ -43,7 +43,7 @@ describe('buildCompositeFsmMermaid', () => {
     const ksm = [
       'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
       'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
-      'Restarting', 'Dead',
+      'Restarting',
     ]
     for (const label of ksm) {
       expect(src).toContain(`"${label}"`)
@@ -51,7 +51,7 @@ describe('buildCompositeFsmMermaid', () => {
   })
 
   it('tags Stopped and Dead as terminal states', () => {
-    expect(src).toMatch(/class .*ksm_stopped.*ksm_dead.*terminal/)
+    expect(src).toMatch(/class .*ksm_stopped.*terminal/)
   })
 
   it('does not emit duplicate top-level node ids (no un-prefixed collisions)', () => {

@@ -407,15 +407,6 @@ let all =
       ~category:"supervisor"
       "Supervisor sweep interval in seconds"
   ; setting
-      ~range:(float_range ~min:60.0 ())
-      ~env_name:"MASC_KEEPER_DEAD_TTL_SEC"
-      ~exposure:(Toml_and_env "lifecycle.dead_ttl_sec")
-      ~value_kind:Float
-      ~default:"3600.0"
-      ~consumers:[ "Env_config_keeper_supervisor"; "Keeper_supervisor" ]
-      ~category:"supervisor"
-      "Dead keeper tombstone retention in seconds"
-  ; setting
       ~range:(int_range ~min:0 ())
       ~env_name:"MASC_KEEPER_METRICS_MAX_BYTES"
       ~exposure:(Toml_and_env "metrics.max_bytes")

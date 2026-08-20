@@ -550,7 +550,6 @@ export type KeeperLifecycleState =
   // Offline-detail sub-states emitted by keeperDisplayStatus.
   | 'paused'
   | 'crashed'
-  | 'dead'
   | 'unknown'
 
 export interface Goal {
@@ -1044,7 +1043,6 @@ export type KeeperPhase =
   | 'Stopped'
   | 'Crashed'
   | 'Restarting'
-  | 'Dead'
 
 export const KEEPER_AUTOBOOT_EXCLUSION_REASONS = [
   'declarative_autoboot_disabled',
@@ -1307,7 +1305,6 @@ export interface KeeperConditions {
   handoff_active: boolean
   operator_paused: boolean
   stop_requested: boolean
-  dead_tombstone_latched: boolean
   drain_complete: boolean
 }
 
@@ -1320,7 +1317,6 @@ interface KeeperSupervisorDiagnostics {
   restart_count?: number
   crash_log?: KeeperSupervisorCrashLogEntry[]
   last_failure_reason?: string | null
-  dead_since?: number | null
 }
 
 // --- Keeper Config (structured read-only view) ---

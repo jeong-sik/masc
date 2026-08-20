@@ -522,8 +522,6 @@ let effective_setting_value (row : Keeper_runtime_setting_registry.setting) =
          display_int Env_config_keeper.KeeperProactive.stage_timing_ring_size
        | "MASC_KEEPER_SUPERVISOR_SWEEP_SEC" ->
          display_float Env_config_keeper.KeeperSupervisor.sweep_interval_sec
-       | "MASC_KEEPER_DEAD_TTL_SEC" ->
-         display_float Env_config_keeper.KeeperSupervisor.dead_ttl_sec
        | "MASC_KEEPER_METRICS_MAX_BYTES" ->
          display_int Env_config_keeper.KeeperMetrics.max_file_bytes
        | "MASC_KEEPER_METRICS_MAX_ROTATED" ->

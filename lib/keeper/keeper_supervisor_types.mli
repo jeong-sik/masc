@@ -44,6 +44,4 @@ val iter_supervision_cohorts :
   unit
 (** Iterate cohorts in order and yield only between cohort boundaries. *)
 
-val should_cleanup_dead :
-  now:float -> dead_ttl_sec:float -> Keeper_registry.registry_entry -> bool
 (** True when a Dead tombstone has exceeded the configured TTL. *)

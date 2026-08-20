@@ -670,12 +670,12 @@ let test_delete_allows_owner () =
     | Error msg -> failf "owner delete failed: %s" msg)
 ;;
 
-(* task-1744: tombstoned annotations must be excluded from load/list.
+(* task-1744: deleted_ids annotations must be excluded from load/list.
 
-   Before the fix, [load_all_for_codebase] only skipped the tombstone marker
+   Before the fix, [load_all_for_codebase] only skipped the deletion marker
    line, leaving the earlier annotation with the same id visible in
-   [list], contradicting the mli contract "Tombstoned entries are
-   excluded". These cases exercise both the plain tombstone path, where
+   [list], contradicting the mli contract "Deleted entries are
+   excluded". These cases exercise both the plain deletion path, where
    [list] must apply the exclusion itself, and the explicit compaction
    marker path. *)
 
@@ -695,7 +695,7 @@ let create_note ~base_dir ~keeper_id ~content () =
 
 let test_list_excludes_soft_deleted_without_compaction () =
   with_temp_dir (fun base_dir ->
-    (* No explicit compaction runs here; [list] must exclude the tombstoned
+    (* No explicit compaction runs here; [list] must exclude the deleted_ids
        id on read while the marker remains physically present. *)
     let notes =
       List.init 6 (fun i ->
@@ -706,10 +706,10 @@ let test_list_excludes_soft_deleted_without_compaction () =
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
     let listed = Store.list ~base_dir ~codebase:"github.com_other_repo" ~filter:(make_filter ()) () in
-    check int "list excludes the tombstoned annotation" 5 (List.length listed);
+    check int "list excludes the deleted_ids annotation" 5 (List.length listed);
     check
       bool
-      "tombstoned id absent from list"
+      "deleted_ids id absent from list"
       false
       (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
 ;;
@@ -742,7 +742,7 @@ let test_list_returns_live_annotation () =
     | rows -> failf "expected one live annotation, got %d" (List.length rows))
 ;;
 
-let test_compact_drops_tombstoned () =
+let test_compact_drops_deleted () =
   with_temp_dir (fun base_dir ->
     let notes =
       List.init 6 (fun i ->
@@ -774,7 +774,7 @@ let test_compact_drops_tombstoned () =
     check int "list count after compact" 5 (List.length listed);
     check
       bool
-      "tombstoned id absent after compact"
+      "deleted_ids id absent after compact"
       false
       (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
 ;;
@@ -982,7 +982,7 @@ let () =
             test_delete_rejects_other_keeper
         ; test_case "owner can delete own annotation" `Quick test_delete_allows_owner
         ] )
-    ; ( "tombstone read (task-1744)"
+    ; ( "deletion read (task-1744)"
       , [ test_case
             "list excludes soft-deleted annotation (no compaction)"
             `Quick
@@ -996,9 +996,9 @@ let () =
             `Quick
             test_list_returns_live_annotation
         ; test_case
-            "compaction drops tombstoned annotation"
+            "compaction drops deleted_ids annotation"
             `Quick
-            test_compact_drops_tombstoned
+            test_compact_drops_deleted
         ] )
     ; ( "append-only compaction + CAS (task-1738)"
       , [ test_case

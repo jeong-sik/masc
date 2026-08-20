@@ -94,7 +94,7 @@ describe('buildCompositeFsmSpec', () => {
   })
 
   it('marks the active KSM child as err for failure-class phases', () => {
-    for (const phase of ['failing', 'stopped', 'crashed', 'dead']) {
+    for (const phase of ['failing', 'stopped', 'crashed']) {
       const spec = buildCompositeFsmSpec({ ...defaultParams, phase })
       expect(spec.nodes.find(n => n.id === `KSM:${phase}`)!.type).toBe('err')
     }

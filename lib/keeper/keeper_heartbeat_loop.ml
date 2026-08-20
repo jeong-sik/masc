@@ -1247,9 +1247,7 @@ let run_heartbeat_loop
         in
         let terminal_lifecycle_blocked =
           match intake_admission with
-          | Intake_lifecycle_blocked
-              Keeper_lifecycle_admission.Autonomous_dead_tombstone -> true
-          | Intake_lifecycle_blocked (Keeper_lifecycle_admission.Autonomous_paused _) -> false
+          | Intake_lifecycle_blocked (Keeper_lifecycle_admission.Autonomous_paused _)
           | Intake_admitted -> false
         in
         (match intake_admission with

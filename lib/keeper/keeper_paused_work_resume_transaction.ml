@@ -22,7 +22,6 @@ type failure =
       }
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
   | Durable_owner_transcript_reset_required
   | Registry_owner_missing
   | Registry_owner_nonce_changed of
@@ -86,8 +85,6 @@ let failure_to_string = function
       actual
   | Durable_owner_identity_changed -> "Resume_owner durable trace identity changed"
   | Durable_owner_not_paused -> "Resume_owner requires a durably paused Keeper"
-  | Durable_owner_dead_tombstone ->
-    "Resume_owner cannot revive a Dead tombstone; use the dead-revival transaction"
   | Durable_owner_transcript_reset_required ->
     "Resume_owner cannot replay a structurally corrupted checkpoint; reset the \
      Keeper checkpoint first"
@@ -249,7 +246,6 @@ let paused_meta receipt (meta : Keeper_meta_contract.keeper_meta) =
       ~paused:meta.paused
       ~latched_reason:meta.latched_reason
   with
-  | Keeper_lifecycle_admission.Dead_tombstone -> Error Durable_owner_dead_tombstone
   | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
   | Keeper_lifecycle_admission.Paused
       (Keeper_lifecycle_admission.Classified

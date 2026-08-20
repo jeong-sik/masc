@@ -745,8 +745,8 @@ let reconcile_keepalive_keepers ~load_or_materialize_keeper_meta (ctx : _ contex
 
 (* Dead-tombstone cleanup submits a durable exact-lane finalization operation;
    completion events/hooks are delivered from its durable receipt. *)
-let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_entry) =
-  Keeper_supervisor_cleanup_tombstone.cleanup_dead_tombstone ctx entry
+let cleanup_absent_keeper (ctx : _ context) (entry : Keeper_registry.registry_entry) =
+  Keeper_supervisor_cleanup.cleanup_absent_keeper ctx entry
 ;;
 
 (** Cohort key from structured failure_reason ADT.

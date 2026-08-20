@@ -242,25 +242,6 @@ let test_generate_compact_shows_exact_librarian_facts () =
         "enabled config renders ON" true
         (contains enabled_output "LIBRARIAN: ON"))
 
-let test_keepers_section_dead_phase () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = test_dir () in
-  Lib.Keeper_registry.For_testing.clear ();
-  ignore
-    (Lib.Keeper_registry.For_testing.register ~base_path:dir "delta"
-       (make_test_meta "delta"));
-  let now_mark = Unix.gettimeofday () in
-  Lib.Keeper_registry.mark_dead ~base_path:dir "delta" ~at:now_mark;
-  let now = Unix.gettimeofday () in
-  let section = Dashboard.keepers_section now in
-  Alcotest.(check int) "one entry" 1 (List.length section.content);
-  let line = List.hd section.content in
-  Alcotest.(check bool) "contains delta" true (contains line "delta");
-  Alcotest.(check bool) "contains dead phase" true (contains line "dead");
-  Alcotest.(check bool) "contains since= marker" true (contains line "since=");
-  Lib.Keeper_registry.For_testing.clear ();
-  cleanup_dir dir
 
 let test_keepers_section_with_error_truncated () =
   Eio_main.run @@ fun env ->
@@ -314,7 +295,6 @@ let keepers_tests = [
   "keepers section with entry", `Quick, test_keepers_section_with_entry;
   "generate full contains keepers", `Quick, test_generate_full_contains_keepers;
   "generate compact contains keepers", `Quick, test_generate_compact_contains_keepers;
-  "keepers section dead phase", `Quick, test_keepers_section_dead_phase;
   "keepers section with error truncated", `Quick, test_keepers_section_with_error_truncated;
   ( "generate compact shows exact librarian facts"
   , `Quick

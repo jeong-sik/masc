@@ -34,7 +34,6 @@ const ALL_PHASES: readonly KeeperPhase[] = [
   'Paused',
   'Stopped',
   'Crashed',
-  'Dead',
 ]
 
 describe('keeper-fsm SSOT closed-sum', () => {
@@ -42,7 +41,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
     expect(new Set(FSM_STATES)).toEqual(new Set([
       'Offline', 'Restarting', 'Running', 'Compacting', 'HandingOff',
       'Failing', 'Overflowed', 'Draining', 'Paused', 'Stopped',
-      'Crashed', 'Dead',
+      'Crashed',
     ]))
   })
 
@@ -94,7 +93,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
     expect(Array.isArray(actions)).toBe(true)
     // transient / terminal phases expose no actions
     const transientOrTerminal: ReadonlySet<KeeperPhase> = new Set([
-      'Compacting', 'HandingOff', 'Draining', 'Restarting', 'Dead',
+      'Compacting', 'HandingOff', 'Draining', 'Restarting',
     ])
     if (transientOrTerminal.has(phase)) {
       expect(actions).toHaveLength(0)

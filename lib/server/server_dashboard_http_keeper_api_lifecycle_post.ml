@@ -249,8 +249,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                    ~latched_reason:meta.latched_reason
                with
                | Keeper_lifecycle_admission.Paused _ -> Boot_operator_paused
-               | Keeper_lifecycle_admission.Active
-               | Keeper_lifecycle_admission.Dead_tombstone -> Boot_allowed)
+               | Keeper_lifecycle_admission.Active -> Boot_allowed)
         in
         (match boot_preflight with
          | Boot_meta_read_failed error ->

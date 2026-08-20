@@ -1,6 +1,6 @@
-(** Submit exact-lane dead-tombstone finalization without blocking the
+(** Submit exact-lane cleanup finalization without blocking the
     supervisor sweep. *)
-val cleanup_dead_tombstone :
+val cleanup_absent_keeper :
   'a Keeper_types_profile.context ->
   Keeper_registry.registry_entry ->
   unit

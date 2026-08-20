@@ -84,7 +84,6 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   Stopped: phaseMetaFromToken('Stopped', 'stopped'),
   Crashed: phaseMetaFromToken('Crashed', 'crashed'),
   Restarting: phaseMetaFromToken('Restarting', 'restarting'),
-  Dead: phaseMetaFromToken('Dead', 'dead'),
   // `active` / `busy` are wire synonyms of `running` (see
   // KEEPER_STATUS_ALIASES in fleet-tone.ts) — same word, same sentence.
   active: phaseMetaFromToken('active', 'running'),

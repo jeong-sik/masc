@@ -31,7 +31,6 @@ type pause_kind =
   | Active
   | Operator_paused
   | Unclassified_paused
-  | Dead_tombstone
   | Transcript_corruption_reset_required
 
 let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
@@ -40,14 +39,11 @@ let pause_kind (meta : Keeper_meta_contract.keeper_meta) =
       ~paused:meta.paused
       ~latched_reason:meta.latched_reason
   with
-  | Keeper_lifecycle_admission.Dead_tombstone -> Dead_tombstone
   | Keeper_lifecycle_admission.Active -> Active
   | Keeper_lifecycle_admission.Paused latch ->
     (match latch with
      | Keeper_lifecycle_admission.Classified
          (Keeper_latched_reason.Operator_paused _) -> Operator_paused
-     | Keeper_lifecycle_admission.Classified Keeper_latched_reason.Dead_tombstone ->
-       Dead_tombstone
      | Keeper_lifecycle_admission.Classified
          Keeper_latched_reason.Transcript_corruption_reset_required ->
        Transcript_corruption_reset_required
@@ -58,7 +54,6 @@ let pause_kind_to_wire = function
   | Active -> "active"
   | Operator_paused -> "operator_paused"
   | Unclassified_paused -> "unclassified_paused"
-  | Dead_tombstone -> "dead_tombstone"
   | Transcript_corruption_reset_required ->
     "transcript_corruption_reset_required"
 ;;
@@ -119,9 +114,6 @@ let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
   | Some
       (Lifecycle_denied (Keeper_lifecycle_admission.Autonomous_paused _)) ->
     Some "resume keeper before expecting autonomous keepalive or PR fan-out"
-  | Some
-      (Lifecycle_denied Keeper_lifecycle_admission.Autonomous_dead_tombstone) ->
-    Some "delete the dead tombstone and create a fresh Keeper before starting a new lane"
   | Some Autoboot_disabled ->
     if meta.autoboot_enabled
     then
@@ -225,8 +217,7 @@ let classify_owner_execution_with
            | Owner_registered
                { phase =
                    ( Keeper_state_machine.Paused
-                   | Keeper_state_machine.Stopped
-                   | Keeper_state_machine.Dead ) as phase
+                   | Keeper_state_machine.Stopped ) as phase
                ; _
                } ->
              Paused_dead (Runtime_terminal phase)

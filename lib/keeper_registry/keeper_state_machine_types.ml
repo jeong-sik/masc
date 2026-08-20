@@ -14,7 +14,6 @@ type phase = Keeper_state_machine_phase.phase =
   | Stopped
   | Crashed
   | Restarting
-  | Dead
 
 let phase_to_string = Keeper_state_machine_phase.phase_to_string
 let phase_of_string = Keeper_state_machine_phase.phase_of_string
@@ -32,7 +31,6 @@ type conditions =
   ; handoff_active : bool
   ; operator_paused : bool
   ; stop_requested : bool
-  ; dead_tombstone_latched : bool
   ; restart_requested : bool
   ; drain_complete : bool
   ; credential_archived : bool
@@ -48,7 +46,6 @@ let default_conditions =
   ; handoff_active = false
   ; operator_paused = false
   ; stop_requested = false
-  ; dead_tombstone_latched = false
   ; restart_requested = false
   ; drain_complete = false
   ; credential_archived = false
@@ -160,7 +157,6 @@ type entry_action =
       { event_name : string
       ; detail : string
       }
-  | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
   | Cancel_pending_agent_core
@@ -217,19 +213,13 @@ let transition_error_to_string = function
    compiler-checked-exhaustive pattern already established in
    [can_execute_turn] below.
 
-   Terminal source phases (Stopped/Dead) keep [_ -> false] because
-   the semantic IS "any phase, including future ones, is unreachable from a
-   terminal state" — the wildcard correctly captures the universal denial.
-   The universal [_, Dead -> true] arm is kept because an explicit durable
-   tombstone can terminate any non-terminal phase. *)
+   The terminal source phase [Stopped] keeps [_ -> false] because the semantic
+   IS "any phase, including future ones, is unreachable from a terminal
+   state" — the wildcard correctly captures the universal denial. *)
 let can_transition ~from_phase ~to_phase =
   match from_phase, to_phase with
   (* Terminal states accept nothing *)
   | Stopped, _ -> false
-  | Dead, _ -> false
-  (* An explicit durable tombstone can terminate any non-terminal keeper.
-     Runtime failure and restart observations cannot synthesize it. *)
-  | _, Dead -> true
   (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
   | Offline, (Running | Stopped | Draining) -> true
   | ( Offline
@@ -350,6 +340,5 @@ let can_execute_turn = function
   | Paused
   | Stopped
   | Crashed
-  | Restarting
-  | Dead -> false
+  | Restarting -> false
 ;;

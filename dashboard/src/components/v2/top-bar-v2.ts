@@ -34,7 +34,7 @@ import {
   subscribeDashboardFullHealthRefresh,
 } from '../dashboard-full-health-state'
 
-const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead'])
+const DEAD_PHASES = new Set(['Overflowed', 'Crashed'])
 
 type TopBarKeeperCount =
   | { kind: 'executable'; count: number }

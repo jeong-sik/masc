@@ -471,7 +471,7 @@ let purge_dashboard_keeper_artifacts config operation =
     remove artifacts
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup ->
+  | Supervisor_cleanup ->
     Error "dashboard Keeper purge artifacts require a dashboard purge operation"
 ;;
 
@@ -513,15 +513,15 @@ let handle_dashboard_keeper_purge_completion config operation =
           Ok ()))
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
-     | Dead_tombstone_cleanup ->
+     | Supervisor_cleanup ->
        Error "dashboard purge completion does not belong to a dashboard purge operation")
 ;;
 
 let handle_keeper_lifecycle_completion config operation = function
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
     handle_dashboard_keeper_purge_completion config operation
-  | Dead_tombstone_reaped as action ->
-    Keeper_supervisor_cleanup_tombstone.handle_completion config operation action
+  | Supervisor_cleaned as action ->
+    Keeper_supervisor_cleanup.handle_completion config operation action
 ;;
 
 let keeper_purge_resolve_status = function
@@ -565,7 +565,7 @@ let respond_keeper_purge_operation_accepted ~request reqd operation =
       reqd
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup ->
+  | Supervisor_cleanup ->
     respond_error
       ~status:`Internal_server_error
       ~request

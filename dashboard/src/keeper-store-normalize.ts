@@ -206,7 +206,6 @@ const BACKEND_PHASE_LOWERCASE_MAP = {
   stopped: 'Stopped',
   crashed: 'Crashed',
   restarting: 'Restarting',
-  dead: 'Dead',
 } as const satisfies Record<string, KeeperPhase>
 
 /** Forward-compat PascalCase passthrough — accepts already-typed values from
@@ -224,7 +223,6 @@ const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Stopped: 'Stopped',
   Crashed: 'Crashed',
   Restarting: 'Restarting',
-  Dead: 'Dead',
 } as const satisfies Record<KeeperPhase, KeeperPhase>
 
 // Compile-time coverage check: every KeeperPhase variant must appear as a
@@ -292,7 +290,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
     return raw
   }
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
-  if (raw === 'dead' || raw === 'left') return 'offline'
+  if (raw === 'left') return 'offline'
   return 'offline'
 }
 
@@ -303,7 +301,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
   'active', 'compacting', 'preparing', 'handoff-imminent',
   'idle', 'offline', 'unbooted', 'stopped',
-  'paused', 'crashed', 'dead', 'unknown',
+  'paused', 'crashed', 'unknown',
 ])
 
 // Typed parse: replaces the `as KeeperLifecycleState` cast that

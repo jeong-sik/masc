@@ -455,9 +455,7 @@ type keeper_meta =
    deleted and recreated rather than revived. *)
 let mark_resumed (m : keeper_meta) : keeper_meta =
   match m.latched_reason with
-  | Some
-      ( Keeper_latched_reason.Transcript_corruption_reset_required
-      | Keeper_latched_reason.Dead_tombstone ) ->
+  | Some Keeper_latched_reason.Transcript_corruption_reset_required ->
     m
   | Some (Keeper_latched_reason.Operator_paused _)
   | None ->
@@ -480,9 +478,7 @@ let terminal_latch_pause_violation (m : keeper_meta) : string option =
      not a violation. [paused = true] is always consistent with any latch. *)
   match m.paused, m.latched_reason with
   | false,
-    Some
-      (( Keeper_latched_reason.Dead_tombstone
-       | Keeper_latched_reason.Transcript_corruption_reset_required ) as reason) ->
+    Some (Keeper_latched_reason.Transcript_corruption_reset_required as reason) ->
     Some
       (Printf.sprintf
          "keeper %s: paused=false with terminal/reset-required latch %s"

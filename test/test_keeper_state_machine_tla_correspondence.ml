@@ -15,7 +15,7 @@
      (update_conditions + derive_phase + can_transition), so any silent
      drift between the spec's [Next] action and the OCaml runtime
      pipeline is caught at the result level.
-   - The "forbidden transition" picks a Dead source phase: every TLA+
+   - The "forbidden transition" picks a terminal source phase: every TLA+
      [Next]-action conjunct includes [NotTerminal], so any event from
      [Dead]/[Stopped] is *not* in the relation.  The OCaml
      [apply_event] mirror is the explicit [Terminal_state] reject at the
@@ -43,7 +43,6 @@ let tla_phase_names =
   ; "Stopped"
   ; "Crashed"
   ; "Restarting"
-  ; "Dead"
   ]
 ;;
 
@@ -62,7 +61,6 @@ let phase_to_tla_name : SM.phase -> string = function
   | Stopped -> "Stopped"
   | Crashed -> "Crashed"
   | Restarting -> "Restarting"
-  | Dead -> "Dead"
 ;;
 
 (* ── Smoke test 1: State set parity ──────────────────────────── *)
@@ -87,7 +85,7 @@ let test_state_set_parity () =
      future OCaml-only phase (e.g. an internal substate not yet modelled
      in the spec) must not break the smoke.  When such drift appears,
      the spec gap should be tracked separately, not enforced here. *)
-  check int "TLA+ phase count" 12 (List.length tla_sorted);
+  check int "TLA+ phase count" 11 (List.length tla_sorted);
   (* OCaml ≥ TLA+ is implied by the per-name check above; we re-state it
      as an explicit inequality for readability. *)
   check
@@ -107,7 +105,6 @@ let running_conditions : SM.conditions =
     fiber_alive = true
   ; heartbeat_healthy = true
   ; turn_healthy = true
-  ; dead_tombstone_latched = false
   }
 ;;
 
@@ -174,35 +171,7 @@ let test_running_to_compacting_via_compaction_started () =
    itself is otherwise unconditional and harmless — failure here proves
    the terminal-reject gate, not an unrelated precondition. *)
 
-(* A baseline "Dead" condition set: fiber dead AND budget exhausted.
-   Mirrors DerivePhase priority 3 (Dead branch). *)
-let dead_conditions : SM.conditions =
-  { SM.default_conditions with fiber_alive = false; dead_tombstone_latched = true }
-;;
 
-let test_forbidden_dead_rejects_heartbeat_ok () =
-  match
-    SM.apply_event
-      ~current_phase:Dead
-      ~conditions:dead_conditions
-      ~event:SM.Heartbeat_ok
-      ~now:0.0
-  with
-  | Ok result ->
-    failf
-      "expected Terminal_state error, got Ok with new_phase=%s"
-      (SM.phase_to_string result.new_phase)
-  | Error (Terminal_state { current; _ }) ->
-    check
-      (testable (fun fmt p -> Format.fprintf fmt "%s" (SM.phase_to_string p)) ( = ))
-      "Terminal_state reports Dead as current"
-      Dead
-      current
-  | Error err ->
-    failf "expected Terminal_state, got %s" (SM.transition_error_to_string err)
-;;
-
-(* ── Wire-up ────────────────────────────────────────────────── *)
 
 let () =
   Alcotest.run
@@ -222,12 +191,6 @@ let () =
             "Running -> Compacting via Compaction_started"
             `Quick
             test_running_to_compacting_via_compaction_started
-        ] )
-    ; ( "forbidden_transitions"
-      , [ test_case
-            "Dead rejects Heartbeat_ok (Terminal_state)"
-            `Quick
-            test_forbidden_dead_rejects_heartbeat_ok
         ] )
     ]
 ;;

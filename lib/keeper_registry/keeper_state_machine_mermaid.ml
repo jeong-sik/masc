@@ -22,7 +22,6 @@ let phase_to_mermaid_id = function
   | Stopped -> "Stopped"
   | Crashed -> "Crashed"
   | Restarting -> "Restarting"
-  | Dead -> "Dead"
 ;;
 
 let phase_to_mermaid ~(current : phase) : string =
@@ -80,7 +79,7 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    classDef terminal fill:#6b7280,stroke:#4b5563,color:#fff\n";
   p "    classDef buffer fill:#f59e0b,stroke:#d97706,color:#fff\n";
   (match current with
-   | Stopped | Dead ->
+   | Stopped ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
    | Failing | Overflowed | Compacting | HandingOff | Draining | Restarting | Crashed ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)

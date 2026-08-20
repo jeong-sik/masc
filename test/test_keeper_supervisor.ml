@@ -28,7 +28,7 @@ module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_types = Masc.Keeper_shutdown_types
 module Subprocess_registry = Masc.Keeper_subprocess_registry
-module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
+module Supervisor_cleanup = Masc.Keeper_supervisor_cleanup
 module Process_switch = Masc.Keeper_process_switch
 module Tool_accumulator = Masc.Keeper_tool_emission_hook
 module Latched_reason = Keeper_latched_reason
@@ -255,46 +255,6 @@ let test_crash_log_empty_for_unknown () =
   Reg.For_testing.clear ();
   check int "empty crash log" 0
     (List.length (Reg.For_testing.crash_log_of ~base_path:"/tmp" "nonexistent"))
-
-let test_should_cleanup_dead_true () =
-  Reg.For_testing.clear ();
-  let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead1"
-      (match
-         Masc_test_deps.meta_of_json_fixture
-           (`Assoc
-             [ ("name", `String "dead1")
-             ; ("trace_id", `String "trace-dead1")
-             ])
-       with
-       | Ok meta -> meta
-       | Error err -> fail err)
-  in
-  Reg.mark_dead ~base_path:"/tmp" "dead1" ~at:10.0;
-  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead1") in
-  check bool "ttl exceeded" true
-    (Sup.should_cleanup_dead ~now:4000.0 ~dead_ttl_sec:3600.0 entry)
-
-let test_should_cleanup_dead_false_when_recent () =
-  Reg.For_testing.clear ();
-  let _entry = Reg.For_testing.register ~base_path:"/tmp" "dead2"
-      (match
-         Masc_test_deps.meta_of_json_fixture
-           (`Assoc
-             [ ("name", `String "dead2")
-             ; ("trace_id", `String "trace-dead2")
-             ])
-       with
-       | Ok meta -> meta
-       | Error err -> fail err)
-  in
-  Reg.mark_dead ~base_path:"/tmp" "dead2" ~at:100.0;
-  let entry = Option.get (Reg.get ~base_path:"/tmp" "dead2") in
-  check bool "ttl not exceeded" false
-    (Sup.should_cleanup_dead ~now:200.0 ~dead_ttl_sec:3600.0 entry)
-
-(* ── Property: backoff invariants ───────────────────────── *)
-
-(* ── Property: keep_last_n invariants ──────────────────── *)
 
 let test_keep_last_n_never_exceeds () =
   let n = 5 in
@@ -1582,192 +1542,6 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       check bool "keeper unregistered after missing meta" false
         (Reg.is_registered ~base_path:config.base_path name))
 
-let test_restart_denies_persisted_dead_tombstone () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  with_config_dir @@ fun config_dir ->
-  let base_dir = temp_dir () in
-  let name = "restart-dead-tombstone-admission" in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg =
-        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
-      in
-      write_keeper_toml config_dir ~name;
-      let active_meta = make_meta name in
-      let dead_meta =
-        { active_meta with
-          paused = true
-        ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-        }
-      in
-      (match Keeper_meta_store.replace_snapshot config dead_meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      install_owner_inventory_exn ~sw config;
-      let reg = Reg.For_testing.register ~base_path:config.base_path name active_meta in
-      resolve_done_for_test reg (`Crashed "crash before terminal persist");
-      Reg.restore_supervisor_state
-        ~base_path:config.base_path
-        name
-        ~restart_count:0
-        ~last_restart_ts:0.0
-        ~crash_log:[];
-      let attempt_labels = [ "keeper", name ] in
-      let denied_labels = [ "keeper", name; "outcome", "lifecycle_denied" ] in
-      let attempts_before =
-        Masc.Otel_metric_store.metric_value_or_zero
-          Keeper_metrics.(to_string RestartAttempts)
-          ~labels:attempt_labels
-          ()
-      in
-      let denied_before =
-        Masc.Otel_metric_store.metric_value_or_zero
-          Keeper_metrics.(to_string RestartOutcomes)
-          ~labels:denied_labels
-          ()
-      in
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      sweep_and_recover_no_materialize ctx;
-      check (float 0.001) "terminal lane consumes no restart attempt"
-        attempts_before
-        (Masc.Otel_metric_store.metric_value_or_zero
-           Keeper_metrics.(to_string RestartAttempts)
-           ~labels:attempt_labels
-           ());
-      check (float 0.001) "typed lifecycle denial is observed"
-        (denied_before +. 1.0)
-        (Masc.Otel_metric_store.metric_value_or_zero
-           Keeper_metrics.(to_string RestartOutcomes)
-           ~labels:denied_labels
-           ());
-      match Reg.get ~base_path:config.base_path name with
-      | None -> fail "terminal registry entry unexpectedly disappeared"
-      | Some entry ->
-        check int "restart count unchanged" 0 entry.restart_count;
-        check bool "terminal registry phase is Dead" true
-          (entry.phase = Keeper_state_machine.Dead);
-        check bool "persisted tombstone meta becomes registry authority" true
-          (match entry.meta.latched_reason with
-           | Some Keeper_latched_reason.Dead_tombstone -> true
-           | Some _ | None -> false);
-        check bool "terminal transition records dead timestamp" true
-          (Option.is_some entry.dead_since_ts))
-
-let with_reap_ready_dead_keeper name f =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
-      Shutdown_finalize.For_testing.reset_completion_handler ();
-      Subprocess_registry.reset_for_testing ();
-      Masc.Keeper_process_switch.For_testing.clear ();
-      KLH.reset_for_testing ();
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let meta = make_meta name in
-      install_owner_inventory_exn ~sw config;
-      create_owner_meta_exn config meta;
-      ignore (Reg.For_testing.register ~base_path:config.base_path name meta);
-      Reg.mark_dead ~base_path:config.base_path name ~at:0.0;
-      let completion_bus = Agent_core.Event_bus.create () in
-      Event_bus_slots.set_masc completion_bus;
-      Subprocess_registry.register_default_cleanup_hook ();
-      Shutdown_finalize.register_remove_pending_confirms_by_target
-        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
-      Shutdown_finalize.register_completion_handler Tombstone_cleanup.handle_completion;
-      let run_sweep () =
-        Sup.set_global_switch sw;
-        let ctx : _ Keeper_types_profile.context =
-          { config
-          ; agent_name = supervisor_agent_name
-          ; sw
-          ; clock = Eio.Stdenv.clock env
-          ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-          ; net = Some (Eio.Stdenv.net env)
-          ; publication_recovery_provider =
-              Masc_test_deps.publication_recovery_provider
-                (publication_recovery_registry env sw config)
-          }
-        in
-        sweep_and_recover_no_materialize ctx
-      in
-      f ~config ~clock:(Eio.Stdenv.clock env) ~run_sweep)
-
-let event_label = function
-  | KLH.Tombstone_reaped -> "tombstone_reaped"
-  | KLH.Phase_transition _ -> "phase_transition"
-
-let test_sweep_and_recover_fires_tombstone_reaped_hook () =
-  KLH.reset_for_testing ();
-  let name = "tombstone-hook-keeper" in
-  let fired = ref [] in
-  KLH.register (fun ~keeper_id event ->
-    fired := (keeper_id, event_label event) :: !fired);
-  with_reap_ready_dead_keeper name @@ fun ~config ~clock ~run_sweep ->
-  run_sweep ();
-  check bool
-    "Tombstone_reaped completion arrived"
-    true
-    (wait_until
-       ~clock
-       ~deadline:(Eio.Time.now clock +. 1.0)
-       (fun () -> !fired <> []));
-  check (list (pair string string))
-    "single Tombstone_reaped event"
-    [ (name, "tombstone_reaped") ] (List.rev !fired);
-  check bool "dead keeper unregistered after tombstone cleanup"
-    false (Reg.is_registered ~base_path:config.base_path name)
-
-let test_sweep_and_recover_swallows_failing_tombstone_hook () =
-  KLH.reset_for_testing ();
-  let name = "tombstone-failing-hook-keeper" in
-  let failing_hook_calls = ref 0 in
-  let later_hook_events = ref [] in
-  KLH.register (fun ~keeper_id:_ _ ->
-    incr failing_hook_calls;
-    raise (Failure "intentional tombstone hook failure"));
-  KLH.register (fun ~keeper_id event ->
-    later_hook_events := (keeper_id, event_label event) :: !later_hook_events);
-  with_reap_ready_dead_keeper name @@ fun ~config ~clock ~run_sweep ->
-  run_sweep ();
-  check bool
-    "later hook observed asynchronous Tombstone_reaped completion"
-    true
-    (wait_until
-       ~clock
-       ~deadline:(Eio.Time.now clock +. 1.0)
-       (fun () -> !later_hook_events <> []));
-  check int "failing hook invoked exactly once" 1 !failing_hook_calls;
-  check (list (pair string string))
-    "later hook still observes Tombstone_reaped"
-    [ (name, "tombstone_reaped") ] (List.rev !later_hook_events);
-  check bool "dead keeper still unregistered after failing hook"
-    false (Reg.is_registered ~base_path:config.base_path name)
 
 exception Synthetic_cleanup_failure
 
@@ -1794,67 +1568,6 @@ let test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures () =
    [Started]/[Running], and the entry's done promise must resolve through
    the crash path so the sweep observes a typed outcome. Pre-fix the fiber
    forked and Running was published despite the reject. *)
-let test_launch_rejected_terminal_state_does_not_announce_running () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
-      let name = "launch-reject-terminal" in
-      let meta = make_meta name in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error err -> fail err);
-      let reg = Reg.For_testing.register ~base_path:config.base_path name meta in
-      Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = supervisor_agent_name;
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = Some (Eio.Stdenv.net env);
-          publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config);
-        }
-      in
-      Sup.with_restart_launch_noop_for_test (fun () ->
-        with_launch_token
-          ~base_path:config.base_path
-          ~keeper_name:name
-          ~expected_generation:reg.transition_seq
-          (fun lifecycle_token ->
-             match
-               Masc.Keeper_supervisor_launch.launch_supervised_fiber
-                 ~lifecycle_token
-                 ~proactive_warmup_sec:0
-                 ctx
-                 meta
-                 reg
-             with
-             | Ok () -> fail "expected Fiber_started to be rejected in terminal state"
-             | Error _ -> ()));
-      (match Reg.get_phase ~base_path:config.base_path name with
-       | Some Keeper_state_machine.Dead -> ()
-       | Some phase ->
-         fail
-           (Printf.sprintf "expected phase to stay Dead, got %s"
-              (Keeper_state_machine.phase_to_string phase))
-       | None -> fail "registry entry disappeared after rejected launch");
-      check bool "done promise resolved through the crash path"
-        true (Option.is_some (Eio.Promise.peek reg.done_p));
-      check bool "rejected launch closes lane join contract"
-        true (Reg.lane_has_exited reg))
-
 let test_supervised_stop_joins_board_attention_worker () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2181,60 +1894,6 @@ let test_fork_rejection_preserves_replacement_lane () =
          | Some KSM.Running -> true
          | Some _ | None -> false))
 
-let test_fork_rejection_unregisters_non_terminalizable_owner () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      Reg.For_testing.clear ();
-      Masc.Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name));
-      let name = "fork-reject-terminal-owner" in
-      let meta = make_meta name in
-      let rejected = Reg.For_testing.register ~base_path:config.base_path name meta in
-      Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
-      (match
-         Lane.reject_before_start rejected.lane ~reason:(Failure "pre-claimed for test")
-       with
-       | Ok () -> ()
-       | Error error -> fail (Lane.start_error_to_string error));
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = supervisor_agent_name
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = Some (Eio.Stdenv.net env)
-        ; publication_recovery_provider =
-            Masc_test_deps.publication_recovery_provider
-              (publication_recovery_registry env sw config)
-        }
-      in
-      with_launch_token
-        ~base_path:config.base_path
-        ~keeper_name:name
-        ~expected_generation:rejected.transition_seq
-        (fun lifecycle_token ->
-           match
-             Masc.Keeper_supervisor_launch.launch_supervised_fiber_body
-               ~lifecycle_token
-               ~proactive_warmup_sec:0
-               ctx
-               meta
-               rejected
-           with
-           | Ok () -> fail "expected rejected terminal lane to propagate as Error"
-           | Error _ -> ());
-      check bool
-        "non-terminalizable exact owner is unregistered"
-        true
-        (Option.is_none (Reg.get ~base_path:config.base_path name)))
-
 let test_sweep_waits_for_lane_join_before_unregister () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2417,8 +2076,7 @@ let test_non_storm_crashed_restarts_normally () =
        | Ok None -> fail "meta missing"
        | Error err -> fail ("read_meta failed: " ^ err));
       (match Reg.get ~base_path:config.base_path name with
-       | Some entry ->
-         check bool "many prior restarts do not make Dead" false (entry.phase = KSM.Dead)
+       | Some _ -> ()
        | None -> fail "registry entry missing after ordinary restart"))
 
 (* Failure observations remain durable across lane unregister/restart without
@@ -3119,8 +2777,6 @@ let () =
       test_case "unknown for unregistered" `Quick test_fiber_health_unknown;
       test_case "registry count zero" `Quick test_registry_count_initially_zero;
       test_case "crash_log empty" `Quick test_crash_log_empty_for_unknown;
-      test_case "should cleanup dead when ttl exceeded" `Quick test_should_cleanup_dead_true;
-      test_case "should not cleanup dead when recent" `Quick test_should_cleanup_dead_false_when_recent;
     ];
     "keep_last_n_properties", [
       test_case "never exceeds limit" `Quick test_keep_last_n_never_exceeds;
@@ -3158,8 +2814,6 @@ let () =
         test_restart_reopens_crash_aborted_librarian_lifecycle;
       test_case "restart path emits missing-meta outcome metrics" `Quick
         test_restart_path_emits_meta_unavailable_outcome_metric;
-      test_case "restart denies persisted dead tombstone" `Quick
-        test_restart_denies_persisted_dead_tombstone;
       test_case "active Librarian abort defers then retries restart" `Quick
         test_active_librarian_abort_defers_then_retries_restart;
       test_case "unexpected cleanup preserves reopened Librarian lifecycle" `Quick
@@ -3177,17 +2831,9 @@ let () =
       test_case "restart intake epoch survives shutdown overlap" `Quick
         test_restart_intake_epoch_survives_shutdown_overlap;
     ];
-    "dead_state_alert", [
-      test_case "sweep cleanup fires Tombstone_reaped hook" `Quick
-        test_sweep_and_recover_fires_tombstone_reaped_hook;
-      test_case "failing Tombstone_reaped hook is swallowed" `Quick
-        test_sweep_and_recover_swallows_failing_tombstone_hook;
-    ];
     "stale_storm_phase2", [
       test_case "supervisor cleanup suppresses cancellation and classifies failures" `Quick
         test_supervisor_cleanup_suppresses_cancellation_and_classifies_failures;
-      test_case "terminal-state launch reject does not announce Running" `Quick
-        test_launch_rejected_terminal_state_does_not_announce_running;
       test_case "supervised stop joins Board worker" `Quick
         test_supervised_stop_joins_board_attention_worker;
       test_case "supervised stop drains Librarian before terminal" `Quick
@@ -3196,8 +2842,6 @@ let () =
         test_launch_fork_rejection_does_not_announce_running;
       test_case "fork reject preserves newer same-name lane" `Quick
         test_fork_rejection_preserves_replacement_lane;
-      test_case "fork reject unregisters non-terminalizable exact owner" `Quick
-        test_fork_rejection_unregisters_non_terminalizable_owner;
       test_case "sweep joins lane before unregister" `Quick
         test_sweep_waits_for_lane_join_before_unregister;
       test_case "idle duration never stops keeper" `Quick

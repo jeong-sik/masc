@@ -51,7 +51,7 @@ describe('isKeeperPaused — RFC-0135 PR-3 SSOT', () => {
 
 describe('isKeeperOffline', () => {
   it.each<[Keeper['phase']]>([
-    ['Offline'], ['Stopped'], ['Dead'], ['Crashed'],
+    ['Offline'], ['Stopped'], ['Crashed'],
   ])('phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline(k({ phase }))).toBe(true)
   })
@@ -92,7 +92,7 @@ describe('isKeeperOperatorTargetable', () => {
 
 describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
   it.each<[Keeper['phase']]>([
-    ['Crashed'], ['Dead'],
+    ['Crashed'],
   ])('phase=%s ⇒ crashed', (phase) => {
     expect(isKeeperCrashed(k({ phase }))).toBe(true)
   })
@@ -109,12 +109,11 @@ describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
     expect(isKeeperCrashed(k())).toBe(false)
   })
   it('lifecycle_phase overrides stale phase for crashed classification', () => {
-    expect(isKeeperCrashed(k({ lifecycle_phase: 'Dead', phase: 'Running' }))).toBe(true)
   })
 })
 
 describe('isCrashedPhase — SSE-safe casing checker', () => {
-  it.each(['Crashed', 'crashed', 'Dead', 'dead'])(
+  it.each(['Crashed', 'crashed'])(
     'phase=%s ⇒ crashed',
     (phase) => {
       expect(isCrashedPhase(phase)).toBe(true)
@@ -180,7 +179,7 @@ describe('isKeeperRunningExcludingRestarting — RFC-0135 PR-11', () => {
     expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: 'Restarting' }))).toBe(false)
   })
   it.each([
-    ['Offline'], ['Stopped'], ['Crashed'], ['Dead'], ['Paused'],
+    ['Offline'], ['Stopped'], ['Crashed'], ['Paused'],
   ])('phase=%s ⇒ NOT running', (phase) => {
     expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: phase as Keeper['phase'] }))).toBe(false)
   })

@@ -143,7 +143,6 @@ describe('deriveKeeperOperationalState — paused branch', () => {
 describe('deriveKeeperOperationalState — offline branch', () => {
   it.each<[Keeper['phase'], 'crashed' | 'dead' | 'shutdown' | 'unbooted']>([
     ['Crashed', 'crashed'],
-    ['Dead', 'dead'],
     ['Stopped', 'shutdown'],
     ['Offline', 'unbooted'],
   ])('phase=%s → cause=%s', (phase, cause) => {
@@ -422,7 +421,7 @@ describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () =
   it.each<KeeperPhase>([
     'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
     'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
-    'Restarting', 'Dead',
+    'Restarting',
   ])('accepts PascalCase KeeperPhase %s', (phase) => {
     expect(toKeeperPhase(phase)).toBe(phase)
   })
@@ -431,7 +430,6 @@ describe('toKeeperPhase — wire-boundary narrow (lowercase + PascalCase)', () =
     ['running', 'Running'],
     ['failing', 'Failing'],
     ['handing_off', 'HandingOff'],
-    ['dead', 'Dead'],
   ])('accepts lowercase wire format %s → %s', (input, expected) => {
     expect(toKeeperPhase(input)).toBe(expected)
   })
@@ -457,7 +455,7 @@ describe('compositePhaseTone — exhaustive switch over KeeperPhase', () => {
     expect(compositePhaseTone(phase)).toBe('warn')
   })
   it.each<KeeperPhase>([
-    'Failing', 'Stopped', 'Crashed', 'Dead',
+    'Failing', 'Stopped', 'Crashed',
   ])('phase %s ⇒ err', (phase) => {
     expect(compositePhaseTone(phase)).toBe('err')
   })

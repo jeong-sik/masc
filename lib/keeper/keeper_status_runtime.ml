@@ -53,8 +53,7 @@ let keeper_metric_producer_active ~base_path =
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
        | Keeper_state_machine.Crashed
-       | Keeper_state_machine.Restarting
-       | Keeper_state_machine.Dead -> false)
+       | Keeper_state_machine.Restarting -> false)
 ;;
 
 let unknown_model_label =
@@ -637,7 +636,6 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Stopped -> "offline"
   | Keeper_state_machine.Crashed -> "crashed"
   | Keeper_state_machine.Restarting -> "restarting"
-  | Keeper_state_machine.Dead -> "offline"
 
 (** Explain the lossy [pipeline_stage] label without changing its wire value.
     Consumers that need exact lifecycle authority should read [lifecycle_phase];
@@ -657,4 +655,3 @@ let pipeline_stage_detail_of_phase (phase : Keeper_state_machine.phase) : string
   | Keeper_state_machine.Stopped -> "clean_stop_terminal"
   | Keeper_state_machine.Crashed -> "crashed_restart_candidate"
   | Keeper_state_machine.Restarting -> "supervisor_restart_requested"
-  | Keeper_state_machine.Dead -> "dead_tombstone_terminal"

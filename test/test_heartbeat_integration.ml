@@ -45,7 +45,7 @@ module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_fs = Masc.Keeper_fs
 module Lifecycle_hooks = Masc.Keeper_lifecycle_hooks
 module Subprocess_registry = Masc.Keeper_subprocess_registry
-module Tombstone_cleanup = Masc.Keeper_supervisor_cleanup_tombstone
+module Supervisor_cleanup = Masc.Keeper_supervisor_cleanup
 module Dashboard_purge = Masc.Keeper_dashboard_purge
 module Dashboard_delete = Server_dashboard_http_delete_actions
 
@@ -375,49 +375,7 @@ let test_crash_fiber_unresolved () =
 
 (** Full lifecycle: Running → Crashed → explicit tombstone → Dead.
     Verifies: Dead is terminal, is_registered=true, Dead→Running blocked,
-    only unregister can remove a Dead entry. *)
-let test_dead_tombstone_full_lifecycle () =
-  R.For_testing.clear ();
-  let meta = make_meta "mortal" in
-  let reg = R.For_testing.register ~base_path:bp "mortal" meta in
-  check string "initially running" "running"
-    (KSM.phase_to_string (Option.get (R.get ~base_path:bp "mortal")).phase);
-  (* Crash *)
-  resolve_done_for_test reg (`Crashed "test");
-  ignore (R.dispatch_event ~base_path:bp "mortal"
-    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  (* Only an explicit durable tombstone transitions to Dead. *)
-  R.mark_dead ~base_path:bp "mortal" ~at:(Unix.gettimeofday ());
-  (* Invariant checks *)
-  check bool "Dead is registered" true (R.is_registered ~base_path:bp "mortal");
-  check bool "Dead is not running" false (R.is_running ~base_path:bp "mortal");
-  check int "running count 0" 0 (R.count_running ~base_path:bp ());
-  (* Dead → Running blocked *)
-  ignore (R.dispatch_event ~base_path:bp "mortal" KSM.Fiber_started);
-  (match R.get ~base_path:bp "mortal" with
-   | Some e -> check string "still dead after Running attempt" "dead"
-       (KSM.phase_to_string e.phase)
-   | None -> fail "expected mortal");
-  (* Dead → Crashed blocked *)
-  ignore (R.dispatch_event ~base_path:bp "mortal"
-    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  (match R.get ~base_path:bp "mortal" with
-   | Some e -> check string "still dead after Crashed attempt" "dead"
-       (KSM.phase_to_string e.phase)
-   | None -> fail "expected mortal");
-  (* Only unregister removes Dead entry *)
-  R.For_testing.unregister ~base_path:bp "mortal";
-  check bool "gone after unregister" false
-    (R.is_registered ~base_path:bp "mortal")
-
-(* ══════════════════════════════════════════════════════════
-   5. Reconcile predicate: sweep-owned vs reconcile-eligible
-   ══════════════════════════════════════════════════════════ *)
-
-(** Verify the dominated_by_sweep logic from reconcile_keepalive_keepers.
-    Running/Paused/Crashed/Dead = sweep-owned (reconcile must skip).
-    Stopped with a resolved terminal and joined lane = reconcile-eligible.
-    Stopped with an unjoined lane = sweep will handle. *)
+    only unregister can remove an entry. *)
 let test_reconcile_predicate_sweep_owned () =
   R.For_testing.clear ();
   (* Running = sweep-owned *)
@@ -427,7 +385,7 @@ let test_reconcile_predicate_sweep_owned () =
      check string "running" "running" (KSM.phase_to_string e.phase);
      check bool "sweep-owned" true
        (e.phase = KSM.Running || e.phase = KSM.Paused
-        || e.phase = KSM.Crashed || e.phase = KSM.Dead)
+        || e.phase = KSM.Crashed)
    | None -> fail "expected r1");
   (* Crashed = sweep-owned *)
   ignore (R.dispatch_event ~base_path:bp "r1"
@@ -435,12 +393,6 @@ let test_reconcile_predicate_sweep_owned () =
   (match R.get ~base_path:bp "r1" with
    | Some e -> check bool "crashed is sweep-owned" true
        (e.phase = KSM.Crashed)
-   | None -> fail "expected r1");
-  (* Dead = sweep-owned *)
-  R.mark_dead ~base_path:bp "r1" ~at:(Unix.gettimeofday ());
-  (match R.get ~base_path:bp "r1" with
-   | Some e -> check bool "dead is sweep-owned" true
-       (e.phase = KSM.Dead)
    | None -> fail "expected r1")
 
 let test_reconcile_predicate_stopped_resolved () =
@@ -457,7 +409,7 @@ let test_reconcile_predicate_stopped_resolved () =
        (Option.is_some (Eio.Promise.peek e.done_p));
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
      let dominated = match e.phase with
-       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
+       | KSM.Running | KSM.Paused | KSM.Crashed -> true
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
@@ -478,7 +430,7 @@ let test_reconcile_predicate_stopped_unresolved () =
      check bool "done_p NOT resolved" true
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
-       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
+       | KSM.Running | KSM.Paused | KSM.Crashed -> true
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
@@ -1058,7 +1010,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
               ; accumulator_dropped = false
               ; completion =
                   Shutdown_types.Completion_pending
-                    Shutdown_types.Dead_tombstone_reaped
+                    Shutdown_types.Supervisor_cleaned
               }
         }
       in
@@ -3324,7 +3276,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
               | `Remove -> { remove_meta_cleanup with remove_session = true }
               | `Dead ->
                 { Shutdown_types.reason =
-                    Shutdown_types.Dead_tombstone_cleanup
+                    Shutdown_types.Supervisor_cleanup
                 ; remove_session = true
                 }
               | `Purge -> dashboard_purge_cleanup meta.name meta
@@ -3420,257 +3372,6 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
               (Sys.file_exists session_dir)))
     [ `Remove; `Dead; `Purge ]
 ;;
-
-let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run @@ fun owner_sw ->
-  let base_dir = temp_dir "shutdown-dead-tombstone-completion" in
-  let completion_bus = Agent_core.Event_bus.create () in
-  let completion_subscription =
-    Masc.Runtime_event_bus.subscribe
-      ~capacity:256
-      ~overflow:Agent_core.Event_bus.Drop_oldest
-      ~purpose:"dead-tombstone-completion-test"
-      completion_bus
-  in
-  Event_bus_slots.set_masc completion_bus;
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Runtime_event_bus.unsubscribe completion_bus completion_subscription;
-      Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
-      Shutdown_finalize.For_testing.reset_completion_handler ();
-      Lifecycle_hooks.reset_for_testing ();
-      Subprocess_registry.reset_for_testing ();
-      R.For_testing.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "supervisor")
-      in
-      let backlog_version =
-        match Workspace_backlog.read_backlog_r config with
-        | Ok backlog -> backlog.version
-        | Error detail -> fail detail
-      in
-      let meta = make_meta "shutdown-dead-tombstone-keeper" in
-      (match Keeper_meta_store.replace_snapshot config meta with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      install_owner_inventory_exn ~sw:owner_sw config;
-      let entry = R.For_testing.register ~base_path:config.base_path meta.name meta in
-      let hook_deliveries = ref 0 in
-      Subprocess_registry.register_default_cleanup_hook ();
-      Lifecycle_hooks.register (fun ~keeper_id event ->
-        match event with
-        | Lifecycle_hooks.Tombstone_reaped ->
-          check string "completion hook Keeper" meta.name keeper_id;
-          incr hook_deliveries
-        | Lifecycle_hooks.Phase_transition _ -> ());
-      Shutdown_finalize.register_remove_pending_confirms_by_target
-        (fun _config ~target_type:_ ~target_id:_ -> Ok 0);
-      Shutdown_finalize.register_completion_handler
-        (fun _config _operation _action -> Error "synthetic completion outage");
-      let operation_id = Shutdown_types.Operation_id.generate () in
-      let operation : Shutdown_types.t =
-        { schema_version = Shutdown_types.schema_version
-        ; revision = 0
-        ; operation_id
-        ; keeper_name = meta.name
-        ; lane_ownership = Shutdown_types.Registered_lane (Lane.id entry.lane)
-        ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.nonce
-        ; actor = "supervisor"
-        ; cleanup_intent =
-            { reason = Shutdown_types.Dead_tombstone_cleanup
-            ; remove_session = false
-            }
-        ; turn_disposition = Shutdown_types.No_inflight_turn
-        ; expected_backlog_version = backlog_version
-        ; owned_task_ids = []
-        ; join_evidence = None
-        ; phase = Shutdown_types.Joined_idle
-        ; created_at = Masc_domain.now_iso ()
-        ; updated_at = Masc_domain.now_iso ()
-        }
-      in
-      (match
-         begin_owner_shutdown_exn
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-           ~operation_id
-       with
-       | Masc.Keeper_owner.Shutdown_reserved _ -> ()
-       | Masc.Keeper_owner.Shutdown_already_reserved _ ->
-         fail "fresh dead-tombstone fixture was already reserved");
-      (match Shutdown_store.persist_new ~config operation with
-       | Ok () -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error));
-      (match Shutdown_finalize.run ~config ~entry:(Some entry) operation with
-       | Error (Shutdown_finalize.Completion_failed (_, detail)) ->
-         check string
-           "completion outage remains explicit"
-           "synthetic completion outage"
-           detail
-       | Error error -> fail (Shutdown_finalize.error_to_string error)
-       | Ok _ -> fail "completion outage was reported as delivered");
-      let pending =
-        match
-          Shutdown_store.load
-            ~config
-            ~keeper_name:meta.name
-            operation_id
-        with
-        | Ok operation -> operation
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      (match pending.phase with
-       | Shutdown_types.Finalized
-           { completion =
-               Shutdown_types.Completion_pending
-                 Shutdown_types.Dead_tombstone_reaped
-           ; registry_unregistered
-           ; _
-           } -> check bool "exact dead lane unregistered" true registry_unregistered
-       | Shutdown_types.Prepared
-       | Shutdown_types.Joining_lanes
-       | Shutdown_types.Joined_idle
-       | Shutdown_types.Finalizing_tasks _
-       | Shutdown_types.Cleanup_ready _
-       | Shutdown_types.Reconciliation_required _
-       | Shutdown_types.Blocked _
-       | Shutdown_types.Finalized _
-       | Shutdown_types.Superseded _ ->
-         fail "completion outage did not retain a pending durable receipt");
-      check int "pending receipt did not fire hook" 0 !hook_deliveries;
-      (match
-         owner_shutdown_operation_id_exn
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-       with
-       | Some reserved ->
-         check bool "pending receipt retains exact admission owner" true
-           (Shutdown_types.Operation_id.equal operation_id reserved)
-       | None ->
-         fail "pending completion reopened admission");
-      let boot_inventory =
-        match Shutdown_store.scan_inventory ~config with
-        | Ok inventory -> inventory
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      let restored =
-        match
-          Shutdown_runtime.restore_inventory_admission ~config boot_inventory
-        with
-        | Ok restored -> restored
-        | Error detail -> fail detail
-      in
-      check
-        (list string)
-        "boot restores pending completion owner fence"
-        [ meta.name ]
-        restored.blocked_keeper_names;
-      (match
-         owner_shutdown_operation_id_exn
-           ~base_path:config.base_path
-           ~keeper_name:meta.name
-       with
-       | Some reserved ->
-         check bool "boot-restored fence keeps exact completion owner" true
-           (Shutdown_types.Operation_id.equal operation_id reserved)
-       | None ->
-         fail "boot recovery reopened pending completion admission");
-      Shutdown_finalize.register_completion_handler
-        Tombstone_cleanup.handle_completion;
-      let finalized =
-        match Shutdown_finalize.run ~config ~entry:None pending with
-        | Ok finalized -> finalized
-        | Error error -> fail (Shutdown_finalize.error_to_string error)
-      in
-      (match finalized.phase with
-       | Shutdown_types.Finalized
-           { completion =
-               Shutdown_types.Completion_delivered
-                 Shutdown_types.Dead_tombstone_reaped
-           ; registry_unregistered
-           ; meta_removed
-           ; _
-           } ->
-         check bool "delivered receipt preserves unregister evidence" true
-           registry_unregistered;
-         check bool "dead tombstone meta retained" false meta_removed
-       | Shutdown_types.Prepared
-       | Shutdown_types.Joining_lanes
-       | Shutdown_types.Joined_idle
-       | Shutdown_types.Finalizing_tasks _
-       | Shutdown_types.Cleanup_ready _
-       | Shutdown_types.Reconciliation_required _
-       | Shutdown_types.Blocked _
-       | Shutdown_types.Finalized _
-       | Shutdown_types.Superseded _ ->
-          fail "dead tombstone completion receipt was not delivered");
-      check int "Tombstone_reaped delivered once" 1 !hook_deliveries;
-      (match Masc.Runtime_event_bus.drain completion_subscription with
-       | [ event ] ->
-         (match event.Agent_core.Event_bus.payload with
-          | Agent_core.Event_bus.Custom
-              ("masc.keeper.lifecycle", `Assoc fields) ->
-            (match List.assoc_opt "event" fields, List.assoc_opt "detail" fields with
-             | Some (`String event_name), Some (`String detail) ->
-               check string "durable completion lifecycle event" "dead_cleaned" event_name;
-               check string
-                 "durable completion event identity"
-                 ("shutdown_operation="
-                  ^ Shutdown_types.Operation_id.to_string operation_id)
-                 detail
-             | _ -> fail "dead completion event payload lost typed fields")
-          | Agent_core.Event_bus.Custom (topic, _) ->
-            fail ("unexpected completion event topic: " ^ topic)
-          | _ -> fail "dead completion did not publish a custom lifecycle event")
-       | events ->
-         fail
-           (Printf.sprintf
-              "expected one durable completion event, got %d"
-              (List.length events)));
-      let reloaded =
-        match
-          Shutdown_store.load
-            ~config
-            ~keeper_name:meta.name
-            operation_id
-        with
-        | Ok operation -> operation
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      check bool "delivered completion receipt survives store round-trip" true
-        (reloaded.phase = finalized.phase);
-      check bool "dead Keeper removed from registry" false
-        (R.is_registered ~base_path:config.base_path meta.name);
-      (match Keeper_meta_store.read_meta config meta.name with
-       | Ok (Some retained) ->
-         check bool "retained dead meta paused" true retained.paused;
-         (match retained.latched_reason with
-          | Some Keeper_latched_reason.Dead_tombstone -> ()
-          | Some _ | None -> fail "retained meta lost Dead_tombstone reason")
-       | Ok None -> fail "dead tombstone meta was removed"
-       | Error detail -> fail detail);
-      (match Shutdown_finalize.run ~config ~entry:None finalized with
-       | Ok _ -> ()
-       | Error error -> fail (Shutdown_finalize.error_to_string error));
-      check int "delivered receipt prevents duplicate hook" 1 !hook_deliveries;
-      check int
-        "delivered receipt prevents duplicate lifecycle event"
-        0
-        (List.length (Masc.Runtime_event_bus.drain completion_subscription));
-      check
-        bool
-        "delivered dead completion releases admission fence"
-        true
-        (Option.is_none
-           (owner_shutdown_operation_id_exn
-              ~base_path:config.base_path
-              ~keeper_name:meta.name)))
 
 let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Eio_main.run @@ fun env ->
@@ -4320,45 +4021,6 @@ let test_librarian_rejection_unregisters_with_lifecycle_authority () =
             ^ Keeper_lifecycle_reservation.release_outcome_to_string outcome));
       Eio.Promise.resolve resolve_librarian_release ())
 
-let test_start_keepalive_denies_dead_tombstone_before_registration () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.For_testing.clear ();
-  let base_dir = temp_dir "dead-tombstone-keepalive-admission" in
-  let keeper_name = "dead-tombstone-admission" in
-  Fun.protect
-    ~finally:(fun () ->
-      R.For_testing.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let meta =
-        { (make_meta keeper_name) with
-          paused = true
-        ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-        }
-      in
-      Eio.Switch.run @@ fun sw ->
-      let ctx : _ Keeper_types_profile.context =
-        { config
-        ; agent_name = "tester"
-        ; sw
-        ; clock = Eio.Stdenv.clock env
-        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
-        ; net = None
-        ; publication_recovery_provider =
-            Masc_test_deps.non_runtime_publication_recovery_provider
-        }
-      in
-      (match Masc.Keeper_keepalive.start_keepalive ctx meta with
-       | Masc.Keeper_keepalive.Keepalive_lifecycle_denied
-           Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
-       | outcome ->
-         failf
-           "dead tombstone returned unexpected launch outcome: %s"
-           (Masc.Keeper_keepalive.start_keepalive_outcome_to_string outcome));
-      check bool "dead keeper never reaches registry registration" false
-        (R.is_registered ~base_path:config.base_path keeper_name))
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4538,9 +4200,8 @@ let test_pipeline_stage_of_phase_exhaustive () =
     (KSM.Stopped, "offline");
     (KSM.Crashed, "crashed");
     (KSM.Restarting, "restarting");
-    (KSM.Dead, "offline");
   ] in
-  check int "all 11 phases covered" 11 (List.length cases);
+  check int "all 10 phases covered" 10 (List.length cases);
   List.iter (fun (phase, expected) ->
     let actual = ES.pipeline_stage_of_phase phase in
     check string
@@ -4552,7 +4213,6 @@ let test_pipeline_stage_detail_distinguishes_offline_projection () =
   let cases = [
     (KSM.Offline, "offline", "launch_pending_no_fiber");
     (KSM.Stopped, "offline", "clean_stop_terminal");
-    (KSM.Dead, "offline", "dead_tombstone_terminal");
   ] in
   List.iter
     (fun (phase, expected_stage, expected_detail) ->
@@ -4610,7 +4270,7 @@ let test_pipeline_stage_sensitivity () =
       true (stage <> "offline")
   ) non_offline_phases;
   (* Terminal/inactive phases DO map to offline *)
-  let offline_phases = [KSM.Offline; KSM.Stopped; KSM.Dead] in
+  let offline_phases = [KSM.Offline; KSM.Stopped] in
   List.iter (fun phase ->
     let stage = ES.pipeline_stage_of_phase phase in
     check string
@@ -4683,25 +4343,8 @@ let test_turn_intake_uses_only_lifecycle () =
    with
    | KHL.Intake_lifecycle_blocked
        (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
-   | KHL.Intake_admitted
-   | KHL.Intake_lifecycle_blocked
-       Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
+   | KHL.Intake_admitted ->
      fail "explicit Keeper pause must stop intake before durable dequeue")
-
-let test_lifecycle_is_classified_before_intake () =
-  let lifecycle =
-    Keeper_lifecycle_admission.Autonomous_denied
-      Keeper_lifecycle_admission.Autonomous_dead_tombstone
-  in
-  match
-    KHL.classify_turn_intake_admission ~lifecycle
-  with
-  | KHL.Intake_lifecycle_blocked
-      Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
-  | KHL.Intake_admitted
-  | KHL.Intake_lifecycle_blocked
-      (Keeper_lifecycle_admission.Autonomous_paused _) ->
-    fail "dead lifecycle must stop intake before durable dequeue"
 
 let test_crashed_cycle_records_health_failure () =
   Eio_main.run @@ fun env ->
@@ -4726,9 +4369,6 @@ let () =
       eio_test "heartbeat_failure catch" test_crash_heartbeat_failure;
       eio_test "generic exception catch" test_crash_generic_exception;
       eio_test "fiber_unresolved fallback" test_crash_fiber_unresolved;
-    ];
-    "dead_tombstone", [
-      eio_test "full lifecycle" test_dead_tombstone_full_lifecycle;
     ];
     "reconcile_predicates", [
       eio_test "sweep-owned states" test_reconcile_predicate_sweep_owned;
@@ -4797,8 +4437,6 @@ let () =
         test_keeper_shutdown_finalizes_idle_operation;
       test_case "destructive shutdown blocks on bound summary" `Quick
         test_destructive_shutdown_drains_bound_summary_then_completes;
-      test_case "shutdown delivers dead tombstone completion after receipt" `Quick
-        test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt;
       test_case "dashboard purge finalizes artifacts and receipt" `Quick
         test_dashboard_keeper_purge_finalizes_artifacts_and_receipt;
       test_case "shutdown cleanup replays after meta removal" `Quick
@@ -4807,8 +4445,6 @@ let () =
         test_keeper_shutdown_rejects_stale_snapshot_delete;
       test_case "shutdown recovers committed task receipt" `Quick
         test_keeper_shutdown_recovers_committed_task_receipt;
-      test_case "dead tombstone denied before registration" `Quick
-        test_start_keepalive_denies_dead_tombstone_before_registration;
       test_case "unresolved failing entry is preserved" `Quick
         test_start_keepalive_preserves_unresolved_failing_entry;
       test_case "finished failing entry is reclaimed" `Quick
@@ -4837,8 +4473,6 @@ let () =
         test_explicit_stop_blocks_requested_turn;
       test_case "active and paused lifecycle classify intake" `Quick
         test_turn_intake_uses_only_lifecycle;
-      test_case "dead lifecycle is classified before intake" `Quick
-        test_lifecycle_is_classified_before_intake;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;
     ];

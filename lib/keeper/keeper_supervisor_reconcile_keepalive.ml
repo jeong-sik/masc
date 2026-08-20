@@ -2,7 +2,7 @@
     Extracted from [keeper_supervisor.ml] (godfile decomp). The
     extractor uses callback injection (publish_lifecycle and
     supervise_keepalive) to avoid sibling -> parent cycles, mirroring
-    the [Keeper_supervisor_cleanup_tombstone] sibling. *)
+    the [Keeper_supervisor_cleanup] sibling. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -44,8 +44,7 @@ let reconcile_keepalive_keepers
         (match e.phase with
          | Keeper_state_machine.Running
          | Keeper_state_machine.Paused -> true
-         | Keeper_state_machine.Crashed
-         | Keeper_state_machine.Dead -> true
+         | Keeper_state_machine.Crashed -> true
          | Keeper_state_machine.Failing
          | Keeper_state_machine.Overflowed
          | Keeper_state_machine.Compacting

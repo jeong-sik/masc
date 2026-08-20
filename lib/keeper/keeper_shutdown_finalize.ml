@@ -331,16 +331,6 @@ let paused_meta (meta : Keeper_meta_contract.keeper_meta) =
   }
 ;;
 
-let dead_tombstone_meta (meta : Keeper_meta_contract.keeper_meta) =
-  { meta with
-    current_task_id = None
-  ; paused = true
-  ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-  ; updated_at = Masc_domain.now_iso ()
-  ; runtime = { meta.runtime with last_blocker = None }
-  }
-;;
-
 let read_operation_meta ~config operation =
   match
     Keeper_owner_registry.get
@@ -402,19 +392,14 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
        | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
        | Ok None -> Error "Keeper metadata disappeared during shutdown pause"
        | Ok (Some retained) -> Ok retained)
-    | Dead_tombstone_cleanup ->
-      (match
-         Keeper_owner_registry.apply_meta
-           ~base_path:config.Workspace.base_path
-           ~keeper_name:operation.keeper_name
-           (Keeper_owner_reducer.Retain_shutdown_latch
-              { latch = Keeper_owner_reducer.Dead_tombstone
-              ; updated_at = Masc_domain.now_iso ()
-              })
-       with
-       | Error error -> Error (Keeper_owner_registry.command_error_to_string error)
-       | Ok None -> Error "Keeper metadata disappeared during dead-tombstone commit"
-       | Ok (Some retained) -> Ok retained)
+    | Supervisor_cleanup ->
+      (* The keeper's process is not there. Its metadata is removed like any
+         other cleanup; nothing is retained that would refuse a later start. *)
+      (match read_operation_meta ~config operation with
+       | Error _ as error -> error
+       | Ok meta ->
+         validate_registry_owner_exact ~config operation
+         |> Result.map (fun () -> meta))
   in
   match meta_prepare_result with
   | Error detail -> block ~config operation Meta_update detail
@@ -484,8 +469,7 @@ let remove_tree path =
 
 let remove_meta_file ~config operation cleanup =
   match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
-  | Retain_operator_pause
-  | Retain_dead_tombstone -> Ok ()
+  | Retain_operator_pause -> Ok ()
   | Remove_meta ->
     (match
        Keeper_owner_registry.apply_meta
@@ -521,8 +505,7 @@ let admission_already_released_by_removal ~(config : Workspace.config) operation
          (Operation_id.to_string operation.operation_id);
        true
      | Ok (Some _) | Error _ -> false)
-  | (Retain_operator_pause | Retain_dead_tombstone), _
-  | Remove_meta, _ -> false
+  | Retain_operator_pause, _ | Remove_meta, _ -> false
 ;;
 
 let remove_session_dir ~config operation =
@@ -713,7 +696,7 @@ let complete_cleanup
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()
     | Operator_stop_remove_meta
-    | Dead_tombstone_cleanup
+    | Supervisor_cleanup
     | Dashboard_keeper_purge _ ->
       (match
          Keeper_approval_queue.retire_summary_owner
@@ -750,8 +733,7 @@ let complete_cleanup
          let meta_removed =
            match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
            | Remove_meta -> true
-           | Retain_operator_pause
-           | Retain_dead_tombstone -> false
+           | Retain_operator_pause -> false
          in
          let accumulator_dropped =
            meta_removed
@@ -865,7 +847,6 @@ let run ~config ~entry ?successor_operation_id operation =
 
 module For_testing = struct
   let paused_meta = paused_meta
-  let dead_tombstone_meta = dead_tombstone_meta
 
   let remove_pending_confirms_by_target ~config ~target_type ~target_id =
     Atomic.get remove_pending_confirms_by_target_callback config ~target_type ~target_id

@@ -36,7 +36,6 @@ end
 
 module KeeperSupervisor : sig
   val sweep_interval_sec : float
-  val dead_ttl_sec : float
 end
 
 (** {1 Keeper poll intervals} *)

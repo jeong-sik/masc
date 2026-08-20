@@ -261,7 +261,6 @@ let error_class = function
           | Resume.Durable_owner_nonce_changed _
           | Resume.Durable_owner_identity_changed
           | Resume.Durable_owner_not_paused
-          | Resume.Durable_owner_dead_tombstone
           | Resume.Durable_owner_transcript_reset_required
           | Resume.Registry_owner_nonce_changed _
           | Resume.Registry_owner_identity_changed
@@ -273,7 +272,6 @@ let error_class = function
       (Cancellation.Failed
         { cause =
             ( Cancellation.Durable_owner_not_paused
-            | Cancellation.Durable_owner_dead_tombstone
             | Cancellation.Durable_owner_nonce_changed _
             | Cancellation.Registry_owner_not_paused _
             | Cancellation.Registry_owner_nonce_changed _ )
@@ -284,7 +282,6 @@ let error_class = function
           ( Transfer.Reservation_conflict _
           | Transfer.Receipt_conflict _
           | Transfer.Source_owner_not_paused
-          | Transfer.Source_owner_dead_tombstone
           | Transfer.Source_owner_nonce_changed _
           | Transfer.Source_owner_identity_changed
           | Transfer.Target_owner_not_active
@@ -299,7 +296,6 @@ let error_class = function
           ( Source_terminal.Reservation_conflict _
           | Source_terminal.Receipt_conflict _
           | Source_terminal.Durable_owner_not_paused
-          | Source_terminal.Durable_owner_dead_tombstone
           | Source_terminal.Durable_owner_nonce_changed _
           | Source_terminal.Durable_owner_identity_changed
           | Source_terminal.Source_queue_validation_failed _ )

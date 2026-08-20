@@ -58,9 +58,6 @@ module For_testing : sig
   val paused_meta :
     Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta
 
-  val dead_tombstone_meta :
-    Keeper_meta_contract.keeper_meta -> Keeper_meta_contract.keeper_meta
-
   val remove_pending_confirms_by_target :
     config:Workspace.config ->
     target_type:Operator_action_constants.target_type ->

@@ -112,7 +112,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
       [ SM.Fiber_started;
         SM.Fiber_terminated { outcome = "fail"; provider_id = None; http_status = None };
       ]
-    | SM.Stopped | SM.Dead -> []
+    | SM.Stopped -> []
     | SM.Offline -> [ SM.Fiber_started ]
   in
   let _ = c in

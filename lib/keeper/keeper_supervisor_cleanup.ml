@@ -3,13 +3,13 @@
     The supervisor only submits an exact-lane durable shutdown operation.
     Meta mutation, lane join, registry removal, and accumulator removal are
     owned by [Keeper_shutdown_finalize]. [Dead_cleaned] and
-    [Tombstone_reaped] are delivered from the durable completion receipt after
+    [Supervisor_cleaned] are delivered from the durable completion receipt after
     finalization, never from the sweep that observed the old entry. *)
 
 open Keeper_shutdown_types
 
 let cleanup_intent : Keeper_shutdown_types.cleanup_intent =
-  { reason = Dead_tombstone_cleanup
+  { reason = Supervisor_cleanup
   ; remove_session = false
   }
 ;;
@@ -21,12 +21,12 @@ let record_submission_failure keeper_name =
       [ "keeper", keeper_name
       ; ( "site"
         , Keeper_supervisor_cleanup_failure_site.(
-            to_label Dead_tombstone_submission) )
+            to_label Supervisor_cleanup_submission) )
       ]
     ()
 ;;
 
-let cleanup_dead_tombstone
+let cleanup_absent_keeper
     (ctx : _ Keeper_types_profile.context)
     (entry : Keeper_registry.registry_entry)
   =
@@ -78,7 +78,7 @@ let lifecycle_event_bus_ready () =
   | Some _ -> Ok ()
 ;;
 
-let dead_tombstone_sinks_ready () =
+let cleanup_sinks_ready () =
   match lifecycle_event_bus_ready () with
   | Error _ as error -> error
   | Ok () when not (Keeper_subprocess_registry.default_cleanup_hook_registered ()) ->
@@ -87,8 +87,8 @@ let dead_tombstone_sinks_ready () =
 ;;
 
 let handle_completion config operation = function
-  | Keeper_shutdown_types.Dead_tombstone_reaped ->
-    (match dead_tombstone_sinks_ready () with
+  | Keeper_shutdown_types.Supervisor_cleaned ->
+    (match cleanup_sinks_ready () with
      | Error _ as error -> error
      | Ok () ->
        let operation_id =
@@ -106,7 +106,7 @@ let handle_completion config operation = function
          ~base_dir:(Workspace.masc_root_dir config)
          ?meta
          ~keeper_id:operation.keeper_name
-         Keeper_lifecycle_hooks.Tombstone_reaped;
+         Keeper_lifecycle_hooks.Supervisor_cleaned;
        Log.Keeper.info
          "%s: dead tombstone finalization delivered operation=%s"
          operation.keeper_name

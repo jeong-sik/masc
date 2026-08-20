@@ -571,7 +571,7 @@ describe('deriveKeeperAttentionReason', () => {
   it('marks critical lifecycle states as bad', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'dead',
-      lifecycle_phase: 'Dead',
+      lifecycle_phase: 'Crashed',
       runtime_blocker_class: 'exception',
     }))
     expect(reason.sev).toBe('bad')

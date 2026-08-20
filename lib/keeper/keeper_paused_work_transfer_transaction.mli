@@ -28,7 +28,6 @@ type failure =
       }
   | Durable_meta_missing of string
   | Source_owner_not_paused
-  | Source_owner_dead_tombstone
   | Source_owner_nonce_changed of
       { expected : int
       ; actual : int

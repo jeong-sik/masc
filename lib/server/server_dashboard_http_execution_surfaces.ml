@@ -670,8 +670,6 @@ let display_of_phase_event = function
   | Keeper_state_machine.Crashed ->
     Some
       { ld_keepalive_running = false; ld_phase = "crashed"; ld_pipeline_stage = "crashed"; ld_paused = Some false }
-  | Keeper_state_machine.Dead ->
-    Some { ld_keepalive_running = false; ld_phase = "dead"; ld_pipeline_stage = "offline"; ld_paused = Some false }
   | Keeper_state_machine.Paused ->
     Some { ld_keepalive_running = true; ld_phase = "paused"; ld_pipeline_stage = "paused"; ld_paused = Some true }
   | Keeper_state_machine.Offline
@@ -769,8 +767,7 @@ let control_status_override_of_lifecycle_event row event =
       | Keeper_state_machine.Draining
       | Keeper_state_machine.Paused
       | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Restarting
-      | Keeper_state_machine.Dead ) ->
+      | Keeper_state_machine.Restarting ) ->
     None)
 ;;
 

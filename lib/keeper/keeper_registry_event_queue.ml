@@ -197,8 +197,7 @@ let authorize_durable_intake_owner ~base_path ~keeper_name =
           | Some meta ->
             Int.equal meta.runtime.nonce operation.generation
             && Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id)
-       | Keeper_shutdown_types.Retain_operator_pause
-       | Keeper_shutdown_types.Retain_dead_tombstone -> false)
+       | Keeper_shutdown_types.Retain_operator_pause -> false)
     | Keeper_shutdown_types.Finalized { meta_removed = false; _ }
     | Keeper_shutdown_types.Prepared
     | Keeper_shutdown_types.Joining_lanes

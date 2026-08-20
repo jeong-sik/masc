@@ -246,7 +246,7 @@ let is_running ~base_path name =
      answers the operator-facing question "is this keeper currently
      running?" and treats only [Running] as such. The 12 other phases
      (Offline, Failing, Overflowed, Compacting, HandingOff, Draining,
-     Paused, Stopped, Crashed, Restarting, Dead) yield [false]
+     Paused, Stopped, Crashed, Restarting) yield [false]
      here. A future phase variant (e.g. a hypothetical [Migrating] or
      [Healing]) would silently inherit [false] under the previous
      [Some _ -> false] catch-all without a review point on whether
@@ -268,15 +268,14 @@ let is_running ~base_path name =
           | Paused
           | Stopped
           | Crashed
-          | Restarting
-          | Dead )
+          | Restarting )
       ; _
       } -> false
   | None -> false
 ;;
 
 (** True if the keeper has ANY registry entry (regardless of state).
-    Used by reconcile to avoid re-launching Crashed/Dead keepers. *)
+    Used by reconcile to avoid re-launching Crashed keepers. *)
 let is_registered ~base_path name = Option.is_some (get ~base_path name)
 
 let count_running ?base_path () =
@@ -514,7 +513,6 @@ let fiber_health_of ~base_path name =
   | None -> Fiber_unknown
   | Some entry ->
     (match entry.phase with
-     | Dead -> Fiber_dead
      | Crashed | Restarting -> Fiber_zombie
      | Stopped ->
        if lane_has_exited entry then Fiber_unknown else Fiber_alive
@@ -837,12 +835,6 @@ let rec dispatch_event_with_audit_internal
        let from_phase_str = Keeper_state_machine.phase_to_string tr.prev_phase in
        let to_phase_str = Keeper_state_machine.phase_to_string tr.new_phase in
        let event_str = Keeper_state_machine.event_to_string event in
-       (* Update dead_since_ts: always set to now on Dead transition *)
-       let dead_since_ts =
-         match tr.new_phase with
-         | Keeper_state_machine.Dead -> Some now
-         | _ -> None
-       in
        let new_seq = entry.transition_seq + 1 in
        (match
           install_entry_if_current_internal
@@ -851,7 +843,6 @@ let rec dispatch_event_with_audit_internal
             { entry with
               phase = tr.new_phase
             ; conditions = tr.updated_conditions
-            ; dead_since_ts
             ; transition_seq = new_seq
             ; last_context_actions
             ; pending_turn_measurement

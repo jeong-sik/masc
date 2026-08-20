@@ -308,10 +308,6 @@ let keepers_section now : section =
     let phase_str = Keeper_state_machine.phase_to_string e.phase in
     let since =
       match e.phase with
-      | Dead ->
-        (match e.dead_since_ts with
-         | Some ts -> format_elapsed_float now ts
-         | None -> "?")
       | _ -> format_elapsed_float now e.started_at
     in
     let last_info =
@@ -445,8 +441,7 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
       keeper_entries
   in
   let k_running = keeper_by_phase Running in
-  let k_dead = keeper_by_phase Dead in
-  let k_other = List.length keeper_entries - k_running - k_dead in
+  let k_other = List.length keeper_entries - k_running in
   (* Attention *)
   let attention_items = Dashboard_attention.collect ~now snapshots in
   let attention_line = Dashboard_attention.compact_summary attention_items in
@@ -534,10 +529,9 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
           ~failures_since_start:librarian_failures_since_start
       in
       Printf.sprintf
-        "KEEPERS: %d running / %d dead / %d other | LIBRARIAN: %s | GUARD: %d | \
+        "KEEPERS: %d running / %d other | LIBRARIAN: %s | GUARD: %d | \
          META-WRITE-ERR: %d%s"
         k_running
-        k_dead
         k_other
         librarian_status
         guard_violations

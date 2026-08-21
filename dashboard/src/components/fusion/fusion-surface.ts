@@ -411,23 +411,26 @@ const FUSION_LIST_PAGE_SIZE = 30
 
 // Dedup key is runId: once a deliberation lands a board post the board entry wins
 // (it carries the detail), so the registry duplicate is dropped. Ordering uses
-// one visible policy — newest first — on a SINGLE stable axis per row kind:
-// board post creation (createdAt ISO — the post lands when the deliberation
-// completes) and registry start (startedAt unix seconds), both normalized to ms.
-// The two kinds approximate different moments of a run's life, but each is
-// immutable, which is the property that matters: sorting board rows by
-// updatedAt let an old run leapfrog newer ones whenever its post was touched,
-// which read as a jumbled list (38-bug campaign #34).
+// one visible policy — newest first — on a SINGLE axis for every row: the run's
+// START time. The registry records startedAt for board runs too (they are only
+// deduped out of the list, not absent from the registry), so we look it up and
+// fall back to board post creation only when no registry row exists. Sorting
+// board rows by createdAt (completion) and registry rows by startedAt (start)
+// was a mixed axis that read as arbitrary — neither date nor result-update order
+// (38-bug campaign #34 follow-up).
 function buildMergedRuns(
   boardRuns: readonly FusionRunView[],
   registryRuns: readonly FusionRunRecord[],
 ): MergedRun[] {
   const boardIds = new Set(boardRuns.map(run => run.runId))
+  const startedByRunId = new Map(
+    registryRuns.map(record => [record.runId, record.startedAt * 1000] as const),
+  )
   const merged: MergedRun[] = [
     ...boardRuns.map((view): MergedRun => ({
       kind: 'board',
       runId: view.runId,
-      sortTime: timeValue(view.createdAt),
+      sortTime: startedByRunId.get(view.runId) ?? timeValue(view.createdAt),
       view,
     })),
     ...registryRuns

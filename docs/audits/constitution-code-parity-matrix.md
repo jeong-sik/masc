@@ -1,6 +1,7 @@
 # Constitution ↔ Code 정합성 매트릭스
 
 - 생성: 2026-08-20 (14개 영역 스웜 검증 기반)
+- Goal verifier 갱신: 2026-08-21 (#29221, #29240 병합 기준)
 - 상태 값: `대기` / `진행중` / `완료` / `보류`
 - 방향: `문서←코드` (코드에 있고 문서에 없음, 문서 보충) / `코드←문서` (문서에 있고 코드에 없음, 코드 구현) / `코드 정리` (헌법 위반 잔여 제거)
 
@@ -24,12 +25,12 @@
 | ID | 항목 | 근거 | 상태 |
 |---|---|---|---|
 | B1 | Goal 생성 시 정량 성공조건 필수화 — 생성 경로가 non-blank `metric`+`target_value` 요구 | `goal_store.mli`, `workspace_goals.ml` | PR #29152 |
-| B2 | Goal Verifier 검증 게이트 — 생성 시 `Criterion_pending` durable 기록(`.masc/goal_verifications.json`), `record_criterion_*` verdict | `lib/goal/goal_verification.ml` | PR #29152 |
-| B3 | Goal 완료 = Verifier 증명 + 인간 최종 확인 — `Verifying`/`Awaiting_confirmation` gate phase, `Request_complete → Completed` 직행 폐기 | `goal_phase.ml`, RFC-0387 | PR #29152 |
+| B2 | Goal Verifier 검증 게이트 — 생성 시 `Criterion_pending` durable 기록, `request_complete` 시 `Proof_pending` 기록과 `Verifying` 진입 | `lib/goal/goal_verification.ml`, `lib/workspace_goals.ml` | #29152, #29221 병합 |
+| B3 | Goal 완료 = 독립 Verifier의 proof proven — 공개 lifecycle API에서 verifier verdict 제거, 고정 `verifier_exact` typed authority만 `Completed` 전이 가능. 인간 최종 확인/`Awaiting_confirmation`은 현행 계약이 아님 | `lib/goal/goal_phase.mli`, `lib/workspace_goals.ml`, RFC-0387 | #29240 병합 |
 | B4 | ParallelTool — read 툴 4종 Concurrent 승격 + fail-closed admission (fan-out 엔진은 기존 `Agent_tool_batch_plan`이 커버) | `keeper_tool_descriptor.ml` | PR #29146 |
 | B5 | 스트리밍 문자열 dedup — exact-prefix retransmission drop / 누적 스냅샷 suffix reconcile, `masc_keeper_stream_text_delta_dedup_total{action=drop\|reconcile}` | `keeper_chat_agent_core_stream_bridge.ml` | PR #29149 |
 | B6 | tool_kind 닫힌 합타입 선언 (실행 기계는 기존 plan IR/executor가 커버) | RFC-0386, `keeper_tool_descriptor.mli:69-82` | PR #29148 |
-| B7 | Verifier keeper급 standalone 격상 — RFC-0361 D7 개정 + 코드 1단계 `verifier_exact` lane(cross_verifier 흡수, frozen-order failover). 2단계(identity+lifecycle)는 RFC 후속 | RFC-0361 D7 | RFC PR #29147, 코드 PR #29155 |
+| B7 | Goal Verifier standalone worker — durable criterion/proof pending ledger를 `verifier_exact` lane으로 drain하고 typed verifier boundary에 verdict를 commit. artifact lookup surface와 live 동일-run 증거는 후속 | `lib/goal_verification_agent.ml`, `lib/workspace_goals.ml`, RFC-0387 | #29221, #29240 병합; live 증거 대기 |
 
 ## C. 코드 정리 (헌법 금지 패턴 잔여)
 
@@ -52,7 +53,7 @@
 | 구분 | 건수 | 상태 |
 |---|---|---|
 | A. 문서 보충 | 10 | PR #29140 |
-| B. 코드 보충 | 7 | B1-B3 #29152 / B4 #29146 / B5 #29149 / B6 #29148 / B7-RFC #29147 / B7-코드 #29155 열림 |
+| B. 코드 보충 | 7 | B1-B3 및 B7 source 구현 병합; B4 #29146 / B5 #29149 / B6 #29148. Goal verifier artifact lookup·배포·동일-run 증거는 대기 |
 | C. 코드 정리 | 4 | PR #29141 |
 | D. RFC stale | 2 | PR #29142 |
-| PR 열림 | 23 / 23 | B7 2단계(identity+lifecycle)는 RFC-0361 D7 후속 범위 |
+| 후속 검증 | — | Goal verifier artifact lookup surface, 실제 배포, ledger/event/browser 동일-run 증거는 living matrix의 미완료 셀로 추적 |

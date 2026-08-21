@@ -129,7 +129,7 @@ let test_keeper_name_extractors_use_shared_grammar () =
     [ "."; ".." ]
 
 let test_keeper_paused_work_route_is_admin_exact () =
-  let path = "/api/v1/keepers/idealist/paused-work" in
+  let path = "/api/v1/keepers/fixture-keeper/paused-work" in
   check bool
     "paused-work POST route kind"
     true
@@ -141,7 +141,7 @@ let test_keeper_paused_work_route_is_admin_exact () =
     (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path path);
   check string
     "paused-work keeper name"
-    "idealist"
+    "fixture-keeper"
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
        path
        Server_dashboard_http_keeper_api.keeper_suffix_paused_work);
@@ -156,21 +156,21 @@ let test_keeper_sensitive_get_permissions_are_exact () =
   in
   List.iter
     (fun suffix ->
-       let path = "/api/v1/keepers/idealist/" ^ suffix in
+       let path = "/api/v1/keepers/fixture-keeper/" ^ suffix in
        check bool (suffix ^ " permission") true
          (permission path = Some Masc_domain.CanAdmin);
        check bool (suffix ^ " trailing segment") true
          (permission (path ^ "/extra") = None))
     [ "raw-traces"; "raw-trace"; "memory-journal" ];
   check bool "checkpoint permission" true
-    (permission "/api/v1/keepers/idealist/checkpoints" = Some Masc_domain.CanAdmin);
+    (permission "/api/v1/keepers/fixture-keeper/checkpoints" = Some Masc_domain.CanAdmin);
   check bool "turn records require authenticated state read" true
-    (permission "/api/v1/keepers/idealist/turn-records"
+    (permission "/api/v1/keepers/fixture-keeper/turn-records"
      = Some Masc_domain.CanReadState);
   check bool "turn records route rejects trailing segment" true
-    (permission "/api/v1/keepers/idealist/turn-records/extra" = None);
+    (permission "/api/v1/keepers/fixture-keeper/turn-records/extra" = None);
   check bool "ordinary keeper read stays public" true
-    (permission "/api/v1/keepers/idealist/trajectory" = None)
+    (permission "/api/v1/keepers/fixture-keeper/trajectory" = None)
 
 let test_internal_exact_lane_registry_is_admin_only () =
   check bool
@@ -187,12 +187,12 @@ let test_runtime_probe_route_owns_read_permission () =
      = Masc_domain.CanReadState)
 
 let test_event_queue_operator_routes_are_exact () =
-  check (option string) "event operator route is exact" (Some "idealist")
+  check (option string) "event operator route is exact" (Some "fixture-keeper")
     (Server_dashboard_http_keeper_event_queue_operator.route
-       "/api/v1/keepers/idealist/events/operator");
+       "/api/v1/keepers/fixture-keeper/events/operator");
   check (option string) "event operator route rejects extra segments" None
     (Server_dashboard_http_keeper_event_queue_operator.route
-       "/api/v1/keepers/idealist/events/operator/extra");
+       "/api/v1/keepers/fixture-keeper/events/operator/extra");
   check bool "Worker cannot mutate pending events" false
     (Masc_domain.has_permission
        Masc_domain.Worker
@@ -241,14 +241,14 @@ let test_event_queue_operator_routes_are_exact () =
   check int "duplicate post ids retain two exact source refs" 2
     (List.sort_uniq String.compare refs |> List.length);
   let quarantine_path =
-    "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
+    "/api/v1/keepers/fixture-keeper/board-attention/quarantines/ba-root-123/recovery"
   in
   (match
      Server_dashboard_http_keeper_api.classify_keeper_post_route quarantine_path
    with
    | Server_dashboard_http_keeper_api
      .Keeper_post_board_attention_quarantine_recovery route ->
-     check string "quarantine route keeper" "idealist" route.keeper_name;
+     check string "quarantine route keeper" "fixture-keeper" route.keeper_name;
      check string "quarantine route partition" "ba-root-123" route.partition_id
    | _ -> fail "exact Board quarantine recovery route was not classified");
   check bool "quarantine route rejects extra segments" true

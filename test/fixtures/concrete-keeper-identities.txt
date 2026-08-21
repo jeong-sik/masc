@@ -1,0 +1,14 @@
+# Concrete runtime Keeper identities forbidden in tracked OCaml source.
+# Protocol roles such as verifier, operator, reviewer, and executor are not
+# runtime Keeper identities and intentionally remain valid collision fixtures.
+taskmaster
+sangsu
+cheolsu
+nick0cave
+jade-heron
+masc-improver
+rondo
+sojin
+kidsnote
+idealist
+issue_king

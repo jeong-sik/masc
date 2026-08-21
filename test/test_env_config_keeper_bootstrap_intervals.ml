@@ -71,7 +71,7 @@ let test_autoboot_warmup_jitter_is_bounded_not_linear () =
       "fixture-keeper";
       "pi_glutton";
       "xi-hammer";
-      "fixture-reviewer";
+      "verifier";
     ]
   in
   let warmups =
@@ -103,7 +103,7 @@ let test_warmup_hash_pinned_cross_platform () =
     Boot.autoboot_proactive_warmup_sec ~base_warmup:0
       ~stagger_window_sec:99 ~keeper_name:name
   in
-  check int "fixture-reviewer hash mod 100 (Int32 djb2)" 90 (warmup "fixture-reviewer");
+  check int "verifier hash mod 100 (Int32 djb2)" 25 (warmup "verifier");
   check int "designer hash mod 100 (Int32 djb2)" 74 (warmup "designer");
   check int "developer hash mod 100 (Int32 djb2)" 15 (warmup "developer");
   check int "delta hash mod 100 (Int32 djb2)" 3 (warmup "delta");
@@ -114,14 +114,14 @@ let test_autoboot_warmup_is_order_independent () =
     Boot.autoboot_proactive_warmup_sec ~base_warmup:60 ~stagger_window_sec:15
       ~keeper_name:name
   in
-  (* PR #13119 review: previously this test called [warmup "fixture-reviewer"]
+  (* PR #13119 review: previously this test called [warmup "verifier"]
      twice with identical inputs, which would still pass even if the
      implementation depended on list position.  The actual invariant
      is "permuting the keeper boot list does not change any individual
      keeper's warmup".  Compute warmups for an ordered name list and
      for its reverse, then assert per-name equality. *)
   let names = [
-    "fixture-reviewer"; "designer"; "developer"; "operator"; "supervisor";
+    "verifier"; "designer"; "developer"; "operator"; "supervisor";
     "tester"; "auditor"; "researcher"; "writer"; "scheduler";
   ] in
   let warmups_forward = List.map (fun n -> (n, warmup n)) names in
@@ -135,10 +135,10 @@ let test_autoboot_warmup_is_order_independent () =
         w_fwd w_rev)
     warmups_forward;
   check int "same keeper gets same warmup independent of boot order"
-    (warmup "fixture-reviewer") (warmup "fixture-reviewer");
+    (warmup "verifier") (warmup "verifier");
   check int "zero jitter keeps exact base warmup" 60
     (Boot.autoboot_proactive_warmup_sec ~base_warmup:60
-       ~stagger_window_sec:0 ~keeper_name:"fixture-reviewer");
+       ~stagger_window_sec:0 ~keeper_name:"verifier");
   (* Coverage smoke: the test assumes the hash actually distributes
      names across the stagger window — if every name collapsed to
      a single offset the previous "no list-position dependency"

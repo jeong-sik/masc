@@ -823,6 +823,15 @@ let test_bundled_keeper_profiles_resolve_prompt_defaults () =
                   (KTP.keeper_toml_load_error_to_string e))
            | Ok _defaults -> ()))
 
+let read_text_file path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
+let neutral_local_inherit_contract = "# test-contract: neutral-local-inherit"
+
 let test_bundled_profiles_include_local_sandbox () =
   let repo = repo_root () in
   Fun.protect
@@ -832,21 +841,78 @@ let test_bundled_profiles_include_local_sandbox () =
           Unix.putenv "MASC_CONFIG_DIR" (Filename.concat repo "config");
           Config_dir_resolver.reset ();
           let keepers_dir = Filename.concat repo "config/keepers" in
-          let has_local_profile =
+          let contract_profiles =
             Sys.readdir keepers_dir
             |> Array.to_list
             |> List.filter (fun file -> Filename.check_suffix file ".toml")
-            |> List.exists (fun file ->
-                 let name = Filename.chop_extension file in
-                 match KTP.load_keeper_profile_defaults_result name with
-                 | Error _ -> false
-                 | Ok defaults ->
-                   Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile
-                   = Some "local"
-                   && Option.map KTP.network_mode_to_string defaults.network_mode
-                      = Some "inherit")
+            |> List.filter (fun file ->
+              String_util.contains_substring
+                (read_text_file (Filename.concat keepers_dir file))
+                neutral_local_inherit_contract)
           in
-          check bool "a bundled profile exercises local/inherit" true has_local_profile))
+          check int "one profile owns the neutral local/inherit contract" 1
+            (List.length contract_profiles);
+          let profile_name =
+            contract_profiles |> List.hd |> Filename.chop_extension
+          in
+          match KTP.load_keeper_profile_defaults_result profile_name with
+          | Error error ->
+            fail
+              ("neutral local/inherit contract failed to load: "
+               ^ KTP.keeper_toml_load_error_to_string error)
+          | Ok defaults ->
+            check (option string) "contract sandbox profile" (Some "local")
+              (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
+            check (option string) "contract network mode" (Some "inherit")
+              (Option.map KTP.network_mode_to_string defaults.network_mode)))
+
+let concrete_keeper_inventory_path repo =
+  Filename.concat repo "test/fixtures/concrete-keeper-identities.txt"
+;;
+
+let concrete_keeper_inventory repo =
+  read_text_file (concrete_keeper_inventory_path repo)
+  |> String.split_on_char '\n'
+  |> List.map String.trim
+  |> List.filter (fun line -> line <> "" && not (String.starts_with ~prefix:"#" line))
+;;
+
+let rec ocaml_source_files path =
+  if Sys.is_directory path
+  then
+    Sys.readdir path
+    |> Array.to_list
+    |> List.concat_map (fun name -> ocaml_source_files (Filename.concat path name))
+  else if Filename.check_suffix path ".ml" || Filename.check_suffix path ".mli"
+  then [ path ]
+  else []
+;;
+
+let test_ocaml_sources_exclude_declared_concrete_keeper_identities () =
+  let repo = repo_root () in
+  let identities = concrete_keeper_inventory repo in
+  check bool "concrete Keeper inventory is declared" true (identities <> []);
+  let source_files =
+    [ "bin"; "lib"; "packages"; "test" ]
+    |> List.concat_map (fun root -> ocaml_source_files (Filename.concat repo root))
+  in
+  List.iter
+    (fun path ->
+       let source = read_text_file path |> String.lowercase_ascii in
+       List.iter
+         (fun identity ->
+            if
+              String_util.contains_substring
+                source
+                (String.lowercase_ascii identity)
+            then
+              failf
+                "concrete Keeper identity %S remains in OCaml source %s"
+                identity
+                path)
+         identities)
+    source_files
+;;
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -1706,5 +1772,7 @@ let () =
             test_bundled_keeper_profiles_resolve_prompt_defaults;
           test_case "bundled profiles include local sandbox" `Quick
             test_bundled_profiles_include_local_sandbox;
+          test_case "OCaml sources exclude concrete Keeper identities" `Quick
+            test_ocaml_sources_exclude_declared_concrete_keeper_identities;
         ] );
     ]

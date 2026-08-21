@@ -113,12 +113,18 @@ val audit_entry_matches :
     projection cannot disagree about what was asked for. *)
 
 val read_entries_matching :
-  ?n:int -> keep:(audit_entry -> bool) -> config -> audit_entry list
+  ?n:int ->
+  ?since:float ->
+  ?until:float ->
+  keep:(audit_entry -> bool) ->
+  config ->
+  audit_entry list
 (** Most-recent [n] entries satisfying [keep]. [n] counts matches,
     where {!read_entries} counts rows read: the store holds every
     agent's actions, so a caller that filters afterwards has no
     window size that means "the newest [n] of mine". Corrupt rows are
-    reported but do not consume the budget. *)
+    reported but do not consume the budget. [since]/[until] additionally bound
+    the day files opened; [keep] still decides exact timestamps on edge days. *)
 
 val read_entries : ?n:int -> config -> audit_entry list
 (** Most-recent [n] (default 10000) parsed entries from the

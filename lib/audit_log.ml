@@ -301,11 +301,35 @@ let read_entries ?(n = 10_000) (config : config) : audit_entry list =
     Some (entry_of_json_r json))
   |> collect_entries
 
+let utc_date_of_timestamp timestamp =
+  match Unix.gmtime timestamp with
+  | tm ->
+    let year = tm.Unix.tm_year + 1900 in
+    if year < 0 || year > 9999
+    then None
+    else
+      Some
+        (Printf.sprintf
+           "%04d-%02d-%02d"
+           year
+           (tm.Unix.tm_mon + 1)
+           tm.Unix.tm_mday)
+  | exception Invalid_argument _
+  | exception Unix.Unix_error _ -> None
+;;
+
+let optional_date_bound = function
+  | None -> Some None
+  | Some timestamp ->
+    Option.map (fun date -> Some date) (utc_date_of_timestamp timestamp)
+;;
+
 (* [n] counts entries that satisfy [keep]. {!read_entries} counts rows read, so
    a caller that filters afterwards has to guess how wide a window its matches
    need — the audit store carries every agent's actions, and one busy agent
    fills any fixed guess. *)
-let read_entries_matching ?(n = 10_000) ~keep (config : config) : audit_entry list
+let read_entries_matching ?(n = 10_000) ?since ?until ~keep (config : config)
+  : audit_entry list
   =
   let store = get_audit_store config in
   (* Corrupt rows are collected but not counted: they are not entries the
@@ -313,14 +337,26 @@ let read_entries_matching ?(n = 10_000) ~keep (config : config) : audit_entry li
      "matches, unless the store is damaged". They still reach
      [collect_entries] so corruption keeps being reported. *)
   let malformed = ref [] in
-  let matched =
-    Dated_jsonl.collect_matching store n ~f:(fun json ->
+  let select json =
       match entry_of_json_r json with
       | Ok entry when keep entry -> Some (Ok entry)
       | Ok _ -> None
       | Error _ as corrupt ->
         malformed := corrupt :: !malformed;
-        None)
+        None
+  in
+  let matched =
+    match optional_date_bound since, optional_date_bound until with
+    | Some since_day, Some until_day
+      when Option.is_some since_day || Option.is_some until_day ->
+      Dated_jsonl.collect_matching_range
+        store
+        ~since:(Option.value ~default:"0000-01-01" since_day)
+        ~until:(Option.value ~default:"9999-12-31" until_day)
+        n
+        ~f:select
+    | Some _, Some _ | None, _ | _, None ->
+      Dated_jsonl.collect_matching store n ~f:select
   in
   collect_entries (List.rev !malformed @ matched)
 

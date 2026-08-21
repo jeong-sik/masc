@@ -134,15 +134,27 @@ val collect_matching :
     Multiplying [n] to compensate only moves the write rate at which the answer
     goes empty.
 
-    The cost is the wider read that guarantee requires: day files are walked
-    newest-first and each is read whole, because how far back the [n]-th match
-    sits cannot be derived from [n]. The walk stops at the first file that
-    completes the count, so a caller whose matches are recent reads no more
-    than {!filter_map_recent} would.
+    Day files are walked newest-first and scanned backwards in fixed-size
+    chunks. The scan stops at the [n]-th match and never materialises a whole
+    day file; memory is bounded by the current chunk/line fragment plus the
+    selected values.
 
     [offset] skips selected values, not rows. Ordering and malformed-row
     skipping match {!filter_map_recent}, including that {b [f] is called
     newest-first}. *)
+
+val collect_matching_range :
+  ?offset:int ->
+  t ->
+  since:string ->
+  until:string ->
+  int ->
+  f:(Yojson.Safe.t -> 'a option) ->
+  'a list
+(** Range-bounded {!collect_matching}. Only day files in the inclusive
+    [[since, until]] UTC date range are opened. Invalid or reversed dates
+    return [[]], matching {!filter_map_range_recent}; row-level [f] remains
+    responsible for exact timestamp boundaries within the edge days. *)
 
 val filter_map_recent :
   ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list

@@ -709,7 +709,12 @@ let add_routes ~sw ~clock router =
              ?severity:severity_filter ?since:since_filter ?until:until_filter
          in
          let all_entries =
-           Audit_log.read_entries_matching ~n:limit ~keep:matches config
+           Audit_log.read_entries_matching
+             ~n:limit
+             ?since:since_filter
+             ?until:until_filter
+             ~keep:matches
+             config
          in
          let json =
            Audit_log.audit_events_response_json ~limit all_entries

@@ -180,6 +180,71 @@ let test_filter_map_recent_does_not_swallow_callback_failure () =
         (Dated_jsonl.filter_map_recent store 10 ~f:(fun _ ->
            raise (Yojson.Json_error "decoder rejected the row"))))
 
+let test_collect_matching_counts_selected_rows () =
+  let dir = tmpdir "dated_jsonl_collect_matching" in
+  write_dated_file
+    dir
+    "2026-01"
+    "01"
+    [ {|{"i":1}|}; {|{"i":2}|}; {|{"i":3}|}; {|{"i":4}|}; {|{"i":5}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let values =
+    Dated_jsonl.collect_matching store 2 ~f:(fun json ->
+      let value = json_i json in
+      if value mod 2 = 0 then Some value else None)
+  in
+  check (list int) "newest two matches stay chronological" [ 2; 4 ] values
+;;
+
+let test_collect_matching_range_skips_out_of_range_files () =
+  let dir = tmpdir "dated_jsonl_collect_matching_range" in
+  write_dated_file dir "2026-01" "31" [ {|{"i":1}|} ];
+  write_dated_file dir "2026-02" "01" [ {|{"i":2}|} ];
+  write_dated_file dir "2026-02" "02" [ {|{"i":3}|} ];
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let visited = ref [] in
+  let values =
+    Dated_jsonl.collect_matching_range
+      store
+      ~since:"2026-02-01"
+      ~until:"2026-02-01"
+      10
+      ~f:(fun json ->
+        let value = json_i json in
+        visited := value :: !visited;
+        Some value)
+  in
+  check (list int) "only the requested day contributes" [ 2 ] values;
+  check (list int) "out-of-range files were never parsed" [ 2 ] !visited
+;;
+
+let test_collect_matching_stops_without_loading_the_day () =
+  let dir = tmpdir "dated_jsonl_collect_matching_bounded" in
+  let month_dir = Filename.concat dir "2026-01" in
+  Fs_compat.mkdir_p month_dir;
+  let path = Filename.concat month_dir "01.jsonl" in
+  let descriptor =
+    Unix.openfile path [ Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY ] 0o600
+  in
+  Fun.protect
+    ~finally:(fun () -> Unix.close descriptor)
+    (fun () ->
+      let sparse_prefix_bytes = 64 * 1024 * 1024 in
+      Unix.ftruncate descriptor sparse_prefix_bytes;
+      ignore (Unix.lseek descriptor sparse_prefix_bytes Unix.SEEK_SET);
+      let suffix = "\n{\"i\":2}\n" in
+      ignore (Unix.write_substring descriptor suffix 0 (String.length suffix)));
+  let store = Dated_jsonl.create ~base_dir:dir () in
+  let allocated_before = Gc.allocated_bytes () in
+  let values =
+    Dated_jsonl.collect_matching store 1 ~f:(fun json -> Some (json_i json))
+  in
+  let allocated = Gc.allocated_bytes () -. allocated_before in
+  check (list int) "the newest match is returned" [ 2 ] values;
+  check bool "reverse scan allocation stays below one whole-day load" true
+    (allocated < Float.of_int (4 * 1024 * 1024))
+;;
+
 let test_read_recent_result_counts_malformed_physical_row () =
   let dir = tmpdir "dated_jsonl_recent_result_malformed" in
   write_dated_file
@@ -1155,6 +1220,14 @@ let () =
             test_filter_map_recent_calls_the_projection_newest_first;
           test_case "callback failure is not swallowed" `Quick
             test_filter_map_recent_does_not_swallow_callback_failure;
+        ] );
+      ( "collect_matching",
+        [ test_case "n counts selected rows" `Quick
+            test_collect_matching_counts_selected_rows;
+          test_case "range skips out-of-range files" `Quick
+            test_collect_matching_range_skips_out_of_range_files;
+          test_case "reverse scan keeps day-file allocation bounded" `Quick
+            test_collect_matching_stops_without_loading_the_day;
         ] );
       ( "read_recent_lines",
         [

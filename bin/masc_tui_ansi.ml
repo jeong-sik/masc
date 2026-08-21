@@ -45,8 +45,15 @@ module Ansi = struct
   let _box_x = "\xe2\x94\xbc"  (* cross *)
 end
 
-(** Get terminal size (fallback to 80x24) *)
-let get_terminal_size () =
+(** Terminal size changes only after SIGWINCH. Cache the process-backed probe so
+    an idle TUI does not spawn [tput] twice per frame. *)
+let terminal_size_cache =
+  Masc_tui_render_schedule.Terminal_size_cache.create ~fallback:(24, 80)
+
+let invalidate_terminal_size () =
+  Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
+
+let probe_terminal_size () =
   let read_tput arg =
     try
       let line, status =
@@ -59,8 +66,13 @@ let get_terminal_size () =
     with Unix.Unix_error _ | Sys_error _ | End_of_file -> None
   in
   match read_tput "cols", read_tput "lines" with
-  | Some cols, Some rows -> (rows, cols)
-  | _ -> (24, 80)
+  | Some cols, Some rows -> Some (rows, cols)
+  | _ -> None
+
+(** Get terminal size (fallback to 80x24). *)
+let get_terminal_size () =
+  Masc_tui_render_schedule.Terminal_size_cache.get terminal_size_cache
+    ~probe:probe_terminal_size
 
 (** Draw horizontal line *)
 let draw_hline width =
@@ -133,6 +145,7 @@ let ctx_color ratio =
 
 (** Format context ratio as a visual bar *)
 let ctx_bar ratio width =
+  let width = Masc_tui_render_schedule.nonnegative_width width in
   let filled = int_of_float (ratio *. float_of_int width) in
   let filled = max 0 (min width filled) in
   let empty = width - filled in

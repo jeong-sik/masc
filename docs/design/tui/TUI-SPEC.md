@@ -58,7 +58,17 @@ MASC TUI를 Dashboard V2 surface 기준으로 확장하여, 웹 대시보드 없
 +------------------+
 ```
 
-### 2.1 확장된 view enum (제안)
+### 2.1 Render scheduling
+
+The main loop requests a frame only for typed input, an applied background
+result/refresh, or a terminal resize. A monotonic 16 ms frame window coalesces
+background bursts; input can preempt an already pending background frame, and a
+resize forces one frame. With no state change the renderer performs no work and
+writes no terminal output. Terminal dimensions are probed once, cached, and
+invalidated by `SIGWINCH`; the signal handler only sets an atomic flag and the
+main fiber performs the later process-backed probe.
+
+### 2.2 확장된 view enum (제안)
 
 ```ocaml
 type surface =
@@ -71,7 +81,7 @@ type surface =
 
 기존 `view_mode` (Dashboard | Keeper_list | Keeper_detail | Keeper_logs | Keeper_message)은 keepers surface 내부 상태로 재편된다.
 
-### 2.2 데이터 로더 전략
+### 2.3 데이터 로더 전략
 
 | 소스 | 우선순위 | 사용 시나리오 |
 |---|---|---|

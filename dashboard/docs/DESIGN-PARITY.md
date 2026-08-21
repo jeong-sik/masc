@@ -46,6 +46,7 @@ Diagnostics, in the order they are usually needed:
 | `design-parity-box.mjs <surface> <sel…>` | where an element actually landed (x/y/size) — what a cumulative offset needs |
 | `design-parity-rules.mjs <url> <sel> <prop>` | which stylesheet rule wins that property (CDP `getMatchedStylesForNode`) |
 | `design-parity-cssdiff.mjs <name…>` | vendored vs prototype stylesheet, with the repo's font-size tokenization normalized away |
+| `design-parity-viewport.mjs <surface> [limit]` | elements that differ AND fall inside the captured 1600×1000 — a block at y=1934 can be repaired without the number moving at all |
 | `design-parity-gaps.mjs [name…]` | selectors the design defines that the vendored kit does not |
 | `design-parity-leaks.mjs` | selectors owned by both a legacy sheet and the kit, and the geometry the kit does not restate |
 
@@ -87,19 +88,19 @@ Two independent full-fleet runs, identical to four decimals.
 
 | Surface | SSIM | | Surface | SSIM |
 |---|---|---|---|---|
-| logs | 0.996 | | registry | 0.955 |
-| monitor | 0.995 | | schedule | 0.944 |
-| ide | 0.995 | | keepers | 0.909 |
+| logs | 0.996 | | approvals | 0.966 |
+| monitor | 0.995 | | registry | 0.955 |
+| ide | 0.995 | | schedule | 0.944 |
+| lab | 0.987 | | keepers | 0.909 |
 | connectors | 0.986 | | work | 0.891 |
-| lab | 0.986 | | board | 0.853 |
+| command | 0.979 | | board | 0.853 |
 | fusion | 0.978 | | overview | 0.842 |
-| command | 0.969 | | | |
-| approvals | 0.966 | | **mean** | **0.948** |
+| | | | **mean** | **0.948** |
 
 Ten of the fourteen sit at 0.95 or above. The four that do not — overview,
 board, work, keepers — are each held there by one named cause, ledgered
 underneath, and none of the four is skin drift. **Across the ten surfaces where
-the two sides agree on structure the mean is 0.977**; that is the figure to read
+the two sides agree on structure the mean is 0.978**; that is the figure to read
 as "does the skin match". The 0.948 fleet mean includes the four and is the
 figure to read as "how close is the whole dashboard to the mock".
 

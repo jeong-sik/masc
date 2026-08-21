@@ -38,7 +38,10 @@
 .fl-brand { display: flex; flex-direction: column; justify-content: center; gap: 1px; flex: none; }
 .fl-brand .ov-eyebrow { margin-bottom: 0; }
 .fl-crumb { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-dim); white-space: nowrap; }
-.fl-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 1.2; letter-spacing: -0.005em; color: var(--text-bright); white-space: nowrap; }
+/* `margin: 0` is the live DOM's — the title is a heading element and the mock's
+   is not. The leading is not: the design states none, so it inherits, and the
+   1.2 that used to sit here sat the title 3.2px high in its own header band. */
+.fl-title { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 18px; letter-spacing: -0.005em; color: var(--text-bright); white-space: nowrap; }
 .fl-health { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fl-hpill {
   display: inline-flex; align-items: center; gap: 7px;

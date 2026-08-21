@@ -31,11 +31,11 @@
   font-size: calc(var(--twk-font-scale, 100) * 1%);
 }
 
-/* ── Button leading ───────────────────────────────────────────── */
-/* The prototype ships no CSS reset, so its <button>s keep the UA metrics
+/* ── Form-control leading ─────────────────────────────────────── */
+/* The prototype ships no CSS reset, so its form controls keep the UA metrics
    (`line-height: normal`) while body copy runs at 1.55. Every dense chrome the
-   design builds out of buttons — log rows, nav items, stat chips, kanban cards
-   — is sized by that tight leading. The dashboard's Tailwind preflight makes
+   design builds out of them — log rows, nav items, stat chips, kanban cards, the
+   Lab/Command entry box — is sized by that tight leading. The dashboard's Tailwind preflight makes
    `button { font: inherit }`, so the same elements inherit 1.55 and every row
    grows ~10% (a log row measured 41.7px against the design's 38.0px, and the
    drift compounds down a list). Restoring proportional leading on the v2 shell's
@@ -47,7 +47,7 @@
    leading keeps it and everything else takes proportional leading. Scoped to
    `.v2-app`; other surfaces untouched. */
 @layer v2-button-leading {
-  .v2-app button {
+  .v2-app :is(button, input, select, textarea) {
     line-height: normal;
   }
 }

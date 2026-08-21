@@ -206,7 +206,12 @@
 .sch-bg { margin-top: 26px; border-top: 1px solid var(--border-soft); padding-top: 18px; }
 .sch-bg-h { margin-bottom: 14px; }
 .sch-bg-h h3 { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-bright); margin: 0 0 4px; }
-.sch-bg-sub { font-size: var(--fs-11); color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 10px; }
+.sch-bg-sub { font-size: var(--fs-11); color: var(--text-dim); }
+/* The design's sub-line is one sentence; the live panel puts three counts here
+   instead and needs them to wrap as a row. Declaring that on the element itself
+   made every sub-line a flex container, which took the section header from the
+   design's 47px to 41px. The live variant asks for it by name. */
+.sch-bg-sub.is-stats { display: flex; flex-wrap: wrap; gap: 10px; }
 .sch-bg-grps { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .sch-bg-grp { min-width: 0; }
 .sch-bg-grp-h { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; }

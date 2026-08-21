@@ -2,6 +2,9 @@
 // parity page. `design-parity-style.mjs` says WHICH property differs; this says
 // where the element actually landed, which is what a cumulative offset needs.
 import { chromium } from 'playwright'
+
+// Port is configurable so a second worktree can serve its own tree alongside.
+const BASE = `http://127.0.0.1:${process.env.PARITY_PORT || 8978}/prototypes/keeper-v2`
 const [surface, ...sels] = process.argv.slice(2)
 const pages = { design: 'Keeper%20Agent%20v5.html', live: '_parity-vendored.html' }
 const b = await chromium.launch()
@@ -9,7 +12,7 @@ const c = await b.newContext({ viewport: { width: 1600, height: 1000 } })
 const res = {}
 for (const [k, f] of Object.entries(pages)) {
   const p = await c.newPage()
-  await p.goto(`http://127.0.0.1:8978/prototypes/keeper-v2/${f}?surface=${surface}`, { waitUntil: 'load', timeout: 45000 })
+  await p.goto(`${BASE}/${f}?surface=${surface}`, { waitUntil: 'load', timeout: 45000 })
   await p.waitForSelector('.v2-app', { timeout: 30000 })
   await p.waitForTimeout(1800)
   res[k] = await p.evaluate((sels) => sels.map((sel) => {

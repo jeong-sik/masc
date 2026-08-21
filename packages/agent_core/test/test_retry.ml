@@ -1,6 +1,7 @@
 open Alcotest
 open Agent_core
 module Retry = Llm_provider.Retry
+module Http_client = Llm_provider.Http_client
 
 let expect_rate_limited err =
   match err with
@@ -268,6 +269,17 @@ let test_error_message_all_variants () =
     ; ( Retry.NetworkError { message = "reset"; kind = Connection_refused }
       , "Network error (connection_refused): reset" )
     ; Retry.Timeout { message = "10s"; phase = None }, "Timeout: 10s"
+      (* A timeout that does not say which phase stalled reads the same as
+         every other timeout. The phase was in the record and absent from
+         the rendering, so the only way to see it in a log was to convert
+         the error into a provider error it was not. *)
+    ; ( Retry.Timeout
+          { message = "no token for 120s"
+          ; phase = Some (Http_client.Stream_idle Http_client.Streaming_answer)
+          }
+      , "Timeout phase=stream_idle:streaming_answer: no token for 120s" )
+    ; ( Retry.Timeout { message = "prefill"; phase = Some Http_client.First_token }
+      , "Timeout phase=first_token: prefill" )
     ]
   in
   List.iter

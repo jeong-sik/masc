@@ -134,7 +134,7 @@ let test_to_string_each_variant () =
     ; `Server_error (503, "unavailable")
     ; `Network_error "connection refused"
     ; `Provider_timeout (None, "3s elapsed")
-    ; `Streaming_timeout (Http_client.Stream_body, "stream body elapsed")
+    ; `Streaming_timeout (Http_client.Stream_body, "stream body elapsed", None)
     ; `Overloaded
     ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "bad body")
     ; `Tool_exec_failed ("search", "crash")
@@ -172,7 +172,8 @@ let test_all_variants_convert () =
     ; `Server_error (500, "x")
     ; `Network_error "x"
     ; `Provider_timeout (None, "x")
-    ; `Streaming_timeout (Http_client.Stream_idle Http_client.Streaming_thinking, "idle")
+    ; `Streaming_timeout
+        (Http_client.Stream_idle Http_client.Streaming_thinking, "idle", None)
     ; `Overloaded
     ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "x")
     ; `Tool_exec_failed ("t", "d")
@@ -272,14 +273,23 @@ let test_roundtrip_api_timeout_preserves_phase () =
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
-   | `Streaming_timeout (Http_client.First_token, "prefill") -> ()
+   | `Streaming_timeout (Http_client.First_token, "prefill", _) -> ()
    | _ -> Alcotest.fail "expected Streaming_timeout with First_token");
   let back = Error_domain.to_core_error poly in
-  match back with
-  | Error.Provider
-      (Llm_provider.Error.Timeout { timeout_phase = Some Http_client.First_token; _ }) ->
-    ()
-  | _ -> Alcotest.fail "roundtrip lost timeout phase"
+  (* It arrived as an API error with no provider, so it goes back as one. It
+     used to be handed back as a provider error named "unknown", which was the
+     only way the phase survived rendering. *)
+  (match back with
+   | Error.Api (Retry.Timeout { phase = Some Http_client.First_token; message = "prefill" })
+     -> ()
+   | _ -> Alcotest.fail "roundtrip lost the API timeout it started as");
+  (* The phase is the point: a rendered timeout that does not say which phase
+     stalled cannot be told apart from any other timeout, and naming a provider
+     that does not exist is worse than naming none. *)
+  Alcotest.(check string)
+    "renders its phase and invents no provider"
+    "Timeout phase=first_token: prefill"
+    (Error.to_string back)
 ;;
 
 let test_roundtrip_api_timeout_preserves_non_streaming_phase () =
@@ -309,13 +319,17 @@ let test_roundtrip_provider_streaming_timeout () =
   in
   let poly = Error_domain.of_core_error orig in
   (match poly with
-   | `Streaming_timeout (Http_client.Stream_body, "stream body cap") -> ()
-   | _ -> Alcotest.fail "expected Streaming_timeout");
+   | `Streaming_timeout (Http_client.Stream_body, "stream body cap", Some "openai") ->
+     ()
+   | _ -> Alcotest.fail "expected Streaming_timeout carrying its provider");
   let back = Error_domain.to_core_error poly in
   match back with
   | Error.Provider
       (Llm_provider.Error.Timeout
-         { timeout_phase = Some Http_client.Stream_body; detail = "stream body cap"; _ })
+         { provider = "openai"
+         ; timeout_phase = Some Http_client.Stream_body
+         ; detail = "stream body cap"
+         })
     ->
     let first_token =
       Error.Provider
@@ -327,7 +341,8 @@ let test_roundtrip_provider_streaming_timeout () =
       |> Error_domain.of_core_error
     in
     (match first_token with
-     | `Streaming_timeout (Http_client.First_token, "awaiting first token") -> ()
+     | `Streaming_timeout (Http_client.First_token, "awaiting first token", Some "openai")
+       -> ()
      | _ -> Alcotest.fail "expected First_token Streaming_timeout")
   | _ -> Alcotest.fail "roundtrip mismatch for streaming Timeout"
 ;;
@@ -629,7 +644,8 @@ let test_retryable_streaming_timeout () =
     "streaming_timeout retryable"
     true
     (Error_domain.is_retryable
-       (`Streaming_timeout (Http_client.Stream_idle Http_client.Streaming_answer, "idle")))
+       (`Streaming_timeout
+          (Http_client.Stream_idle Http_client.Streaming_answer, "idle", None)))
 ;;
 
 let test_retryable_network_error () =
@@ -793,7 +809,8 @@ let test_provider_roundtrip_all_via_to_sdk () =
     ; `Server_error (500, "x")
     ; `Network_error "x"
     ; `Provider_timeout (None, "x")
-    ; `Streaming_timeout (Http_client.Stream_body, "x")
+    ; `Streaming_timeout (Http_client.Stream_body, "x", Some "openai")
+    ; `Streaming_timeout (Http_client.Stream_body, "x", None)
     ; `Overloaded
     ; `Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "x")
     ]
@@ -804,9 +821,11 @@ let test_provider_roundtrip_all_via_to_sdk () =
        let s = Error.to_string core_error in
        Alcotest.(check bool) "nonempty to_string" true (String.length s > 0);
        match v, core_error with
-       | `Streaming_timeout _, Error.Provider _ -> ()
+       | `Streaming_timeout (_, _, Some _), Error.Provider _ -> ()
+       | `Streaming_timeout (_, _, None), Error.Api _ -> ()
        | `Streaming_timeout _, _ ->
-         Alcotest.fail "expected Provider for streaming_timeout"
+         Alcotest.fail
+           "a streaming timeout keeps its provider or stays the API error it was"
        | _, Error.Api _ -> ()
        | _ -> Alcotest.fail "expected Api for provider_error")
     variants

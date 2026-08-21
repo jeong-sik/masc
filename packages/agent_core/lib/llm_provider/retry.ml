@@ -102,7 +102,18 @@ let error_message = function
   | NetworkError { message; kind = Unknown } -> Printf.sprintf "Network error: %s" message
   | NetworkError { message; kind } ->
     Printf.sprintf "Network error (%s): %s" (network_error_kind_label kind) message
-  | Timeout r -> Printf.sprintf "Timeout: %s" r.message
+  | Timeout r ->
+    (* The phase is the whole diagnostic value of a timeout -- a stalled stream
+       and a refused admission are different failures. It was carried in the
+       record and dropped here, which is why the only way to see it in a log was
+       to convert the error into a provider error it was not. *)
+    let phase_suffix =
+      match r.phase with
+      | None -> ""
+      | Some phase ->
+        Printf.sprintf " phase=%s" (Http_client.timeout_phase_to_label phase)
+    in
+    Printf.sprintf "Timeout%s: %s" phase_suffix r.message
 ;;
 
 let is_retryable = function

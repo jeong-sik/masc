@@ -790,6 +790,9 @@ let process_pending (runtime : runtime) =
       (fun goal_work ->
          Eio.Fiber.fork ~sw:runtime.sw (fun () ->
            Eio.Semaphore.acquire runtime.review_slots;
+           (* fun-protect-finally-ok: [Eio.Semaphore.release] is
+              non-suspending and must return the bounded review slot on
+              normal completion, exception, or cancellation. *)
            Fun.protect
              ~finally:(fun () -> Eio.Semaphore.release runtime.review_slots)
              (fun () -> process_goal_work runtime goal_work)))

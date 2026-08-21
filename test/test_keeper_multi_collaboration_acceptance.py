@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -40,6 +41,51 @@ acceptance = load_acceptance_module()
 
 
 class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
+    def test_runtime_by_role_requires_exact_five_role_object(self):
+        mapping = {
+            "coordinator": "runtime-a",
+            "builder-a": "runtime-b",
+            "builder-b": "runtime-c",
+            "reviewer": "runtime-d",
+            "researcher": "runtime-e",
+        }
+
+        parsed = acceptance.parse_runtime_by_role(json.dumps(mapping))
+
+        self.assertEqual(parsed, mapping)
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "exact five roles"):
+            acceptance.parse_runtime_by_role(
+                json.dumps({"coordinator": "runtime-a"})
+            )
+
+    def test_heterogeneous_runtime_mode_refuses_duplicates_and_fallback_mix(self):
+        mapping = {
+            "coordinator": "runtime-a",
+            "builder-a": "runtime-b",
+            "builder-b": "runtime-c",
+            "reviewer": "runtime-d",
+            "researcher": "runtime-e",
+        }
+        acceptance.validate_runtime_strategy(
+            runtime_id=None,
+            runtime_by_role=mapping,
+            require_heterogeneous=True,
+        )
+        duplicate = dict(mapping)
+        duplicate["researcher"] = "runtime-a"
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "five distinct"):
+            acceptance.validate_runtime_strategy(
+                runtime_id=None,
+                runtime_by_role=duplicate,
+                require_heterogeneous=True,
+            )
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "mutually exclusive"):
+            acceptance.validate_runtime_strategy(
+                runtime_id="fallback",
+                runtime_by_role=mapping,
+                require_heterogeneous=False,
+            )
+
     def test_catalog_has_exact_rw19_persistence_projection_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 

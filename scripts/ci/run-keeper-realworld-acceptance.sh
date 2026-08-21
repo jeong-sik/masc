@@ -18,6 +18,8 @@ EXPECTED_REF_PROTECTED="${KEEPER_ACCEPTANCE_EXPECTED_REF_PROTECTED:?KEEPER_ACCEP
 EXPECTED_WORKFLOW_REF="${KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_REF:?KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_REF is required}"
 EXPECTED_WORKFLOW_SHA="${KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_SHA:?KEEPER_ACCEPTANCE_EXPECTED_WORKFLOW_SHA is required}"
 RUNTIME_ID="${KEEPER_ACCEPTANCE_RUNTIME_ID:-glm-coding.glm-4-7-coding}"
+RUNTIME_BY_ROLE_JSON="${KEEPER_ACCEPTANCE_RUNTIME_BY_ROLE_JSON:-}"
+REQUIRE_HETEROGENEOUS_RUNTIMES="${KEEPER_ACCEPTANCE_REQUIRE_HETEROGENEOUS_RUNTIMES:-false}"
 TURN_TIMEOUT_SEC="${KEEPER_ACCEPTANCE_TURN_TIMEOUT_SEC:-300}"
 RUNNER_TEMP_ROOT="${RUNNER_TEMP:?RUNNER_TEMP is required}"
 : "${ZAI_API_KEY_SB:?ZAI_API_KEY_SB is required by the isolated GLM runtime}"
@@ -182,13 +184,27 @@ common_args=(
   --browser-proof-script "$ROOT_DIR/dashboard/e2e/keeper-composition-real-backend.mjs"
 )
 
+runtime_args=(--runtime-id "$RUNTIME_ID")
+if [[ -n "$RUNTIME_BY_ROLE_JSON" ]]; then
+  runtime_args=(--runtime-by-role-json "$RUNTIME_BY_ROLE_JSON")
+fi
+if [[ "$REQUIRE_HETEROGENEOUS_RUNTIMES" == "true" ]]; then
+  runtime_args+=(--require-heterogeneous-runtimes)
+elif [[ "$REQUIRE_HETEROGENEOUS_RUNTIMES" != "false" ]]; then
+  fail "KEEPER_ACCEPTANCE_REQUIRE_HETEROGENEOUS_RUNTIMES must be true or false"
+fi
+GATE_RUNTIME_BY_ROLE_JSON="$RUNTIME_BY_ROLE_JSON"
+if [[ -z "$GATE_RUNTIME_BY_ROLE_JSON" ]]; then
+  GATE_RUNTIME_BY_ROLE_JSON="{}"
+fi
+
 python3 "$ROOT_DIR/scripts/harness/workload/keeper_multi_collaboration_acceptance.py" \
   --preflight "${common_args[@]}" >"$preflight_json"
 
 python3 "$ROOT_DIR/scripts/harness/workload/keeper_multi_collaboration_acceptance.py" \
   --run \
   --allow-mutation \
-  --runtime-id "$RUNTIME_ID" \
+  "${runtime_args[@]}" \
   --run-id "rw-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}" \
   --output-dir "$evidence_dir" \
   "${common_args[@]}" >"$run_json"
@@ -210,6 +226,8 @@ jq -n \
   --arg binary_sha256 "$actual_binary_sha" \
   --arg effective_base_path "$base_path" \
   --arg runtime_id "$RUNTIME_ID" \
+  --arg runtime_by_role_json "$GATE_RUNTIME_BY_ROLE_JSON" \
+  --arg require_heterogeneous_runtimes "$REQUIRE_HETEROGENEOUS_RUNTIMES" \
   --arg run_id "${GITHUB_RUN_ID:-local}" \
   --arg run_attempt "${GITHUB_RUN_ATTEMPT:-1}" \
   '{
@@ -223,7 +241,9 @@ jq -n \
     workflow_sha: $workflow_sha,
     binary_sha256: $binary_sha256,
     effective_base_path: $effective_base_path,
-    runtime_id: $runtime_id,
+    runtime_id: (if ($runtime_by_role_json | fromjson | length) > 0 then null else $runtime_id end),
+    runtime_by_role: ($runtime_by_role_json | fromjson),
+    require_heterogeneous_runtimes: ($require_heterogeneous_runtimes == "true"),
     github_run_id: $run_id,
     github_run_attempt: $run_attempt
   }' >"$OUTPUT_DIR/gate-result.json"

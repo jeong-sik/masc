@@ -160,11 +160,6 @@ let schemas : tool_schema list = [
           ("items", `Assoc [("type", `String "string")]);
           ("description", `String "Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['sangsu']).");
         ]);
-        ("active_goal_ids", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Goal IDs this keeper is allowed to claim work for. Empty clears goal scoping.");
-        ]);
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
           ("enum", `List [`String "local"; `String "docker"]);

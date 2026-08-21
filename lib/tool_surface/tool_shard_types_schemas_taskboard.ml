@@ -104,9 +104,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
          keeper_tasks_list row identifies it; an awaiting_verification task returns \
          the typed pending-verdict refusal. If you already own another \
          Claimed/InProgress task, finish it with keeper_task_done or explicitly \
-         release it first; keeper_task_claim does not auto-release active work. If \
-         active_goal_ids are configured, the no-arg claim prefers goal-linked work \
-         and only widens when the scoped pool has no eligible task."
+         release it first; keeper_task_claim does not auto-release active work."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

@@ -222,36 +222,6 @@ let repair_non_canonical_enum_fields json =
   | _ -> None
 ;;
 
-(* [active_goal_ids] was present in the immediately preceding durable schema,
-   but goal assignment is no longer Keeper metadata.  Accepting this one key
-   on read is a migration tombstone, not a schema field: it is discarded before
-   current-schema validation and is never available to [decode_current_meta] or
-   emitted by the writer.  The retired payload still has to match its former
-   string-list contract before it is discarded; accepting arbitrary JSON here
-   would silently turn corruption into a valid current snapshot.  Duplicate
-   tombstones still fail closed, as do all other unknown fields. *)
-let drop_legacy_active_goal_ids = function
-  | `Assoc fields ->
-    let count =
-      List.fold_left
-        (fun count (key, _) ->
-           if String.equal key "active_goal_ids" then count + 1 else count)
-        0
-        fields
-    in
-    if count > 1
-    then invalidf "duplicate field active_goal_ids"
-    else if count = 0
-    then Ok (`Assoc fields)
-    else (
-      let* (_ : string list) = string_list_field fields "active_goal_ids" in
-      Ok
-        (`Assoc
-           (List.filter
-              (fun (key, _) -> not (String.equal key "active_goal_ids"))
-              fields)))
-  | json -> Ok json
-;;
 
 let parse_last_blocker fields =
   let* value = required_field fields "last_blocker" in
@@ -585,7 +555,6 @@ let decode_current_meta fields =
 
 let meta_of_json json =
   try
-    let* json = drop_legacy_active_goal_ids json in
     match validate_current_object json with
     | Error error -> Error (validation_error_detail error)
     | Ok fields ->

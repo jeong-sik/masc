@@ -38,8 +38,6 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - uses: actions/github-script@v9
-        with:
-      - uses: actions/github-script@v9
         env:
           DISPATCH_ISSUE_NUMBER: ${{ inputs.issue_number }}
           DISPATCH_SCOPE: ${{ inputs.scope }}
@@ -137,9 +135,10 @@ jobs:
               return { add: [...new Set(add)], errors };
             }
 
+            // One source for label names: knownLabels is what the SSOT declares. The prefixes
+            // only catch orphans left behind by a value that the SSOT no longer carries.
             const axisPrefixes = Object.keys(SSOT.axes).map((a) => a + '/');
-            const flagNames = new Set(Object.keys(SSOT.flags));
-            const managed = (name) => axisPrefixes.some((p) => name.startsWith(p)) || flagNames.has(name);
+            const managed = (name) => knownLabels.has(name) || axisPrefixes.some((p) => name.startsWith(p));
 
             async function commentOnce(issue_number, body) {
               const existing = await github.paginate(github.rest.issues.listComments, {

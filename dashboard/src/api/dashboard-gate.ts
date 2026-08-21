@@ -1,7 +1,7 @@
 // MASC Dashboard — Gate / HITL transport and normalization boundary.
 // Public symbols are re-exported from dashboard.ts.
 
-import { ApiRequestError, get, post, withRetries } from './core'
+import { ApiRequestError, get, post, runRequest } from './core'
 import { isRecord, asBoolean, asInt, asNullableString, asString } from '../components/common/normalize'
 import {
   asNullableIsoTimestamp,
@@ -371,7 +371,7 @@ function normalizeKeeperResolvedApprovalState(raw: unknown): KeeperResolvedAppro
 export function fetchDashboardGate(
   opts?: FetchDashboardGateOptions,
 ): Promise<DashboardGateResponse> {
-  return withRetries('fetchDashboardGate', async () => {
+  return runRequest('fetchDashboardGate', async () => {
     const query = opts?.force ? '?force=1' : ''
     const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/gate${query}`, {
       signal: opts?.signal,

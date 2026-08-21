@@ -61,8 +61,7 @@ describe('ensureDevToken', () => {
     vi.useRealTimers()
   })
 
-  it('waits through the exact server warm-up payload and continues bootstrap', async () => {
-    vi.useFakeTimers()
+  it('requires an explicit bootstrap call after the server warm-up payload', async () => {
     fetchWithTimeout
       .mockResolvedValueOnce(jsonResponse({
         status: 'initializing',
@@ -74,9 +73,12 @@ describe('ensureDevToken', () => {
         role: 'admin',
       }))
 
-    const bootstrap = ensureDevToken()
-    await vi.advanceTimersByTimeAsync(1_000)
-    await bootstrap
+    await ensureDevToken()
+    expect(fetchWithTimeout).toHaveBeenCalledTimes(1)
+    expect(setStoredToken).not.toHaveBeenCalled()
+    expect(devTokenBootstrapStatus.value).toBe('warming')
+
+    await ensureDevToken()
 
     expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
     expect(setStoredToken).toHaveBeenCalledWith('ready-dev-token', {
@@ -108,7 +110,7 @@ describe('ensureDevToken', () => {
     expect(token).toBe('operator-token')
   })
 
-  it('retries after a transient network bootstrap failure in the same page load', async () => {
+  it('allows a later explicit bootstrap after a network failure', async () => {
     fetchWithTimeout
       .mockRejectedValueOnce(new Error('server not ready'))
       .mockResolvedValueOnce(jsonResponse({

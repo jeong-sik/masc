@@ -23,8 +23,10 @@ type rejection_event = {
   ts : float;
   tool_name : string;
   reason_code : string;
-  keeper_name : string;
 }
+(* The ring's contract is (tool_name, reason_code), the pair the SSE stream
+   carries. [keeper_name] was threaded from every caller into this record and
+   read by nothing -- a breakdown axis nobody ever grouped by. *)
 
 let max_ring_size = 43200
 (** Bounded ring buffer to prevent unbounded memory growth.
@@ -67,14 +69,8 @@ let append_rejection_event event =
         ; count = max_ring_size
         })
 
-let record_tool_skipped_with_append ~append
-    ~keeper_name ~tool_name ~reason_code =
-  let event = {
-    ts = Unix.gettimeofday ();
-    tool_name;
-    reason_code;
-    keeper_name;
-  } in
+let record_tool_skipped_with_append ~append ~tool_name ~reason_code =
+  let event = { ts = Unix.gettimeofday (); tool_name; reason_code } in
   try
     append event
   with
@@ -83,12 +79,8 @@ let record_tool_skipped_with_append ~append
 
 (** Record a tool-skip event. Called from [Keeper_hooks_agent_core.broadcast_tool_skipped]
     so the in-memory ring stays in sync with the SSE event stream. *)
-let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
-  record_tool_skipped_with_append
-    ~append:append_rejection_event
-    ~keeper_name
-    ~tool_name
-    ~reason_code
+let record_tool_skipped ~tool_name ~reason_code =
+  record_tool_skipped_with_append ~append:append_rejection_event ~tool_name ~reason_code
 
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)
@@ -99,8 +91,8 @@ let snapshot_ring () =
   Safe_ops.protect ~default:[] (fun () ->
     Eio.Mutex.use_ro ring_mu (fun () -> (!ring).events))
 
-let inject_for_testing ~keeper_name ~tool_name ~reason_code ~ts =
-  let event = { ts; tool_name; reason_code; keeper_name } in
+let inject_for_testing ~tool_name ~reason_code ~ts =
+  let event = { ts; tool_name; reason_code } in
   append_rejection_event event
 
 let max_ring_size_for_testing = max_ring_size
@@ -108,11 +100,9 @@ let max_ring_size_for_testing = max_ring_size
 let ring_size_for_testing () =
   Eio.Mutex.use_ro ring_mu (fun () -> (!ring).count)
 
-let record_tool_skipped_with_append_for_testing
-    ~append ~keeper_name ~tool_name ~reason_code =
+let record_tool_skipped_with_append_for_testing ~append ~tool_name ~reason_code =
   record_tool_skipped_with_append
     ~append:(fun _event -> append ())
-    ~keeper_name
     ~tool_name
     ~reason_code
 
@@ -264,7 +254,7 @@ let gate_tool_events_json_with_pending_result_for_testing =
   gate_tool_events_json_with_pending_result
 
 let () =
-  Keeper_keepalive_signal.register_record_tool_skipped (fun ~keeper_name ~tool_name ~reason_code ->
-    ignore (record_tool_skipped ~keeper_name ~tool_name ~reason_code)
+  Keeper_keepalive_signal.register_record_tool_skipped (fun ~tool_name ~reason_code ->
+    ignore (record_tool_skipped ~tool_name ~reason_code)
   )
 ;;

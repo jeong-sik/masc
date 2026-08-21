@@ -136,9 +136,11 @@ module Lease = struct
       Held.remove held token)
 end
 
+(* The open file is not carried here. [Eio.Path.open_out ~sw] gives the
+   switch ownership of the descriptor and of the lock held on it, so a second
+   reference in this record kept nothing alive and nothing read it. *)
 type lock_handle =
-  { file : Eio.File.rw_ty Eio.Resource.t
-  ; path : Eio.Fs.dir_ty Eio.Path.t
+  { path : Eio.Fs.dir_ty Eio.Path.t
   ; stat : Eio.File.Stat.t
   ; epoch : string
   }
@@ -397,7 +399,7 @@ let open_lock ~sw ~secure_random ~parent ~leaf =
       if not (String.equal contents "")
       then
         let* epoch = parse_marker contents in
-        Ok { file; path; stat = opened_stat; epoch }
+        Ok { path; stat = opened_stat; epoch }
       else
         (match Eio.Path.kind ~follow:false target_path with
          | `Not_found ->
@@ -405,7 +407,7 @@ let open_lock ~sw ~secure_random ~parent ~leaf =
            let* () = sync_parent parent in
            let* epoch = fresh_epoch secure_random in
            let* () = write_initial_marker file epoch in
-           Ok { file; path; stat = opened_stat; epoch }
+           Ok { path; stat = opened_stat; epoch }
          | _ ->
            Error (Corrupt_lock "empty stable lock exists beside a present HEAD"))
     | `Symbolic_link -> Error (Corrupt_lock "stable lock path is a symbolic link")
@@ -493,8 +495,23 @@ let read_current ~sw ~parent ~parent_stat ~leaf ~lock =
     let cursor = make_cursor ~parent_stat ~leaf ~lock ~target:(Some fingerprint) in
     Ok { row = Some row; cursor; settlement_warnings = [] }
 
+(* Field by field, not [=]: an [option] of a record compared structurally
+   says nothing about which part differed, and reading the fields is what
+   proves they are load-bearing. *)
+let target_fingerprint_equal left right =
+  Int64.equal left.dev right.dev
+  && Int64.equal left.ino right.ino
+  && Int64.equal left.length right.length
+  && String.equal left.sha256 right.sha256
+
 let cursor_equal left right =
-  left = right
+  Int64.equal left.parent_dev right.parent_dev
+  && Int64.equal left.parent_ino right.parent_ino
+  && String.equal left.leaf right.leaf
+  && Int64.equal left.lock_dev right.lock_dev
+  && Int64.equal left.lock_ino right.lock_ino
+  && String.equal left.lock_epoch right.lock_epoch
+  && Option.equal target_fingerprint_equal left.target right.target
 
 let fresh_stage_leaf secure_random =
   protect_io Create_stage (fun () ->

@@ -1425,6 +1425,17 @@ type ledger_stat_key =
   ; stat_size : int
   }
 
+(* Compared field by field rather than with [=]: the record carries a float,
+   and polymorphic compare on a float is the one case where two values that
+   should match do not. Reading each field is also what tells the compiler
+   these are used. *)
+let ledger_stat_key_equal left right =
+  Int.equal left.stat_dev right.stat_dev
+  && Int.equal left.stat_ino right.stat_ino
+  && Float.equal left.stat_mtime right.stat_mtime
+  && Int.equal left.stat_size right.stat_size
+;;
+
 let ledger_stat_key_opt path =
   match Unix.stat path with
   | stats ->
@@ -1465,7 +1476,8 @@ let load_candidates ~base_path ~keeper_name =
        the read; a concurrent rewrite lands as a new inode and skips the
        store, so the next call re-reads. *)
     (match before, ledger_stat_key_opt path with
-     | Some key_before, Some key_after when key_before = key_after ->
+     | Some key_before, Some key_after
+       when ledger_stat_key_equal key_before key_after ->
        Stdlib.Mutex.protect candidate_read_memo_mutex (fun () ->
          Hashtbl.replace candidate_read_memo path (key_before, candidates))
      | Some _, (Some _ | None) | None, (Some _ | None) -> ());

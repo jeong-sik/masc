@@ -8,12 +8,12 @@ type target_ref = Target_ref of string
 type catalog_generation = Catalog_generation of string
 type catalog_evidence = Catalog_evidence of string
 
+(* [identity_fingerprint] already hashes the provider id, model id, base url
+   and request path along with the rest of the binding, and it is the only
+   thing read back out. Keeping the four beside their own hash stored the same
+   facts twice with nothing to keep the copies honest. *)
 type target_identity =
   { target_ref : target_ref
-  ; provider_id : string
-  ; model_id : string
-  ; base_url : string
-  ; request_path : string
   ; fingerprint : string
   }
 
@@ -870,13 +870,7 @@ let load_resolver_snapshot
                   ~anthropic_thinking_control)
          in
          let identity =
-           { target_ref = target.target_ref
-           ; provider_id = provider.id
-           ; model_id = target.model_id
-           ; base_url
-           ; request_path = provider.request_path
-           ; fingerprint = identity_fingerprint
-           }
+           { target_ref = target.target_ref; fingerprint = identity_fingerprint }
          in
          let credential =
            if provider.api_key_env = ""

@@ -15,13 +15,23 @@
 ; before anyone could see it. Setting it centrally means the build stops the
 ; moment a value loses its last caller, in the same edit that removed it.
 ; scripts/ci/check-ocaml-compile-authority.sh asserts both flags stay here.
+;
+; Warning 69 (unused record field) joins it for the same reason, one level
+; down: 32 stops a value that lost its last caller, 69 stops a field that lost
+; its last reader. The sweep that turned it on found 14 fields nothing read --
+; nine of them a hash's own ingredients stored beside the hash, and one
+; holding tool output measured at 624 KB -- and four records whose fields were
+; only ever compared with polymorphic [=] or hashed by the generic table.
+; That second group is why this is worth a build error rather than a report:
+; [=] and [Hashtbl.hash] do not read fields, they read memory, and every one
+; of those four carried a float, where that difference is a real one.
 (env
  (dev
   (flags
-   (:standard -w +32 -warn-error +a)))
+   (:standard -w +32+69 -warn-error +a)))
  (release
   (flags
-   (:standard -w +32 -warn-error +a))))
+   (:standard -w +32+69 -warn-error +a))))
 
 (install
  (package masc)

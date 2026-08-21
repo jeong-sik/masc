@@ -57,7 +57,9 @@ let test_mixed_types () =
    in order. *)
 let test_source_order_preserved () =
   let module Ordered = struct
-    type t = { z : int; a : int; m : int } [@@deriving tla]
+    (* The deriver reads the field names, not the fields: [field_names]
+       and [field_count] below are the whole point of the fixture. *)
+    type t = { z : int; a : int; m : int } [@@deriving tla] [@@warning "-69"]
   end in
   assert (Ordered.field_names = [ "z"; "a"; "m" ]);
   assert (Ordered.field_count = 3)

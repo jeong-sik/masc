@@ -21,8 +21,7 @@ type approval_summary = {
   oldest_pending_sec : float option;
 }
 
-val record_tool_skipped :
-  keeper_name:string -> tool_name:string -> reason_code:string -> unit
+val record_tool_skipped : tool_name:string -> reason_code:string -> unit
 (** Record a tool-skip event into the bounded ring. Safe to call from
     cancellable Eio fibers — internal cancellation is re-raised, all
     other exceptions are reported via
@@ -53,7 +52,6 @@ val reset_for_testing : unit -> unit
     start from a clean state regardless of test order. *)
 
 val inject_for_testing :
-  keeper_name:string ->
   tool_name:string ->
   reason_code:string ->
   ts:float ->
@@ -71,7 +69,6 @@ val ring_size_for_testing : unit -> int
 
 val record_tool_skipped_with_append_for_testing :
   append:(unit -> unit) ->
-  keeper_name:string ->
   tool_name:string ->
   reason_code:string ->
   unit

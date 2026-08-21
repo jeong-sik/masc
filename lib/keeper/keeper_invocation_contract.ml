@@ -2,9 +2,13 @@ type capability = Invoke_turn
 
 type target = Keeper of Keeper_id.Keeper_name.t
 
+(* [capability] is validated on the way in by [optional_capability_of_json]
+   and was then stored and never read. The validation stays -- an explicit
+   wrong value is still refused -- but a field with one legal value that
+   nothing consults is a menu with no dishes. A second capability would add it
+   back together with the code that reads it. *)
 type request =
   { target : target
-  ; capability : capability
   ; prompt : string
   }
 
@@ -114,7 +118,7 @@ let request ~keeper_name ~prompt =
   in
   if String.equal prompt ""
   then Error Empty_prompt
-  else Ok { target = Keeper keeper_name; capability = Invoke_turn; prompt }
+  else Ok { target = Keeper keeper_name; prompt }
 ;;
 
 let nonempty_trimmed_option = function
@@ -203,14 +207,16 @@ let request_of_json json =
   in
   let* target_json = required_field ~field:"delegate" "target" fields in
   let* target = target_of_json target_json in
-  let* capability =
+  (* Validated and discarded: an explicit wrong value is still refused here,
+     which is the whole of what the field does. *)
+  let* (Invoke_turn : capability) =
     optional_capability_of_json
       ~field:"delegate.capability"
       (List.assoc_opt "capability" fields)
   in
   let* prompt_json = required_field ~field:"delegate" "prompt" fields in
   let* prompt = string_value ~field:"delegate.prompt" prompt_json in
-  if String.equal prompt "" then Error Empty_prompt else Ok { target; capability; prompt }
+  if String.equal prompt "" then Error Empty_prompt else Ok { target; prompt }
 ;;
 
 let request_error_to_string = function

@@ -118,9 +118,7 @@ let today_yyyymmdd () =
   Printf.sprintf "%04d%02d%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
 ;;
 
-let legacy_status_rel id =
-  Filename.concat Common.masc_dirname (Printf.sprintf "connectors/%s/status.json" id)
-;;
+let default_status_rel id = Printf.sprintf ".gate/runtime/%s/status.json" id
 
 type sidecar_status_config =
   { env_names : string list
@@ -276,17 +274,14 @@ let status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path i
       |> Option.map (fun raw -> resolve_relative_path ~roots:[ root ] raw))
     |> List.concat
   in
-  let default_paths =
-    resolve_relative_path ~roots (Printf.sprintf ".gate/runtime/%s/status.json" id)
-  in
-  let legacy_paths = resolve_relative_path ~roots (legacy_status_rel id) in
-  Json_util.dedupe_keep_order (env_paths @ dotenv_paths @ toml_paths @ default_paths @ legacy_paths)
+  let default_paths = resolve_relative_path ~roots (default_status_rel id) in
+  Json_util.dedupe_keep_order (env_paths @ dotenv_paths @ toml_paths @ default_paths)
 ;;
 
 let status_file ?sidecar_root ?project_root ?sidecar_dir ~base_path id =
   status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path id
   |> first_existing_or_first
-  |> Option.value ~default:(Filename.concat base_path (legacy_status_rel id))
+  |> Option.value ~default:(Filename.concat base_path (default_status_rel id))
 ;;
 
 let log_file_candidates ?sidecar_root ?project_root ~base_path id =

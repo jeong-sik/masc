@@ -29,7 +29,8 @@ val missing_sidecar_dir_message :
   ?project_root:string -> base_path:string -> string -> string
 
 val today_yyyymmdd : unit -> string
-val legacy_status_rel : string -> string
+val default_status_rel : string -> string
+(** Canonical relative path of the per-sidecar status JSON. *)
 
 type sidecar_status_config =
   { env_names : string list

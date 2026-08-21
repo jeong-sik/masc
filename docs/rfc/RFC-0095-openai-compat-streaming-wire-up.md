@@ -16,7 +16,7 @@ implementation_prs: [15722,15725]
 ## 1. Summary
 
 masc 의 streaming infrastructure 는 4 layer (llama-server SSE,
-runtime transport `complete_stream`, OAS streaming hooks,
+runtime transport `complete_stream`, agent_core streaming hooks,
 `llm_metric_bridge` legacy metrics backend emission) 모두 코드 수준에 정착돼 있으나,
 **`Custom_openai_compat` runtime binding 을 사용하는 provider
 (예: 본 RFC 작성 시점의 `runpod_mtp`, `local_mtp`) 는 streaming chunk 를
@@ -138,7 +138,7 @@ Phase 0 PR 은 **production behavior 무변경**. trace 코드는 `-tags trace`
   `rg` grep 결과를 부록으로 첨부.
 - **H3 confirmed**: SDK 가 외부 opam dependency 라 직접 patch 불가
   → runtime transport layer 에 *openai_compat 전용 chunk parser shim*
-  을 추가하여 OAS hook chain 에 직접 연결. SDK upgrade path 와 충돌하지
+  을 추가하여 agent_core hook chain 에 직접 연결. SDK upgrade path 와 충돌하지
   않는 *layer-above* fix.
 
 Fix 자체는 **production-impacting**. 다음 안전망 적용:

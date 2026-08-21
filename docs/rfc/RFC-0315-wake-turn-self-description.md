@@ -22,7 +22,7 @@ stimuli arrived without inventing a second state protocol.
 - Goal and Task APIs own objectives, assignment, priority, and status.
 - Board, connector, and reaction ledgers own incoming stimuli and delivery
   evidence.
-- OAS checkpoints own replayable typed message/tool/reasoning blocks.
+- agent_core checkpoints own replayable typed message/tool/reasoning blocks.
 - Memory APIs own durable notes. Transcript prose is context only.
 
 The complete boundary is
@@ -57,4 +57,4 @@ remain explicit lifecycle outcomes for genuine failure or operator action.
 - `test_keeper_event_queue.ml` and reaction-ledger tests pin assignment edges.
 - Keeper state-machine tests pin lane lifecycle transitions independently of
   transcript content.
-- Replay-checkpoint tests pin typed OAS message/tool/reasoning preservation.
+- Replay-checkpoint tests pin typed agent_core message/tool/reasoning preservation.

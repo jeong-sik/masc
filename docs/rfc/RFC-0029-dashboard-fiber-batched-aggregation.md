@@ -36,7 +36,7 @@ Two concrete defects to verify:
    without an Eio fiber group. Eio scheduling is single-threaded but
    non-blocking sub-ops (in-memory projection lookups) finish in
    sub-millisecond — so today's cost is dominated by the *blocking*
-   sub-ops (model adapter health probes, OAS roundtrips) which the
+   sub-ops (model adapter health probes, agent_core roundtrips) which the
    serial walk forces into a chain.
 
 2. **No per-site latency budget.** None of the four fan-out sites emits

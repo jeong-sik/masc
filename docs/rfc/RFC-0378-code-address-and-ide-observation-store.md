@@ -43,7 +43,7 @@ Keeper 의 코드 작업이 IDE 에 보이려면 쓰기와 읽기가 같은 주�
 |---|---|
 | store 전체 | 389 MiB |
 | 그중 `_orphan/` | 380 MiB (**97.6%**) |
-| `by-url/` 파티션 15개 중 내용 있는 것 | 3개 (masc, oas, masc 8.5M 가 사실상 전부) |
+| `by-url/` 파티션 15개 중 내용 있는 것 | 3개 (masc, agent_core, masc 8.5M 가 사실상 전부) |
 | `by-url/wkbl·kirin·grpc-direct` | 0행 (라이브 API 확인) |
 | turn_events 가 by-url 에 존재 | **0건** — 146 MiB 전량 `_orphan` |
 | annotations 평생 총량 | **4행**, 전부 `_orphan` |
@@ -307,7 +307,7 @@ workspace-root-only 2a/2b 와의 결합: A 는 2a 의 `Unattributed` 타입을 �
 
 1. cursor_events — UI 는 wired(`keeper-cursor-overlay` → `fetchIdeCursors` → `list_cursors`, dashboard snapshot 도 호출)인데 producer 가 07-04 이후 침묵. "안 쓰는 기능"이 아니라 **"조용히 고장난 기능"**이다 — producer 수선 vs 기능 동반 삭제의 제품 결정 필요.
 2. checkout 판별자 표기 — `rev-parse --show-toplevel` 기반 실측값 제안 (workspace-root-only §5.2 인수). key 비참여는 본문 확정, 표기 형식만 미정.
-3. 한 tool call 이 **두 저장소의 파일을 만지는 경우** (예: Execute 가 masc 와 oas 를 함께 편집) — fact 는 주 경로 하나의 주소만 나른다. 현행과 동일한 한계이나 타입이 이를 명시하지 않는다. 부 경로들을 별도 Code fact 로 분리 방출할지, 단일 주소 한계를 계약으로 못박을지 결정 필요.
+3. 한 tool call 이 **두 저장소의 파일을 만지는 경우** (예: Execute 가 masc 와 agent_core 를 함께 편집) — fact 는 주 경로 하나의 주소만 나른다. 현행과 동일한 한계이나 타입이 이를 명시하지 않는다. 부 경로들을 별도 Code fact 로 분리 방출할지, 단일 주소 한계를 계약으로 못박을지 결정 필요.
 4. annotate 의 unaddressed tool-response — §5.3 의 typed reject 로 원칙은 닫혔으나, reject payload 의 정확한 필드(재시도 힌트 포함 여부)는 C 의 스키마 작업에서 확정.
 5. keeper 가 보내는 slug 는 self-asserted — 형식 검증(`Code_address.v`)만 있고 "이 keeper 가 실제로 그 저장소에서 작업 중인가"는 검증하지 않는다 (C 적대 리뷰 P1-3). co-view echo 계약의 의도된 신뢰이나, LLM 이 멀티턴에서 이전 저장소의 slug 를 재사용하면 orphan 매장보다 조용한 오귀속이 된다. 방어를 넣는다면 자리는 workspace-root-only 2b 의 실측 체크아웃 slug 집합 대조 — 게이트 신설이 아니라 관측 소비.
 6. slug drift — origin remote 가 바뀌면(조직 개명, host 이전, fork 승격) slug 가 갈라져 같은 저장소의 기록이 두 파티션으로 나뉜다. 일회성 전환이 아니라 **운영 중 반복 가능한 정상 이벤트**라 hard-cut 독트린의 범주 밖이다. 권고 기본값: drift 는 정상 동작으로 계약한다 — 새 파티션이 시작되고 둘 다 §5.4 모집합에 보인다. 자동 병합은 만들지 않는다 (병합은 identity 를 다시 추측하는 일이고, 그 추측이 이 RFC 가 죽이는 부류다). 운영에서 실제로 아프면 명시적 1회성 이관 도구로.

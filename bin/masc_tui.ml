@@ -9,6 +9,7 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 module Metrics_tail = Masc_tui_metrics_tail
 module Render_schedule = Masc_tui_render_schedule
+module Terminal_write_repair = Masc_tui_terminal_write_repair
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
@@ -404,6 +405,14 @@ let launch_keeper_request state ~base_path ~mailbox request =
         (Keeper_chat_dispatch_blocked
            (request, "Eio switch is unavailable"))
 
+let persist_keeper_message_fence ~base_path request =
+  (* [Fs_compat.save_file_atomic_strict] can report a close failure directly to
+     stderr. This action already owns an input-triggered frame, so marking the
+     cached frame before the persistence attempt is sufficient to make that
+     presentation a full redraw without adding another wake-up. *)
+  Terminal_write_repair.note ();
+  Keeper_chat_recovery.persist_pending ~base_path request
+
 let rec start_keeper_message state ~base_path ~mailbox text =
   match state.msg_prepared with
   | Some request ->
@@ -453,7 +462,7 @@ let rec start_keeper_message state ~base_path ~mailbox text =
           let request =
             Keeper_chat.create_request ~keeper_name ~message:text
           in
-          (match Keeper_chat_recovery.persist_pending ~base_path request with
+          (match persist_keeper_message_fence ~base_path request with
            | Error detail ->
                state.msg_recovery_error <- Some (Recovery_blocked detail);
                add_event state "error"
@@ -1462,6 +1471,9 @@ let invalidate_frame_for_resize frame_presenter render_schedule =
   Frame_presenter.invalidate frame_presenter;
   Render_schedule.request render_schedule Render_schedule.Force
 
+let request_console_write_repair render_schedule =
+  Terminal_write_repair.request_repaint render_schedule
+
 let enter_terminal_session ~cleanup ~terminate ~request_full_repaint ~suspend
     ~new_term =
   at_exit cleanup;
@@ -1501,6 +1513,7 @@ let main () =
   let cleanup_started = Atomic.make false in
   let cleanup () =
     if Atomic.compare_and_set cleanup_started false true then begin
+      Console_sink.set_after_write_observer None;
       restore_terminal ();
       print_endline "Goodbye!"
     end
@@ -1523,6 +1536,9 @@ let main () =
   let render_schedule =
     Render_schedule.create ~min_interval_ns:frame_interval_ns ()
   in
+  if Terminal_write_repair.console_sink_writes_to_terminal () then
+    Console_sink.set_after_write_observer
+      (Some (fun () -> Terminal_write_repair.note ()));
 
   (* Initial load *)
   load_from_masc_dir state base_path;
@@ -1598,6 +1614,7 @@ let main () =
   let input_reader = create_input_reader () in
   let run_loop () =
     while true do
+      request_console_write_repair render_schedule;
       if Atomic.exchange resize_requested false then begin
         invalidate_frame_for_resize frame_presenter render_schedule
       end;
@@ -1945,7 +1962,7 @@ let main () =
        | Render_schedule.Render ->
            let frame = render state in
            Frame_presenter.present frame_presenter
-             ~invalidate_before:(consume_terminal_write_outside_frame ())
+             ~invalidate_before:(Terminal_write_repair.consume_damage ())
              ~write:(output_string stdout)
              ~flush:(fun () -> flush stdout) frame
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())

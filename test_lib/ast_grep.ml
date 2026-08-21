@@ -122,6 +122,50 @@ let count_calls_in_value_binding ~module_path ~binding_name ~callee =
   !total
 ;;
 
+let count_calls_inside_while_in_value_binding ~module_path ~binding_name ~callee =
+  let structure = parse_implementation_or_fail module_path in
+  let count_calls_in_expr expr =
+    let while_depth = ref 0 in
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self expression ->
+            let enters_while =
+              match expression.pexp_desc with
+              | Pexp_while _ -> true
+              | _ -> false
+            in
+            if enters_while then incr while_depth;
+            (match expression.pexp_desc with
+             | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _)
+               when !while_depth > 0
+                    && String.equal (longident_to_string txt) callee ->
+               incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self expression;
+            if enters_while then decr while_depth)
+      }
+    in
+    iter.expr iter expr;
+    !count
+  in
+  let total = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self binding ->
+          (match binding.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when String.equal txt binding_name ->
+             total := !total + count_calls_in_expr binding.pvb_expr
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self binding)
+    }
+  in
+  iter.structure iter structure;
+  !total
+;;
+
 let count_expressions_outside_calls_in_value_binding
       ~module_path
       ~binding_name
@@ -324,7 +368,7 @@ let count_applications_with_exact_positional_constructor_in_value_binding
     |> fun positional_arguments -> List.nth_opt positional_arguments position
     |> Option.exists (fun (argument : Parsetree.expression) ->
       match argument.pexp_desc with
-      | Pexp_construct ({ txt; _ }, None) ->
+      | Pexp_construct ({ txt; _ }, _) ->
           String.equal (longident_to_string txt) constructor
       | _ -> false)
   in

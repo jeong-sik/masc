@@ -17,10 +17,12 @@ import termios
 import time
 from typing import Any
 
-Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray], None]
+Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
 WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
 WORKSPACE_RENDERED = b"workspace\\x1B]8;;https://attacker.invalid\\x07owned"
 FRAME_END = b"\x1b[?7h"
+FULL_REDRAW = b"\x1b[2J"
+CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
 
 
 def assert_workspace_payload_is_inert(output: bytearray) -> None:
@@ -281,6 +283,7 @@ def run_terminal_scenario(
     *,
     description: str,
     interact: Interaction,
+    refresh: float = 60.0,
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -320,7 +323,7 @@ def run_terminal_scenario(
                         "--port",
                         str(stalled_port),
                         "--refresh",
-                        "60",
+                        str(refresh),
                     ],
                     stdin=slave_fd,
                     stdout=slave_fd,
@@ -370,7 +373,7 @@ def run_terminal_scenario(
                     raise AssertionError(
                         f"TUI did not enter noncanonical no-echo mode: {active_lflag:#x}"
                     )
-                interact(process, master_fd, slave_fd, output)
+                interact(process, master_fd, slave_fd, output, base_path)
                 wait_for_stop(
                     process,
                     master_fd,
@@ -413,6 +416,7 @@ def navigate_with_arrows_and_quit(
     master_fd: int,
     slave_fd: int,
     output: bytearray,
+    _base_path: str,
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     send_and_wait(
@@ -522,6 +526,7 @@ def interrupt_with_ctrl_c(
     master_fd: int,
     _slave_fd: int,
     _output: bytearray,
+    _base_path: str,
 ) -> None:
     os.write(master_fd, b"\x03")
 
@@ -531,6 +536,7 @@ def quit_from_compact_message(
     master_fd: int,
     _slave_fd: int,
     output: bytearray,
+    _base_path: str,
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
@@ -548,7 +554,63 @@ def quit_from_compact_message(
     os.write(master_fd, b"q")
 
 
+def repair_after_console_diagnostic(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    base_path: str,
+) -> None:
+    read_available(master_fd, output)
+    start = len(output)
+    keeper_path = Path(base_path) / ".masc" / "keepers" / "alpha.json"
+    keeper_path.write_text("{", encoding="utf-8")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        CONSOLE_DIAGNOSTIC,
+        start=start,
+        timeout=3.0,
+    )
+    diagnostic_end = output.find(CONSOLE_DIAGNOSTIC, start) + len(CONSOLE_DIAGNOSTIC)
+    keeper_path.write_text(json.dumps(keeper_metadata("alpha")), encoding="utf-8")
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FULL_REDRAW,
+        start=diagnostic_end,
+        timeout=3.0,
+    )
+    redraw_start = output.find(FULL_REDRAW, diagnostic_end)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"MASC Overview",
+        start=redraw_start,
+        timeout=3.0,
+    )
+    overview_start = output.find(b"MASC Overview", redraw_start)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        FRAME_END,
+        start=overview_start + len(b"MASC Overview"),
+        timeout=3.0,
+    )
+    os.write(master_fd, b"q")
+
+
 def run_keyboard_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="console diagnostic repair",
+        interact=repair_after_console_diagnostic,
+        refresh=0.05,
+    )
     run_terminal_scenario(
         executable,
         description="q",

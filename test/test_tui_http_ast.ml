@@ -152,7 +152,7 @@ let test_keeper_chat_uses_current_async_contract () =
   check bool "request is durably fenced before POST" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"start_keeper_message"
-       ~callee:"Keeper_chat_recovery.persist_pending"
+       ~callee:"persist_keeper_message_fence"
      >= 1);
   check bool "startup restores the durable request fence" true
     (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name:"main"
@@ -686,19 +686,102 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "main uses the coupled resize boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"invalidate_frame_for_resize");
+  let terminal_repair_path = "bin/masc_tui_terminal_write_repair.ml" in
+  check int "console repair boundary delegates to the repair state" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"request_console_write_repair"
+       ~callee:"Terminal_write_repair.request_repaint");
+  check int "damaged terminal state requests one forced frame" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:terminal_repair_path
+       ~binding_name:"request_repaint"
+       ~callee:"Render_schedule.request");
+  check int "console repair request's reason is exactly Force" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:terminal_repair_path ~binding_name:"request_repaint"
+       ~callee:"Render_schedule.request" ~position:1
+       ~constructor:"Render_schedule.Force");
+  check int "terminal write publishes one durable damage marker" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:terminal_repair_path
+       ~binding_name:"note" ~callee:"Atomic.set");
+  check int "repaint inspection does not consume the damage marker" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:terminal_repair_path
+       ~binding_name:"request_repaint" ~callee:"Atomic.get");
+  check int "run loop polls the console repair boundary inside its while" 1
+    (Ast_grep.count_calls_inside_while_in_value_binding ~module_path:main_path
+       ~binding_name:"run_loop" ~callee:"request_console_write_repair");
+  check int "main enters the run loop" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"run_loop");
   check int "presentation consumes the external-write marker as invalidation" 1
     (Ast_grep
      .count_applications_with_exact_labelled_unit_call_in_value_binding
        ~module_path:main_path ~binding_name:"main"
        ~callee:"Frame_presenter.present" ~label:"invalidate_before"
-       ~nested_callee:"consume_terminal_write_outside_frame");
+       ~nested_callee:"Terminal_write_repair.consume_damage");
   check int "TTY gate validates stdin and stdout" 2
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"require_interactive_terminal" ~callee:"Unix.isatty");
-  check int "loader marks its direct diagnostic write" 1
+  check int "console observer gate requires stderr to target a TTY" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:terminal_repair_path
+       ~binding_name:"console_sink_writes_to_terminal" ~callee:"Unix.isatty");
+  check int "main gates the observer on a terminal-backed console sink" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main"
+       ~callee:"Terminal_write_repair.console_sink_writes_to_terminal");
+  check int "TUI installs and removes one Console_sink observer" 2
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Console_sink.set_after_write_observer");
+  check int "TUI installs the Console_sink observer with Some" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callee:"Console_sink.set_after_write_observer" ~position:0
+       ~constructor:"Some");
+  check int "cleanup removes the Console_sink observer" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"cleanup"
+       ~callee:"Console_sink.set_after_write_observer" ~position:0
+       ~constructor:"None");
+  check int "Console_sink observer marks the terminal write" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Terminal_write_repair.note");
+  check int "keeper fence wrapper marks possible direct stderr damage" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"persist_keeper_message_fence"
+       ~callee:"Terminal_write_repair.note");
+  check int "keeper fence wrapper performs one persistence attempt" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"persist_keeper_message_fence"
+       ~callee:"Keeper_chat_recovery.persist_pending");
+  check int "message submit uses the guarded persistence boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"start_keeper_message"
+       ~callee:"persist_keeper_message_fence");
+  check int "message submit has no unguarded persistence call" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"start_keeper_message"
+       ~callee:"Keeper_chat_recovery.persist_pending");
+  check int "loader routes its diagnostic through Console_sink" 1
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"report"
-       ~callee:"Masc_tui_ansi.note_terminal_write_outside_frame");
+       ~callee:"Console_sink.write");
+  check int "loader no longer writes directly to stderr" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"report"
+       ~callee:"Printf.eprintf");
+  let console_sink_path = "lib/masc_log/console_sink.ml" in
+  check int "synchronous console writes use the observed writer boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:console_sink_path
+       ~binding_name:"write" ~callee:"write_line");
+  check int "queued lines and the drop marker use the observed boundary" 2
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:console_sink_path ~binding_name:"write_batch" ~callees:[]
+       ~identifiers:[ "write_line" ]);
+  check int "observed writer boundary attempts the configured writer once" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:console_sink_path
+       ~binding_name:"write_line" ~callee:"current_writer");
   let signal_handler signal handler =
     Ast_grep.count_applications_with_exact_signal_handler_in_value_binding
       ~module_path:main_path ~binding_name:"enter_terminal_session" ~signal

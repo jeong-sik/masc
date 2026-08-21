@@ -106,7 +106,9 @@ Keeper's canonical dated metrics store, spanning month boundaries and rotated
 day segments. Reads are tail-bounded by row count rather than file size.
 Malformed JSON, current-schema decode failures, and storage/layout failures are
 shown explicitly; rejected rows consume the 200-row window and are never
-silently backfilled with older data.
+silently backfilled with older data. A current-schema row whose `name` does not
+match the selected Keeper is rejected instead of being attributed to that
+Keeper by its file location.
 
 ```
 Keeper Logs: sangsu  (85 entries)

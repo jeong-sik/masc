@@ -343,6 +343,10 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui_metrics_tail.ml" ~binding_name:"load"
        ~callee:"Dated_jsonl.read_recent_result"
      = 1);
+  check int "selected Keeper identity reaches the metrics decoder" 1
+    (Ast_grep.count_calls_with_label
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~callee:"Metrics_tail.load" ~label:"expected_keeper");
   check bool "all log interactions use the selected Keeper loader" true
     (Ast_grep.count_calls
        ~module_path:"bin/masc_tui.ml"

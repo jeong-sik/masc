@@ -54,7 +54,28 @@ let error_to_string = function
       Printf.sprintf "metrics tail rejected %d/%d physical rows: %s%s" rejected
         physical_rows first suffix
 
-let resolve_with ~read_recent ~limit =
+let decode_for_keeper ~expected_keeper json =
+  match Decode.decode_log_entry json with
+  | Error detail -> Error detail
+  | Ok entry ->
+      let actual_keeper =
+        match json with
+        | `Assoc fields ->
+            (match List.assoc_opt "name" fields with
+             | Some (`String name) -> Some name
+             | Some _ | None -> None)
+        | _ -> None
+      in
+      (match actual_keeper with
+       | Some actual when String.equal actual expected_keeper -> Ok entry
+       | Some actual ->
+           Error
+             (Printf.sprintf
+                "metrics Keeper name %S does not match selected Keeper %S"
+                actual expected_keeper)
+       | None -> Error "current Keeper metrics row lost its required name")
+
+let resolve_with ~expected_keeper ~read_recent ~limit =
   match read_recent limit with
   | Error error -> { entries = []; error = Some (Storage_error error) }
   | Ok rows ->
@@ -64,7 +85,7 @@ let resolve_with ~read_recent ~limit =
           (fun (physical_index, row) (entries, errors) ->
             match row with
             | Dated_jsonl.Parsed json -> (
-                match Decode.decode_log_entry json with
+                match decode_for_keeper ~expected_keeper json with
                 | Ok entry -> entry :: entries, errors
                 | Error detail ->
                     ( entries,
@@ -81,8 +102,9 @@ let resolve_with ~read_recent ~limit =
       in
       { entries; error }
 
-let load ~store ~limit =
-  resolve_with ~read_recent:(Dated_jsonl.read_recent_result store) ~limit
+let load ~store ~expected_keeper ~limit =
+  resolve_with ~expected_keeper
+    ~read_recent:(Dated_jsonl.read_recent_result store) ~limit
 
 let for_selection ~load = function
   | Some keeper -> load keeper

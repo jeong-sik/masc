@@ -2640,6 +2640,7 @@
 (include stanzas/test_keeper_operator_note.inc)
 
 (include stanzas/test_keeper_memory_journal_projection.inc)
+(include stanzas/test_review_prompt_sections_reach_the_model.inc)
 
 (test
  (name test_code_address)

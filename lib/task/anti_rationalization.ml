@@ -110,12 +110,22 @@ let contract_section = function
 
 (* required_evidence + verify_gate_evidence are requirements from the task
    contract, not evidence fetched by this reviewer.  Surface them as a
-   distinct checklist the evaluator judges item-by-item against the immutable
-   typed submit-time snapshot.  A URL, host path, commit, or board reference
-   remains only a requirement unless its relevant contents were materialized
-   as an [artifact:] snapshot.  Order-preserving dedup keeps a requirement
+   distinct checklist the evaluator judges item-by-item.  What counts as
+   inspectable depends on the surface: with no lookup tools the typed
+   submit-time snapshot is the only readable thing, and with them the
+   evaluator's own reads count too.  Saying "only [artifact:] content" in both
+   cases contradicted the lookup section, which tells the same evaluator to go
+   check the claims it can reach.  Order-preserving dedup keeps a requirement
    listed in both source lists from appearing twice. *)
-let evidence_section ~required_evidence ~verify_gate_evidence =
+let evidence_section ~lookup ~required_evidence ~verify_gate_evidence =
+  let inspectable_sources =
+    match lookup with
+    | No_lookup_surface ->
+      "only available, non-truncated [artifact:] content is inspectable proof"
+    | Lookup_tools _ ->
+      "inspectable proof is available, non-truncated [artifact:] content, or \
+       what you open yourself with the lookup tools described below"
+  in
   let items =
     List.fold_left
       (fun acc raw ->
@@ -134,14 +144,13 @@ let evidence_section ~required_evidence ~verify_gate_evidence =
       "\n\
        <required_evidence>\n\
        The task contract requires support for every item listed below. Judge each \
-       item independently against the typed submit-time snapshot: only available, \
-       non-truncated [artifact:] content is inspectable proof. A URL, host path, \
-       commit, board reference, command claim, or narrative note is not proof that \
-       this system agent fetched or executed anything. Reject if the required \
-       support is missing, unavailable, truncated, a placeholder, or \
-       unsubstantiated.\n\
+       item independently: %s. A URL, host path, commit, board reference, command \
+       claim, or narrative note is not proof on its own — it names something \
+       rather than showing it. Reject if the required support is missing, \
+       unavailable, truncated, a placeholder, or unsubstantiated.\n\
        %s\n\
        </required_evidence>\n"
+      inspectable_sources
       (items |> List.mapi render_item |> String.concat "\n")
 ;;
 
@@ -245,7 +254,8 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
   in
   let verification_contract_section = contract_section completion_contract in
   let required_evidence_section =
-    evidence_section ~required_evidence ~verify_gate_evidence
+    (* same surface the lookup section describes, so the two agree *)
+    evidence_section ~lookup ~required_evidence ~verify_gate_evidence
   in
   let evidence_refs_json =
     req.evidence_refs

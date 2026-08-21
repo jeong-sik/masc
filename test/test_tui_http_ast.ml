@@ -248,6 +248,26 @@ let test_tui_current_projection_wiring () =
        ~module_path:"bin/masc_tui_loader.ml"
        ~callee:"Keeper_types_support.keeper_metrics_dir"
      >= 1);
+  check bool "Keeper log rows use the current typed discriminator" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/tui_decode.ml" ~binding_name:"decode_log_entry"
+       ~callee:"Keeper_metrics_record.kind_of_json"
+     = 1);
+  check bool "live context uses the trace-scoped TurnRecord projection" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_context_state.ml" ~binding_name:"load"
+       ~callee:"Projection.context_fields"
+     = 1);
+  check bool "loader applies the behavior-tested selection transition" true
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~binding_name:"load_selected_live_context"
+       ~callee:"Context_state.for_selection"
+     = 1);
+  check int "live context never tails the metrics ledger" 0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"load_live_context"
+       ~callee:"read_last_lines");
   check int "retired planning running alias absent" 0
     (Ast_grep.count_string_literals
        ~module_path:"lib/tui_decode.ml"

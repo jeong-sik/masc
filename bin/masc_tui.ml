@@ -1007,7 +1007,7 @@ let main () =
                 if state.keeper_cursor < List.length state.keepers - 1 then begin
                   state.keeper_cursor <- state.keeper_cursor + 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k.k_name
+                   | Some k -> load_live_context state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
@@ -1046,7 +1046,7 @@ let main () =
                 if state.keeper_cursor > 0 then begin
                   state.keeper_cursor <- state.keeper_cursor - 1;
                   (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k.k_name
+                   | Some k -> load_live_context state base_path k
                    | None -> ())
                 end
             | Keepers Keeper_detail ->
@@ -1085,7 +1085,7 @@ let main () =
                  | Some k ->
                      state.view <- Keepers Keeper_detail;
                      state.detail_scroll <- 0;
-                     load_live_context state base_path k.k_name
+                     load_live_context state base_path k
                  | None -> ())
             | Board ->
                 (match state.board_mode with

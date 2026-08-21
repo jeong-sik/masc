@@ -5,6 +5,7 @@ open Tui_decode
 open Masc_tui_ansi
 
 module Message_layout = Masc_tui_message_layout
+module Observation_layout = Masc_tui_observation_layout
 module Keeper_chat = Masc_tui_keeper_chat_projection
 
 (* Exhaustive over [connection_status]: a new state is a compile error
@@ -945,19 +946,34 @@ let render_keeper_detail (state : state) =
 
     (* Live Context section (Phase 2) *)
     add_section "Live Context";
-    if state.live_context_max > 0 then begin
-      let pct = state.live_context_ratio *. 100.0 in
-      let bar_width =
-        Masc_tui_render_schedule.keeper_context_bar_width ~inner_width:inner
-      in
-      add_row "Context:" (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
-        (ctx_color state.live_context_ratio) pct Ansi.reset
-        (ctx_bar state.live_context_ratio bar_width)
-        state.live_context_tokens state.live_context_max);
-      add_row "Messages:" (string_of_int state.live_message_count);
-    end else begin
-      add_row "Context:" (Ansi.dim ^ "(no metrics data)" ^ Ansi.reset);
-    end;
+    (match state.live_context_error, state.live_context with
+     | Some error, _ -> add_row "Context:" (Ansi.red ^ error ^ Ansi.reset)
+     | None, Some observation ->
+         (match Observation_layout.context_summary observation with
+          | Observation_layout.Context_measured observation ->
+              let ratio = observation.ratio in
+              let pct = ratio *. 100.0 in
+              let bar_width =
+                Masc_tui_render_schedule.keeper_context_bar_width
+                  ~inner_width:inner
+              in
+              add_row "Context:"
+                (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
+                   (ctx_color ratio) pct Ansi.reset
+                   (ctx_bar ratio bar_width) observation.tokens
+                   observation.maximum);
+              add_row "Observed:" (short_ts observation.observed_at);
+              add_row "Turn Ref:" observation.turn_ref
+          | Observation_layout.Context_partial observation ->
+              add_row "Context:"
+                (Printf.sprintf "%d tokens; context window not observed"
+                   observation.tokens);
+              add_row "Observed:" (short_ts observation.observed_at);
+              add_row "Turn Ref:" observation.turn_ref
+          | Observation_layout.Context_unavailable reason ->
+              add_row "Context:" (Ansi.dim ^ reason ^ Ansi.reset))
+     | None, None ->
+         add_row "Context:" (Ansi.dim ^ "not loaded" ^ Ansi.reset));
     add_empty ();
 
     (* Runtime section *)
@@ -1058,17 +1074,20 @@ let render_keeper_logs (state : state) =
     let total_entries = List.length state.log_entries in
 
     (* Header *)
-    let header = Printf.sprintf " Keeper Logs: %s%s%s  (%d entries)"
-      Ansi.bold k.k_name Ansi.reset total_entries in
+    let header =
+      Printf.sprintf " Keeper Logs: %s  (%d entries)" k.k_name total_entries
+    in
 
     box_top buf cols;
-    box_line buf cols header;
+    box_line_styled buf cols ~style:Ansi.bold header;
     box_divider buf cols;
 
     (* Column header *)
-    let col_hdr = Printf.sprintf "%s  %-8s %-5s %-7s %12s %8s %7s %6s  %-10s%s"
-      Ansi.dim "Time" "Chan" "Ctx" "Tokens" "In/Out" "Lat" "Cost" "Work" Ansi.reset in
-    box_line buf cols col_hdr;
+    let col_hdr =
+      Printf.sprintf "  %-8s %-4s %-8s %5s %13s %9s %9s  %-10s" "Time"
+        "Kind" "Channel" "Msgs" "In/Out" "Lat" "Cost" "Work"
+    in
+    box_line_styled buf cols ~style:Ansi.dim col_hdr;
     box_divider buf cols;
 
     (* Content area *)
@@ -1076,7 +1095,7 @@ let render_keeper_logs (state : state) =
     let scroll = min state.log_scroll (max 0 (total_entries - content_height)) in
 
     if total_entries = 0 then begin
-      box_line buf cols (Ansi.dim ^ "  (no log entries found)" ^ Ansi.reset);
+      box_line_styled buf cols ~style:Ansi.dim "  (no log entries found)";
       for _ = 1 to content_height - 1 do
         box_empty buf cols
       done
@@ -1091,36 +1110,14 @@ let render_keeper_logs (state : state) =
               String.sub e.le_ts 11 8  (* HH:MM:SS *)
             else e.le_ts
           in
-          let pct = e.le_context_ratio *. 100.0 in
-          let ctx_str = Printf.sprintf "%s%5.1f%%%s"
-            (ctx_color e.le_context_ratio) pct Ansi.reset in
-          let tokens_str = Printf.sprintf "%6d/%6d"
-            e.le_context_tokens e.le_context_max in
-          let io_str =
-            match e.le_input_tokens, e.le_output_tokens with
-            | Some input, Some output -> Printf.sprintf "%4d/%4d" input output
-            | _ -> Ansi.dim ^ "   --/--" ^ Ansi.reset
-          in
-          let lat_str =
-            match e.le_latency_ms with
-            | Some latency when latency > 0 -> Printf.sprintf "%5dms" latency
-            | _ -> Ansi.dim ^ "     --" ^ Ansi.reset
-          in
-          let cost_str =
-            match e.le_cost_usd with
-            | Some cost when cost > 0.0 -> Printf.sprintf "$%.3f" cost
-            | _ -> Ansi.dim ^ "   --" ^ Ansi.reset
-          in
           let tools_str =
             if List.length e.le_tools_used > 0 then
-              " " ^ Ansi.dim ^ (String.concat "," (List.filteri (fun i _ -> i < 2) e.le_tools_used)) ^ Ansi.reset
+              " "
+              ^ String.concat ","
+                  (List.filteri (fun i _ -> i < 2) e.le_tools_used)
             else ""
           in
-          let work_kind = Option.value ~default:"" e.le_work_kind in
-          let line = Printf.sprintf "  %s %s %s %s %s %s %s  %-10s%s"
-            time_str (channel_color e.le_channel) ctx_str tokens_str
-            io_str lat_str cost_str work_kind tools_str
-          in
+          let line = Observation_layout.plain_log_row ~time:time_str e ^ tools_str in
           box_line buf cols line
         end else
           box_empty buf cols
@@ -1129,9 +1126,11 @@ let render_keeper_logs (state : state) =
 
     (* Scroll indicator *)
     if total_entries > content_height then begin
-      let indicator = Printf.sprintf "%s[%d/%d entries, scroll %d]%s"
-        Ansi.dim total_entries (total_entries) scroll Ansi.reset in
-      box_line buf cols indicator
+      let indicator =
+        Printf.sprintf "[%d/%d entries, scroll %d]" total_entries total_entries
+          scroll
+      in
+      box_line_styled buf cols ~style:Ansi.dim indicator
     end;
 
     box_bottom buf cols;

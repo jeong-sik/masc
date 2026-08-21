@@ -16,6 +16,7 @@ type task = {
 
 type keeper = {
   k_name : string;
+  k_trace_id : string;
   k_generation : int;
   k_paused : bool;
   k_current_task_id : string option;
@@ -69,22 +70,44 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
+type log_kind =
+  | Log_turn
+  | Log_heartbeat
+
+type log_channel =
+  | Log_channel_turn
+  | Log_channel_scheduled_autonomous
+  | Log_channel_heartbeat
+
 type log_entry = {
+  le_kind : log_kind;
   le_ts : string;
-  le_channel : string;
-  le_context_ratio : float;
-  le_context_tokens : int;
-  le_context_max : int;
-  le_message_count : int;
-  le_model_used : string option;
+  le_channel : log_channel;
+  le_message_count : int option;
   le_input_tokens : int option;
   le_output_tokens : int option;
   le_latency_ms : int option;
   le_cost_usd : float option;
   le_work_kind : string option;
   le_tools_used : string list;
-  le_compacted : bool option;
 }
+
+type context_unavailable_reason =
+  | Context_measurement_missing
+  | Context_turn_record_undecodable
+  | Context_turn_record_read_failed
+  | Context_turn_record_without_usage
+  | Context_turn_record_trace_mismatch
+
+type context_observation =
+  | Context_observed of {
+      ratio : float option;
+      tokens : int;
+      maximum : int option;
+      observed_at : string;
+      turn_ref : string;
+    }
+  | Context_unavailable of context_unavailable_reason
 
 let ( let* ) = Result.bind
 
@@ -92,6 +115,11 @@ let member key json =
   match Json_util.assoc_member_opt key json with
   | Some v -> v
   | None -> `Null
+
+let required_member json key =
+  match Json_util.assoc_member_opt key json with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
 
 let optional_string json key =
   match member key json with
@@ -102,37 +130,39 @@ let optional_string json key =
         (Printf.sprintf "field '%s' must be a string (received %s)" key
            (Json_util.kind_name other))
 
-let optional_int json key =
-  match member key json with
-  | `Null -> Ok None
-  | `Int n -> Ok (Some n)
-  | `Intlit s -> (
+let required_nullable_int_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`Int n) -> Ok (Some n)
+  | Some (`Intlit s) -> (
       match int_of_string_opt s with
       | Some n -> Ok (Some n)
       | None ->
           Error (Printf.sprintf "field '%s' has non-integer intlit %S" key s))
-  | other ->
+  | Some other ->
       Error
-        (Printf.sprintf "field '%s' must be an int (received %s)" key
+        (Printf.sprintf "field '%s' must be an int or null (received %s)" key
            (Json_util.kind_name other))
 
-let optional_float json key =
-  match member key json with
-  | `Null -> Ok None
-  | `Float f -> Ok (Some f)
-  | `Int n -> Ok (Some (Float.of_int n))
-  | other ->
+let required_nullable_float_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok None
+  | Some (`Float value) -> Ok (Some value)
+  | Some (`Int value) -> Ok (Some (Float.of_int value))
+  | Some other ->
       Error
-        (Printf.sprintf "field '%s' must be a float (received %s)" key
+        (Printf.sprintf "field '%s' must be a float or null (received %s)" key
            (Json_util.kind_name other))
 
-let optional_bool json key =
-  match member key json with
-  | `Null -> Ok None
-  | `Bool b -> Ok (Some b)
-  | other ->
+let require_null_field json key =
+  match Json_util.assoc_member_opt key json with
+  | None -> Error (Printf.sprintf "missing required field '%s'" key)
+  | Some `Null -> Ok ()
+  | Some other ->
       Error
-        (Printf.sprintf "field '%s' must be a bool (received %s)" key
+        (Printf.sprintf "field '%s' must be null (received %s)" key
            (Json_util.kind_name other))
 
 let require_string_field json key = require_string json key
@@ -226,6 +256,7 @@ let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   in
   {
     k_name = meta.name;
+    k_trace_id = Keeper_id.Trace_id.to_string runtime.trace_id;
     k_generation = runtime.nonce;
     k_paused = meta.paused;
     k_current_task_id =
@@ -253,62 +284,345 @@ let decode_keeper json =
   let* meta = Keeper_meta_json_parse.meta_of_json json in
   Ok (keeper_of_meta meta)
 
+let decode_turn_channel raw =
+  match Keeper_world_observation.channel_of_string raw with
+  | Some Keeper_world_observation.Reactive -> Ok Log_channel_turn
+  | Some Keeper_world_observation.Scheduled_autonomous ->
+      Ok Log_channel_scheduled_autonomous
+  | None -> Error (Printf.sprintf "unknown current turn channel %S" raw)
+
+let decode_turn_mode json =
+  let* raw = require_string_field json "turn_mode" in
+  match Turn_mode_codec.turn_mode_of_string raw with
+  | Some mode -> Ok mode
+  | None -> Error (Printf.sprintf "unknown current turn mode %S" raw)
+
+let validate_usage_projection ~input_tokens ~output_tokens
+    ~cache_creation_tokens ~cache_read_tokens ~total_tokens ~cost_usd
+    ~inner_trust ~inner_anomaly ~inner_reasons ~outer_trust ~outer_reasons =
+  let classified =
+    match
+      ( input_tokens,
+        output_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
+        total_tokens,
+        cost_usd )
+    with
+    | ( Some input_tokens,
+        Some output_tokens,
+        Some cache_creation_tokens,
+        Some cache_read_tokens,
+        Some total_tokens,
+        Some cost_usd ) ->
+        if total_tokens <> input_tokens + output_tokens then
+          Error "usage total_tokens does not equal input_tokens + output_tokens"
+        else
+          let usage : Agent_core.Types.api_usage =
+            { input_tokens;
+              output_tokens;
+              cache_creation_input_tokens = cache_creation_tokens;
+              cache_read_input_tokens = cache_read_tokens;
+              cost_usd = Some cost_usd;
+            }
+          in
+          Ok (Keeper_usage_trust.classify ~usage_reported:true ~usage)
+    | None, None, None, None, None, None ->
+        let usage : Agent_core.Types.api_usage =
+          { input_tokens = 0;
+            output_tokens = 0;
+            cache_creation_input_tokens = 0;
+            cache_read_input_tokens = 0;
+            cost_usd = None;
+          }
+        in
+        Ok (Keeper_usage_trust.classify ~usage_reported:false ~usage)
+    | _ ->
+        Error
+          "usage tokens, cost, and trust must form one current atomic observation"
+  in
+  let* classified = classified in
+  let expected_trust = Keeper_usage_trust.to_string classified in
+  let expected_reasons = Keeper_usage_trust.reasons classified in
+  let expected_anomaly =
+    match classified with
+    | Keeper_usage_trust.Usage_untrusted _ -> true
+    | Keeper_usage_trust.Usage_missing | Keeper_usage_trust.Usage_trusted ->
+        false
+  in
+  if
+    not
+      (String.equal inner_trust expected_trust
+      && String.equal outer_trust expected_trust)
+  then Error "usage trust does not match the current counter observation"
+  else if inner_anomaly <> expected_anomaly then
+    Error "usage anomaly flag does not match the current trust classification"
+  else if inner_reasons <> expected_reasons || outer_reasons <> expected_reasons
+  then Error "usage anomaly reasons do not match the current trust classification"
+  else Ok ()
+
+let decode_log_entry json =
+  let* kind =
+    match Keeper_metrics_record.kind_of_json json with
+    | Some kind -> Ok kind
+    | None -> Error "unknown current keeper metrics schema or record kind"
+  in
+  let* le_ts = require_string_field json "ts" in
+  let* _ts_unix = require_float_field json "ts_unix" in
+  let* raw_channel = require_string_field json "channel" in
+  let* _name = require_string_field json "name" in
+  let* _agent_name = require_string_field json "agent_name" in
+  let* _trace_id = require_string_field json "trace_id" in
+  let* _generation = require_int_field json "generation" in
+  match kind with
+  | Keeper_metrics_record.Heartbeat ->
+      if not (String.equal raw_channel "heartbeat") then
+        Error
+          (Printf.sprintf "heartbeat metrics row has invalid channel %S"
+             raw_channel)
+      else
+        let* le_message_count =
+          required_nullable_int_field json "message_count"
+        in
+        let* () =
+          if Option.exists (fun count -> count < 0) le_message_count then
+            Error "heartbeat message_count must be non-negative"
+          else Ok ()
+        in
+        Ok
+          { le_kind = Log_heartbeat;
+            le_ts;
+            le_channel = Log_channel_heartbeat;
+            le_message_count;
+            le_input_tokens = None;
+            le_output_tokens = None;
+            le_latency_ms = None;
+            le_cost_usd = None;
+            le_work_kind = None;
+            le_tools_used = [];
+          }
+  | Keeper_metrics_record.Turn ->
+      let* le_channel = decode_turn_channel raw_channel in
+      let* le_message_count = require_int_field json "message_count" in
+      let* () =
+        if le_message_count < 0 then
+          Error "turn message_count must be non-negative"
+        else Ok ()
+      in
+      let* usage =
+        match member "usage" json with
+        | `Assoc _ as usage -> Ok usage
+        | `Null -> Error "missing required field 'usage'"
+        | other ->
+            Error
+              (Printf.sprintf "field 'usage' must be an object (received %s)"
+                 (Json_util.kind_name other))
+      in
+      let* le_input_tokens =
+        required_nullable_int_field usage "input_tokens"
+      in
+      let* le_output_tokens =
+        required_nullable_int_field usage "output_tokens"
+      in
+      let* cache_creation_tokens =
+        required_nullable_int_field usage "cache_creation_tokens"
+      in
+      let* cache_read_tokens =
+        required_nullable_int_field usage "cache_read_tokens"
+      in
+      let* total_tokens = required_nullable_int_field usage "total_tokens" in
+      let* inner_usage_trust = require_string_field usage "usage_trust" in
+      let* inner_usage_anomaly = require_bool usage "usage_anomaly" in
+      let* inner_usage_anomaly_reasons =
+        require_string_list usage "usage_anomaly_reasons"
+      in
+      let* outer_usage_trust = require_string_field json "usage_trust" in
+      let* outer_usage_anomaly_reasons =
+        require_string_list json "usage_anomaly_reasons"
+      in
+      let* latency_ms = require_int_field json "latency_ms" in
+      let* () =
+        if latency_ms < 0 then Error "latency_ms must be non-negative" else Ok ()
+      in
+      let* le_cost_usd = required_nullable_float_field json "cost_usd" in
+      let* () =
+        validate_usage_projection ~input_tokens:le_input_tokens
+          ~output_tokens:le_output_tokens ~cache_creation_tokens
+          ~cache_read_tokens ~total_tokens ~cost_usd:le_cost_usd
+          ~inner_trust:inner_usage_trust
+          ~inner_anomaly:inner_usage_anomaly
+          ~inner_reasons:inner_usage_anomaly_reasons
+          ~outer_trust:outer_usage_trust
+          ~outer_reasons:outer_usage_anomaly_reasons
+      in
+      let* turn_mode = decode_turn_mode json in
+      let* tool_call_count = require_int_field json "tool_call_count" in
+      let* le_tools_used = require_string_list json "tools_used" in
+      let* () =
+        if tool_call_count < 0 then Error "tool_call_count must be non-negative"
+        else if tool_call_count <> List.length le_tools_used then
+          Error "tool_call_count does not match tools_used"
+        else
+          match turn_mode with
+          | Turn_mode_codec.Tool_use -> Ok ()
+          | Turn_mode_codec.Text_response
+          | Turn_mode_codec.Skip_text
+          | Turn_mode_codec.Noop ->
+              if tool_call_count = 0 then Ok ()
+              else Error "non-tool turn mode cannot carry tool calls"
+      in
+      Ok
+        { le_kind = Log_turn;
+          le_ts;
+          le_channel;
+          le_message_count = Some le_message_count;
+          le_input_tokens;
+          le_output_tokens;
+          le_latency_ms = Some latency_ms;
+          le_cost_usd;
+          le_work_kind =
+            Some (Turn_mode_codec.work_kind_of_turn_mode turn_mode);
+          le_tools_used;
+        }
+
 let parse_log_entry line =
   let json =
     try Ok (Yojson.Safe.from_string line)
     with Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
   in
   let* json = json in
-  let* le_ts = require_string_field json "ts" in
-  let* le_channel = require_string_field json "channel" in
-  let* le_context_ratio = require_float_field json "context_ratio" in
-  let* le_context_tokens = require_int_field json "context_tokens" in
-  let* le_context_max = require_int_field json "context_max" in
-  let* le_message_count = require_int_field json "message_count" in
-  let le_model_used = get_string json "model_used" in
-  let usage_json = get_object json "usage" in
-  let* le_input_tokens =
-    match usage_json with
-    | None -> Ok None
-    | Some usage -> optional_int usage "input_tokens"
-  in
-  let* le_output_tokens =
-    match usage_json with
-    | None -> Ok None
-    | Some usage -> optional_int usage "output_tokens"
-  in
-  let* le_latency_ms = optional_int json "latency_ms" in
-  let* le_cost_usd = optional_float json "cost_usd" in
-  let* le_work_kind = optional_string json "work_kind" in
-  let le_tools_used =
-    match member "tools_used" json with
-    | `Null -> Ok []
-    | `List _ -> require_string_list json "tools_used"
-    | other ->
-        Error
-          (Printf.sprintf
-             "field 'tools_used' must be an array (received %s)"
-             (Json_util.kind_name other))
-  in
-  let* le_tools_used = le_tools_used in
-  let* le_compacted = optional_bool json "compacted" in
-  Ok
-    {
-      le_ts;
-      le_channel;
-      le_context_ratio;
-      le_context_tokens;
-      le_context_max;
-      le_message_count;
-      le_model_used;
-      le_input_tokens;
-      le_output_tokens;
-      le_latency_ms;
-      le_cost_usd;
-      le_work_kind;
-      le_tools_used;
-      le_compacted;
-    }
+  decode_log_entry json
+
+let context_unavailable_reason_of_string = function
+  | "context_measurement_missing" -> Ok Context_measurement_missing
+  | "turn_record_undecodable" -> Ok Context_turn_record_undecodable
+  | "turn_record_read_failed" -> Ok Context_turn_record_read_failed
+  | "turn_record_without_usage" -> Ok Context_turn_record_without_usage
+  | "turn_record_trace_mismatch" -> Ok Context_turn_record_trace_mismatch
+  | raw -> Error (Printf.sprintf "unknown context unavailable reason %S" raw)
+
+let context_unavailable_reason_to_string = function
+  | Context_measurement_missing -> "context measurement missing"
+  | Context_turn_record_undecodable -> "turn record undecodable"
+  | Context_turn_record_read_failed -> "turn record read failed"
+  | Context_turn_record_without_usage -> "turn record has no provider usage"
+  | Context_turn_record_trace_mismatch -> "turn record belongs to a prior trace"
+
+let require_object_member json key =
+  let* value = required_member json key in
+  match value with
+  | `Assoc _ as object_value -> Ok object_value
+  | other ->
+      Error
+        (Printf.sprintf "field '%s' must be an object (received %s)" key
+           (Json_util.kind_name other))
+
+let decode_context_unavailable_payload json =
+  let* kind = require_string_field json "kind" in
+  if not (String.equal kind "not_observed") then
+    Error (Printf.sprintf "unknown context unavailable kind %S" kind)
+  else
+    let* reason = require_string_field json "reason" in
+    context_unavailable_reason_of_string reason
+
+let validate_context_ratio ~tokens ~maximum ~ratio =
+  match maximum, ratio with
+  | Some maximum, Some ratio when maximum > 0 ->
+      let expected = Float.of_int tokens /. Float.of_int maximum in
+      let tolerance = 1e-12 *. Float.max 1.0 (Float.abs expected) in
+      if Float.is_finite ratio && Float.abs (ratio -. expected) <= tolerance then
+        Ok ()
+      else Error "context ratio does not match tokens / context window"
+  | Some maximum, None when maximum > 0 ->
+      Error "positive context window requires an observed ratio"
+  | (None | Some 0), None -> Ok ()
+  | (None | Some 0), Some _ ->
+      Error "context ratio requires a positive context window"
+  | Some _, (Some _ | None) -> Error "context window must be non-negative"
+
+let decode_context_observation ~expected_trace_id json =
+  match Json_util.assoc_member_opt "context_metrics_unavailable" json with
+  | None -> Error "missing required field 'context_metrics_unavailable'"
+  | Some (`Assoc _ as unavailable) ->
+      let* reason = decode_context_unavailable_payload unavailable in
+      let* () = require_null_field json "context_ratio" in
+      let* () = require_null_field json "context_tokens" in
+      let* () = require_null_field json "context_max" in
+      let* () = require_null_field json "context_source" in
+      let* context = require_object_member json "context" in
+      let* () = require_null_field context "source" in
+      let* () = require_null_field context "context_ratio" in
+      let* () = require_null_field context "context_tokens" in
+      let* () = require_null_field context "context_max" in
+      let* nested_unavailable =
+        require_object_member context "metrics_unavailable"
+      in
+      let* nested_reason =
+        decode_context_unavailable_payload nested_unavailable
+      in
+      if nested_reason <> reason then
+        Error "nested and top-level context unavailable reasons disagree"
+      else Ok (Context_unavailable reason)
+  | Some `Null ->
+      let* ratio = required_nullable_float_field json "context_ratio" in
+      let* tokens = require_int_field json "context_tokens" in
+      let* maximum = required_nullable_int_field json "context_max" in
+      let* source = require_string_field json "context_source" in
+      if not (String.equal source "turn_record") then
+        Error (Printf.sprintf "unknown context observation source %S" source)
+      else if
+        tokens < 0
+        || Option.exists (fun value -> not (Float.is_finite value)) ratio
+      then
+        Error "context observation has an invalid numeric range"
+      else
+        let* () = validate_context_ratio ~tokens ~maximum ~ratio in
+        let* context = require_object_member json "context" in
+        let* nested_source = require_string_field context "source" in
+        let* nested_ratio =
+          required_nullable_float_field context "context_ratio"
+        in
+        let* nested_tokens = require_int_field context "context_tokens" in
+        let* nested_maximum =
+          required_nullable_int_field context "context_max"
+        in
+        let* () = require_null_field context "metrics_unavailable" in
+        if not (String.equal nested_source source) then
+          Error "nested and top-level context sources disagree"
+        else if
+          nested_ratio <> ratio || nested_tokens <> tokens
+          || nested_maximum <> maximum
+        then Error "nested and top-level context measurements disagree"
+        else
+          let* observed_at = require_string_field context "observed_at" in
+          let* turn_ref_json = required_member context "turn_ref" in
+          let* turn_ref = Ids.Turn_ref.of_yojson turn_ref_json in
+          let* absolute_turn = require_int_field context "absolute_turn" in
+          let* request_body_bytes =
+            required_nullable_int_field context "request_body_bytes"
+          in
+          if
+            not
+              (String.equal (Ids.Turn_ref.trace_id turn_ref) expected_trace_id)
+          then Error "context turn reference belongs to a different trace"
+          else if absolute_turn <> Ids.Turn_ref.absolute_turn turn_ref then
+            Error "context absolute turn disagrees with its turn reference"
+          else if Option.exists (fun value -> value < 0) request_body_bytes then
+            Error "context request body bytes must be non-negative"
+          else
+            Ok
+              (Context_observed
+                 { ratio;
+                   tokens;
+                   maximum;
+                   observed_at;
+                   turn_ref = Ids.Turn_ref.to_string turn_ref;
+                 })
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "field 'context_metrics_unavailable' must be an object or null (received %s)"
+           (Json_util.kind_name other))
 
 let trim = String.trim
 

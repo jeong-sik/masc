@@ -224,6 +224,18 @@
  (libraries masc.masc_core))
 
 (library
+ (name masc_tui_context_state)
+ (wrapped false)
+ (modules masc_tui_context_state)
+ (libraries masc masc.masc_workspace yojson))
+
+(library
+ (name masc_tui_observation_layout)
+ (wrapped false)
+ (modules masc_tui_observation_layout)
+ (libraries masc))
+
+(library
  (name masc_tui_render_schedule)
  (wrapped false)
  (modules masc_tui_render_schedule))
@@ -241,8 +253,10 @@
  (package masc)
  (libraries
   masc
+  masc_tui_context_state
   masc_tui_keeper_chat_projection
   masc_tui_message_layout
+  masc_tui_observation_layout
   masc_tui_operator_projection
   masc_tui_render_schedule
   masc.dashboard

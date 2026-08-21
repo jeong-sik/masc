@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   devTokenBootstrapStatus,
+  devTokenBootstrapNeedsReadinessProbe,
   ensureDevToken,
   refreshDevTokenAfterAuthError,
   resetDevTokenBootstrap,
@@ -89,6 +90,27 @@ describe('ensureDevToken', () => {
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
 
+  it.each([408, 425, 429, 500, 503])(
+    'exposes HTTP %s as a readiness state without pinning the in-flight promise',
+    async status => {
+      fetchWithTimeout
+        .mockResolvedValueOnce(new Response('not ready', { status }))
+        .mockResolvedValueOnce(jsonResponse({
+          token: 'ready-dev-token',
+          actor: 'dashboard',
+          role: 'admin',
+        }))
+
+      await ensureDevToken()
+      expect(devTokenBootstrapStatus.value).toBe('warming')
+      expect(devTokenBootstrapNeedsReadinessProbe()).toBe(true)
+
+      await ensureDevToken()
+      expect(fetchWithTimeout).toHaveBeenCalledTimes(2)
+      expect(devTokenBootstrapStatus.value).toBe('ok')
+    },
+  )
+
   it('does not overwrite a manual token entered while the server is warming', async () => {
     vi.useFakeTimers()
     let token: string | null = null
@@ -150,7 +172,7 @@ describe('ensureDevToken', () => {
     expect(devTokenBootstrapStatus.value).toBe('ok')
   })
 
-  it('does not keep retrying a disabled loopback dev-token endpoint', async () => {
+  it('memoizes a disabled loopback dev-token endpoint as terminal', async () => {
     fetchWithTimeout.mockResolvedValueOnce(new Response('not found', { status: 404 }))
 
     await ensureDevToken()

@@ -20,7 +20,7 @@ let devTokenRefreshPromise: Promise<boolean> | null = null
  * distinguish "auth required but no token" from "network error" etc.
  *   idle       — not yet attempted
  *   fetching   — in-flight
- *   warming    — server accepted HTTP but has not installed runtime state yet
+ *   warming    — server is initializing or explicitly reports temporary unavailability
  *   ok         — token stored
  *   no_endpoint — /dev-token returned 404 (loopback disabled or strict auth)
  *   invalid_response — endpoint response violated the exact token contract
@@ -37,6 +37,12 @@ export type DevTokenBootstrapStatus =
 
 export const devTokenBootstrapStatus: ReadonlySignal<DevTokenBootstrapStatus> =
   signal<DevTokenBootstrapStatus>('idle')
+
+export function devTokenBootstrapNeedsReadinessProbe(): boolean {
+  return shouldRefreshDevToken()
+    && (devTokenBootstrapStatus.value === 'warming'
+      || devTokenBootstrapStatus.value === 'network')
+}
 
 interface DevTokenBootstrapPayload {
   token?: unknown
@@ -96,7 +102,14 @@ export async function ensureDevToken(): Promise<void> {
           if (res.status === 404 && storedMeta?.source === 'dev') {
             clearStoredToken()
           }
-          ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'no_endpoint'
+          if (res.status === 408 || res.status === 425 || res.status === 429 || res.status >= 500) {
+            ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = 'warming'
+            devTokenBootstrapPromise = null
+          } else {
+            ;(devTokenBootstrapStatus as { value: DevTokenBootstrapStatus }).value = res.status === 404
+              ? 'no_endpoint'
+              : 'invalid_response'
+          }
           return
         }
         const payload = (await res.json()) as DevTokenBootstrapPayload

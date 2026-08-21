@@ -839,6 +839,6 @@ sequenceDiagram
 | httpun-ws | https://github.com/anmonteiro/httpun-ws |
 | grpc-direct | `workspace/yousleepwhen/grpc-direct` |
 | Cloudflare Tunnel | `docs/spec/01-system-overview.md` |
-| QUICK-START.md | `docs/QUICK-START.md` |
+| README quickstart | `README.md#start-here` |
 | COMMON-PITFALLS.md | `docs/COMMON-PITFALLS.md` |
 | 02-types-and-invariants | `docs/spec/02-types-and-invariants.md` |

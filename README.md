@@ -30,16 +30,20 @@ contains 24 screens and the exact capture metadata.
 
 ### Local source checkout
 
-The native launcher uses the default runtime in `config/runtime.toml`, seeds the
-`classic` four-Keeper preset, starts the server, and opens the dashboard.
-It expects the OCaml dependencies to be installed already.
+Install the OCaml dependencies once, then run the workspace server. The default
+quickstart does not start Keepers and does not require a model-provider key.
 
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
 
-export OLLAMA_CLOUD_API_KEY=...
+scripts/opam-pin-external-deps.sh --install
+opam install . --deps-only
 ./quickstart.sh
+
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+curl http://127.0.0.1:8935/health
 ```
 
 Defaults:
@@ -48,33 +52,22 @@ Defaults:
 - HTTP port: `8935`
 - dashboard: `http://127.0.0.1:8935/dashboard/`
 - MCP endpoint: `http://127.0.0.1:8935/mcp`
-- Keeper preset: `classic`
+- Keeper preset: none
 - runtime: the current `[runtime].default` in `config/runtime.toml`
+- MCP bearer exports: `~/masc-quickstart/.masc/config/mcp-client.env`
 
 Use `./quickstart.sh --help` for `--base-path`, `--team`, `--port`,
 `--no-open`, and `--no-start`.
 
-`./quickstart.sh --docker` builds a self-contained image. The container binds a
-network address, so dashboard data requires an explicit bearer token. The
-loopback native path is the simpler dashboard path.
-
-### Build from source manually
-
-The exact compiler and Dune versions are defined in `dune-project`.
+To start the `classic` Keeper preset, provide its model key on the first run:
 
 ```bash
-scripts/opam-pin-external-deps.sh --install
-opam install . --deps-only
-scripts/dune-local.sh build @default
-
 export OLLAMA_CLOUD_API_KEY=...
-./start-masc.sh --http --base-path "$PWD" --port 8935
-curl http://127.0.0.1:8935/health
+./quickstart.sh --team classic
 ```
 
-`start-masc.sh` builds the dashboard when its source is newer than the checked-in
-bundle. Use `cd dashboard && pnpm dev` only when developing the dashboard with
-Vite.
+The exact compiler and Dune versions are defined in `dune-project`. The first
+source run builds the OCaml server and dashboard and can take several minutes.
 
 ### Published binaries
 
@@ -94,22 +87,27 @@ bash /tmp/masc-install.sh --version "$TAG"
 Installation behavior is versioned with the selected tag. Recent release
 scripts verify `SHA256SUMS` when it is present and stop when required files are
 absent. Supported platforms are the assets attached to that release. Follow
-the start command printed by the installer.
+the login and start commands printed by the installer. The login command mints
+a worker bearer for the MCP client; the endpoint does not accept an
+unauthenticated client by default.
 
 ## MCP client setup
 
-HTTP is the public MCP path. Merge this entry into the MCP configuration used
-by your client:
+HTTP is the public MCP path. First load the worker bearer created by
+`quickstart.sh`:
 
-```json
-{
-  "mcpServers": {
-    "masc": {
-      "type": "http",
-      "url": "http://127.0.0.1:8935/mcp"
-    }
-  }
-}
+```bash
+BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
+source "$BASE_PATH/.masc/config/mcp-client.env"
+```
+
+For clients that support a bearer-token environment variable, use this shape:
+
+```toml
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+bearer_token_env_var = "MASC_TOKEN"
+http_headers = { "Accept" = "application/json, text/event-stream" }
 ```
 
 After the client connects, the shortest workspace flow is:
@@ -123,9 +121,10 @@ masc_status()
 and claims a task. Goals, tasks, board posts, and status changes are then shared
 through the MASC tool set.
 
-Loopback development can run without a client bearer depending on the active
-auth configuration. Non-loopback binds and stricter local setups require an
-explicit token. See [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md) and
+URL-only configuration fails with `401 Unauthorized` under the default local
+auth policy. For other client formats, a direct initialize probe, and manual
+bearer creation, see [`docs/MCP-TEMPLATE.md`](docs/MCP-TEMPLATE.md). Admin-only
+dashboard operations are covered by
 [`docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md`](docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md).
 
 ## Current scope

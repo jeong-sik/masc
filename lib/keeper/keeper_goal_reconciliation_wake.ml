@@ -32,13 +32,6 @@ let exact_producer_keeper_name ~config ~completing_agent_name =
   | Keeper_identity_binding.Lookup_failed detail -> Error detail
 ;;
 
-(* A wake is a message into a keeper's queue, not a contract, so several
-   recipients is an ordinary outcome rather than a condition to fail on.
-   Several keepers carrying one goal is what a collaboration mission looks
-   like, and every one of them wants to know its Task finished -- so every one
-   of them hears. Nothing narrows the list: narrowing would need a declared
-   responsible keeper, and a Goal names none. *)
-
 (* A Goal names no keeper, so the wake goes to whoever just finished the Task
    that moved it. That is the one identity the event actually carries. *)
 let target_keeper_names ~config ~completing_agent_name ~goal_id =
@@ -90,7 +83,7 @@ let enqueue_ready ?(wake_if_present = false) ~config ~completing_agent_name
        Keeper_target_lookup_failed { goal_id; detail }
      | Ok [] ->
        Log.Keeper.warn
-         "goal reconciliation ready but nobody carries the Goal goal_id=%s \
+         "goal reconciliation ready but Task producer has no Keeper binding goal_id=%s \
           triggering_task_id=%s completing_agent=%s"
          goal_id
          triggering_task_id

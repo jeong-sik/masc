@@ -64,8 +64,8 @@ let nullable_field_names =
 
 let test_current_writer_roundtrip_and_keyset () =
   check int
-    "current schema has 53 fields"
-    53
+    "current schema has 52 fields"
+    52
     (List.length Keeper_meta_json.current_field_names);
   let meta =
     match Keeper_meta_json_parse.meta_of_json (current_json ()) with

@@ -153,7 +153,6 @@ type runtime_handler =
 type policy =
   { readonly_of_input : readonly_of_input
   ; readonly_hint : bool option
-  ; retryable : bool
   ; cwd_scope : string option
   ; polling_read : bool
   }

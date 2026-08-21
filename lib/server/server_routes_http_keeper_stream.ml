@@ -1665,7 +1665,7 @@ let process_single_turn ~user_row_origin ~submission
                 let kind =
                   match dispatch_failure_class with
                   | Tool_result.Operator_cancelled -> Turn_cancelled
-                  | Tool_result.Transient_error
+                  | Tool_result.Dependency_unavailable
                   | Tool_result.Policy_rejection
                   | Tool_result.Runtime_failure
                   | Tool_result.Workflow_rejection -> Turn_failed

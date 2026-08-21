@@ -30,7 +30,7 @@ let tool_failure_class_of_image_preflight_failure failure_class =
   | Keeper_sandbox_runtime_classify.Image_config_missing ->
     Tool_result.Policy_rejection
   | Image_inspect_timeout ->
-    Tool_result.Transient_error
+    Tool_result.Dependency_unavailable
   | _ -> Tool_result.Runtime_failure
 ;;
 

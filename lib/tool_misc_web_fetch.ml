@@ -573,7 +573,7 @@ let fetch_failure_to_string = function
 
 let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
   function
-  | Transport_error _ -> Tool_result.Transient_error
+  | Transport_error _ -> Tool_result.Dependency_unavailable
   | Http_status _ -> Tool_result.Runtime_failure
   | No_http_status -> Tool_result.Runtime_failure
   | Invalid_redirect _ -> Tool_result.Workflow_rejection
@@ -734,7 +734,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
 (* RFC-0189 PR-1b.8 — typed result.
    Failure-class assignments live with construction:
    - [Workflow_rejection]: caller-input violation (invalid URL).
-   - [Transient_error]:    rate-limit hit + transport-level failure
+   - [Dependency_unavailable]:    rate-limit hit + transport-level failure
                            ([fetch_failure_class] for transport).
                            Both retry-friendly by nature; clients can
                            now back off automatically based on the

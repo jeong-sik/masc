@@ -368,12 +368,12 @@ let test_typed_outcome_alone_controls_projection () =
     let transient =
       Tool_result.make_err
         ~tool_name:"masc_status"
-        ~class_:Tool_result.Transient_error
+        ~class_:Tool_result.Dependency_unavailable
         ~start_time:0.0
         "ordinary producer failure"
     in
     let transient_response = call_with_result ~env ~sw state transient in
-    check string "typed transient class is preserved" "transient_error"
+    check string "typed transient class is preserved" "dependency_unavailable"
       (result_fields transient_response
        |> U.member "_meta"
        |> U.member "failure_class"
@@ -413,7 +413,7 @@ let test_handle_call_executes_transient_failure_once () =
               incr calls;
               Tool_result.make_err
                 ~tool_name:name
-                ~class_:Tool_result.Transient_error
+                ~class_:Tool_result.Dependency_unavailable
                 ~start_time:0.0
                 "transient failure")
           ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())

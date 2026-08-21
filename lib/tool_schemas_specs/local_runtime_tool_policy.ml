@@ -12,7 +12,6 @@ type t =
   { required_permission : permission
   ; read_only : bool
   ; idempotent : bool
-  ; retryable : bool
   }
 
 let operation_id = function
@@ -32,13 +31,11 @@ let execution_policy = function
     { required_permission = CanAdmin
     ; read_only = false
     ; idempotent = false
-    ; retryable = false
     }
   | Ollama_probe ->
     (* [/api/generate] can load a model and changes warm/cache state. *)
     { required_permission = CanAdmin
     ; read_only = false
     ; idempotent = false
-    ; retryable = false
     }
 ;;

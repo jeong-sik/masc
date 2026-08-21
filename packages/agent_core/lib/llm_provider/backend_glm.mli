@@ -26,8 +26,7 @@ type glm_error_class =
   | Glm_invalid_request
   | Glm_context_overflow
   (** agent-core boundary: code 1261 "Prompt exceeds max length" — the request
-        exceeded the model context window. Not retryable at the transport:
-        only the consumer's context recovery can make progress. *)
+        exceeded the model context window. *)
 
 type glm_error_origin =
   | Provider_response
@@ -37,7 +36,6 @@ type glm_error =
   { code : string option
   ; message : string
   ; error_class : glm_error_class
-  ; is_retryable : bool
   ; origin : glm_error_origin
   }
 
@@ -50,7 +48,7 @@ val request_output_token_receipt : request_artifact -> Types.output_token_receip
 
 (** Classify a Glm error code + message into a semantic class.
     Code-based classification takes priority; message keywords are fallback. *)
-val classify_glm_error : code:string -> glm_error_class * bool
+val classify_glm_error : code:string -> glm_error_class
 
 (** Map a Glm error class to the equivalent HTTP status code.
     Used by complete.ml to normalize provider-specific codes

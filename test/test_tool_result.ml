@@ -81,7 +81,7 @@ let test_plain_dispatch_failure_does_not_infer_from_message () =
 let test_plain_dispatch_failure_honors_explicit_failure_class () =
   let r =
     Tool_result.error
-      ~failure_class:Tool_result.Transient_error
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
@@ -89,7 +89,7 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
-    "transient_error"
+    "dependency_unavailable"
     (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
@@ -115,7 +115,7 @@ let test_exception_message_does_not_infer_failure_class () =
 let test_exception_boundary_honors_explicit_failure_class () =
   let r =
     Tool_result.of_exn
-      ~failure_class:Tool_result.Transient_error
+      ~failure_class:Tool_result.Dependency_unavailable
       ~tool_name:"masc_transition"
       ~start_time:0.0
       (Invalid_argument
@@ -124,7 +124,7 @@ let test_exception_boundary_honors_explicit_failure_class () =
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
-    "transient_error"
+    "dependency_unavailable"
     (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
@@ -329,7 +329,7 @@ let test_make_err_of_exn_classifies_constructor () =
   | Tool_result.Failed f ->
     Alcotest.(check string)
       "Timeout classified as transient"
-      "transient_error"
+      "dependency_unavailable"
       (Tool_result.tool_failure_class_to_string f.class_)
   | Tool_result.Completed _ -> Alcotest.fail "make_err_of_exn returned Completed"
   | Tool_result.Deferred _ -> Alcotest.fail "make_err_of_exn returned Deferred"

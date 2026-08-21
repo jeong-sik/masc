@@ -10,19 +10,17 @@
 (** {1 Failure classification} *)
 
 (** Closed sum type for tool failure classification.  Each constructor
-    maps to a distinct retry/log/telemetry policy; the compiler enforces
+    maps to distinct diagnostic/log/telemetry evidence; the compiler enforces
     exhaustive handling at every match site.
 
     @since 2.96.0 *)
 type tool_failure_class =
-  | Transient_error (** Network/timeout/rate-limit — retryable *)
+  | Dependency_unavailable (** A required external dependency was unavailable. *)
   | Policy_rejection (** Auth/permission/boundary — permanent *)
-  | Runtime_failure (** Internal error/bug — non-retryable *)
-  | Workflow_rejection (** Business rule violation — non-retryable *)
+  | Runtime_failure (** Internal error/bug. *)
+  | Workflow_rejection (** Business rule violation. *)
   | Operator_cancelled
-      (** An operator interrupted the work (#28810). Not retryable by the
-          system — resending is the operator's own decision — and not an
-          internal error: consumers must not classify it as a crash. *)
+      (** An operator interrupted the work (#28810). *)
 
 type failure_effect_disposition =
   | Proven_pre_effect
@@ -44,9 +42,6 @@ val show_tool_failure_class : tool_failure_class -> string
 
 val tool_failure_class_to_string : tool_failure_class -> string
 val tool_failure_class_of_string : string -> tool_failure_class option
-
-(** [Transient_error] is the only retryable class. *)
-val is_retryable : tool_failure_class -> bool
 
 (** [Runtime_failure] maps to [Error]; all others to [Warn]. *)
 val log_level_of_failure_class : tool_failure_class -> Log.level

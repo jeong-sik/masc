@@ -36,10 +36,8 @@ let glm_config ?enable_thinking ?clear_thinking ?(tool_stream = false) () =
 
 let check_class label expected actual = check bool label true (actual = expected)
 
-let check_classification label code expected retryable =
-  let actual, retry = K.classify_glm_error ~code in
-  check_class (label ^ " class") expected actual;
-  check bool (label ^ " retryable") retryable retry
+let check_classification label code expected =
+  check_class (label ^ " class") expected (K.classify_glm_error ~code)
 ;;
 
 let response_json ?(reasoning = Some "step by step") ?(content = "answer") () =
@@ -69,13 +67,13 @@ let response_json ?(reasoning = Some "step by step") ?(content = "answer") () =
 ;;
 
 let test_classification_matrix () =
-  check_classification "auth" "1001" K.Glm_auth_error false;
-  check_classification "rate" "1305" K.Glm_rate_limited true;
-  check_classification "quota" "1308" K.Glm_quota_exceeded false;
-  check_classification "server" "1234" K.Glm_server_error true;
-  check_classification "invalid" "1210" K.Glm_invalid_request false;
-  check_classification "context overflow (agent-core boundary)" "1261" K.Glm_context_overflow false;
-  check_classification "unknown" "9999" K.Glm_invalid_request false
+  check_classification "auth" "1001" K.Glm_auth_error;
+  check_classification "rate" "1305" K.Glm_rate_limited;
+  check_classification "quota" "1308" K.Glm_quota_exceeded;
+  check_classification "server" "1234" K.Glm_server_error;
+  check_classification "invalid" "1210" K.Glm_invalid_request;
+  check_classification "context overflow (agent-core boundary)" "1261" K.Glm_context_overflow;
+  check_classification "unknown" "9999" K.Glm_invalid_request
 ;;
 
 (* agent-core boundary: the streaming path classifies a non-200 rejection by the
@@ -189,26 +187,22 @@ let test_parse_response_classifies_glm_errors () =
   let cases =
     [ ( {|{"error":{"code":"1305","message":"service overloaded"}}|}
       , Some "1305"
-      , K.Glm_rate_limited
-      , true )
+      , K.Glm_rate_limited )
     ; ( {|{"error":{"code":1234,"message":"server unavailable"}}|}
       , Some "1234"
-      , K.Glm_server_error
-      , true )
+      , K.Glm_server_error )
     ; ( {|{"error":{"code":{"nested":true},"message":"quota exceeded"}}|}
       , None
-      , K.Glm_invalid_request
-      , false )
-    ; {|{"error":{"code":1200}}|}, Some "1200", K.Glm_invalid_request, false
+      , K.Glm_invalid_request )
+    ; {|{"error":{"code":1200}}|}, Some "1200", K.Glm_invalid_request
     ]
   in
   List.iter
-    (fun (body, code, expected_class, expected_retryable) ->
+    (fun (body, code, expected_class) ->
        match K.parse_response body with
        | exception K.Glm_api_error err ->
          check (option string) "error code" code err.code;
-         check_class "error class" expected_class err.error_class;
-         check bool "retryable" expected_retryable err.is_retryable
+         check_class "error class" expected_class err.error_class
        | _ -> fail "expected Glm_api_error")
     cases
 ;;
@@ -219,7 +213,6 @@ let test_parse_response_wraps_openai_parse_errors () =
     check (option string) "parse code absent" None err.code;
     check bool "parse origin" true (err.origin = K.Response_parse);
     check_class "parse class" K.Glm_invalid_request err.error_class;
-    check bool "parse is not retryable" false err.is_retryable;
     check bool "parse message surfaced" true (String.length err.message > 0)
   | _ -> fail "expected Glm_api_error"
 ;;

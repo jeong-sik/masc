@@ -351,7 +351,7 @@ let task_recovery_failure_class = function
   | Masc_domain.Auth _ -> Tool_result.Policy_rejection
   | Masc_domain.System (Masc_domain.System_error.LockContention _)
   | Masc_domain.RateLimitExceeded _ ->
-    Tool_result.Transient_error
+    Tool_result.Dependency_unavailable
   | Masc_domain.System _ | Masc_domain.CacheError _ -> Tool_result.Runtime_failure
 ;;
 

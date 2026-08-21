@@ -76,7 +76,9 @@ let log_level_of_tool_call_outcome = function
     be passed explicitly at the catch boundary. *)
 let classify_from_exception (exn : exn) : tool_failure_class =
   match exn with
-  | Eio.Time.Timeout -> Dependency_unavailable
+  | Eio.Time.Timeout
+  | Eio.Cancel.Cancelled Eio.Time.Timeout ->
+    Dependency_unavailable
   | Eio.Cancel.Cancelled _ -> Operator_cancelled
   | Invalid_argument _ -> Runtime_failure
   | Failure _ -> Runtime_failure

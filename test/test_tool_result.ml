@@ -363,6 +363,15 @@ let test_make_err_of_exn_classifies_constructor () =
   | Tool_result.Deferred _ -> Alcotest.fail "make_err_of_exn returned Deferred"
 ;;
 
+let test_cancelled_timeout_classifies_as_dependency_unavailable () =
+  Alcotest.(check string)
+    "wrapped timeout is not an operator cancellation"
+    "dependency_unavailable"
+    (Eio.Cancel.Cancelled Eio.Time.Timeout
+     |> Tool_result.classify_from_exception
+     |> Tool_result.tool_failure_class_to_string)
+;;
+
 let test_disposition_preserves_typed_payload () =
   let r =
     Tool_result.make_ok ~tool_name:"x" ~start_time:0.0 ~data:(`Int 1) ()
@@ -575,6 +584,10 @@ let () =
             "make_err_of_exn classifies by constructor"
             `Quick
             test_make_err_of_exn_classifies_constructor
+        ; Alcotest.test_case
+            "cancelled timeout remains dependency unavailable"
+            `Quick
+            test_cancelled_timeout_classifies_as_dependency_unavailable
         ; Alcotest.test_case
             "disposition preserves typed payload"
             `Quick

@@ -23,6 +23,15 @@ val goal_verification_proof : string
     prove the declared success criterion? *)
 
 val goal_verification_criterion : string
+val verification_lookup_none : string
+val verification_lookup_producer_tree : string
+val verification_lookup_producer_forest : string
+val verification_contract : string
+val verification_required_evidence : string
+val keeper_observation_recovered_current_task : string
+val keeper_observation_current_task_absent : string
+val keeper_observation_current_task_absent_in_recovery : string
+val keeper_observation_current_task_unobservable : string
 (** Goal success-criterion viability review (RFC-0387 B2): is the declared
     metric/target reachable in principle? *)
 

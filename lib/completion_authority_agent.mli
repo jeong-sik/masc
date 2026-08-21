@@ -29,15 +29,10 @@ module For_testing : sig
     authority:Masc_domain.completion_authority ->
     string
 
-  (** How one review attempt ended, decoupled from the Eio scheduling loop so
-      the retry decision below is a pure function of it. *)
+  (** How one review attempt ended. [Deferred] carries no payload: a review
+      that did not commit a verdict is reported to the Board and the producer
+      Keeper chooses what happens next. *)
   type process_outcome =
     | Committed
-    | Deferred of { retryable : bool }
-
-  val should_schedule_retry : process_outcome -> bool
-  (** Whether [process_task] should arm the maintenance-pulse retry timer for
-      this outcome. [false] for [Committed] (nothing left to retry) and for
-      [Deferred { retryable = false }] (retrying is known not to change the
-      outcome) — [true] otherwise. *)
+    | Deferred
 end

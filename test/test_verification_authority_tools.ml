@@ -325,6 +325,76 @@ let test_forest_requires_and_enforces_exact_producer () =
 ;;
 
 (* The prompt states the exact tools attached to the review request. *)
+(* masc task-403 (vrf-8bac5f46, 2026-08-21): the prompt told the evaluator its
+   tools were "pointed at the producer's tree". They are pointed at the
+   producer's sandbox root, one level above any checkout, so an evaluator that
+   read that literally opened dune-project, .git, lib/, README.md, Makefile,
+   src and bin — 77 consecutive failed reads, no verdict, and a producer that
+   never learned why. The root's real shape is a fact available at review
+   time; these pin that it is stated instead of guessed. *)
+let test_root_layout_lists_the_root_the_tools_resolve_against () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+    mkdir (Filename.concat root "repos");
+    mkdir (Filename.concat root "repos/masc");
+    mkdir (Filename.concat root "artifacts");
+    (* An empty directory is the verifier's own failure mode, so it has to be
+       distinguishable from a directory that could not be read at all. *)
+    mkdir (Filename.concat root "mind");
+    let layout = VAT.root_layout surface in
+    let holds affix =
+      List.exists (fun entry -> Astring.String.is_infix ~affix entry) layout
+    in
+    Alcotest.(check bool) "names the checkout one level down" true (holds "repos/masc");
+    Alcotest.(check bool) "names a sibling top-level entry" true (holds "artifacts");
+    Alcotest.(check bool) "marks a directory with no children" true (holds "(empty)"))
+;;
+
+let test_prompt_states_the_root_and_not_a_repository () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+    mkdir (Filename.concat root "repos");
+    mkdir (Filename.concat root "repos/masc");
+    let request : AR.review_request =
+      { agent_name = producer
+      ; task_title = "t"
+      ; task_description = "d"
+      ; completion_notes = "n"
+      ; task_id = "task-403"
+      ; evidence_refs = []
+      }
+    in
+    let text =
+      match
+        AR.build_prompt
+          ~lookup:
+            (AR.Lookup_tools
+               { schemas = VAT.schemas surface
+               ; dispatch = VAT.dispatch surface
+               ; scope = AR.Producer_tree
+               ; root_layout = VAT.root_layout surface
+               })
+          request
+      with
+      | Ok text -> text
+      | Error detail -> Alcotest.failf "prompt render failed: %s" detail
+    in
+    Alcotest.(check bool)
+      "the prompt shows the checkout prefix the evaluator would otherwise guess"
+      true
+      (Astring.String.is_infix ~affix:"repos/masc" text);
+    Alcotest.(check bool)
+      "the prompt no longer calls the root the producer's tree"
+      false
+      (Astring.String.is_infix ~affix:"pointed at the producer's tree" text);
+    Alcotest.(check bool)
+      "a missing path is framed as an answer about the path, not about the work"
+      true
+      (Astring.String.is_infix ~affix:"not the question of whether the work exists" text))
+;;
+
 let test_prompt_states_the_available_surface () =
   with_surface (fun _config surface ->
     let request : AR.review_request =
@@ -348,6 +418,7 @@ let test_prompt_states_the_available_surface () =
            { schemas = VAT.schemas surface
            ; dispatch = VAT.dispatch surface
            ; scope = AR.Producer_tree
+           ; root_layout = VAT.root_layout surface
            })
     in
     Alcotest.(check bool)
@@ -460,6 +531,14 @@ let () =
     ; ( "prompt"
       , [ Alcotest.test_case "prompt states the available surface" `Quick
             test_prompt_states_the_available_surface
+        ; Alcotest.test_case
+            "root_layout lists the root the tools resolve against"
+            `Quick
+            test_root_layout_lists_the_root_the_tools_resolve_against
+        ; Alcotest.test_case
+            "prompt states the root instead of implying a repository"
+            `Quick
+            test_prompt_states_the_root_and_not_a_repository
         ] )
     ]
 ;;

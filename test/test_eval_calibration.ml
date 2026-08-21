@@ -40,7 +40,8 @@ let make_req ?(title = "Fix auth bug") ?(desc = "Fix the login issue")
 let make_result ?(verdict = AR.Approve) ?(runtime = "verifier")
     ?gen_runtime ?(gate = AR.Structured_tool) ?fallback_reason () : AR.review_result =
   { verdict = Some verdict; evaluator_runtime = runtime;
-    generator_runtime = gen_runtime; gate; fallback_reason; retryable = true }
+    generator_runtime = gen_runtime; gate; fallback_reason;
+      evaluator_error_retryable = None }
 
 (* ================================================================ *)
 (* Hashing tests                                                     *)

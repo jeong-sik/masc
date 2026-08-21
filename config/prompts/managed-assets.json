@@ -8,7 +8,16 @@
     "judge.catchup.md",
     "judge.effect.md",
     "keeper.md",
+    "keeper.observation.current_task_absent.md",
+    "keeper.observation.current_task_absent_in_recovery.md",
+    "keeper.observation.current_task_unobservable.md",
+    "keeper.observation.recovered_current_task.md",
     "librarian.md",
-    "verification.md"
+    "verification.md",
+    "verification.contract.md",
+    "verification.lookup.none.md",
+    "verification.lookup.producer_forest.md",
+    "verification.lookup.producer_tree.md",
+    "verification.required_evidence.md"
   ]
 }

@@ -82,10 +82,10 @@ val notify_stalled_verification :
   gate:string ->
   detail:string ->
   unit
-(** Board projection for a review that completed [Not_reviewed] with
-    [retryable = false]: the completion authority will not schedule another
-    automatic attempt, so without this post the only surface is the bounded
-    run registry and the task waits invisibly. The post names the task, the
+(** Board projection for every review that completed [Not_reviewed]: no
+    verdict was committed and the authority schedules no further attempt, so
+    without this post the only surface is the bounded run registry and the
+    task waits invisibly. The post names the task, the
     verification id, the gate, and the two forward paths that exist today —
     the assignee resubmitting through [submit_for_verification] (a legal
     transition from [AwaitingVerification] that supersedes this

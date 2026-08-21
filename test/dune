@@ -2586,7 +2586,6 @@
 
 (include stanzas/test_verifier_exact_lane.inc)
 
-(include stanzas/test_completion_authority_retry_policy.inc)
 
 (include stanzas/test_keeper_canary_facts.inc)
 (include stanzas/test_keeper_canary_evidence.inc)
@@ -2639,6 +2638,8 @@
 (include stanzas/test_keeper_operator_note.inc)
 
 (include stanzas/test_keeper_memory_journal_projection.inc)
+(include stanzas/test_review_prompt_sections_reach_the_model.inc)
+(include stanzas/test_prompt_templates_render.inc)
 
 (test
  (name test_code_address)

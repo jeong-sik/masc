@@ -63,7 +63,7 @@ let all_outcomes : (string * E.outcome) list =
     , E.Infrastructure_unavailable
         { stage = E.Review_preparation; detail = "request store unavailable" } )
   ; ( "not_reviewed"
-    , E.Not_reviewed { gate = "evaluator_unavailable"; detail = "no runtime"; retryable = true } )
+    , E.Not_reviewed { gate = "evaluator_unavailable"; detail = "no runtime" } )
   ; "commit_failed", E.Commit_failed { detail = "verification id mismatch" }
   ; "raised", E.Raised { detail = "Failure(\"boom\")" }
   ]
@@ -156,55 +156,71 @@ let test_outcomes_survive_replay () =
     all_outcomes
 ;;
 
-(* [Not_reviewed.retryable] is what tells an operator whether the completion
-   authority will keep polling this outcome or has already given up — it must
-   round-trip through the wire projection and through replay exactly like
-   [gate]/[detail] do, in both directions. *)
-let test_not_reviewed_retryable_survives_wire_and_replay () =
-  List.iter
-    (fun retryable ->
-       let label = if retryable then "retryable" else "non-retryable" in
-       let path = fresh_path (".not-reviewed-" ^ label ^ ".jsonl") in
-       let t = R.create ~path () in
-       let verification_id = "vrf-" ^ label in
-       register t ~verification_id ~started_at:5.0;
-       R.mark_completed
-         t
-         ~verification_id
-         ~outcome:
-           (E.Not_reviewed
-              { gate = "evaluator_unavailable"
-              ; detail = "newest conversation atom does not fit the model input budget"
-              ; retryable
-              })
-         ~tools:[]
-         ~elapsed_s:1.0
-         ();
-       (match R.get t ~verification_id with
-        | None -> fail (label ^ ": completed review should stay tracked")
-        | Some run ->
-          let json = R.run_to_yojson run in
-          check
-            (option bool)
-            (label ^ ": wire field")
-            (Some retryable)
-            (match field json "retryable" with
-             | Some (`Bool value) -> Some value
-             | _ -> None));
-       let replayed = R.replay path in
-       (match R.get replayed ~verification_id with
-        | None -> fail (label ^ ": lost on replay")
-        | Some run ->
-          let json = R.run_to_yojson run in
-          check
-            (option bool)
-            (label ^ ": replayed wire field")
-            (Some retryable)
-            (match field json "retryable" with
-             | Some (`Bool value) -> Some value
-             | _ -> None));
-       remove_if_exists path)
-    [ true; false ]
+(* [Not_reviewed] carries the gate and the detail and nothing else. The
+   completion authority no longer decides whether to poll this outcome again,
+   so there is no retry flag to project. The wire shape is a hard cut: a row
+   written by an older binary still carries [retryable], and [exact_fields]
+   rejects it rather than reading the row as if the field had never been
+   there. That rejection is the contract — a tolerated extra field would let
+   a stale retry decision travel silently into a registry that has no place
+   to put it. *)
+let test_not_reviewed_wire_shape_is_gate_and_detail () =
+  let path = fresh_path ".not-reviewed.jsonl" in
+  let t = R.create ~path () in
+  register t ~verification_id:"vrf-not-reviewed" ~started_at:5.0;
+  R.mark_completed
+    t
+    ~verification_id:"vrf-not-reviewed"
+    ~outcome:
+      (E.Not_reviewed
+         { gate = "invalid_verdict"
+         ; detail = "evaluator did not call report_review_verdict exactly once"
+         })
+    ~tools:[]
+    ~elapsed_s:1.0
+    ();
+  (match R.get t ~verification_id:"vrf-not-reviewed" with
+   | None -> fail "completed review should stay tracked"
+   | Some run ->
+     let json = R.run_to_yojson run in
+     check (option string) "gate on the wire" (Some "invalid_verdict")
+       (match field json "gate" with
+        | Some (`String value) -> Some value
+        | _ -> None);
+     check bool "no retry flag on the wire" true (Option.is_none (field json "retryable")));
+  let replayed = R.replay path in
+  (match R.get replayed ~verification_id:"vrf-not-reviewed" with
+   | None -> fail "not_reviewed lost on replay"
+   | Some run ->
+     let json = R.run_to_yojson run in
+     check bool "no retry flag after replay" true (Option.is_none (field json "retryable")));
+  remove_if_exists path
+;;
+
+(* A legacy row is skipped, not silently reinterpreted. *)
+let test_legacy_retryable_row_is_rejected () =
+  let path = fresh_path ".legacy-retryable.jsonl" in
+  remove_if_exists path;
+  let out = open_out path in
+  output_string
+    out
+    ({|{"event":"register","id":"vrf-legacy","started_at":1.0,"registration":|}
+     ^ {|{"task_id":"task-1","producer":"p","authority_kind":"system_llm_agent",|}
+     ^ {|"authority_actor":"verifier_exact"}}|}
+     ^ "\n"
+     ^ {|{"event":"complete","id":"vrf-legacy","completion":{"outcome":"not_reviewed",|}
+     ^ {|"elapsed_s":1.0,"tools":[],"gate":"invalid_verdict","detail":"d","retryable":true}}|}
+     ^ "\n");
+  close_out out;
+  let replayed = R.replay path in
+  check
+    bool
+    "legacy completion carrying retryable is not replayed"
+    true
+    (match R.get replayed ~verification_id:"vrf-legacy" with
+     | None -> true
+     | Some run -> not (String.equal (R.status_label run.status) "completed"));
+  remove_if_exists path
 ;;
 
 let test_replay_drops_running_reviews () =
@@ -236,7 +252,7 @@ let test_retry_replaces_the_prior_attempt () =
   R.mark_completed
     t
     ~verification_id:"vrf-retry"
-    ~outcome:(E.Not_reviewed { gate = "invalid_verdict"; detail = "no tool call"; retryable = true })
+    ~outcome:(E.Not_reviewed { gate = "invalid_verdict"; detail = "no tool call" })
     ~tools:[]
     ~elapsed_s:1.0
     ();
@@ -288,37 +304,6 @@ let test_unknown_outcome_label_is_an_error () =
     (Option.is_none (R.get replayed ~verification_id:"vrf-unknown"));
   check bool "unknown outcome evidence is preserved" true
     (String_util.contains_substring (Fs_compat.load_file path) "probably_fine");
-  remove_if_exists path
-;;
-
-(* Deploy contract for the retryable field this PR adds to [Not_reviewed]
-   (masc, task-336 P1 review): [retryable] is required, not optional-with-a-
-   default, because a missing-field default would make this a legacy-shape
-   compat reader — exactly what the repo's hard-cut policy forbids (#28735's
-   turn_record precedent: required field + a store cut at deploy, never a
-   silent default). A pre-this-PR [not_reviewed] row therefore does not
-   survive replay: it is malformed, dropped, and left on disk untouched
-   (fold_replay_events reports it through [malformed], which also blocks
-   [compact_replay_log] from ever running again on this file — the intended
-   operator action is to cut the store at deploy, not to let old rows
-   accumulate forever behind a permanently malformed line). This pins that
-   behavior as the deliberate contract, not a regression to fix later. *)
-let test_pre_retryable_not_reviewed_row_is_malformed_on_replay () =
-  let path = fresh_path ".pre-retryable-not-reviewed.jsonl" in
-  let content =
-    String.concat
-      "\n"
-      [ {|{"event":"register","id":"vrf-pre-retryable","started_at":1.0,"registration":{"task_id":"task-336","producer":"keeper-rondo-agent","authority_kind":"system_llm_agent","authority_actor":"reviewer"}}|}
-      ; {|{"event":"complete","id":"vrf-pre-retryable","completion":{"outcome":"not_reviewed","elapsed_s":1.0,"gate":"evaluator_unavailable","detail":"no runtime"}}|}
-      ; ""
-      ]
-  in
-  Fs_compat.save_file path content;
-  let replayed = R.replay path in
-  check bool "pre-retryable not_reviewed row is not replayed" true
-    (Option.is_none (R.get replayed ~verification_id:"vrf-pre-retryable"));
-  check bool "the malformed row is left on disk, not silently compacted away" true
-    (String_util.contains_substring (Fs_compat.load_file path) "vrf-pre-retryable");
   remove_if_exists path
 ;;
 
@@ -442,9 +427,13 @@ let () =
             test_outcome_detail_reaches_the_surface
         ; test_case "every outcome survives replay" `Quick test_outcomes_survive_replay
         ; test_case
-            "not_reviewed retryable survives the wire and replay, both values"
+            "not_reviewed wire shape is gate and detail only"
             `Quick
-            test_not_reviewed_retryable_survives_wire_and_replay
+            test_not_reviewed_wire_shape_is_gate_and_detail
+        ; test_case
+            "legacy row carrying retryable is rejected on replay"
+            `Quick
+            test_legacy_retryable_row_is_rejected
         ; test_case
             "replay drops running reviews"
             `Quick
@@ -465,10 +454,6 @@ let () =
             "rejected without a reason is an error"
             `Quick
             test_missing_outcome_payload_is_an_error
-        ; test_case
-            "a pre-retryable not_reviewed row is malformed on replay (deploy contract)"
-            `Quick
-            test_pre_retryable_not_reviewed_row_is_malformed_on_replay
         ; test_case "completed runs are pruned" `Quick test_completed_runs_are_pruned
         ; test_case
             "tool evidence keeps input and typed disposition"

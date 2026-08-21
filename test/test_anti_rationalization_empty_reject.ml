@@ -98,7 +98,7 @@ let test_evaluator_failure_is_unavailable_not_reject () =
    already exceeds the target's whole budget cannot be fixed by trying again
    with the same request, so [Agent_core.Error.is_retryable] already reports
    [false] for it (it is an [Agent (HookExecutionFailed _)]). [review] must
-   carry that through as [retryable = false] rather than default to the
+   carry that through as [evaluator_error_retryable = Some false] rather than default to the
    always-retry [true] every other gate uses. *)
 let test_structural_budget_failure_is_not_retryable () =
   with_reviewer
@@ -120,7 +120,10 @@ let test_structural_budget_failure_is_not_retryable () =
          "gate"
          "evaluator_unavailable"
          (AR.gate_to_string result.gate);
-       Alcotest.(check bool) "not retryable" false result.retryable)
+       Alcotest.(check (option bool))
+         "classified non-retryable"
+         (Some false)
+         result.evaluator_error_retryable)
 ;;
 
 (* Contrast case: a rate limit is exactly the kind of failure retrying is
@@ -139,7 +142,10 @@ let test_rate_limit_failure_stays_retryable () =
          "gate"
          "evaluator_unavailable"
          (AR.gate_to_string result.gate);
-       Alcotest.(check bool) "retryable" true result.retryable)
+       Alcotest.(check (option bool))
+         "classified retryable"
+         (Some true)
+         result.evaluator_error_retryable)
 ;;
 
 let test_reject_without_reason_is_malformed () =

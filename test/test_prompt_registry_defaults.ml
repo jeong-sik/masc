@@ -167,13 +167,6 @@ let () =
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "file source" "file"
                 (Prompt_registry.prompt_source "keeper.reply_guidelines"));
-          test_case "validate_required_prompt_files detects missing file" `Quick
-            (fun () ->
-              with_registry @@ fun ~dir:_ ~prompts_dir ->
-              Sys.remove (Filename.concat prompts_dir "test.templated.md");
-              let missing = Prompt_registry.validate_required_prompt_files () in
-              check bool "missing file found" true
-                (List.mem_assoc "test.templated" missing));
         ] );
       ( "rendering",
         [

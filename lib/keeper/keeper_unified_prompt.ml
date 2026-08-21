@@ -293,6 +293,28 @@ let quote_prompt_field value =
   Buffer.add_char buf '"';
   Buffer.contents buf
 
+(* What a degraded observation permits the Keeper to conclude is prose, and it
+   lives with the other prompt text under [config/prompts]. This module keeps
+   the state detection and the task id.
+
+   The data-only fallback is not a second source of truth: it exists because
+   the fact that the current task is in a degraded state has to reach the
+   prompt even if its sentence cannot be rendered, and losing the fact is worse
+   than losing the wording. [test_prompt_templates_render] renders every
+   registered key with its declared variables, so a broken template is a CI
+   failure rather than something this branch quietly absorbs. *)
+let observation_prose key vars ~fallback =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> String.trim text ^ "\n\n"
+  | Error detail ->
+    Log.Misc.error
+      "keeper observation prompt %s did not render, falling back to the bare \
+       observation: %s"
+      key
+      detail;
+    fallback
+;;
+
 let format_current_task_observation = function
   | Keeper_world_observation_inputs.No_current_task -> None
   | Keeper_world_observation_inputs.Current_task task -> Some (format_current_task task)
@@ -301,23 +323,41 @@ let format_current_task_observation = function
       (format_current_task_with_heading
          ~heading:"Current Task (recovery observation; non-authoritative)"
          task
-       ^ "- The primary backlog is unavailable. Do not use this recovery observation as mutation authority.\n\n")
+       ^ observation_prose
+           Prompt_names.keeper_observation_recovered_current_task
+           []
+           ~fallback:"- The primary backlog is unavailable.\n\n")
   | Keeper_world_observation_inputs.Current_task_missing { task_id; recovery = None } ->
+    let task_id = Keeper_id.Task_id.to_string task_id in
     Some
-      (Printf.sprintf
-         "### Current Task\n- Keeper metadata references %s, but that task is absent from the authoritative backlog. Do not infer or invent task details.\n\n"
-         (Keeper_id.Task_id.to_string task_id))
+      (observation_prose
+         Prompt_names.keeper_observation_current_task_absent
+         [ "task_id", task_id ]
+         ~fallback:
+           (Printf.sprintf
+              "### Current Task\n- %s is absent from the authoritative backlog.\n\n"
+              task_id))
   | Keeper_world_observation_inputs.Current_task_missing
       { task_id; recovery = Some _ } ->
+    let task_id = Keeper_id.Task_id.to_string task_id in
     Some
-      (Printf.sprintf
-         "### Current Task\n- Keeper metadata references %s, but it was not found in the recovery snapshot. The primary backlog is unavailable, so absence is not authoritative.\n\n"
-         (Keeper_id.Task_id.to_string task_id))
+      (observation_prose
+         Prompt_names.keeper_observation_current_task_absent_in_recovery
+         [ "task_id", task_id ]
+         ~fallback:
+           (Printf.sprintf
+              "### Current Task\n- %s was not found in the recovery snapshot.\n\n"
+              task_id))
   | Keeper_world_observation_inputs.Current_task_unavailable { task_id; error = _ } ->
+    let task_id = Keeper_id.Task_id.to_string task_id in
     Some
-      (Printf.sprintf
-         "### Current Task\n- Task %s could not be observed because the backlog is unavailable. This does not mean the task is absent; preserve its ownership state.\n\n"
-         (Keeper_id.Task_id.to_string task_id))
+      (observation_prose
+         Prompt_names.keeper_observation_current_task_unobservable
+         [ "task_id", task_id ]
+         ~fallback:
+           (Printf.sprintf
+              "### Current Task\n- %s could not be observed.\n\n"
+              task_id))
 ;;
 
 let format_prompt_row fields =

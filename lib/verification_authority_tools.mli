@@ -17,6 +17,14 @@ type forest
 val create :
   config:Workspace.config -> producer:string -> (t, string) result
 
+val root_layout : t -> string list
+(** The paths the lookup tools resolve against, listed from disk at review
+    time and relative to the ownership root: every immediate entry, plus one
+    further level so a checkout under [repos/] names itself. A directory with
+    no children is marked, because an empty tree and an unreachable one are
+    different findings. [[]] when the root itself cannot be listed. Bounded;
+    a truncated listing says so in its last line. *)
+
 val schemas : t -> Types_core.tool_schema list
 
 val dispatch : t -> name:string -> args:Yojson.Safe.t -> (string, string) result
@@ -26,6 +34,12 @@ val create_forest :
 (** Bind a read-only verifier surface to a closed set of producer trees. The
     filesystem schemas require an exact [producer] chosen from this set; the
     dispatcher refuses every other identity before reaching a tree. *)
+
+val forest_root_layout : forest -> string list
+(** {!root_layout} for every producer in the forest, each entry prefixed with
+    the producer it belongs to, because the forest dispatcher requires an
+    exact producer argument and a bare path would not name one. Bounded
+    across the whole forest. *)
 
 val forest_schemas : forest -> Types_core.tool_schema list
 

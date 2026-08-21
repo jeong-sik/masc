@@ -1093,7 +1093,6 @@ export function votePost(postId: string, direction: 'up' | 'down'): Promise<unkn
   return post('/api/v1/tools/masc_board_vote', {
     post_id: postId,
     direction,
-    vote: direction,
     voter: defaultBoardVoter(),
   })
 }
@@ -1102,7 +1101,6 @@ export function voteComment(commentId: string, direction: 'up' | 'down'): Promis
   return post('/api/v1/tools/masc_board_comment_vote', {
     comment_id: commentId,
     direction,
-    vote: direction,
     voter: defaultBoardVoter(),
   })
 }

@@ -24,7 +24,7 @@ Scope levels:
 | Track | Goal | Why now | Primary references |
 |------|------|---------|--------------------|
 | Product truth and onboarding | Make the product easy to describe and start correctly | front-door docs and product posture are still fragmented | `README.md`, `docs/PRODUCT-OPERATING-PLAN.md`, `docs/PRODUCT-REVIEW.md` |
-| GitHub planning hygiene | Make issues, PRs, and releases reflect product reality instead of drifting | `type:*` exists, but `target:*` and release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
+| GitHub planning hygiene | Make issues, PRs, and releases reflect product reality instead of drifting | Issues declare a `masc-triage` block; release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
 | Scope hardening | Tighten the parts of the product users actually depend on first | CI truth, transport truth, config visibility, and release truth are blocking trust | `CHANGELOG.md`, `docs/spec/SPEC-INDEX.md`, open issues below |
 
 ## Now

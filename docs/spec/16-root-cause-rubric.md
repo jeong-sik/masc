@@ -18,7 +18,10 @@ Every open issue in `masc` and `agent core` should be classifiable into one or m
 
 The rubric is applied two ways:
 
-1. GitHub labels `root-cause:{SSOT,TEL,BND,SIL,VAR,STR,DET}` are attached to each issue that matches one or more markers.
+1. The issue body declares `root: <value>[, <value>]` in its `masc-triage` block for each marker that matches;
+   the `Issue Taxonomy` workflow projects those onto `root/*` labels. The vocabulary lives in
+   `.github/issue-taxonomy.json` and carries one value this rubric does not yet describe: `ndt`
+   (non-determinism not embraced - retry, fallback, or jitter absent).
 2. Benchmark: `~/me/lab/keeper-benchmark/bookshelf/` seeds one bug per category and measures whether the Keeper agent detects, fixes, and self-classifies them.
 
 ## The 7 Categories
@@ -27,7 +30,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:SSOT` |
+| Label | `root/ssot` |
 | Color | `#aa0000` |
 | Marker | Same literal or constant appears in ≥2 sites AND at least one site does not go through `Env_config_runtime` / `Config.*` |
 | Example | `"127.0.0.1"` inlined in 6 files with one using a different host (`#8387`) |
@@ -37,7 +40,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:TEL` |
+| Label | `root/telemetry` |
 | Color | `#0066cc` |
 | Marker | A request path, state transition, or error branch exists without a corresponding metric / span / `correlation_id` propagation |
 | Example | `emit_task_activity ~correlation_id:_` signature exists but no caller wires a real value (`#7520`) |
@@ -47,7 +50,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:BND` |
+| Label | `root/boundary` |
 | Color | `#ff6600` |
 | Marker | MASC-side code reimplements something agent core already provides: lifecycle, budget, retry, approval hook, context injector |
 | Example | `context_agent_core_sync` manually tracking token counts duplicates agent core context_injector |
@@ -57,7 +60,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:SIL` |
+| Label | `root/silent` |
 | Color | `#990066` |
 | Marker | Error / unknown branch coerced to a default without caller signal: `try ... with _ -> default`, `match ... Error _ -> ""`, `Result.value ~default`, `_ -> Unknown → Some Default` |
 | Example | `timeout_s >= interval_s silently clamps across 3 components` (`#7695`) |
@@ -67,7 +70,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:VAR` |
+| Label | `root/variant` |
 | Color | `#006633` |
 | Marker | A `match` uses `| _ -> fallback` where the wildcard collapses a constructor added later; or a schema enum hand-rolled drifts from a Variant type |
 | Example | A schema enum is maintained separately from its typed variant and omits a constructor |
@@ -77,7 +80,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:STR` |
+| Label | `root/string` |
 | Color | `#cc6600` |
 | Marker | Control flow branches on `String.contains`, `Str.regexp`, or substring check where a structural parse exists |
 | Example | Title-similarity triage pairing PRs with issues produces 0/17 valid matches (2026-04-19 incident) |
@@ -87,7 +90,7 @@ The rubric is applied two ways:
 
 | Field | Content |
 |-------|---------|
-| Label | `root-cause:DET` |
+| Label | `root/det` |
 | Color | `#333399` |
 | Marker | Code assumes a single input shape, a race-free ordering, or a stable LLM tool-call format without synchronization or parsing fallback |
 | Example | Admission queue lacks fd/memory saturation gate (`#7500`); shared `ref` counter without `Atomic.int` or `Mutex` |
@@ -117,7 +120,8 @@ For a new or existing issue:
 
 1. Read title + body first 800 chars.
 2. For each of the 7 triggers above, check marker match.
-3. Apply `root-cause:<CODE>` via `gh issue edit <N> --repo <repo> --add-label "root-cause:<CODE>"`.
+3. Put the matching value in the issue body's `masc-triage` block under `root:`. Do not add the label by hand;
+   the workflow reconciles labels from the block and will remove one that the block does not declare.
 4. If no marker matches, do not apply a default label — either the rubric is underspecified for this case (data for next iteration) or the issue is a pure feature request, not a root-cause fix.
 
 ## Benchmark Linkage

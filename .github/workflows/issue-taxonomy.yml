@@ -39,6 +39,11 @@ jobs:
 
       - uses: actions/github-script@v9
         with:
+      - uses: actions/github-script@v9
+        env:
+          DISPATCH_ISSUE_NUMBER: ${{ inputs.issue_number }}
+          DISPATCH_SCOPE: ${{ inputs.scope }}
+        with:
           script: |
             const fs = require('fs');
             const { owner, repo } = context.repo;
@@ -50,7 +55,6 @@ jobs:
             for (const ax of Object.values(SSOT.axes))
               for (const v of Object.values(ax.values)) knownLabels.add(v.label);
             for (const f of Object.values(SSOT.flags)) knownLabels.add(f.label);
-            for (const e of Object.values(SSOT.standalone_labels)) knownLabels.add(e.label);
 
             const repoLabels = new Set(
               (await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 }))
@@ -65,16 +69,39 @@ jobs:
               return;
             }
 
+            const declaredKeys = new Set([...Object.keys(SSOT.axes), ...Object.keys(SSOT.flags)]);
+
+            // severity_order is the priority order the docs quote. Keep it honest against the
+            // value set it orders, or the two drift inside one file.
+            for (const [ax, spec] of Object.entries(SSOT.axes)) {
+              if (!spec.severity_order) continue;
+              const a = [...spec.severity_order].sort().join(',');
+              const b = Object.keys(spec.values).sort().join(',');
+              if (a !== b) {
+                core.setFailed(`axis '${ax}': severity_order does not cover its values (${a} vs ${b}).`);
+                return;
+              }
+            }
+
+            const orderedValues = (spec) => spec.severity_order || Object.keys(spec.values);
+
             function parseDeclaration(body) {
-              const m = new RegExp('```' + LANG + '\\s*\\n([\\s\\S]*?)```').exec(body || '');
-              if (!m) return { present: false };
+              const re = new RegExp('```' + LANG + '\\s*\\n([\\s\\S]*?)```', 'g');
+              const blocks = [...(body || '').matchAll(re)];
+              if (blocks.length === 0) return { present: false };
+              if (blocks.length > 1)
+                return { present: true, error: `the body carries ${blocks.length} ${LANG} blocks; keep exactly one` };
               const out = {};
-              for (const raw of m[1].split('\n')) {
+              for (const raw of blocks[0][1].split('\n')) {
                 const line = raw.trim();
                 if (!line || line.startsWith('#')) continue;
                 const sep = line.indexOf(':');
                 if (sep < 0) return { present: true, error: `line is not key: value -> ${line}` };
-                out[line.slice(0, sep).trim()] = line.slice(sep + 1).trim();
+                const key = line.slice(0, sep).trim().toLowerCase();
+                if (!declaredKeys.has(key))
+                  return { present: true, error: `unknown key '${key}'. Keys: ${[...declaredKeys].join(', ')}` };
+                if (key in out) return { present: true, error: `key '${key}' appears twice` };
+                out[key] = line.slice(sep + 1).trim().toLowerCase();
               }
               return { present: true, fields: out };
             }
@@ -84,30 +111,35 @@ jobs:
             }
 
             function resolve(fields) {
-              const add = [], errors = [], axisPrefixes = [];
+              const add = [], errors = [];
               for (const [ax, spec] of Object.entries(SSOT.axes)) {
-                axisPrefixes.push(ax + '/');
                 const raw = fields[ax];
                 if (raw === undefined || raw === '') {
                   if (spec.required) errors.push(`axis '${ax}' is not declared.`);
                   continue;
                 }
-                const vals = spec.cardinality === 'many' ? splitList(raw) : [raw];
-                if (spec.cardinality === 'one' && vals.length !== 1)
-                  errors.push(`axis '${ax}' takes exactly one value, got: ${raw}`);
+                const vals = splitList(raw);
+                if (spec.cardinality === 'one' && vals.length !== 1) {
+                  errors.push(`axis '${ax}' takes exactly one value, got ${vals.length}: ${raw}`);
+                  continue;
+                }
                 for (const v of vals) {
                   const hit = spec.values[v];
-                  if (!hit) errors.push(`'${ax}: ${v}' is not in the vocabulary. Allowed: ${Object.keys(spec.values).join(', ')}`);
+                  if (!hit) errors.push(`'${ax}: ${v}' is not in the vocabulary. Allowed: ${orderedValues(spec).join(', ')}`);
                   else add.push(hit.label);
                 }
               }
               for (const [flag, spec] of Object.entries(SSOT.flags)) {
-                const raw = (fields[flag] || '').toLowerCase();
+                const raw = fields[flag] || '';
                 if (raw === 'true') add.push(spec.label);
                 else if (raw && raw !== 'false') errors.push(`'${flag}' takes true or false, got: ${raw}`);
               }
-              return { add, errors, axisPrefixes };
+              return { add: [...new Set(add)], errors };
             }
+
+            const axisPrefixes = Object.keys(SSOT.axes).map((a) => a + '/');
+            const flagNames = new Set(Object.keys(SSOT.flags));
+            const managed = (name) => axisPrefixes.some((p) => name.startsWith(p)) || flagNames.has(name);
 
             async function commentOnce(issue_number, body) {
               const existing = await github.paginate(github.rest.issues.listComments, {
@@ -115,46 +147,49 @@ jobs:
               });
               const mine = existing.find((c) => (c.body || '').includes(MARKER));
               const payload = `${MARKER}\n${body}`;
-              if (mine) {
-                if ((mine.body || '').trim() === payload.trim()) return;
-                await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: payload });
-              } else {
+              if (!mine) {
                 await github.rest.issues.createComment({ owner, repo, issue_number, body: payload });
+              } else if ((mine.body || '').trim() !== payload.trim()) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body: payload });
               }
             }
 
             function template() {
               const lines = Object.entries(SSOT.axes).map(([ax, spec]) => {
-                const opts = Object.keys(spec.values).join(' | ');
-                return `${ax}: ${spec.required ? '<' + opts + '>' : '(optional) ' + opts}`;
+                const opts = orderedValues(spec).join(' | ');
+                return `${ax}: ${spec.required ? opts : '(optional) ' + opts}`;
               });
-              return ['```' + LANG, ...lines, 'must-do: false', '```'].join('\n');
+              for (const flag of Object.keys(SSOT.flags)) lines.push(`${flag}: true or false`);
+              return ['```' + LANG, ...lines, '```'].join('\n');
             }
 
-            async function apply(issue_number) {
-              const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+            // Labels claim a classification. When the body does not declare one, or declares
+            // one we cannot read, the labels must not keep claiming it.
+            async function clearManaged(issue_number, current) {
+              const stale = current.filter(managed);
+              for (const label of stale)
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name: label })
+                  .catch((e) => { if (e.status !== 404) throw e; });
+              return stale;
+            }
+
+            async function apply(issue) {
+              const issue_number = issue.number;
               if (issue.pull_request) return { issue_number, skipped: 'pull request' };
+              const current = issue.labels.map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean);
 
               const decl = parseDeclaration(issue.body);
-              if (!decl.present)
-                return (await commentOnce(issue_number,
-                  `No taxonomy declaration block, so no labels were applied. Add this block to the issue body.\n\n${template()}\n\n` +
-                  `Value meanings live in \`.github/issue-taxonomy.json\`.`),
-                  { issue_number, declared: false });
+              const reject = async (why) => {
+                const cleared = await clearManaged(issue_number, current);
+                await commentOnce(issue_number, `${why}\n\n${template()}\n\nValue meanings live in \`.github/issue-taxonomy.json\`.`);
+                return { issue_number, declared: false, cleared };
+              };
+              if (!decl.present) return reject('No taxonomy declaration block, so no labels were applied.');
+              if (decl.error) return reject(`Could not read the declaration block: ${decl.error}`);
 
-              if (decl.error)
-                return (await commentOnce(issue_number, `Could not read the declaration block: ${decl.error}`),
-                  { issue_number, declared: false });
+              const { add, errors } = resolve(decl.fields);
+              if (errors.length) return reject(`The declaration block does not match the vocabulary.\n\n- ${errors.join('\n- ')}`);
 
-              const { add, errors, axisPrefixes } = resolve(decl.fields);
-              if (errors.length)
-                return (await commentOnce(issue_number,
-                  `The declaration block does not match the vocabulary.\n\n- ${errors.join('\n- ')}\n\n${template()}`),
-                  { issue_number, declared: false, errors });
-
-              const managed = (name) =>
-                axisPrefixes.some((p) => name.startsWith(p)) || Object.keys(SSOT.flags).includes(name);
-              const current = issue.labels.map((l) => (typeof l === 'string' ? l : l.name)).filter(Boolean);
               const target = new Set(add);
               const toRemove = current.filter((l) => managed(l) && !target.has(l));
               const toAdd = [...target].filter((l) => !current.includes(l));
@@ -165,23 +200,39 @@ jobs:
               if (toAdd.length)
                 await github.rest.issues.addLabels({ owner, repo, issue_number, labels: toAdd });
 
-              await commentOnce(issue_number, `Taxonomy applied: ${[...target].sort().join(', ') || '(none)'}`);
+              // A run that changed nothing says nothing. Sweeps would otherwise notify every subscriber.
+              if (toAdd.length || toRemove.length)
+                await commentOnce(issue_number, `Taxonomy applied: ${[...target].sort().join(', ')}`);
               return { issue_number, declared: true, added: toAdd, removed: toRemove };
             }
 
-            let numbers = [];
-            if (context.payload.issue?.number) numbers = [context.payload.issue.number];
-            else if (core.getInput('issue_number')) numbers = [Number(core.getInput('issue_number'))];
-            else if ((core.getInput('scope') || 'single') === 'open')
-              numbers = (await github.paginate(github.rest.issues.listForRepo, {
+            const dispatchNumber = (process.env.DISPATCH_ISSUE_NUMBER || '').trim();
+            const dispatchScope = (process.env.DISPATCH_SCOPE || 'single').trim();
+
+            let issues = [];
+            if (context.payload.issue?.number) {
+              const { data } = await github.rest.issues.get({ owner, repo, issue_number: context.payload.issue.number });
+              issues = [data];
+            } else if (dispatchNumber) {
+              const n = Number(dispatchNumber);
+              if (!Number.isInteger(n) || n <= 0) { core.setFailed(`invalid issue number: ${dispatchNumber}`); return; }
+              const { data } = await github.rest.issues.get({ owner, repo, issue_number: n });
+              issues = [data];
+            } else if (dispatchScope === 'open') {
+              // listForRepo already carries body and labels; re-fetching each issue would
+              // spend the token's hourly budget before the sweep finishes.
+              issues = (await github.paginate(github.rest.issues.listForRepo, {
                 owner, repo, state: 'open', per_page: 100,
-              })).filter((i) => !i.pull_request).map((i) => i.number);
-            else {
+              })).filter((i) => !i.pull_request);
+            } else {
               core.setFailed('workflow_dispatch requires issue_number or scope=open.');
               return;
             }
 
-            for (const n of numbers) {
-              if (!Number.isInteger(n) || n <= 0) { core.setFailed(`invalid issue number: ${n}`); return; }
-              core.info(JSON.stringify(await apply(n)));
+            let changed = 0;
+            for (const issue of issues) {
+              const r = await apply(issue);
+              if (r.added?.length || r.removed?.length || r.cleared?.length) changed++;
+              core.info(JSON.stringify(r));
             }
+            core.info(`scanned ${issues.length}, changed ${changed}`);

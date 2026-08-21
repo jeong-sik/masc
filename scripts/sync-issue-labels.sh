@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Projects .github/issue-taxonomy.json onto the repository labels.
-# Labels absent from the SSOT are deleted. Deleting a label emits an unlabeled event on every issue that carried it.
+#
+# Ownership is scoped: this script only creates, edits, or deletes labels whose name
+# matches an SSOT axis prefix (kind/, area/, ...) or an SSOT flag name. Labels owned by
+# other systems - dependabot's `dependencies`, the release gate's `release-blocker` - are
+# left alone. An earlier unscoped sweep deleted those and broke both consumers.
+#
+# Deleting a label removes it from every issue that carried it and emits an unlabeled
+# event on each one.
 set -euo pipefail
 
 REPO="${1:-jeong-sik/masc}"
@@ -12,22 +19,25 @@ APPLY="${APPLY:-0}"
 
 desired="$(jq -r '
   [ (.axes | to_entries[] | .value.values | to_entries[] | .value),
-    (.flags | to_entries[] | .value),
-    (.standalone_labels | to_entries[] | .value) ]
+    (.flags | to_entries[] | .value) ]
   | .[] | [.label, .color, .description] | @tsv' "$SSOT")"
 
-current="$(gh label list --repo "$REPO" --limit 400 --json name,color,description \
-  --jq '.[] | [.name, .color, (.description // "")] | @tsv')"
+# Every name this script is allowed to touch: axis prefixes plus flag names.
+owned_re="$(jq -r '
+  ((.axes | keys | map(. + "/")) + (.flags | keys | map(. + "$")))
+  | map("^" + .) | join("|")' "$SSOT")"
 
+current_all="$(gh label list --repo "$REPO" --limit 400 --json name --jq '.[].name' | sort)"
+current_owned="$(grep -E "$owned_re" <<<"$current_all" || true)"
 desired_names="$(cut -f1 <<<"$desired" | sort)"
-current_names="$(cut -f1 <<<"$current" | sort)"
 
-to_delete="$(comm -13 <(echo "$desired_names") <(echo "$current_names"))"
-to_create="$(comm -23 <(echo "$desired_names") <(echo "$current_names"))"
+to_delete="$(comm -13 <(echo "$desired_names") <(echo "$current_owned"))"
+to_create="$(comm -23 <(echo "$desired_names") <(echo "$current_owned"))"
+foreign_count=$(( $(wc -l <<<"$current_all") - $(wc -l <<<"${current_owned:-}") ))
 
-echo "ssot=$(wc -l <<<"$desired_names" | tr -d ' ') repo=$(wc -l <<<"$current_names" | tr -d ' ')"
-[ -n "$to_create" ] && echo "to create:" && echo "$to_create" | sed 's/^/  + /'
-[ -n "$to_delete" ] && echo "to delete:" && echo "$to_delete" | sed 's/^/  - /'
+echo "ssot=$(wc -l <<<"$desired_names" | tr -d ' ') owned_in_repo=$(grep -c . <<<"${current_owned:-}" || echo 0) untouched=$foreign_count"
+[ -n "$to_create" ] && { echo "to create:"; sed 's/^/  + /' <<<"$to_create"; }
+[ -n "$to_delete" ] && { echo "to delete (owned prefix, absent from SSOT):"; sed 's/^/  - /' <<<"$to_delete"; }
 
 if [ "$APPLY" != "1" ]; then
   echo

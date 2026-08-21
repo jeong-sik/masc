@@ -90,9 +90,9 @@ let group_pending_by_goal work =
    ledger row lost the durable proof request is re-armed via
    [mark_proof_pending] and joins the work set, the same recovery
    [answer_verifying_repeat] performs on the MCP surface. A [Verifying] goal
-   with a committed [Proof_proven] verdict is the
-   crash-between-writes case the keeper's repeated [request_complete]
-   reconciles; the lane must not overwrite that verdict. *)
+   with a committed proof verdict is the crash-between-writes case: the exact
+   stored verdict reconciles the missing phase/event effect without another
+   model call or ledger rewrite. *)
 
 let collect_pending config : (pending_work list, string) result =
   match Goal_verification.load_records config with
@@ -120,9 +120,9 @@ let collect_pending config : (pending_work list, string) result =
            criterion @ proof)
         records
     in
-    let rearmed =
-      Goal_store.list_goals config ~phase:Goal_phase.Verifying ()
-      |> List.filter_map (fun (goal : Goal_store.goal) ->
+    let rec reconcile_verifying acc = function
+      | [] -> Ok (List.rev acc)
+      | (goal : Goal_store.goal) :: rest ->
         if
           List.exists
             (fun work ->
@@ -131,7 +131,7 @@ let collect_pending config : (pending_work list, string) result =
                 | Criterion_check -> false)
                && String.equal work.goal_id goal.id)
             from_rows
-        then None
+        then reconcile_verifying acc rest
         else
           match
             List.find_opt
@@ -140,32 +140,67 @@ let collect_pending config : (pending_work list, string) result =
               records
           with
           | Some
-              { Goal_verification.completion =
-                  (Goal_verification.Proof_proven _ | Goal_verification.Proof_pending _)
-              ; _
-              } -> None
+              { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
+            reconcile_verifying acc rest
           | Some
               { Goal_verification.completion =
-                  ( Goal_verification.Completion_idle
-                  | Goal_verification.Proof_refuted _ )
+                  (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _)
               ; _
-              }
+              } ->
+            (match Workspace_goals.reconcile_committed_proof config ~goal_id:goal.id with
+             | Error detail ->
+               Error
+                 (Printf.sprintf
+                    "goal verifier could not reconcile committed proof goal_id=%s \
+                     detail=%s"
+                    goal.id
+                    detail)
+             | Ok Workspace_goals.No_committed_proof ->
+               Error
+                 (Printf.sprintf
+                    "goal verifier saw a committed proof but reconciliation \
+                     found none goal_id=%s"
+                    goal.id)
+             | Ok (Workspace_goals.Reconciled phase) ->
+               Log.Misc.info
+                 "goal verifier reconciled committed proof after restart \
+                  goal_id=%s phase=%s"
+                 goal.id
+                 (Goal_phase.to_string phase);
+               reconcile_verifying acc rest
+             | Ok (Workspace_goals.Reconciliation_not_needed phase) ->
+               Log.Misc.info
+                 "goal verifier skipped proof reconciliation after concurrent \
+                  phase change goal_id=%s phase=%s"
+                 goal.id
+                 (Goal_phase.to_string phase);
+               reconcile_verifying acc rest)
+          | Some
+              { Goal_verification.completion = Goal_verification.Completion_idle; _ }
           | None ->
             (match Goal_verification.mark_proof_pending config ~goal_id:goal.id with
              | Ok _ ->
                Log.Misc.info
                  "goal verifier re-armed a missing proof request (P0-2) goal_id=%s"
                  goal.id;
-               Some { goal_id = goal.id; kind = Completion_proof }
+               reconcile_verifying
+                 ({ goal_id = goal.id; kind = Completion_proof } :: acc)
+                 rest
              | Error msg ->
-               Log.Misc.error
-                 "goal verifier could not re-arm a missing proof request goal_id=%s \
-                  detail=%s"
-                 goal.id
-                 msg;
-               None))
+               Error
+                 (Printf.sprintf
+                    "goal verifier could not re-arm a missing proof request \
+                     goal_id=%s detail=%s"
+                    goal.id
+                    msg))
     in
-    Ok (from_rows @ rearmed)
+    (match
+       reconcile_verifying
+         []
+         (Goal_store.list_goals config ~phase:Goal_phase.Verifying ())
+     with
+     | Error _ as error -> error
+     | Ok rearmed -> Ok (from_rows @ rearmed))
 ;;
 
 (* {1 Review request construction}

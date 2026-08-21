@@ -755,7 +755,7 @@ let test_constraint_category_excludes_self_imposed_scope () =
       (String_util.contains_substring user_text
          "does not earn retention by already being there");
     (* Scoping the omit rule to the constraint bullet left the category itself
-       as the escape hatch. Observed live 2026-08-05 within one hour: gamma's
+       as the escape hatch. Observed live 2026-08-05 within one hour: one Keeper's
        store went from revision 129 carrying [constraint] "standing-by policy,
        only intervening ... when directly mentioned" to revision 131 carrying
        [preference] "Skip polling on non-scheduled wakes, acting only when the
@@ -776,10 +776,10 @@ let test_constraint_category_excludes_self_imposed_scope () =
       (String_util.contains_substring user_text
          "drop a stored memory that no external rule enforces but that still \
           narrows what the agent takes on");
-    (* Measured 2026-08-05. gamma's operator instructions say "@gamma로
+    (* Measured 2026-08-05. That Keeper's operator instructions say "@<keeper>로
        요청받으면 같은 post_id에 구체적인 댓글을 남긴다" -- when to act. The
        stored memory reads "standing-by policy, only intervening in board posts
-       or tasks when directly mentioned (@gamma) or assigned" -- the
+       or tasks when directly mentioned (@<keeper>) or assigned" -- the
        inverse, with an exclusivity the operator never wrote. The category
        rules do not catch it because it looks like operator policy, which is
        the family they preserve. This is about the shape of the statement, not

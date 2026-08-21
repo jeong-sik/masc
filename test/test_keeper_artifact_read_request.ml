@@ -1,6 +1,6 @@
 (** Per-field diagnostics for [keeper_artifact_read] request parsing.
 
-    Live failure 2026-08-05 20:06:36 (keeper gamma):
+    Live failure 2026-08-05 20:06:36:
     [{"max_bytes": 565244, "offset": 0, "sha256": "8ee32b2a…740c"}] was
     answered with ["expected sha256, non-negative offset, and max_bytes
     1..65536"]. The sha256 was correct; [max_bytes] was over the maximum.

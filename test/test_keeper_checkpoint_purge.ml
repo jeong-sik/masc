@@ -1,5 +1,5 @@
 (* RFC-0351 S1: deterministic offline checkpoint purge. The rules were
-   measured live on the delta checkpoint (1,315 -> 579 messages, -28.0%
+   measured live on one Keeper's checkpoint (1,315 -> 579 messages, -28.0%
    bytes); these tests pin the rule contract so the checked-in tool cannot
    drift from what was validated. *)
 
@@ -130,7 +130,7 @@ let test_reasoning_strip_scope () =
 (* Contract change: R2 used to skip any message carrying a ToolUse, so the
    assistant message that opens a tool cycle kept its unsigned reasoning. On an
    agentic keeper that is almost every assistant message — measured on the
-   alpha checkpoint, 418 of 422 surviving unsigned Thinking blocks (490,370 B,
+   that checkpoint, 418 of 422 surviving unsigned Thinking blocks (490,370 B,
    41.0% of the file) were held by this rule. Unsigned reasoning carries no
    signature to replay, so the exemption bought nothing. *)
 let test_unsigned_reasoning_inside_tool_cycle_is_stripped () =
@@ -266,7 +266,7 @@ let test_cycle_overlapping_protected_tail_is_untouched () =
 let test_strip_revealed_duplicates_collapse_in_one_pass () =
   (* Three assistant replies that differ only in their reasoning become
      byte-identical once R2 strips them; R1 must see the stripped form in the
-     same pass (measured on the alpha checkpoint: the reverse ordering left
+     same pass (measured on that checkpoint: the reverse ordering left
      229 duplicates for a second run to find). *)
   let reply thinking =
     block_message Types.Assistant [ unsigned_thinking thinking; Types.Text "same answer" ]

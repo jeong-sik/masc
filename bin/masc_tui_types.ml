@@ -83,14 +83,6 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
-(** Goal status from /api/v1/dashboard/planning. Unknown wire values are
-    rejected at decode time so the renderer cannot silently dim a new state. *)
-type planning_goal_status =
-  | Planning_goal_active
-  | Planning_goal_paused
-  | Planning_goal_done
-  | Planning_goal_dropped
-
 (** Approval / pending confirmation item *)
 type approval_item = {
   ap_token: string;
@@ -135,28 +127,30 @@ type overview_snapshot = {
   ov_generated_at: string;
 }
 
-(** Planning goal from /api/v1/dashboard/planning *)
-type planning_goal = {
+(** Planning projections from [Tui_decode], which owns the current wire
+    contract and its behavioral decoder tests. *)
+type planning_goal = Tui_decode.planning_goal
+  = {
   pg_id: string;
   pg_title: string;
-  pg_status: planning_goal_status;
-  pg_phase: string;
+  pg_phase: Goal_phase.t;
   pg_priority: int;
   pg_due_date: string option;
   pg_metric: string option;
   pg_target_value: string option;
 }
 
-(** Planning rollup from /api/v1/dashboard/planning *)
-type planning_rollup = {
+type planning_rollup = Tui_decode.planning_rollup
+  = {
   pr_active: int;
   pr_paused: int;
+  pr_verifying: int;
   pr_done: int;
   pr_dropped: int;
 }
 
-(** Planning task backlog summary *)
-type planning_backlog = {
+type planning_backlog = Tui_decode.planning_backlog
+  = {
   pb_todo: int;
   pb_claimed: int;
   pb_running: int;
@@ -164,8 +158,8 @@ type planning_backlog = {
   pb_cancelled: int;
 }
 
-(** Planning snapshot from /api/v1/dashboard/planning *)
-type planning_snapshot = {
+type planning_snapshot = Tui_decode.planning_snapshot
+  = {
   pl_goals: planning_goal list;
   pl_rollup: planning_rollup;
   pl_backlog: planning_backlog;
@@ -210,8 +204,10 @@ type view_mode = surface
 type state = {
   mutable agents: agent list;
   mutable tasks: task list;
+  mutable tasks_error: string option;
   mutable events: event list;
   mutable keepers: keeper list;
+  mutable keepers_error: string option;
   mutable connection_status: connection_status;
   mutable last_refresh: float;
   mutable view: view_mode;
@@ -250,8 +246,10 @@ type state = {
 let create_state ~workspace ~port ~refresh_interval = {
   agents = [];
   tasks = [];
+  tasks_error = None;
   events = [];
   keepers = [];
+  keepers_error = None;
   connection_status = Disconnected;
   last_refresh = 0.0;
   view = Overview;

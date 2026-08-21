@@ -193,6 +193,321 @@ let count_applications_with_label_containing_call_in_value_binding
   !total
 ;;
 
+let count_exact_applications_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~arguments_match
+  =
+  let structure = parse_implementation_or_fail module_path in
+  let count_in_expression expression =
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self expression ->
+            (match expression.pexp_desc with
+             | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+               when String.equal (longident_to_string txt) callee
+                    && arguments_match args -> incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self expression)
+      }
+    in
+    iter.expr iter expression;
+    !count
+  in
+  let total = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self binding ->
+          (match binding.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when String.equal txt binding_name ->
+             total := !total + count_in_expression binding.pvb_expr
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self binding)
+    }
+  in
+  iter.structure iter structure;
+  !total
+;;
+
+let count_applications_with_exact_positional_constructor_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~position
+      ~constructor
+  =
+  let arguments_match args =
+    args
+    |> List.filter_map (function
+      | Asttypes.Nolabel, argument -> Some argument
+      | (Asttypes.Labelled _ | Asttypes.Optional _), _ -> None)
+    |> fun positional_arguments -> List.nth_opt positional_arguments position
+    |> Option.exists (fun (argument : Parsetree.expression) ->
+      match argument.pexp_desc with
+      | Pexp_construct ({ txt; _ }, None) ->
+          String.equal (longident_to_string txt) constructor
+      | _ -> false)
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
+let positional_argument args position =
+  args
+  |> List.filter_map (function
+    | Asttypes.Nolabel, argument -> Some argument
+    | (Asttypes.Labelled _ | Asttypes.Optional _), _ -> None)
+  |> fun positional_arguments -> List.nth_opt positional_arguments position
+;;
+
+let expression_is_identifier identifier (expression : Parsetree.expression) =
+  match expression.pexp_desc with
+  | Pexp_ident { txt; _ } ->
+      String.equal (longident_to_string txt) identifier
+  | _ -> false
+;;
+
+let expression_is_constructor constructor (expression : Parsetree.expression) =
+  match expression.pexp_desc with
+  | Pexp_construct ({ txt; _ }, None) ->
+      String.equal (longident_to_string txt) constructor
+  | _ -> false
+;;
+
+let count_applications_with_exact_positional_identifier_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~position
+      ~identifier
+  =
+  let arguments_match args =
+    positional_argument args position
+    |> Option.exists (expression_is_identifier identifier)
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
+let count_applications_with_exact_identifier_and_constructor_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~identifier_position
+      ~identifier
+      ~constructor_position
+      ~constructor
+  =
+  let arguments_match args =
+    Option.exists (expression_is_identifier identifier)
+      (positional_argument args identifier_position)
+    && Option.exists (expression_is_constructor constructor)
+         (positional_argument args constructor_position)
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
+let count_applications_with_exact_signal_handler_in_value_binding
+      ~module_path
+      ~binding_name
+      ~signal
+      ~handler
+  =
+  let is_signal_handler expression =
+    match expression.Parsetree.pexp_desc with
+    | Pexp_construct
+        ( { txt; _ }
+        , Some { pexp_desc = Pexp_ident { txt = handler_id; _ }; _ } ) ->
+        String.equal (longident_to_string txt) "Sys.Signal_handle"
+        && String.equal (longident_to_string handler_id) handler
+    | _ -> false
+  in
+  let arguments_match args =
+    Option.exists (expression_is_identifier signal) (positional_argument args 0)
+    && Option.exists is_signal_handler (positional_argument args 1)
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name
+    ~callee:"Sys.set_signal" ~arguments_match
+;;
+
+let count_applications_with_exact_labelled_identifiers_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~arguments
+  =
+  let arguments_match actual_arguments =
+    let actual_labelled =
+      List.filter_map
+        (fun (label, expression) ->
+           match label with
+           | Asttypes.Labelled name -> Some (name, expression)
+           | Asttypes.Nolabel | Asttypes.Optional _ -> None)
+        actual_arguments
+    in
+    List.length actual_labelled = List.length arguments
+    && List.for_all
+         (fun (expected_label, expected_identifier) ->
+            match List.assoc_opt expected_label actual_labelled with
+            | Some expression ->
+                expression_is_identifier expected_identifier expression
+            | None -> false)
+         arguments
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
+let expressions_of_value_binding ~module_path ~binding_name =
+  let structure = parse_implementation_or_fail module_path in
+  let expressions = ref [] in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self binding ->
+          (match binding.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when String.equal txt binding_name ->
+             expressions := binding.pvb_expr :: !expressions
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self binding)
+    }
+  in
+  iter.structure iter structure;
+  List.rev !expressions
+;;
+
+let rec strip_function_parameters (expression : Parsetree.expression) =
+  match expression.pexp_desc with
+  | Pexp_function (_, _, Pfunction_body body) -> strip_function_parameters body
+  | _ -> expression
+;;
+
+let rec flatten_direct_sequence (expression : Parsetree.expression) =
+  match expression.pexp_desc with
+  | Pexp_sequence (left, right) -> left :: flatten_direct_sequence right
+  | _ -> [ expression ]
+;;
+
+let direct_callee (expression : Parsetree.expression) =
+  match expression.pexp_desc with
+  | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
+      Some (longident_to_string txt)
+  | _ -> None
+;;
+
+let direct_call_sequence_matches_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callees
+  =
+  match expressions_of_value_binding ~module_path ~binding_name with
+  | [ expression ] ->
+      let actual =
+        expression
+        |> strip_function_parameters
+        |> flatten_direct_sequence
+        |> List.map direct_callee
+      in
+      List.equal (Option.equal String.equal) actual (List.map Option.some callees)
+  | [] | _ :: _ :: _ -> false
+;;
+
+let unit_lambda_body (expression : Parsetree.expression) =
+  match expression.pexp_desc with
+  | Pexp_function
+      ( [ { pparam_desc =
+              Pparam_val
+                ( Asttypes.Nolabel
+                , None
+                , { ppat_desc =
+                      Ppat_construct ({ txt = Lident "()"; _ }, None);
+                    _ } );
+            _ } ]
+      , None
+      , Pfunction_body body ) -> Some body
+  | _ -> None
+;;
+
+let fun_protect_sequences_match_in_value_binding
+      ~module_path
+      ~binding_name
+      ~body_callees
+      ~finally_callees
+  =
+  let callback_callees expression =
+    expression
+    |> unit_lambda_body
+    |> Option.map (fun body ->
+      body |> flatten_direct_sequence |> List.map direct_callee)
+  in
+  let expected callees = List.map Option.some callees in
+  match expressions_of_value_binding ~module_path ~binding_name with
+  | [ expression ] ->
+      let statements =
+        expression |> strip_function_parameters |> flatten_direct_sequence
+      in
+      (match List.rev statements with
+       | { pexp_desc =
+             Pexp_apply
+               ( { pexp_desc = Pexp_ident { txt; _ }; _ }
+               , [ (Asttypes.Labelled "finally", finally_callback)
+                 ; (Asttypes.Nolabel, body_callback)
+                 ] );
+           _ }
+         :: _
+         when String.equal (longident_to_string txt) "Fun.protect" ->
+           Option.equal
+             (List.equal (Option.equal String.equal))
+             (callback_callees body_callback)
+             (Some (expected body_callees))
+           && Option.equal
+                (List.equal (Option.equal String.equal))
+                (callback_callees finally_callback)
+                (Some (expected finally_callees))
+       | _ -> false)
+  | [] | _ :: _ :: _ -> false
+;;
+
+let count_applications_with_exact_labelled_unit_call_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~label
+      ~nested_callee
+  =
+  let is_unit_expression (expression : Parsetree.expression) =
+    match expression.pexp_desc with
+    | Pexp_construct ({ txt = Lident "()"; _ }, None) -> true
+    | _ -> false
+  in
+  let arguments_match args =
+    List.exists
+      (fun (argument_label, (argument : Parsetree.expression)) ->
+         let label_matches =
+           match argument_label with
+           | Asttypes.Labelled name -> String.equal name label
+           | Asttypes.Nolabel | Asttypes.Optional _ -> false
+         in
+         label_matches
+         &&
+         match argument.pexp_desc with
+         | Pexp_apply
+             ( { pexp_desc = Pexp_ident { txt; _ }; _ }
+             , [ Asttypes.Nolabel, unit_argument ] ) ->
+             String.equal (longident_to_string txt) nested_callee
+             && is_unit_expression unit_argument
+         | _ -> false)
+      args
+  in
+  count_exact_applications_in_value_binding ~module_path ~binding_name ~callee
+    ~arguments_match
+;;
+
 let rec pattern_has_constructor_leaf ~name (pattern : Parsetree.pattern) =
   match pattern.ppat_desc with
   | Ppat_construct ({ txt; _ }, _) -> String.equal (longident_leaf txt) name

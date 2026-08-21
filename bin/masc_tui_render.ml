@@ -4,10 +4,25 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
+module Frame_presenter = Masc_tui_frame_presenter
 module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
 module Keeper_chat = Masc_tui_keeper_chat_projection
+
+let frame_lines buf =
+  match List.rev (String.split_on_char '\n' (Buffer.contents buf)) with
+  | "" :: reversed -> List.rev reversed
+  | reversed -> List.rev reversed
+
+let finish_frame ~surface_key ~cursor ~rows ~cols buf :
+    Frame_presenter.frame =
+  { surface_key;
+    terminal_rows = rows;
+    terminal_cols = cols;
+    cursor;
+    lines = frame_lines buf;
+  }
 
 (* Exhaustive over [connection_status]: a new state is a compile error
    here rather than an unexplained [disconnected] on screen. *)
@@ -69,10 +84,6 @@ let task_line (task : task) =
 let render_dashboard (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  (* Clear screen *)
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   (* Header *)
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -178,16 +189,13 @@ let render_dashboard (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  q:quit  r:refresh  Tab:keepers  | Refresh: %.0fs | Port: %d%s\n"
     Ansi.dim state.refresh_interval state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"dashboard" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render the Overview surface (Dashboard V2 shell/briefing summary). *)
 let render_overview (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -316,16 +324,13 @@ let render_overview (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  q:quit  r:refresh  Tab:next  2:keepers  | Refresh: %.0fs | Port: %d%s\n"
     Ansi.dim state.refresh_interval state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"overview" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render the Approvals surface (pending confirmations). *)
 let render_approvals (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -469,16 +474,13 @@ let render_approvals (state : state) =
        "%s  j/k:move  y/y:confirm  n/n:deny  r:refresh  Tab:next  | Port: %d%s\n"
        Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"approvals" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render the Board surface (list view). *)
 let render_board_list (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -541,16 +543,13 @@ let render_board_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:read  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"board-list" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render the Board surface (read view). *)
 let render_board_read (state : state) (post : board_post) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let header = Printf.sprintf " MASC Board  %s[%s]%s  by %s  +%d  c%d"
     Ansi.cyan (fit_width post.bp_id 12) Ansi.reset
@@ -613,8 +612,8 @@ let render_board_read (state : state) (post : board_post) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"board-read" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 let planning_phase_label phase = Goal_phase.to_string phase
 
@@ -630,9 +629,6 @@ let planning_phase_color = function
 let render_planning_list (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let now = Unix.localtime (Unix.gettimeofday ()) in
   let timestamp = Printf.sprintf "%02d:%02d:%02d"
@@ -731,16 +727,13 @@ let render_planning_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"planning-list" ~cursor:Frame_presenter.Hidden
+    ~rows ~cols buf
 
 (** Render the Planning surface (detail view). *)
 let render_planning_detail (state : state) (goal : planning_goal) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   let status_color = planning_phase_color goal.pg_phase in
   let status_label = planning_phase_label goal.pg_phase in
@@ -777,16 +770,13 @@ let render_planning_detail (state : state) (goal : planning_goal) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  r:refresh  Tab:next  | Port: %d%s\n"
     Ansi.dim state.port Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"planning-detail" ~cursor:Frame_presenter.Hidden
+    ~rows ~cols buf
 
 (** Render the keeper list view *)
 let render_keeper_list (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
 
   (* Header *)
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -912,21 +902,18 @@ let render_keeper_list (state : state) =
   Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  Tab:dashboard  q:quit  r:refresh%s\n"
     Ansi.dim Ansi.reset);
 
-  print_string (Buffer.contents buf);
-  flush stdout
+  finish_frame ~surface_key:"keeper-list" ~cursor:Frame_presenter.Hidden ~rows
+    ~cols buf
 
 (** Render keeper detail view with live context and scrolling *)
 let render_keeper_detail (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   if state.keeper_cursor >= List.length state.keepers then begin
     Buffer.add_string buf "No keeper selected.\n";
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let inner = cols - 4 in  (* width inside borders *)
@@ -1068,8 +1055,8 @@ let render_keeper_detail (state : state) =
     Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:dashboard  q:quit  r:refresh%s\n"
       Ansi.dim Ansi.reset);
 
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-detail" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end
 
 (** Render keeper log view *)
@@ -1077,13 +1064,10 @@ let render_keeper_logs (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   if state.keeper_cursor >= List.length state.keepers then begin
     Buffer.add_string buf "No keeper selected.\n";
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-logs" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end else begin
     let k = List.nth state.keepers state.keeper_cursor in
     let total_entries = List.length state.log_entries in
@@ -1177,8 +1161,8 @@ let render_keeper_logs (state : state) =
     Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  q:quit  r:refresh%s\n"
       Ansi.dim Ansi.reset);
 
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-logs" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   end
 
 (** Render message input/conversation view *)
@@ -1186,14 +1170,11 @@ let render_keeper_message (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
 
-  Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.hide_cursor;
-
   match state.msg_target_keeper_name with
   | None ->
     Buffer.add_string buf "No keeper selected.\n";
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-message" ~cursor:Frame_presenter.Hidden
+      ~rows ~cols buf
   | Some keeper_name ->
     let display_keeper_name = Keeper_chat.terminal_safe_text keeper_name in
     let header =
@@ -1213,8 +1194,8 @@ let render_keeper_message (state : state) =
       in
       Buffer.add_string buf
         (Message_layout.fit_width notice (max 1 (cols - 1)));
-      print_string (Buffer.contents buf);
-      flush stdout
+      finish_frame ~surface_key:"keeper-message"
+        ~cursor:Frame_presenter.Hidden ~rows ~cols buf
     end else begin
     (* Header *)
     box_top buf cols;
@@ -1439,11 +1420,11 @@ let render_keeper_message (state : state) =
       Message_layout.input_cursor_column ~terminal_cols:cols
         ~input:visible_input
     in
-    Buffer.add_string buf (Ansi.move_to input_row input_column);
-    Buffer.add_string buf Ansi.show_cursor;
-
-    print_string (Buffer.contents buf);
-    flush stdout
+    finish_frame ~surface_key:"keeper-message"
+      ~cursor:
+        (Frame_presenter.Visible_at
+           { row = input_row; column = input_column })
+      ~rows ~cols buf
     end
 
 (** Dispatch render based on current surface *)

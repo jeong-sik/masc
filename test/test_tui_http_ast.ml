@@ -627,7 +627,150 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"read_byte_unix"
        ~callee:"Render_schedule.Input_wait.await"
-     = 1)
+     = 1);
+  check int "surface renderers perform no direct stdout writes" 0
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml" ~callee:"print_string");
+  check int "surface renderers perform no direct flushes" 0
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml" ~callee:"flush");
+  check int "main has one frame presentation boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"Frame_presenter.present");
+  check int "resize invalidation and Force request share one boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"Frame_presenter.invalidate");
+  check int "resize boundary owns terminal-size cache invalidation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"invalidate_terminal_size");
+  check int "resize boundary requests one forced frame" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"Render_schedule.request");
+  check int "resize request's reason is exactly Force" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"invalidate_frame_for_resize"
+       ~callee:"Render_schedule.request" ~position:1
+       ~constructor:"Render_schedule.Force");
+  check int "main uses the coupled resize boundary" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main" ~callee:"invalidate_frame_for_resize");
+  check int "presentation consumes the external-write marker as invalidation" 1
+    (Ast_grep
+     .count_applications_with_exact_labelled_unit_call_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callee:"Frame_presenter.present" ~label:"invalidate_before"
+       ~nested_callee:"consume_terminal_write_outside_frame");
+  check int "TTY gate validates stdin and stdout" 2
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"require_interactive_terminal" ~callee:"Unix.isatty");
+  check int "loader marks its direct diagnostic write" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_loader.ml" ~binding_name:"report"
+       ~callee:"Masc_tui_ansi.note_terminal_write_outside_frame");
+  let signal_handler signal handler =
+    Ast_grep.count_applications_with_exact_signal_handler_in_value_binding
+      ~module_path:main_path ~binding_name:"enter_terminal_session" ~signal
+      ~handler
+  in
+  check bool "startup registers cleanup and handlers before raw mode" true
+    (Ast_grep.direct_call_sequence_matches_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callees:
+         [ "at_exit"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Sys.set_signal"
+         ; "Unix.tcsetattr"
+         ]);
+  check int "startup registers the real cleanup callback" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callee:"at_exit" ~position:0 ~identifier:"cleanup");
+  check int "main enters the guarded terminal session once" 1
+    (Ast_grep
+     .count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"main"
+       ~callee:"enter_terminal_session"
+       ~arguments:
+         [ "cleanup", "cleanup"
+         ; "terminate", "terminate"
+         ; "request_full_repaint", "request_full_repaint"
+         ; "suspend", "suspend"
+         ; "new_term", "new_term"
+         ]);
+  check int "SIGINT terminates through cleanup" 1
+    (signal_handler "Sys.sigint" "terminate");
+  check int "SIGTERM terminates through cleanup" 1
+    (signal_handler "Sys.sigterm" "terminate");
+  check int "SIGHUP terminates through cleanup" 1
+    (signal_handler "Sys.sighup" "terminate");
+  check int "SIGQUIT terminates through cleanup" 1
+    (signal_handler "Sys.sigquit" "terminate");
+  check int "SIGWINCH requests a full repaint" 1
+    (signal_handler "Sys.sigwinch" "request_full_repaint");
+  check int "SIGCONT requests a full repaint" 1
+    (signal_handler "Sys.sigcont" "request_full_repaint");
+  check int "SIGTSTP initially installs the suspend handler" 1
+    (signal_handler "Sys.sigtstp" "suspend");
+  check int "resume reinstalls the suspend handler" 1
+    (Ast_grep.count_applications_with_exact_signal_handler_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend" ~signal:"Sys.sigtstp"
+       ~handler:"suspend");
+  check int "startup raw mode uses new termios" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"enter_terminal_session"
+       ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
+  check int "terminal restoration cleans presenter state" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"restore_terminal" ~callee:"Frame_presenter.cleanup");
+  check int "terminal restoration reapplies old termios" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"restore_terminal"
+       ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"old_term");
+  check int "suspend restores the shell terminal first" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"suspend" ~callee:"restore_terminal");
+  check int "suspend temporarily installs the default action" 1
+    (Ast_grep
+     .count_applications_with_exact_identifier_and_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~callee:"Sys.set_signal" ~identifier_position:0
+       ~identifier:"Sys.sigtstp" ~constructor_position:1
+       ~constructor:"Sys.Signal_default");
+  check int "suspend self-signals SIGTSTP" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend" ~callee:"Unix.kill"
+       ~position:1 ~identifier:"Sys.sigtstp");
+  check int "resume reapplies raw termios" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~callee:"Unix.tcsetattr" ~position:2 ~identifier:"new_term");
+  check int "resume requests a repaint" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"suspend" ~callee:"request_full_repaint");
+  check bool "suspend reaches self-stop only after terminal restoration" true
+    (Ast_grep.direct_call_sequence_matches_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~callees:[ "restore_terminal"; "Sys.set_signal"; "Fun.protect" ]);
+  check bool "resume lifecycle is confined to Fun.protect finally" true
+    (Ast_grep.fun_protect_sequences_match_in_value_binding
+       ~module_path:main_path ~binding_name:"suspend"
+       ~body_callees:[ "Unix.kill" ]
+       ~finally_callees:
+         [ "Sys.set_signal"; "Unix.tcsetattr"; "request_full_repaint" ])
 ;;
 
 let () =

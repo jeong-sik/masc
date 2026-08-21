@@ -245,6 +245,11 @@
   unix))
 
 (library
+ (name masc_tui_frame_presenter)
+ (wrapped false)
+ (modules masc_tui_frame_presenter))
+
+(library
  (name masc_tui_metrics_tail)
  (wrapped false)
  (modules masc_tui_metrics_tail)
@@ -281,6 +286,7 @@
  (libraries
   masc
   masc_tui_context_state
+  masc_tui_frame_presenter
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_recovery
   masc_tui_message_layout

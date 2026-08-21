@@ -242,6 +242,10 @@ let input_cursor_column ~terminal_cols ~input =
 let message_viewport_supported ~terminal_rows ~terminal_cols ~status_rows =
   terminal_cols >= 11 && terminal_rows >= 8 + max 0 status_rows
 
+let input_cursor_column ~terminal_cols ~input_bytes =
+  let last_content_column = max 1 (terminal_cols - 2) in
+  min last_content_column (7 + max 0 input_bytes)
+
 let take_last count values =
   let drop = max 0 (List.length values - max 0 count) in
   values |> List.filteri (fun index _ -> index >= drop)

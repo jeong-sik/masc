@@ -113,6 +113,18 @@ let request_body request = Yojson.Safe.to_string (request_to_yojson request)
 let same_request_identity left right =
   String.equal left.request_id right.request_id
   && String.equal left.keeper_name right.keeper_name
+  && String.equal left.message right.message
+
+let request_operation_input request =
+  Masc.Keeper_chat_operation_payload.input_to_json
+    ~message:request.message
+    ~user_blocks:[]
+    ~turn_instructions:None
+    ~surface_context:None
+    ~attachments:[]
+
+let request_execution_digest request =
+  Keeper_chat_operation.execution_digest (request_operation_input request)
 
 let compact_request_id value =
   let length = String.length value in
@@ -796,8 +808,8 @@ let decode_operation_reconciliation ~request json =
   let* () =
     validate_exact_fields ~surface
       ~allowed:
-        ([ "schema"; "operation_id"; "sequence"; "created_at"; "source"
-         ; "input"; "state"
+        ([ "schema"; "operation_id"; "sequence"; "created_at"
+         ; "execution_digest"; "source"; "input"; "state"
          ]
          @ state_fields)
       fields
@@ -824,6 +836,15 @@ let decode_operation_reconciliation ~request json =
     required_finite_nonnegative_number ~surface "created_at" fields
     |> Result.map_error (fun detail -> Malformed_event detail)
   in
+  let* expected_execution_digest =
+    request_execution_digest request
+    |> Result.map_error (fun detail ->
+      Malformed_event (surface ^ ".expected input is not canonical: " ^ detail))
+  in
+  let* () =
+    validate_expected_string ~surface ~field:"execution_digest"
+      ~expected:expected_execution_digest fields
+  in
   let* () =
     match List.assoc_opt "source" fields with
     | Some (`Assoc _) -> Ok ()
@@ -836,7 +857,22 @@ let decode_operation_reconciliation ~request json =
   in
   let* () =
     match List.assoc_opt "input" fields with
-    | Some (`Assoc _ | `Null) -> Ok ()
+    | Some `Null -> Ok ()
+    | Some (`Assoc _ as input) ->
+        let* observed_execution_digest =
+          Keeper_chat_operation.execution_digest input
+          |> Result.map_error (fun detail ->
+            Malformed_event (surface ^ ".input is not canonical: " ^ detail))
+        in
+        if String.equal observed_execution_digest expected_execution_digest
+        then Ok ()
+        else
+          Error
+            (Event_identity_mismatch
+               { field = "input"
+               ; expected = expected_execution_digest
+               ; received = observed_execution_digest
+               })
     | Some other ->
         Error
           (Malformed_event

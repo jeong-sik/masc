@@ -103,6 +103,11 @@ let test_exact_idempotency_and_terminal_dedupe () =
     |> store_ok
     |> accepted
   in
+  check
+    string
+    "wire projection keeps execution identity"
+    first.execution_digest
+    Yojson.Safe.Util.(Operation.to_json first |> member "execution_digest" |> to_string);
   (match
      store_ok
        (Store.submit

@@ -215,7 +215,13 @@
  (name masc_tui_keeper_chat_projection)
  (wrapped false)
  (modules masc_tui_keeper_chat_projection)
- (libraries masc masc.masc_random_id masc.masc_core masc.masc_types yojson))
+ (libraries
+  masc
+  masc.keeper_chat_operations
+  masc.masc_random_id
+  masc.masc_core
+  masc.masc_types
+  yojson))
 
 (executable
  (name masc_tui)

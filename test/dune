@@ -2574,6 +2574,8 @@
  (modules test_tui_keeper_chat_projection)
  (libraries
   alcotest
+  masc
+  masc.keeper_chat_operations
   masc_tui_keeper_chat_projection
   masc.masc_random_id
   yojson))

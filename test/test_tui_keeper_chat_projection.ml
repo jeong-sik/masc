@@ -370,13 +370,27 @@ let test_error_certainty () =
      = Chat.Verified_failed)
 
 let operation_json state fields =
+  let input =
+    Masc.Keeper_chat_operation_payload.input_to_json
+      ~message:request.message
+      ~user_blocks:[]
+      ~turn_instructions:None
+      ~surface_context:None
+      ~attachments:[]
+  in
+  let execution_digest =
+    match Keeper_chat_operation.execution_digest input with
+    | Ok digest -> digest
+    | Error detail -> fail detail
+  in
   `Assoc
     ([ "schema", `String "masc.keeper_chat_operation.v1"
      ; "operation_id", `String request.request_id
      ; "sequence", `String "7"
      ; "created_at", `Float 1.0
+     ; "execution_digest", `String execution_digest
      ; "source", `Assoc []
-     ; "input", `Assoc []
+     ; "input", input
      ; "state", `String state
      ]
      @ fields)
@@ -427,12 +441,52 @@ let test_stale_completion_identity () =
   let same = { current with message = "same identity" } in
   let stale = { current with request_id = "tui-stale" } in
   let wrong_keeper = { current with keeper_name = "keeper.two" } in
-  check bool "same request identity" true
+  check bool "changed message rejected" false
     (Chat.same_request_identity current same);
   check bool "stale request rejected" false
     (Chat.same_request_identity current stale);
   check bool "wrong keeper rejected" false
     (Chat.same_request_identity current wrong_keeper)
+
+let test_operation_reconciliation_binds_original_input () =
+  let valid = operation_json "Running" [ "started_at", `Float 2.0 ] in
+  let replace name value = function
+    | `Assoc fields ->
+        `Assoc
+          (List.map
+             (fun (field, current) ->
+               if String.equal field name then field, value else field, current)
+             fields)
+    | _ -> fail "operation fixture must be an object"
+  in
+  let changed_input =
+    Masc.Keeper_chat_operation_payload.input_to_json
+      ~message:"different message"
+      ~user_blocks:[]
+      ~turn_instructions:None
+      ~surface_context:None
+      ~attachments:[]
+  in
+  (match
+     Chat.decode_operation_reconciliation ~request
+       (replace "input" changed_input valid)
+   with
+   | Error (Chat.Event_identity_mismatch { field = "input"; _ }) -> ()
+   | Error error -> fail (Chat.stream_error_to_string error)
+   | Ok _ -> fail "changed durable input matched the original request");
+  (match
+     Chat.decode_operation_reconciliation ~request
+       (replace "execution_digest" (`String "wrong-digest") valid)
+   with
+   | Error (Chat.Event_identity_mismatch { field = "execution_digest"; _ }) -> ()
+   | Error error -> fail (Chat.stream_error_to_string error)
+   | Ok _ -> fail "wrong durable execution digest matched the original request");
+  match
+    Chat.decode_operation_reconciliation ~request (replace "input" `Null valid)
+  with
+  | Ok (Chat.Operation_pending Chat.Running) -> ()
+  | Error error -> fail (Chat.stream_error_to_string error)
+  | Ok _ -> fail "digest-bound redacted operation projected to the wrong state"
 
 let () =
   run "tui_keeper_chat_projection"
@@ -471,6 +525,8 @@ let () =
         ; test_case "typed error certainty" `Quick test_error_certainty
         ; test_case "operation reconciliation projection" `Quick
             test_operation_reconciliation_projection
+        ; test_case "operation reconciliation binds original input" `Quick
+            test_operation_reconciliation_binds_original_input
         ; test_case "stale completion identity" `Quick
             test_stale_completion_identity
         ] )

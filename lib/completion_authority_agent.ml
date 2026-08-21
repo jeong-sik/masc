@@ -298,30 +298,16 @@ let prepare_review
 
 type process_outcome =
   | Committed
-  | Deferred of { retryable : bool }
+  | Deferred
 
-(** [retryable] defaults [true]: every existing call site keeps scheduling
-    the maintenance-pulse retry unless it has positive evidence retrying
-    cannot succeed (currently only the review gate, via
-    {!Task.Anti_rationalization.review_result.retryable}). A [false] here
-    does not stop the task from ever being reviewed again — the next
-    unrelated verification submission still rescans the whole backlog — it
-    only stops this failure from keeping the maintenance-pulse timer
-    self-perpetuating on its own. *)
-let defer ?(retryable = true) ~task_id ~verification_id ~authority ~reason () =
+let defer ~task_id ~verification_id ~authority ~reason () =
   Log.Misc.warn
-    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s retryable=%b reason=%s"
+    "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
-    retryable
     reason;
-  Deferred { retryable }
-;;
-
-let should_schedule_retry = function
-  | Committed -> false
-  | Deferred { retryable } -> retryable
+  Deferred
 ;;
 
 let observe_rejection_wakeup
@@ -558,28 +544,21 @@ let process_task_once
            | Some reason -> reason
            | None -> gate
          in
-         (* A non-retryable deferral never gets another automatic attempt, so
-            the registry row would be its only surface. Promote it to the
-            Board so the assignee/operator sees the forward path. *)
-         if not result.retryable
-         then
-           Verification_protocol.notify_stalled_verification
-             ~authority
-             ~task_id:task.id
-             ~verification_id
-             ~gate
-             ~detail;
+         (* No verdict means nobody judged this submission. The registry row
+            alone reaches no one, so the outcome is always promoted to the
+            Board, where the producer Keeper and the operator both read it and
+            decide whether to resubmit. The authority does not decide that on
+            their behalf. *)
+         Verification_protocol.notify_stalled_verification
+           ~authority
+           ~task_id:task.id
+           ~verification_id
+           ~gate
+           ~detail;
          complete
            ~evaluator_runtime
-           ( defer
-               ~retryable:result.retryable
-               ~task_id:task.id
-               ~verification_id
-               ~authority
-               ~reason:detail
-               ()
-           , Verification_run_registry.Not_reviewed
-               { gate; detail; retryable = result.retryable } )
+           ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+           , Verification_run_registry.Not_reviewed { gate; detail } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
          let notes =
@@ -641,7 +620,11 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
         ~finally:(fun () -> release_review runtime key)
         (fun () -> process_task_once runtime task ~assignee ~verification_id)
     in
-    if should_schedule_retry outcome then schedule_retry runtime)
+    (* The outcome is recorded in the run registry and, when no verdict was
+       committed, posted to the Board. Nothing here re-arms a timer: a review
+       that produced no verdict is a fact for the producer Keeper to act on,
+       and its resubmission is what rescans the backlog. *)
+    ignore (outcome : process_outcome))
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -761,7 +744,6 @@ module For_testing = struct
 
   type nonrec process_outcome = process_outcome =
     | Committed
-    | Deferred of { retryable : bool }
+    | Deferred
 
-  let should_schedule_retry = should_schedule_retry
 end

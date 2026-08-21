@@ -2588,7 +2588,6 @@
 
 (include stanzas/test_verifier_exact_lane.inc)
 
-(include stanzas/test_completion_authority_retry_policy.inc)
 
 (include stanzas/test_keeper_canary_facts.inc)
 (include stanzas/test_keeper_canary_evidence.inc)

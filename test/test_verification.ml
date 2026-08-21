@@ -312,6 +312,20 @@ let test_system_llm_authority_helpers_are_typed () =
     Alcotest.(check string) "typed rejection reason" "missing evidence" reason
   | Masc_domain.Verdict_approved -> Alcotest.fail "reject must remain a rejection"
 
+let test_system_llm_retry_disposition_is_typed () =
+  let module For_testing = Masc.Completion_authority_agent.For_testing in
+  (match For_testing.process_outcome_of_evaluator_retryable (Some true) with
+   | For_testing.Retryable_deferred -> ()
+   | For_testing.Committed | For_testing.Deferred ->
+     Alcotest.fail "typed retryable evaluator failure must re-arm the lane");
+  List.iter
+    (fun retryable ->
+       match For_testing.process_outcome_of_evaluator_retryable retryable with
+       | For_testing.Deferred -> ()
+       | For_testing.Committed | For_testing.Retryable_deferred ->
+         Alcotest.fail "non-retryable or unclassified deferral must await action")
+    [ Some false; None ]
+
 let test_system_llm_review_notes_are_metadata_only () =
   let request : V.verification_request =
     { id = "vrf-metadata-only"
@@ -2423,6 +2437,8 @@ let () =
     "completion_authority", [
       Alcotest.test_case "system LLM helpers keep typed facts" `Quick
         test_system_llm_authority_helpers_are_typed;
+      Alcotest.test_case "system LLM retry disposition is typed" `Quick
+        test_system_llm_retry_disposition_is_typed;
       Alcotest.test_case "system LLM notes keep metadata only" `Quick
         test_system_llm_review_notes_are_metadata_only;
       Alcotest.test_case "unreadable evidence uses structured current contract" `Quick

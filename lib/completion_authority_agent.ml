@@ -299,15 +299,21 @@ let prepare_review
 type process_outcome =
   | Committed
   | Deferred
+  | Retryable_deferred
 
-let defer ~task_id ~verification_id ~authority ~reason () =
+let process_outcome_of_evaluator_retryable = function
+  | Some true -> Retryable_deferred
+  | Some false | None -> Deferred
+;;
+
+let defer ?(evaluator_retryable = None) ~task_id ~verification_id ~authority ~reason () =
   Log.Misc.warn
     "system LLM completion authority deferred task_id=%s verification_id=%s authority=%s reason=%s"
     task_id
     verification_id
     (Masc_domain.completion_authority_actor authority)
     reason;
-  Deferred
+  process_outcome_of_evaluator_retryable evaluator_retryable
 ;;
 
 let observe_rejection_wakeup
@@ -563,7 +569,13 @@ let process_task_once
            ~detail;
          complete
            ~evaluator_runtime
-           ( defer ~task_id:task.id ~verification_id ~authority ~reason:detail ()
+           ( defer
+               ~evaluator_retryable:result.evaluator_error_retryable
+               ~task_id:task.id
+               ~verification_id
+               ~authority
+               ~reason:detail
+               ()
            , Verification_run_registry.Not_reviewed { gate; detail } )
        | Some review_verdict ->
          let verdict = completion_verdict_of_review review_verdict in
@@ -621,18 +633,26 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
   let key = { task_id = task.id; verification_id } in
   if claim_review runtime key
   then (
-    (* The outcome is already durable where it belongs: the run registry, and
-       for a review that committed no verdict the Board post as well. Nothing
-       here re-arms a timer — that outcome is a fact for the producer Keeper
-       to act on, and its resubmission is what rescans the backlog. The
-       annotated binding keeps that discard deliberate: a future outcome the
-       caller must handle changes this line's type. *)
-    let (_ : process_outcome) =
+    (* A retryable evaluator failure has no producer action that can legally
+       advance the Task: it is still [AwaitingVerification]. Re-arm the
+       application-owned scan after the durable run/Board observation is
+       recorded. Non-retryable deferrals keep the existing producer/operator
+       contract, and restart recovery still comes from [start]'s initial
+       pending scan. *)
+    let outcome =
       Fun.protect
         ~finally:(fun () -> release_review runtime key)
         (fun () -> process_task_once runtime task ~assignee ~verification_id)
     in
-    ())
+    match outcome with
+    | Retryable_deferred ->
+      Log.Misc.info
+        "system LLM completion authority scheduled retry task_id=%s verification_id=%s interval_sec=%.1f"
+        task.id
+        verification_id
+        runtime.retry_interval_sec;
+      schedule_retry runtime
+    | Committed | Deferred -> ())
   else
     Log.Misc.debug
       "system LLM completion authority skipped duplicate in-flight review task_id=%s verification_id=%s"
@@ -753,5 +773,9 @@ module For_testing = struct
   type nonrec process_outcome = process_outcome =
     | Committed
     | Deferred
+    | Retryable_deferred
+
+  let process_outcome_of_evaluator_retryable =
+    process_outcome_of_evaluator_retryable
 
 end

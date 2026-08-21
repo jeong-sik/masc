@@ -271,7 +271,7 @@ let test_list_events_merges_kinds_newest_first () =
 let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
   with_temp_dir (fun base_dir ->
     let raw_argument =
-      "/base/.masc/playground/analyst/repos/masc/lib/keeper/keeper_approval_queue.ml"
+      "/base/.masc/playground/delta/repos/masc/lib/keeper/keeper_approval_queue.ml"
     in
     let resolved = "lib/keeper/keeper_approval_queue.ml" in
     let input =
@@ -285,7 +285,7 @@ let test_hook_row_carries_the_resolved_path_not_the_raw_argument () =
       ~base_path:base_dir
       ~attribution:(addressed_file ~codebase:"github.com_x_y" ~path:resolved)
       ~tool_name:"edit_file"
-      ~keeper_id:"analyst"
+      ~keeper_id:"delta"
       ~turn_id:"turn-3"
       ~outcome:"ok"
       ~typed_outcome_str:"progress"
@@ -321,7 +321,7 @@ let test_pathless_hook_stores_no_document () =
       ~base_path:base_dir
       ~attribution:Agent_observation.Pathless
       ~tool_name:"masc_broadcast"
-      ~keeper_id:"analyst"
+      ~keeper_id:"delta"
       ~turn_id:"turn-4"
       ~outcome:"ok"
       ~typed_outcome_str:"progress"

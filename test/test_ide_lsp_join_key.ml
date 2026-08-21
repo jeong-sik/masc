@@ -70,7 +70,7 @@ let test_write_is_read_under_its_codebase () =
       (create_annotation
          ~base_dir
          ~codebase:slug
-         ~keeper_id:"analyst"
+         ~keeper_id:"delta"
          ~content:"picked Eio.Mutex over Lazy here"
          ~line:12);
     check
@@ -96,7 +96,7 @@ let test_unaddressed_store_reads_empty () =
       (create_annotation
          ~base_dir
          ~codebase:"github.com_other_repo"
-         ~keeper_id:"analyst"
+         ~keeper_id:"delta"
          ~content:"orphan lane row"
          ~line:3);
     check
@@ -117,14 +117,14 @@ let test_codebases_do_not_share_cache_entries () =
       (create_annotation
          ~base_dir
          ~codebase:slug
-         ~keeper_id:"analyst"
+         ~keeper_id:"delta"
          ~content:"by-url row"
          ~line:5);
     ignore
       (create_annotation
          ~base_dir
          ~codebase:"github.com_other_repo"
-         ~keeper_id:"sangsu"
+         ~keeper_id:"alpha"
          ~content:"orphan row"
          ~line:5);
     (* Read the by-URL codebase first so its rows are the cached ones. *)
@@ -156,7 +156,7 @@ let test_write_after_first_read_becomes_visible () =
       (create_annotation
          ~base_dir
          ~codebase:slug
-         ~keeper_id:"analyst"
+         ~keeper_id:"delta"
          ~content:"written after the reader cached the empty store"
          ~line:9);
     check

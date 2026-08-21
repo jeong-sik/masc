@@ -2069,7 +2069,7 @@ let test_docker_mount_failure_structured_details () =
   match
     Keeper_sandbox_runtime.docker_mount_failure_details
       ~base_path_hash:"hash456"
-      ~keeper_name:"ramarama"
+      ~keeper_name:"nu"
       ~image:"masc-keeper-sandbox:local"
       ~status_label:"exit=125"
       ~container_kind:"turn"
@@ -2083,7 +2083,7 @@ let test_docker_mount_failure_structured_details () =
     Alcotest.(check string) "event" "keeper_docker_mount_failure" (field "event");
     Alcotest.(check string) "mount_path" mount_path (field "mount_path");
     Alcotest.(check string) "base_path_hash" "hash456" (field "base_path_hash");
-    Alcotest.(check string) "keeper" "ramarama" (field "keeper");
+    Alcotest.(check string) "keeper" "nu" (field "keeper");
     Alcotest.(check string) "container_kind" "turn" (field "container_kind");
     Alcotest.(check string) "network" "none" (field "network")
 

@@ -36,8 +36,8 @@ let outcome_label = function
 
 (* Both actor fields are resolved to a canonical Keeper name before they are
    compared, because they are recorded in different vocabularies:
-   [created_by] holds a canonical Keeper name ("sangsu", "lane-smith") while
-   [cancelled_by] holds an agent name ("keeper-sangsu-agent"). Comparing the raw
+   [created_by] holds a canonical Keeper name ("keeper-a", "keeper-b") while
+   [cancelled_by] holds an agent name ("keeper-keeper-a-agent"). Comparing the raw
    strings reads a self-cancellation as a cross-Keeper one and wakes a Keeper
    about a decision it just made itself; resolving only by agent name finds no
    author at all.
@@ -86,8 +86,8 @@ let keeper_of_author ~config ~author =
    stores the acting [agent_name] verbatim — so the agent binding answers it
    completely. There is deliberately no lane-name fallback: no caller writes a
    lane name here, and accepting one resolved a non-Keeper actor whose id
-   happens to match a lane (an operator called "sangsu" against Keeper lane
-   "sangsu") to that Keeper, which then read as a self-cancellation and
+   happens to match a lane (an operator called "keeper-a" against Keeper lane
+   "keeper-a") to that Keeper, which then read as a self-cancellation and
    swallowed a wake the author was owed. *)
 let keeper_of_canceller ~config ~agent_name =
   keeper_of_agent_binding ~config ~actor:agent_name

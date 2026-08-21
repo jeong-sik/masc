@@ -86,7 +86,7 @@ let handle_speak_with_outcome
          playback finishes". The former fire-and-forget queue returned
          status="queued" immediately, so the model never saw playback
          complete and re-spoke the same content every sub-turn
-         (2026-06-10 sangsu voice repeat incident). *)
+         (2026-06-10 live voice-repeat incident). *)
       authorize_external_effect
         ~operation:(command_to_string Speak)
         ~input:args

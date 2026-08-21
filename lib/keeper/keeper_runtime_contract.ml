@@ -39,7 +39,7 @@ let describe_pruned_goal = function
     succeeds ... but the task is now irrelevant") and closed the seconds-wide
     observe/claim race; its §8 comparison records that the chosen approach
     "doesn't catch goal property changes (status, phase)", which is the residue
-    this closes. Measured 2026-08-07: sangsu carried goal-request-menu-zero for
+    this closes. Measured 2026-08-07: one Keeper carried goal-request-menu-zero for
     5,362 tool calls across 2.5 days after it completed, stamped goal-bound the
     whole time, with an empty Active goals section in every one of those turns.
 

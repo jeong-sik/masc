@@ -597,7 +597,7 @@ let run_keepalive_unified_turn
       then (
         (* #10008 fm3: emit per-reason skip counter so operators can
            see why proactive scheduler never fires for a given keeper.
-           scholar/executor stayed at [proactive_count_total=0,
+           two Keepers stayed at [proactive_count_total=0,
            last_proactive_ts=0.0] for 45+ min despite
            proactive_enabled=true — the info log alone buried the
            reason across many lines.  Labelled counter lets Grafana

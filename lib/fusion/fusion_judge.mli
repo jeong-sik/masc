@@ -17,7 +17,7 @@
     벗기므로(fusion_judge_parse.ml:177-190), 응답 전체가 펜스 블록 하나면 파싱은
     통과한다. 벗겨지지 않는 경우는 둘뿐이다 — 펜스 앞에 산문이 붙어 첫 3바이트가
     ``` 이 아니거나, 펜스 뒤에 개행이 없어 [String.index_opt s '\n'] 이 [None]
-    이라 원문이 그대로 나가는 경우. 라이브 관측(keeper rondo, event-queue-v12.json
+    이라 원문이 그대로 나가는 경우. 라이브 Keeper 관측(event-queue-v12.json
     last_settlement, 2026-07-25T10:44Z, ``Invalid token '```json``)은 Yojson 이
     펜스를 봤다는 뜻이므로 이 둘 중 하나이며, 어느 쪽인지는 tier 기록이 없어
     settlement 만으로는 가려지지 않는다.

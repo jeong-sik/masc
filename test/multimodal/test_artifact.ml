@@ -80,7 +80,7 @@ let test_provenance_with_origins_round_trip () =
   let pr =
     {
       Pr.origin_artifact_ids = [ id1; id2 ];
-      created_by = "executor";
+      created_by = "omega";
       created_at = 9999.0;
     }
   in
@@ -100,7 +100,7 @@ let make_image_artifact () : A.image A.t =
     kind = A.Image;
     payload = P.Blob_ref "img-blob-1";
     metadata = `Assoc [ ("width", `Int 800); ("height", `Int 600) ];
-    provenance = Pr.provenance_empty ~created_by:"executor" ~created_at:1.0;
+    provenance = Pr.provenance_empty ~created_by:"omega" ~created_at:1.0;
   }
 [@@warning "-37"]
 
@@ -136,7 +136,7 @@ let test_homogeneous_list_of_any () =
       kind = A.Code;
       payload = P.Streaming 0;
       metadata = `Null;
-      provenance = Pr.provenance_empty ~created_by:"executor" ~created_at:2.0;
+      provenance = Pr.provenance_empty ~created_by:"omega" ~created_at:2.0;
     }
   in
   let xs = [ A.Any a_img; A.Any a_code ] in

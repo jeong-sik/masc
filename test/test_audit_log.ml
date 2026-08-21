@@ -349,7 +349,7 @@ let test_runtime_config_write_assignment_projection () =
           [
             ("path", `String "/x/config/runtime.toml");
             ("operation", `String "assignment");
-            ("keeper_name", `String "verifier");
+            ("keeper_name", `String "fixture-reviewer");
             ("runtime_id", `String "ollama_cloud.deepseek-v4-flash");
             ("cleared", `Bool false);
             ("bytes", `Int 18783);
@@ -371,7 +371,7 @@ let test_runtime_config_write_assignment_projection () =
     | _ -> failf "audit_event_json is not an object"
   in
   check string "summary"
-    "runtime.toml assignment updated: verifier -> ollama_cloud.deepseek-v4-flash"
+    "runtime.toml assignment updated: fixture-reviewer -> ollama_cloud.deepseek-v4-flash"
     (field "summary");
   check string "target" "/x/config/runtime.toml" (field "target");
   check string "severity" "warn" (field "severity")

@@ -51,7 +51,7 @@ type config =
 
 val default_config : config
 (** [{ dup_threshold = 3; keep_recent_messages = 20; strip_thinking = true;
-      clear_tool_results = true }] — the rule set measured on the analyst
+      clear_tool_results = true }] — the rule set measured on a live Keeper
     checkpoint (1,315 -> 579 messages, -28.0% bytes, next-turn input
     -26.0%). *)
 

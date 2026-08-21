@@ -79,8 +79,8 @@ let channel =
 ;;
 
 let payload ?(prompt = "compare implementations") () : Obligation.accepted_payload =
-  { keeper_name = "analyst"
-  ; submitted_by = "analyst"
+  { keeper_name = "delta"
+  ; submitted_by = "delta"
   ; prompt
   ; preset = "council"
   ; web_tools = false
@@ -184,7 +184,7 @@ let test_startup_recovery_projects_canonical_terminal () =
           Keeper_msg_async.submit_with_request_id ~on_accepted
             ~on_worker_settled:(fun settlement ->
               Eio.Promise.resolve resolve_settled settlement)
-            ~background_sw ~base_path ~caller:"analyst" ~keeper_name:"analyst"
+            ~background_sw ~base_path ~caller:"delta" ~keeper_name:"delta"
             ~f:(fun ~request_id:_ _request_sw ->
               Keeper_types_profile.tool_result_ok_data
                 (Fusion_types.deliberation_evidence_to_yojson evidence))
@@ -232,7 +232,7 @@ let test_startup_recovery_projects_canonical_terminal () =
          | Error error -> fail (Obligation.error_to_string error)
          | Ok _ -> fail "projected obligation was not removed");
         match
-          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"analyst"
+          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"delta"
           |> Keeper_event_queue.dequeue
         with
         | Some ({ payload = Keeper_event_queue.Fusion_completed completion; _ }, _) ->
@@ -295,7 +295,7 @@ let test_startup_recovery_remediates_missing_evidence () =
           Keeper_msg_async.submit_with_request_id ~on_accepted
             ~on_worker_settled:(fun settlement ->
               Eio.Promise.resolve resolve_settled settlement)
-            ~background_sw ~base_path ~caller:"analyst" ~keeper_name:"analyst"
+            ~background_sw ~base_path ~caller:"delta" ~keeper_name:"delta"
             ~f:(fun ~request_id:_ _request_sw ->
               (* A plain string body settles [Done{ok=true; data=None}]. *)
               Keeper_types_profile.tool_result_ok "done without evidence")
@@ -340,7 +340,7 @@ let test_startup_recovery_remediates_missing_evidence () =
          | Error error -> fail (Obligation.error_to_string error)
          | Ok _ -> fail "remediated obligation was not removed");
         match
-          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"analyst"
+          Keeper_event_queue_persistence.load ~base_path ~keeper_name:"delta"
           |> Keeper_event_queue.dequeue
         with
         | Some ({ payload = Keeper_event_queue.Fusion_completed completion; _ }, _) ->

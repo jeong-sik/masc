@@ -10,7 +10,7 @@ let make_artifact ~id ~kind ~payload ~metadata ts =
   ; kind
   ; payload
   ; metadata
-  ; provenance = A.provenance_empty ~created_by:"executor" ~created_at:ts
+  ; provenance = A.provenance_empty ~created_by:"omega" ~created_at:ts
   }
 
 let make_doc id ts =

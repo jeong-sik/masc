@@ -114,7 +114,7 @@ let row_is_task_claim json =
    [filter_rows_for_keeper] rings a busy keeper down to its last
    [claim_rows_per_keeper] rows, which usually trims the older claim away and
    leaves the newer one to be found by accident; a quiet keeper keeps both and
-   reports the superseded task. Measured live: keeper [analyst] (46 rows in
+   reports the superseded task. Measured on one live Keeper (46 rows in
    window, nothing trimmed) reported task-305 while it had claimed task-306.
    See #28437.
 

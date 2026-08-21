@@ -212,9 +212,9 @@ let test_assembled_prompt_opens_with_system_tag () =
     [ ("no instructions", KP.build_keeper_system_prompt ~instructions:"" ())
     ; ( "with instructions and identity"
       , KP.build_keeper_system_prompt ~instructions:"stay terse"
-          ~keeper_name:"imseonghan" ~workspace_root:"/tmp/ws" () )
+          ~keeper_name:"tau" ~workspace_root:"/tmp/ws" () )
     ; ( "with active goals"
-      , KP.build_keeper_system_prompt ~instructions:"" ~keeper_name:"imseonghan"
+      , KP.build_keeper_system_prompt ~instructions:"" ~keeper_name:"tau"
           ~active_goals:[ ("g-1", "ship it") ]
           () )
     ]

@@ -79,7 +79,7 @@ let is_dictionary_generated_nickname name =
 
 (** Extract the stable agent prefix from a generated nickname.
     "<prefix>-<adj>-<animal>" -> Some "<prefix>"
-    "qa-king-warm-heron" -> Some "qa-king"
+    "example-keeper-warm-heron" -> Some "example-keeper"
     "<prefix>" -> Some "<prefix>" (legacy bare-prefix form) *)
 let extract_agent_type name =
   let parts = String.split_on_char '-' name in

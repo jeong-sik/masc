@@ -137,7 +137,7 @@ let test_with_fresh_terminal_returns_none () =
     seed_backlog config (make_task ~id:"task-102" ~status:status_done);
     let result =
       TCI.with_fresh_task_status config
-        ~agent_name:"keeper-executor-agent"
+        ~agent_name:"keeper-omega-agent"
         ~task_id:"task-102"
         ~module_name:"test.mention_tracker"
         (fun _ -> `should_not_run)

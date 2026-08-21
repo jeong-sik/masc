@@ -269,11 +269,11 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   in
   let _ = Workspace.init config ~agent_name:(Some "fixture-keeper") in
   let _ = Workspace.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
-  let _ = Workspace.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
+  let _ = Workspace.claim_task config ~agent_name:"theta0" ~task_id:"task-001" in
   (match
      transition_done_r
        config
-       ~agent_name:"nick0cave"
+       ~agent_name:"theta0"
        ~task_id:"task-001"
        ~notes:"terminal in backlog"
    with
@@ -288,10 +288,10 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Alcotest.(check (option string))
     "assignee current_task already cleared before invariant"
     None
-    (current_task_for "nick0cave");
+    (current_task_for "theta0");
 
   let stale_message =
-    "@nick0cave task-001 stale claim detected: current_task_id=null but \
+    "@theta0 task-001 stale claim detected: current_task_id=null but \
      MASC still lists task-001 as claimed by you. Please release it."
   in
   let since_seq =
@@ -312,7 +312,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     (str_contains result.content "[cache_invalidated]");
   Alcotest.(check (option string))
     "delivery preserves the original mention"
-    (Some "nick0cave")
+    (Some "theta0")
     result.mention;
   Alcotest.(check string)
     "delivery exposes the canonical persisted sender"
@@ -334,7 +334,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Alcotest.(check (option string))
     "stale current_task cleared"
     None
-    (current_task_for "nick0cave");
+    (current_task_for "theta0");
 
   let normal_update =
     "Normal update: blocked by task-001 while I wait for review context."

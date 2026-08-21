@@ -146,7 +146,7 @@ let schemas : Masc_domain.tool_schema list =
                      (board_tool_post.ml handle_post_list) already
                      reads [compact] (default true), but the keeper surface
                      omitted it, so a keeper could never request full output
-                     and qa-king's [compact] arg was rejected as an
+                     and a live Keeper's [compact] arg was rejected as an
                      unsupported field. additionalProperties stays false —
                      unknown fields remain fail-closed. *)
                   ( "compact"

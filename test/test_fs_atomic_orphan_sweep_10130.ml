@@ -77,7 +77,7 @@ let test_name_matcher () =
   no "atomic_abc.tmp";
   no ".atomic_abc";
   no "normal.json";
-  no "sangsu.json";
+  no "alpha.json";
   no ".atomic_prefix_only";
   no "prefix_.atomic_abc.tmp" (* prefix not at start *)
 
@@ -101,7 +101,7 @@ let test_zero_byte_orphan_at_base_deleted () =
 let test_nonzero_orphan_preserved_in_recovered () =
   with_temp_base @@ fun base_path ->
   let orphan = Filename.concat base_path ".atomic_data42.tmp" in
-  let payload = "{\"name\":\"sangsu\",\"goal\":\"…\"}" in
+  let payload = "{\"name\":\"alpha\",\"goal\":\"…\"}" in
   write_file ~path:orphan ~content:payload;
   let report = cleanup base_path in
   check_no_failures report;
@@ -131,7 +131,7 @@ let test_orphans_in_subdirs_found () =
   Unix.mkdir subdir 0o755;
   touch (Filename.concat subdir ".atomic_zeroKeeper.tmp");
   write_file ~path:(Filename.concat subdir ".atomic_dataKeeper.tmp")
-    ~content:"sangsu data";
+    ~content:"alpha data";
   let report =
     cleanup
       ~scope:Fs_compat.Directory_and_immediate_subdirectories
@@ -150,13 +150,13 @@ let test_orphans_in_subdirs_found () =
    [is_atomic_orphan_name] predicate strictly. *)
 let test_non_orphan_files_untouched () =
   with_temp_base @@ fun base_path ->
-  let normal = Filename.concat base_path "sangsu.json" in
+  let normal = Filename.concat base_path "alpha.json" in
   write_file ~path:normal ~content:"{\"real\":\"data\"}";
   let atomic_no_suffix = Filename.concat base_path ".atomic_abc" in
   write_file ~path:atomic_no_suffix ~content:"not an orphan";
   let report = cleanup base_path in
   check_no_failures report;
-  Alcotest.(check bool) "sangsu.json survived" true
+  Alcotest.(check bool) "alpha.json survived" true
     (Sys.file_exists normal);
   Alcotest.(check bool) ".atomic_abc (no .tmp) survived" true
     (Sys.file_exists atomic_no_suffix)

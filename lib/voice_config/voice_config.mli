@@ -34,7 +34,6 @@ type endpoint = {
   api_key_env : string option;
   enabled : bool;
   timeout_seconds : float option;
-  max_retries : int option;
 }
 (** Per-endpoint configuration.  [api_key_env] names the
     environment variable holding the credential (not the

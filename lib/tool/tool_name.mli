@@ -62,7 +62,6 @@ module Goal_name : sig
     | Goal_list
     | Goal_transition
     | Goal_upsert
-    | Goal_assign
 
   val to_string : t -> string
   val of_string : string -> t option

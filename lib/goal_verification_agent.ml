@@ -253,11 +253,13 @@ let linked_task_rollup config ~goal_id : (string * string list, string) result =
          , evidence_refs ))
 ;;
 
-let goal_owner_name (goal : Goal_store.goal) =
-  match goal.owner with
-  | Some owner when String.trim owner <> "" -> owner
-  | Some _ | None -> "unassigned"
-;;
+(* [review_request] is task-shaped and its [agent_name] names the producer whose
+   work is being judged. A Goal has no producer: it is a shared intent that any
+   Keeper may advance, and the evidence under review is the Goal's own declared
+   criterion plus its linked Task rollup, not one agent's submission. The lane
+   passes [No_lookup_surface], so this string builds no producer-bound tool
+   surface -- it only tells the judge there is no single author to attribute. *)
+let goal_producer_name = "no single producer (shared Goal)"
 
 let build_review_request config (goal : Goal_store.goal) kind
   : (Task.Anti_rationalization.review_request * string, string) result
@@ -266,7 +268,7 @@ let build_review_request config (goal : Goal_store.goal) kind
     { Task.Anti_rationalization.task_title = goal.title
     ; task_description = criterion_description goal
     ; completion_notes = ""
-    ; agent_name = goal_owner_name goal
+    ; agent_name = goal_producer_name
     ; task_id = goal.id
     ; evidence_refs = []
     }

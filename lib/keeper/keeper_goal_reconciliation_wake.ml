@@ -94,39 +94,18 @@ let exact_producer_keeper_name ~config ~completing_agent_name =
   | Keeper_identity_binding.Lookup_failed detail -> Error detail
 ;;
 
-(* RFC-0362 names [owner] as the keeper responsible for turning this Goal into
-   Tasks, which is exactly who a completion should wake. The reverse index of
-   keepers carrying the goal in [active_goal_ids] answers a different question —
-   who is working on it — and a collaboration mission legitimately has several. *)
-let goal_owner_keeper ~config goal_id =
-  match Goal_store.get_goal config ~goal_id with
-  | Some { Goal_store.owner = Some owner; _ } ->
-    (match String.trim owner with
-     | "" -> None
-     | owner -> Some owner)
-  | Some { Goal_store.owner = None; _ } | None -> None
-;;
-
 (* A wake is a message into a keeper's queue, not a contract, so several
    recipients is an ordinary outcome rather than a condition to fail on.
    Several keepers carrying one goal is what a collaboration mission looks
-   like, and every one of them wants to know its Task finished.
-
-   The declared owner narrows the wake when the Goal names one that is
-   actually working under it. Otherwise everyone carrying the goal hears,
-   which is the honest reading of the reverse index. Pure so the choice is
-   testable without a workspace. *)
-let resolve_assignment ~owner ~keeper_names =
-  match owner with
-  | Some owner when List.mem owner keeper_names -> [ owner ]
-  | Some _ | None -> keeper_names
-;;
+   like, and every one of them wants to know its Task finished -- so every one
+   of them hears. Nothing narrows the list: narrowing would need a declared
+   responsible keeper, and a Goal names none. *)
 
 let target_keeper_names ~config ~completing_agent_name ~goal_id =
   match assigned_keeper_resolution ~config goal_id with
   | Assigned_keeper keeper_name -> Ok [ keeper_name ]
   | Ambiguous_assigned_keepers keeper_names ->
-    Ok (resolve_assignment ~owner:(goal_owner_keeper ~config goal_id) ~keeper_names)
+    Ok keeper_names
   | Assigned_keeper_lookup_failed detail -> Error detail
   | No_assigned_keeper ->
     (match exact_producer_keeper_name ~config ~completing_agent_name with

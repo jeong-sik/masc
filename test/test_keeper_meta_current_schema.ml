@@ -148,51 +148,11 @@ let test_every_outside_field_has_one_classification () =
       (current_json () |> replace_field key (`String "ignored-value")))
 ;;
 
-let test_legacy_active_goal_ids_is_read_only_tombstone () =
-  let legacy_json =
-    current_json ()
-    |> replace_field
-         "active_goal_ids"
-         (`List [ `String "goal-a"; `String "goal-b" ])
-  in
-  let decoded =
-    match Keeper_meta_json_parse.meta_of_json legacy_json with
-    | Ok meta -> meta
-    | Error detail -> Alcotest.failf "legacy active_goal_ids rejected: %s" detail
-  in
-  let rewritten_fields = Keeper_meta_json.meta_to_json decoded |> fields_exn in
-  check bool
-    "current writer drops active_goal_ids"
-    false
-    (List.mem_assoc "active_goal_ids" rewritten_fields)
-;;
-
-let test_legacy_tombstone_does_not_weaken_closed_schema () =
-  let fields = fields_exn (current_json ()) in
+let test_retired_active_goal_ids_requires_reset () =
   expect_rejected
-    "legacy tombstone plus unrelated unknown"
-    (`Assoc
-       (("active_goal_ids", `List [ `String "goal-a" ])
-        :: ("unexpected_assignment", `String "still-closed")
-        :: fields));
-  expect_rejected
-    "duplicate legacy tombstone"
-    (`Assoc
-       (("active_goal_ids", `List [])
-        :: ("active_goal_ids", `List [ `String "goal-a" ])
-        :: fields))
-;;
-
-let test_legacy_tombstone_rejects_wrong_payload_shapes () =
-  [ "scalar", `String "goal-a"
-  ; "null", `Null
-  ; "object", `Assoc [ "goal", `String "goal-a" ]
-  ; "mixed element", `List [ `String "goal-a"; `Int 7 ]
-  ]
-  |> List.iter (fun (label, payload) ->
-    expect_rejected
-      ("legacy tombstone " ^ label)
-      (current_json () |> replace_field "active_goal_ids" payload))
+    "retired active_goal_ids"
+    (current_json ()
+     |> replace_field "active_goal_ids" (`List [ `String "goal-a" ]))
 ;;
 
 let test_retired_compaction_failure_authority_requires_reset () =
@@ -218,12 +178,8 @@ let () =
             test_nullability_is_exact
         ; test_case "outside fields share one classification" `Quick
             test_every_outside_field_has_one_classification
-        ; test_case "legacy active_goal_ids is a read-only tombstone" `Quick
-            test_legacy_active_goal_ids_is_read_only_tombstone
-        ; test_case "legacy tombstone keeps the remaining schema closed" `Quick
-            test_legacy_tombstone_does_not_weaken_closed_schema
-        ; test_case "legacy tombstone rejects wrong payload shapes" `Quick
-            test_legacy_tombstone_rejects_wrong_payload_shapes
+        ; test_case "retired active_goal_ids requires reset" `Quick
+            test_retired_active_goal_ids_requires_reset
         ; test_case
             "retired compaction failure authority requires reset"
             `Quick

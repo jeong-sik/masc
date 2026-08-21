@@ -196,6 +196,7 @@ let task_rollup_json (task : Masc_domain.task) =
   let verification_evidence =
     Task.Completion_review.concrete_verification_evidence task
   in
+  let producer = Masc_domain.task_performer_of_status task.task_status in
   let status_fields =
     match task.task_status with
     | Masc_domain.Done { assignee; completed_at; notes } ->
@@ -216,6 +217,10 @@ let task_rollup_json (task : Masc_domain.task) =
     ([ "task_id", `String task.id
      ; "title", `String task.title
      ; "status", `String (Masc_domain.task_status_to_string task.task_status)
+     ; ( "producer"
+       , match producer with
+         | Some producer -> `String producer
+         | None -> `Null )
      ; ( "verification_evidence"
        , Task.Completion_review.verification_evidence_to_yojson
            verification_evidence )
@@ -232,7 +237,9 @@ let task_submitted_evidence (task : Masc_domain.task) =
 
 (* A backlog that does not read is infrastructure failure: the proof review
    defers rather than judging a goal on an absent rollup. *)
-let linked_task_rollup config ~goal_id : (string * string list, string) result =
+let linked_task_rollup config ~goal_id
+  : (string * string list * Masc_domain.task list, string) result
+  =
   match Workspace_backlog.read_backlog_r config with
   | Error detail -> Error detail
   | Ok backlog ->
@@ -250,7 +257,8 @@ let linked_task_rollup config ~goal_id : (string * string list, string) result =
        in
        Ok
          ( Yojson.Safe.pretty_to_string (`List (List.map task_rollup_json tasks))
-         , evidence_refs ))
+         , evidence_refs
+         , tasks ))
 ;;
 
 let goal_owner_name (goal : Goal_store.goal) =
@@ -259,8 +267,57 @@ let goal_owner_name (goal : Goal_store.goal) =
   | Some _ | None -> "unassigned"
 ;;
 
+let single_producer_lookup config ~producer =
+  let open Result.Syntax in
+  let* tools = Verification_authority_tools.create ~config ~producer in
+  Ok
+    (Task.Anti_rationalization.Lookup_tools
+       { schemas = Verification_authority_tools.schemas tools
+       ; dispatch = Verification_authority_tools.dispatch tools
+       ; scope = Task.Anti_rationalization.Producer_tree
+       })
+;;
+
+let task_producer (task : Masc_domain.task) =
+  match Masc_domain.task_performer_of_status task.task_status with
+  | Some producer when not (String.equal (String.trim producer) "") -> Ok producer
+  | Some _ | None ->
+    Error
+      (Printf.sprintf
+         "linked task %s has no performer tree for Goal verification"
+         task.id)
+;;
+
+let rec task_producers = function
+  | [] -> Ok []
+  | task :: rest ->
+    let open Result.Syntax in
+    let* producer = task_producer task in
+    let* producers = task_producers rest in
+    Ok (producer :: producers)
+;;
+
+let linked_task_lookup config tasks =
+  let open Result.Syntax in
+  let* producers = task_producers tasks in
+  let producers = List.sort_uniq String.compare producers in
+  let* tools =
+    Verification_authority_tools.create_forest ~config ~producers
+  in
+  Ok
+    (Task.Anti_rationalization.Lookup_tools
+       { schemas = Verification_authority_tools.forest_schemas tools
+       ; dispatch = Verification_authority_tools.dispatch_forest tools
+       ; scope = Task.Anti_rationalization.Producer_forest { producers }
+       })
+;;
+
 let build_review_request config (goal : Goal_store.goal) kind
-  : (Task.Anti_rationalization.review_request * string, string) result
+  : ( Task.Anti_rationalization.review_request
+      * string
+      * Task.Anti_rationalization.lookup_surface
+    , string )
+      result
   =
   let base =
     { Task.Anti_rationalization.task_title = goal.title
@@ -273,22 +330,38 @@ let build_review_request config (goal : Goal_store.goal) kind
   in
   match kind with
   | Criterion_check ->
+    let open Result.Syntax in
+    let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
     Ok
       ( { base with
           Task.Anti_rationalization.completion_notes =
             Yojson.Safe.pretty_to_string (Goal_store.goal_to_yojson goal)
         }
-      , Prompt_names.goal_verification_criterion )
+      , Prompt_names.goal_verification_criterion
+      , lookup )
   | Completion_proof ->
     (match linked_task_rollup config ~goal_id:goal.id with
      | Error _ as error -> error
-     | Ok (rollup, evidence_refs) ->
+     | Ok (rollup, evidence_refs, []) ->
+       let open Result.Syntax in
+       let* lookup = single_producer_lookup config ~producer:(goal_owner_name goal) in
        Ok
          ( { base with
              Task.Anti_rationalization.completion_notes = rollup
            ; evidence_refs
            }
-         , Prompt_names.goal_verification_proof ))
+         , Prompt_names.goal_verification_proof
+         , lookup )
+     | Ok (rollup, evidence_refs, tasks) ->
+       let open Result.Syntax in
+       let* lookup = linked_task_lookup config tasks in
+       Ok
+         ( { base with
+             Task.Anti_rationalization.completion_notes = rollup
+           ; evidence_refs
+           }
+         , Prompt_names.goal_verification_proof
+         , lookup ))
 ;;
 
 (* {1 Verdict commit}
@@ -374,7 +447,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
        (match build_review_request config goal work.kind with
         | Error detail ->
           defer ~goal_id:work.goal_id ~kind:work.kind ~retryable:true ~reason:detail
-        | Ok (review_request, prompt_name) ->
+        | Ok (review_request, prompt_name, lookup) ->
           (* The verdict channel drops the reason for [Approve]; capture the
              stated reason from the successful verdict tool call — exactly one
              such call exists per review, and it belongs to the winning slot
@@ -398,7 +471,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
               ~base_path:config.base_path
               ~sw
               ~prompt_name
-              ~lookup:Task.Anti_rationalization.No_lookup_surface
+              ~lookup
               ~on_tool_result
               review_request
           in

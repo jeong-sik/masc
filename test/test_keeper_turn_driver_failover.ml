@@ -1974,6 +1974,49 @@ let test_attempt_loop_exhaustion_preserves_earlier_overflow () =
     [ "small.test_model"; "fallback.test_model" ]
     !attempts
 
+(* A fully exhausted runtime lane is retryable when any real candidate failure
+   was transient.  This is the inner boundary used by verifier_exact: a GLM
+   rate limit followed by an unavailable default must re-arm the verifier
+   worker instead of leaving its durable request pending forever. *)
+let test_attempt_loop_exhaustion_preserves_earlier_retryable_error () =
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"verifier-runtime"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "glm.test-model" ->
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Agent_core.Retry.RateLimited
+                     { retry_after = Some 1.0; message = "provider busy" })))
+            None
+        | "default.test-model" ->
+          attempt_without_effect
+            (Error
+               (Agent_core.Error.Api
+                  (Agent_core.Retry.AuthError
+                     { message = "fallback credential rejected" })))
+            None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "glm.test-model"; "default.test-model" ]
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "expected exhausted verifier runtime lane"
+   | Error error ->
+     Alcotest.(check bool)
+       "an earlier transient candidate keeps the exhausted lane retryable"
+       true
+       (Agent_core.Error.is_retryable error));
+  Alcotest.(check (list string))
+    "both declared candidates were attempted"
+    [ "glm.test-model"; "default.test-model" ]
+    !attempts
+
 (* Overflow precedence applies only to an exhausted lane: a walk stopped
    mid-lane by a non-retryable error keeps that stopping error, which is the
    immediate operator signal. *)
@@ -2358,6 +2401,10 @@ let () =
             "mid-lane terminal outranks observed overflow"
             `Quick
             test_attempt_loop_midwalk_terminal_outranks_observed_overflow;
+          Alcotest.test_case
+            "exhaustion preserves earlier retryable error"
+            `Quick
+            test_attempt_loop_exhaustion_preserves_earlier_retryable_error;
           Alcotest.test_case
             "checkpoint denial defers exact frozen suffix once"
             `Quick

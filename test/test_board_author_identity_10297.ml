@@ -134,7 +134,7 @@ let test_caller_passes_full_agent_name_form () =
 
 (* --- 3. caller canonical disagrees with ctx canonical ----------- *)
 
-let test_velvet_hammer_cannot_post_as_delta () =
+let test_xi_hammer_cannot_post_as_delta () =
   (* The exact #10297 reproducer: xi-hammer keeper attempts to
      write a board post under delta's name.  Dispatcher must
      rewrite the author to xi-hammer, preserve the delta
@@ -236,7 +236,7 @@ let () =
       ( "spoof-rewrite",
         [
           test_case "xi-hammer cannot post as delta" `Quick
-            test_velvet_hammer_cannot_post_as_delta;
+            test_xi_hammer_cannot_post_as_delta;
           test_case "voter spoof also rewritten" `Quick
             test_voter_field_spoof_also_rewritten;
         ] );

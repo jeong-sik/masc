@@ -105,12 +105,23 @@ let create ~config ~producer =
   Ok { ownership_root; config; producer_scope; tools }
 ;;
 
-(* Two levels, because a checkout root sits one level below the sandbox root
-   ([repos/<name>/]) and that second level is the prefix an evaluator needs in
-   order to open anything the submitter described relative to a checkout. The
-   cap keeps a producer with many working trees from crowding the rest of the
-   review prompt out of the context window. *)
-let root_layout_depth_2_entry_cap = 64
+(* The listing answers one question for the evaluator: where do the paths the
+   submitter wrote actually resolve. Two facts do that, and they are different
+   facts.
+
+   The immediate entries say what the root holds — [artifacts/] and the rest
+   are read directly and need no prefix.
+
+   The checkouts say where a repository-relative path has to be rooted, and
+   they come from [Keeper_playground_checkouts], which finds a checkout by its
+   [.git] entry wherever the keeper put it. This module must not scan for them
+   itself: that module exists because three separate scans each hardcoded a
+   [repos/] segment and each disagreed about what counted as a checkout
+   (RFC-keeper-workspace-root-only §1.2). [repos/masc] is one keeper's own
+   convention, written in its config, not a layout the system imposes — a
+   keeper with a checkout at the top level or under another name is equally
+   valid, and a fourth hardcoded scan here would miss it. *)
+let root_entry_cap = 32
 
 (* [None] is "this path did not answer as a directory" — absent, a regular
    file, or unreadable. The listing is prompt context, so none of those is
@@ -122,27 +133,38 @@ let children path =
   | _ -> None
 ;;
 
+let checkout_lines root =
+  match Keeper_playground_checkouts.discover ~root with
+  | Error _ -> []
+  | Ok discovery ->
+    let describe (checkout : Keeper_playground_checkouts.checkout) =
+      Printf.sprintf
+        "  %s/    (git checkout — a repository-relative path is rooted here)"
+        checkout.relative_path
+    in
+    (match discovery with
+     | Keeper_playground_checkouts.Complete checkouts -> List.map describe checkouts
+     | Keeper_playground_checkouts.Partial { found; limit = _ } ->
+       (* The contract is explicit that a partial list must not be presented as
+          complete: an evaluator told these are all the checkouts would read a
+          path's absence from the list as the work's absence. *)
+       List.map describe found
+       @ [ "  (this listing is partial — more checkouts exist than are shown)" ])
+;;
+
 let root_layout t =
   match children t.ownership_root with
   | None -> []
-  | Some top ->
-    let rendered =
-      List.concat_map
-        (fun entry ->
-           let entry_path = Filename.concat t.ownership_root entry in
-           match children entry_path with
-           | None -> [ entry ]
-           | Some [] -> [ entry ^ "/  (empty)" ]
-           | Some nested ->
-             (entry ^ "/")
-             :: List.map (fun nested_entry -> entry ^ "/" ^ nested_entry) nested)
-        top
+  | Some entries ->
+    let shown = List.filteri (fun index _ -> index < root_entry_cap) entries in
+    let omitted = List.length entries - List.length shown in
+    let entry_lines = List.map (fun entry -> "  " ^ entry) shown in
+    let entry_lines =
+      if omitted <= 0
+      then entry_lines
+      else entry_lines @ [ Printf.sprintf "  ... and %d more" omitted ]
     in
-    let shown = List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered in
-    let omitted = List.length rendered - List.length shown in
-    if omitted <= 0
-    then shown
-    else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
+    entry_lines @ checkout_lines t.ownership_root
 ;;
 
 (* ================================================================ *)
@@ -436,26 +458,29 @@ let create_forest ~config ~producers =
   Ok { bindings; forest_tools }
 ;;
 
-(* A forest has one root per producer, so the listing has to say which
-   producer each path belongs to: the forest dispatcher requires an exact
-   producer argument, and a bare path would not tell the evaluator which one
-   to pass. The same cap applies to the joined listing. *)
+(* A forest has one root per producer, so every line has to name the producer
+   it belongs to: the forest dispatcher requires an exact producer argument,
+   and a bare path would not tell the evaluator which one to pass. The joined
+   listing carries its own bound because the producer count is not fixed. *)
+let forest_root_entry_cap = 96
+
 let forest_root_layout forest =
   let rendered =
     List.concat_map
       (fun (producer, tools) ->
          match root_layout tools with
-         | [] -> [ producer ^ ": root could not be listed" ]
-         | entries -> List.map (fun entry -> producer ^ ": " ^ entry) entries)
+         | [] -> [ "  " ^ producer ^ ": root could not be read" ]
+         | entries ->
+           List.map
+             (fun entry -> "  " ^ producer ^ ": " ^ String.trim entry)
+             entries)
       forest.bindings
   in
-  let shown =
-    List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered
-  in
+  let shown = List.filteri (fun index _ -> index < forest_root_entry_cap) rendered in
   let omitted = List.length rendered - List.length shown in
   if omitted <= 0
   then shown
-  else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
+  else shown @ [ Printf.sprintf "  ... and %d more" omitted ]
 ;;
 
 let forest_schemas forest = List.map snd forest.forest_tools

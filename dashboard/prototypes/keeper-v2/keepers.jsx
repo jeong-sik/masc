@@ -159,7 +159,7 @@ function KeepersSurface({ t, setTweak, sel, setSel, keepers, onAction, threads, 
             onOpenConfig={onConfig} onAction={onAction} />
           {backTo && !isMobile && (
             <button className="chat-backctx" onClick={onBackTo} title={`${(window.SURFACE_LABEL && SURFACE_LABEL[backTo]) || backTo} 으로 돌아가기`}>
-              {'←'} {(window.SURFACE_LABEL && SURFACE_LABEL[backTo]) || backTo} 으로
+              {'\u2190'} {(window.SURFACE_LABEL && SURFACE_LABEL[backTo]) || backTo} 으로
             </button>
           )}
           <div className="thread" ref={threadRef}>
@@ -197,7 +197,7 @@ function KeepersSurface({ t, setTweak, sel, setSel, keepers, onAction, threads, 
       {(isMobile || drawerCtx) && ctxDrawer && (
         <div className="ctx-overlay" onClick={() => setCtxDrawer(false)}>
           <div className="ctx-drawer" onClick={(e) => e.stopPropagation()}>
-            <button className="ctx-drawer-close" onClick={() => setCtxDrawer(false)} title="닫기">{'✕'}</button>
+            <button className="ctx-drawer-close" onClick={() => setCtxDrawer(false)} title="닫기">{'\u2715'}</button>
             <ContextRail keeper={keeper} onAction={onAction} onNav={onNav} />
           </div>
         </div>

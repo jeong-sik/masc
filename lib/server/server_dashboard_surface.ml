@@ -23,7 +23,7 @@ let schema = "masc.dashboard_surface.v1"
 
 let string_field key json =
   match Json_util.assoc_member_opt key json with
-  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`String value) -> String_util.trim_nonempty value
   | _ -> None
 ;;
 

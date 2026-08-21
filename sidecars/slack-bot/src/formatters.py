@@ -136,6 +136,32 @@ def _fusion_block(board_post_id: str, run_id: str = "") -> dict[str, Any]:
     return _section_block("\n".join(lines))
 
 
+def _button_block(
+    label: str,
+    action_id: str,
+    value: str = "",
+    style: str = "",
+) -> dict[str, Any] | None:
+    """Build a Slack actions block carrying a single button element.
+
+    The button carries an ``action_id`` (stable identifier the interactive
+    handler routes on) and an optional ``value`` payload. ``style`` is one of
+    ``primary`` / ``danger`` / ``""`` (default).
+    """
+    if not label or not action_id:
+        return None
+    element: dict[str, Any] = {
+        "type": "button",
+        "text": {"type": "plain_text", "text": label[:75]},
+        "action_id": action_id[:255],
+    }
+    if value:
+        element["value"] = value[:2000]
+    if style in ("primary", "danger"):
+        element["style"] = style
+    return {"type": "actions", "elements": [element]}
+
+
 def _code_block(source: str, cap: str = "") -> dict[str, Any]:
     title = f"*Code:* `{escape_mrkdwn_text(cap)}`\n" if cap else ""
     body = escape_mrkdwn_text(source)
@@ -284,6 +310,14 @@ def _slack_block_from_structured(raw: Any) -> dict[str, Any] | None:
         if not board_post_id:
             return None
         return _fusion_block(board_post_id, _structured_text(raw.get("run_id")).strip())
+    if block_type == "button":
+        label = _structured_text(raw.get("label")).strip()
+        action_id = _structured_text(raw.get("action_id")).strip()
+        if not label or not action_id:
+            return None
+        value = _structured_text(raw.get("value")).strip()
+        style = _structured_text(raw.get("style")).strip()
+        return _button_block(label, action_id, value, style)
     if block_type in ("voice", "audio"):
         return _voice_block(raw)
     if block_type == "attach":

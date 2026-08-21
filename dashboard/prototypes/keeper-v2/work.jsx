@@ -61,16 +61,16 @@ function TaskGate({ gate }) {
 }
 
 const LINEAGE_EV = {
-  created:   { lbl: '생성',      glyph: '○', cls: 'dim' },
-  claimed:   { lbl: '클레임',    glyph: '◉', cls: 'claimed' },
-  started:   { lbl: '착수',      glyph: '▶', cls: 'wip' },
-  handoff:   { lbl: '핸드오프',  glyph: '⇄', cls: 'volt' },
-  submitted: { lbl: '검증 제출', glyph: '◬', cls: 'verify' },
-  approved:  { lbl: '검증 승인', glyph: '✓', cls: 'done' },
-  rejected:  { lbl: '반려',      glyph: '✕', cls: 'bad' },
-  blocked:   { lbl: '차단',      glyph: '⚠', cls: 'bad' },
-  done:      { lbl: '완료',      glyph: '✓', cls: 'done' },
-  cancelled: { lbl: '취소',      glyph: '◌', cls: 'dim' },
+  created:   { lbl: '생성',      glyph: '\u25CB', cls: 'dim' },
+  claimed:   { lbl: '클레임',    glyph: '\u25C9', cls: 'claimed' },
+  started:   { lbl: '착수',      glyph: '\u25B6', cls: 'wip' },
+  handoff:   { lbl: '핸드오프',  glyph: '\u21C4', cls: 'volt' },
+  submitted: { lbl: '검증 제출', glyph: '\u25EC', cls: 'verify' },
+  approved:  { lbl: '검증 승인', glyph: '\u2713', cls: 'done' },
+  rejected:  { lbl: '반려',      glyph: '\u2715', cls: 'bad' },
+  blocked:   { lbl: '차단',      glyph: '\u26A0', cls: 'bad' },
+  done:      { lbl: '완료',      glyph: '\u2713', cls: 'done' },
+  cancelled: { lbl: '취소',      glyph: '\u25CC', cls: 'dim' },
 };
 
 // task.lineage 가 없으면 현재 상태에서 최소 흐름을 합성 (assignee 기준)
@@ -104,7 +104,7 @@ function TaskLineage({ events, assignee, onOpenKeeper }) {
         <span className="wk-lin-chain">
           {chain.map((id, i) => (
             <React.Fragment key={id}>
-              {i > 0 && <span className="wk-lin-chain-arr">{'→'}</span>}
+              {i > 0 && <span className="wk-lin-chain-arr">{'\u2192'}</span>}
               <LinActor id={id} onOpenKeeper={onOpenKeeper} cls={id === assignee ? 'cur' : ''} />
             </React.Fragment>
           ))}
@@ -112,7 +112,7 @@ function TaskLineage({ events, assignee, onOpenKeeper }) {
       </div>
       <div className="wk-lin-track">
         {events.map((e, i) => {
-          const m = LINEAGE_EV[e.ev] || { lbl: e.ev, glyph: '·', cls: 'dim' };
+          const m = LINEAGE_EV[e.ev] || { lbl: e.ev, glyph: '\u00B7', cls: 'dim' };
           return (
             <div key={i} className={`wk-lin-row ${m.cls}`}>
               <span className="wk-lin-at mono">{e.at || ''}</span>
@@ -121,7 +121,7 @@ function TaskLineage({ events, assignee, onOpenKeeper }) {
                 <span className="wk-lin-line">
                   <span className={`wk-lin-ev ${m.cls}`}>{m.glyph} {m.lbl}</span>
                   <LinActor id={e.actor} onOpenKeeper={onOpenKeeper} />
-                  {e.to && <React.Fragment><span className="wk-lin-arr">{'→'}</span><LinActor id={e.to} onOpenKeeper={onOpenKeeper} cls="to" /></React.Fragment>}
+                  {e.to && <React.Fragment><span className="wk-lin-arr">{'\u2192'}</span><LinActor id={e.to} onOpenKeeper={onOpenKeeper} cls="to" /></React.Fragment>}
                 </span>
                 {e.note && <span className="wk-lin-note">{e.note}</span>}
               </span>
@@ -145,24 +145,24 @@ function TaskRow({ t, onOpenKeeper, onClaim, onRequestVerify }) {
         <span className="wk-task-id mono">{t.id}</span>
         <span className="wk-task-title">{t.title}
           {t.predecessor_task_id && <span className="wk-rerun" title={`RFC-0323 재실행 · predecessor_task_id = ${t.predecessor_task_id}`}>↻ 재실행 ← {t.predecessor_task_id}</span>}
-          {t.blocker && <span className="wk-task-block">{'⚠'} {t.blocker}</span>}
-          <span className="wk-task-chev">{open ? '▾' : '▸'}</span>
+          {t.blocker && <span className="wk-task-block">{'\u26A0'} {t.blocker}</span>}
+          <span className="wk-task-chev">{open ? '\u25BE' : '\u25B8'}</span>
         </span>
         <span className="wk-spacer"></span>
         <span className={`wk-task-state ${st.cls}`}>{st.lbl}</span>
         {k
           ? <button className="wk-task-kp" onClick={(e) => { e.stopPropagation(); onOpenKeeper(k.id); }} title={`${k.id} 대화 열기`}><SigilBadge k={k} size={18} /><span className="mono">{k.id}</span></button>
           : t.status === 'todo'
-            ? <button className="wk-task-claim" onClick={(e) => { e.stopPropagation(); onClaim(t.id); }} title="operator가 keeper에게 배정 (keeper는 스스로 claim)">{'＋'} 배정</button>
+            ? <button className="wk-task-claim" onClick={(e) => { e.stopPropagation(); onClaim(t.id); }} title="operator가 keeper에게 배정 (keeper는 스스로 claim)">{'\uFF0B'} 배정</button>
             : <span className="wk-task-kp none mono">미배정</span>}
       </div>
       {open && (
         <div className="wk-task-detail">
-          {t._rejected && <div className="wk-rejected">{'✕'} 검증 반려됨 · {t._rejected}</div>}
+          {t._rejected && <div className="wk-rejected">{'\u2715'} 검증 반려됨 · {t._rejected}</div>}
           <TaskLineage events={lineage} assignee={t.assignee} onOpenKeeper={onOpenKeeper} />
           {t.gate && <TaskGate gate={t.gate} />}
           {(t.status === 'in_progress' || t.status === 'claimed') && onRequestVerify && (
-            <button className="wk-reqverify" onClick={(e) => { e.stopPropagation(); onRequestVerify(t.id); }} title="이 task 를 검증 대기 큐로 제출">{'◷'} 검증 요청 · awaiting_verification 으로 제출</button>
+            <button className="wk-reqverify" onClick={(e) => { e.stopPropagation(); onRequestVerify(t.id); }} title="이 task 를 검증 대기 큐로 제출">{'\u25F7'} 검증 요청 · awaiting_verification 으로 제출</button>
           )}
           {t.handoff && (
             <div className="wk-handoff">
@@ -183,7 +183,7 @@ function AddTaskInline({ goalId, onAdd }) {
   const [openA, setOpenA] = useWkState(false);
   const [title, setTitle] = useWkState('');
   const submit = () => { if (!title.trim()) return; onAdd(goalId, { title: title.trim() }); setTitle(''); setOpenA(false); };
-  if (!openA) return <button className="wk-addtask" onClick={() => setOpenA(true)}>{'＋'} task 추가</button>;
+  if (!openA) return <button className="wk-addtask" onClick={() => setOpenA(true)}>{'\uFF0B'} task 추가</button>;
   return (
     <div className="wk-addtask-row">
       <input className="wk-addtask-in" autoFocus value={title} placeholder="새 task 제목… (Enter 추가 · todo·미배정으로 생성)"
@@ -202,12 +202,12 @@ function GoalCard({ g, open, onToggle, onOpenKeeper, onClaim, onAddTask, onReque
   return (
     <div className={`wk-goal ${open ? 'open' : ''} st-${gm.cls}`} data-goal-id={g.id}>
       <button className="wk-goal-h" onClick={onToggle}>
-        <span className="wk-caret">{open ? '▾' : '▸'}</span>
+        <span className="wk-caret">{open ? '\u25BE' : '\u25B8'}</span>
         <span className="wk-prio mono" title={`우선순위 ${g.priority}`}>P{g.priority}</span>
         <span className={`wk-gstatus ${gm.cls}`}>{gm.lbl}</span>
         <span className="wk-goal-title">{g.title}</span>
         <span className="wk-spacer"></span>
-        {g.require_completion_approval && <span className="wk-approval" title={`완료 승인 필요 · 검증자 ${(g.verifier || []).join(', ')}`}>{'✓'} 완료 승인</span>}
+        {g.require_completion_approval && <span className="wk-approval" title={`완료 승인 필요 · 검증자 ${(g.verifier || []).join(', ')}`}>{'\u2713'} 완료 승인</span>}
         {g.due_date && <span className="wk-due mono">{g.due_date}</span>}
         {lead && <span className="wk-lead" title={`리드 · ${lead.id}`}><SigilBadge k={lead} size={22} /></span>}
       </button>
@@ -250,7 +250,7 @@ function WorkAside({ flagged, approvals, verifyTasks, blockers, backlog, recent,
   if (collapsed) {
     return (
       <aside className="ov-aside wka collapsed" onClick={() => setCol(false)} role="button" tabIndex={0} title="클릭하여 운영 상태 패널 펼치기" onKeyDown={(e) => { if (e.key === 'Enter') setCol(false); }}>
-        <button className="wka-railbtn" onClick={(e) => { e.stopPropagation(); setCol(false); }} title="운영 상태 패널 펼치기">{'«'}</button>
+        <button className="wka-railbtn" onClick={(e) => { e.stopPropagation(); setCol(false); }} title="운영 상태 패널 펼치기">{'\u00AB'}</button>
         <div className="wka-rail-stats">
           <div className="wka-rail-stat"><b className="mono">{counts.wip}</b><span>진행</span></div>
           <div className={`wka-rail-stat ${counts.verify ? 'volt' : ''}`}><b className="mono">{counts.verify}</b><span>검증</span></div>
@@ -269,7 +269,7 @@ function WorkAside({ flagged, approvals, verifyTasks, blockers, backlog, recent,
       <div className="wka-bar">
         <span className="wka-bar-t">운영 상태</span>
         <span className="wka-bar-live"><span className="wka-livedot"></span>{counts.active} active</span>
-        <button className="wka-collapse" onClick={() => setCol(true)} title="접기 — Chat 열 때 공간 확보">{'»'}</button>
+        <button className="wka-collapse" onClick={() => setCol(true)} title="접기 — Chat 열 때 공간 확보">{'\u00BB'}</button>
       </div>
       <div className="wka-hud">
         <div className="wka-hud-c"><span className="wka-hud-k">진행</span><span className="wka-hud-v">{counts.wip}</span></div>
@@ -335,7 +335,7 @@ function WorkAside({ flagged, approvals, verifyTasks, blockers, backlog, recent,
               ? <div className="wka-calm mono">완료된 task 없음</div>
               : recent.map(t => (
                   <button key={t.id} className="wka-done" onClick={() => onJump(t.goalId)}>
-                    <span className="wka-done-mark">{'✓'}</span>
+                    <span className="wka-done-mark">{'\u2713'}</span>
                     <span className="wka-done-t">{t.title}</span>
                   </button>
                 ))}
@@ -359,15 +359,15 @@ function KanbanCard({ t, onOpen, onOpenKeeper, onClaim, onJumpGoal }) {
       </div>
       <div className="wk-kcard-title">{t.title}</div>
       {t.predecessor_task_id && <div className="wk-kcard-rerun" title={`predecessor_task_id = ${t.predecessor_task_id}`}>↻ 재실행 ← {t.predecessor_task_id}</div>}
-      {t.blocker && <div className="wk-kcard-block">{'⚠'} 차단됨</div>}
-      <button className="wk-kcard-goal" onClick={(e) => { e.stopPropagation(); onJumpGoal(t._goalId); }} title={`소속 목표로 이동 · ${t._goalTitle}`}>{'↳'} {t._goalTitle}</button>
+      {t.blocker && <div className="wk-kcard-block">{'\u26A0'} 차단됨</div>}
+      <button className="wk-kcard-goal" onClick={(e) => { e.stopPropagation(); onJumpGoal(t._goalId); }} title={`소속 목표로 이동 · ${t._goalTitle}`}>{'\u21B3'} {t._goalTitle}</button>
       <div className="wk-kcard-foot">
-        {hasHandoff && <span className="wk-kcard-ho" title="핸드오프 이력">{'⇄'}</span>}
+        {hasHandoff && <span className="wk-kcard-ho" title="핸드오프 이력">{'\u21C4'}</span>}
         <span className="wk-spacer"></span>
         {k
           ? <button className="wk-kcard-kp" onClick={(e) => { e.stopPropagation(); onOpenKeeper(k.id); }} title={`${k.id} 대화 열기`}><SigilBadge k={k} size={16} /></button>
           : t.status === 'todo'
-            ? <button className="wk-kcard-claim" onClick={(e) => { e.stopPropagation(); onClaim(t.id); }} title="operator가 keeper에게 배정">{'＋'}</button>
+            ? <button className="wk-kcard-claim" onClick={(e) => { e.stopPropagation(); onClaim(t.id); }} title="operator가 keeper에게 배정">{'\uFF0B'}</button>
             : <span className="wk-kcard-kp none mono">·</span>}
       </div>
     </div>
@@ -413,7 +413,7 @@ function TaskDrawer({ t, onClose, onOpenKeeper }) {
           <span className="wk-td-goal">{t._goalTitle}</span>
           <span style={{ marginLeft: 'auto' }}></span>
           <span className={`wk-task-state ${st.cls}`}>{st.lbl}</span>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           <div className="wk-td-title">{t.title}</div>
@@ -423,7 +423,7 @@ function TaskDrawer({ t, onClose, onOpenKeeper }) {
               ? <button className="wk-task-kp" onClick={() => onOpenKeeper(k.id)} title={`${k.id} 대화 열기`}><SigilBadge k={k} size={18} /><span className="mono">{k.id}</span></button>
               : <span className="wk-task-kp none mono">미배정</span>}
           </div>
-          {t.blocker && <div className="wk-td-block">{'⚠'} {t.blocker}</div>}
+          {t.blocker && <div className="wk-td-block">{'\u26A0'} {t.blocker}</div>}
           <TaskLineage events={lineage} assignee={t.assignee} onOpenKeeper={onOpenKeeper} />
           {t.gate && <TaskGate gate={t.gate} />}
           {t.handoff && (
@@ -479,7 +479,7 @@ function NewGoalComposer({ onClose, onCreate }) {
           <h3>새 목표</h3>
           <span className="tid mono">goal store · create</span>
           <span style={{ marginLeft: 'auto' }}></span>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           <div className="turn-sec">
@@ -511,7 +511,7 @@ function NewGoalComposer({ onClose, onCreate }) {
             {risk.cls === 'bad' && !approval && <div className="ngc-rec">위험도 높음 — 완료 승인 게이트를 권장합니다</div>}
           </div>
           <div className="turn-sec bcc-actions">
-            <button className="bcc-send" disabled={!valid} onClick={submit}>{'＋'} 목표 생성</button>
+            <button className="bcc-send" disabled={!valid} onClick={submit}>{'\uFF0B'} 목표 생성</button>
             <button className="sch-act ghost" onClick={onClose}>취소</button>
           </div>
         </div>
@@ -538,7 +538,7 @@ function AssignDrawer({ task, onClose, onAssign }) {
           <h3>task 배정</h3>
           <span className="tid mono">{task.id}</span>
           <span style={{ marginLeft: 'auto' }}></span>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           <div className="wk-assign-note">이 task는 원래 keeper가 스스로 <span className="mono">keeper_task_claim</span> 으로 가져갑니다. 여기서는 <b>operator가 대신 특정 keeper에게 배정</b>합니다 — 배정되면 상태가 <span className="mono">claimed</span> 로.</div>
@@ -720,7 +720,7 @@ function WorkSurface({ onOpenKeeper, onNav, wantGoal }) {
               <button className={view === 'kanban' ? 'on' : ''} onClick={() => setView('kanban')}>칸반</button>
               <button className={view === 'verify' ? 'on' : ''} onClick={() => setView('verify')}>검증{verify ? ` ${verify}` : ''}</button>
             </div>
-            <button className="set-add wk-newgoal" title="새 목표 생성" onClick={() => setComposer(true)}>{'＋'} 새 목표</button>
+            <button className="set-add wk-newgoal" title="새 목표 생성" onClick={() => setComposer(true)}>{'\uFF0B'} 새 목표</button>
           </div>
         </header>
 
@@ -739,10 +739,10 @@ function WorkSurface({ onOpenKeeper, onNav, wantGoal }) {
               {backlog.map(t => (
                 <div key={t.id} className="wk-bl-row">
                   <span className="wk-task-id mono">{t.id}</span>
-                  <span className="wk-bl-title">{t.title}<span className="wk-bl-goal">{'↳'} {t.goal}</span></span>
+                  <span className="wk-bl-title">{t.title}<span className="wk-bl-goal">{'\u21B3'} {t.goal}</span></span>
                   <span className="wk-spacer"></span>
                   <span className="wk-bl-prio mono">P{t.priority}</span>
-                  <button className="wk-task-claim" onClick={() => openAssign(t.id)} title="operator가 keeper에게 배정">{'＋'} 배정</button>
+                  <button className="wk-task-claim" onClick={() => openAssign(t.id)} title="operator가 keeper에게 배정">{'\uFF0B'} 배정</button>
                 </div>
               ))}
             </div>

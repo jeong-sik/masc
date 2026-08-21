@@ -566,31 +566,23 @@ module Ring = struct
        boot even when [capacity] was much smaller.
 
        [Fs_compat.fold_jsonl_lines] also gives us non-blocking IO
-       under Eio, max-line-size enforcement via the [~max_size:16 MiB]
+       under Eio and max-line-size enforcement via the [~max_size:16 MiB]
        cap on [Eio.Buf_read.of_flow] (which [Buf_read.lines] then
-       streams under), and consistent malformed-line handling (stderr
-       warning + skip) in place of the prior silent drop on
-       [Yojson.Json_error]. *)
+       streams under).
+
+       A row that does not decode raises [Entry_decode_error] here, the
+       same as at every other boundary. This fold used to swallow that so
+       rows written before the typed encoder ([raw_level] /
+       [normalized_level] / [legacy_classified]) could pass through as a
+       WARN; those schemas are gone and nothing writes them. *)
     let buf_ring : entry Queue.t = Queue.create () in
     let push_file path =
       Fs_compat.fold_jsonl_lines
         ~init:()
-        ~f:(fun () ~line_no json ->
-          (* RFC-0079: file-fold is the one boundary that tolerates legacy
-             rows written before the typed encoder. Older JSONL files (with
-             [raw_level] / [normalized_level] / [legacy_classified]) fail
-             [entry_of_json] because their schema is gone; the cleanup_old
-             rotation deletes them within [keep_days], so the WARN here is
-             load-bearing only during that window. Anywhere else, a decode
-             error propagates as [Entry_decode_error]. *)
-          match entry_of_json json with
-          | exception Entry_decode_error msg ->
-              Printf.eprintf
-                "[%s] [WARN] [Log] skip legacy/malformed JSONL row %s:%d: %s\n%!"
-                (timestamp ()) path line_no msg
-          | e ->
-            Queue.add e buf_ring;
-            if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))
+        ~f:(fun () ~line_no:_ json ->
+          let e = entry_of_json json in
+          Queue.add e buf_ring;
+          if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))
         path
     in
     push_file (log_file_path dir yesterday);

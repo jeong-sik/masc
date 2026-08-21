@@ -11,7 +11,11 @@
 
     While the run is active, the production adapter refreshes Discord's
     native typing indicator. Tool lifecycle events refresh that indicator
-    but never create standalone tool messages.
+    but never create standalone tool messages: {!Keeper_chat_tool_trail}
+    collects them into one fenced block appended to the final reply instead.
+    That block carries each call's name and the one argument it acted on -- a
+    path, a command, a search pattern -- which a channel with readers beyond
+    the keeper's operator should be bound with in mind.
 
     @since 2.145.0 *)
 
@@ -57,8 +61,10 @@ val adapter_loop :
     - [Status_block]: replace the terminal assistant text with typed status UI
       or messages.
     - [Tool_call_start], [Tool_call_args], [Tool_call_args_snapshot],
-      [Tool_call_end], and [Tool_context_block]: no message projection;
-      activity stays on Discord's native typing surface.
+      [Tool_call_end]: no message of their own; activity stays on Discord's
+      native typing surface and the calls are appended to the final reply as
+      one {!Keeper_chat_tool_trail} block. [Tool_context_block] is not
+      projected at all.
 
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.

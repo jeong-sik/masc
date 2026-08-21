@@ -85,6 +85,8 @@ val restart_is_continuation : restart_injection -> bool
 type run_evidence = {
   captured_at : string;
   harness_git_commit : string option;
+      (** Build-time commit embedded in the canary executable.  This is not
+          the HEAD of a checkout from which the packaged binary is invoked. *)
   run_id : string;
   keeper_name : string;
   runtime : string option;

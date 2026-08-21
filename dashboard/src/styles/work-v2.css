@@ -117,7 +117,6 @@
   cursor: pointer;
   text-align: left;
   color: inherit;
-  font: inherit;
 }
 
 .wk-goal-h:hover {
@@ -430,11 +429,15 @@
   overflow: hidden;
 }
 
+/* The vendored `.wk-backlog` container already carries the design's 13px/15px
+   inset. This header used to add 12px/16px of its own on top, and the list
+   below another 8px/16px/10px, so the backlog sat 43px taller than the design
+   and double-inset on both edges. Spacing is the container's now; the header
+   keeps only its own type. */
 .wk-backlog-h {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px 16px;
   font-size: var(--fs-13);
   font-weight: 600;
   color: var(--text-mid);
@@ -444,14 +447,11 @@
   color: var(--status-warn);
 }
 
+/* Count reads as warn-toned mono text, per the vendored kit. The filled pill
+   this used to be is the chip ground the tempered tone takes away. */
 .wk-backlog-h .n {
   font-family: var(--font-mono);
   font-size: var(--fs-11);
-  font-weight: 700;
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  background: color-mix(in oklab, var(--status-warn) 12%, transparent);
-  border: 1px solid color-mix(in oklab, var(--status-warn) 35%, transparent);
   color: var(--status-warn);
 }
 
@@ -462,8 +462,7 @@
 }
 
 .wk-backlog-list {
-  border-top: 1px solid var(--border-soft);
-  padding: 8px 16px 10px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -612,7 +611,6 @@
   font-size: 11.5px;
   white-space: nowrap;
   transition: border-color 0.15s ease, color 0.15s ease;
-  font: inherit;
 }
 
 .wk-task-kp:hover {
@@ -633,7 +631,6 @@
   border: 1px solid var(--border-highlight);
   background: var(--bg-sunken);
   color: var(--text-mid);
-  font: inherit;
   font-size: var(--fs-11);
   cursor: pointer;
   transition: border-color 0.15s ease, color 0.15s ease;

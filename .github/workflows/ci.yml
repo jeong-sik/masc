@@ -371,7 +371,7 @@ jobs:
             lib_deps=true
           fi
 
-          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/keeper-full-lifecycle-evidence\.py$|scripts/install\.sh$)'; then
+          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|quickstart\.sh$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/quickstart-smoke\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/keeper-full-lifecycle-evidence\.py$|scripts/install\.sh$)'; then
             doc_truth=true
           fi
 
@@ -905,6 +905,9 @@ jobs:
           kill "${heartbeat_pid}" 2>/dev/null || true
           wait "${heartbeat_pid}" 2>/dev/null || true
           exit "${build_status}"
+
+      - name: Run source quickstart onboarding smoke
+        run: scripts/quickstart-smoke.sh
 
       - name: Run typed functional-core boundary audit
         env:

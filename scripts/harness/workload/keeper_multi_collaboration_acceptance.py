@@ -62,7 +62,7 @@ KNOWN_ASSERTIONS = {
     "role_identity_preserved",
     "runtime_assignment_serving_observed",
     "goal_visible",
-    "goal_assignment_visible",
+    "goal_shared_open_set_visible",
     "tasks_linked_to_goal",
     "parallel_wave_completed",
     "parallel_keeper_overlap_observed",
@@ -1289,35 +1289,6 @@ class MissionRun:
                 "priority": 1,
             },
         )
-        self.call(
-            "goal-assign",
-            "masc_goal_assign",
-            {"goal_id": self.goal_id, "owner": self.roles["coordinator"]},
-        )
-        self.call(
-            "goal-verifier-upsert",
-            "masc_goal_upsert",
-            {
-                "id": self.verifier_goal_id,
-                "title": f"Artifact-gated Goal verifier mission {self.marker}",
-                "metric": (
-                    f"owner artifact {self.verifier_artifact} contains the exact "
-                    f"token {self.verifier_success_token}"
-                ),
-                "target_value": self.verifier_success_token,
-                "priority": 1,
-            },
-        )
-        for role, keeper in self.roles.items():
-            arguments: dict[str, Any] = {
-                "name": keeper,
-                "active_goal_ids": [self.goal_id],
-            }
-            runtime_id = self.runtime_for_role(role)
-            if runtime_id:
-                arguments["runtime_id"] = runtime_id
-            self.call(f"keeper-goal-scope-{role}", "masc_keeper_up", arguments)
-
         task_specs = {
             "builder-a": "Build the first durable collaboration artifact",
             "builder-b": "Build the second durable collaboration artifact",
@@ -1820,6 +1791,20 @@ class MissionRun:
         )
 
     def run_goal_verifier_refute_reenter_prove(self) -> None:
+        self.call(
+            "goal-verifier-upsert",
+            "masc_goal_upsert",
+            {
+                "id": self.verifier_goal_id,
+                "title": f"Artifact-gated Goal verifier mission {self.marker}",
+                "metric": (
+                    f"producer artifact {self.verifier_artifact} contains the exact "
+                    f"token {self.verifier_success_token}"
+                ),
+                "target_value": self.verifier_success_token,
+                "priority": 1,
+            },
+        )
         self.wait_for_goal_state(
             phase="executing",
             criterion_state="viable",
@@ -1844,27 +1829,12 @@ class MissionRun:
         self.run_turn(
             "coordinator",
             "goal-verifier-refute-artifact",
-            (
-                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"exact Task {self.verifier_task_id}를 claim하세요. "
-                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}에 "
-                f"정확히 '{failure_token}' 한 줄만 쓰세요. 다른 토큰을 추가하지 마세요. "
-                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
-                "제출하세요. 실패 내용이어도 완료를 가장하지 말고 실제 파일을 그대로 제출하세요."
-            ),
+            self._goal_verifier_refute_prompt(failure_token),
         )
         rejected_task_verdict = self.wait_for_verifier_task_verdict("in_progress")
         self.writer.write_json(
             "observations/goal-verifier-task-refuted.json",
             rejected_task_verdict,
-        )
-        self.call(
-            "goal-verifier-assign",
-            "masc_goal_assign",
-            {
-                "goal_id": self.verifier_goal_id,
-                "owner": self.roles["coordinator"],
-            },
         )
         self.call(
             "goal-verifier-request-refute",
@@ -1889,14 +1859,7 @@ class MissionRun:
         self.run_turn(
             "coordinator",
             "goal-verifier-proven-artifact",
-            (
-                f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
-                f"Write(tool_write_file)로 playground의 {self.verifier_artifact}를 "
-                f"정확히 '{self.verifier_success_token}' 한 줄로 교체하세요. "
-                "쓴 뒤 파일의 exact content를 다시 읽어 확인하고, "
-                f"keeper_task_done으로 artifact:{self.verifier_artifact}를 evidence로 "
-                "다시 제출하세요."
-            ),
+            self._goal_verifier_proven_prompt(),
         )
         approved_task_verdict = self.wait_for_verifier_task_verdict("done")
         self.writer.write_json(
@@ -1973,6 +1936,32 @@ class MissionRun:
         self.writer.write_json(
             "observations/goal-verification-runs.json",
             {"payload": runs_payload, "evidence": self.goal_verifier_evidence},
+        )
+
+    def _goal_verifier_refute_prompt(self, failure_token: str) -> str:
+        return (
+            f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+            f"exact Task {self.verifier_task_id}를 claim하세요. "
+            f"tool_write_file을 path='{self.verifier_artifact}', "
+            f"content='{failure_token}', mode='overwrite'로 호출하세요. "
+            "path에 'playground/' 접두사나 절대 경로를 붙이지 마세요. "
+            f"keeper_task_done은 task_id='{self.verifier_task_id}', "
+            f"evidence_refs=['artifact:{self.verifier_artifact}']로 제출하세요. "
+            "실패 내용이어도 완료를 가장하지 말고 실제 파일을 그대로 제출하세요."
+        )
+
+    def _goal_verifier_proven_prompt(self) -> str:
+        return (
+            f"Mission {self.marker}. composition 도구는 호출하지 마세요. "
+            f"반려 뒤 in_progress인 exact Task {self.verifier_task_id}만 계속 처리하세요. "
+            "keeper_task_release, masc_add_task, keeper_task_claim을 호출하지 말고 "
+            "Task를 release하거나 대체 Task를 만들거나 claim하지 마세요. "
+            f"tool_write_file을 path='{self.verifier_artifact}', "
+            f"content='{self.verifier_success_token}', mode='overwrite'로 호출하세요. "
+            "path에 'playground/' 접두사나 절대 경로를 붙이지 마세요. "
+            f"tool_read_file도 path='{self.verifier_artifact}'로 호출해 exact content를 확인하세요. "
+            f"keeper_task_done은 task_id='{self.verifier_task_id}', "
+            f"evidence_refs=['artifact:{self.verifier_artifact}']로 다시 제출하세요."
         )
 
     def restart_and_recall(self, post_id: str) -> None:
@@ -2256,6 +2245,15 @@ class MissionRun:
         board_text = json.dumps(board, ensure_ascii=False)
         task_text = json.dumps(tasks, ensure_ascii=False)
         goal_text = json.dumps(goals, ensure_ascii=False)
+        goal_rows = goals.get("goals", []) if isinstance(goals, dict) else []
+        shared_goal = next(
+            (
+                row
+                for row in goal_rows
+                if isinstance(row, dict) and row.get("id") == self.goal_id
+            ),
+            None,
+        )
         history_text = json.dumps(histories, ensure_ascii=False)
         qa_verdicts = [
             self._completion_verdict(key) for key in ("qa-implement", "qa-test")
@@ -2771,9 +2769,9 @@ class MissionRun:
                 ),
             ),
             "goal_visible": (self.goal_id.lower() in goal_text.lower(), self.goal_id),
-            "goal_assignment_visible": (
-                self.roles["coordinator"].lower() in goal_text.lower(),
-                self.roles["coordinator"],
+            "goal_shared_open_set_visible": (
+                isinstance(shared_goal, dict) and "owner" not in shared_goal,
+                "shared Goal is present and the removed owner field is absent",
             ),
             "tasks_linked_to_goal": (
                 # Goal linkage is judged from the creation receipts (the

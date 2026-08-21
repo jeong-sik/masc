@@ -50,7 +50,7 @@ function VqGate({ task, checks, onToggleGate }) {
             onClick={() => onToggleGate(task.id, i, !conf)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggleGate(task.id, i, !conf); } }}
             title={conf ? 'operator 확인됨 — 클릭하여 해제' : (g.outcome === 'satisfied' ? '클릭하여 확인' : 'operator 판단으로 강제 확인 (미충족 증거)')}>
-            <span className="vq-gate-box">{'✓'}</span>
+            <span className="vq-gate-box">{'\u2713'}</span>
             <span className="vq-gate-ev">{g.evidence}</span>
             <span className={`vq-gate-out ${g.outcome}`}>{L[g.outcome] || g.outcome}</span>
           </div>
@@ -74,11 +74,11 @@ function VqActions({ task, checks, verifier, reassign, onResolve, onReassign, co
       <div className="vq-actions">
         <button className="vq-act approve" disabled={!st.allConfirmed}
           title={st.allConfirmed ? '모든 게이트 확인됨 — 통과 처리 (task → done)' : `게이트 ${st.total - st.confirmed}건 미확인 — 통과 불가`}
-          onClick={() => onResolve(task.id, 'approved', {})}>{'✓'} 승인 · 통과</button>
-        <button className={`vq-act reject ${compact ? 'mini' : ''}`} onClick={() => setMode(m => m === 'reject' ? null : 'reject')}>{'✕'} 반려</button>
-        <button className={`vq-act defer ${compact ? 'mini' : ''}`} onClick={() => onResolve(task.id, 'deferred', {})} title="보류 — 재검증 대기로 남김">{'⏸'} 보류</button>
+          onClick={() => onResolve(task.id, 'approved', {})}>{'\u2713'} 승인 · 통과</button>
+        <button className={`vq-act reject ${compact ? 'mini' : ''}`} onClick={() => setMode(m => m === 'reject' ? null : 'reject')}>{'\u2715'} 반려</button>
+        <button className={`vq-act defer ${compact ? 'mini' : ''}`} onClick={() => onResolve(task.id, 'deferred', {})} title="보류 — 재검증 대기로 남김">{'\u23F8'} 보류</button>
         <span className="vq-act-spacer"></span>
-        <button className={`vq-act ${compact ? 'mini' : ''}`} onClick={() => setMode(m => m === 'reassign' ? null : 'reassign')} title="다른 keeper·operator에게 검증 재배정">{'⇄'} 검증자</button>
+        <button className={`vq-act ${compact ? 'mini' : ''}`} onClick={() => setMode(m => m === 'reassign' ? null : 'reassign')} title="다른 keeper·operator에게 검증 재배정">{'\u21C4'} 검증자</button>
       </div>
 
       {mode === 'reject' && (
@@ -89,7 +89,7 @@ function VqActions({ task, checks, verifier, reassign, onResolve, onReassign, co
           </div>
           <textarea value={reason} autoFocus placeholder="무엇이 부족한지, 무엇을 다시 해야 하는지…" onChange={e => setReason(e.target.value)} />
           <div className="vq-form-row">
-            <button className="vq-act reject mini" onClick={doReject}>{'✕'} 반려하고 반송</button>
+            <button className="vq-act reject mini" onClick={doReject}>{'\u2715'} 반려하고 반송</button>
             <button className="vq-act mini" onClick={() => { setMode(null); setReason(''); }}>취소</button>
           </div>
         </div>
@@ -131,7 +131,7 @@ function VqReview({ task, checks, reassign, onToggleGate, onResolve, onReassign,
   const sub = vqSubmit(task);
   return (
     <React.Fragment>
-      {task.predecessor_task_id && <div className="vq-note rerun">{'↻'} 재실행 제출 · predecessor <b>{task.predecessor_task_id}</b> — 반려 후 재검증</div>}
+      {task.predecessor_task_id && <div className="vq-note rerun">{'\u21BB'} 재실행 제출 · predecessor <b>{task.predecessor_task_id}</b> — 반려 후 재검증</div>}
       {sub.note && <div className="vq-note"><b>제출 메모</b> · {sub.note}</div>}
       <VqGate task={task} checks={checks} onToggleGate={onToggleGate} />
       {task.handoff && (
@@ -159,7 +159,7 @@ function VqStack(props) {
             <div className="grow">
               <div className="vq-req-id mono">{task.id} · P{task.priority}</div>
               <div className="vq-req-title">{task.title}</div>
-              <button className="vq-req-goal" onClick={() => props.onJumpGoal(task._goalId)} title="소속 목표로 이동">{'↳'} {task._goalTitle}</button>
+              <button className="vq-req-goal" onClick={() => props.onJumpGoal(task._goalId)} title="소속 목표로 이동">{'\u21B3'} {task._goalTitle}</button>
             </div>
             <div className="vq-card-meta"><VqSubmitter task={task} onOpenKeeper={props.onOpenKeeper} /></div>
           </div>
@@ -203,7 +203,7 @@ function VqSplit(props) {
               <div style={{ flex: 1 }}>
                 <div className="vq-req-id mono">{sel.id} · P{sel.priority}</div>
                 <div className="vq-req-title">{sel.title}</div>
-                <button className="vq-req-goal" onClick={() => props.onJumpGoal(sel._goalId)}>{'↳'} {sel._goalTitle}</button>
+                <button className="vq-req-goal" onClick={() => props.onJumpGoal(sel._goalId)}>{'\u21B3'} {sel._goalTitle}</button>
               </div>
               <VqSubmitter task={sel} onOpenKeeper={props.onOpenKeeper} />
             </div>
@@ -237,7 +237,7 @@ function VqTriage(props) {
             </div>
             <div className="vq-tri-title" onClick={() => setExpand(id => id === task.id ? null : task.id)}>{task.title}</div>
             <div className="vq-tri-meta">
-              <button className="vq-req-goal" onClick={() => props.onJumpGoal(task._goalId)}>{'↳'} {task._goalTitle}</button>
+              <button className="vq-req-goal" onClick={() => props.onJumpGoal(task._goalId)}>{'\u21B3'} {task._goalTitle}</button>
             </div>
             <div className="vq-tri-gate">
               <span className="vq-tri-gate-bar"><span style={{ width: (st.total ? st.confirmed / st.total * 100 : 0) + '%' }}></span></span>
@@ -246,17 +246,17 @@ function VqTriage(props) {
             {!expanded ? (
               <React.Fragment>
                 <div className="vq-tri-actions">
-                  <button className="vq-act approve mini" disabled={!st.allConfirmed} onClick={() => props.onResolve(task.id, 'approved', {})}>{'✓'} 통과</button>
-                  <button className="vq-act reject mini" onClick={() => setExpand(task.id)}>{'✕'} 반려</button>
+                  <button className="vq-act approve mini" disabled={!st.allConfirmed} onClick={() => props.onResolve(task.id, 'approved', {})}>{'\u2713'} 통과</button>
+                  <button className="vq-act reject mini" onClick={() => setExpand(task.id)}>{'\u2715'} 반려</button>
                 </div>
-                <button className="vq-tri-more" onClick={() => setExpand(task.id)}>게이트 증거 검토 {'→'}</button>
+                <button className="vq-tri-more" onClick={() => setExpand(task.id)}>게이트 증거 검토 {'\u2192'}</button>
               </React.Fragment>
             ) : (
               <React.Fragment>
                 <VqGate task={task} checks={checks} onToggleGate={props.onToggleGate} />
                 <VqActions task={task} checks={checks} verifier={task._verifier} reassign={reassign[task.id]}
                   onResolve={props.onResolve} onReassign={props.onReassign} compact />
-                <button className="vq-tri-more" onClick={() => setExpand(null)}>{'↑'} 접기</button>
+                <button className="vq-tri-more" onClick={() => setExpand(null)}>{'\u2191'} 접기</button>
               </React.Fragment>
             )}
           </article>
@@ -267,9 +267,9 @@ function VqTriage(props) {
 }
 
 const VQ_VERDICT = {
-  approved: { cls: 'approved', mark: '✓', lbl: '승인 · 통과', tail: 'task → done' },
-  rejected: { cls: 'rejected', mark: '✕', lbl: '반려', tail: 'keeper 에게 반송 · in_progress' },
-  deferred: { cls: 'deferred', mark: '⏸', lbl: '보류', tail: '재검증 대기' },
+  approved: { cls: 'approved', mark: '\u2713', lbl: '승인 · 통과', tail: 'task → done' },
+  rejected: { cls: 'rejected', mark: '\u2715', lbl: '반려', tail: 'keeper 에게 반송 · in_progress' },
+  deferred: { cls: 'deferred', mark: '\u23F8', lbl: '보류', tail: '재검증 대기' },
 };
 
 function VerificationQueue({ queue, resolvedList, layout, setLayout, checks, reassign, verdicts,
@@ -314,7 +314,7 @@ function VerificationQueue({ queue, resolvedList, layout, setLayout, checks, rea
 
       {queue.length === 0 ? (
         <div className="vq-clear">
-          <div className="ico">{'✓'}</div>
+          <div className="ico">{'\u2713'}</div>
           <h3>검증 대기 요청이 없습니다</h3>
           <div className="vq-clear-sub">keeper 가 task 를 <span className="mono">awaiting_verification</span> 으로 제출하면 여기에 모입니다 — 트리·칸반에서 진행 중 task 의 <b>검증 요청</b> 으로도 올릴 수 있습니다.</div>
         </div>

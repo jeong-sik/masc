@@ -17,13 +17,12 @@ type forest
 val create :
   config:Workspace.config -> producer:string -> (t, string) result
 
-val root_layout : t -> string list
+val root_layout : t -> (string list, string) result
 (** The paths the lookup tools resolve against, listed from disk at review
-    time and relative to the ownership root: every immediate entry, plus one
-    further level so a checkout under [repos/] names itself. A directory with
-    no children is marked, because an empty tree and an unreachable one are
-    different findings. [[]] when the root itself cannot be listed. Bounded;
-    a truncated listing says so in its last line. *)
+    time and relative to the ownership root: bounded immediate entries plus
+    every checkout returned by the shared checkout-discovery authority.
+    Unavailable or partial discovery is [Error], so a caller must defer the
+    review instead of turning an incomplete list into absence evidence. *)
 
 val schemas : t -> Types_core.tool_schema list
 
@@ -35,11 +34,13 @@ val create_forest :
     filesystem schemas require an exact [producer] chosen from this set; the
     dispatcher refuses every other identity before reaching a tree. *)
 
-val forest_root_layout : forest -> string list
+val forest_root_layout : forest -> (string list, string) result
 (** {!root_layout} for every producer in the forest, each entry prefixed with
     the producer it belongs to, because the forest dispatcher requires an
-    exact producer argument and a bare path would not name one. Bounded
-    across the whole forest. *)
+    exact producer argument and a bare path would not name one. Each producer's
+    already-bounded full layout is retained; no later producer can be removed
+    by an earlier producer's entries. Any unavailable/partial producer layout
+    makes the whole forest unavailable. *)
 
 val forest_schemas : forest -> Types_core.tool_schema list
 

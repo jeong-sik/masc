@@ -105,44 +105,67 @@ let create ~config ~producer =
   Ok { ownership_root; config; producer_scope; tools }
 ;;
 
-(* Two levels, because a checkout root sits one level below the sandbox root
-   ([repos/<name>/]) and that second level is the prefix an evaluator needs in
-   order to open anything the submitter described relative to a checkout. The
-   cap keeps a producer with many working trees from crowding the rest of the
-   review prompt out of the context window. *)
-let root_layout_depth_2_entry_cap = 64
+(* The listing answers one question for the evaluator: where do the paths the
+   submitter wrote actually resolve. Two facts do that, and they are different
+   facts.
 
-(* [None] is "this path did not answer as a directory" — absent, a regular
-   file, or unreadable. The listing is prompt context, so none of those is
-   worth failing a review over. Cancellation is not one of them and travels
-   on. *)
+   The immediate entries say what the root holds — [artifacts/] and the rest
+   are read directly and need no prefix.
+
+   The checkouts say where a repository-relative path has to be rooted, and
+   they come from [Keeper_playground_checkouts], which finds a checkout by its
+   [.git] entry wherever the keeper put it. This module must not scan for them
+   itself: that module exists because three separate scans each hardcoded a
+   [repos/] segment and each disagreed about what counted as a checkout
+   (RFC-keeper-workspace-root-only §1.2). [repos/masc] is one keeper's own
+   convention, written in its config, not a layout the system imposes — a
+   keeper with a checkout at the top level or under another name is equally
+   valid, and a fourth hardcoded scan here would miss it. *)
+let root_entry_cap = 32
+
 let children path =
-  try Some (Fs_compat.read_dir path) with
+  try Ok (Fs_compat.read_dir path) with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> None
+  | Sys_error detail -> Error detail
+  | Unix.Unix_error (code, operation, _) ->
+    Error (Printf.sprintf "%s: %s" operation (Unix.error_message code))
+;;
+
+let checkout_lines root =
+  match Keeper_playground_checkouts.discover ~root with
+  | Error error ->
+    Error (Keeper_playground_checkouts.scan_error_to_string error)
+  | Ok (Keeper_playground_checkouts.Partial { limit; _ }) ->
+    Error
+      (Printf.sprintf
+         "checkout discovery is partial: %s"
+         (Keeper_playground_checkouts.limit_to_string limit))
+  | Ok (Keeper_playground_checkouts.Complete checkouts) ->
+    let describe (checkout : Keeper_playground_checkouts.checkout) =
+      Printf.sprintf
+        "  %s/    (git checkout — a repository-relative path is rooted here)"
+        checkout.relative_path
+    in
+    Ok (List.map describe checkouts)
 ;;
 
 let root_layout t =
-  match children t.ownership_root with
-  | None -> []
-  | Some top ->
-    let rendered =
-      List.concat_map
-        (fun entry ->
-           let entry_path = Filename.concat t.ownership_root entry in
-           match children entry_path with
-           | None -> [ entry ]
-           | Some [] -> [ entry ^ "/  (empty)" ]
-           | Some nested ->
-             (entry ^ "/")
-             :: List.map (fun nested_entry -> entry ^ "/" ^ nested_entry) nested)
-        top
+  let open Result.Syntax in
+  let* entries =
+    children t.ownership_root
+    |> Result.map_error (fun detail ->
+      Printf.sprintf "verification root unreadable: %s" detail)
+  in
+  let* checkout_lines = checkout_lines t.ownership_root in
+    let shown = List.filteri (fun index _ -> index < root_entry_cap) entries in
+    let omitted = List.length entries - List.length shown in
+    let entry_lines = List.map (fun entry -> "  " ^ entry) shown in
+    let entry_lines =
+      if omitted <= 0
+      then entry_lines
+      else entry_lines @ [ Printf.sprintf "  ... and %d more" omitted ]
     in
-    let shown = List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered in
-    let omitted = List.length rendered - List.length shown in
-    if omitted <= 0
-    then shown
-    else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
+    Ok (entry_lines @ checkout_lines)
 ;;
 
 (* ================================================================ *)
@@ -436,26 +459,26 @@ let create_forest ~config ~producers =
   Ok { bindings; forest_tools }
 ;;
 
-(* A forest has one root per producer, so the listing has to say which
-   producer each path belongs to: the forest dispatcher requires an exact
-   producer argument, and a bare path would not tell the evaluator which one
-   to pass. The same cap applies to the joined listing. *)
+(* A forest has one root per producer, so every line has to name the producer
+   it belongs to. [root_layout] is already bounded per producer; applying a
+   second global prefix cap lets a noisy first producer erase every later
+   producer and turns omission into false evidence. *)
+
 let forest_root_layout forest =
-  let rendered =
-    List.concat_map
-      (fun (producer, tools) ->
-         match root_layout tools with
-         | [] -> [ producer ^ ": root could not be listed" ]
-         | entries -> List.map (fun entry -> producer ^ ": " ^ entry) entries)
-      forest.bindings
+  let render_producer producer entries =
+    let entries = match entries with [] -> [ "root is empty" ] | _ -> entries in
+    List.map
+      (fun entry -> "  " ^ producer ^ ": " ^ String.trim entry)
+      entries
   in
-  let shown =
-    List.filteri (fun index _ -> index < root_layout_depth_2_entry_cap) rendered
+  let rec collect acc = function
+    | [] -> Ok (List.rev acc |> List.concat)
+    | (producer, tools) :: rest ->
+      (match root_layout tools with
+       | Error detail -> Error (Printf.sprintf "producer %s: %s" producer detail)
+       | Ok entries -> collect (render_producer producer entries :: acc) rest)
   in
-  let omitted = List.length rendered - List.length shown in
-  if omitted <= 0
-  then shown
-  else shown @ [ Printf.sprintf "... and %d more not listed here" omitted ]
+  collect [] forest.bindings
 ;;
 
 let forest_schemas forest = List.map snd forest.forest_tools

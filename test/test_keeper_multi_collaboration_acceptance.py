@@ -117,6 +117,16 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
         self.assertEqual(len(catalog["missions"]), 23)
+        self.assertEqual(
+            len(
+                {
+                    assertion
+                    for mission in catalog["missions"]
+                    for assertion in mission["assertions"]
+                }
+            ),
+            48,
+        )
         self.assertEqual(catalog["missions"][18]["id"], "RW19")
         self.assertEqual(
             catalog["missions"][18]["assertions"],
@@ -182,27 +192,191 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             ["A", "B", "C"],
         )
 
+    def test_runtime_serving_evidence_requires_exact_completed_receipt_per_role(self):
+        keepers = {"coordinator": "keeper-c", "reviewer": "keeper-r"}
+        expected = {"coordinator": "runtime-c", "reviewer": "runtime-r"}
+        with tempfile.TemporaryDirectory() as tmp_name:
+            base_path = Path(tmp_name)
+            cursors = acceptance.capture_runtime_manifest_line_cursors(
+                base_path=base_path, keepers_by_role=keepers
+            )
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-c",
+                [
+                    self.runtime_receipt(
+                        "runtime-c", keeper_name="keeper-c", fallback=False
+                    )
+                ],
+            )
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-r",
+                [
+                    self.runtime_receipt(
+                        "runtime-fallback", keeper_name="keeper-r", fallback=True
+                    )
+                ],
+            )
+
+            failed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
+            )
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(failed["served_role_count"], 1)
+            self.assertEqual(
+                failed["roles"]["reviewer"]["fallback_receipt_count"], 1
+            )
+
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-r",
+                [
+                    self.runtime_receipt(
+                        "runtime-fallback", keeper_name="keeper-r", fallback=True
+                    ),
+                    self.runtime_receipt(
+                        "runtime-r", keeper_name="keeper-r", fallback=False
+                    ),
+                ],
+            )
+            passed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
+            )
+            self.assertEqual(passed["status"], "passed")
+            self.assertEqual(passed["served_role_count"], 2)
+            self.assertEqual(passed["distinct_served_runtime_count"], 2)
+
+    def test_campaign_identity_slug_keeps_seconds_in_identity(self):
+        first = acceptance.campaign_identity_slug("rw-20260821-090001", 16)
+        second = acceptance.campaign_identity_slug("rw-20260821-090059", 16)
+
+        self.assertNotEqual(first, second)
+        self.assertLessEqual(len(first), 16)
+        self.assertLessEqual(len(second), 16)
+
+    def test_runtime_serving_evidence_rejects_stale_exact_receipt(self):
+        keepers = {"coordinator": "keeper-c"}
+        expected = {"coordinator": "runtime-c"}
+        with tempfile.TemporaryDirectory() as tmp_name:
+            base_path = Path(tmp_name)
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-c",
+                [
+                    self.runtime_receipt(
+                        "runtime-c", keeper_name="keeper-c", fallback=False
+                    )
+                ],
+            )
+            cursors = acceptance.capture_runtime_manifest_line_cursors(
+                base_path=base_path, keepers_by_role=keepers
+            )
+            self.append_runtime_receipts(
+                base_path,
+                "keeper-c",
+                [
+                    self.runtime_receipt(
+                        "runtime-fallback", keeper_name="keeper-c", fallback=True
+                    )
+                ],
+            )
+
+            failed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
+            )
+
+            self.assertEqual(failed["status"], "failed")
+            role = failed["roles"]["coordinator"]
+            self.assertEqual(role["baseline_manifest_line_count"], 1)
+            self.assertEqual(role["current_run_receipt_row_count"], 1)
+            self.assertEqual(role["exact_success_count"], 0)
+            self.assertEqual(role["fallback_receipt_count"], 1)
+
+    def test_runtime_serving_evidence_rejects_malformed_receipt_identity(self):
+        keepers = {"coordinator": "keeper-c"}
+        expected = {"coordinator": "runtime-c"}
+        with tempfile.TemporaryDirectory() as tmp_name:
+            base_path = Path(tmp_name)
+            cursors = acceptance.capture_runtime_manifest_line_cursors(
+                base_path=base_path, keepers_by_role=keepers
+            )
+            malformed = self.runtime_receipt(
+                "runtime-c", keeper_name="wrong-keeper", fallback=False
+            )
+            malformed["runtime_id"] = "different-top-level-runtime"
+            self.write_runtime_receipts(base_path, "keeper-c", [malformed])
+
+            failed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+                manifest_line_cursors_by_keeper=cursors,
+            )
+
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(
+                failed["roles"]["coordinator"]["exact_success_count"], 0
+            )
+            self.assertTrue(
+                any("keeper_name mismatch" in error for error in failed["parse_errors"])
+            )
+            self.assertTrue(
+                any(
+                    "top-level runtime_id does not match decision" in error
+                    for error in failed["parse_errors"]
+                )
+            )
+
     def test_rw23_task_is_not_exposed_to_autonomous_work_before_refutation(self):
         setup_source = inspect.getsource(acceptance.MissionRun.setup_product_state)
         rw23_source = inspect.getsource(
             acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
         )
 
-        # The success-token Task used to be created during fleet setup and the
-        # coordinator completed it autonomously before RW23 could write the
-        # failing artifact. Keep the Task creation inside the directed RW23
-        # phase and keep the verifier Goal out of the ordinary fleet scope.
+        # The success-token Task and Goal assignment both used to be visible
+        # during fleet setup. A capable coordinator completed them autonomously
+        # before RW23 could write the failing artifact. Keep both inside the
+        # directed RW23 phase and the verifier Goal out of ordinary fleet scope.
         self.assertNotIn("goal-verifier-task-create", setup_source)
+        self.assertNotIn("goal-verifier-assign", setup_source)
         self.assertIn('"active_goal_ids": [self.goal_id]', setup_source)
         self.assertNotIn(
             '"active_goal_ids": [self.goal_id, self.verifier_goal_id]',
             setup_source,
         )
         self.assertIn("goal-verifier-task-create", rw23_source)
+        self.assertIn("goal-verifier-assign", rw23_source)
         self.assertLess(
             rw23_source.index("goal-verifier-task-create"),
             rw23_source.index("goal-verifier-refute-artifact"),
         )
+        self.assertLess(
+            rw23_source.index('wait_for_verifier_task_verdict("in_progress")'),
+            rw23_source.index("goal-verifier-assign"),
+        )
+
+    def test_rw23_uses_durable_verdict_without_parsing_board_text(self):
+        rw23_source = inspect.getsource(
+            acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
+        )
+
+        # masc_tasks is a human-facing Board rendering in the live server. The
+        # verifier history event is the typed durable authority for both the
+        # rejected and approved transitions.
+        self.assertNotIn("wait_for_verifier_task_status", rw23_source)
+        self.assertEqual(rw23_source.count("wait_for_verifier_task_verdict"), 2)
+        self.assertIn('wait_for_verifier_task_verdict("in_progress")', rw23_source)
+        self.assertIn('wait_for_verifier_task_verdict("done")', rw23_source)
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}
@@ -266,6 +440,50 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             "observed_keepers": observed,
             "missing_keepers": missing,
         }
+
+    @staticmethod
+    def runtime_receipt(runtime_id, *, keeper_name, fallback):
+        return {
+            "schema_version": 1,
+            "ts": "2026-08-21T09:00:00Z",
+            "keeper_name": keeper_name,
+            "trace_id": f"trace-{runtime_id}",
+            "keeper_turn_id": 1,
+            "event": "receipt_appended",
+            "runtime_id": runtime_id,
+            "status": "ok",
+            "decision": {
+                "outcome": "ok",
+                "runtime_id": runtime_id,
+                "runtime_attempt_count": 1,
+                "runtime_fallback_applied": fallback,
+                "runtime_outcome": "completed",
+            },
+        }
+
+    @staticmethod
+    def write_runtime_receipts(base_path, keeper, rows):
+        manifest_root = (
+            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
+        )
+        manifest_root.mkdir(parents=True, exist_ok=True)
+        (manifest_root / "trace.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def append_runtime_receipts(base_path, keeper, rows):
+        manifest_path = (
+            base_path
+            / ".masc"
+            / "keepers"
+            / keeper
+            / "runtime-manifests"
+            / "trace.jsonl"
+        )
+        with manifest_path.open("a", encoding="utf-8") as handle:
+            handle.write("".join(json.dumps(row) + "\n" for row in rows))
 
 
 if __name__ == "__main__":

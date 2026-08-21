@@ -513,26 +513,32 @@ let process_task_once
            ~stage:Verification_run_registry.Lookup_surface
            ~detail:reason
        | Ok lookup_tools ->
-         let lookup =
-           Task.Anti_rationalization.Lookup_tools
-             { schemas = Verification_authority_tools.schemas lookup_tools
-             ; dispatch = Verification_authority_tools.dispatch lookup_tools
-             ; scope = Task.Anti_rationalization.Producer_tree
-             ; root_layout = Verification_authority_tools.root_layout lookup_tools
-             }
-         in
-         let result =
-           Task.Anti_rationalization.review
-             ~base_path:runtime.config.base_path
-             ~sw:(Some runtime.sw)
-             ~lookup
-             ?completion_contract:prepared.completion_contract
-             ~required_evidence:prepared.required_artifacts
-             ~on_tool_result
-             prepared.review_request
-         in
-         let evaluator_runtime = result.evaluator_runtime in
-         match result.verdict with
+         (match Verification_authority_tools.root_layout lookup_tools with
+          | Error reason ->
+            defer_unavailable
+              ~stage:Verification_run_registry.Lookup_surface
+              ~detail:reason
+          | Ok root_layout ->
+            let lookup =
+              Task.Anti_rationalization.Lookup_tools
+                { schemas = Verification_authority_tools.schemas lookup_tools
+                ; dispatch = Verification_authority_tools.dispatch lookup_tools
+                ; scope = Task.Anti_rationalization.Producer_tree
+                ; root_layout
+                }
+            in
+            let result =
+              Task.Anti_rationalization.review
+                ~base_path:runtime.config.base_path
+                ~sw:(Some runtime.sw)
+                ~lookup
+                ?completion_contract:prepared.completion_contract
+                ~required_evidence:prepared.required_artifacts
+                ~on_tool_result
+                prepared.review_request
+            in
+            let evaluator_runtime = result.evaluator_runtime in
+            match result.verdict with
        | None ->
          let gate = Task.Anti_rationalization.gate_to_string result.gate in
          (* Both arms are real descriptions, not a default standing in for an
@@ -587,7 +593,7 @@ let process_task_once
               ~verdict_label:
                 (Task.Anti_rationalization.verdict_constructor_name review_verdict)
               ~on_commit
-              ~evaluator_runtime:(Some evaluator_runtime)))
+              ~evaluator_runtime:(Some evaluator_runtime))))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

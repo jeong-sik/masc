@@ -10,11 +10,13 @@ closed producer set is: {{lookup_producers}}. Filesystem calls require one
 producer from that set; selecting a producer does not grant access to any other
 tree. The available tools are: {{lookup_tools}}.
 
-Each producer has its own sandbox root, and a path resolves against the root of
-the producer you name. A root is a sandbox root, not a repository: a checkout
-lives one level down, so a path the submitter wrote relative to a checkout
-needs that checkout's prefix here. These paths exist right now, each prefixed
-with the producer it belongs to:
+Each producer has its own sandbox root, and a path resolves against the root
+of the producer you name. A root is a sandbox root rather than a repository,
+and where a producer keeps its git checkouts under it is that producer's own
+choice, so a path the submitter wrote relative to a checkout needs that
+checkout's prefix here. The listing below holds what each root contains right
+now, marks the checkouts that were found, and prefixes every line with the
+producer it belongs to:
 
 {{lookup_root_layout}}
 

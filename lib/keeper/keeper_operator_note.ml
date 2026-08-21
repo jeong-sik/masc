@@ -51,8 +51,8 @@ let path_for config keeper =
 
 (* A note is one instruction for one turn. The cap is a constant rather than a
    knob because nothing has asked to tune it, and an operator who needs more
-   than this is describing standing context, which belongs in the persona or in
-   memory rather than in a note that expires next turn. *)
+   than this is describing standing context, which belongs in the keeper's
+   instructions or in memory rather than in a note that expires next turn. *)
 let max_note_bytes = 4 * 1024
 let max_bytes () = max_note_bytes
 

@@ -404,6 +404,7 @@ sse_targets=(
   @test/runtest-test_tui_frame_presenter
   @test/runtest-test_tui_keeper_chat_projection
   @test/runtest-test_tui_keeper_chat_recovery
+  @test/runtest-test_tui_keyboard_input
   @test/runtest-test_tui_message_layout
   @test/runtest-test_tui_metrics_tail
   @test/runtest-test_tui_observation_layout

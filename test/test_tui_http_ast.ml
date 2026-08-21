@@ -770,7 +770,26 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~module_path:main_path ~binding_name:"suspend"
        ~body_callees:[ "Unix.kill" ]
        ~finally_callees:
-         [ "Sys.set_signal"; "Unix.tcsetattr"; "request_full_repaint" ])
+         [ "Sys.set_signal"; "Unix.tcsetattr"; "request_full_repaint" ]);
+  check int "the local input loop propagates one Break" 1
+    (Ast_grep.count_applications_with_exact_positional_constructor_in_value_binding
+       ~module_path:main_path ~binding_name:"run_loop" ~callee:"raise"
+       ~position:0 ~constructor:"Break");
+  check bool "Break is converted to success outside the root Eio switch" true
+    (Ast_grep.try_handler_wraps_nested_callback_in_value_binding
+       ~module_path:main_path ~binding_name:"run_with_eio_context"
+       ~exception_constructor:"Break" ~outer_callee:"Eio_main.run"
+       ~inner_callee:"Eio.Switch.run" ~callback_callee:"f");
+  check int "main passes its message mode to q classification" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"run_loop"
+       ~callee:"Render_schedule.Input_shortcut.is_quit"
+       ~arguments:[ "message_mode", "message_mode" ]);
+  check int "main passes its message mode to Keeper classification" 1
+    (Ast_grep.count_applications_with_exact_labelled_identifiers_in_value_binding
+       ~module_path:main_path ~binding_name:"run_loop"
+       ~callee:"Render_schedule.Input_shortcut.opens_keepers"
+       ~arguments:[ "message_mode", "message_mode" ])
 ;;
 
 let () =

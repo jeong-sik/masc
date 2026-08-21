@@ -473,6 +473,67 @@ let fun_protect_sequences_match_in_value_binding
   | [] | _ :: _ :: _ -> false
 ;;
 
+let try_handler_wraps_nested_callback_in_value_binding
+      ~module_path
+      ~binding_name
+      ~exception_constructor
+      ~outer_callee
+      ~inner_callee
+      ~callback_callee
+  =
+  let unit_expression (expression : Parsetree.expression) =
+    match expression.pexp_desc with
+    | Pexp_construct ({ txt = Lident "()"; _ }, None) -> true
+    | _ -> false
+  in
+  let catches_exception (case : Parsetree.case) =
+    let matches =
+      match case.pc_lhs.ppat_desc with
+      | Ppat_construct ({ txt; _ }, None) ->
+          String.equal (longident_leaf txt) exception_constructor
+      | _ -> false
+    in
+    matches && Option.is_none case.pc_guard && unit_expression case.pc_rhs
+  in
+  let callback_ends_with_call callback =
+    let statements =
+      callback |> strip_function_parameters |> flatten_direct_sequence
+    in
+    match List.rev statements with
+    | { pexp_desc =
+          Pexp_apply
+            ( { pexp_desc = Pexp_ident { txt; _ }; _ }
+            , [ Asttypes.Nolabel, argument ] );
+        _ }
+      :: _ ->
+        String.equal (longident_to_string txt) callback_callee
+        && unit_expression argument
+    | [] | _ :: _ -> false
+  in
+  let try_body_matches (body : Parsetree.expression) =
+    match body.pexp_desc with
+    | Pexp_apply
+        ( { pexp_desc = Pexp_ident { txt = outer_id; _ }; _ }
+        , [ Asttypes.Nolabel, outer_callback ] )
+      when String.equal (longident_to_string outer_id) outer_callee ->
+        (match (strip_function_parameters outer_callback).pexp_desc with
+         | Pexp_apply
+             ( { pexp_desc = Pexp_ident { txt = inner_id; _ }; _ }
+             , [ Asttypes.Nolabel, inner_callback ] ) ->
+             String.equal (longident_to_string inner_id) inner_callee
+             && callback_ends_with_call inner_callback
+         | _ -> false)
+    | _ -> false
+  in
+  match expressions_of_value_binding ~module_path ~binding_name with
+  | [ expression ] ->
+      (match (strip_function_parameters expression).pexp_desc with
+       | Pexp_try (body, cases) ->
+           try_body_matches body && List.exists catches_exception cases
+       | _ -> false)
+  | [] | _ :: _ :: _ -> false
+;;
+
 let count_applications_with_exact_labelled_unit_call_in_value_binding
       ~module_path
       ~binding_name

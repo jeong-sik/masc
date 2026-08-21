@@ -91,10 +91,15 @@ val adapter_loop :
 
     Rich events ([Link_block], [Image_block], [Status_block], [Audio_block])
     are rendered as Slack Block Kit sections and included alongside the final
-    message. [Tool_call_start],
-    [Tool_call_args], [Tool_call_args_snapshot], and [Tool_call_end] are
-    projected only as native activity; [Tool_context_block] is not exposed in
-    the conversation.
+    message. [Tool_call_start], [Tool_call_args], [Tool_call_args_snapshot],
+    and [Tool_call_end] create no message of their own: they show as native
+    activity while the run is open, and {!Keeper_chat_tool_trail} collects them
+    into one fenced block appended to the terminal reply, so the delivered
+    message names the work the turn did. That block carries each call's name and
+    the one argument it acted on -- a path, a command, a search pattern -- which
+    a channel with readers beyond the keeper's operator should be bound with in
+    mind. [Tool_context_block] stays out of the conversation entirely: its
+    summaries are the tool's own account of itself, not the call's identity.
 
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.

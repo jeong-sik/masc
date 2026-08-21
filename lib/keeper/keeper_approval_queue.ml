@@ -850,6 +850,7 @@ let pending_entry_of_yojson ~base_path json =
           ; "request_context_version"
           ; "task_id"
           ; "goal_id"
+          ; "continuation_channel"
           ; "summary_status"
           ; "exact_attempt"
           ; "summary_attempt_disposition"

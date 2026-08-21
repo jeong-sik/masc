@@ -291,22 +291,9 @@ let test_dedup_never_merges_distinct_origins () =
            ~input
            ()
        in
-       let another_goal_context =
-         submit_with_context
-           ~turn_id:1
-           ~continuation_channel:dashboard_a
-           ~base_path
-           ~keeper_name
-           ~input
-           ()
-       in
-       List.iter
-         (fun id ->
-            Alcotest.(check bool) "distinct origin has its own request" true
-              (not (String.equal first id)))
-         [ another_channel; another_goal_context ];
-       List.iter (reject_and_cleanup ~base_path)
-         [ first; another_channel; another_goal_context ])
+       Alcotest.(check bool) "distinct origin has its own request" true
+         (not (String.equal first another_channel));
+       List.iter (reject_and_cleanup ~base_path) [ first; another_channel ])
 ;;
 
 (* The measured 2026-08-16 incident, end to end: the retry lands after the

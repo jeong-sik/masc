@@ -89,7 +89,7 @@ let test_root_itself_is_a_checkout () =
       (C.discover ~root))
 ;;
 
-(* Measured live: epsilon-reviewer and alpha both put checkouts under a
+(* Measured live: two live Keepers both put checkouts under a
    dot-directory. A scan that skips hidden names loses them. *)
 let test_finds_checkout_under_hidden_directory () =
   with_temp_root (fun root ->
@@ -147,7 +147,7 @@ let test_hierarchical_worktree_is_not_a_separate_checkout () =
       (C.discover ~root))
 ;;
 
-(* Measured live: gamma/repos/masc-task-188 sits beside the checkout it
+(* Measured live: a Keeper's repos/masc-task-188 sits beside the checkout it
    belongs to, not under it. The old scan already counted these, so the
    behaviour must not change. *)
 let test_flat_worktree_is_its_own_checkout () =
@@ -159,7 +159,7 @@ let test_flat_worktree_is_its_own_checkout () =
       (C.discover ~root))
 ;;
 
-(* Measured live: epsilon-reviewer/repos/masc/review-pr-28304 is a worktree
+(* Measured live: a Keeper's repos/masc/review-pr-28304 is a worktree
    outside the .worktrees/ convention. Naming that directory would miss it. *)
 let test_worktree_outside_the_worktrees_convention () =
   with_temp_root (fun root ->

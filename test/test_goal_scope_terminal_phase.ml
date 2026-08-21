@@ -87,7 +87,7 @@ let test_every_terminal_phase_leaves_scope () =
         (surviving config ("goal-executing" :: List.map fst terminal)))
 ;;
 
-(* The live shape this closes, measured 2026-08-07: alpha's only configured
+(* The live shape this closes, measured 2026-08-07: one Keeper's only configured
    goal completed 2h12m after it entered scope and stayed there. Over the next
    2.5 days the runtime contract stamped goal_ids from the raw list for 5,362
    tool calls while the prompt, applying the phase predicate, showed no goal in

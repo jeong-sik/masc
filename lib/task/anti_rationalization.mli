@@ -21,11 +21,21 @@ type review_request =
     that the submitted excerpt reads as real work. This module deliberately
     does not build the surface itself: the tools that read a producer's tree
     belong above the containment primitives, not inside the review protocol. *)
+type lookup_scope =
+  | Producer_tree
+      (** Every advertised filesystem tool is already bound to the one
+          producer named by the review request. *)
+  | Producer_forest of { producers : string list }
+      (** Filesystem calls must select one producer from this closed set. Used
+          by Goal proof review, where linked Tasks may have different
+          performers and therefore different owned trees. *)
+
 type lookup_surface =
   | No_lookup_surface
   | Lookup_tools of
       { schemas : Types_core.tool_schema list
       ; dispatch : name:string -> args:Yojson.Safe.t -> (string, string) result
+      ; scope : lookup_scope
       }
 
 type verdict =

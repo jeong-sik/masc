@@ -103,7 +103,7 @@ This RFC authorizes one hard-cut implementation slice:
    decision-log guessing, and zero-call fabrication.
 6. Remove producer-less metrics context, model, drift, compaction, fallback,
    event, and history surfaces instead of filling them with defaults.
-7. Delete the dormant context-bearing OAS keeper snapshot publisher and its
+7. Delete the dormant context-bearing agent_core keeper snapshot publisher and its
    Dashboard decoder/state.
 8. Make the direct `keeper_context_status` tool output and both of its
    descriptors state checkpoint/session facts without promising unobserved
@@ -112,7 +112,7 @@ This RFC authorizes one hard-cut implementation slice:
 
 The implementation changes observation writers and read models. It does not
 change Keeper turn scheduling, heartbeat cadence, compaction admission,
-provider routing, checkpoints, or the OAS runtime contract.
+provider routing, checkpoints, or the agent_core runtime contract.
 
 ## 4. Typed contract
 
@@ -271,14 +271,14 @@ Implementation blast radius:
   harness, and operator tool audit;
 - shared missing-context projection and operator/status call sites;
 - direct `keeper_context_status` output, model schema, and internal descriptor;
-- Dashboard Keeper/OAS types, normalizers, telemetry panels, and focused tests;
+- Dashboard Keeper/agent_core types, normalizers, telemetry panels, and focused tests;
 - deletion of the private context snapshot decoder, producer-less compaction
-  history options, tool-alias facade, dormant OAS snapshot publisher/decoder,
+  history options, tool-alias facade, dormant agent_core snapshot publisher/decoder,
   and their tests;
 - `docs/KEEPER-USER-MANUAL.md` and
   `docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md`.
 
-Compaction policy, provider routing, and OAS request/response serialization
+Compaction policy, provider routing, and agent_core request/response serialization
 remain outside this RFC.
 
 ## 8. Rejected alternatives

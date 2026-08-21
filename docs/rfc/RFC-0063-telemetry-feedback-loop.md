@@ -8,7 +8,7 @@
 
 ## 1. Problem
 
-PR #14491 (`feat(keeper): wire OAS telemetry into provider health, livelock gate, and supervisor`, merged 2026-05-10 14:34Z) introduced the OAS-side telemetry feedback loop without a tracking RFC. The PR body cited `RFC-WAIVED: telemetry feedback loop is new cross-repo concern, no prior RFC exists.` and pointed to `docs/design/telemetry-feedback-loop-architecture.md` as the design substitute.
+PR #14491 (`feat(keeper): wire agent_core telemetry into provider health, livelock gate, and supervisor`, merged 2026-05-10 14:34Z) introduced the agent_core-side telemetry feedback loop without a tracking RFC. The PR body cited `RFC-WAIVED: telemetry feedback loop is new cross-repo concern, no prior RFC exists.` and pointed to `docs/design/telemetry-feedback-loop-architecture.md` as the design substitute.
 
 Two retroactive findings from origin/main on 2026-05-11:
 
@@ -49,7 +49,7 @@ Diagnostic decisive moment: `sample 22289 2 -mayDie` showed the hot stack as `Ke
 ## 5. Telemetry feedback loop architecture (as shipped by #14491)
 
 ```
-OAS turn execution
+agent_core turn execution
    │
    ▼
 Agent_sdk.Event_bus  (bounded Eio.Stream, default depth 256)

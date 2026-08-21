@@ -4,7 +4,7 @@
 - Author: Vincent (yousleepwhen) + Claude
 - Created: 2026-06-16
 - Scope: `lib/fusion/` (신규), `lib/runtime/` (config 확장), `.masc/config/runtime.toml` (`[fusion]` 테이블)
-- Boundary: OAS(`~/me/workspace/yousleepwhen/oas`)는 **0줄 변경**. 본 루프는 OAS의 범용 프리미티브만 소비한다.
+- Boundary: agent_core(`~/me/workspace/yousleepwhen/agent_core`)는 **0줄 변경**. 본 루프는 agent_core의 범용 프리미티브만 소비한다.
 - 참조: OpenRouter Fusion API — [plugin](https://openrouter.ai/docs/guides/features/plugins/fusion), [router](https://openrouter.ai/docs/guides/routing/routers/fusion-router)
 - Concurrency update (2026-07-17): the retired
   `max_concurrent_panels`/`max_concurrent_judges` settings never controlled
@@ -39,7 +39,7 @@ MASC는 이미 멀티 fiber로 N개 키퍼를 상시 병렬 구동한다. 같은
 
 ## 2. Non-goals / 경계
 
-- **OAS 변경 금지.** OAS는 single-provider completion + 범용 fan-out(`Async_agent.all`) + 구조화 출력(`Structured.extract`)만 제공한다. 멀티모델 오케스트레이션·심판 프롬프트·게이트·가시성은 전부 MASC.
+- **agent_core 변경 금지.** agent_core는 single-provider completion + 범용 fan-out(`Async_agent.all`) + 구조화 출력(`Structured.extract`)만 제공한다. 멀티모델 오케스트레이션·심판 프롬프트·게이트·가시성은 전부 MASC.
 - **죽은 합의 코드에 의존 금지.** MAGI 삼두정치·walph·cascade·board curation은 작동/사용된 적 없음(사용자 확인). 본 루프는 그 위에 쌓지 않고 새로 만든다. (죽은 3종의 *삭제*는 본 RFC 범위 밖, 별도 정리.)
 - **v1은 advisory만.** 패널/심판은 분석·종합을 산출하는 read-only. tool-call을 패널이 제안하고 심판이 골라 *실행*하는 action 모드는 side-effect atomicity가 필요 → v2(§14).
 - **재귀 금지.** 패널·심판은 fusion을 다시 못 부른다(§10). OpenRouter의 `x-openrouter-fusion-depth`에 대응하는 타입드 depth guard.
@@ -197,11 +197,11 @@ val decide
 
 ---
 
-## 7. 패널 + 심판 (OAS 프리미티브 소비)
+## 7. 패널 + 심판 (agent_core 프리미티브 소비)
 
 ### 7.1 패널 — `Async_agent.all`
 
-`oas/lib/async_agent.mli:78`:
+`agent_core/lib/async_agent.mli:78`:
 ```ocaml
 val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
        -> (Agent.t * string) list
@@ -228,7 +228,7 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
 > 이 절은 `lib/fusion/fusion_judge.mli` 헤더가 "RFC가 요구하는지 확인하지 않았다"로 남겨둔
 > 미해결 항목이었다. 요구는 실재했고, 맞추는 쪽이 RFC다.
 
-`oas/lib/structured.mli:38` (provider-native JSON schema 강제, 미지원 provider fail-fast):
+`agent_core/lib/structured.mli:38` (provider-native JSON schema 강제, 미지원 provider fail-fast):
 ```ocaml
 val extract : sw:_ -> net:_ -> ?provider:Provider.config -> config:agent_config
            -> schema:'a schema -> string -> ('a, Error.sdk_error) result

@@ -4,7 +4,7 @@
 - Author: Vincent (yousleepwhen) + Claude
 - Created: 2026-06-22
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) §7 — 본 RFC는 패널 정체성(panel identity)을 개정한다. RFC-0277(이종 패널 그룹)의 후속 슬라이스.
-- Scope: `lib/fusion_core/` (policy/config/types), `lib/fusion/` (panel/oas/sink). judge/dashboard 무변경.
+- Scope: `lib/fusion_core/` (policy/config/types), `lib/fusion/` (panel/agent_core/sink). judge/dashboard 무변경.
 - Boundary: provider 라우팅 무변경(언제나 raw model). judge 계약 무변경. sink는 패널 실패 렌더를 정체성 대신 raw-model attribution으로 분리(`panel_failure_text`, §2.5) — label 없는 config에는 byte-identical(§3).
 
 ---

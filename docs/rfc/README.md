@@ -73,7 +73,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0077 | Write-side silent failure — typed propagation | Implemented | - |
 | 0079 | Log row typed encoder + silent-drop removal | Implemented | - |
 | 0080 | Registered descriptors are the tool-surface SSOT | Implemented | - |
-| 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | - |
+| 0081 | agent_core Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | - |
 | 0083 | Dashboard system-actor convention typed unification | Implemented | - |
 | 0084 | Tool dispatch handler and observation unification | Implemented | - |
 | 0086 | Keeper namespace bulk promotion to sub-library | Implemented | - |

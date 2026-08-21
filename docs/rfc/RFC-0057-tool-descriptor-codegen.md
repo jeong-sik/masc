@@ -39,7 +39,7 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 
 | # | 문제 | 현상 | 본 RFC 적용 범위 |
 |---|------|------|-----------------|
-| 1 | 과거 command/effect 분류 | generic executor/OAS에 제품 의미 유입 | **폐기** — descriptor codegen과 통합하지 않음 |
+| 1 | 과거 command/effect 분류 | generic executor/agent_core에 제품 의미 유입 | **폐기** — descriptor codegen과 통합하지 않음 |
 | 2 | `agent_tools` O(n) 선형 검색 | 도구 이름 문자열로 linear search | **Phase 2** — GADT dispatch로 대체 |
 | 3 | **61개 도구 수동 Yojson AST** | `{name="..."; description="..."; ...}` 하드코딩 | **핵심 범위** — codegen으로 자동화 |
 | 4 | 중복 도구 | `read_file` / `tool_read_file` 등 의미 중복 | **Phase 2** — alias/unification 계획 |
@@ -88,7 +88,7 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 
 1. **PPX 사용** (RFC-0054 §3 Non-goals #1과 동일한 근거)
 2. **런타임 코드 생성** — 동적 `ocamlc` 호출이나 `Metaocaml` 사용 금지
-3. **`mode_enforcer.ml` 마이그레이션** — OAS subsystem 별도 작업
+3. **`mode_enforcer.ml` 마이그레이션** — agent_core subsystem 별도 작업
 4. **다국어 description 자동 번역** — 영문 description 기준, 번역은 별도 파이프라인
 
 ---
@@ -299,7 +299,7 @@ python3 -c "import json; tools=json.load(open('tool_descriptors_golden.json')); 
 ## §10 Open Questions
 
 1. **Parameter record의 GADT화 수준**: `param`을 GADT로 만들면 type-safe tool calling이 가능하지만, 61개 도구의 parameter 정의가 복잡해집니다. Phase 0에서는 value-level record로 시작할까요, 아니면 바로 GADT로 갈까요?
-2. **Authorization boundary (resolved 2026-07-13)**: OAS 또는 descriptor
+2. **Authorization boundary (resolved 2026-07-13)**: agent_core 또는 descriptor
    codegen과 command/effect 분류를 통합하지 않는다. 실제 외부 효과는
    MASC의 product-neutral Keeper Gate가 concrete input으로 판단한다.
 3. **Git 관리**: `tool_descriptors_gen.ml`을 `.gitignore`할지, 아니면 golden test용으로 커밋할지?

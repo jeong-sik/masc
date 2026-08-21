@@ -159,9 +159,9 @@ can prevent: **the process dies between committing a `ToolUse` and
 committing its `ToolResult`.** The write that would have closed the pair
 never runs, so "reject at write" has nothing to reject.
 
-**The producer is exact and reachable today.** OAS persists a durable
+**The producer is exact and reachable today.** agent_core persists a durable
 checkpoint at stage `After_assistant_collected`
-(`oas/lib/pipeline/pipeline.ml:213-220` **(verified 07-28)**), whose
+(`agent_core/lib/pipeline/pipeline.ml:213-220` **(verified 07-28)**), whose
 state is `messages = snoc agent.state.messages assistant_message` — the
 assistant message carrying the `ToolUse` blocks appended, no `ToolResult`
 in existence yet. masc's sink saves **every** snapshot with no stage
@@ -546,14 +546,14 @@ unresolved ids from the 2026-07-27 incident are absent from their
 keepers' `decisions.jsonl` while completed ids from the same turns are
 present. Absence therefore cannot be read as "did not run".
 
-OAS does have the authority: `Pipeline_execution_resume`
-(`oas/lib/pipeline/pipeline_execution_resume.ml`) classifies a crashed
+agent_core does have the authority: `Pipeline_execution_resume`
+(`agent_core/lib/pipeline/pipeline_execution_resume.ml`) classifies a crashed
 tool turn against the execution journal and replays settled results
 rather than re-executing. masc does not use it — `rg` for
 `Execution_journal|Pipeline_execution_resume|durable_execution` over
 masc `lib/` and `bin/` returns **zero hits**, and receipts record
 `oas_dispatch_mode: single_provider_agent_run` with
-`oas_internal_runtime_disabled: true`. Adopting OAS durable execution
+`oas_internal_runtime_disabled: true`. Adopting agent_core durable execution
 for keeper turns is the principled successor to §2.4 and would replace
 "may or may not have taken effect" with a journal-backed answer. It is a
 separate project; until then, stating the uncertainty is the accurate
@@ -788,7 +788,7 @@ New anchors introduced by this amendment, all **(verified 07-28)**:
 - Recovery phases: `lib/server/server_bootstrap_loops.ml:490,558`.
 - Removal of repair: `f5f45f97c3` (#25046, 2026-07-18). Hard reject:
   `4a1880624b` (#25335, 2026-07-23).
-- Producer: `oas/lib/pipeline/pipeline.ml:213-220`
+- Producer: `agent_core/lib/pipeline/pipeline.ml:213-220`
   (`persist_turn_checkpoint_for_state … After_assistant_collected` over
   `snoc messages assistant_message`); unfiltered sink `checkpoint_sink`
   in `lib/keeper/keeper_agent_run.ml` (passes `snapshot.stage` to an

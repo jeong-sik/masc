@@ -270,6 +270,50 @@ let test_legacy_owner_is_read_only_tombstone () =
   in
   check bool "canonical rewrite drops legacy owner" false owner_persisted
 
+let test_legacy_owner_null_retains_former_optional_shape () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "legacy-owner-null" "legacy null owner is ignored" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  add_goal_field config "owner" `Null;
+  check int "legacy null owner remains readable" 1
+    (List.length (Goal_store.read_state config).goals)
+
+let test_legacy_owner_rejects_malformed_payloads () =
+  [ "integer", `Int 7
+  ; "object", `Assoc [ "keeper", `String "retired" ]
+  ; "array", `List [ `String "retired" ]
+  ; "boolean", `Bool false
+  ]
+  |> List.iter (fun (label, payload) ->
+    with_workspace @@ fun config ->
+    let goal = make_goal ("legacy-owner-" ^ label) "malformed owner fails" in
+    Goal_store.write_state config
+      { version = 1; updated_at = iso_now (); goals = [ goal ] };
+    add_goal_field config "owner" payload;
+    check int (label ^ " owner keeps store undecodable") 0
+      (List.length (Goal_store.read_state config).goals);
+    match Goal_store.update_goal config ~goal_id:goal.id Fun.id with
+    | Ok _ -> fail (label ^ " owner licensed a canonical rewrite")
+    | Error detail ->
+      check bool (label ^ " owner fails closed") true
+        (String_util.contains_substring detail "refusing to write"))
+
+let test_legacy_owner_rejects_duplicate_tombstones () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "legacy-owner-duplicate" "duplicate owner fails" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  add_goal_field config "owner" (`String "retired-a");
+  add_goal_field config "owner" (`String "retired-b");
+  check int "duplicate owner keeps store undecodable" 0
+    (List.length (Goal_store.read_state config).goals);
+  match Goal_store.update_goal config ~goal_id:goal.id Fun.id with
+  | Ok _ -> fail "duplicate retired owner licensed a canonical rewrite"
+  | Error detail ->
+    check bool "duplicate owner fails closed" true
+      (String_util.contains_substring detail "refusing to write")
+
 let test_other_unknown_goal_field_still_fails () =
   with_workspace @@ fun config ->
   let goal = make_goal "unknown-field" "unknown field fails" in
@@ -434,6 +478,12 @@ let () =
             test_serializer_omits_status;
           test_case "legacy owner is a read-only tombstone" `Quick
             test_legacy_owner_is_read_only_tombstone;
+          test_case "legacy null owner retains former optional shape" `Quick
+            test_legacy_owner_null_retains_former_optional_shape;
+          test_case "legacy owner rejects malformed payloads" `Quick
+            test_legacy_owner_rejects_malformed_payloads;
+          test_case "legacy owner rejects duplicate tombstones" `Quick
+            test_legacy_owner_rejects_duplicate_tombstones;
           test_case "other unknown goal field still fails" `Quick
             test_other_unknown_goal_field_still_fails;
           test_case "phase-less row no longer decodes" `Quick

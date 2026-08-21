@@ -37,6 +37,21 @@ scripts/dune-local.sh exec test/test_keeper_meta_json_config_toml_only.exe
 - **Resource cleanup** — `Eio.Switch.on_release` over nested `Fun.protect`
 - **Pure functions** — extract testable logic from IO code when it keeps the change simpler
 
+#### Formatting
+
+CI checks `.ml` and `.mli` files with `ocamlformat` directly, on changed files
+only. Match it:
+
+```bash
+opam exec -- ocamlformat -i <changed .ml/.mli files>
+```
+
+Do **not** run `dune build @fmt --auto-promote`. It also rewrites `dune` files
+— 18 of them from a clean tree, including a blank line in `lib/dune` that puts
+the file one line over the `lib_dune_lines` baseline and fails the OCaml
+Structure Ratchet. CI never asks for those rewrites, so they are diff noise
+that costs a round trip. See #29253.
+
 ### Project Structure
 
 ```

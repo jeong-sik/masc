@@ -2,10 +2,14 @@
 
 val meta_of_json :
   Yojson.Safe.t -> (Keeper_meta_contract.keeper_meta, string) result
-(** Decode only the exact top-level shape emitted by
-    [Keeper_meta_json.meta_to_json]. Missing, wrong-typed, retired, duplicate,
-    unknown, or malformed fields are explicit reset-required errors. Nullable
-    domain fields still accept their current [`Null] representation. *)
+(** Decode the exact top-level shape emitted by
+    [Keeper_meta_json.meta_to_json]. The immediately preceding
+    ["active_goal_ids"] field is accepted in its former string-list shape and
+    discarded as a read-only migration tombstone; it never reaches the runtime
+    record or writer. Wrong-shaped tombstone payloads remain reset-required.
+    Missing, wrong-typed, other retired, duplicate, unknown, or malformed
+    fields are explicit reset-required errors. Nullable domain fields still
+    accept their current [`Null] representation. *)
 
 (** One enumerated-field repair: [field] held [previous_value], which is not a
     canonical spelling of any variant, and is reset to [repaired_value]. *)

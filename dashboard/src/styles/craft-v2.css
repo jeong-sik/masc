@@ -45,6 +45,16 @@
   line-height: normal;
 }
 
+/* ── Surface subtitle spacing ─────────────────────────────────── */
+/* `.ov-sub` is a <p> in the design, where the UA's 1em bottom margin puts 12px
+   between the surface subtitle and the first band. The dashboard's reset zeroes
+   that margin, so every surface header sat 12px tighter than the design and the
+   header block measured 87px against the design's 99px. Stated explicitly here
+   rather than left to a UA default. */
+.v2-app .ov-sub {
+  margin-bottom: 12px;
+}
+
 /* ── Density ──────────────────────────────────────────────────── */
 .v2-app[data-density="spacious"] {
   --twk-pad-surface: 32px 42px 60px;
@@ -79,19 +89,17 @@
    card padding it was never meant to have. Its `:not(.twk-panel)` pair also
    pushed it to (0,5,0), outranking the prototype's own density rules, so
    `.ctx-card` rendered at 16px/18px where the design specifies 14px/15px.
-   `:is()` here keeps the rule at (0,3,0) so a component that states its own
-   density padding still wins. Guarded by craft-v2-card-density.test.ts: a new
-   `*-card` class either joins this list or states `padding: var(--pad-card)`. */
+   The list holds only cards nothing else pads: a component that states its own
+   padding keeps it (the design gives `.rtc-card` 10px/12px and `.ctx-card`
+   14px/15px), and the four the design deliberately leaves unpadded —
+   `.ap-card`, `.cn-card`, `.ia-card`, `.sch-card`, whose inner sections carry
+   the padding — stay out. Guarded by craft-v2-card-density.test.ts: a new
+   `*-card` class either joins this list or states its own padding. */
 .v2-app[data-density] :is(
-  .card, .agent-card, .ap-auto-card, .ap-card, .chat-artifact-card, .cmd-card, .cn-card,
-  .ctx-card, .drain-card, .focus-agent-card, .fus-panel-card, .fus-runs-card, .ia-card,
-  .ide-ann-card, .ide-annotation-rail-card, .ide-conversation-card, .ide-keeper-work-card,
-  .kti-ctx-card, .kw-card, .mem-trust-card, .mg-step-card, .mission-activity-card,
-  .mission-crew-card, .monitor-surface-card, .ops-card, .ov-card, .prompt-preset-card,
-  .rt-card, .rtc-card, .rw-pick-card, .sandbox-card, .sch-card, .sch-poll-card, .ss-card,
-  .ti-ctx-card, .tm-paused-card, .tps-card, .v2-command-card, .v2-ide-card, .v2-lab-card,
-  .v2-monitoring-card, .v2-overview-ticker-card, .v2-workspace-card, .verif-card, .vq-card,
-  .wka-card
+  .card, .agent-card, .ap-auto-card, .cmd-card, .focus-agent-card, .mission-activity-card,
+  .mission-crew-card, .ops-card, .prompt-preset-card, .ss-card, .v2-command-card,
+  .v2-ide-card, .v2-lab-card, .v2-monitoring-card, .v2-overview-ticker-card,
+  .v2-workspace-card
 ) {
   padding: var(--twk-pad-card);
 }
@@ -242,15 +250,10 @@
 }
 
 .v2-app[data-motion="lively"] :is(
-  .card, .agent-card, .ap-auto-card, .ap-card, .chat-artifact-card, .cmd-card, .cn-card,
-  .ctx-card, .drain-card, .focus-agent-card, .fus-panel-card, .fus-runs-card, .ia-card,
-  .ide-ann-card, .ide-annotation-rail-card, .ide-conversation-card, .ide-keeper-work-card,
-  .kti-ctx-card, .kw-card, .mem-trust-card, .mg-step-card, .mission-activity-card,
-  .mission-crew-card, .monitor-surface-card, .ops-card, .ov-card, .prompt-preset-card,
-  .rt-card, .rtc-card, .rw-pick-card, .sandbox-card, .sch-card, .sch-poll-card, .ss-card,
-  .ti-ctx-card, .tm-paused-card, .tps-card, .v2-command-card, .v2-ide-card, .v2-lab-card,
-  .v2-monitoring-card, .v2-overview-ticker-card, .v2-workspace-card, .verif-card, .vq-card,
-  .wka-card
+  .card, .agent-card, .ap-auto-card, .cmd-card, .focus-agent-card, .mission-activity-card,
+  .mission-crew-card, .ops-card, .prompt-preset-card, .ss-card, .v2-command-card,
+  .v2-ide-card, .v2-lab-card, .v2-monitoring-card, .v2-overview-ticker-card,
+  .v2-workspace-card
 ):hover,
 .v2-app[data-motion="lively"] .ov-keeper:hover,
 .v2-app[data-motion="lively"] .cp-route:hover,

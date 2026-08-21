@@ -44,17 +44,28 @@ function declaredCardClasses(): Map<string, Set<string>> {
   return byClass
 }
 
-/** True when some rule whose selector names the class also declares padding. */
+/** True when a rule selecting the class ITSELF (not a descendant) sets padding. */
 function statesOwnPadding(cls: string, files: Set<string>): boolean {
-  const selectorHasClass = new RegExp(`\\.${cls}\\b(?![\\w-])`)
+  const endsWithClass = new RegExp(`\\.${cls}\\b(?![\\w-])[^\\s>+~]*$`)
   for (const file of files) {
-    const css = readFileSync(file, 'utf-8')
+    // The density/motion rules list every card inside `:is(...)`; splitting that
+    // on commas would read each listed class as its own padded selector.
+    const css = readFileSync(file, 'utf-8').replace(/\.v2-app\[data-[^\]]+\] :is\([\s\S]*?\)[^{]*\{[^{}]*\}/g, '')
     for (const block of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      if (selectorHasClass.test(block[1]) && /(^|[\s;])padding\s*:/.test(block[2])) return true
+      if (!/(^|[\s;])padding\s*:/.test(block[2])) continue
+      if (block[1].split(',').map((s) => s.trim()).some((s) => endsWithClass.test(s))) return true
     }
   }
   return false
 }
+
+/** Cards the design deliberately leaves unpadded — an inner section carries it.
+ *  Verified against prototypes/keeper-v2/styles: `.ap-card`, `.cn-card`,
+ *  `.ia-card` and `.sch-card` get no padding rule at all, and `.ti-ctx-card`
+ *  puts it on the nested <pre> instead. Padding these would double-inset them. */
+const DESIGN_UNPADDED = new Set([
+  'ap-card', 'cn-card', 'ia-card', 'sch-card', 'ti-ctx-card', 'kti-ctx-card',
+])
 
 describe('craft-v2.css density card set', () => {
   it('selects cards by name, never by substring', () => {
@@ -64,9 +75,22 @@ describe('craft-v2.css density card set', () => {
   it('covers every declared *-card container class', () => {
     const listed = enumeratedCards()
     const uncovered = [...declaredCardClasses()]
-      .filter(([cls, files]) => !listed.has(cls) && !statesOwnPadding(cls, files))
+      .filter(([cls, files]) => !listed.has(cls) && !DESIGN_UNPADDED.has(cls) && !statesOwnPadding(cls, files))
       .map(([cls]) => cls)
     expect(uncovered).toEqual([])
+  })
+
+  it('does not claim a card the design leaves unpadded', () => {
+    const listed = enumeratedCards()
+    expect([...DESIGN_UNPADDED].filter((c) => listed.has(c))).toEqual([])
+  })
+
+  it('does not claim a card that states its own padding', () => {
+    const listed = enumeratedCards()
+    const doubled = [...declaredCardClasses()]
+      .filter(([cls, files]) => listed.has(cls) && statesOwnPadding(cls, files))
+      .map(([cls]) => cls)
+    expect(doubled).toEqual([])
   })
 
   it('keeps the rule at (0,3,0) so a component can state its own density padding', () => {

@@ -4,9 +4,10 @@
     Before this fix, the handler called [Workspace_task.add_task], which
     folds [add_task_with_result]'s [Error] into a display string and drops
     it. This branch then unconditionally returned [ok:true,
-    typed_outcome:Progress] -- a failed goal-link write (or backlog write)
-    was invisible to the keeper. See [Workspace_task.add_task_with_result]
-    for the typed error this now surfaces instead. *)
+    typed_outcome:Progress] -- a failed explicit goal-link write (or backlog
+    write) was invisible to the keeper. See
+    [Workspace_task.add_task_with_result] for the typed error this now
+    surfaces instead. *)
 
 open Alcotest
 open Masc
@@ -73,6 +74,7 @@ let test_task_create_goal_link_write_failure_returns_typed_failure () =
             [ "title", `String "Blocked by goal-link write failure"
             ; "description", `String "must not silently report success"
             ; "priority", `Int 3
+            ; "goal_id", `String "goal-a"
             ])
     in
     (* An IO/write failure is [Runtime_failure], not [Workflow_rejection]:

@@ -7,7 +7,7 @@
     validation hook therefore never saw them, and a caller learned about an
     out-of-range value only if the handler happened to re-check it — which
     is how [keeper_artifact_read] answered [max_bytes=565244] with a message
-    that named [sha256] first (2026-08-05 20:06:36, keeper kidsnote).
+    that named [sha256] first (2026-08-05 20:06:36, keeper gamma).
 
     These tests pin that the bounds are read from the raw schema, that the
     rejection names the field and the bound, that a schema without a bound

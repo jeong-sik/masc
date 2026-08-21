@@ -58,20 +58,20 @@ let test_polling_floor () =
 let test_autoboot_warmup_jitter_is_bounded_not_linear () =
   let names =
     [
-      "analyst";
-      "executor";
-      "issue_king";
+      "delta";
+      "omega";
+      "kappa_keeper";
       "janitor";
-      "masc-improver";
-      "nick0cave";
-      "qa-king";
-      "ramarama";
-      "sangsu";
-      "scholar";
-      "taskmaster";
-      "tech_glutton";
-      "velvet-hammer";
-      "verifier";
+      "omicron-improver";
+      "theta0";
+      "mu-king";
+      "nu";
+      "alpha";
+      "iota";
+      "fixture-keeper";
+      "pi_glutton";
+      "xi-hammer";
+      "fixture-reviewer";
     ]
   in
   let warmups =
@@ -103,10 +103,10 @@ let test_warmup_hash_pinned_cross_platform () =
     Boot.autoboot_proactive_warmup_sec ~base_warmup:0
       ~stagger_window_sec:99 ~keeper_name:name
   in
-  check int "verifier hash mod 100 (Int32 djb2)" 25 (warmup "verifier");
+  check int "fixture-reviewer hash mod 100 (Int32 djb2)" 90 (warmup "fixture-reviewer");
   check int "designer hash mod 100 (Int32 djb2)" 74 (warmup "designer");
   check int "developer hash mod 100 (Int32 djb2)" 15 (warmup "developer");
-  check int "analyst hash mod 100 (Int32 djb2)" 73 (warmup "analyst");
+  check int "delta hash mod 100 (Int32 djb2)" 3 (warmup "delta");
   check int "janitor hash mod 100 (Int32 djb2)" 4 (warmup "janitor")
 
 let test_autoboot_warmup_is_order_independent () =
@@ -114,14 +114,14 @@ let test_autoboot_warmup_is_order_independent () =
     Boot.autoboot_proactive_warmup_sec ~base_warmup:60 ~stagger_window_sec:15
       ~keeper_name:name
   in
-  (* PR #13119 review: previously this test called [warmup "verifier"]
+  (* PR #13119 review: previously this test called [warmup "fixture-reviewer"]
      twice with identical inputs, which would still pass even if the
      implementation depended on list position.  The actual invariant
      is "permuting the keeper boot list does not change any individual
      keeper's warmup".  Compute warmups for an ordered name list and
      for its reverse, then assert per-name equality. *)
   let names = [
-    "verifier"; "designer"; "developer"; "operator"; "supervisor";
+    "fixture-reviewer"; "designer"; "developer"; "operator"; "supervisor";
     "tester"; "auditor"; "researcher"; "writer"; "scheduler";
   ] in
   let warmups_forward = List.map (fun n -> (n, warmup n)) names in
@@ -135,10 +135,10 @@ let test_autoboot_warmup_is_order_independent () =
         w_fwd w_rev)
     warmups_forward;
   check int "same keeper gets same warmup independent of boot order"
-    (warmup "verifier") (warmup "verifier");
+    (warmup "fixture-reviewer") (warmup "fixture-reviewer");
   check int "zero jitter keeps exact base warmup" 60
     (Boot.autoboot_proactive_warmup_sec ~base_warmup:60
-       ~stagger_window_sec:0 ~keeper_name:"verifier");
+       ~stagger_window_sec:0 ~keeper_name:"fixture-reviewer");
   (* Coverage smoke: the test assumes the hash actually distributes
      names across the stagger window — if every name collapsed to
      a single offset the previous "no list-position dependency"

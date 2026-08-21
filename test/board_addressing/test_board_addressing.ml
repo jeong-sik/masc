@@ -23,8 +23,8 @@ let test_trim_token_edges () =
   check string "wrapping parens" "@alice" (Board_addressing.trim_token_edges "(@alice)");
   check string "email keeps internal dot" "email@alice.com"
     (Board_addressing.trim_token_edges "email@alice.com");
-  check string "possessive apostrophe kept" "@sangsu's"
-    (Board_addressing.trim_token_edges "@sangsu's");
+  check string "possessive apostrophe kept" "@alpha's"
+    (Board_addressing.trim_token_edges "@alpha's");
   check string "all non-word" "" (Board_addressing.trim_token_edges "...")
 
 let test_tokens_of_text () =
@@ -60,22 +60,22 @@ let test_parse_targets () =
   check_parse "mid-token at is not a target" "none" "mid@alice token";
   check_parse "bare at is the empty candidate" "targets:" "@ bare at";
   check_parse "trailing punctuation trimmed" "targets:alice" "ok @alice, thanks";
-  check_parse "possessive stays distinct" "targets:sangsu's" "@sangsu's note"
+  check_parse "possessive stays distinct" "targets:alpha's" "@alpha's note"
 
 let test_parse_broadcast () =
   check_parse "exact broadcast" "broadcast" "release note @@all";
   check_parse "broadcast selector compare is case-insensitive" "broadcast"
     "release note @@ALL";
-  check_parse "unsupported selector" "unsupported:analyst" "release note @@analyst";
-  check_parse "unsupported selectors lowercased" "unsupported:analyst"
-    "release note @@Analyst";
+  check_parse "unsupported selector" "unsupported:delta" "release note @@delta";
+  check_parse "unsupported selectors lowercased" "unsupported:delta"
+    "release note @@Delta";
   check_parse "empty broadcast selector fails closed" "unsupported:" "release @@";
-  check_parse "mixed all and unsupported fails closed" "unsupported:all,analyst"
-    "@@all @@analyst";
+  check_parse "mixed all and unsupported fails closed" "unsupported:all,delta"
+    "@@all @@delta";
   check_parse "broadcast precedence over direct targets" "broadcast"
     "@@all and @alpha";
-  check_parse "unsupported broadcast hides direct targets" "unsupported:analyst"
-    "@@analyst and @alpha"
+  check_parse "unsupported broadcast hides direct targets" "unsupported:delta"
+    "@@delta and @alpha"
 
 (* Code spans are not address text. Every one of these strings appeared in a
    live Board comment that was rejected whole: @internals/libs/datadogRum

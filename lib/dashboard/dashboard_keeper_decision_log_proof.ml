@@ -54,7 +54,7 @@ let decision_tail_max_lines = 5000
 
 (* Head budget for locating the earliest turn row in one segment. Measured
    2026-08-09 over the 8-keeper fleet: the first turn row sat within 7.6 KB of
-   every segment head (worst case [sangsu], row 4), so this clears the observed
+   every segment head (worst case a live Keeper at row 4), so this clears the observed
    worst case by ~67x while keeping the read O(1) in file size. *)
 let decision_head_max_bytes = 512 * 1024
 

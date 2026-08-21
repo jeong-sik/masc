@@ -363,7 +363,7 @@ let test_relative_cwd_is_not_rewritten () =
       (String_util.contains_substring error "path_outside_sandbox")
 
 let test_container_cwd_is_not_rewritten () =
-  setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let host_worktree =
     Filename.concat playground "repos/masc/.worktrees/task-186"
@@ -422,7 +422,7 @@ let test_readonly_execute_omitted_cwd_does_not_create_playground () =
   Alcotest.(check bool) "playground remains absent" false (Sys.file_exists playground)
 
 let test_container_file_path_is_not_rewritten () =
-  setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground ->
   let host_file =
     Filename.concat playground
@@ -447,11 +447,11 @@ let test_container_file_path_is_not_rewritten () =
       (String_util.contains_substring error "path_outside_sandbox")
 
 let test_docker_other_container_root_stays_blocked () =
-  setup ~keeper_name:"executor" ~sandbox:Keeper_types_profile_sandbox.Docker
+  setup ~keeper_name:"omega" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base:_ ~config ~meta ~playground:_ ->
   let other_container_cwd =
     Filename.concat
-      (Keeper_sandbox.container_root "analyst")
+      (Keeper_sandbox.container_root "delta")
       "repos/masc"
   in
   let args = `Assoc [ ("cwd", `String other_container_cwd) ] in

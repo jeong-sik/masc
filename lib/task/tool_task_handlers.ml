@@ -409,7 +409,7 @@ let handle_claim ~tool_name ~start_time ctx args =
 
    This is consumed only by [format_no_eligible] below, to give the LLM
    the *current* goal phase instead of letting it infer "completed goal"
-   from the bare excluded_count. See PR body for the velvet-hammer
+   from the bare excluded_count. See PR body for the live Keeper
    misdiagnosis that motivated this surface. *)
 let active_goal_phases_for_agent ctx =
   (current_task_owner_hooks ()).active_goal_phases_for_agent

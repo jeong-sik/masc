@@ -184,7 +184,7 @@ let env_is_restored () =
 let disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_off" "" in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
       ~turn_id:1
       ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"u" ~history_messages:[] ~tools:[] ();
@@ -194,14 +194,14 @@ let disabled_is_noop () =
 let enabled_writes_redacted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_on" "" in
-    install_projected_secret ~base_path:base ~keeper_name:"sangsu";
+    install_projected_secret ~base_path:base ~keeper_name:"alpha";
     let history =
       [
         Agent_core.Types.assistant_msg "좋아, 연구 시작한다";
         Agent_core.Types.user_msg "continue";
       ]
     in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
       ~turn_id:7
       ~agent_core_turn:3
       ~system_prompt:("token " ^ projected_secret ^ " end")
@@ -216,7 +216,7 @@ let enabled_writes_redacted () =
     Alcotest.(check bool) "redaction marker present" true
       (contains ~needle:"[REDACTED]" (json_string "system_prompt" json));
     check_json_string "request kind recorded" "kind" "request" json;
-    check_json_string "keeper name recorded" "keeper" "sangsu" json;
+    check_json_string "keeper name recorded" "keeper" "alpha" json;
     check_json_int "turn_id recorded" "turn_id" 7 json;
     check_json_int "agent_core_turn recorded" "agent_core_turn" 3 json;
     check_json_null "missing trace_id is null" "trace_id" json;
@@ -254,7 +254,7 @@ let record_size_is_independent_of_history_length () =
     let capture ~history_messages =
       let base = Filename.temp_dir "wirecap_size" "" in
       Wire.capture_request ~base_path:base ~masc_root:base
-        ~keeper_name:"sangsu" ~turn_id:1 ~agent_core_turn:1 ~system_prompt:"sys"
+        ~keeper_name:"alpha" ~turn_id:1 ~agent_core_turn:1 ~system_prompt:"sys"
         ~extra_system_context:None ~user_message:"u" ~history_messages
         ~tools:[] ();
       match find_jsonl base with
@@ -280,7 +280,7 @@ let record_size_is_independent_of_history_length () =
 let request_captures_exact_redacted_tool_schemas () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_tools" "" in
-    install_projected_secret ~base_path:base ~keeper_name:"sangsu";
+    install_projected_secret ~base_path:base ~keeper_name:"alpha";
     let tool =
       Agent_core.Tool.create
         ~name:"probe_tool"
@@ -295,7 +295,7 @@ let request_captures_exact_redacted_tool_schemas () =
         (fun _input -> Ok { Agent_core.Types.content = "ok"; _meta = None })
     in
     let raw_tools = `List [ Agent_core.Tool.schema_to_json tool ] in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
       ~turn_id:8
       ~agent_core_turn:2 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ~tools:[ tool ] ();
@@ -351,7 +351,7 @@ let tools_blob_is_shared_across_requests () =
     in
     let capture ~turn_id =
       Wire.capture_request ~base_path:base ~masc_root:base
-        ~keeper_name:"sangsu" ~turn_id ~agent_core_turn:1 ~system_prompt:"sys"
+        ~keeper_name:"alpha" ~turn_id ~agent_core_turn:1 ~system_prompt:"sys"
         ~extra_system_context:None ~user_message:"u" ~history_messages:[]
         ~tools:[ tool ] ()
     in
@@ -377,7 +377,7 @@ let request_trace_id_emitted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_req_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-req-abc" in
-    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+    Wire.capture_request ~base_path:base ~masc_root:base ~keeper_name:"alpha"
       ~turn_id:1
       ~trace_id ~agent_core_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ~tools:[] ();
@@ -406,7 +406,7 @@ let request_capture_failure_is_best_effort () =
 let response_disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_off" "" in
-    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
       ~turn_id:1
       ~agent_core_turn:2 ~response_text:"anything" ();
     Alcotest.(check (list string))
@@ -415,8 +415,8 @@ let response_disabled_is_noop () =
 let response_capture_writes_redacted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_on" "" in
-    install_projected_secret ~base_path:base ~keeper_name:"sangsu";
-    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+    install_projected_secret ~base_path:base ~keeper_name:"alpha";
+    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
       ~turn_id:9
       ~agent_core_turn:4 ~response_text:("out " ^ projected_secret ^ " done") ();
     let files = find_jsonl base in
@@ -428,7 +428,7 @@ let response_capture_writes_redacted () =
       (contains ~needle:projected_secret content);
     Alcotest.(check bool) "redaction marker present" true
       (contains ~needle:"[REDACTED]" (json_string "response_text" json));
-    check_json_string "keeper name recorded" "keeper" "sangsu" json;
+    check_json_string "keeper name recorded" "keeper" "alpha" json;
     check_json_int "turn_id recorded" "turn_id" 9 json;
     check_json_int "agent_core_turn recorded" "agent_core_turn" 4 json;
     check_json_null "missing trace_id is null" "trace_id" json)
@@ -454,7 +454,7 @@ let response_trace_id_emitted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
-    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+    Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
       ~turn_id:2
       ~agent_core_turn:1 ~trace_id ~response_text:"ok" ();
     let json = read_single_json_record base in
@@ -472,7 +472,7 @@ let capture_prunes_old_files () =
         ensure_dir old_month;
         let old_file = Filename.concat old_month "01.jsonl" in
         write_file old_file (String.make 1024 'x');
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
           ~turn_id:10
           ~agent_core_turn:1 ~response_text:"bounded" ();
         Alcotest.(check bool) "old capture file pruned" false
@@ -516,13 +516,13 @@ let capture_cache_reloads_when_retention_changes () =
       let old_file = Filename.concat old_month old_day_name in
       write_file old_file (String.make 1024 'x');
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "30" (fun () ->
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
           ~turn_id:20
           ~agent_core_turn:1 ~response_text:"cache warmup" ());
       Alcotest.(check bool) "old capture retained by warm cache" true
         (Sys.file_exists old_file);
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"sangsu"
+        Wire.capture_response ~base_path:base ~masc_root:base ~keeper_name:"alpha"
           ~turn_id:21
           ~agent_core_turn:1 ~response_text:"cache reload" ());
       Alcotest.(check bool) "old capture pruned after retention change" false

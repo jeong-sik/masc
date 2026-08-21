@@ -28,7 +28,7 @@ let with_workspace f =
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
       let config = Workspace.default_config dir in
-      ignore (Workspace.init config ~agent_name:(Some "keeper-sangsu-agent"));
+      ignore (Workspace.init config ~agent_name:(Some "keeper-alpha-agent"));
       f config)
 
 let make_meta name : Keeper_meta_contract.keeper_meta =
@@ -84,15 +84,15 @@ let check_bad_request label expected = function
 
 let test_parse_request () =
   (* 1. Valid payload *)
-  let json = `Assoc [("post_id", `String "post-123"); ("target_keeper", `String "sangsu")] in
+  let json = `Assoc [("post_id", `String "post-123"); ("target_keeper", `String "alpha")] in
   (match Server_routes_http_routes_activity.parse_board_context_inference_request json with
    | Ok req ->
      check string "post_id parsed" "post-123" req.post_id;
-     check (option string) "target_keeper parsed" (Some "sangsu") req.target_keeper
+     check (option string) "target_keeper parsed" (Some "alpha") req.target_keeper
    | Error err -> fail ("parse failed: " ^ err));
 
   (* 2. Missing post_id *)
-  let json = `Assoc [("target_keeper", `String "sangsu")] in
+  let json = `Assoc [("target_keeper", `String "alpha")] in
   (match Server_routes_http_routes_activity.parse_board_context_inference_request json with
    | Error err -> check string "error on missing post_id" "post_id is required" err
    | Ok _ -> fail "expected parsing error");
@@ -107,15 +107,15 @@ let test_parse_request () =
 
 let test_target_resolution_explicit_registered () =
   with_workspace (fun config ->
-    (* Register keeper "sangsu" *)
-    (match Keeper_meta_store.replace_snapshot config (make_meta "sangsu") with
+    (* Register keeper "alpha" *)
+    (match Keeper_meta_store.replace_snapshot config (make_meta "alpha") with
      | Ok _ -> ()
      | Error msg -> fail ("write_meta failed: " ^ msg));
 
     let post = make_post ~id:"post-1" ~author:"operator" in
-    match Server_routes_http_routes_activity.resolve_board_context_inference_target ~config post (Some "sangsu") with
+    match Server_routes_http_routes_activity.resolve_board_context_inference_target ~config post (Some "alpha") with
     | Ok (resolved_name, source) ->
-      check string "resolved name" "sangsu" resolved_name;
+      check string "resolved name" "alpha" resolved_name;
       check bool "source is Explicit_target" true (source = Server_routes_http_routes_activity.Explicit_target)
     | Error _ -> fail "expected resolution to succeed")
 
@@ -130,16 +130,16 @@ let test_target_resolution_explicit_unregistered () =
 
 let test_target_resolution_implicit_registered_author () =
   with_workspace (fun config ->
-    (* Register keeper "sangsu" *)
-    (match Keeper_meta_store.replace_snapshot config (make_meta "sangsu") with
+    (* Register keeper "alpha" *)
+    (match Keeper_meta_store.replace_snapshot config (make_meta "alpha") with
      | Ok _ -> ()
      | Error msg -> fail ("write_meta failed: " ^ msg));
 
     (* Post author matches a registered keeper (either by short name or full agent name) *)
-    let post = make_post ~id:"post-1" ~author:"sangsu" in
+    let post = make_post ~id:"post-1" ~author:"alpha" in
     match Server_routes_http_routes_activity.resolve_board_context_inference_target ~config post None with
     | Ok (resolved_name, source) ->
-      check string "resolved name" "sangsu" resolved_name;
+      check string "resolved name" "alpha" resolved_name;
       check bool "source is Post_author" true (source = Server_routes_http_routes_activity.Post_author)
     | Error _ -> fail "expected resolution to succeed")
 

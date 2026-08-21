@@ -721,7 +721,7 @@ let test_goal_reconciliation_prefers_authoritative_assignment
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        KR.For_testing.clear ();
        let config = Masc.Workspace.default_config dir in
-       let completing_agent_name = "keeper-executor-agent-agent" in
+       let completing_agent_name = "keeper-omega-agent-agent" in
        ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
        let producer_meta =
          { (make_meta "producer") with agent_name = completing_agent_name }

@@ -158,7 +158,7 @@ let schemas : tool_schema list = [
         ("mention_targets", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['sangsu']).");
+          ("description", `String "Exact direct-mention tokens that can wake the keeper in workspace traffic (for example ['example-keeper']).");
         ]);
         ("active_goal_ids", `Assoc [
           ("type", `String "array");

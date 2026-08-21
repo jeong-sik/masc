@@ -77,8 +77,8 @@ type try_provider_ctx =
        #27349 measured this against total elapsed wall-clock. Elapsed cannot
        separate "a turn that stopped" from "a turn that is taking a while",
        and on 2026-08-12 the same 900s value did both at once: it correctly
-       rotated 4 wedged sangsu attempts (65 minutes with zero trajectory
-       events) and killed a healthy rondo attempt 6 seconds after a
+       rotated 4 wedged attempts (65 minutes with zero trajectory
+       events) and killed a healthy Keeper attempt 6 seconds after a
        successful tool call (30+ tool calls inside the window, longest
        progress gap 120s). #28417 moves the measurement onto the progress
        signal, which is the distinction #27355's own observation side always
@@ -296,7 +296,7 @@ let attempt_stalled ~now ~threshold_sec ~attempt_started_at ~sample =
   | Some { last_progress_at; active_tool_count } ->
     (* A tool call that runs for minutes refreshes no progress signal while
        it runs, so tools in flight are work, not a stall. The 2026-08-12
-       rondo attempt spent 120s inside one [Execute] and was healthy. *)
+       live attempt spent 120s inside one [Execute] and was healthy. *)
     active_tool_count = 0 && now -. last_progress_at > threshold_sec
   | None ->
     (* Probe absent, or the keeper has no live turn observation to read.

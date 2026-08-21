@@ -6,7 +6,7 @@
     [Keeper_tool_execution.failure], whose [Failed] disposition the tool
     bundle promotes to a sticky [Terminal_effect_failed], killing the
     whole turn: four keeper turn deaths across the E0 campaign and the
-    polisher pilot (2026-08-18) traced to probes like [ls] on a missing
+    eta pilot (2026-08-18) traced to probes like [ls] on a missing
     path.
 
     Pins: a nonzero exit produces a [Completed] execution whose payload

@@ -232,7 +232,7 @@ let test_sandbox_playground_path_joins_with_worktree () =
     let sandbox_file =
       Filename.concat
         base_dir
-        ".masc/playground/sangsu/repos/masc/lib/foo.ml"
+        ".masc/playground/alpha/repos/masc/lib/foo.ml"
     in
     let worktree_file = Filename.concat worktree "lib/foo.ml" in
     let sandbox_address =
@@ -291,7 +291,7 @@ let test_docker_playground_path_also_resolves () =
     let docker_file =
       Filename.concat
         base_dir
-        ".masc/playground/docker/tech_glutton/repos/masc/lib/foo.ml"
+        ".masc/playground/docker/pi_glutton/repos/masc/lib/foo.ml"
     in
     let address =
       addressed_or_fail

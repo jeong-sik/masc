@@ -309,7 +309,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   Workspace.write_json config agent_file (Masc_domain.agent_to_yojson stale_agent);
 
   let stale_message =
-    "@nick0cave task-001 stale claim detected: current_task_id=null but \
+    "@theta0 task-001 stale claim detected: current_task_id=null but \
      MASC still lists task-001 as claimed by you. Please release it."
   in
   let since_seq =
@@ -330,7 +330,7 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
     (str_contains result.content "[cache_invalidated]");
   Alcotest.(check (option string))
     "delivery preserves the original mention"
-    (Some "nick0cave")
+    (Some "theta0")
     result.mention;
   Alcotest.(check string)
     "delivery exposes the canonical persisted sender"

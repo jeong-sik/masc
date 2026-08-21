@@ -59,15 +59,15 @@ let test_unique_tokens_return_empty () =
 let test_shared_token_surfaces_pair () =
   with_temp_base (fun base ->
     let shared = "shared_token_hash_value_with_enough_length" in
-    write_cred ~base ~agent_name:"keeper-sangsu-agent" ~token_hash:shared;
-    write_cred ~base ~agent_name:"nick0cave-sage-heron" ~token_hash:shared;
+    write_cred ~base ~agent_name:"keeper-alpha-agent" ~token_hash:shared;
+    write_cred ~base ~agent_name:"theta0-sage-heron" ~token_hash:shared;
     let groups = Auth.audit_token_uniqueness base in
     match groups with
     | [ (prefix, agents) ] ->
         Alcotest.(check int) "exactly 2 agents in group"
           2 (List.length agents);
         Alcotest.(check (list string)) "agents sorted"
-          [ "keeper-sangsu-agent"; "nick0cave-sage-heron" ]
+          [ "keeper-alpha-agent"; "theta0-sage-heron" ]
           agents;
         Alcotest.(check int) "prefix is 12 chars"
           12 (String.length prefix);

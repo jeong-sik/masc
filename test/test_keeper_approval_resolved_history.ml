@@ -69,7 +69,7 @@ let append_row ~base_path ~ts (row : Yojson.Safe.t) =
     (fun () -> output_string oc (Yojson.Safe.to_string row ^ "\n"))
 ;;
 
-let seed_resolved ~base_path ~ts ~id ?(keeper = "rondo") ?(tool = "tool_execute")
+let seed_resolved ~base_path ~ts ~id ?(keeper = "beta") ?(tool = "tool_execute")
       ?(decision = "approve") ?(source = "auto_judge") ()
   =
   let decision_kind, decision_reason =
@@ -118,7 +118,7 @@ let seed_noise ~base_path ~ts ~count =
             [ "event", `String "summary_updated"
             ; "id", `String (Printf.sprintf "noise_%d" i)
             ; "ts", `Float ts
-            ; "keeper", `String "rondo"
+            ; "keeper", `String "beta"
             ]
         in
         output_string oc (Yojson.Safe.to_string row ^ "\n")
@@ -284,7 +284,7 @@ let test_nullable_string_projection_is_literal base_path =
         [ "event", `String "resolved"
         ; "id", `String "approve-nullable"
         ; "ts", `Float approve_ts
-        ; "keeper", `String "rondo"
+        ; "keeper", `String "beta"
         ; "tool", `String "tool_execute"
         ; "decision", `String "approve"
         ; "turn_id", `Null
@@ -309,7 +309,7 @@ let test_nullable_string_projection_is_literal base_path =
         [ "event", `String "resolved"
         ; "id", `String "reject-present"
         ; "ts", `Float reject_ts
-        ; "keeper", `String "rondo"
+        ; "keeper", `String "beta"
         ; "tool", `String "tool_execute"
         ; "decision", `String "reject"
         ; "turn_id", `Null
@@ -334,7 +334,7 @@ let test_nullable_string_projection_is_literal base_path =
     [ `Assoc
         [ "id", `String "reject-present"
         ; "event", `String "resolved"
-        ; "keeper_name", `String "rondo"
+        ; "keeper_name", `String "beta"
         ; "tool_name", `String "tool_execute"
         ; "decision", `String "reject"
         ; "decision_kind", `String "reject"
@@ -352,7 +352,7 @@ let test_nullable_string_projection_is_literal base_path =
     ; `Assoc
         [ "id", `String "approve-nullable"
         ; "event", `String "resolved"
-        ; "keeper_name", `String "rondo"
+        ; "keeper_name", `String "beta"
         ; "tool_name", `String "tool_execute"
         ; "decision", `String "approve"
         ; "decision_kind", `String "approve"
@@ -383,7 +383,7 @@ let test_judge_evidence_passes_through base_path =
         [ "event", `String "resolved"
         ; "id", `String "with-judge"
         ; "ts", `Float (now -. minutes 5)
-        ; "keeper", `String "rondo"
+        ; "keeper", `String "beta"
         ; "tool", `String "tool_execute"
         ; "decision", `String "approve"
         ; "turn_id", `Null

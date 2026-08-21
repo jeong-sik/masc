@@ -311,7 +311,7 @@ let test_composition_action_context_persisted () =
         }
     in
     Keeper_tool_call_log.log_call
-      ~keeper_name:"analyst"
+      ~keeper_name:"delta"
       ~tool_name:"keeper_fs_read"
       ~input:(`Assoc [ "path", `String "lib/runtime.ml" ])
       ~output_text:"typed output"
@@ -716,7 +716,7 @@ let test_turn_context_fields_absent_without_context () =
 let test_route_evidence_stored_for_git_push () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -788,7 +788,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
               ~preview:{|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}))
     in
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -831,7 +831,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
 let test_route_evidence_redacts_wrapped_git_push () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_execute"
       ~input:
         (`Assoc
@@ -868,7 +868,7 @@ let test_route_evidence_command_redaction_fails_closed () =
     (fun command ->
        with_tmp_log (fun () ->
          Keeper_tool_call_log.log_call
-           ~keeper_name:"executor"
+           ~keeper_name:"omega"
            ~tool_name:"tool_execute"
            ~input:(`Assoc [ ("cmd", `String command) ])
            ~output_text:
@@ -904,7 +904,7 @@ let test_route_evidence_command_redaction_fails_closed () =
 let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"Read"
       ~input:(`Assoc [ ("file_path", `String "README.md") ])
       ~output_text:"file contents"
@@ -942,7 +942,7 @@ let test_route_evidence_records_descriptor_for_filesystem_calls () =
 let test_route_evidence_records_internal_descriptor () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"keeper_time_now"
       ~input:(`Assoc [])
       ~output_text:
@@ -984,7 +984,7 @@ let test_route_evidence_records_internal_descriptor () =
 let test_route_evidence_records_masc_board_descriptor () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"mcp__masc__masc_board_post"
       ~input:(`Assoc [ "body", `String "descriptor evidence test" ])
       ~output_text:{|{"ok":true,"post_id":"post-1"}|}
@@ -1045,7 +1045,7 @@ let test_route_evidence_records_descriptor_eval_tags () =
 let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"executor"
+      ~keeper_name:"omega"
       ~tool_name:"tool_write_file"
       ~input:(`String "raw pre-tool gate payload")
       ~output_text:"gate_waiting_for_operator"

@@ -24,7 +24,7 @@ let with_keepers_dir f =
     (fun () -> f dir)
 ;;
 
-let keeper_id = "masc-improver"
+let keeper_id = "omicron-improver"
 
 let append_raw ~keepers_dir line =
   let path = Current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id in

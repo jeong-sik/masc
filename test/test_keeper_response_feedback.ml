@@ -23,7 +23,7 @@ let test_signal_unknown_is_error () =
   check "empty signal -> Error" (Result.is_error (F.signal_of_wire ""))
 
 let test_json_roundtrip () =
-  let r = mk ~turn_id:"masc-improver:42" ~signal:F.Not_helpful ~recorded_at:1718000000.5 () in
+  let r = mk ~turn_id:"omicron-improver:42" ~signal:F.Not_helpful ~recorded_at:1718000000.5 () in
   check "json roundtrip" (F.of_json (F.to_json r) = Ok r)
 
 let test_json_strict () =

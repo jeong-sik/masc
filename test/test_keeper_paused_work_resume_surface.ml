@@ -29,7 +29,7 @@ let test_bulk_resume_requires_per_owner_targets () =
   let names_only =
     `Assoc
       [ "action", `String "resume"
-      ; "names", `List [ `String "rondo"; `String "qa-king" ]
+      ; "names", `List [ `String "beta"; `String "mu-king" ]
       ]
   in
   (match Surface.parse_bulk_resume_requests names_only with
@@ -42,12 +42,12 @@ let test_bulk_resume_requires_per_owner_targets () =
          ; ( "targets"
            , `List
                [ `Assoc
-                   [ "name", `String "rondo"
+                   [ "name", `String "beta"
                    ; "owner_nonce", `Int 3
-                   ; "operator_operation_id", `String "resume-rondo-1"
+                   ; "operator_operation_id", `String "resume-beta-1"
                    ]
                ; `Assoc
-                   [ "name", `String "qa-king"
+                   [ "name", `String "mu-king"
                    ; "owner_nonce", `Int 5
                    ; "operator_operation_id", `String "resume-qa-1"
                    ]
@@ -58,7 +58,7 @@ let test_bulk_resume_requires_per_owner_targets () =
   check
     (list (triple string int string))
     "per-owner fences"
-    [ "rondo", 3, "resume-rondo-1"; "qa-king", 5, "resume-qa-1" ]
+    [ "beta", 3, "resume-beta-1"; "mu-king", 5, "resume-qa-1" ]
     parsed
 ;;
 

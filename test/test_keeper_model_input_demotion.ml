@@ -440,7 +440,7 @@ let projection_reuses_candidate_measurements () =
 
 (* --- 7. Last resort: the newest atom does not fit (#28845) ------------- *)
 
-(* The sangsu incident shape: parallel WebSearch results joined the assistant
+(* The alpha incident shape: parallel WebSearch results joined the assistant
    atom that called them, and that one atom (indivisible to the tail window)
    outgrew the whole history budget. Ordinary demotion cannot help — its
    boundary excludes the current turn (RFC-0351 §4) — so composition refused

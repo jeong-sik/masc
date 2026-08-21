@@ -104,11 +104,6 @@ type failure_stage =
   | Session_remove
   | Registry_unregister
 
-type failure =
-  { stage : failure_stage
-  ; detail : string
-  }
-
 type operator_purge_reissue =
   { actor : string
   ; reason : string
@@ -136,6 +131,17 @@ type cleanup_evidence =
   { settled_task_ids : Keeper_id.Task_id.t list
   ; pending_confirms_removed : int
   ; meta_snapshot_digest : Keeper_meta_json.Snapshot_digest.t
+  }
+
+type blocked_resume =
+  | Resume_joined_idle
+  | Resume_finalizing_tasks of Keeper_id.Task_id.t list
+  | Resume_cleanup_ready of cleanup_evidence
+
+type failure =
+  { stage : failure_stage
+  ; detail : string
+  ; resume : blocked_resume option
   }
 
 type finalization_evidence =
@@ -201,6 +207,7 @@ type invariant_error =
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
+  | Blocked_resume_without_purge_reissue
 
 let schema_version = 8
 
@@ -306,6 +313,8 @@ let invariant_error_to_string = function
     Printf.sprintf
       "shutdown supersession requires operator_stop_retain_meta, actual=%s"
       (cleanup_reason_label cleanup_reason)
+  | Blocked_resume_without_purge_reissue ->
+    "shutdown blocked retry checkpoint requires typed operator purge reissue evidence"
 ;;
 
 let validate operation =
@@ -316,6 +325,15 @@ let validate operation =
          { expected_schema_version = schema_version
          ; actual_schema_version = operation.schema_version
          })
+  else if
+    match operation.phase with
+    | Blocked { resume = Some _; _ } ->
+      (match operation.join_evidence, operation.cleanup_intent.reason with
+       | ( Some { lane_outcome = Lane_operator_purge_reissue _; _ }
+         , Dashboard_keeper_purge _ ) -> false
+       | _ -> true)
+    | _ -> false
+  then Error Blocked_resume_without_purge_reissue
   else
     match operation.phase with
     | Finalized evidence ->

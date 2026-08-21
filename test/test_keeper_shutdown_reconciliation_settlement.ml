@@ -258,7 +258,7 @@ let test_recovery_blocks_interrupted_lane_join () =
     persist_exn ~config operation;
     let recovered = recover_exn ~config operation in
     (match recovered.phase with
-     | Blocked { stage = Lane_join; detail } ->
+     | Blocked { stage = Lane_join; detail; _ } ->
        check string
          "blocked evidence names unknown Librarian completion"
          "server process ended while joining Keeper and Librarian lanes; Librarian completion is unknown"

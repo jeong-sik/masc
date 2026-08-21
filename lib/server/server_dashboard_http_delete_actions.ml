@@ -556,12 +556,14 @@ let blocked_purge_reissue_status =
   | Store_reissue_failed
       ( Keeper_shutdown_store.Revision_conflict _
       | Supersession_phase_mismatch _
-      | Supersession_intent_mismatch _ )
+      | Supersession_intent_mismatch _
+      | Invalid_purge_recovery_proof _ )
   -> `Conflict
   | Operation_load_failed
       ( Keeper_shutdown_store.Revision_conflict _
       | Supersession_phase_mismatch _
-      | Supersession_intent_mismatch _ ) -> `Conflict
+      | Supersession_intent_mismatch _
+      | Invalid_purge_recovery_proof _ ) -> `Conflict
   | Operation_load_failed
       ( Keeper_shutdown_store.Already_exists _
       | Io_error _

@@ -417,7 +417,7 @@ let test_predicate_answers_every_cleanup_reason () =
       let operation =
         make_operation
           ~keeper_name:label
-          ~phase:(Blocked { stage = Meta_remove; detail = "fixture" })
+          ~phase:(Blocked { stage = Meta_remove; detail = "fixture"; resume = None })
           ~cleanup_intent:{ reason; remove_session = false }
       in
       check
@@ -474,6 +474,7 @@ let test_boot_recovery_keeps_blocked_ownerless_cleanup_fenced () =
           (Blocked
              { stage = Session_remove
              ; detail = "remove_session_dir failed after remove_meta_file"
+             ; resume = None
              })
         ~cleanup_intent:
           { reason = Operator_stop_remove_meta; remove_session = true }
@@ -499,7 +500,7 @@ let check_boot_recovery_rejects_ownerless_retain_intent label reason =
     let operation =
       make_operation
         ~keeper_name:label
-        ~phase:(Blocked { stage = Meta_remove; detail = "fixture" })
+        ~phase:(Blocked { stage = Meta_remove; detail = "fixture"; resume = None })
         ~cleanup_intent:{ reason; remove_session = false }
     in
     persist_exn ~config operation;
@@ -530,7 +531,7 @@ let check_corrupt_sibling_does_not_hide_ownerless_retain label reason =
     let operation =
       make_operation
         ~keeper_name:label
-        ~phase:(Blocked { stage = Meta_remove; detail = "fixture" })
+        ~phase:(Blocked { stage = Meta_remove; detail = "fixture"; resume = None })
         ~cleanup_intent:{ reason; remove_session = false }
     in
     let corrupt_sibling =

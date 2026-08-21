@@ -135,6 +135,7 @@ let with_workspace f =
            Keeper_shutdown_finalize.For_testing
            .reset_remove_pending_confirms_by_target ();
            Keeper_shutdown_finalize.For_testing.reset_completion_handler ();
+           Keeper_shutdown_finalize.For_testing.reset_failure_injection ();
            Keeper_shutdown_blocked_purge_release.For_testing.reset_audit_writer ();
            Fs_compat.clear_fs ())
          (fun () ->
@@ -173,6 +174,7 @@ let interrupted_lane_join =
   Blocked
     { stage = Lane_join
     ; detail = "server process ended while joining Keeper and Librarian lanes"
+    ; resume = None
     }
 ;;
 
@@ -205,27 +207,64 @@ let persist_exn ~config operation =
 
 let reissue_store_exn ~config operation =
   match
-    Keeper_shutdown_store.reissue_blocked_dashboard_purge
+    Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
       ~config
       ~keeper_name
       ~operation_id:operation.operation_id
       ~expected_revision:operation.revision
       ~actor:"operator"
       ~reason:"test exact reissue"
-      ~now:Masc_domain.now_iso
   with
-  | Ok (Purge_reissue_persisted reissued | Purge_reissue_already_persisted reissued) ->
-    reissued
+  | Ok (Purge_reissue_initial_prepared (token, _)) ->
+    (match
+       Keeper_shutdown_store.reissue_blocked_dashboard_purge
+         ~config
+         ~token
+         ~now:Masc_domain.now_iso
+     with
+     | Ok (Purge_reissue_persisted reissued) -> reissued
+     | Error error -> fail (Keeper_shutdown_store.error_to_string error))
+  | Ok (Purge_reissue_already_persisted reissued) -> reissued
   | Error error ->
     failf
       "blocked purge refused exact reissue: %s"
       (Keeper_shutdown_store.error_to_string error)
 ;;
 
+let store_live_shape operation =
+  { operation with
+    lane_ownership =
+      Registered_lane
+        (lane_id_exn "lane-ec166371-dc82-41dc-81df-1fd9ffcc7c39")
+  }
+;;
+
+let with_store_reissue_fixture ~config f =
+  Eio.Switch.run @@ fun sw ->
+  (match
+     Keeper_owner_registry.install_from_store
+       ~sw
+       ~operation_runner:None
+       ~on_turn_slot_released:None
+       config
+   with
+   | Ok 0 -> ()
+   | Ok count -> failf "store fixture installed %d owner(s)" count
+   | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+  let operation =
+    make_operation ~cleanup_intent:purge_intent ~phase:interrupted_lane_join
+    |> store_live_shape
+  in
+  persist_exn ~config operation;
+  (match Keeper_shutdown_runtime.recover_at_boot ~config with
+   | [ Ok _ ] -> ()
+   | _ -> fail "store fixture did not restore exact shutdown fence");
+  f operation
+;;
+
 let test_reissue_keeps_the_admission_fence () =
   with_workspace (fun ~config ->
-    let operation = make_operation ~cleanup_intent:purge_intent ~phase:interrupted_lane_join in
-    persist_exn ~config operation;
+    with_store_reissue_fixture ~config @@ fun operation ->
     check bool "a blocked purge holds the fence" true
       (requires_admission_fence operation);
     let reissued = reissue_store_exn ~config operation in
@@ -234,11 +273,10 @@ let test_reissue_keeps_the_admission_fence () =
 
 let test_reissue_is_recorded_in_join_evidence () =
   with_workspace (fun ~config ->
-    let operation = make_operation ~cleanup_intent:purge_intent ~phase:interrupted_lane_join in
-    persist_exn ~config operation;
+    with_store_reissue_fixture ~config @@ fun operation ->
     let reissued = reissue_store_exn ~config operation in
     match reissued.phase, reissued.join_evidence with
-    | ( Joined_idle
+    | ( Blocked { stage = Lane_join; resume = Some Resume_joined_idle; _ }
       , Some
           { lane_outcome =
               Lane_operator_purge_reissue
@@ -251,8 +289,7 @@ let test_reissue_is_recorded_in_join_evidence () =
 
 let test_reissue_survives_a_reload () =
   with_workspace (fun ~config ->
-    let operation = make_operation ~cleanup_intent:purge_intent ~phase:interrupted_lane_join in
-    persist_exn ~config operation;
+    with_store_reissue_fixture ~config @@ fun operation ->
     let (_reissued : Keeper_shutdown_types.t) = reissue_store_exn ~config operation in
     match Keeper_shutdown_store.load ~config ~keeper_name operation.operation_id with
     | Error error ->
@@ -266,18 +303,142 @@ let test_operator_stop_reissue_is_refused () =
     let operation = make_operation ~cleanup_intent:stop_intent ~phase:interrupted_lane_join in
     persist_exn ~config operation;
     match
-      Keeper_shutdown_store.reissue_blocked_dashboard_purge
+      Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
         ~config
         ~keeper_name
         ~operation_id:operation.operation_id
         ~expected_revision:operation.revision
         ~actor:"operator"
         ~reason:"must fail"
-        ~now:Masc_domain.now_iso
     with
     | Error (Supersession_intent_mismatch _) -> ()
     | Error error -> fail (Keeper_shutdown_store.error_to_string error)
     | Ok _ -> fail "operator stop was reissued as a purge")
+;;
+
+let all_failure_stages =
+  [ Task_discovery
+  ; Record_persist
+  ; Turn_cancel
+  ; Lane_cancel
+  ; Turn_join
+  ; Lane_join
+  ; Record_update
+  ; Unhandled_worker
+  ; Task_settlement
+  ; Pending_confirm_cleanup
+  ; Approval_summary_retirement
+  ; Meta_update
+  ; Meta_remove
+  ; Session_remove
+  ; Registry_unregister
+  ]
+;;
+
+let test_initial_reissue_accepts_only_lane_join_stage () =
+  List.iter
+    (fun stage ->
+       with_workspace (fun ~config ->
+         if stage = Lane_join
+         then
+           with_store_reissue_fixture ~config @@ fun operation ->
+           (match
+              Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
+                ~config
+                ~keeper_name
+                ~operation_id:operation.operation_id
+                ~expected_revision:operation.revision
+                ~actor:"operator"
+                ~reason:"stage table"
+            with
+            | Ok (Purge_reissue_initial_prepared _) -> ()
+            | Ok (Purge_reissue_already_persisted _) ->
+              fail "fresh lane_join was reported as already reissued"
+            | Error error -> fail (Keeper_shutdown_store.error_to_string error))
+         else
+           let operation =
+             { (make_operation
+                  ~cleanup_intent:purge_intent
+                  ~phase:
+                    (Blocked
+                       { stage
+                       ; detail = "stage-table fixture"
+                       ; resume = None
+                       })) with
+               lane_ownership =
+                 Registered_lane
+                   (lane_id_exn
+                      "lane-ec166371-dc82-41dc-81df-1fd9ffcc7c39")
+             }
+           in
+           persist_exn ~config operation;
+           match
+             Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
+               ~config
+               ~keeper_name
+               ~operation_id:operation.operation_id
+               ~expected_revision:operation.revision
+               ~actor:"operator"
+               ~reason:"stage table"
+           with
+           | Error (Supersession_phase_mismatch _) -> ()
+           | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+           | Ok _ ->
+             failf
+               "initial reissue accepted blocked stage %s"
+               (failure_stage_to_string stage)))
+    all_failure_stages
+;;
+
+let test_initial_reissue_refuses_other_intents_and_revision () =
+  let intent_cases =
+    [ { reason = Operator_stop_retain_meta; remove_session = false }
+    ; { reason = Operator_stop_remove_meta; remove_session = false }
+    ; { reason = Supervisor_cleanup; remove_session = true }
+    ; { purge_intent with remove_session = false }
+    ]
+  in
+  List.iter
+    (fun cleanup_intent ->
+       with_workspace (fun ~config ->
+         let operation =
+           make_operation ~cleanup_intent ~phase:interrupted_lane_join
+           |> store_live_shape
+         in
+         persist_exn ~config operation;
+         match
+           Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
+             ~config
+             ~keeper_name
+             ~operation_id:operation.operation_id
+             ~expected_revision:operation.revision
+             ~actor:"operator"
+             ~reason:"intent table"
+         with
+         | Error (Supersession_intent_mismatch _ | Supersession_phase_mismatch _) -> ()
+         | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+         | Ok _ -> fail "initial reissue accepted a non-exact purge intent"))
+    intent_cases;
+  with_workspace (fun ~config ->
+    let operation =
+      make_operation ~cleanup_intent:purge_intent ~phase:interrupted_lane_join
+      |> store_live_shape
+    in
+    persist_exn ~config operation;
+    match
+      Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
+        ~config
+        ~keeper_name
+        ~operation_id:operation.operation_id
+        ~expected_revision:(operation.revision + 1)
+        ~actor:"operator"
+        ~reason:"revision mismatch"
+    with
+    | Error (Revision_conflict { expected; actual }) ->
+      check int "expected revision preserved" (operation.revision + 1) expected;
+      check int "actual revision reported" operation.revision actual
+    | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+    | Ok _ -> fail "initial reissue accepted a revision mismatch")
 ;;
 
 let live_release_command operation =
@@ -543,7 +704,7 @@ let test_crash_after_reissue_keeps_exact_fence_and_retry_finishes () =
       | Error error -> fail (Keeper_shutdown_store.error_to_string error)
     in
     (match current.phase, current.join_evidence with
-     | ( Joined_idle
+     | ( Blocked { stage = Lane_join; resume = Some Resume_joined_idle; _ }
        , Some { lane_outcome = Lane_operator_purge_reissue _; _ } ) -> ()
      | _ -> fail "crash window did not retain durable reissue intent");
     check
@@ -563,7 +724,14 @@ let test_crash_after_reissue_keeps_exact_fence_and_retry_finishes () =
      | Ok owner ->
        (match Keeper_owner.exact_projection owner with
         | Ok { meta = Some meta; _ } ->
-       check bool "recovery meta is paused" true meta.paused;
+          check string "recovery meta keeps name" operation.keeper_name meta.name;
+          check
+            string
+            "recovery meta keeps trace"
+            (Keeper_id.Trace_id.to_string operation.trace_id)
+            (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+          check int "recovery meta keeps generation" operation.generation meta.runtime.nonce;
+          check bool "recovery meta is paused" true meta.paused;
        check bool "recovery meta disables proactive" false meta.proactive.enabled;
        check bool "recovery meta disables autoboot" false meta.autoboot_enabled
         | Ok { meta = None; _ } -> fail "crash window lost recovery metadata"
@@ -581,6 +749,18 @@ let test_crash_after_reissue_keeps_exact_fence_and_retry_finishes () =
          (Operation_id.to_string operation.operation_id)
          (Operation_id.to_string existing)
      | Intake_committed _ -> fail "ordinary intake crossed the reissue fence");
+    (match Keeper_meta_store.read_meta config keeper_name with
+     | Ok (Some meta) ->
+       check string "stored recovery meta keeps name" operation.keeper_name meta.name;
+       check
+         string
+         "stored recovery meta keeps trace"
+         (Keeper_id.Trace_id.to_string operation.trace_id)
+         (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+       check int "stored recovery meta keeps generation" operation.generation meta.runtime.nonce;
+       check bool "stored recovery meta is paused" true meta.paused
+     | Ok None -> fail "stored recovery metadata disappeared"
+     | Error detail -> fail detail);
     (match Keeper_runtime.autoboot_exclusion_reason config keeper_name with
      | Some Keeper_runtime.Shutdown_admission_fence
      | Some Keeper_runtime.Paused -> ()
@@ -613,6 +793,70 @@ let test_crash_after_reissue_keeps_exact_fence_and_retry_finishes () =
     | Error error ->
       failf
         "crash-window retry failed: %s"
+        (Keeper_shutdown_blocked_purge_release.error_to_string error))
+;;
+
+let test_crash_after_intent_before_meta_is_retryable () =
+  with_workspace (fun ~config ->
+    Eio.Switch.run @@ fun sw ->
+    install_empty_owner_inventory_exn ~config ~sw;
+    let operation, _toml_path = persist_live_fixture ~config in
+    let command = live_release_command operation in
+    let token =
+      match
+        Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
+          ~config
+          ~keeper_name
+          ~operation_id:operation.operation_id
+          ~expected_revision:command.expected_revision
+          ~actor:"purge-operator"
+          ~reason:command.reason
+      with
+      | Ok (Purge_reissue_initial_prepared (token, _)) -> token
+      | Ok (Purge_reissue_already_persisted _) ->
+        fail "fresh operation unexpectedly had reissue evidence"
+      | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+    in
+    (match
+       Keeper_shutdown_store.reissue_blocked_dashboard_purge
+         ~config
+         ~token
+         ~now:Masc_domain.now_iso
+     with
+     | Ok (Purge_reissue_persisted _) -> ()
+     | Error error -> fail (Keeper_shutdown_store.error_to_string error));
+    (match Keeper_meta_store.read_meta config keeper_name with
+     | Ok None -> ()
+     | Ok (Some _) -> fail "pre-meta crash fixture materialized metadata"
+     | Error detail -> fail detail);
+    let durable =
+      match Keeper_shutdown_store.load ~config ~keeper_name operation.operation_id with
+      | Ok operation -> operation
+      | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+    in
+    (match durable.phase, durable.join_evidence with
+     | ( Blocked { stage = Lane_join; resume = Some Resume_joined_idle; _ }
+       , Some { lane_outcome = Lane_operator_purge_reissue _; _ } ) -> ()
+     | _ -> fail "pre-meta crash lost durable typed reissue checkpoint");
+    check
+      (option string)
+      "pre-meta crash keeps exact fence"
+      (Some (Operation_id.to_string operation.operation_id))
+      (Keeper_shutdown_intake_fence.shutdown_operation_id
+         ~base_path:config.base_path
+         ~keeper_name
+       |> Option.map Operation_id.to_string);
+    match
+      Keeper_shutdown_blocked_purge_release.execute
+        ~config
+        ~actor:"purge-operator"
+        command
+    with
+    | Ok { operation = { phase = Finalized _; _ }; already_reissued = true } -> ()
+    | Ok _ -> fail "pre-meta crash retry did not finalize"
+    | Error error ->
+      failf
+        "pre-meta crash retry failed: %s"
         (Keeper_shutdown_blocked_purge_release.error_to_string error))
 ;;
 
@@ -695,6 +939,161 @@ let test_audit_failure_is_http_error_and_identical_retry_repairs () =
          | _ -> false)))
 ;;
 
+let resumable_cleanup_stages =
+  [ Meta_update
+  ; Task_settlement
+  ; Pending_confirm_cleanup
+  ; Approval_summary_retirement
+  ; Registry_unregister
+  ; Meta_remove
+  ; Session_remove
+  ]
+;;
+
+let expect_replay_rejected ~config ~actor command =
+  match Keeper_shutdown_blocked_purge_release.execute ~config ~actor command with
+  | Error (Store_reissue_failed _) -> ()
+  | Error error ->
+    failf
+      "mismatched replay returned wrong error: %s"
+      (Keeper_shutdown_blocked_purge_release.error_to_string error)
+  | Ok _ -> fail "mismatched replay was accepted"
+;;
+
+let test_cleanup_blocked_stages_resume_exact_retry () =
+  List.iter
+    (fun stage ->
+       with_workspace (fun ~config ->
+         Eio.Switch.run @@ fun sw ->
+         install_empty_owner_inventory_exn ~config ~sw;
+         let operation, _toml_path = persist_live_fixture ~config in
+         let auth_config =
+           { Masc_domain.default_auth_config with enabled = true; require_token = true }
+         in
+         Auth.save_auth_config config.base_path auth_config;
+         let actor = "purge-stage-operator" in
+         let admin_token =
+           create_token_exn config.base_path ~agent_name:actor ~role:Masc_domain.Admin
+         in
+         let command = live_release_command operation in
+         let body = release_command_json command in
+         let path = "/api/v1/dashboard/agents/purge/reissue" in
+         let saved_state = Server_auth.For_testing.snapshot_server_state () in
+         Fun.protect
+           ~finally:(fun () -> Server_auth.For_testing.restore_server_state saved_state)
+           (fun () ->
+              Server_auth.For_testing.restore_server_state
+                (Some (Mcp_server.For_testing.create_state ~base_path:config.base_path));
+              let router =
+                Server_dashboard_http_delete_actions.add_delete_action_routes
+                  (Http.Router.create ())
+              in
+              Keeper_shutdown_finalize.For_testing.fail_next_at_stage stage;
+              let first =
+                dispatch_with_body
+                  router
+                  (post_request ~path ~token:admin_token body)
+                  body
+              in
+              check
+                int
+                ("first " ^ failure_stage_to_string stage ^ " failure is HTTP 500")
+                500
+                (status_of_response first);
+              let blocked =
+                match
+                  Keeper_shutdown_store.load
+                    ~config
+                    ~keeper_name
+                    operation.operation_id
+                with
+                | Ok operation -> operation
+                | Error error -> fail (Keeper_shutdown_store.error_to_string error)
+              in
+              (match blocked.phase, blocked.join_evidence with
+               | ( Blocked { stage = persisted_stage; resume = Some _; _ }
+                 , Some
+                     { lane_outcome =
+                         Lane_operator_purge_reissue
+                           { actor = persisted_actor
+                           ; reason = persisted_reason
+                           ; expected_revision
+                           }
+                     ; _
+                     } ) ->
+                 check
+                   string
+                   "blocked stage persisted"
+                   (failure_stage_to_string stage)
+                   (failure_stage_to_string persisted_stage);
+                 check string "typed actor retained" actor persisted_actor;
+                 check string "typed reason retained" command.reason persisted_reason;
+                 check int "typed original revision retained" 2 expected_revision
+               | _ -> fail "cleanup failure lost typed retry checkpoint");
+              let blocked_revision = blocked.revision in
+              expect_replay_rejected
+                ~config
+                ~actor:"different-operator"
+                command;
+              expect_replay_rejected
+                ~config
+                ~actor
+                { command with reason = command.reason ^ " mismatched" };
+              expect_replay_rejected
+                ~config
+                ~actor
+                { command with expected_revision = command.expected_revision + 1 };
+              (match
+                 Keeper_shutdown_store.load
+                   ~config
+                   ~keeper_name
+                   operation.operation_id
+               with
+               | Ok current ->
+                 check int "mismatched retries do not write" blocked_revision current.revision
+               | Error error -> fail (Keeper_shutdown_store.error_to_string error));
+              check
+                (option string)
+                "blocked retry keeps exact fence"
+                (Some (Operation_id.to_string operation.operation_id))
+                (Keeper_shutdown_intake_fence.shutdown_operation_id
+                   ~base_path:config.base_path
+                   ~keeper_name
+                 |> Option.map Operation_id.to_string);
+              let retry =
+                dispatch_with_body
+                  router
+                  (post_request ~path ~token:admin_token body)
+                  body
+              in
+              check int "identical retry finalizes" 200 (status_of_response retry);
+              check
+                bool
+                "identical retry reports durable audit"
+                true
+                (Astring.String.is_infix ~affix:"\"audit_durable\":true" retry));
+         (match
+            Keeper_shutdown_store.load
+              ~config
+              ~keeper_name
+              operation.operation_id
+          with
+          | Ok { phase = Finalized _; _ } -> ()
+          | Ok _ -> fail "identical cleanup retry did not finalize"
+          | Error error -> fail (Keeper_shutdown_store.error_to_string error));
+         check
+           bool
+           "success audit row is durable"
+           true
+           (Audit_log.read_entries config
+            |> List.exists (fun (entry : Audit_log.audit_entry) ->
+              match entry.action with
+              | Audit_log.Custom "keeper_blocked_purge_reissue" ->
+                String.equal entry.agent_id actor
+              | _ -> false))))
+    resumable_cleanup_stages
+;;
+
 let test_non_purge_is_refused_and_stays_fenced () =
   with_workspace (fun ~config ->
     let operation =
@@ -711,7 +1110,8 @@ let test_non_purge_is_refused_and_stays_fenced () =
         ~actor:"operator"
         (live_release_command operation)
     with
-    | Error (Profile_materialization_failed _) ->
+    | Error
+        (Store_reissue_failed (Keeper_shutdown_store.Supersession_intent_mismatch _)) ->
       (match Keeper_shutdown_store.load ~config ~keeper_name operation.operation_id with
        | Ok { phase = Blocked _; revision = 2; _ } -> ()
        | Ok _ -> fail "non-purge operation changed despite fail-closed reissue"
@@ -758,6 +1158,14 @@ let () =
             `Quick
             test_operator_stop_reissue_is_refused
         ; test_case
+            "accepts only blocked lane_join initially"
+            `Quick
+            test_initial_reissue_accepts_only_lane_join_stage
+        ; test_case
+            "refuses mismatched intent and revision"
+            `Quick
+            test_initial_reissue_refuses_other_intents_and_revision
+        ; test_case
             "releases live-shaped missing-meta fence"
             `Quick
             test_missing_meta_live_shape_releases_exact_fence
@@ -766,9 +1174,17 @@ let () =
             `Quick
             test_crash_after_reissue_keeps_exact_fence_and_retry_finishes
         ; test_case
+            "recovers the pre-meta crash window"
+            `Quick
+            test_crash_after_intent_before_meta_is_retryable
+        ; test_case
             "fails closed and repairs an audit write"
             `Quick
             test_audit_failure_is_http_error_and_identical_retry_repairs
+        ; test_case
+            "resumes every cleanup blocked stage"
+            `Quick
+            test_cleanup_blocked_stages_resume_exact_retry
         ; test_case
             "refuses a non-purge operation"
             `Quick

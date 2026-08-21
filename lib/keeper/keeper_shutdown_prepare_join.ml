@@ -145,7 +145,7 @@ let persist_blocked ~config operation stage detail =
   let blocked =
     { operation with
       revision = operation.revision + 1
-    ; phase = Blocked { stage; detail }
+    ; phase = Blocked { stage; detail; resume = None }
     ; updated_at = Masc_domain.now_iso ()
     }
   in

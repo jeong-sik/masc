@@ -199,28 +199,6 @@ let error_to_string = function
   | Injected_after_reissue detail -> detail
 ;;
 
-let operator_reissue_matches ~actor command operation =
-  match operation.Keeper_shutdown_types.join_evidence with
-  | Some
-      { lane_outcome =
-          Lane_operator_purge_reissue
-            { actor = persisted_actor; reason; expected_revision }
-      ; _
-      } ->
-    String.equal actor persisted_actor
-    && String.equal command.reason reason
-    && Int.equal command.expected_revision expected_revision
-  | Some
-      { lane_outcome =
-          ( Lane_completed
-          | Lane_shutdown_requested
-          | Lane_cancelled_by_parent _
-          | Lane_failed _ )
-      ; _
-      }
-  | None -> false
-;;
-
 let paused_meta_from_profile ~config command operation =
   let open Result.Syntax in
   let* context =
@@ -251,6 +229,23 @@ let paused_meta_from_profile ~config command operation =
       Profile_materialization_failed
         (Keeper_types_profile.keeper_toml_load_error_to_string error))
   in
+  let* instructions =
+    match defaults.instructions with
+    | Some instructions -> Ok instructions
+    | None ->
+      Error
+        (Profile_materialization_failed
+           "surviving Keeper profile did not resolve exact instructions")
+  in
+  let allowed_paths =
+    match defaults.allowed_paths with
+    | Some allowed_paths -> allowed_paths
+    | None ->
+      (* DET-OK: the normal Keeper create contract maps an omitted
+         [allowed_paths] profile field to the least-privilege empty set. This
+         recovery materialization applies that same total mapping. *)
+      []
+  in
   let sandbox_profile =
     Keeper_turn_up_args.resolve_sandbox_profile
       ?requested:None
@@ -269,12 +264,12 @@ let paused_meta_from_profile ~config command operation =
     { id = defaults.id
     ; name = command.keeper_id
     ; agent_name = context.agent_name
-    ; instructions = Option.value ~default:"" defaults.instructions
+    ; instructions
     ; autonomous_instructions = defaults.autonomous_instructions
     ; sandbox_profile
     ; sandbox_image = defaults.sandbox_image
     ; network_mode
-    ; allowed_paths = Option.value ~default:[] defaults.allowed_paths
+    ; allowed_paths
     ; mention_targets =
         Keeper_turn_up_args.resolve_mention_targets
           ~mention_targets_opt:(Some defaults.mention_targets)
@@ -351,18 +346,60 @@ let paused_meta_from_profile ~config command operation =
     }
 ;;
 
-let exact_paused_meta operation meta =
+let exact_recovery_snapshot operation meta =
   String.equal meta.Keeper_meta_contract.name operation.Keeper_shutdown_types.keeper_name
   && Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id
   && Int.equal meta.runtime.nonce operation.generation
   && meta.paused
 ;;
 
+let exact_paused_meta operation meta =
+  exact_recovery_snapshot operation meta
+  && not meta.proactive.enabled
+  && not meta.autoboot_enabled
+;;
+
+let apply_paused_profile ~config desired =
+  Keeper_owner_registry.apply_meta
+    ~base_path:config.Workspace.base_path
+    ~keeper_name:desired.Keeper_meta_contract.name
+    (Keeper_owner_reducer.Update_profile
+       { instructions = desired.instructions
+       ; autonomous_instructions = desired.autonomous_instructions
+       ; sandbox_profile = desired.sandbox_profile
+       ; sandbox_image = desired.sandbox_image
+       ; network_mode = desired.network_mode
+       ; allowed_paths = desired.allowed_paths
+       ; mention_targets = desired.mention_targets
+       ; proactive_enabled = false
+       ; max_context_override = desired.max_context_override
+       ; autoboot_enabled = false
+       ; telemetry_feedback_enabled = desired.telemetry_feedback_enabled
+       ; telemetry_feedback_window_hours =
+           desired.telemetry_feedback_window_hours
+       ; always_allow = desired.always_allow
+       ; agent_core_env = desired.agent_core_env
+       ; updated_at = desired.updated_at
+       })
+  |> Result.map_error (fun error ->
+    Metadata_materialization_failed
+      (Keeper_owner_registry.command_error_to_string error))
+;;
+
 let ensure_paused_meta ~config command operation =
   let open Result.Syntax in
   match Keeper_meta_store.read_meta config command.keeper_id with
   | Error detail -> Error (Metadata_materialization_failed detail)
-  | Ok (Some meta) when exact_paused_meta operation meta -> Ok meta
+  | Ok (Some meta) when exact_recovery_snapshot operation meta ->
+    let* desired = paused_meta_from_profile ~config command operation in
+    let* committed = apply_paused_profile ~config desired in
+    (match committed with
+     | Some committed when exact_paused_meta operation committed -> Ok committed
+     | Some _ ->
+       Error
+         (Metadata_materialization_failed
+            "Owner did not retain the paused recovery policy")
+     | None -> Error (Metadata_materialization_failed "metadata disappeared during repair"))
   | Ok (Some _) ->
     Error
       (Metadata_materialization_failed
@@ -392,50 +429,63 @@ let finalize_reissued ~config operation =
   | Joined_idle
   | Finalizing_tasks _
   | Cleanup_ready _
+  | Blocked { resume = Some _; _ }
   | Finalized _ ->
     Keeper_shutdown_finalize.run ~config ~entry:None operation
     |> Result.map_error (fun error -> Finalization_failed error)
   | Prepared
   | Joining_lanes
   | Reconciliation_required _
-  | Blocked _
+  | Blocked { resume = None; _ }
   | Superseded _ ->
     Error (Store_reissue_failed (Keeper_shutdown_store.Supersession_phase_mismatch operation))
 ;;
 
 let fail_after_reissue_once : string option Atomic.t = Atomic.make None
 
+let needs_initial_recovery_meta operation =
+  match operation.Keeper_shutdown_types.phase, operation.join_evidence with
+  | ( Blocked { stage = Lane_join; resume = Some Resume_joined_idle; _ }
+    , Some { lane_outcome = Lane_operator_purge_reissue _; _ } ) -> true
+  | _ -> false
+;;
+
 let execute ~config ~actor command =
   let open Result.Syntax in
-  let* observed =
-    Keeper_shutdown_store.load
-      ~config
-      ~keeper_name:command.keeper_id
-      command.operation_id
-    |> Result.map_error (fun error -> Operation_load_failed error)
-  in
-  let already_reissued = operator_reissue_matches ~actor command observed in
-  let* (_meta : Keeper_meta_contract.keeper_meta option) =
-    if already_reissued
-    then Ok None
-    else ensure_paused_meta ~config command observed |> Result.map Option.some
-  in
-  let* reissue =
-    Keeper_shutdown_store.reissue_blocked_dashboard_purge
+  let* prepared =
+    Keeper_shutdown_store.prepare_blocked_dashboard_purge_reissue
       ~config
       ~keeper_name:command.keeper_id
       ~operation_id:command.operation_id
       ~expected_revision:command.expected_revision
       ~actor
       ~reason:command.reason
-      ~now:Masc_domain.now_iso
     |> Result.map_error (fun error -> Store_reissue_failed error)
   in
-  let reissued, already_reissued =
-    match reissue with
-    | Keeper_shutdown_store.Purge_reissue_persisted operation -> operation, false
+  let* reissued, already_reissued =
+    match prepared with
     | Keeper_shutdown_store.Purge_reissue_already_persisted operation ->
-      operation, true
+      let* () =
+        if needs_initial_recovery_meta operation
+        then ensure_paused_meta ~config command operation |> Result.map ignore
+        else Ok ()
+      in
+      Ok (operation, true)
+    | Purge_reissue_initial_prepared (token, _operation) ->
+      let* reissued =
+        Keeper_shutdown_store.reissue_blocked_dashboard_purge
+          ~config
+          ~token
+          ~now:Masc_domain.now_iso
+        |> Result.map_error (fun error -> Store_reissue_failed error)
+        |> Result.map
+             (fun (Keeper_shutdown_store.Purge_reissue_persisted operation) ->
+                operation)
+      in
+      let* (_meta : Keeper_meta_contract.keeper_meta) =
+        ensure_paused_meta ~config command reissued
+      in
+      Ok (reissued, false)
   in
   let* () =
     match Atomic.exchange fail_after_reissue_once None with

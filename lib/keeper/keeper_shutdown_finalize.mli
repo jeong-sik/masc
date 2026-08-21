@@ -66,5 +66,7 @@ module For_testing : sig
 
   val reset_remove_pending_confirms_by_target : unit -> unit
   val reset_completion_handler : unit -> unit
+  val fail_next_at_stage : Keeper_shutdown_types.failure_stage -> unit
+  val reset_failure_injection : unit -> unit
 
 end

@@ -87,11 +87,6 @@ type failure_stage =
   | Session_remove
   | Registry_unregister
 
-type failure =
-  { stage : failure_stage
-  ; detail : string
-  }
-
 type operator_purge_reissue =
   { actor : string
   ; reason : string
@@ -122,6 +117,19 @@ type cleanup_evidence =
   { settled_task_ids : Keeper_id.Task_id.t list
   ; pending_confirms_removed : int
   ; meta_snapshot_digest : Keeper_meta_json.Snapshot_digest.t
+  }
+
+type blocked_resume =
+  | Resume_joined_idle
+  | Resume_finalizing_tasks of Keeper_id.Task_id.t list
+  | Resume_cleanup_ready of cleanup_evidence
+(** Durable checkpoint for retrying a cleanup failure. Legacy blocked records
+    have no checkpoint and remain fail closed. *)
+
+type failure =
+  { stage : failure_stage
+  ; detail : string
+  ; resume : blocked_resume option
   }
 
 type finalization_evidence =
@@ -224,6 +232,7 @@ type invariant_error =
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
+  | Blocked_resume_without_purge_reissue
 
 val schema_version : int
 val requires_admission_fence : t -> bool

@@ -19,6 +19,7 @@ type error =
   | Supersession_intent_mismatch of Keeper_shutdown_types.t
   | Invalid_supersession_actor of string
   | Invalid_supersession_reason of string
+  | Invalid_purge_recovery_proof of string
 
 type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
@@ -30,6 +31,12 @@ type supersede_blocked_result =
 
 type reissue_blocked_purge_result =
   | Purge_reissue_persisted of Keeper_shutdown_types.t
+
+type blocked_purge_reissue_token
+
+type prepare_blocked_purge_reissue_result =
+  | Purge_reissue_initial_prepared of
+      blocked_purge_reissue_token * Keeper_shutdown_types.t
   | Purge_reissue_already_persisted of Keeper_shutdown_types.t
 
 type operator_metadata_supersession_token
@@ -98,17 +105,28 @@ val supersede_blocked_operator_stop :
   now:(unit -> string) ->
   (supersede_blocked_result, error) result
 
-(** CAS one exact [Blocked] dashboard purge back into [Joined_idle] while the
-    same operation continues to own admission. The typed operator intent is
-    persisted in [join_evidence] and remains through finalization. An exact
-    retry observes the same intent and reconciles from the current phase. *)
-val reissue_blocked_dashboard_purge :
+(** Prove that the initial record is the exact ownerless post-process-boundary
+    recovery shape: [Blocked Lane_join], dashboard purge with session removal,
+    registered historical lane, no in-flight turn or owned tasks, no join
+    evidence, missing metadata/Owner/live registry lane, and the exact intake
+    fence. Matching typed reissue evidence is the only retry entry. *)
+val prepare_blocked_dashboard_purge_reissue :
   config:Workspace.config ->
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
   expected_revision:int ->
   actor:string ->
   reason:string ->
+  (prepare_blocked_purge_reissue_result, error) result
+
+(** Use the abstract proof to durably attach the typed operator intent and a
+    [Resume_joined_idle] checkpoint to the exact [Blocked Lane_join] record.
+    Recovery metadata is materialized only after this CAS, so a crash before
+    or after the write is an identical-retry state. No caller can pass an
+    arbitrary [Blocked] record. The same operation owns admission throughout. *)
+val reissue_blocked_dashboard_purge :
+  config:Workspace.config ->
+  token:blocked_purge_reissue_token ->
   now:(unit -> string) ->
   (reissue_blocked_purge_result, error) result
 

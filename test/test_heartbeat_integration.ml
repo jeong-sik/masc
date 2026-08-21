@@ -1078,7 +1078,12 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       let stale =
         { loaded with
           revision = loaded.revision + 1
-        ; phase = Shutdown_types.Blocked { stage = Shutdown_types.Record_update; detail = "stale" }
+        ; phase =
+            Shutdown_types.Blocked
+              { stage = Shutdown_types.Record_update
+              ; detail = "stale"
+              ; resume = None
+              }
         }
       in
       (match Shutdown_store.replace ~config ~expected_revision:loaded.revision stale with
@@ -1177,7 +1182,8 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         failure_timestamp
         blocked.updated_at;
       (match blocked.phase with
-       | Shutdown_types.Blocked { stage = Shutdown_types.Unhandled_worker; detail } ->
+       | Shutdown_types.Blocked
+           { stage = Shutdown_types.Unhandled_worker; detail; _ } ->
          check string
            "unhandled worker failure detail"
            (Printexc.to_string worker_failure)
@@ -1276,6 +1282,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         Shutdown_types.Blocked
           { stage = Shutdown_types.Record_update
           ; detail = "operator repair required"
+          ; resume = None
           }
       in
       let blocked =
@@ -1613,6 +1620,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
             Shutdown_types.Blocked
               { stage = Shutdown_types.Meta_update
               ; detail = "new durable failure"
+              ; resume = None
               }
         }
       in
@@ -2046,6 +2054,7 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           (Shutdown_types.Blocked
              { stage = Shutdown_types.Record_update
              ; detail = "operator repair required"
+             ; resume = None
              })
       in
       let corrupt_path =
@@ -2757,7 +2766,7 @@ let test_keeper_shutdown_owner_failure_persists_blocked_join () =
         | Ok _ -> fail "closed owner was reported as a successful lane join"
       in
       (match blocked.phase with
-       | Shutdown_types.Blocked { stage = Shutdown_types.Lane_join; detail } ->
+       | Shutdown_types.Blocked { stage = Shutdown_types.Lane_join; detail; _ } ->
          check bool "owner failure records a non-empty join detail" true
            (String.length detail > 0)
        | _ -> fail "owner failure did not become durable Blocked/Lane_join");

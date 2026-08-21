@@ -263,7 +263,7 @@ let persist_unhandled_failure
       Keeper_shutdown_store.persist_blocked_latest
         ~config
         ~identity:operation
-        ~failure:{ stage = Unhandled_worker; detail }
+        ~failure:{ stage = Unhandled_worker; detail; resume = None }
         ~now
     with
     | Ok (Keeper_shutdown_store.Blocked_persisted blocked) ->
@@ -519,6 +519,7 @@ let blocked_interrupted_join_state (operation : Keeper_shutdown_types.t) =
         { stage = Lane_join
         ; detail =
             "server process ended while joining Keeper and Librarian lanes; Librarian completion is unknown"
+        ; resume = None
         }
   ; updated_at = Masc_domain.now_iso ()
   }

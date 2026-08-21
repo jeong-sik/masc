@@ -17,6 +17,7 @@ type error =
   | Supersession_intent_mismatch of Keeper_shutdown_types.t
   | Invalid_supersession_actor of string
   | Invalid_supersession_reason of string
+  | Invalid_purge_recovery_proof of string
 
 type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
@@ -28,6 +29,19 @@ type supersede_blocked_result =
 
 type reissue_blocked_purge_result =
   | Purge_reissue_persisted of Keeper_shutdown_types.t
+
+type blocked_purge_reissue_token =
+  { base_path : string
+  ; keeper_name : string
+  ; operation_id : Operation_id.t
+  ; expected_revision : int
+  ; actor : string
+  ; reason : string
+  }
+
+type prepare_blocked_purge_reissue_result =
+  | Purge_reissue_initial_prepared of
+      blocked_purge_reissue_token * Keeper_shutdown_types.t
   | Purge_reissue_already_persisted of Keeper_shutdown_types.t
 
 (* What the operator is releasing. [Blocked_operator_stop] carries no
@@ -116,6 +130,8 @@ let error_to_string = function
     Printf.sprintf "shutdown supersession actor is invalid: %s" detail
   | Invalid_supersession_reason detail ->
     Printf.sprintf "shutdown supersession reason is invalid: %s" detail
+  | Invalid_purge_recovery_proof detail ->
+    Printf.sprintf "blocked purge recovery proof is invalid: %s" detail
 ;;
 
 type lock_access =
@@ -234,13 +250,6 @@ let turn_disposition_to_json = function
       ]
 ;;
 
-let failure_to_json failure =
-  `Assoc
-    [ "stage", `String (failure_stage_to_string failure.stage)
-    ; "detail", `String failure.detail
-    ]
-;;
-
 let task_ids_to_json task_ids =
   `List
     (List.map
@@ -256,6 +265,31 @@ let cleanup_evidence_to_json evidence =
       , `String
           (Keeper_meta_json.Snapshot_digest.to_string
              evidence.meta_snapshot_digest) )
+    ]
+;;
+
+let blocked_resume_to_json = function
+  | Resume_joined_idle -> `Assoc [ "kind", `String "joined_idle" ]
+  | Resume_finalizing_tasks settled_task_ids ->
+    `Assoc
+      [ "kind", `String "finalizing_tasks"
+      ; "settled_task_ids", task_ids_to_json settled_task_ids
+      ]
+  | Resume_cleanup_ready cleanup ->
+    `Assoc
+      [ "kind", `String "cleanup_ready"
+      ; "evidence", cleanup_evidence_to_json cleanup
+      ]
+;;
+
+let failure_to_json failure =
+  `Assoc
+    [ "stage", `String (failure_stage_to_string failure.stage)
+    ; "detail", `String failure.detail
+    ; ( "resume"
+      , match failure.resume with
+        | None -> `Null
+        | Some resume -> blocked_resume_to_json resume )
     ]
 ;;
 
@@ -526,13 +560,6 @@ let turn_disposition_of_json json =
   | value -> Error (Decode_error (Printf.sprintf "unknown turn disposition: %S" value))
 ;;
 
-let failure_of_json json =
-  let* stage_wire = string "stage" json in
-  let* stage = failure_stage_of_string stage_wire |> Result.map_error (fun e -> Decode_error e) in
-  let* detail = string "detail" json in
-  Ok { stage; detail }
-;;
-
 let task_ids_field_of_json field json =
   match assoc field json with
   | Error _ as error -> error
@@ -563,6 +590,38 @@ let cleanup_evidence_of_json json =
     |> Result.map_error (fun detail -> Decode_error detail)
   in
   Ok { settled_task_ids; pending_confirms_removed; meta_snapshot_digest }
+;;
+
+let blocked_resume_of_json json =
+  let* kind = string "kind" json in
+  match kind with
+  | "joined_idle" -> Ok Resume_joined_idle
+  | "finalizing_tasks" ->
+    let* settled_task_ids = task_ids_field_of_json "settled_task_ids" json in
+    Ok (Resume_finalizing_tasks settled_task_ids)
+  | "cleanup_ready" ->
+    let* evidence_json = assoc "evidence" json in
+    let* cleanup = cleanup_evidence_of_json evidence_json in
+    Ok (Resume_cleanup_ready cleanup)
+  | value ->
+    Error
+      (Decode_error
+         (Printf.sprintf "unknown shutdown blocked resume phase: %S" value))
+;;
+
+let failure_of_json json =
+  let* stage_wire = string "stage" json in
+  let* stage =
+    failure_stage_of_string stage_wire
+    |> Result.map_error (fun e -> Decode_error e)
+  in
+  let* detail = string "detail" json in
+  let* resume =
+    match Json_util.assoc_member_opt "resume" json with
+    | None | Some `Null -> Ok None
+    | Some value -> blocked_resume_of_json value |> Result.map Option.some
+  in
+  Ok { stage; detail; resume }
 ;;
 
 let completion_receipt_of_json json =
@@ -813,7 +872,8 @@ let contextualize_error operation_path = function
     | Supersession_phase_mismatch _
     | Supersession_intent_mismatch _
     | Invalid_supersession_actor _
-    | Invalid_supersession_reason _ ) as error ->
+    | Invalid_supersession_reason _
+    | Invalid_purge_recovery_proof _ ) as error ->
     error
 ;;
 
@@ -1051,15 +1111,7 @@ let supersede_blocked_operator_stop ~config ~token ~now =
          | Ok existing -> Error (Supersession_phase_mismatch existing)))
 ;;
 
-let reissue_blocked_dashboard_purge
-      ~config
-      ~keeper_name
-      ~operation_id
-      ~expected_revision
-      ~actor
-      ~reason
-      ~now
-  =
+let validate_purge_reissue_operator ~actor ~reason =
   let* actor =
     Workspace.validate_agent_name actor
     |> Result.map_error (fun detail -> Invalid_supersession_actor detail)
@@ -1070,13 +1122,85 @@ let reissue_blocked_dashboard_purge
     then Error (Invalid_supersession_reason "reason must be non-empty")
     else Ok ()
   in
+  Ok (actor, reason)
+;;
+
+let is_exact_initial_blocked_purge operation =
+  match operation with
+  | { phase = Blocked { stage = Lane_join; resume = None; _ }
+    ; cleanup_intent = { reason = Dashboard_keeper_purge _; remove_session = true }
+    ; lane_ownership = Registered_lane _
+    ; turn_disposition = No_inflight_turn
+    ; owned_task_ids = []
+    ; join_evidence = None
+    ; _ } -> true
+  | _ -> false
+;;
+
+let invalid_purge_proof detail = Error (Invalid_purge_recovery_proof detail)
+
+let prove_ownerless_process_boundary
+      ~config
+      (operation : Keeper_shutdown_types.t)
+  =
+  let* () =
+    match Keeper_meta_store.read_meta config operation.keeper_name with
+    | Ok None -> Ok ()
+    | Ok (Some _) -> invalid_purge_proof "Keeper metadata is present"
+    | Error detail -> invalid_purge_proof ("metadata lookup failed: " ^ detail)
+  in
+  let* () =
+    match
+      Keeper_owner_registry.get
+        ~base_path:config.Workspace.base_path
+        ~keeper_name:operation.keeper_name
+    with
+    | Error (Keeper_owner_registry.Owner_not_found _) -> Ok ()
+    | Error error ->
+      invalid_purge_proof
+        ("Owner lookup did not prove absence: "
+         ^ Keeper_owner_registry.lookup_error_to_string error)
+    | Ok _ -> invalid_purge_proof "Keeper Owner is present"
+  in
+  let* () =
+    match
+      Keeper_registry.get
+        ~base_path:config.Workspace.base_path
+        operation.keeper_name
+    with
+    | None -> Ok ()
+    | Some _ -> invalid_purge_proof "live Keeper registry lane is present"
+  in
+  match
+    Keeper_shutdown_intake_fence.shutdown_operation_id
+      ~base_path:config.Workspace.base_path
+      ~keeper_name:operation.keeper_name
+  with
+  | Some existing when Operation_id.equal existing operation.operation_id -> Ok ()
+  | Some existing ->
+    invalid_purge_proof
+      (Printf.sprintf
+         "intake fence is owned by %s"
+         (Operation_id.to_string existing))
+  | None -> invalid_purge_proof "exact shutdown intake fence is absent"
+;;
+
+let prepare_blocked_dashboard_purge_reissue
+      ~config
+      ~keeper_name
+      ~operation_id
+      ~expected_revision
+      ~actor
+      ~reason
+  =
+  let* actor, reason = validate_purge_reissue_operator ~actor ~reason in
   let* operation_path = path ~config ~keeper_name operation_id in
   with_keeper_inventory_lock
-    ~access:Write
+    ~access:Read
     ~config
     ~keeper_name
     (fun () ->
-       with_operation_lock ~access:Write operation_path (fun () ->
+       with_operation_lock ~access:Read operation_path (fun () ->
          match
            load_path_unlocked ~operation_path ~keeper_name ~operation_id
          with
@@ -1104,25 +1228,97 @@ let reissue_blocked_dashboard_purge
                 && String.equal reason persisted_reason
                 && Int.equal expected_revision persisted_revision ->
            Ok (Purge_reissue_already_persisted existing)
-         | Ok
-             ({ phase = Blocked _
-              ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
-              ; _ } as existing) ->
+         | Ok existing when is_exact_initial_blocked_purge existing ->
            if not (Int.equal existing.revision expected_revision)
            then
              Error
                (Revision_conflict
                   { expected = expected_revision; actual = existing.revision })
            else
+             let* () = prove_ownerless_process_boundary ~config existing in
+             Ok
+               (Purge_reissue_initial_prepared
+                  ( { base_path = config.Workspace.base_path
+                    ; keeper_name
+                    ; operation_id
+                    ; expected_revision
+                    ; actor
+                    ; reason
+                    }
+                  , existing ))
+         | Ok ({ phase = Blocked _; _ } as existing) ->
+           (match existing.cleanup_intent.reason with
+            | Dashboard_keeper_purge _ -> Error (Supersession_phase_mismatch existing)
+            | Operator_stop_retain_meta
+            | Operator_stop_remove_meta
+            | Supervisor_cleanup -> Error (Supersession_intent_mismatch existing))
+         | Ok existing -> Error (Supersession_phase_mismatch existing)))
+;;
+
+let reissue_blocked_dashboard_purge
+      ~config
+      ~(token : blocked_purge_reissue_token)
+      ~now
+  =
+  if not (String.equal config.Workspace.base_path token.base_path)
+  then invalid_purge_proof "prepared token belongs to another BasePath"
+  else
+    let* operation_path =
+      path ~config ~keeper_name:token.keeper_name token.operation_id
+    in
+    with_keeper_inventory_lock
+      ~access:Write
+      ~config
+      ~keeper_name:token.keeper_name
+      (fun () ->
+         with_operation_lock ~access:Write operation_path (fun () ->
+           let* existing =
+             load_path_unlocked
+               ~operation_path
+               ~keeper_name:token.keeper_name
+               ~operation_id:token.operation_id
+           in
+           if not (Int.equal existing.revision token.expected_revision)
+           then
+             Error
+               (Revision_conflict
+                  { expected = token.expected_revision
+                  ; actual = existing.revision
+                  })
+           else if not (is_exact_initial_blocked_purge existing)
+           then Error (Supersession_phase_mismatch existing)
+           else
+             let* () =
+               match
+                 Keeper_shutdown_intake_fence.shutdown_operation_id
+                   ~base_path:config.Workspace.base_path
+                   ~keeper_name:token.keeper_name
+               with
+               | Some operation_id
+                 when Operation_id.equal operation_id token.operation_id -> Ok ()
+               | Some operation_id ->
+                 invalid_purge_proof
+                   (Printf.sprintf
+                      "intake fence changed to %s"
+                      (Operation_id.to_string operation_id))
+               | None -> invalid_purge_proof "shutdown intake fence disappeared"
+             in
              let reissued =
                { existing with
                  revision = existing.revision + 1
-               ; phase = Joined_idle
+               ; phase =
+                   (match existing.phase with
+                    | Blocked failure ->
+                      Blocked { failure with resume = Some Resume_joined_idle }
+                    | _ -> existing.phase)
                ; join_evidence =
                    Some
                      { lane_outcome =
                          Lane_operator_purge_reissue
-                           { actor; reason; expected_revision }
+                           { actor = token.actor
+                           ; reason = token.reason
+                           ; expected_revision = token.expected_revision
+                           }
                      ; terminal = Terminal_stopped
                      ; cleanup_error = None
                      }
@@ -1131,10 +1327,7 @@ let reissue_blocked_dashboard_purge
              in
              Keeper_fs.save_json_atomic operation_path (to_json reissued)
              |> Result.map_error (fun detail -> Io_error detail)
-             |> Result.map (fun () -> Purge_reissue_persisted reissued)
-         | Ok ({ phase = Blocked _; _ } as existing) ->
-           Error (Supersession_intent_mismatch existing)
-         | Ok existing -> Error (Supersession_phase_mismatch existing)))
+             |> Result.map (fun () -> Purge_reissue_persisted reissued)))
 ;;
 
 let persist_blocked_latest ~config ~identity ~failure ~now =

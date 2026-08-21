@@ -12,7 +12,7 @@ let error_to_string = function
   | Store_error error -> Keeper_shutdown_store.error_to_string error
   | Unsupported_phase -> "Keeper shutdown operation is not ready for finalization"
   | Finalization_blocked
-      ({ phase = Blocked { stage; detail }; _ } as operation) ->
+      ({ phase = Blocked { stage; detail; _ }; _ } as operation) ->
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s at %s: %s"
       (Operation_id.to_string operation.operation_id)
@@ -77,16 +77,68 @@ let replace ~config operation =
   |> Result.map_error (fun error -> Store_error error)
 ;;
 
+let blocked_resume_of_phase = function
+  | Joined_idle -> Some Resume_joined_idle
+  | Finalizing_tasks settled_task_ids ->
+    Some (Resume_finalizing_tasks settled_task_ids)
+  | Cleanup_ready cleanup -> Some (Resume_cleanup_ready cleanup)
+  | Blocked failure -> failure.resume
+  | Prepared
+  | Joining_lanes
+  | Reconciliation_required _
+  | Finalized _
+  | Superseded _ -> None
+;;
+
+let has_operator_purge_reissue operation =
+  match operation.join_evidence with
+  | Some { lane_outcome = Lane_operator_purge_reissue _; _ } -> true
+  | Some
+      { lane_outcome =
+          ( Lane_completed
+          | Lane_shutdown_requested
+          | Lane_cancelled_by_parent _
+          | Lane_failed _ )
+      ; _
+      }
+  | None -> false
+;;
+
 let block ~config operation stage detail =
   let blocked =
     { operation with
-      phase = Blocked { stage; detail }
+      phase =
+        Blocked
+          { stage
+          ; detail
+          ; resume =
+              (if has_operator_purge_reissue operation
+               then blocked_resume_of_phase operation.phase
+               else None)
+          }
     ; updated_at = Masc_domain.now_iso ()
     }
   in
   match replace ~config blocked with
   | Ok persisted -> Error (Finalization_blocked persisted)
   | Error _ as error -> error
+;;
+
+let injected_failure_stage : failure_stage option Atomic.t = Atomic.make None
+
+let rec take_injected_failure stage =
+  let current = Atomic.get injected_failure_stage in
+  match current with
+  | Some injected when injected = stage ->
+    Atomic.compare_and_set injected_failure_stage current None
+    || take_injected_failure stage
+  | Some _ | None -> false
+;;
+
+let inject_or_run ~config operation stage run =
+  if take_injected_failure stage
+  then block ~config operation stage "injected finalization failure"
+  else run ()
 ;;
 
 let task_id_equal = Keeper_id.Task_id.equal
@@ -407,30 +459,31 @@ let prepare_cleanup ~config ~entry operation settled_task_ids =
     (match validate_registry_owner_exact ~config operation with
      | Error detail -> block ~config operation Meta_update detail
      | Ok () ->
-         (match
-            Atomic.get remove_pending_confirms_by_target_callback
-              config
-              ~target_type:Operator_action_constants.Keeper
-              ~target_id:(Some operation.keeper_name)
-          with
-          | Error detail -> block ~config operation Pending_confirm_cleanup detail
-          | Ok pending_confirms_removed ->
-            let cleanup =
-              { settled_task_ids
-              ; pending_confirms_removed
-              ; meta_snapshot_digest =
-                  Keeper_meta_json.Snapshot_digest.of_meta prepared_meta
-              }
-            in
-            let ready =
-              { operation with
-                phase = Cleanup_ready cleanup
-              ; updated_at = Masc_domain.now_iso ()
-              }
-            in
-            (match replace ~config ready with
-             | Ok persisted -> Ok persisted
-             | Error _ as error -> error)))
+         inject_or_run ~config operation Pending_confirm_cleanup (fun () ->
+           match
+             Atomic.get remove_pending_confirms_by_target_callback
+               config
+               ~target_type:Operator_action_constants.Keeper
+               ~target_id:(Some operation.keeper_name)
+           with
+           | Error detail -> block ~config operation Pending_confirm_cleanup detail
+           | Ok pending_confirms_removed ->
+             let cleanup =
+               { settled_task_ids
+               ; pending_confirms_removed
+               ; meta_snapshot_digest =
+                   Keeper_meta_json.Snapshot_digest.of_meta prepared_meta
+               }
+             in
+             let ready =
+               { operation with
+                 phase = Cleanup_ready cleanup
+               ; updated_at = Masc_domain.now_iso ()
+               }
+             in
+             (match replace ~config ready with
+              | Ok persisted -> Ok persisted
+              | Error _ as error -> error)))
 ;;
 
 let rec remove_tree_blocking path =
@@ -724,12 +777,14 @@ let complete_cleanup
                     error))))
   in
   let finish registry_unregistered =
-    match remove_meta_file ~config operation cleanup with
-    | Error detail -> block ~config operation Meta_remove detail
-    | Ok () ->
-      (match remove_session_dir ~config operation with
-       | Error detail -> block ~config operation Session_remove detail
-       | Ok () ->
+    inject_or_run ~config operation Meta_remove (fun () ->
+      match remove_meta_file ~config operation cleanup with
+      | Error detail -> block ~config operation Meta_remove detail
+      | Ok () ->
+        inject_or_run ~config operation Session_remove (fun () ->
+          match remove_session_dir ~config operation with
+          | Error detail -> block ~config operation Session_remove detail
+          | Ok () ->
          let meta_removed =
            match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
            | Remove_meta -> true
@@ -771,65 +826,86 @@ let complete_cleanup
            deliver_finalized_completion
              ~config
              ?successor_operation_id
-             persisted_finalized)
+             persisted_finalized))
   in
-  match validate_exact_registry_generation ~base_path:config.base_path operation entry with
-  | Error detail -> block ~config operation Registry_unregister detail
-  | Ok () ->
-    (match require_released_summary_owner () with
-     | Error (`Draining detail) ->
-       Error (Finalization_draining (operation, detail))
-     | Error (`Failed detail) ->
-       block ~config operation Approval_summary_retirement detail
-     | Ok () ->
-       (match
-          unregister_retired_exact ~base_path:config.base_path operation entry
-        with
-        | Error detail -> block ~config operation Registry_unregister detail
-        | Ok registry_unregistered -> finish registry_unregistered))
+  inject_or_run ~config operation Registry_unregister (fun () ->
+    match validate_exact_registry_generation ~base_path:config.base_path operation entry with
+    | Error detail -> block ~config operation Registry_unregister detail
+    | Ok () ->
+      inject_or_run ~config operation Approval_summary_retirement (fun () ->
+        match require_released_summary_owner () with
+        | Error (`Draining detail) ->
+          Error (Finalization_draining (operation, detail))
+        | Error (`Failed detail) ->
+          block ~config operation Approval_summary_retirement detail
+        | Ok () ->
+          (match
+             unregister_retired_exact ~base_path:config.base_path operation entry
+           with
+           | Error detail -> block ~config operation Registry_unregister detail
+           | Ok registry_unregistered -> finish registry_unregistered)))
+;;
+
+let run_from_tasks
+      ~config
+      ~entry
+      ?successor_operation_id
+      operation
+      settled_task_ids
+  =
+  inject_or_run ~config operation Meta_update (fun () ->
+    match read_operation_meta ~config operation with
+    | Error detail -> block ~config operation Meta_update detail
+    | Ok meta ->
+      inject_or_run ~config operation Task_settlement (fun () ->
+        match settle_tasks ~config ~meta operation settled_task_ids with
+        | Error _ as error -> error
+        | Ok (settled_operation, settled_task_ids) ->
+          (match prepare_cleanup ~config ~entry settled_operation settled_task_ids with
+           | Error _ as error -> error
+           | Ok ready ->
+             (match ready.phase with
+              | Cleanup_ready cleanup ->
+                complete_cleanup
+                  ~config
+                  ~entry
+                  ?successor_operation_id
+                  ready
+                  cleanup
+              | _ -> Error Unsupported_phase))))
 ;;
 
 let run ~config ~entry ?successor_operation_id operation =
   match operation.phase with
   | Joined_idle ->
-    (match read_operation_meta ~config operation with
-     | Error detail -> block ~config operation Meta_update detail
-     | Ok meta ->
-       (match settle_tasks ~config ~meta operation [] with
-        | Error _ as error -> error
-        | Ok (settled_operation, settled_task_ids) ->
-          (match prepare_cleanup ~config ~entry settled_operation settled_task_ids with
-           | Error _ as error -> error
-           | Ok ready ->
-             (match ready.phase with
-              | Cleanup_ready cleanup ->
-                complete_cleanup
-                  ~config
-                  ~entry
-                  ?successor_operation_id
-                  ready
-                  cleanup
-              | _ -> Error Unsupported_phase))))
+    run_from_tasks ~config ~entry ?successor_operation_id operation []
   | Finalizing_tasks settled_task_ids ->
-    (match read_operation_meta ~config operation with
-     | Error detail -> block ~config operation Meta_update detail
-     | Ok meta ->
-       (match settle_tasks ~config ~meta operation settled_task_ids with
-        | Error _ as error -> error
-        | Ok (settled_operation, settled_task_ids) ->
-          (match prepare_cleanup ~config ~entry settled_operation settled_task_ids with
-           | Error _ as error -> error
-           | Ok ready ->
-             (match ready.phase with
-              | Cleanup_ready cleanup ->
-                complete_cleanup
-                  ~config
-                  ~entry
-                  ?successor_operation_id
-                  ready
-                  cleanup
-              | _ -> Error Unsupported_phase))))
+    run_from_tasks
+      ~config
+      ~entry
+      ?successor_operation_id
+      operation
+      settled_task_ids
   | Cleanup_ready cleanup ->
+    complete_cleanup
+      ~config
+      ~entry
+      ?successor_operation_id
+      operation
+      cleanup
+  | Blocked { resume = Some Resume_joined_idle; _ }
+    when has_operator_purge_reissue operation ->
+    run_from_tasks ~config ~entry ?successor_operation_id operation []
+  | Blocked { resume = Some (Resume_finalizing_tasks settled_task_ids); _ }
+    when has_operator_purge_reissue operation ->
+    run_from_tasks
+      ~config
+      ~entry
+      ?successor_operation_id
+      operation
+      settled_task_ids
+  | Blocked { resume = Some (Resume_cleanup_ready cleanup); _ }
+    when has_operator_purge_reissue operation ->
     complete_cleanup
       ~config
       ~entry
@@ -862,5 +938,9 @@ module For_testing = struct
     Atomic.set completion_handler (fun _config _operation _action ->
       Error "shutdown completion handler is not registered")
   ;;
+
+  let fail_next_at_stage stage = Atomic.set injected_failure_stage (Some stage)
+
+  let reset_failure_injection () = Atomic.set injected_failure_stage None
 
 end

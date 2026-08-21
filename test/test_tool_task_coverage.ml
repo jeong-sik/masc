@@ -369,11 +369,11 @@ let () = test "dispatch_add_task" (fun () ->
 )
 
 let () = test "keeper dispatch keeps task author distinct from actor identity" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster-agent" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper-agent" in
   let args = `Assoc [ ("title", `String "Keeper-authored task") ] in
   let result =
     Task.Tool.dispatch_for_keeper
-      ~created_by:"taskmaster"
+      ~created_by:"fixture-keeper"
       ctx
       ~name:"masc_add_task"
       ~args
@@ -382,7 +382,7 @@ let () = test "keeper dispatch keeps task author distinct from actor identity" (
    | Some result -> assert (Tool_result.is_success result)
    | None -> failwith "Keeper add-task dispatch returned None");
   match (Workspace.read_backlog ctx.config).tasks with
-  | [ task ] -> assert (task.created_by = Some "taskmaster")
+  | [ task ] -> assert (task.created_by = Some "fixture-keeper")
   | tasks ->
     failwith
       (Printf.sprintf "expected exactly one task, got %d" (List.length tasks)))
@@ -464,25 +464,25 @@ let claimed_title = function
 ;;
 
 let () = test "auto_claim_takes_self_authored_task_without_filter" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper" in
   let _ =
     Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
       ~description:""
   in
-  let result = Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster" () in
+  let result = Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper" () in
   assert (claimed_title result = Some "self routing task"))
 
 let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper" in
   let _ =
     Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
       ~description:""
   in
-  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "taskmaster" in
+  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "fixture-keeper" in
   let result =
-    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster"
+    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
       ~hard_filter:self_excluding ()
   in
   assert (claimed_title result = None))
@@ -496,15 +496,15 @@ let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun (
    moved to [hard_filter] the widening still respects it, so the own-task is NOT
    claimed. Reverting the exclusion back into [task_filter] turns this RED. *)
 let () = test "auto_claim_hard_filter_survives_scope_fallback" (fun () ->
-  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let ctx = make_test_ctx_with_agent "fixture-keeper" in
   let _ =
     Workspace.add_task_with_result ctx.Task.Tool.config
-      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~created_by:"fixture-keeper" ~title:"self routing task" ~priority:1
       ~description:""
   in
-  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "taskmaster" in
+  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "fixture-keeper" in
   let result =
-    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster"
+    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"fixture-keeper"
       ~task_filter:(fun _ -> false)
       ~hard_filter:self_excluding
       ~allow_scope_fallback:true ()

@@ -1101,7 +1101,7 @@ let test_item_output_deltas_are_typed_and_unbounded () =
    the turn, put the official-client session into Recovery_required, and made
    every later turn for that keeper fail closed until an operator resolved it
    by hand: three such chunks accounted for 3,236 rejected turns across sangsu,
-   kidsnote and taskmaster in one retained log window (#27967).
+   kidsnote and fixture-keeper in one retained log window (#27967).
 
    The rejections that must survive are in the same test, because widening a
    decoder is only correct if it stops accepting nothing else: an empty

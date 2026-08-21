@@ -228,14 +228,14 @@ let test_history_summary_decodes_content_blocks () =
     String.concat
       "\n"
       [ {|{"role":"assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
-      ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @taskmaster please"}],"ts_unix":2.0}|}
+      ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @fixture-keeper please"}],"ts_unix":2.0}|}
       ]
     ^ "\n"
   in
   with_temp_history rows (fun path ->
       let conversation, _k2k_recent, _k2k_mentions, raw_count, _frag, _filtered =
         Metrics.keeper_history_summary_json
-          ~all_keeper_names:[ "albini"; "taskmaster" ]
+          ~all_keeper_names:[ "albini"; "fixture-keeper" ]
           ~keeper_name:"albini"
           ~history_path:path
           ~filter_fragments:false

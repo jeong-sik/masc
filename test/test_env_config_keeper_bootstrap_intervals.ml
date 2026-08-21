@@ -68,7 +68,7 @@ let test_autoboot_warmup_jitter_is_bounded_not_linear () =
       "ramarama";
       "sangsu";
       "scholar";
-      "taskmaster";
+      "fixture-keeper";
       "tech_glutton";
       "velvet-hammer";
       "verifier";

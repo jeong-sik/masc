@@ -49,7 +49,7 @@ let exact_fields ~field ~allowed fields =
     | None -> Ok ()
     | Some key ->
       (* [allowed] is the answer the caller is looking for, and dropping it
-         made the rejection unactionable: live logs carry taskmaster trying
+         made the rejection unactionable: live logs carry a Keeper trying
          target.agent, then target.keeper_name, then target.keeper, one per
          call, against an allowed list of kind and name. Naming the accepted
          fields turns three round trips into one. *)

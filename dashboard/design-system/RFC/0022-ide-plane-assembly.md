@@ -77,7 +77,7 @@ PR-2~7 은 server endpoint scope 가 분리되어 있어 keeper 별 병렬 가�
 | **masc-improver** | yes | P0-B runtime (delivery preset, runtime 도메인) |
 | **issue_king** | yes | P2 audit replay (delivery preset, 감사 도메인) |
 | **ramarama** | yes | P1-B drawer 서버 (delivery, sandbox) |
-| **taskmaster** | yes | umbrella 진행 추적 (delivery preset) |
+| **fixture-keeper** | yes | umbrella 진행 추적 (delivery preset) |
 | **verifier** | AGENT.md | 모든 PR 테스트 검증 |
 | **executor** | AGENT.md | 빌드/lint 게이트 |
 | **jobsian_purist** | AGENT.md | P1-B drawer 클라이언트 |

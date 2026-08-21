@@ -341,7 +341,7 @@ describe('countRuntimeKinds', () => {
       [],
       [
         {
-          name: 'taskmaster',
+          name: 'fixture-keeper',
           status: 'active',
           registered: true,
           keepalive_running: true,
@@ -435,18 +435,18 @@ describe('countRuntimeKinds', () => {
     const result = countRuntimeKinds(
       [
         makeAgent({
-          name: 'keeper-taskmaster-agent',
+          name: 'keeper-fixture-agent',
           agent_type: 'agent',
         }),
         makeAgent({
-          name: 'taskmaster-proud-bear',
-          agent_type: 'taskmaster',
+          name: 'fixture-keeper-proud-bear',
+          agent_type: 'fixture-keeper',
         }),
       ],
       [
         {
-          name: 'taskmaster',
-          agent_name: 'keeper-taskmaster-agent',
+          name: 'fixture-keeper',
+          agent_name: 'keeper-fixture-agent',
           status: 'active',
         } as Keeper,
       ],
@@ -998,11 +998,11 @@ describe('AgentRoster live-only cards', () => {
   })
 
   it('keeps an untyped generated-style agent on the agent-profile detail path', async () => {
-    agents.value = [makeAgent({ name: 'taskmaster-proud-bear', status: 'active' })]
+    agents.value = [makeAgent({ name: 'fixture-keeper-proud-bear', status: 'active' })]
     keepers.value = [
       {
-        name: 'taskmaster',
-        agent_name: 'keeper-taskmaster-agent',
+        name: 'fixture-keeper',
+        agent_name: 'keeper-fixture-agent',
         status: 'active',
         phase: 'Running',
         registered: true,
@@ -1017,8 +1017,8 @@ describe('AgentRoster live-only cards', () => {
 
     const detailButton = container.querySelector('.fl-open-chat') as HTMLButtonElement
     expect(detailButton.dataset.detailKind).toBe('agent-profile')
-    expect(detailButton.dataset.detailTarget).toBe('taskmaster-proud-bear')
-    expect(container.querySelector('.fl-as-name')?.textContent).toBe('taskmaster-proud-bear')
+    expect(detailButton.dataset.detailTarget).toBe('fixture-keeper-proud-bear')
+    expect(container.querySelector('.fl-as-name')?.textContent).toBe('fixture-keeper-proud-bear')
   })
 
   it('keeps equal display names selectable across agent and keeper namespaces', async () => {

@@ -61,7 +61,7 @@ function BoardFeed() {
       <ZoneHeader
         title="BOARD · FEED"
         branch="main"
-        keepers={["scholar","janitor","taskmaster","verdict"]}
+        keepers={["scholar","janitor","fixture-keeper","verdict"]}
         meta={`${P2e.boardPosts.length} live · ${hearths.length} hearths · sort: hot`}
         right={
           <div className="filt" role="radiogroup" aria-label="Post filter">

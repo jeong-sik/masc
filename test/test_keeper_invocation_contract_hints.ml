@@ -19,7 +19,7 @@ let contains ~needle haystack =
   nl = 0 || go 0
 
 let test_undeclared_field_names_the_accepted_set () =
-  (* The exact shape taskmaster sent. *)
+  (* The exact shape fixture-keeper sent. *)
   let json = `Assoc [ "agent", `String "analyst" ] in
   match message_of_target_json json with
   | None -> Alcotest.fail "expected target.agent to be rejected"

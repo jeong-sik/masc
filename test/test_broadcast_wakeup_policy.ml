@@ -359,11 +359,11 @@ let fleet_delivery ~request_id ~from_agent ~content
 let test_fleet_projection_reaches_other_keepers () =
   with_workspace @@ fun config ->
   let request_id = "wmsg-00fleet0000000001" in
-  List.iter (persist_meta config) [ "rondo"; "sangsu"; "taskmaster" ];
+  List.iter (persist_meta config) [ "rondo"; "sangsu"; "fixture-keeper" ];
   Broadcast_wakeup.project_workspace_message_to_fleet
     ~base_path:config.base_path
     ~registered_keepers:(fun () ->
-       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu"; "taskmaster", Keeper_identity.keeper_agent_name "taskmaster" ])
+       [ "rondo", Keeper_identity.keeper_agent_name "rondo"; "sangsu", Keeper_identity.keeper_agent_name "sangsu"; "fixture-keeper", Keeper_identity.keeper_agent_name "fixture-keeper" ])
     (fleet_delivery
        ~request_id
        ~from_agent:(Keeper_identity.keeper_agent_name "rondo")
@@ -372,7 +372,7 @@ let test_fleet_projection_reaches_other_keepers () =
     count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id
   in
   check int "listener sees the broadcast" 1 (rows "sangsu");
-  check int "second listener sees the broadcast" 1 (rows "taskmaster");
+  check int "second listener sees the broadcast" 1 (rows "fixture-keeper");
   (* The author already knows what it said; echoing it back would put the
      Keeper's own speech in front of it as someone else's line. *)
   check int "author does not receive its own broadcast" 0 (rows "rondo")

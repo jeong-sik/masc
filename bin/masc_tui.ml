@@ -5,6 +5,7 @@ open Masc_tui_loader
 
 module Approval = Masc_tui_operator_projection
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Keeper_chat_recovery = Masc_tui_keeper_chat_recovery
 
 (** Local exception for breaking the main TUI loop without using Exit. *)
 exception Break
@@ -231,7 +232,12 @@ let launch_keeper_request state ~mailbox request =
            , Error
                (Keeper_chat.Transport_error "Eio switch is unavailable") ))
 
-let start_keeper_message state ~mailbox text =
+let start_keeper_message state ~base_path ~mailbox text =
+  match state.msg_recovery_error with
+  | Some detail ->
+      add_event state "error"
+        ("Cannot send while Keeper chat recovery is invalid: " ^ detail)
+  | None ->
   match state.msg_inflight with
   | Some request ->
       add_event state "system"
@@ -260,17 +266,24 @@ let start_keeper_message state ~mailbox text =
           let request =
             Keeper_chat.create_request ~keeper_name ~message:text
           in
-          append_chat_history state request Message_user text;
-          clear_current_message_draft state;
-          add_event state "message"
-            (Printf.sprintf "Keeper message accepted locally: %s"
-               request.request_id);
-          launch_keeper_request state ~mailbox request)
+          (match Keeper_chat_recovery.persist_pending ~base_path request with
+           | Error detail ->
+               state.msg_recovery_error <- Some detail;
+               add_event state "error"
+                 ("Keeper message was not sent because its recovery fence could not be persisted: "
+                ^ detail)
+           | Ok () ->
+               append_chat_history state request Message_user text;
+               clear_current_message_draft state;
+               add_event state "message"
+                 (Printf.sprintf "Keeper message durably fenced: %s"
+                    request.request_id);
+               launch_keeper_request state ~mailbox request))
 
 let launch_keeper_reconciliation state ~mailbox request =
   state.msg_inflight <- Some request;
   let run clock =
-    let rec poll not_found_retries =
+    let rec poll remaining =
       let result =
         try
           Masc_tui_http.fetch_keeper_chat_operation
@@ -280,20 +293,30 @@ let launch_keeper_reconciliation state ~mailbox request =
         | exn -> Error (Keeper_chat.Transport_error (Printexc.to_string exn))
       in
       match result with
-      | Ok (Keeper_chat.Operation_pending _) ->
-          Eio.Time.sleep clock 1.5;
-          poll not_found_retries
+      | Ok (Keeper_chat.Operation_pending _ as pending) ->
+          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
+           | `Poll remaining ->
+               Eio.Time.sleep clock 1.5;
+               poll remaining
+           | `Stop ->
+               enqueue_async mailbox
+                 (Keeper_chat_reconciled (request, Ok pending)))
       | Error (Keeper_chat.Http_error { status = 404; _ })
-        when not_found_retries > 0 ->
-          Eio.Time.sleep clock 1.5;
-          poll (not_found_retries - 1)
+        as not_found ->
+          (match Keeper_chat_recovery.next_reconciliation_poll ~remaining with
+           | `Poll remaining ->
+               Eio.Time.sleep clock 1.5;
+               poll remaining
+           | `Stop ->
+               enqueue_async mailbox
+                 (Keeper_chat_reconciled (request, not_found)))
       | (Ok
           (Keeper_chat.Operation_succeeded _ | Keeper_chat.Operation_failed _
           | Keeper_chat.Operation_cancelled)
         | Error _) as settled ->
           enqueue_async mailbox (Keeper_chat_reconciled (request, settled))
     in
-    poll 3
+    poll Keeper_chat_recovery.max_reconciliation_polls
   in
   match Eio_context.get_switch_opt (), Eio_context.get_clock_opt () with
   | Some sw, Some clock ->
@@ -339,7 +362,16 @@ let chat_status_text completed =
   | Keeper_chat.No_visible_reply ->
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 
-let apply_keeper_chat_result state request result =
+let clear_keeper_chat_recovery state ~base_path request =
+  match Keeper_chat_recovery.clear_pending ~base_path request with
+  | Ok () -> state.msg_recovery_error <- None
+  | Error detail ->
+      state.msg_recovery_error <- Some detail;
+      add_event state "error"
+        ("Keeper chat settled, but its recovery fence could not be cleared: "
+       ^ detail)
+
+let apply_keeper_chat_result state ~base_path request result =
   match state.msg_inflight with
   | Some current when Keeper_chat.same_request_identity current request ->
       let reconnecting_unverified =
@@ -351,6 +383,7 @@ let apply_keeper_chat_result state request result =
       (match result with
        | Ok (Keeper_chat.Turn_completed completed) ->
            state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
            let role =
              match completed.turn_outcome with
              | Keeper_chat.Visible_reply
@@ -367,6 +400,7 @@ let apply_keeper_chat_result state request result =
              (Printf.sprintf "Keeper turn finished: %s" request.request_id)
        | Ok (Keeper_chat.Replayed_succeeded _) ->
            state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
            append_chat_history state request Message_status
              "Request was already completed; canonical reply is not present in this replay stream";
            add_event state "message"
@@ -385,6 +419,7 @@ let apply_keeper_chat_result state request result =
              match certainty with
              | Keeper_chat.Verified_rejected | Keeper_chat.Verified_failed ->
                  state.msg_unverified <- None;
+                 clear_keeper_chat_recovery state ~base_path request;
                  detail
              | Keeper_chat.Outcome_unverified ->
                  state.msg_unverified <- Some request;
@@ -398,13 +433,14 @@ let apply_keeper_chat_result state request result =
       true
   | Some _ | None -> false
 
-let apply_keeper_chat_reconciliation state request result =
+let apply_keeper_chat_reconciliation state ~base_path request result =
   match state.msg_inflight with
   | Some current when Keeper_chat.same_request_identity current request ->
       state.msg_inflight <- None;
       (match result with
        | Ok (Keeper_chat.Operation_succeeded { outcome_ref }) ->
            state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
            append_chat_history state request Message_status
              (Printf.sprintf
                 "Operation settled successfully (%s); canonical reply is unavailable after transport recovery"
@@ -416,6 +452,7 @@ let apply_keeper_chat_reconciliation state request result =
            (Keeper_chat.Operation_failed
              { failure_kind; detail; outcome_ref }) ->
            state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
            let outcome =
              match outcome_ref with
              | None -> ""
@@ -430,6 +467,7 @@ let apply_keeper_chat_reconciliation state request result =
              (Printf.sprintf "Keeper operation failed: %s" request.request_id)
        | Ok Keeper_chat.Operation_cancelled ->
            state.msg_unverified <- None;
+           clear_keeper_chat_recovery state ~base_path request;
            append_chat_history state request Message_status
              "Operation was cancelled";
            add_event state "message"
@@ -802,10 +840,10 @@ let apply_async_message state ~base_path ~http_refresh_inflight
       apply_approval_decision_completion state approvals.ao_generation approval
         decision result approvals.ao_result
   | Keeper_chat_done (request, result) ->
-      if apply_keeper_chat_result state request result then
+      if apply_keeper_chat_result state ~base_path request result then
         load_from_masc_dir state base_path
   | Keeper_chat_reconciled (request, result) ->
-      if apply_keeper_chat_reconciliation state request result then
+      if apply_keeper_chat_reconciliation state ~base_path request result then
         load_from_masc_dir state base_path
 
 let drain_async_messages state ~base_path ~http_refresh_inflight
@@ -848,6 +886,19 @@ let main () =
   let http_refresh_inflight = ref false in
   let board_post_refresh_inflight = ref None in
   let async_messages = Eio.Stream.create 32 in
+  (match Keeper_chat_recovery.load_pending ~base_path with
+   | Ok None -> ()
+   | Error detail ->
+       state.msg_recovery_error <- Some detail;
+       add_event state "error"
+         ("Keeper chat recovery is invalid; new sends are blocked: " ^ detail)
+   | Ok (Some request) ->
+       state.msg_unverified <- Some request;
+       append_chat_history state request Message_status
+         "Recovered an unsettled request; reconciling the exact durable operation";
+       add_event state "message"
+         (Printf.sprintf "Recovered Keeper request: %s" request.request_id);
+       launch_keeper_reconciliation state ~mailbox:async_messages request);
   start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight
     ~mailbox:async_messages;
   add_event state "system" "TUI started";
@@ -868,7 +919,9 @@ let main () =
        | Some k when state.view = Keepers Keeper_message ->
            let _handled =
              handle_message_key state
-               ~submit_message:(start_keeper_message state ~mailbox:async_messages)
+               ~submit_message:
+                 (start_keeper_message state ~base_path
+                    ~mailbox:async_messages)
                ~retry_message:(fun () ->
                  retry_keeper_message state ~mailbox:async_messages)
                k

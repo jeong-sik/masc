@@ -3,6 +3,7 @@
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 let default_timeout_sec = 10.0
 let request_timeout_sec () = default_timeout_sec
+let keeper_chat_timeout_sec = 180.0
 
 let trim_nonempty value =
   let trimmed = String.trim value in
@@ -95,7 +96,8 @@ let post_keeper_chat ~(host : string) ~(port : int)
   in
   let body = Masc_tui_keeper_chat_projection.request_body request in
   match
-    Masc_http_client.post_sync ?clock:(request_clock ()) ~url ~headers ~body ()
+    Masc_http_client.post_sync ?clock:(request_clock ())
+      ~timeout_sec:keeper_chat_timeout_sec ~url ~headers ~body ()
   with
   | Error detail ->
       Error (Masc_tui_keeper_chat_projection.Transport_error detail)

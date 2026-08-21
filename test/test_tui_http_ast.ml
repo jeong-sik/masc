@@ -54,10 +54,11 @@ let test_keeper_chat_uses_current_async_contract () =
     (Ast_grep.count_calls_across_files
        ~module_paths:[ "bin/masc_tui.ml"; "bin/masc_tui_http.ml" ]
        ~callee:"Tui_decode.parse_keeper_chat_response");
-  check int "chat POST has no dashboard request deadline" 0
-    (Ast_grep.count_calls_in_value_binding
+  check bool "chat POST has a finite request deadline" true
+    (Ast_grep.count_calls_with_label
        ~module_path:"bin/masc_tui_http.ml"
-       ~binding_name:"post_keeper_chat" ~callee:"request_timeout_sec");
+       ~callee:"Masc_http_client.post_sync" ~label:"timeout_sec"
+     >= 1);
   check int "chat send does not keep the root switch alive on exit" 0
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_request" ~callee:"Eio.Fiber.fork");
@@ -83,6 +84,15 @@ let test_keeper_chat_uses_current_async_contract () =
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_reconciliation"
        ~callee:"Masc_tui_http.post_keeper_chat");
+  check bool "request is durably fenced before POST" true
+    (Ast_grep.count_calls_in_value_binding ~module_path
+       ~binding_name:"start_keeper_message"
+       ~callee:"Keeper_chat_recovery.persist_pending"
+     >= 1);
+  check bool "startup restores the durable request fence" true
+    (Ast_grep.count_calls_in_value_binding ~module_path ~binding_name:"main"
+       ~callee:"Keeper_chat_recovery.load_pending"
+     >= 1);
   check bool "recovery polls the exact durable operation" true
     (Ast_grep.count_calls_in_value_binding ~module_path
        ~binding_name:"launch_keeper_reconciliation"

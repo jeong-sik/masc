@@ -263,6 +263,7 @@ type state = {
   mutable msg_history: msg_entry list;
   mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
   mutable msg_unverified: Masc_tui_keeper_chat_projection.request option;
+  mutable msg_recovery_error: string option;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -311,6 +312,7 @@ let create_state ~workspace ~port ~refresh_interval = {
   msg_history = [];
   msg_inflight = None;
   msg_unverified = None;
+  msg_recovery_error = None;
   detail_scroll = 0;
   workspace;
   port;

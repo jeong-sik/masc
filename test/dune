@@ -2581,6 +2581,16 @@
   yojson))
 
 (test
+ (name test_tui_keeper_chat_recovery)
+ (modules test_tui_keeper_chat_recovery)
+ (libraries
+  alcotest
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_recovery
+  fs_compat
+  unix))
+
+(test
  (name test_tui_message_layout)
  (modules test_tui_message_layout)
  (libraries alcotest masc_tui_message_layout))

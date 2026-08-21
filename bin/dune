@@ -229,6 +229,19 @@
  (modules masc_tui_message_layout)
  (libraries masc.masc_core))
 
+(library
+ (name masc_tui_keeper_chat_recovery)
+ (wrapped false)
+ (modules masc_tui_keeper_chat_recovery)
+ (libraries
+  masc.masc_core
+  masc.masc_process
+  masc.masc_random_id
+  masc_tui_keeper_chat_projection
+  fs_compat
+  yojson
+  unix))
+
 (executable
  (name masc_tui)
  (modules
@@ -243,6 +256,7 @@
  (libraries
   masc
   masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_recovery
   masc_tui_message_layout
   masc_tui_operator_projection
   masc.dashboard

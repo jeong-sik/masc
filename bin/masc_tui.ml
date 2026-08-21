@@ -1614,12 +1614,22 @@ let main () =
       let key = read_key ~timeout:input_timeout input_reader () in
       if Option.is_some key then
         Render_schedule.request render_schedule Render_schedule.Input;
-      let message_mode = state.view = Keepers Keeper_message in
+      let terminal_rows, _terminal_columns = get_terminal_size () in
+      let compact_viewport =
+        Render_schedule.Viewport.requires_compact_frame ~rows:terminal_rows
+      in
+      let message_mode =
+        (not compact_viewport) && state.view = Keepers Keeper_message
+      in
       (match state.view, key with
+       | _ when compact_viewport -> ()
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None
        | _ -> ());
       (match key with
+       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
+           raise Break
+       | Some _ when compact_viewport -> ()
        | Some k when message_mode ->
            let recovery_key =
              String.length k = 1 && Char.code k.[0] = 18
@@ -1640,8 +1650,6 @@ let main () =
                  k
              in
              ()
-       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
-           raise Break
        | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
            state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->

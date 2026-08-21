@@ -9,6 +9,7 @@ module Message_layout = Masc_tui_message_layout
 module Metrics_tail = Masc_tui_metrics_tail
 module Observation_layout = Masc_tui_observation_layout
 module Keeper_chat = Masc_tui_keeper_chat_projection
+module Render_schedule = Masc_tui_render_schedule
 
 let frame_lines buf =
   match List.rev (String.split_on_char '\n' (Buffer.contents buf)) with
@@ -1427,8 +1428,8 @@ let render_keeper_message (state : state) =
       ~rows ~cols buf
     end
 
-(** Dispatch render based on current surface *)
-let render (state : state) =
+(** Dispatch a normal-height render based on the current surface. *)
+let render_surface (state : state) =
   match state.view with
   | Overview -> render_overview state
   | Keepers Keeper_list -> render_keeper_list state
@@ -1451,3 +1452,23 @@ let render (state : state) =
            | Some goal -> render_planning_detail state goal
            | None -> render_planning_list state)
   | Approvals -> render_approvals state
+
+let render_terminal_too_small ~rows ~cols =
+  let buf = Buffer.create 64 in
+  Buffer.add_string buf
+    (fit_width
+       (Printf.sprintf "terminal too small -- resize to at least %d rows; q: quit"
+          Render_schedule.Viewport.minimum_fixed_chrome_rows)
+       cols);
+  Buffer.add_char buf '\n';
+  finish_frame ~surface_key:"terminal-too-small"
+    ~cursor:Frame_presenter.Hidden ~rows ~cols buf
+
+(** Keep every high-chrome surface out of a viewport that cannot contain the
+    largest declared fixed-row budget. Main ignores hidden surface input, and
+    growing the terminal restores the unchanged selected surface. *)
+let render (state : state) =
+  let rows, cols = get_terminal_size () in
+  if Render_schedule.Viewport.requires_compact_frame ~rows
+  then render_terminal_too_small ~rows ~cols
+  else render_surface state

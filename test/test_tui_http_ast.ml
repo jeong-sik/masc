@@ -200,11 +200,16 @@ let test_keeper_chat_uses_current_async_contract () =
         (Ast_grep.count_calls_in_value_binding ~module_path:render_path
            ~binding_name:"render_keeper_message" ~callee
          >= 1))
+    (* [Ansi.move_to] is gone from this binding on purpose: the renderer no
+       longer writes a cursor escape inline. It hands the position to
+       [finish_frame ~cursor:(Frame_presenter.Visible_at ...)], and the frame
+       presenter emits the move when it paints. Asserting the old escape here
+       would pin the pre-differential-frame renderer. *)
     [ "Message_layout.input_viewport"
     ; "Message_layout.input_cursor_row"
     ; "Message_layout.input_cursor_column"
     ; "Message_layout.message_viewport_supported"
-    ; "Ansi.move_to"
+    ; "finish_frame"
     ];
   check bool "message input uses the same viewport gate as rendering" true
     (Ast_grep.count_calls_in_value_binding ~module_path
@@ -637,6 +642,22 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
   check int "main has one frame presentation boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"main" ~callee:"Frame_presenter.present");
+  check int "main gates input once on the compact viewport" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:main_path
+       ~binding_name:"main"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "render owns one compact viewport gate" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
+       ~callee:"Render_schedule.Viewport.requires_compact_frame");
+  check int "compact render has one fallback branch" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
+       ~callee:"render_terminal_too_small");
+  check int "compact render has one normal-surface branch" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
+       ~callee:"render_surface");
   check int "resize invalidation and Force request share one boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"

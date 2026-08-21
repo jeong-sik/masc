@@ -153,6 +153,16 @@ let test_global_shortcuts_do_not_steal_message_input () =
   check bool "unrelated key is not a shortcut" false
     (Schedule.Input_shortcut.opens_keepers ~message_mode:false "x")
 
+let test_compact_viewport_uses_largest_fixed_chrome_budget () =
+  check int "minimum fixed chrome height" 14
+    Schedule.Viewport.minimum_fixed_chrome_rows;
+  check bool "thirteen rows use the compact frame" true
+    (Schedule.Viewport.requires_compact_frame ~rows:13);
+  check bool "fourteen rows restore the selected surface" false
+    (Schedule.Viewport.requires_compact_frame ~rows:14);
+  check bool "normal terminals keep the selected surface" false
+    (Schedule.Viewport.requires_compact_frame ~rows:30)
+
 let () =
   run "tui_render_schedule"
     [ ( "render scheduling"
@@ -176,5 +186,7 @@ let () =
             test_interrupted_input_wait_retries_until_deadline
         ; test_case "global shortcuts preserve message input" `Quick
             test_global_shortcuts_do_not_steal_message_input
+        ; test_case "compact viewport follows fixed chrome budget" `Quick
+            test_compact_viewport_uses_largest_fixed_chrome_budget
         ] )
     ]

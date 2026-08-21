@@ -35,6 +35,11 @@ module Input_shortcut : sig
   val opens_keepers : message_mode:bool -> string -> bool
 end
 
+module Viewport : sig
+  val minimum_fixed_chrome_rows : int
+  val requires_compact_frame : rows:int -> bool
+end
+
 module Terminal_size_cache : sig
   type t
 

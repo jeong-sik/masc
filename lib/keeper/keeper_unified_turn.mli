@@ -8,17 +8,6 @@
 
     @since Unified Keeper Loop *)
 
-type degraded_retry_decision =
-  | No_degraded_retry
-  | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
-
-val decide_degraded_retry
-  :  base_runtime:string
-  -> effective_runtime:string
-  -> attempted_runtimes:string list
-  -> Agent_core.Error.t
-  -> degraded_retry_decision
-
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)
 type turn_event_bus_summary =
@@ -90,18 +79,6 @@ val decide_turn_plan_at_phase_gate
 
 val turn_plan_manifest_status : turn_plan -> string
 val turn_plan_manifest_decision : turn_plan -> Yojson.Safe.t
-
-(** Resolve the next runtime to try after an auto-recoverable failure.
-    Uses the current effective runtime and the default degraded rotation
-    candidate, then suppresses suggestions
-    that would loop back to a runtime already attempted during the current
-    turn. Exposed for targeted tests. *)
-val next_fail_open_runtime_for_turn
-  :  base_runtime:string
-  -> effective_runtime:string
-  -> attempted_runtimes:string list
-  -> Agent_core.Error.t
-  -> Keeper_error_classify.degraded_retry option
 
 (** Record the streaming-cancel observation shared by the Eio.Cancel handler.
     Exposed so tests can pin the supervisor [fiber_stop] branch without forcing

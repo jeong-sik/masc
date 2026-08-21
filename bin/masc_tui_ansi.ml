@@ -66,11 +66,8 @@ let get_terminal_size () =
 let draw_hline width =
   String.concat "" (List.init width (fun _ -> Ansi.box_h))
 
-(** Pad or truncate string to width *)
-let fit_width s width =
-  let len = String.length s in
-  if len >= width then String.sub s 0 (max 0 (width - 1)) ^ (if len > width then "~" else "")
-  else s ^ String.make (width - len) ' '
+(** Pad or truncate plain text without counting ANSI style bytes. *)
+let fit_width = Masc_tui_message_layout.fit_width
 
 let is_keeper name =
   String.length name >= 7 && String.sub name 0 7 = "keeper-"
@@ -178,6 +175,15 @@ let box_line buf cols content =
     Ansi.gray Ansi.box_v Ansi.reset
     (fit_width content inner)
     Ansi.gray Ansi.box_v Ansi.reset)
+
+(** Fit plain content first, then add style bytes so ANSI escapes never count
+    toward the terminal width. *)
+let box_line_styled buf cols ~style content =
+  let inner = cols - 4 in
+  let content = fit_width content inner in
+  Buffer.add_string buf
+    (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n" Ansi.gray Ansi.box_v
+       Ansi.reset style content Ansi.reset Ansi.gray Ansi.box_v Ansi.reset)
 
 (** Shared helper: empty line inside a box *)
 let box_empty buf cols =

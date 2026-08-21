@@ -83,13 +83,63 @@ let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
       Masc.Tui_decode.decode_json_response_body ~allow_empty:true ~status_code
         ~body
 
-let post_raw_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
-    (string, string) result =
-  match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
-  | Error e -> Error e
-  | Ok (status_code, body) ->
-      if Masc.Tui_decode.is_success_http_status status_code then Ok body
-      else Error (Masc.Tui_decode.http_status_error ~status_code ~body)
+let post_keeper_chat ~(host : string) ~(port : int)
+    (request : Masc_tui_keeper_chat_projection.request) :
+    ( Masc_tui_keeper_chat_projection.response
+    , Masc_tui_keeper_chat_projection.error )
+    result =
+  let url = url_of ~host ~port ~path:"/api/v1/keepers/chat/stream" in
+  let headers =
+    json_headers
+      (("Accept", "text/event-stream") :: auth_headers ())
+  in
+  let body = Masc_tui_keeper_chat_projection.request_body request in
+  match
+    Masc_http_client.post_sync ?clock:(request_clock ()) ~url ~headers ~body ()
+  with
+  | Error detail ->
+      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
+  | Ok (status, response_body)
+    when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error
+        (Masc_tui_keeper_chat_projection.Http_error
+           { status; body = response_body })
+  | Ok (_, response_body) ->
+      Masc_tui_keeper_chat_projection.decode_response ~request response_body
+      |> Result.map_error (fun error ->
+             Masc_tui_keeper_chat_projection.Protocol_error error)
+
+let fetch_keeper_chat_operation ~(host : string) ~(port : int)
+    (request : Masc_tui_keeper_chat_projection.request) :
+    ( Masc_tui_keeper_chat_projection.operation_reconciliation
+    , Masc_tui_keeper_chat_projection.error )
+    result =
+  let path =
+    Printf.sprintf "/api/v1/keepers/%s/chat/operations/%s"
+      (percent_encode_path_segment request.keeper_name)
+      (percent_encode_path_segment request.request_id)
+  in
+  match http_get ~host ~port ~path with
+  | Error detail ->
+      Error (Masc_tui_keeper_chat_projection.Transport_error detail)
+  | Ok (status, response_body)
+    when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error
+        (Masc_tui_keeper_chat_projection.Http_error
+           { status; body = response_body })
+  | Ok (_, response_body) ->
+      (match Yojson.Safe.from_string response_body with
+       | json ->
+           Masc_tui_keeper_chat_projection.decode_operation_reconciliation
+             ~request json
+           |> Result.map_error (fun error ->
+                  Masc_tui_keeper_chat_projection.Protocol_error error)
+       | exception Yojson.Json_error detail ->
+           Error
+             (Masc_tui_keeper_chat_projection.Protocol_error
+                (Masc_tui_keeper_chat_projection.Malformed_event
+                   ("Keeper chat operation response is invalid JSON: "
+                  ^ detail))))
 
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =

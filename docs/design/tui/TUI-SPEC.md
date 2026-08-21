@@ -160,7 +160,7 @@ scope가 결합된 서버 계약이므로 파일시스템이나 briefing을 대�
 - List: name, generation, runtime lane, composite phase, goal
 - Detail: identity, live context, runtime lane, runtime stats, behavior, timestamps
 - Logs: metrics JSONL tail
-- Message: chat stream
+- Message: request-correlated asynchronous chat stream. The TUI creates one durable UUIDv7 request ID per send, accepts only the current Keeper SSE contract, and applies a completion only when both request and Keeper identities match. Partial text, interrupted streams, and terminal outcomes without a visible reply are explicit status/error values rather than successful replies.
 
 강화: 24h bucket 요약, tool call 카운트, composite phase (`Stable <- paused`)
 
@@ -281,10 +281,16 @@ type tui_state = {
   log_entries: log_entry list;
   log_scroll: int;
   msg_input: Buffer.t;
+  msg_target_keeper_name: string option;
+  msg_drafts: (string * string) list;
   msg_history: msg_entry list;
+  msg_inflight: keeper_chat_request option;
+  msg_unverified: keeper_chat_request option;
   ...
 }
 ```
+
+`msg_entry` carries a typed role plus Keeper and request identities. Sending runs on a cancellable background fiber and completion is returned through the UI mailbox; a stale completion cannot clear or overwrite a newer request. Selection survives roster refresh by Keeper identity and drafts are owned per Keeper. A transport cut cannot prove whether durable acceptance occurred, so the TUI retains the original request as `msg_unverified`, blocks fresh-ID submission, and uses `Ctrl-R` to poll `/api/v1/keepers/<name>/chat/operations/<request_id>` until its exact durable state settles. Recovery never issues a second chat POST or mints a new ID. The current initial-send transport buffers the SSE body before strict terminal decoding, so token-level incremental painting remains a follow-up transport/performance item.
 
 ## 7. 단계별 구현 계획
 

@@ -124,18 +124,20 @@ Fields displayed per entry:
 
 ### Keeper Message View
 
-Press `m` from detail view. Type a message and send it to the keeper via `POST /api/v1/keepers/chat/stream`. The MASC server must be running for this feature.
+Press `m` from detail view. Type a message and send it to the keeper via `POST /api/v1/keepers/chat/stream`. Each send uses a durable UUIDv7 request ID and runs in the background, so navigation and refresh remain responsive while the turn runs. The MASC server must be running for this feature.
 
 ```
 Message to: sangsu  (port 8935)
 
-  [14:35:01] you:    hello, how are you?
-  [14:35:03] sangsu: ...reply text...
+  [14:35:01] you:    hello, how are you?  [tui-019...]
+  [14:35:03] sangsu: ...reply text...       [tui-019...]
 
   > type here_
 
 [Enter] Send  [Esc] Back  [Ctrl-U] Clear line
 ```
+
+Only a request-correlated terminal Keeper result is shown as a reply. Interrupted streams, protocol errors, rejected turns, and terminal outcomes without visible text are rendered as explicit status/error rows; partial text is never promoted to a successful reply. One request may be in flight at a time. If delivery becomes uncertain after submission, new sends are blocked and `Ctrl-R` polls the exact durable operation until it settles—never a fresh implicit retry or a second POST. Drafts are retained per Keeper while navigating.
 
 ## Keybindings
 
@@ -151,6 +153,7 @@ Message to: sangsu  (port 8935)
 | `Esc` | Detail | Back to keeper list |
 | `Esc` | Logs / Message | Back to detail |
 | `Enter` | Message | Send message |
+| `Ctrl-R` | Message | Reconcile an outcome-unverified request by its exact durable ID |
 | `Ctrl-U` | Message | Clear input line |
 | `Backspace` | Message | Delete last character |
 | `r` | All (except message) | Force refresh |
@@ -180,7 +183,7 @@ Dashboard <--Tab--> Keeper List
 | Keeper logs | `<name>/metrics/YYYY-MM/DD.jsonl` (last 200 entries) | No |
 | Goal planning | `GET /api/v1/dashboard/planning` | Yes |
 | Actor-scoped approvals | `GET /api/v1/operator?view=summary&include_messages=0&include_keepers=0` | Yes |
-| Send messages | `POST /api/v1/keepers/chat/stream` | Yes |
+| Send messages | request-correlated `POST /api/v1/keepers/chat/stream` SSE | Yes |
 
 ## Requirements
 

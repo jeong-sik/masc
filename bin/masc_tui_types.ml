@@ -32,11 +32,19 @@ type keeper = Tui_decode.keeper
 (** A single metrics/log entry (from Tui_decode) *)
 type log_entry = Tui_decode.log_entry
 
-(** Message history entry *)
+type msg_role =
+  | Message_user
+  | Message_keeper
+  | Message_status
+  | Message_error
+
+(** Request-correlated message history entry. *)
 type msg_entry = {
-  me_role: string;
+  me_role: msg_role;
   me_text: string;
   me_timestamp: string;
+  me_keeper_name: string;
+  me_request_id: string;
 }
 
 (** Attention item for the Overview surface *)
@@ -250,8 +258,11 @@ type state = {
   mutable planning_scroll: int;
   mutable planning_mode: planning_mode;
   mutable msg_input: Buffer.t;
+  mutable msg_target_keeper_name: string option;
+  mutable msg_drafts: (string * string) list;
   mutable msg_history: msg_entry list;
-  mutable msg_sending: bool;
+  mutable msg_inflight: Masc_tui_keeper_chat_projection.request option;
+  mutable msg_unverified: Masc_tui_keeper_chat_projection.request option;
   mutable detail_scroll: int;
   workspace: string;
   port: int;
@@ -295,8 +306,11 @@ let create_state ~workspace ~port ~refresh_interval = {
   planning_scroll = 0;
   planning_mode = Planning_list;
   msg_input = Buffer.create 256;
+  msg_target_keeper_name = None;
+  msg_drafts = [];
   msg_history = [];
-  msg_sending = false;
+  msg_inflight = None;
+  msg_unverified = None;
   detail_scroll = 0;
   workspace;
   port;

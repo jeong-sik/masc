@@ -207,14 +207,29 @@ let load_from_masc_dir (state : state) (base_path : string) =
   state.tasks <- tasks;
   state.tasks_error <- tasks_error;
 
+  (* Preserve the selected Keeper by identity across sorted roster refreshes. *)
+  let selected_keeper_name =
+    List.nth_opt state.keepers state.keeper_cursor
+    |> Option.map (fun keeper -> keeper.k_name)
+  in
+
   (* Load keepers *)
   let keepers, keepers_error = load_keepers base_path in
   state.keepers <- keepers;
   state.keepers_error <- keepers_error;
 
-  (* Clamp cursor if keepers changed *)
-  if state.keeper_cursor >= List.length state.keepers then
-    state.keeper_cursor <- max 0 (List.length state.keepers - 1);
+  (* Re-find the same identity, or clamp only when that Keeper disappeared. *)
+  state.keeper_cursor <-
+    (match selected_keeper_name with
+     | Some keeper_name ->
+         (match
+            List.find_index
+              (fun keeper -> String.equal keeper.k_name keeper_name)
+              state.keepers
+          with
+          | Some index -> index
+          | None -> min state.keeper_cursor (max 0 (List.length state.keepers - 1)))
+     | None -> min state.keeper_cursor (max 0 (List.length state.keepers - 1)));
 
   (* Load live context for selected keeper *)
   if state.keeper_cursor < List.length state.keepers then begin

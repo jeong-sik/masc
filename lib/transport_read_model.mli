@@ -102,8 +102,7 @@ val websocket_discovery_json : http_context -> Yojson.Safe.t
 (** [websocket_discovery_json ctx] returns the WebSocket
     discovery payload used by browser dashboards to learn the
     same-origin [ws://]/[wss://] upgrade URL.  Includes the
-    legacy standalone configured-port + runtime-listening fields
-    when [ctx.include_configured] is [true]. *)
+    [configured] field when [ctx.include_configured] is [true]. *)
 
 val transport_status_json : http_context -> Yojson.Safe.t
 (** [transport_status_json ctx] returns the full transport

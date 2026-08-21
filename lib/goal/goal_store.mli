@@ -134,6 +134,20 @@ val update_goal :
     (with [updated_at] pre-stamped), normalises the result,
     and writes back.  Errors when the [goal_id] is unknown. *)
 
+type conditional_update =
+  | Goal_updated of goal
+  | Goal_phase_mismatch of Goal_phase.t
+
+val update_goal_if_phase :
+  Workspace_utils.config ->
+  goal_id:string ->
+  expected_phase:Goal_phase.t ->
+  (goal -> goal) ->
+  (conditional_update, string) result
+(** Atomic compare-and-update under the goals file lock. A phase mismatch is
+    returned without writing, so recovery cannot overwrite a concurrent
+    lifecycle transition. *)
+
 type delete_goal_outcome =
   | Deleted
   | Deleted_with_orphaned_links of string

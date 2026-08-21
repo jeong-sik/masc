@@ -17,8 +17,8 @@
       declared success condition. [Criterion_unchecked] is the explicit
       default for pre-RFC-0387 goals, not a silent fallback.
     - [completion_state] (B3) — the completion-time proof chain. A gated
-      [Completed] goal carries [Human_confirmed { proof; … }], so "verifier
-      proof plus human confirmation" reads back as one durable record.
+      [Completed] goal carries [Proof_proven verdict], so the verifier's exact
+      run, authority, evidence, and timestamp read back as one durable record.
 
     Mutation discipline mirrors [Goal_store]: locked read-modify-write, strict
     decode, and a store that does not decode refuses every mutation (the
@@ -32,6 +32,9 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  verification_run_id : string;
+      (** Exact Goal-verifier attempt whose durable run record contains the
+          evaluator and tool observations supporting this verdict. *)
   authority : Masc_domain.completion_authority;
       (** Typed provenance, reused from the Task completion protocol. The
           stage-2 verifier lane commits with its own run identity
@@ -51,11 +54,6 @@ type completion_state =
   | Proof_pending of { requested_at : string }
   | Proof_proven of verdict
   | Proof_refuted of verdict
-  | Human_confirmed of {
-      proof : verdict;
-      confirmed_by : string;
-      confirmed_at : string;
-    }
 
 type record = {
   goal_id : string;
@@ -125,7 +123,7 @@ val mark_proof_pending :
     [Verifying] (persist-before-model-call). Idempotent when already pending —
     a repeated [request_complete] re-arms the request. A standing
     [Proof_refuted] is superseded by the new request; a committed
-    [Proof_proven] / [Human_confirmed] verdict is never overwritten. *)
+    [Proof_proven] verdict is never overwritten. *)
 
 val record_criterion_verdict :
   Workspace_utils.config ->
@@ -150,12 +148,3 @@ val record_proof_verdict :
     check happens inside the same locked record mutation, so a racing
     unreachable verdict cannot be followed by a proof commit. Anything else
     is an [Error], not a silent overwrite. *)
-
-val record_human_confirmation :
-  Workspace_utils.config ->
-  goal_id:string ->
-  confirmed_by:string ->
-  (record, string) result
-(** Commits the human's final confirmation (B3). Requires [Proof_proven]; the
-    proof is carried into [Human_confirmed] so the completed goal retains the
-    whole chain. *)

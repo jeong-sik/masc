@@ -34,7 +34,10 @@ module For_testing : sig
       retry decision is a pure function of it. *)
   type process_outcome =
     | Committed
-    | Deferred of { retryable : bool }
+    | Deferred of {
+        retryable : bool;
+        reason : string;
+      }
 
   val should_schedule_retry : process_outcome -> bool
   (** Whether the maintenance-pulse retry timer should arm for this outcome.

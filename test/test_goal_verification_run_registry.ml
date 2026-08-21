@@ -78,6 +78,37 @@ let test_running_attempt_is_not_claimed_after_restart () =
     (List.length (R.list_runs (R.replay path)))
 ;;
 
+let test_reviewed_observation_survives_replay () =
+  with_path
+  @@ fun path ->
+  let registry = R.create ~path () in
+  let run_id = "goal-run-reviewed" in
+  R.register_running
+    registry
+    ~run_id
+    ~goal_id:"goal-reviewed"
+    ~review_kind:R.Proof
+    ~authority_actor:"verifier_exact"
+    ~started_at:20.0;
+  R.mark_completed
+    registry
+    ~run_id
+    ~outcome:R.Reviewed
+    ~tools:[ sample_tool () ]
+    ~evaluator_runtime:"runtime-a"
+    ~elapsed_s:2.5
+    ();
+  match R.get (R.replay path) ~run_id with
+  | Some
+      { status =
+          R.Completed
+            { outcome = R.Reviewed; tools = [ tool ]; _ }
+      ; _
+      } ->
+    check string "replayed reviewed tool" "verification_read_file" tool.tool_name
+  | _ -> fail "reviewed Goal verification observation did not replay"
+;;
+
 let () =
   run
     "goal verification run registry"
@@ -90,6 +121,10 @@ let () =
             "running attempt is not claimed after restart"
             `Quick
             test_running_attempt_is_not_claimed_after_restart
+        ; test_case
+            "reviewed observation survives restart"
+            `Quick
+            test_reviewed_observation_survives_replay
         ] )
     ]
 ;;

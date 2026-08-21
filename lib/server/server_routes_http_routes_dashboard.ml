@@ -844,6 +844,25 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/goal-verification-runs" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let runs =
+           Goal_verification_run_registry.list_runs
+             (Goal_verification_run_registry.global ())
+         in
+         let json =
+           `Assoc
+             [ ("generated_at", `String (Masc_domain.now_iso ()))
+             ; ("count", `Int (List.length runs))
+             ; ( "runs"
+               , `List
+                   (List.map
+                      Goal_verification_run_registry.run_to_yojson
+                      runs) )
+             ]
+         in
+         Http.Response.json_value ~compress:true ~request:req json reqd
+       ) request reqd)
   (* Paged, and without either exact payload. Serving every retained run with
      its payloads made this one response 246 MB for 5,908 runs — the whole
      rendered prompt of every lane run, to draw a table of timestamps — and the

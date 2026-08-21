@@ -8,6 +8,7 @@ type review_kind =
   | Proof
 
 type outcome =
+  | Reviewed
   | Committed
   | Deferred of
       { retryable : bool

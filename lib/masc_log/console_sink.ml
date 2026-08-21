@@ -36,16 +36,28 @@ let stderr_write line =
   flush stderr
 
 let writer_override : (string -> unit) option Atomic.t = Atomic.make None
+let write_observer : (unit -> unit) option Atomic.t = Atomic.make None
+
+let set_write_observer observer = Atomic.set write_observer observer
 
 let current_writer () =
   match Atomic.get writer_override with
   | Some w -> w
   | None -> stderr_write
 
+let notify_write_observer () =
+  (match Atomic.get write_observer with
+   | None -> ()
+   | Some observe ->
+       (try observe () with _ -> ()))
+
+let write_current line =
+  Fun.protect ~finally:notify_write_observer (fun () -> current_writer () line)
+
 let write_batch ~last_reported_drops batch =
   Queue.iter
     (fun line ->
-       try current_writer () line with
+       try write_current line with
        | _ ->
          (* A failing console writer must never take the process down;
             the file sink still has the record. *)
@@ -55,7 +67,7 @@ let write_batch ~last_reported_drops batch =
   if d > !last_reported_drops
   then begin
     (try
-       current_writer ()
+       write_current
          (Printf.sprintf
             "[console-sink] dropped %d console line(s) while the console writer \
              was blocked (file sink unaffected)"
@@ -102,7 +114,7 @@ let write line =
      [Log] hands it the raw pre-[Ring.push] line. *)
   let line = Secret_patterns.redact_text line in
   if not (Atomic.get enqueue_active)
-  then current_writer () line
+  then write_current line
   else begin
     Mutex.lock mu;
     let full = Queue.length queue >= capacity in
@@ -140,5 +152,6 @@ module For_testing = struct
     Mutex.unlock mu;
     Atomic.set enqueue_active false;
     Atomic.set dropped 0;
-    Atomic.set writer_override None
+    Atomic.set writer_override None;
+    Atomic.set write_observer None
 end

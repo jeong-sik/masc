@@ -2604,6 +2604,11 @@
  (libraries alcotest masc_tui_context_state masc))
 
 (test
+ (name test_tui_frame_presenter)
+ (modules test_tui_frame_presenter)
+ (libraries alcotest masc_tui_frame_presenter))
+
+(test
  (name test_tui_metrics_tail)
  (modules test_tui_metrics_tail)
  (libraries

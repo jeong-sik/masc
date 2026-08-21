@@ -18,6 +18,12 @@ val start : unit -> unit
     {!start}; synchronous before. *)
 val write : string -> unit
 
+(** Install a process-local observer invoked after each attempted actual
+    console-mirror write, including an attempt that raises. Enqueueing alone
+    does not invoke it. The observer may run on the console writer thread, must
+    be non-blocking, and cannot change the write outcome if it raises. *)
+val set_write_observer : (unit -> unit) option -> unit
+
 (** Total mirror lines dropped due to a blocked console writer. *)
 val dropped_count : unit -> int
 

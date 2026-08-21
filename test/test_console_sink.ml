@@ -36,6 +36,23 @@ let test_enqueue_mode_defers_fd_write () =
     check (list string) "drained to writer" [ "queued line" ] !written)
 ;;
 
+let test_write_observer_tracks_actual_writes () =
+  with_clean_sink (fun () ->
+    let observed = ref 0 in
+    let observed_during_write = ref (-1) in
+    Console_sink.set_write_observer (Some (fun () -> incr observed));
+    Console_sink.For_testing.set_writer
+      (Some (fun _ -> observed_during_write := !observed));
+    Console_sink.write "direct line";
+    check int "observer runs after the writer returns" 0 !observed_during_write;
+    check int "synchronous write is observed" 1 !observed;
+    Console_sink.For_testing.set_enqueue_active true;
+    Console_sink.write "queued line";
+    check int "enqueue is not an actual write" 1 !observed;
+    ignore (Console_sink.For_testing.drain_now () : int);
+    check int "drained write is observed" 2 !observed)
+;;
+
 let test_overflow_drops_and_counts () =
   with_clean_sink (fun () ->
     let written = ref 0 in
@@ -55,12 +72,21 @@ let test_overflow_drops_and_counts () =
 
 let test_writer_exception_does_not_escape () =
   with_clean_sink (fun () ->
-    Console_sink.For_testing.set_writer (Some (fun _ -> failwith "fd broken"));
+    let observed = ref 0 in
+    let observed_during_writes = ref [] in
+    Console_sink.set_write_observer (Some (fun () -> incr observed));
+    Console_sink.For_testing.set_writer
+      (Some (fun _ ->
+         observed_during_writes := !observed :: !observed_during_writes;
+         failwith "fd broken"));
     Console_sink.For_testing.set_enqueue_active true;
     Console_sink.write "line a";
     Console_sink.write "line b";
     let n = Console_sink.For_testing.drain_now () in
-    check int "drain survives a throwing writer" 2 n)
+    check int "drain survives a throwing writer" 2 n;
+    check (list int) "observer runs after each failed writer attempt" [ 1; 0 ]
+      !observed_during_writes;
+    check int "failed write attempts are still observed" 2 !observed)
 ;;
 
 let () =
@@ -69,6 +95,8 @@ let () =
       , [ test_case "synchronous before start" `Quick test_synchronous_before_start
         ; test_case "enqueue mode defers fd write" `Quick
             test_enqueue_mode_defers_fd_write
+        ; test_case "observer tracks actual writes" `Quick
+            test_write_observer_tracks_actual_writes
         ; test_case "overflow drops and counts" `Quick test_overflow_drops_and_counts
         ; test_case "writer exception contained" `Quick
             test_writer_exception_does_not_escape

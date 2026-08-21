@@ -53,6 +53,20 @@ let terminal_size_cache =
 let invalidate_terminal_size () =
   Masc_tui_render_schedule.Terminal_size_cache.invalidate terminal_size_cache
 
+(** Writes outside the frame presenter make its cached screen untrustworthy.
+    Direct producers mark before touching the TTY; the console sink observer
+    marks after each attempted mirror write. *)
+let terminal_write_outside_frame = Atomic.make false
+
+let note_terminal_write_outside_frame () =
+  Atomic.set terminal_write_outside_frame true
+
+let consume_terminal_write_outside_frame () =
+  Atomic.exchange terminal_write_outside_frame false
+
+let terminal_write_outside_frame_pending () =
+  Atomic.get terminal_write_outside_frame
+
 let probe_terminal_size () =
   let read_tput arg =
     try

@@ -75,6 +75,11 @@ let with_forest producers f =
   | Ok forest -> f config forest
 ;;
 
+let require_layout = function
+  | Ok layout -> layout
+  | Error detail -> Alcotest.failf "root layout unavailable: %s" detail
+;;
+
 (* Create the producer playground used to resolve relative tool paths. *)
 let producer_playground (config : Workspace_core.config) producer_name =
   let path =
@@ -327,36 +332,124 @@ let test_forest_requires_and_enforces_exact_producer () =
 (* The prompt states the exact tools attached to the review request. *)
 (* masc task-403 (vrf-8bac5f46, 2026-08-21): the prompt told the evaluator its
    tools were "pointed at the producer's tree". They are pointed at the
-   producer's sandbox root, one level above any checkout, so an evaluator that
-   read that literally opened dune-project, .git, lib/, README.md, Makefile,
-   src and bin — 77 consecutive failed reads, no verdict, and a producer that
-   never learned why. The root's real shape is a fact available at review
-   time; these pin that it is stated instead of guessed. *)
-let test_root_layout_lists_the_root_the_tools_resolve_against () =
+   producer's sandbox root, which holds checkouts rather than being one, so an
+   evaluator that read that literally opened dune-project, .git, lib/,
+   README.md, Makefile, src and bin — 77 consecutive failed reads, no verdict,
+   and a producer that never learned why.
+
+   Where a checkout sits is the producer's own choice — [repos/masc] is one
+   keeper's convention written in its config, not a layout the system imposes —
+   so the checkouts are found by [Keeper_playground_checkouts], which looks for
+   a [.git] entry wherever it is. A scan that hardcoded [repos/] here would be
+   the fourth such scan, and that module exists to have removed the other
+   three. *)
+let make_checkout root relative =
+  let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
+  let rec mkdir_p path =
+    let parent = Filename.dirname path in
+    if parent <> path && not (Sys.file_exists parent) then mkdir_p parent;
+    mkdir path
+  in
+  let checkout = Filename.concat root relative in
+  mkdir_p checkout;
+  mkdir (Filename.concat checkout ".git")
+;;
+
+let test_root_layout_fails_closed_when_discovery_is_unavailable () =
+  with_surface (fun _config surface ->
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "missing producer root was presented as a usable layout: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "unavailable discovery remains an error"
+        true
+        (Astring.String.is_infix ~affix:"workspace root" detail
+         || Astring.String.is_infix ~affix:"verification root" detail))
+;;
+
+let test_root_layout_fails_closed_when_checkout_discovery_is_partial () =
+  with_surface (fun config surface ->
+    let root = producer_playground config producer in
+    for index = 0 to Masc.Keeper_playground_checkouts.max_reported_checkouts do
+      make_checkout root (Printf.sprintf "checkout-%02d" index)
+    done;
+    match VAT.root_layout surface with
+    | Ok layout ->
+      Alcotest.failf
+        "partial checkout discovery was presented as complete: %s"
+        (String.concat ", " layout)
+    | Error detail ->
+      Alcotest.(check bool)
+        "partial discovery names its limit"
+        true
+        (Astring.String.is_infix ~affix:"checkout discovery is partial" detail))
+;;
+
+let test_forest_layout_reserves_each_producer () =
+  let producers = List.init 9 (fun index -> Printf.sprintf "producer-%02d" index) in
+  with_forest producers (fun config forest ->
+    List.iter
+      (fun producer_name ->
+         let root = producer_playground config producer_name in
+         for index = 0 to 19 do
+           Unix.mkdir (Filename.concat root (Printf.sprintf "entry-%02d" index)) 0o755
+         done)
+      producers;
+    let layout = VAT.forest_root_layout forest |> require_layout in
+    List.iter
+      (fun producer_name ->
+         Alcotest.(check bool)
+           (producer_name ^ " retains a reserved layout slice")
+           true
+           (List.exists
+              (Astring.String.is_infix ~affix:(producer_name ^ ":"))
+              layout))
+      producers;
+    Alcotest.(check bool)
+      "the last producer retains entries beyond the old global prefix cap"
+      true
+      (List.exists
+         (Astring.String.is_infix ~affix:"producer-08: entry-19")
+         layout))
+;;
+
+let test_root_layout_reports_entries_and_discovered_checkouts () =
   with_surface (fun config surface ->
     let root = producer_playground config producer in
     let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
-    mkdir (Filename.concat root "repos");
-    mkdir (Filename.concat root "repos/masc");
+    make_checkout root "repos/masc";
+    (* A checkout the conventional prefix would miss entirely. *)
+    make_checkout root "scratch-tree";
     mkdir (Filename.concat root "artifacts");
-    (* An empty directory is the verifier's own failure mode, so it has to be
-       distinguishable from a directory that could not be read at all. *)
-    mkdir (Filename.concat root "mind");
-    let layout = VAT.root_layout surface in
+    let layout = VAT.root_layout surface |> require_layout in
     let holds affix =
       List.exists (fun entry -> Astring.String.is_infix ~affix entry) layout
     in
-    Alcotest.(check bool) "names the checkout one level down" true (holds "repos/masc");
-    Alcotest.(check bool) "names a sibling top-level entry" true (holds "artifacts");
-    Alcotest.(check bool) "marks a directory with no children" true (holds "(empty)"))
+    Alcotest.(check bool)
+      "reports a checkout under the keeper's own repos/ convention"
+      true
+      (holds "repos/masc");
+    Alcotest.(check bool)
+      "reports a checkout that convention would have missed"
+      true
+      (holds "scratch-tree");
+    Alcotest.(check bool)
+      "a checkout is marked as one, so a path prefix is identifiable"
+      true
+      (holds "git checkout");
+    Alcotest.(check bool)
+      "still names the root's own entries, which need no prefix"
+      true
+      (holds "artifacts"))
 ;;
 
 let test_prompt_states_the_root_and_not_a_repository () =
   with_surface (fun config surface ->
     let root = producer_playground config producer in
-    let mkdir path = try Unix.mkdir path 0o755 with Unix.Unix_error _ -> () in
-    mkdir (Filename.concat root "repos");
-    mkdir (Filename.concat root "repos/masc");
+    make_checkout root "repos/masc";
     let request : AR.review_request =
       { agent_name = producer
       ; task_title = "t"
@@ -374,7 +467,7 @@ let test_prompt_states_the_root_and_not_a_repository () =
                { schemas = VAT.schemas surface
                ; dispatch = VAT.dispatch surface
                ; scope = AR.Producer_tree
-               ; root_layout = VAT.root_layout surface
+               ; root_layout = VAT.root_layout surface |> require_layout
                })
           request
       with
@@ -396,7 +489,8 @@ let test_prompt_states_the_root_and_not_a_repository () =
 ;;
 
 let test_prompt_states_the_available_surface () =
-  with_surface (fun _config surface ->
+  with_surface (fun config surface ->
+    ignore (producer_playground config producer);
     let request : AR.review_request =
       { agent_name = producer
       ; task_title = "t"
@@ -418,7 +512,7 @@ let test_prompt_states_the_available_surface () =
            { schemas = VAT.schemas surface
            ; dispatch = VAT.dispatch surface
            ; scope = AR.Producer_tree
-           ; root_layout = VAT.root_layout surface
+           ; root_layout = VAT.root_layout surface |> require_layout
            })
     in
     Alcotest.(check bool)
@@ -532,9 +626,21 @@ let () =
       , [ Alcotest.test_case "prompt states the available surface" `Quick
             test_prompt_states_the_available_surface
         ; Alcotest.test_case
-            "root_layout lists the root the tools resolve against"
+            "root_layout reports entries and discovered checkouts"
             `Quick
-            test_root_layout_lists_the_root_the_tools_resolve_against
+            test_root_layout_reports_entries_and_discovered_checkouts
+        ; Alcotest.test_case
+            "root_layout fails closed when discovery is unavailable"
+            `Quick
+            test_root_layout_fails_closed_when_discovery_is_unavailable
+        ; Alcotest.test_case
+            "root_layout fails closed when checkout discovery is partial"
+            `Quick
+            test_root_layout_fails_closed_when_checkout_discovery_is_partial
+        ; Alcotest.test_case
+            "forest layout reserves each producer"
+            `Quick
+            test_forest_layout_reserves_each_producer
         ; Alcotest.test_case
             "prompt states the root instead of implying a repository"
             `Quick

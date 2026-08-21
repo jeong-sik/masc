@@ -42,6 +42,23 @@ let configure_prompt_registry () =
     (Filename.concat (Masc_test_deps.find_project_root ()) "config/prompts")
 ;;
 
+let ensure_producer_playground (config : Workspace.config) producer =
+  let path =
+    Keeper_sandbox_config.host_root_abs_of_agent
+      ~base_path:
+        (Workspace_verification_store.project_root_of_base_path config.base_path)
+      ~agent_name:producer
+  in
+  let rec mkdir_p dir =
+    if not (Sys.file_exists dir)
+    then (
+      mkdir_p (Filename.dirname dir);
+      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  in
+  mkdir_p path;
+  path
+;;
+
 let with_workspace f =
   Eio_main.run
   @@ fun env ->
@@ -52,6 +69,7 @@ let with_workspace f =
     (fun () ->
        let config = Workspace.default_config dir in
        ignore (Workspace.init config ~agent_name:(Some "planner"));
+       ignore (ensure_producer_playground config "unassigned");
        f config)
 ;;
 
@@ -108,20 +126,7 @@ let create_goal ctx title =
 ;;
 
 let producer_playground (config : Workspace.config) producer =
-  let path =
-    Keeper_sandbox_config.host_root_abs_of_agent
-      ~base_path:
-        (Workspace_verification_store.project_root_of_base_path config.base_path)
-      ~agent_name:producer
-  in
-  let rec mkdir_p dir =
-    if not (Sys.file_exists dir)
-    then (
-      mkdir_p (Filename.dirname dir);
-      try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-  in
-  mkdir_p path;
-  path
+  ensure_producer_playground config producer
 ;;
 
 let add_linked_task_with_evidence config ~goal_id ~producer ~evidence_ref =

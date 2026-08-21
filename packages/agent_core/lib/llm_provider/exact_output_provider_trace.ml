@@ -1,13 +1,8 @@
 module Exec = Exact_output_execution
 
-type t =
-  { fingerprint : string
-  ; http_status : int
-  ; response_header_evidence_fingerprint : string
-  ; raw_response_body_sha256 : string
-  ; response_id : string option
-  ; response_model : string option
-  }
+(* Everything the trace attests to is folded into [payload] and hashed into
+   [fingerprint]; [equal] compares fingerprints. *)
+type t = { fingerprint : string }
 
 type raw_response =
   { body : string
@@ -66,11 +61,5 @@ let of_evidence ?response receipt (evidence : Exec.raw_response_evidence) =
     |> Digestif.SHA256.digest_string
     |> Digestif.SHA256.to_hex
   in
-  { fingerprint
-  ; http_status
-  ; response_header_evidence_fingerprint
-  ; raw_response_body_sha256 = evidence.raw_body_sha256
-  ; response_id
-  ; response_model
-  }
+  { fingerprint }
 ;;

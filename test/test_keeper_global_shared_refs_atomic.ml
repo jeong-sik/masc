@@ -99,14 +99,11 @@ let test_keepalive_signal_callbacks () =
     -> ());
   let skipped = ref false in
   Keeper_keepalive_signal.register_record_tool_skipped
-    (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> skipped := true);
-  Keeper_keepalive_signal.record_tool_skipped
-    ~keeper_name:"k"
-    ~tool_name:"t"
-    ~reason_code:"r";
+    (fun ~tool_name:_ ~reason_code:_ -> skipped := true);
+  Keeper_keepalive_signal.record_tool_skipped ~tool_name:"t" ~reason_code:"r";
   check bool "tool skipped callback invoked" true !skipped;
   Keeper_keepalive_signal.register_record_tool_skipped
-    (fun ~keeper_name:_ ~tool_name:_ ~reason_code:_ -> ());
+    (fun ~tool_name:_ ~reason_code:_ -> ());
   let output = ref false in
   Keeper_keepalive_signal.register_record_execute_output
     (fun

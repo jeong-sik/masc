@@ -34,9 +34,7 @@ type 'a transfer_intake_result =
   | Transfer_intake_target_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
 type slot =
-  { base_path : string
-  ; keeper_name : string
-  ; intake_mu : Eio.Mutex.t
+  { intake_mu : Eio.Mutex.t
   ; state_mu : Stdlib.Mutex.t
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
@@ -57,9 +55,7 @@ let slot_for ~base_path ~keeper_name =
     | Some slot -> slot
     | None ->
       let slot =
-        { base_path
-        ; keeper_name
-        ; intake_mu = Eio.Mutex.create ()
+        { intake_mu = Eio.Mutex.create ()
         ; state_mu = Stdlib.Mutex.create ()
         ; shutdown_operation_id = None
         }

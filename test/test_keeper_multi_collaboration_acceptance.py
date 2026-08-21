@@ -117,6 +117,16 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
         self.assertEqual(len(catalog["missions"]), 23)
+        self.assertEqual(
+            len(
+                {
+                    assertion
+                    for mission in catalog["missions"]
+                    for assertion in mission["assertions"]
+                }
+            ),
+            48,
+        )
         self.assertEqual(catalog["missions"][18]["id"], "RW19")
         self.assertEqual(
             catalog["missions"][18]["assertions"],
@@ -181,6 +191,50 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             [approach["id"] for approach in catalog["execution_approaches"]],
             ["A", "B", "C"],
         )
+
+    def test_runtime_serving_evidence_requires_exact_completed_receipt_per_role(self):
+        keepers = {"coordinator": "keeper-c", "reviewer": "keeper-r"}
+        expected = {"coordinator": "runtime-c", "reviewer": "runtime-r"}
+        with tempfile.TemporaryDirectory() as tmp_name:
+            base_path = Path(tmp_name)
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-c",
+                [self.runtime_receipt("runtime-c", fallback=False)],
+            )
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-r",
+                [self.runtime_receipt("runtime-fallback", fallback=True)],
+            )
+
+            failed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+            )
+            self.assertEqual(failed["status"], "failed")
+            self.assertEqual(failed["served_role_count"], 1)
+            self.assertEqual(
+                failed["roles"]["reviewer"]["fallback_receipt_count"], 1
+            )
+
+            self.write_runtime_receipts(
+                base_path,
+                "keeper-r",
+                [
+                    self.runtime_receipt("runtime-fallback", fallback=True),
+                    self.runtime_receipt("runtime-r", fallback=False),
+                ],
+            )
+            passed = acceptance.collect_runtime_serving_evidence(
+                base_path=base_path,
+                keepers_by_role=keepers,
+                expected_runtime_by_role=expected,
+            )
+            self.assertEqual(passed["status"], "passed")
+            self.assertEqual(passed["served_role_count"], 2)
+            self.assertEqual(passed["distinct_served_runtime_count"], 2)
 
     def test_rw23_task_is_not_exposed_to_autonomous_work_before_refutation(self):
         setup_source = inspect.getsource(acceptance.MissionRun.setup_product_state)
@@ -266,6 +320,36 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             "observed_keepers": observed,
             "missing_keepers": missing,
         }
+
+    @staticmethod
+    def runtime_receipt(runtime_id, *, fallback):
+        return {
+            "schema_version": 1,
+            "ts": "2026-08-21T09:00:00Z",
+            "trace_id": f"trace-{runtime_id}",
+            "keeper_turn_id": 1,
+            "event": "receipt_appended",
+            "runtime_id": runtime_id,
+            "status": "ok",
+            "decision": {
+                "outcome": "ok",
+                "runtime_id": runtime_id,
+                "runtime_attempt_count": 1,
+                "runtime_fallback_applied": fallback,
+                "runtime_outcome": "completed",
+            },
+        }
+
+    @staticmethod
+    def write_runtime_receipts(base_path, keeper, rows):
+        manifest_root = (
+            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
+        )
+        manifest_root.mkdir(parents=True, exist_ok=True)
+        (manifest_root / "trace.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows),
+            encoding="utf-8",
+        )
 
 
 if __name__ == "__main__":

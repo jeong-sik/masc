@@ -978,7 +978,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
     Keeper_tool_board_runtime.handle_board_tool
       ~meta:keeper_meta
       ~name:"masc_board_comment_vote"
-      ~args:(make_args [ ("comment_id", `String "") ])
+      ~args:(make_args [ ("comment_id", `String ""); ("direction", `String "up") ])
   in
   Alcotest.(check bool) "typed comment vote reaches board handler" true
     (String_util.contains_substring comment_vote "comment_id required");

@@ -397,16 +397,16 @@ let test_predicate_rejects_other_lookup_errors () =
             Keeper_owner_registry.Inventory_stopping)))
 ;;
 
-(* Owner absence plus missing metadata is only terminal removal evidence when
-   the operation itself promised [Remove_meta]. Retain-meta operations must
-   keep surfacing the inconsistency. *)
-let test_predicate_rejects_retain_meta_intents () =
+(* Owner absence plus missing metadata is terminal removal evidence exactly
+   when the operation promised [Remove_meta]. Operator pause retains metadata;
+   supervisor cleanup removes it now that no tombstone lifecycle remains. *)
+let test_predicate_distinguishes_retain_and_remove_intents () =
   with_workspace (fun ~config ->
     let owner_not_found name =
       Keeper_owner_registry.Command_lookup_failed
         (Keeper_owner_registry.Owner_not_found name)
     in
-    let check_reason label reason =
+    let check_reason label reason expected =
       let operation =
         make_operation
           ~keeper_name:label
@@ -415,15 +415,15 @@ let test_predicate_rejects_retain_meta_intents () =
       in
       check
         bool
-        (label ^ ": retain-meta intent is not removal evidence")
-        false
+        (label ^ ": cleanup disposition determines removal evidence")
+        expected
         (Keeper_shutdown_finalize.admission_already_released_by_removal
            ~config
            operation
            (owner_not_found label))
     in
-    check_reason "ownerless-retain-operator" Operator_stop_retain_meta;
-    check_reason "ownerless-retain-tombstone" Supervisor_cleanup)
+    check_reason "ownerless-retain-operator" Operator_stop_retain_meta false;
+    check_reason "ownerless-supervisor-cleanup" Supervisor_cleanup true)
 ;;
 
 (* The cases above enter through [recover_operation_with_corrupt_owner_fence].
@@ -679,9 +679,9 @@ let () =
             `Quick
             test_predicate_rejects_other_lookup_errors
         ; Alcotest.test_case
-            "predicate rejects retain-meta intents"
+            "predicate distinguishes retain and remove intents"
             `Quick
-            test_predicate_rejects_retain_meta_intents
+            test_predicate_distinguishes_retain_and_remove_intents
         ; Alcotest.test_case
             "corrupt sibling does not hide ownerless operator-retain"
             `Quick

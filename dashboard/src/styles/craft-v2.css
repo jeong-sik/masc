@@ -62,7 +62,7 @@
    first. Stated per component rather than by dropping the default, which the
    other 1,309 rely on. */
 .v2-app :is(
-.ap-klink, .ap-viewbtn, .cn-bind-row, .fus-rich-more, .fus-sink-to, .fus-who,
+  .ap-klink, .ap-viewbtn, .cn-bind-row, .fus-rich-more, .fus-sink-to, .fus-who,
   .ide-remote, .lg-line, .ov-dlink, .ov-link, .sch-sig-id, .sch-viewbtn, .wk-goal-h
 ) {
   border-radius: 0;

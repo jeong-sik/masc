@@ -24,7 +24,7 @@
 }
 
 .v2-overview-alerts ul > li,
-.v2-overview-alerts .chip,
+.v2-overview-alerts .tag-chip,
 .v2-overview-ticker-card,
 .v2-overview-keepers li,
 .v2-cockpit-route {

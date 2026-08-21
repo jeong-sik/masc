@@ -61,21 +61,25 @@ both are gitignored and regenerated.
 
 | Surface | SSIM | | Surface | SSIM |
 |---|---|---|---|---|
-| logs | 0.996 | | schedule | 0.944 |
-| connectors | 0.986 | | ide | 0.935 |
-| lab | 0.986 | | monitor | 0.928 |
-| fusion | 0.978 | | work | 0.891 |
-| command | 0.969 | | board | 0.853 |
-| approvals | 0.966 | | keepers | 0.848 |
-| registry | 0.955 | | overview | 0.842 |
-| | | | **mean** | **0.934** |
+| logs | 0.996 | | registry | 0.955 |
+| connectors | 0.986 | | schedule | 0.944 |
+| lab | 0.986 | | ide | 0.935 |
+| fusion | 0.978 | | monitor | 0.928 |
+| command | 0.969 | | keepers | 0.909 |
+| approvals | 0.966 | | work | 0.891 |
+| | | | board | 0.853 |
+| | | | overview | 0.842 |
+| | | | **mean** | **0.939** |
 
-Nine of the fourteen sit at 0.93 or above and seven at 0.96 or above. The five
-below are each held there by one named cause, ledgered underneath — none of them
-skin drift.
+Nine of the fourteen sit at 0.93 or above and seven at 0.95 or above. The four
+that do not — overview, board, work, monitor — are each held there by one named
+cause, ledgered underneath, and none of the four is skin drift. **Across the ten
+surfaces where the two sides agree on structure the mean is 0.962**; that is the
+figure to read as "does the skin match". The 0.939 fleet mean includes the four
+and is the figure to read as "how close is the whole dashboard to the mock".
 
 Style conformance — `getComputedStyle` compared property by property across every
-classed element on ten surfaces — is **96.83%** (41,155 of 42,504 declarations),
+classed element on ten surfaces — is **96.89%** (41,182 of 42,504 declarations),
 from 85.85% before this pass. The largest remaining group is `font-family` (263),
 which is the UA fallback the dashboard deliberately does not reproduce (see
 below); without it the figure is 97.6%.
@@ -99,30 +103,29 @@ this design drop, so it was put to the operator on 2026-08-22 with the
 measurement — the decision is to keep full width.
 
 Cost: overview measures **0.842**; restoring `max-width: 1280px; margin: 0 auto`
-takes it to **0.996**, and the fleet mean from 0.934 to 0.945. No other
+takes it to **0.996**, and the fleet mean from 0.939 to 0.950. No other
 surface moves — `.ov-scroll` is the only centred container, and `work`,
 `approvals` and `board` render full-width in the design too.
 
-### Keepers — `.chip` names two different components
+### Keepers — resolved: `.chip` named two different components
 
 The design uses `.chip` for the suggestion chip: a 13px pill with 8px/13px
-padding that wraps. The dashboard's L0 `primitives.css` uses `.chip` for a mono
-badge with a fixed `height: 18px`. The kit loads last and wins on padding and
-type, but inherits the badge's `display: inline-flex`, `align-items`, `gap` and
-fixed height — which clips the suggestion chip (measured: content 21px in a 16px
-box, 16 occurrences).
+padding that wraps. The dashboard's L0 `primitives.css` used `.chip` for a mono
+badge with a fixed `height: 18px`. The kit loads last and won on padding and
+type while inheriting the badge's `display: inline-flex`, `align-items`, `gap`
+and fixed height — 21px of content in a 16px box, sixteen occurrences.
 
-The live app does not hit this: its suggestions render `.suggestion-chip`
-(`components/common/suggestion-chip.ts`), whose metrics are now the design's.
-The one component that rendered the design's `.chip` — `SuggestionChip` in
-`components/v2/primitives-v2.ts` — was imported nowhere and has been removed.
-So the collision is latent, not live, and resolving it means renaming the L0
-badge across 5 stylesheets and `ide-shell.ts` for no change in what ships. Left
-as a named finding.
+The badge is `.tag-chip` now. It takes the new name because the design owns
+`.chip` in the skin's vocabulary, and because it is the smaller move:
+`ide-shell.ts` is its only renderer, and the `.chip.k-*`,
+`.v2-overview-alerts .chip` and `.ide-plane-statusbar-meta .chip` rules that
+came with it have no renderer at all. `components/v2/primitives-v2.ts` also had
+a `SuggestionChip` rendering the design's `.chip`; nothing imported it, and it
+is gone. The live suggestion chip is `components/common/suggestion-chip.ts`,
+whose metrics are now the design's.
 
-Cost: three assistant messages in the mock thread are ~17px short each, and the
-thread is bottom-anchored, so the whole column sits ~50px off. keepers measures
-**0.848**.
+keepers went **0.848 → 0.909** on that. What is left is the roster and thread
+chrome, where the residual is the button font fallback described below.
 
 ### Board — `.bd-stateblock` is a design component the dashboard has not built
 

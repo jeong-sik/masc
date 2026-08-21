@@ -124,6 +124,21 @@ type finalization_evidence =
   }
 
 type supersession =
+  | Operator_blocked_purge_released of { actor : string }
+      (** The operator released a [Blocked] dashboard purge whose worker died
+          before it finished. Like {!Operator_metadata_update} this carries no
+          effect-duplication risk -- the work failed -- but it is not a
+          metadata update: a purge leaves no metadata to update, and the
+          admission fence it holds is what stops the purge being reissued.
+          Kept apart so the durable record says which release was signed off.
+
+          Without this the pair ([Blocked], [Dashboard_keeper_purge]) had no
+          exit: the fence blocks meta materialization, {!val:resolve} needs
+          that meta to build a purge target, and supersession refused any
+          intent but [Operator_stop_retain_meta]. A worker that died in
+          [Joining_lanes] left the Keeper permanently half-purged
+          (RFC-0000 1.2 LAW 1 "No dead-end", the same law #25491 restored for
+          [Reconciliation_required]). *)
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string

@@ -37,6 +37,11 @@ type resolve_error =
       ; operation_id : Keeper_shutdown_types.Operation_id.t
       ; detail : string
       }
+  | Keeper_purge_blocked of
+      { keeper_name : string
+      ; operation_id : Keeper_shutdown_types.Operation_id.t
+      ; detail : string
+      }
   | Keeper_lane_executing of
       { keeper_name : string
       ; phase : string
@@ -44,6 +49,14 @@ type resolve_error =
       }
 
 let resolve_error_to_string = function
+  | Keeper_purge_blocked { keeper_name; operation_id; detail } ->
+    Printf.sprintf
+      "keeper purge %s is blocked and will not resume on its own: keeper=%s \
+       failure=%s; release the admission fence with an operator supersession, \
+       then reissue the purge"
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+      keeper_name
+      detail
   | Keeper_lane_executing { keeper_name; phase; live_turn_id } ->
     (match live_turn_id with
      | None ->
@@ -200,12 +213,32 @@ let existing_operation (config : Workspace.config) requested_name =
                ; detail = Keeper_shutdown_store.error_to_string error
                })
         | Ok operation ->
-          Ok
-            (match operation.cleanup_intent.reason with
-             | Keeper_shutdown_types.Dashboard_keeper_purge _ -> Some operation
-             | Operator_stop_retain_meta
-             | Operator_stop_remove_meta
-             | Supervisor_cleanup -> None)))
+          (match operation.cleanup_intent.reason with
+           | Keeper_shutdown_types.Dashboard_keeper_purge _ ->
+             (match operation.phase with
+              | Keeper_shutdown_types.Blocked failure ->
+                Error
+                  (Keeper_purge_blocked
+                     { keeper_name
+                     ; operation_id
+                     ; detail =
+                         Printf.sprintf
+                           "%s: %s"
+                           (Keeper_shutdown_types.failure_stage_to_string
+                              failure.Keeper_shutdown_types.stage)
+                           failure.Keeper_shutdown_types.detail
+                     })
+              | Prepared
+              | Joining_lanes
+              | Joined_idle
+              | Finalizing_tasks _
+              | Cleanup_ready _
+              | Reconciliation_required _
+              | Finalized _
+              | Superseded _ -> Ok (Some operation))
+           | Operator_stop_retain_meta
+           | Operator_stop_remove_meta
+           | Supervisor_cleanup -> Ok None)))
 ;;
 
 let submit ~config ~actor ({ requested_name; keeper_name; meta } : target) =

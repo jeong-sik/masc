@@ -35,6 +35,7 @@ type supersede_blocked_result =
    recovered from the record afterwards. *)
 type superseded_admission =
   | Blocked_operator_stop
+  | Blocked_dashboard_purge
   | Unreconciled_turn of Keeper_shutdown_types.active_turn
 
 type operator_metadata_supersession_token =
@@ -278,6 +279,11 @@ let finalization_evidence_to_json evidence =
 ;;
 
 let supersession_to_json = function
+  | Operator_blocked_purge_released { actor } ->
+    `Assoc
+      [ "kind", `String "operator_blocked_purge_released"
+      ; "actor", `String actor
+      ]
   | Operator_metadata_update { actor } ->
     `Assoc
       [ "kind", `String "operator_metadata_update"
@@ -592,6 +598,9 @@ let finalization_evidence_of_json json =
 let supersession_of_json json =
   let* kind = string "kind" json in
   match kind with
+  | "operator_blocked_purge_released" ->
+    let* actor = string "actor" json in
+    Ok (Operator_blocked_purge_released { actor })
   | "operator_metadata_update" ->
     let* actor = string "actor" json in
     Ok (Operator_metadata_update { actor })
@@ -927,6 +936,20 @@ let prepare_operator_metadata_supersession
       ; superseded_admission = Unreconciled_turn turn
       }
   | Ok
+      ({ phase = Superseded (Operator_blocked_purge_released _)
+       ; revision
+       ; _ } as _operation) ->
+    (* Idempotent: a second release of the same purge re-mints the same token
+       rather than reporting a phase mismatch. *)
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision = revision
+      ; actor
+      ; superseded_admission = Blocked_dashboard_purge
+      }
+  | Ok
       ({ phase = Superseded (Operator_metadata_update _ | Operator_reconciliation_accepted _)
        ; revision
        ; _ } as _operation) ->
@@ -937,6 +960,25 @@ let prepare_operator_metadata_supersession
       ; expected_revision = revision
       ; actor
       ; superseded_admission = Blocked_operator_stop
+      }
+  (* A purge whose worker died in [Joining_lanes] holds the admission fence,
+     and that fence is what stops its own reissue: meta cannot be materialized
+     while it is held, and [Keeper_dashboard_purge.resolve] needs that meta to
+     build a target. Releasing it is the only exit, and it is as safe here as
+     for an operator stop -- the phase, not the intent, is what says the work
+     failed. *)
+  | Ok
+      ({ phase = Blocked _
+       ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
+       ; revision
+       ; _ } as _operation) ->
+    Ok
+      { base_path
+      ; keeper_name
+      ; operation_id
+      ; expected_revision = revision
+      ; actor
+      ; superseded_admission = Blocked_dashboard_purge
       }
   | Ok ({ phase = Blocked _; _ } as operation) ->
     Error (Supersession_intent_mismatch operation)
@@ -982,12 +1024,18 @@ let supersede_blocked_operator_stop ~config ~token ~now =
          | Ok
              ({ phase =
                   Superseded
-                    (Operator_metadata_update _ | Operator_reconciliation_accepted _)
+                    ( Operator_metadata_update _
+                    | Operator_reconciliation_accepted _
+                    | Operator_blocked_purge_released _ )
               ; _ } as existing) ->
            Ok (Superseded_already_persisted existing)
          | Ok
              ({ phase = Blocked _ | Reconciliation_required _
               ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
+              ; _ } as existing)
+         | Ok
+             ({ phase = Blocked _
+              ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
               ; _ } as existing) ->
            if not (Int.equal existing.revision token.expected_revision)
            then
@@ -1002,6 +1050,8 @@ let supersede_blocked_operator_stop ~config ~token ~now =
                match token.superseded_admission with
                | Blocked_operator_stop ->
                  Operator_metadata_update { actor = token.actor }
+               | Blocked_dashboard_purge ->
+                 Operator_blocked_purge_released { actor = token.actor }
                | Unreconciled_turn unreconciled_turn ->
                  Operator_reconciliation_accepted
                    { actor = token.actor; unreconciled_turn }

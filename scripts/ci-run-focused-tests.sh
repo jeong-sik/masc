@@ -79,6 +79,7 @@ fi
 
 paused_targets=(
   @test/runtest-test_keeper_turn_outcome
+  @test/runtest-test_keeper_shutdown_blocked_purge_release
   @test/runtest-test_keeper_paused_work_transfer_transaction
   @test/runtest-test_keeper_paused_work_source_terminal_transaction
   @test/runtest-test_keeper_paused_work_operator

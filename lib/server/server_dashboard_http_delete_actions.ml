@@ -534,6 +534,9 @@ let keeper_purge_resolve_status = function
   | Keeper_lane_executing _ -> `Conflict
   | Keeper_owner_unavailable _ -> `Service_unavailable
   | Keeper_operation_unreadable _ -> `Internal_server_error
+  (* Not 500: the record is readable and the state is exact. It is a conflict
+     the operator resolves by releasing the fence. *)
+  | Keeper_purge_blocked _ -> `Conflict
 ;;
 
 let keeper_purge_submit_status = function

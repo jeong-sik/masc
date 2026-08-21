@@ -248,13 +248,19 @@ let goal_event_timeline_json event =
           payload_field "phase" |> json_to_string_opt
           |> Option.value ~default:"<missing payload.phase>"
         in
+        (* [payload.actor] is the agent name, a bare string: every producer
+           builds it that way ([gate_event_payload] and the two inline
+           payloads in workspace_goals.ml). Reading it as [actor.id] made
+           [json_member_or_null] return [`Null] for every event ever written,
+           so the summary silently lost the actor — the one field that says
+           who moved the goal. Marked like [phase] when absent, so a producer
+           that stops writing it shows up instead of disappearing. *)
         let actor =
-          payload_field "actor" |> json_member_or_null "id" |> json_to_string_opt
+          payload_field "actor" |> json_to_string_opt
+          |> Option.value ~default:"<missing payload.actor>"
         in
         ( "Goal Phase",
-          (match actor with
-          | Some actor_id -> Printf.sprintf "phase=%s by %s" phase actor_id
-          | None -> Printf.sprintf "phase=%s" phase),
+          Printf.sprintf "phase=%s by %s" phase actor,
           (match phase with
           | "blocked" -> "bad"
           | "paused" -> "warn"

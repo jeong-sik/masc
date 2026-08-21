@@ -918,6 +918,14 @@
  (modules test_dashboard_goal_id_projection)
  (libraries masc_test_deps))
 
+; #29299: the goal tree emitted raw goal_events.jsonl rows under
+; timeline_events while every consumer reads the normalized shape.
+
+(test
+ (name test_goal_timeline_projection)
+ (modules test_goal_timeline_projection)
+ (libraries masc_test_deps))
+
 ; RFC-0267 Phase 2: validated task->goal assignment
 ; (Task.Goal_assignment.set_task_goal).
 

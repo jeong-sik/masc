@@ -18,7 +18,6 @@ let compact_keeper_json keeper_json =
       , string_json_opt ~max_len:160 (member_assoc "current_task_id" keeper_json) );
       ("last_reply_status", string_json_opt (member_assoc "last_reply_status" diagnostic));
       ("last_reply_preview", string_json_opt ~max_len:160 (member_assoc "last_reply_preview" diagnostic));
-      ("active_goal_ids", string_list_json (member_assoc "active_goal_ids" keeper_json));
     ]
 
 let compact_agent_json (agent : Masc_domain.agent) =

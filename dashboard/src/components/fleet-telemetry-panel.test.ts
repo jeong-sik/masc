@@ -317,7 +317,6 @@ describe('FleetTelemetryPanel', () => {
       keepers: [
         {
           ...executionResponse.keepers[0],
-          active_goal_ids: ['goal-1'],
           sandbox_profile: 'docker',
           sandbox_last_error: 'bind EPERM at /var/folders/tmp',
         },
@@ -341,9 +340,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Gate 대기')
     expect(container.textContent).toContain('주의 대기열')
     expect(container.textContent).toContain('keeper-alpha has a pending Gate request.')
-    expect(container.textContent).toContain('goal linked')
     expect(container.textContent).toContain('sandbox docker')
-    expect(container.textContent).toContain('goal-1')
     expect(container.textContent).toContain('bind EPERM at /var/folders/tmp')
   }, 60_000)
 

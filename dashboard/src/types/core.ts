@@ -1150,7 +1150,6 @@ export interface Keeper {
   attention_reason?: string | null
   next_human_action?: string | null
   config_error?: KeeperProfileConfigError | null
-  active_goal_ids?: string[]
   sandbox_profile?: 'local' | 'docker' | null
   sandbox_target?: string | null
   sandbox_last_error?: string | null
@@ -1379,10 +1378,6 @@ interface KeeperConfigRuntime {
 interface KeeperConfigWorkspace {
   mention_targets: string[]
   bound_workspace_ids: string[]
-  active_goal_ids: string[]
-  active_goals: KeeperConfigActiveGoal[]
-  active_goal_count: number
-  missing_active_goal_ids: string[]
 }
 
 export interface KeeperConfigOverrideFieldSource {
@@ -1446,7 +1441,6 @@ interface KeeperHookIntrospection {
 
 export interface KeeperConfig {
   name: string
-  active_goal_ids: string[]
   autoboot_enabled: boolean
   max_context_override: number | null
   /** Keeper-level autonomous wake prompt override; null inherits the fleet

@@ -37,6 +37,11 @@ type audience =
   | Fleet_conversation
   | System_record
 
+type task_cache_signal =
+  { subject_agent : string
+  ; task_id : string
+  }
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -131,6 +136,7 @@ val broadcast_delivery_to_yojson : broadcast_delivery -> Yojson.Safe.t
 
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
+           ?task_cache_signal:task_cache_signal ->
            audience:audience ->
            Workspace_utils_backend_setup.config ->
            from_agent:string -> content:string ->

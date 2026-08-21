@@ -25,6 +25,14 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let state = ctx.state in
   let content = arg_get_string ctx "content" "" in
   let trimmed = String.trim content in
+  let task_cache_subject_agent =
+    Safe_ops.json_string_opt "task_cache_subject_agent" ctx.arguments
+    |> String_util.option_trim
+  in
+  let task_cache_task_id =
+    Safe_ops.json_string_opt "task_cache_task_id" ctx.arguments
+    |> String_util.option_trim
+  in
   if String.equal trimmed "" then
     (* RFC-0189: caller-input violation (empty broadcast content).
        The producer supplies [Workflow_rejection] explicitly; body text
@@ -33,7 +41,22 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
             ~failure_class:Tool_result.Workflow_rejection
             ~tool_name ~start_time
             "Broadcast content cannot be empty")
+  else if Option.is_some task_cache_subject_agent <> Option.is_some task_cache_task_id
+  then
+    Some
+      (Tool_result.error
+         ~failure_class:Tool_result.Workflow_rejection
+         ~tool_name
+         ~start_time
+         "task_cache_subject_agent and task_cache_task_id must be supplied together")
   else
+  let task_cache_signal =
+    match task_cache_subject_agent, task_cache_task_id with
+    | Some subject_agent, Some task_id ->
+      Some Workspace_broadcast.{ subject_agent; task_id }
+    | None, None -> None
+    | Some _, None | None, Some _ -> None
+  in
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in
   if not allowed then
     (* RFC-0189: rate-limit hit — caller should retry after [wait_secs].
@@ -51,6 +74,7 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
       (* A Keeper calling masc_broadcast is speaking to the workspace, so
          this reaches every Keeper's conversation window. *)
       Workspace.broadcast ?trace_context
+        ?task_cache_signal
         ~audience:Workspace_broadcast.Fleet_conversation config
         ~from_agent:agent_name ~content
     in

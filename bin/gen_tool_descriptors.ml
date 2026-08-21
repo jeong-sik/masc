@@ -335,6 +335,18 @@ let masc_broadcast_spec : tool_spec =
         ; p_description = "Broadcast body text (use @mention for specific agents)"
         ; p_required = true
         }
+      ; { p_name = "task_cache_subject_agent"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description =
+            "Optional typed cache signal: agent whose cached current task is being observed. Must be supplied together with task_cache_task_id."
+        ; p_required = false
+        }
+      ; { p_name = "task_cache_task_id"
+        ; p_type = T_string { enum = None; default = None }
+        ; p_description =
+            "Optional typed cache signal: task ID observed as active in the subject agent cache. Must be supplied together with task_cache_subject_agent."
+        ; p_required = false
+        }
       ]
   ; additional_properties = false
   ; behavior_contract =

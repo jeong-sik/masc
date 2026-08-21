@@ -1,13 +1,17 @@
-(** Guard an agent-owned task cache against canonical backlog state. *)
+(** Guard an explicitly declared task-cache signal against canonical backlog state. *)
+
+type signal =
+  { subject_agent : string
+  ; task_id : string
+  }
 
 type rewrite =
   | Unchanged of string
   | Invalidated of string
 
-val rewrite_current_task :
+val rewrite_signal :
   config:Workspace_utils_backend_setup.config ->
-  from_agent:string ->
   module_name:string ->
-  task_id:string ->
+  signal:signal ->
   content:string ->
   rewrite

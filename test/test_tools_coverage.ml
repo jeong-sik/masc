@@ -208,6 +208,25 @@ let test_masc_broadcast_schema () =
       | Some props ->
           Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
           Alcotest.(check bool) "has content" true (List.mem_assoc "content" props);
+          Alcotest.(check bool)
+            "has typed cache subject"
+            true
+            (List.mem_assoc "task_cache_subject_agent" props);
+          Alcotest.(check bool)
+            "has typed cache task"
+            true
+            (List.mem_assoc "task_cache_task_id" props);
+          (match get_json_list "required" schema.input_schema with
+           | Some required ->
+             Alcotest.(check bool)
+               "typed cache subject is optional"
+               false
+               (List.mem (`String "task_cache_subject_agent") required);
+             Alcotest.(check bool)
+               "typed cache task is optional"
+               false
+               (List.mem (`String "task_cache_task_id") required)
+           | None -> Alcotest.fail "masc_broadcast missing required field");
           (* The body is named "content" on every surface that carries it —
              board post, surface post, file write, and this tool's own result
              payload. A stray "message" here is the fork that cost a keeper

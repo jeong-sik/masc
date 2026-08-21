@@ -45,6 +45,11 @@ type audience =
   | Fleet_conversation
   | System_record
 
+type task_cache_signal = Workspace_task_cache_invariant.signal =
+  { subject_agent : string
+  ; task_id : string
+  }
+
 type broadcast_delivery =
   { request_id : string
   ; seq : int
@@ -770,8 +775,8 @@ let reconcile_pending_mentions config =
   Cross_context_mutex.with_lock mention_delivery_mutex (fun () ->
     reconcile_pending_mentions_unlocked config)
 
-let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
-    ~content ~pre_extract_mention ~deferred_by_predecessor =
+let broadcast_with_mention ?trace_context ~msg_type ~audience ~task_cache_signal
+    config ~from_agent ~content ~pre_extract_mention ~deferred_by_predecessor =
   let started_at = Time_compat.now () in
   let observe final_msg_type =
     let elapsed_s = Float.max 0.0 (Time_compat.now () -. started_at) in
@@ -781,34 +786,22 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
   in
   ensure_initialized config;
 
-  (* Fleet-wide invariant (PR-B): if the broadcasting agent's typed
-     [current_task] is terminal in the canonical backlog, replace the original
-     broadcast and clear that stale state.  Message prose is deliberately not
-     inspected: arbitrary operator/agent text is not a cache signal. *)
+  (* Fleet-wide invariant (PR-B): only an explicitly typed producer signal can
+     identify a cache observation.  This supports observer -> assignee checks
+     without deriving authority from sender identity or message prose. *)
   let content, msg_type =
-    if String.equal msg_type "broadcast" then
-      let agent_file =
-        Filename.concat (agents_dir config) (safe_filename from_agent ^ ".json")
-      in
-      if path_exists config agent_file then
-        match agent_of_yojson (read_json config agent_file) with
-        | Ok agent -> (
-            match agent.current_task with
-            | Some task_id ->
-              (match
-                 Workspace_task_cache_invariant.rewrite_current_task
-                   ~config
-                   ~from_agent
-                   ~module_name:"workspace_broadcast"
-                   ~task_id
-                   ~content
-               with
-               | Unchanged content -> content, msg_type
-               | Invalidated content -> content, "cache_invalidated")
-            | None -> content, msg_type)
-        | Error _ -> content, msg_type
-      else content, msg_type
-    else (content, msg_type)
+    match task_cache_signal with
+    | Some signal when String.equal msg_type "broadcast" ->
+      (match
+         Workspace_task_cache_invariant.rewrite_signal
+           ~config
+           ~module_name:"workspace_broadcast"
+           ~signal
+           ~content
+       with
+       | Unchanged content -> content, msg_type
+       | Invalidated content -> content, "cache_invalidated")
+    | Some _ | None -> content, msg_type
   in
   let seq = Workspace_state.next_seq config in
   let request_id = Random_id.prefixed ~prefix:"wmsg-" ~bytes:16 in
@@ -905,8 +898,8 @@ let broadcast_with_mention ?trace_context ~msg_type ~audience config ~from_agent
      observe safe_msg_type;
      Ok { delivery with mention_delivery })
 
-let broadcast ?trace_context ?(msg_type = "broadcast") ~audience config
-      ~from_agent ~content =
+let broadcast ?trace_context ?(msg_type = "broadcast") ?task_cache_signal
+      ~audience config ~from_agent ~content =
   (* Preserve original content and extract mention tokens before any
      fleet-wide invariant rewrite. Explicit mentions share the recovery lock,
      so sequence assignment, commit, intake materialization, and wake request
@@ -918,6 +911,7 @@ let broadcast ?trace_context ?(msg_type = "broadcast") ~audience config
       ?trace_context
       ~msg_type
       ~audience
+      ~task_cache_signal
       config
       ~from_agent
       ~content

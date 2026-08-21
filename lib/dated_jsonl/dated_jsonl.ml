@@ -953,6 +953,94 @@ let filter_map_recent ?(offset=0) t n ~f =
     !collected
   end
 
+(* [n] counts the values [f] produced, where [filter_map_recent]'s [n] counts
+   rows visited. Each day file is scanned backwards in 8 KB chunks through the
+   same primitive as [find_latest_entry_result], so a sparse/no-match query
+   never materialises a whole day file. Only the current chunk/line fragment
+   and the selected values remain live. *)
+let collect_matching_files ?(offset = 0) t n ~month_is_in_range
+      ~day_is_in_range ~f =
+  if n <= 0 then []
+  else begin
+    let skip = ref offset in
+    let collected = ref [] in
+    let count = ref 0 in
+    let months = list_month_dirs t.base_dir in
+    let exception Done in
+    (try
+       List.iter (fun m ->
+         if month_is_in_range m
+         then begin
+           let month_path = Filename.concat t.base_dir m in
+           let days = list_day_files month_path in
+           List.iter (fun d ->
+             if !count >= n then raise_notrace Done;
+             if day_is_in_range m d
+             then begin
+               let path = Filename.concat month_path d in
+               let input = open_in_bin path in
+               Fun.protect
+                 ~finally:(fun () -> close_in_noerr input)
+                 (fun () ->
+                    ignore
+                      (find_latest_line_from_channel input (fun line ->
+                         let parsed =
+                           try Some (Yojson.Safe.from_string line)
+                           with Yojson.Json_error _ -> None
+                         in
+                         match parsed with
+                         | None -> None
+                         | Some json ->
+                           (match f json with
+                            | None -> None
+                            | Some value ->
+                              if !skip > 0
+                              then (
+                                decr skip;
+                                None)
+                              else begin
+                                collected := value :: !collected;
+                                incr count;
+                                if !count >= n then Some () else None
+                              end))))
+             end)
+             days
+         end
+       ) months
+     with Done -> ());
+    !collected
+  end
+
+let collect_matching ?offset t n ~f =
+  collect_matching_files
+    ?offset
+    t
+    n
+    ~month_is_in_range:(fun _ -> true)
+    ~day_is_in_range:(fun _ _ -> true)
+    ~f
+;;
+
+let collect_matching_range ?offset t ~since ~until n ~f =
+  match parse_date since, parse_date until with
+  | Some (since_month, since_day), Some (until_month, until_day)
+    when String.compare since until <= 0 ->
+    collect_matching_files
+      ?offset
+      t
+      n
+      ~month_is_in_range:(fun month ->
+        String.compare month since_month >= 0
+        && String.compare month until_month <= 0)
+      ~day_is_in_range:(fun month day_file ->
+        let day = day_number_of_day_file_name day_file in
+        not
+          ((String.equal month since_month && String.compare day since_day < 0)
+           || (String.equal month until_month && String.compare day until_day > 0)))
+      ~f
+  | Some _, Some _ | None, _ | _, None -> []
+;;
+
 let read_recent ?offset t n =
   filter_map_recent ?offset t n ~f:(fun json -> Some json)
 
@@ -1463,4 +1551,3 @@ module For_testing = struct
     Atomic.get cell
 
 end
-

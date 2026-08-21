@@ -249,7 +249,7 @@ let test_state_defaults_to_max_capacity_when_unseen () =
   Shrink_state.For_testing.reset ();
   check int "no memory yet: falls back to the declared cap" 1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let test_state_remembers_last_success () =
@@ -257,10 +257,10 @@ let test_state_remembers_last_success () =
   @@ fun _env ->
   Shrink_state.For_testing.reset ();
   Shrink_state.record_success
-    ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
+    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
   check int "next turn starts from the remembered capacity" 131_072
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let test_state_clamps_a_remembered_value_above_the_current_cap () =
@@ -268,11 +268,11 @@ let test_state_clamps_a_remembered_value_above_the_current_cap () =
   @@ fun _env ->
   Shrink_state.For_testing.reset ();
   Shrink_state.record_success
-    ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~capacity_bytes:2_097_152;
+    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity_bytes:2_097_152;
   check int "a stale remembered value never exceeds the current declared cap"
     1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let test_state_is_keyed_per_keeper_and_runtime () =
@@ -280,13 +280,13 @@ let test_state_is_keyed_per_keeper_and_runtime () =
   @@ fun _env ->
   Shrink_state.For_testing.reset ();
   Shrink_state.record_success
-    ~keeper_name:"sangsu" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
+    ~keeper_name:"alpha" ~runtime_id:"agent_core-primary" ~capacity_bytes:131_072;
   check int "a different runtime on the same keeper is unaffected" 1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"sangsu" ~runtime_id:"agent_core-fallback" ~max_capacity_bytes:1_048_576);
+       ~keeper_name:"alpha" ~runtime_id:"agent_core-fallback" ~max_capacity_bytes:1_048_576);
   check int "the same runtime id on a different keeper is unaffected" 1_048_576
     (Shrink_state.starting_capacity_bytes
-       ~keeper_name:"analyst" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
+       ~keeper_name:"beta" ~runtime_id:"agent_core-primary" ~max_capacity_bytes:1_048_576)
 ;;
 
 let () =

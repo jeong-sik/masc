@@ -197,7 +197,7 @@ let string_opt_nonempty name json =
    A keeper that guesses the host layout ("workspace/<org>/<repo>") gets the
    same "directory does not exist" as one that asked for a repo nobody
    materialized, and the two need opposite responses: retry with the right
-   path, or stop asking. Live taskmaster hit the first and kept retrying
+   path, or stop asking. A live Keeper hit the first and kept retrying
    (#23442). The set is measured, not prescribed: whatever git checkouts sit
    under the keeper's workspace root, wherever the keeper put them. An empty
    set is reported as empty rather than omitted, because "no repository is

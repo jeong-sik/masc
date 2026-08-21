@@ -164,7 +164,7 @@ let clear_agent_current_task_cache config ~task_id =
 (* #13460: cache desync invalidation counter. Workspace_broadcast emits this when
    it replaces an active-claim/release message for a terminal backlog task with
    a cache_invalidated broadcast.  Clear workspace-owned current_task caches so the
-   same stale claim does not re-emit every taskmaster cycle.  Keep labels
+   same stale claim does not re-emit every Keeper cycle. Keep labels
    fleet-bounded; the task id stays in the replacement message/event, not the
    Otel_metric_store series key. *)
 let record_cache_desync_cleared config ~module_name:_ ~task_id ~status =
@@ -220,7 +220,6 @@ let () =
                   ()))
          active_agents)
 ;;
-
 
 
 

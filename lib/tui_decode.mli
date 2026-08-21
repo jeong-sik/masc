@@ -34,6 +34,16 @@ type keeper = {
   k_updated_at : string;
 }
 
+val sanitize_terminal_text : string -> string
+(** Escape C0, DEL, C1 bytes, and UTF-8 encoded C1 code points so external
+    diagnostics cannot emit terminal control sequences. Call at the terminal
+    rendering boundary; decoded records intentionally retain their raw typed
+    diagnostic for non-terminal consumers. *)
+
+val keeper_blocker_for_terminal : keeper -> string
+(** Terminal-boundary projection for the raw typed blocker stored in
+    {!type-keeper}. Missing blockers render as [-]. *)
+
 type planning_goal = {
   pg_id : string;
   pg_title : string;

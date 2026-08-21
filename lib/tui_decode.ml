@@ -215,6 +215,92 @@ let blocker_summary (blocker : Keeper_meta_contract.blocker_info) =
   | "" -> label
   | detail -> label ^ ": " ^ detail
 
+let sanitize_terminal_text text =
+  let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
+  let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
+  let output = Buffer.create (String.length text) in
+  let byte_at index = Char.code text.[index] in
+  let is_continuation byte = byte >= 0x80 && byte <= 0xBF in
+  let valid_utf8_length index =
+    let remaining = String.length text - index in
+    let first = byte_at index in
+    if first >= 0xC2 && first <= 0xDF && remaining >= 2
+       && is_continuation (byte_at (index + 1))
+    then Some 2
+    else if first = 0xE0 && remaining >= 3
+            && byte_at (index + 1) >= 0xA0
+            && byte_at (index + 1) <= 0xBF
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first >= 0xE1 && first <= 0xEC && remaining >= 3
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first = 0xED && remaining >= 3
+            && byte_at (index + 1) >= 0x80
+            && byte_at (index + 1) <= 0x9F
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first >= 0xEE && first <= 0xEF && remaining >= 3
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+    then Some 3
+    else if first = 0xF0 && remaining >= 4
+            && byte_at (index + 1) >= 0x90
+            && byte_at (index + 1) <= 0xBF
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else if first >= 0xF1 && first <= 0xF3 && remaining >= 4
+            && is_continuation (byte_at (index + 1))
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else if first = 0xF4 && remaining >= 4
+            && byte_at (index + 1) >= 0x80
+            && byte_at (index + 1) <= 0x8F
+            && is_continuation (byte_at (index + 2))
+            && is_continuation (byte_at (index + 3))
+    then Some 4
+    else None
+  in
+  let rec append index =
+    if index < String.length text
+    then (
+      let byte = Char.code text.[index] in
+      if
+        byte = 0xC2
+        && index + 1 < String.length text
+        && let next = Char.code text.[index + 1] in
+           next >= 0x80 && next <= 0x9F
+      then (
+        Buffer.add_string output (escaped_codepoint (Char.code text.[index + 1]));
+        append (index + 2))
+      else if byte >= 0xC2
+      then (
+        match valid_utf8_length index with
+        | Some length ->
+          Buffer.add_substring output text index length;
+          append (index + length)
+        | None ->
+          Buffer.add_char output text.[index];
+          append (index + 1))
+      else if byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
+      then (
+        Buffer.add_string output (escaped_byte byte);
+        append (index + 1))
+      else (
+        Buffer.add_char output text.[index];
+        append (index + 1)))
+  in
+  append 0;
+  Buffer.contents output
+;;
+
+let keeper_blocker_for_terminal keeper =
+  Option.value ~default:"-" keeper.k_last_blocker |> sanitize_terminal_text
+;;
+
 let keeper_of_meta (meta : Keeper_meta_contract.keeper_meta) =
   let runtime = meta.runtime in
   let usage = runtime.usage in

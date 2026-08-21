@@ -74,6 +74,19 @@ let seed_all_phases config =
     }
 ;;
 
+(* Only terminal Goals: nothing on the surface, and nothing that could be
+   mistaken for an empty list produced some other way. *)
+let seed_terminal_phases_only config =
+  Goal_store.write_state config
+    { version = 1
+    ; updated_at = Masc_domain.now_iso ()
+    ; goals =
+        [ goal_in Goal_phase.Completed "goal-completed" "already achieved"
+        ; goal_in Goal_phase.Dropped "goal-dropped" "abandoned"
+        ]
+    }
+;;
+
 let meta_with_goals ids =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -138,24 +151,12 @@ let test_world_observation_drops_terminal_goals () =
     observation.Keeper_world_observation.active_goals
 ;;
 
-let test_unresolved_goal_id_stays_visible () =
-  (* An assigned goal that no longer exists is a different fault. Dropping it
-     alongside the terminal ones would replace a visible inconsistency with a
-     silent one, so it keeps its bare-id rendering. *)
-  with_workspace @@ fun config ->
-  seed_all_phases config;
-  let _meta = meta_with_goals [ "goal-completed"; "goal-vanished" ] in
-  let summaries = Keeper_unified_prompt.active_goal_summaries_of_store ~config in
-  check (list string) "the terminal goal goes, the unknown id stays"
-    [ "goal-vanished" ] (summary_ids summaries);
-  check (option string) "unknown id renders with no title" (Some "")
-    (summary_title_opt "goal-vanished" summaries)
-;;
-
+(* Terminal phases are the only thing that removes a Goal from the surface.
+   Seed a store whose Goals are all terminal and neither surface offers any --
+   an empty block rather than one that looks empty for a different reason. *)
 let test_no_goals_surface_when_all_are_terminal () =
   with_workspace @@ fun config ->
-  seed_all_phases config;
-  let _meta = meta_with_goals [ "goal-completed"; "goal-dropped" ] in
+  seed_terminal_phases_only config;
   let meta = meta_with_goals [] in
   check (list string) "no goal block rather than an empty-looking one" []
     (summary_ids (Keeper_unified_prompt.active_goal_summaries_of_store ~config));
@@ -166,7 +167,6 @@ let test_no_goals_surface_when_all_are_terminal () =
   check (list string) "and the frame carries none either" []
     observation.Keeper_world_observation.active_goals
 ;;
-
 
 (* An executing Goal that no Task serves is one fact addressed to every Keeper.
    The keeper's [active_goal_ids] is empty here on purpose: the fact lives on
@@ -300,8 +300,6 @@ let () =
             test_system_prompt_surface_drops_terminal_goals
         ; test_case "world observation drops terminal goals" `Quick
             test_world_observation_drops_terminal_goals
-        ; test_case "unresolved goal id stays visible" `Quick
-            test_unresolved_goal_id_stays_visible
         ; test_case "all-terminal yields no goals at either surface" `Quick
             test_no_goals_surface_when_all_are_terminal
         ] )

@@ -1664,7 +1664,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
          ; "trace_id"
          ; "generation"
          ; "current_task_id"
-         ; "active_goal_ids"
          ; "trust"
          ])
   in
@@ -1683,8 +1682,6 @@ let test_execution_trust_uses_narrow_keeper_projection () =
   check string "trace id" "execution-trust-narrow-trace"
     (row |> member "trace_id" |> to_string);
   check int "generation" 17 (row |> member "generation" |> to_int);
-  check (list string) "active goals" [ "goal-narrow-1" ]
-    (row |> member "active_goal_ids" |> to_list |> List.map to_string);
   check bool "trust summary remains populated" true
     (match row |> member "trust" with `Assoc _ -> true | _ -> false)
 

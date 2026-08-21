@@ -145,24 +145,22 @@ let test_empty_response_detail_counts_via_canonical_projection () =
     (String_util.string_contains_substring ~needle:"text_chars=4" detail)
 ;;
 
-let test_panel_failure_yojson_accepts_legacy_empty_response () =
-  let decode json =
+let test_panel_failure_yojson_rejects_bare_string_shapes () =
+  (* Both used to decode. `String "Empty_response" also invented the detail
+     "empty response", which no producer ever sent. *)
+  let rejects label json =
     match Fusion_types.panel_failure_of_yojson json with
-    | Ok failure -> failure
-    | Error err -> Alcotest.fail err
+    | Error _ -> ()
+    | Ok failure ->
+      Alcotest.failf "%s decoded as %s" label
+        (Fusion_types.show_panel_failure failure)
   in
-  let legacy_detail =
-    match decode (`String "Empty_response") with
-    | Fusion_types.Empty_response detail -> detail
-    | other ->
-      Alcotest.failf "unexpected panel failure: %s"
-        (Fusion_types.show_panel_failure other)
-  in
-  Alcotest.(check string) "legacy detail" "empty response" legacy_detail;
-  Alcotest.(check string)
-    "legacy timeout"
-    (Fusion_types.show_panel_failure Fusion_types.Timeout)
-    (Fusion_types.show_panel_failure (decode (`String "Timeout")))
+  rejects "bare Empty_response" (`String "Empty_response");
+  rejects "bare Timeout" (`String "Timeout");
+  (* An [`Int] in the float slot was accepted for hand-written records and
+     earlier wire. *)
+  rejects "Invalid_timeout_s carrying an Int"
+    (`List [ `String "Invalid_timeout_s"; `Int 3 ])
 ;;
 
 let test_panel_failure_yojson_round_trips_current_shapes () =
@@ -232,9 +230,9 @@ let () =
             `Quick
             test_empty_response_detail_uses_canonical_unknown_stop_reason
         ; Alcotest.test_case
-            "panel failure yojson accepts legacy empty response"
+            "panel failure yojson rejects bare string shapes"
             `Quick
-            test_panel_failure_yojson_accepts_legacy_empty_response
+            test_panel_failure_yojson_rejects_bare_string_shapes
         ; Alcotest.test_case
             "panel failure yojson round-trips current shapes"
             `Quick

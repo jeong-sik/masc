@@ -359,7 +359,7 @@ let test_moved_tool_surface_starts_fresh () =
    operator's judgement on what a crash left behind; the owner knows the turn
    did not finish and why, and already classifies the operation as
    Turn_cancelled. Routing it to Recovery_required blocked every later turn for
-   that keeper until someone resolved it by hand -- kidsnote re-entered three
+   that keeper until someone resolved it by hand -- gamma re-entered three
    minutes after being cleared (#28012). *)
 let test_owner_stop_releases_without_recovery () =
   check bool

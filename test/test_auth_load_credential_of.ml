@@ -52,15 +52,15 @@ let write_cred ~base ~agent_name ~token_hash =
 
 let test_exact_match_load_ok () =
   with_temp_base (fun base ->
-    write_cred ~base ~agent_name:"keeper-sangsu-agent"
+    write_cred ~base ~agent_name:"keeper-alpha-agent"
       ~token_hash:"abc123";
     match
       Auth.load_credential_of base
-        ~ctx_agent_name:"keeper-sangsu-agent"
-        ~resolved_credential_stem:"keeper-sangsu-agent"
+        ~ctx_agent_name:"keeper-alpha-agent"
+        ~resolved_credential_stem:"keeper-alpha-agent"
     with
     | Ok cred ->
-        assert (cred.agent_name = "keeper-sangsu-agent");
+        assert (cred.agent_name = "keeper-alpha-agent");
         print_endline "PASS: exact match -> Ok cred"
     | Error e ->
         Printf.printf "FAIL: expected Ok, got Error %s\n"
@@ -89,13 +89,13 @@ let test_mismatch_rejects_even_when_resolved_stem_exists () =
   (* Dual-identity scenario: bare nickname cred exists on disk, but ctx
      is canonical. load_credential_of must reject rather than fall back. *)
   with_temp_base (fun base ->
-    write_cred ~base ~agent_name:"sangsu" ~token_hash:"bare-token";
-    write_cred ~base ~agent_name:"keeper-sangsu-agent"
+    write_cred ~base ~agent_name:"alpha" ~token_hash:"bare-token";
+    write_cred ~base ~agent_name:"keeper-alpha-agent"
       ~token_hash:"canonical-token";
     match
       Auth.load_credential_of base
-        ~ctx_agent_name:"keeper-sangsu-agent"
-        ~resolved_credential_stem:"sangsu"
+        ~ctx_agent_name:"keeper-alpha-agent"
+        ~resolved_credential_stem:"alpha"
     with
     | Ok _ ->
         print_endline "FAIL: expected Credential_mismatch, got Ok (silent fallback)";
@@ -106,8 +106,8 @@ let test_mismatch_rejects_even_when_resolved_stem_exists () =
     | Error
         (Auth.Credential_mismatch
            { ctx_agent_name; resolved_credential_stem }) ->
-        assert (ctx_agent_name = "keeper-sangsu-agent");
-        assert (resolved_credential_stem = "sangsu");
+        assert (ctx_agent_name = "keeper-alpha-agent");
+        assert (resolved_credential_stem = "alpha");
         print_endline
           "PASS: ctx<>stem -> Credential_mismatch (no silent fallback)")
 

@@ -145,7 +145,7 @@ let record_identity_raw_surface field raw canonical fields =
     1. Empty / "anonymous" -> fill from [agent_name].
     2. Caller's canonical equals ctx canonical -> keep the caller's
        canonicalisation (same keeper, possibly different surface form
-       like [keeper-velvet-hammer-agent] vs [velvet-hammer]).
+       like [keeper-example-keeper-agent] vs [example-keeper]).
     3. Caller's canonical disagrees -> rewrite the field to ctx
        canonical, preserve the caller's claim in
        [meta.<field>_caller_claim] for forensics, and increment

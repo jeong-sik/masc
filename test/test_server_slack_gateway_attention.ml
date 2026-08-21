@@ -36,7 +36,7 @@ let pending ~base_path ~keeper_name =
 let record ~base_path ?(team_id = Some "T1") ?(thread_ts = None) ~ts ~route
     ~urgency () =
   G.For_testing.record_external_attention ~base_dir:base_path
-    ~keeper_name:"sangsu" ~team_id ~channel_id:"C1" ~thread_ts ~ts
+    ~keeper_name:"alpha" ~team_id ~channel_id:"C1" ~thread_ts ~ts
     ~user_id:"U1" ~user_name:(Some "user-one") ~content:"hello keeper"
     ~mentions_bot:(urgency = A.Mention) ~route ~urgency
 
@@ -46,7 +46,7 @@ let test_triggered_record_is_pending_with_slack_surface () =
           ~urgency:A.Mention () with
   | None -> fail "record returned None"
   | Some event_id -> (
-    match pending ~base_path ~keeper_name:"sangsu" with
+    match pending ~base_path ~keeper_name:"alpha" with
     | [ item ] ->
       check string "event id" event_id item.A.event_id;
       check string "urgency" "mention" (A.urgency_to_string item.A.urgency);
@@ -67,7 +67,7 @@ let test_ambient_record_uses_ambient_urgency () =
           ~urgency:A.Ambient () with
   | None -> fail "record returned None"
   | Some _ -> (
-    match pending ~base_path ~keeper_name:"sangsu" with
+    match pending ~base_path ~keeper_name:"alpha" with
     | [ item ] ->
       check string "urgency" "ambient" (A.urgency_to_string item.A.urgency)
     | items ->
@@ -84,7 +84,7 @@ let test_duplicate_wire_delivery_keeps_one_pending () =
       ~urgency:A.Mention ()
   in
   check (option string) "same event id" first second;
-  check int "one pending" 1 (List.length (pending ~base_path ~keeper_name:"sangsu"))
+  check int "one pending" 1 (List.length (pending ~base_path ~keeper_name:"alpha"))
 
 let test_sent_reply_retires_attention () =
   with_temp_base "slack-attention-resolve" @@ fun base_path ->
@@ -93,11 +93,11 @@ let test_sent_reply_retires_attention () =
   | None -> fail "record returned None"
   | Some event_id ->
     check int "pending before reply" 1
-      (List.length (pending ~base_path ~keeper_name:"sangsu"));
+      (List.length (pending ~base_path ~keeper_name:"alpha"));
     G.For_testing.mark_attention_resolved ~base_dir:base_path
-      ~keeper_name:"sangsu" ~event_id ~reason:"slack_reply_sent";
+      ~keeper_name:"alpha" ~event_id ~reason:"slack_reply_sent";
     check int "pending after reply" 0
-      (List.length (pending ~base_path ~keeper_name:"sangsu"))
+      (List.length (pending ~base_path ~keeper_name:"alpha"))
 
 (* Inbound identity rendering (issue #28376): the lane-shared mapping
    resolves the author label and rewrites mention escapes, and never touches

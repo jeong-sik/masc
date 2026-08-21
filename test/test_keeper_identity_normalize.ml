@@ -41,26 +41,26 @@ let check_bundle ~label ~input ~keeper ~agent =
   check string (label ^ ": agent_name") agent b.agent_name
 
 let test_bare_canonical () =
-  check_bundle ~label:"bare canonical" ~input:"sangsu"
-    ~keeper:"sangsu" ~agent:"sangsu"
+  check_bundle ~label:"bare canonical" ~input:"alpha"
+    ~keeper:"alpha" ~agent:"alpha"
 
 let test_keeper_dash_agent_wrapper () =
-  check_bundle ~label:"keeper-X-agent wrapper" ~input:"keeper-sangsu-agent"
-    ~keeper:"sangsu" ~agent:"keeper-sangsu-agent"
+  check_bundle ~label:"keeper-X-agent wrapper" ~input:"keeper-alpha-agent"
+    ~keeper:"alpha" ~agent:"keeper-alpha-agent"
 
 let test_keeper_underscore_agent_wrapper () =
-  check_bundle ~label:"keeper_X_agent wrapper" ~input:"keeper_sangsu_agent"
-    ~keeper:"sangsu" ~agent:"keeper_sangsu_agent"
+  check_bundle ~label:"keeper_X_agent wrapper" ~input:"keeper_alpha_agent"
+    ~keeper:"alpha" ~agent:"keeper_alpha_agent"
 
 let test_ephemeral_suffix_only () =
-  check_bundle ~label:"ephemeral suffix" ~input:"issue_king-pale-llama"
-    ~keeper:"issue_king"
-    ~agent:"issue_king-pale-llama"
+  check_bundle ~label:"ephemeral suffix" ~input:"kappa_keeper-pale-llama"
+    ~keeper:"kappa_keeper"
+    ~agent:"kappa_keeper-pale-llama"
 
 let test_wrapper_plus_ephemeral () =
   check_bundle ~label:"wrapper + suffix"
-    ~input:"keeper-executor-warm-raven-agent"
-    ~keeper:"executor" ~agent:"keeper-executor-warm-raven-agent"
+    ~input:"keeper-omega-warm-raven-agent"
+    ~keeper:"omega" ~agent:"keeper-omega-warm-raven-agent"
 
 let test_empty_input () =
   match normalize "" with
@@ -134,12 +134,12 @@ let () =
         ] );
       ( "round_trip",
         [
-          test_case "round-trip sangsu" `Quick (test_round_trip_for_name "sangsu");
+          test_case "round-trip alpha" `Quick (test_round_trip_for_name "alpha");
           test_case "round-trip executor" `Quick
-            (test_round_trip_for_name "executor");
-          test_case "round-trip qa-king" `Quick
-            (test_round_trip_for_name "qa-king");
-          test_case "round-trip masc-improver" `Quick
-            (test_round_trip_for_name "masc-improver");
+            (test_round_trip_for_name "omega");
+          test_case "round-trip mu-king" `Quick
+            (test_round_trip_for_name "mu-king");
+          test_case "round-trip omicron-improver" `Quick
+            (test_round_trip_for_name "omicron-improver");
         ] );
     ]

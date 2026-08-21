@@ -5,9 +5,9 @@ let make_meta () =
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
-          ("name", `String "verifier");
-          ("agent_name", `String "keeper-verifier-agent");
-          ("trace_id", `String "trace-verifier");
+          ("name", `String "omega");
+          ("agent_name", `String "keeper-omega-agent");
+          ("trace_id", `String "trace-omega");
         ])
   with
   | Ok meta -> meta
@@ -98,7 +98,7 @@ let shutdown_operation_with_phase phase =
       Keeper_shutdown_types.schema_version
   ; revision = 1
   ; operation_id = Keeper_shutdown_types.Operation_id.generate ()
-  ; keeper_name = "verifier"
+  ; keeper_name = "omega"
   ; lane_ownership = Keeper_shutdown_types.Dormant_meta
   ; trace_id
   ; generation = 1

@@ -28,10 +28,10 @@ let conversation ?(surface = discord_surface "chan-1") id =
 let external_message ?(surface = discord_surface "chan-1") message_id =
   { A.surface = surface; message_id; reply_to_message_id = None }
 
-let item ?(dedupe_key = "discord:chan-1:msg-1") ?(keeper_name = "sangsu")
+let item ?(dedupe_key = "discord:chan-1:msg-1") ?(keeper_name = "alpha")
     ?(conversation = conversation "discord:guild-1:chan-1")
     ?external_message ?(urgency = A.Mention) ?(received_at = 10.0)
-    ?(preview = "@sangsu check this") () =
+    ?(preview = "@alpha check this") () =
   {
     A.event_id = A.event_id_of_dedupe_key dedupe_key;
     dedupe_key;

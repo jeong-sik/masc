@@ -262,7 +262,7 @@ let test_awaiting_is_claimable_by_nobody () =
          when String.equal verification_id "vrf-1" -> ()
        | _ ->
          failwith (actor ^ " must not claim an obligation awaiting a completion verdict"))
-    [ owner; "verifier"; "other" ]
+    [ owner; "fixture-reviewer"; "other" ]
 ;;
 
 let () =

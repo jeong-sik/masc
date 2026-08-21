@@ -84,7 +84,7 @@ let test_waiting_inventory_changed_wire_contract () =
         received_events := ev.Masc.Sse.ext_frame :: !received_events)
       ();
     Masc.Keeper_waiting_inventory_broadcast.changed
-      ~keeper_name:"kidsnote"
+      ~keeper_name:"gamma"
       ~source:Event_queue;
     Alcotest.(check int) "received invalidation" 1 (List.length !received_events);
     let frame = List.hd !received_events in
@@ -101,7 +101,7 @@ let test_waiting_inventory_changed_wire_contract () =
       (payload |> member "type" |> to_string);
     Alcotest.(check string)
       "keeper name"
-      "kidsnote"
+      "gamma"
       (payload |> member "keeper_name" |> to_string);
     Alcotest.(check string)
       "queue kind"

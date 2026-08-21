@@ -295,7 +295,7 @@ let test_keeper_surface_resolves_alias_names () =
 
 let test_toml_overlay_reaches_effective_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "analyst" in
+  let name = "delta" in
   write_keeper_agent ~keepers_dir ~name "Analyze carefully.";
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
@@ -419,7 +419,7 @@ multimodal_policy = "delegate"
 
 let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
-  let name = "masc-improver" in
+  let name = "omicron-improver" in
   let agent_dir = Filename.concat keepers_dir name in
   mkdir_p agent_dir;
   write_file
@@ -431,7 +431,7 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
 sandbox_profile = "docker"
 proactive_enabled = true
 allowed_paths = ["workspace/yousleepwhen/masc"]
-active_goal_ids = ["goal-masc-improver"]
+active_goal_ids = ["goal-omicron-improver"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -492,7 +492,7 @@ active_goal_ids = ["goal-masc-improver"]
     returned.allowed_paths;
   Alcotest.(check (list string))
     "returned active_goal_ids is TOML canonical"
-    [ "goal-masc-improver" ]
+    [ "goal-omicron-improver" ]
     returned.active_goal_ids
 
 let test_ensure_keeper_meta_preserves_live_usage_during_reconcile () =

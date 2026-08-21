@@ -1,6 +1,6 @@
 (* Pure-decision tests for [Runtime_agent.classify_advanced_outcome].
 
-   Live defect (2026-08-14, sangsu discord-msg-1537658864005021797): a
+   Live defect (2026-08-14, alpha discord-msg-1537658864005021797): a
    terminal-contract tool delivered its effect, Agent Core ended the run with
    [Terminal_tool_completed], and the runtime mapped that success to
    [Internal "runtime_agent_terminal_tool_completion_unsupported"] — an error

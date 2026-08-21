@@ -77,17 +77,17 @@ let test_no_path_escape () =
 
 let test_strip_canonical_to_short () =
   check string "canonical stripped to short"
-    "masc-improver"
-    (PP.sanitize_keeper_name "keeper-masc-improver-agent");
+    "omicron-improver"
+    (PP.sanitize_keeper_name "keeper-omicron-improver-agent");
   check string "short stays short"
-    "masc-improver"
-    (PP.sanitize_keeper_name "masc-improver");
+    "omicron-improver"
+    (PP.sanitize_keeper_name "omicron-improver");
   check string "cheolsu canonical"
     "cheolsu"
     (PP.sanitize_keeper_name "keeper-cheolsu-agent");
-  check string "sangsu canonical"
-    "sangsu"
-    (PP.sanitize_keeper_name "keeper-sangsu-agent")
+  check string "alpha canonical"
+    "alpha"
+    (PP.sanitize_keeper_name "keeper-alpha-agent")
 
 let test_canonical_short_path_identity () =
   check string "bundle_root identity"
@@ -102,15 +102,15 @@ let test_strip_edge_cases () =
     "x"
     (PP.sanitize_keeper_name "keeper-x-agent");
   check string "idempotent"
-    (PP.sanitize_keeper_name "masc-improver")
+    (PP.sanitize_keeper_name "omicron-improver")
     (PP.sanitize_keeper_name
-       (PP.sanitize_keeper_name "keeper-masc-improver-agent"));
+       (PP.sanitize_keeper_name "keeper-omicron-improver-agent"));
   check string "different keepers stay different"
-    "sangsu"
-    (PP.sanitize_keeper_name "keeper-sangsu-agent");
-  check bool "sangsu != cheolsu after normalize"
+    "alpha"
+    (PP.sanitize_keeper_name "keeper-alpha-agent");
+  check bool "alpha != cheolsu after normalize"
     true
-    (PP.sanitize_keeper_name "keeper-sangsu-agent"
+    (PP.sanitize_keeper_name "keeper-alpha-agent"
      <> PP.sanitize_keeper_name "keeper-cheolsu-agent")
 
 let test_strip_no_traversal () =
@@ -129,10 +129,10 @@ let test_parse_playground_repo_path () =
   in
   check (option (pair string string)) "local sandbox path"
     (Some ("masc", "lib/foo.ml"))
-    (parse ".masc/playground/sangsu/repos/masc/lib/foo.ml");
+    (parse ".masc/playground/alpha/repos/masc/lib/foo.ml");
   check (option (pair string string)) "docker sandbox path"
     (Some ("masc", "lib/foo.ml"))
-    (parse ".masc/playground/docker/sangsu/repos/masc/lib/foo.ml");
+    (parse ".masc/playground/docker/alpha/repos/masc/lib/foo.ml");
   check (option (pair string string)) "keeper named repos"
     (Some ("masc", "lib/foo.ml"))
     (parse ".masc/playground/repos/repos/masc/lib/foo.ml");
@@ -141,7 +141,7 @@ let test_parse_playground_repo_path () =
     (parse ".masc/playground/docker/repos/repos/masc/lib/foo.ml");
   check (option (pair string string)) "nested repo-local pattern is not sandbox"
     None
-    (parse "workspace/repo/.masc/playground/sangsu/repos/masc/lib/foo.ml")
+    (parse "workspace/repo/.masc/playground/alpha/repos/masc/lib/foo.ml")
 
 let test_parse_playground_file_path () =
   let base_path = "/tmp/masc-base" in
@@ -156,15 +156,15 @@ let test_parse_playground_file_path () =
   check bool "local playground artifact"
     true
     (parse ".masc/playground/executor/artifact.txt"
-     = parsed "executor" "artifact.txt");
+     = parsed "omega" "artifact.txt");
   check bool "docker playground artifact"
     true
     (parse ".masc/playground/docker/executor/artifact.txt"
-     = parsed "executor" "artifact.txt");
+     = parsed "omega" "artifact.txt");
   check bool "nested artifact"
     true
     (parse ".masc/playground/docker/executor/scratch/report.txt"
-     = parsed "executor" "scratch/report.txt");
+     = parsed "omega" "scratch/report.txt");
   check bool "outside playground rejected"
     true
     (parse "workspace/report.txt" = None);

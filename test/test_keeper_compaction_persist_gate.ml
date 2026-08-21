@@ -46,7 +46,7 @@ let result id =
 
 (* One complete tool cycle, then an assistant turn that opens a cycle and a
    second assistant turn that opens another before the first is answered. That
-   overlap is the shape observed live on analyst and idealist:
+   overlap is the shape observed live on delta and idealist:
 
      compaction_rejected reason=invalid_structure:
        Keeper_compaction_unit.Overlapping_tool_cycle

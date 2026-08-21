@@ -88,7 +88,7 @@ let utf8_repair_string (s : string) : string =
 (* #10552: trim BOTH before and after [String_util.utf8_prefix].  The
    pre-fix sequence was [trim → prefix], but [String_util.utf8_prefix]
    can cut at a position that leaves trailing ASCII whitespace
-   (e.g. nick0cave's 322-byte desires field ends with [...는 것.] —
+   (e.g. a 322-byte live desires field ends with [...는 것.] —
    the prefix at max_bytes=320 backs up to byte 318, ending at the
    space before [것]). That made the previous normalizer
    non-idempotent: applying it once produces a 318-byte string ending

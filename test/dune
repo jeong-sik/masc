@@ -2606,6 +2606,17 @@
  (modules test_tui_frame_presenter)
  (libraries alcotest masc_tui_frame_presenter))
 
+(rule
+ (alias runtest-test_tui_keyboard_input)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe})))
+
 (test
  (name test_tui_metrics_tail)
  (modules test_tui_metrics_tail)

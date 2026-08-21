@@ -56,10 +56,6 @@ val message_viewport_supported :
     scrolling. Unsupported viewports render a compact resize gate and suppress
     message editing. *)
 
-val input_cursor_column : terminal_cols:int -> input_bytes:int -> int
-(** One-based cursor column for the current ASCII message editor. The result
-    stays inside the box content rather than covering its right border. *)
-
 val visible_rows : inner_width:int -> height:int -> entry list -> row list
 (** Render chat entries into cell-bounded, UTF-8-safe physical rows and retain
     the newest rows. The newest entry always keeps its metadata row. *)

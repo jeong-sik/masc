@@ -113,6 +113,13 @@ module Input_shortcut = struct
     (not message_mode) && String.equal key "2"
 end
 
+module Viewport = struct
+  (* This is the largest fixed-row budget declared by a surface, not a promise
+     that every variable section already accounts for the viewport. *)
+  let minimum_fixed_chrome_rows = 14
+  let requires_compact_frame ~rows = rows < minimum_fixed_chrome_rows
+end
+
 module Terminal_size_cache = struct
   type t = {
     fallback : int * int;

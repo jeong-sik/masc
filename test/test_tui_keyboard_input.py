@@ -17,7 +17,7 @@ import termios
 import time
 from typing import Any
 
-Interaction = Callable[[subprocess.Popen[bytes], int, bytearray], None]
+Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray], None]
 
 
 def read_available(master_fd: int, output: bytearray) -> None:
@@ -65,6 +65,72 @@ def send_and_wait(
     start = len(output)
     os.write(master_fd, data)
     wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
+
+
+def wait_for_terminal_input_consumed(slave_fd: int) -> None:
+    deadline = time.monotonic() + 3.0
+    while True:
+        pending = struct.unpack(
+            "I",
+            fcntl.ioctl(slave_fd, termios.FIONREAD, struct.pack("I", 0)),
+        )[0]
+        if pending == 0:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"terminal still has {pending} unread input bytes")
+        time.sleep(0.01)
+
+
+def resize_and_wait(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    output: bytearray,
+    *,
+    rows: int,
+    columns: int,
+    needle: bytes,
+    controls: tuple[bytes, ...] = (),
+    final_cursor: bytes | None = None,
+) -> bytes:
+    read_available(master_fd, output)
+    start = len(output)
+    fcntl.ioctl(
+        master_fd,
+        termios.TIOCSWINSZ,
+        struct.pack("HHHH", rows, columns, 0, 0),
+    )
+    wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
+    needle_end = output.find(needle, start) + len(needle)
+    for control in controls:
+        wait_for_output(process, master_fd, output, control, start=start, timeout=3.0)
+    if final_cursor is not None:
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            final_cursor,
+            start=needle_end,
+            timeout=3.0,
+        )
+        cursor_start = output.rfind(final_cursor, needle_end)
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            b"\x1b[?7h",
+            start=cursor_start,
+            timeout=3.0,
+        )
+        segment = bytes(output[start:])
+        last_hidden = segment.rfind(b"\x1b[?25l")
+        last_visible = segment.rfind(b"\x1b[?25h")
+        actual_cursor = b"\x1b[?25h" if last_visible > last_hidden else b"\x1b[?25l"
+        if actual_cursor != final_cursor:
+            raise AssertionError(
+                f"resize ended in {actual_cursor!r}, expected {final_cursor!r}: "
+                f"{segment!r}"
+            )
+    return bytes(output[start:])
 
 
 def kill_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -219,6 +285,8 @@ def run_terminal_scenario(
             with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
                 seed_workspace(base_path)
                 environment = os.environ.copy()
+                environment.pop("LINES", None)
+                environment.pop("COLUMNS", None)
                 environment.update(
                     {
                         "MASC_BASE_PATH": base_path,
@@ -271,7 +339,7 @@ def run_terminal_scenario(
                     raise AssertionError(
                         f"TUI did not enter noncanonical no-echo mode: {active_lflag:#x}"
                     )
-                interact(process, master_fd, output)
+                interact(process, master_fd, slave_fd, output)
                 wait_for_stop(
                     process,
                     master_fd,
@@ -308,7 +376,10 @@ def run_terminal_scenario(
 
 
 def navigate_with_arrows_and_quit(
-    process: subprocess.Popen[bytes], master_fd: int, output: bytearray
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    slave_fd: int,
+    output: bytearray,
 ) -> None:
     send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
     send_and_wait(
@@ -328,14 +399,120 @@ def navigate_with_arrows_and_quit(
     send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
     send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
     send_and_wait(process, master_fd, output, b"q2Q", b"> q2Q")
+
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    os.write(master_fd, b"x\r")
+    wait_for_terminal_input_consumed(slave_fd)
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=99,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    restored_message_patch = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=100,
+        needle=b"> q2Q",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25h",
+    )
+    if b"> q2Qx" in restored_message_patch or b"(sending " in restored_message_patch:
+        raise AssertionError(
+            "compact viewport accepted hidden message input: "
+            f"{restored_message_patch!r}"
+        )
+
     send_and_wait(process, master_fd, output, b"\x1b", b"Keeper: \x1b[1malpha")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=100,
+        needle=b"Keeper: \x1b[1malpha",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+
+    send_and_wait(process, master_fd, output, b"l", b"Keeper Logs: alpha")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=100,
+        needle=b"Keeper Logs: alpha",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
     os.write(master_fd, b"q")
 
 
 def interrupt_with_ctrl_c(
-    _process: subprocess.Popen[bytes], master_fd: int, _output: bytearray
+    _process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    _output: bytearray,
 ) -> None:
     os.write(master_fd, b"\x03")
+
+
+def quit_from_compact_message(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+) -> None:
+    send_and_wait(process, master_fd, output, b"2", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\r", b"Keeper: \x1b[1malpha")
+    send_and_wait(process, master_fd, output, b"m", b"Message to: alpha")
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=8,
+        columns=100,
+        needle=b"terminal too small",
+        controls=(b"\x1b[2J",),
+        final_cursor=b"\x1b[?25l",
+    )
+    os.write(master_fd, b"q")
 
 
 def run_keyboard_regression(executable: str) -> None:
@@ -343,6 +520,11 @@ def run_keyboard_regression(executable: str) -> None:
         executable,
         description="q",
         interact=navigate_with_arrows_and_quit,
+    )
+    run_terminal_scenario(
+        executable,
+        description="compact q",
+        interact=quit_from_compact_message,
     )
     run_terminal_scenario(
         executable,

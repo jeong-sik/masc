@@ -18,6 +18,16 @@ import time
 from typing import Any
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray], None]
+WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
+WORKSPACE_RENDERED = b"workspace\\x1B]8;;https://attacker.invalid\\x07owned"
+FRAME_END = b"\x1b[?7h"
+
+
+def assert_workspace_payload_is_inert(output: bytearray) -> None:
+    if WORKSPACE_PAYLOAD.encode() in output:
+        raise AssertionError(
+            f"workspace emitted raw terminal controls: {bytes(output)!r}"
+        )
 
 
 def read_available(master_fd: int, output: bytearray) -> None:
@@ -305,6 +315,8 @@ def run_terminal_scenario(
                         executable,
                         "--base-path",
                         base_path,
+                        "--workspace",
+                        WORKSPACE_PAYLOAD,
                         "--port",
                         str(stalled_port),
                         "--refresh",
@@ -334,6 +346,25 @@ def run_terminal_scenario(
                     start=0,
                     timeout=10.0,
                 )
+                wait_for_output(
+                    process,
+                    master_fd,
+                    output,
+                    WORKSPACE_RENDERED,
+                    start=0,
+                    timeout=3.0,
+                )
+                workspace_offset = output.find(WORKSPACE_RENDERED)
+                wait_for_output(
+                    process,
+                    master_fd,
+                    output,
+                    FRAME_END,
+                    start=workspace_offset + len(WORKSPACE_RENDERED),
+                    timeout=3.0,
+                )
+                read_available(master_fd, output)
+                assert_workspace_payload_is_inert(output)
                 active_lflag = int(termios.tcgetattr(slave_fd)[3])
                 if active_lflag & (termios.ICANON | termios.ECHO):
                     raise AssertionError(
@@ -355,6 +386,8 @@ def run_terminal_scenario(
                     start=0,
                     timeout=1.0,
                 )
+                read_available(master_fd, output)
+                assert_workspace_payload_is_inert(output)
                 restored_termios = termios.tcgetattr(slave_fd)
                 if stable_termios(restored_termios) != stable_termios(original_termios):
                     raise AssertionError(

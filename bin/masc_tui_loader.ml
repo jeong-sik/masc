@@ -12,7 +12,9 @@ open Masc_tui_http
 
 let report path err =
   Masc_tui_ansi.note_terminal_write_outside_frame ();
-  Printf.eprintf "[masc-tui] decode failed for %s: %s\n%!" path err
+  Printf.eprintf "[masc-tui] decode failed for %s: %s\n%!"
+    (Masc_tui_ansi.Terminal_text.single_line path)
+    (Masc_tui_ansi.Terminal_text.single_line err)
 
 let summarize_errors label errors =
   match List.rev errors with

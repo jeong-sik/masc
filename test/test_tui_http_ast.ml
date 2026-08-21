@@ -813,6 +813,190 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
        ~arguments:[ "message_mode", "message_mode" ])
 ;;
 
+let test_renderers_sanitize_untrusted_terminal_fields () =
+  let render_path = "bin/masc_tui_render.ml" in
+  let sanitizer_calls =
+    [ "Terminal_text.single_line"
+    ; "Terminal_text.optional_single_line"
+    ; "Terminal_text.single_line_or"
+    ; "Terminal_text.single_lines"
+    ; "Terminal_text.short_timestamp"
+    ; "Terminal_text.clock_timestamp"
+    ]
+  in
+  let fixture_path = "test/fixtures/tui_terminal_text_ast_fixture.ml" in
+  check int "field boundary helper catches the unwrapped fixture field" 1
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:fixture_path ~binding_name:"render"
+       ~callees:sanitizer_calls ~fields:[ "safe"; "raw" ]);
+  check int "identifier boundary helper catches the unwrapped fixture value" 1
+    (Ast_grep.count_identifiers_outside_calls_in_value_binding
+       ~module_path:fixture_path ~binding_name:"report"
+       ~callees:[ "Terminal_text.single_line" ]
+       ~identifiers:[ "path"; "err" ]);
+  let check_binding module_path binding =
+    check int (binding ^ " exists exactly once") 1
+      (Ast_grep.count_value_bindings ~module_path ~name:binding)
+  in
+  let check_fields binding fields =
+    check_binding render_path binding;
+    List.iter
+      (fun field ->
+        let total =
+          Ast_grep.count_field_accesses_outside_calls_in_value_binding
+            ~module_path:render_path ~binding_name:binding ~callees:[]
+            ~fields:[ field ]
+        in
+        if total = 0 then
+          failf "%s no longer accesses expected untrusted field %s" binding field;
+        let outside =
+          Ast_grep.count_field_accesses_outside_calls_in_value_binding
+            ~module_path:render_path ~binding_name:binding
+            ~callees:sanitizer_calls ~fields:[ field ]
+        in
+        if outside <> 0 then
+          failf
+            "%s has %d %s access(es) outside Terminal_text"
+            binding outside field)
+      fields
+  in
+  let check_identifiers ~module_path ~binding ~callees identifiers =
+    check_binding module_path binding;
+    List.iter
+      (fun identifier ->
+        let total =
+          Ast_grep.count_identifiers_outside_calls_in_value_binding
+            ~module_path ~binding_name:binding ~callees:[]
+            ~identifiers:[ identifier ]
+        in
+        if total = 0 then
+          failf "%s no longer references expected untrusted value %s" binding
+            identifier;
+        let outside =
+          Ast_grep.count_identifiers_outside_calls_in_value_binding
+            ~module_path ~binding_name:binding ~callees
+            ~identifiers:[ identifier ]
+        in
+        if outside <> 0 then
+          failf "%s has %d raw %s reference(s) outside Terminal_text" binding
+            outside identifier)
+      identifiers
+  in
+  check_fields "task_line" [ "id"; "title" ];
+  check_identifiers ~module_path:render_path ~binding:"task_line"
+    ~callees:sanitizer_calls [ "name" ];
+  check_fields "render_dashboard" [ "workspace"; "name"; "status"; "content" ];
+  check_fields "render_overview"
+    [ "workspace"
+    ; "overview_error"
+    ; "ov_cluster"
+    ; "ov_project"
+    ; "ai_summary"
+    ; "content"
+    ; "tasks_error"
+    ];
+  check_fields "render_approvals"
+    [ "aps_actor_filter"
+    ; "approvals_error"
+    ; "ap_target_id"
+    ; "ap_actor"
+    ; "ap_action_type"
+    ; "ap_target_type"
+    ; "ap_summary"
+    ; "ap_expires_at"
+    ; "ap_payload"
+    ; "ap_trace_id"
+    ; "ap_created_at"
+    ];
+  check_fields "render_board_list"
+    [ "board_error"; "bp_id"; "bp_author"; "bp_title" ];
+  check_fields "render_board_read"
+    [ "bp_id"
+    ; "bp_author"
+    ; "bp_title"
+    ; "bp_created_at"
+    ; "bp_body"
+    ; "bc_author"
+    ; "bc_content"
+    ];
+  check_fields "render_planning_list"
+    [ "planning_error"; "pg_due_date"; "pg_title" ];
+  check_fields "render_planning_detail"
+    [ "pg_id"; "pg_title"; "pg_due_date"; "pg_metric"; "pg_target_value" ];
+  check_fields "render_keeper_list"
+    [ "keepers_error"; "k_current_task_id"; "k_name" ];
+  check_fields "render_keeper_detail"
+    [ "k_name"
+    ; "k_current_task_id"
+    ; "live_context_error"
+    ; "observed_at"
+    ; "turn_ref"
+    ; "k_last_turn_ts"
+    ; "k_created_at"
+    ; "k_updated_at"
+    ];
+  check_fields "render_keeper_logs"
+    [ "k_name"; "le_ts"; "le_tools_used"; "le_work_kind" ];
+  let ansi_path = "bin/masc_tui_ansi.ml" in
+  [ "single_line"
+  ; "optional_single_line"
+  ; "single_line_or"
+  ; "single_lines"
+  ; "short_timestamp"
+  ; "clock_timestamp"
+  ]
+  |> List.iter (check_binding ansi_path);
+  check int "shared terminal boundary delegates to the typed sanitizer" 1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:ansi_path ~binding_name:"single_line"
+       ~callee:"Masc.Tui_decode.sanitize_terminal_text");
+  check int "optional boundary maps the sanitizer" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:ansi_path ~binding_name:"optional_single_line"
+       ~callee:"Option.map" ~position:0 ~identifier:"single_line");
+  check int "defaulted boundary uses the optional sanitizer" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"single_line_or" ~callee:"optional_single_line");
+  check int "list boundary maps the sanitizer" 1
+    (Ast_grep
+     .count_applications_with_exact_positional_identifier_in_value_binding
+       ~module_path:ansi_path ~binding_name:"single_lines" ~callee:"List.map"
+       ~position:0 ~identifier:"single_line");
+  check int "short timestamp delegates to slice-then-sanitize helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"short_timestamp"
+       ~callee:"Masc.Tui_decode.short_timestamp_for_terminal");
+  check int "clock timestamp delegates to slice-then-sanitize helper" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:ansi_path
+       ~binding_name:"clock_timestamp"
+       ~callee:"Masc.Tui_decode.clock_timestamp_for_terminal");
+  let decode_path = "lib/tui_decode.ml" in
+  [ "short_timestamp_for_terminal"; "clock_timestamp_for_terminal" ]
+  |> List.iter (fun binding ->
+       check_binding decode_path binding;
+       check int (binding ^ " has one final sanitizer") 1
+         (Ast_grep.count_calls_in_value_binding ~module_path:decode_path
+            ~binding_name:binding ~callee:"sanitize_terminal_text");
+       check int (binding ^ " never uses raw text after sanitizing") 0
+         (Ast_grep.count_identifiers_outside_calls_in_value_binding
+            ~module_path:decode_path ~binding_name:binding
+            ~callees:[ "sanitize_terminal_text" ] ~identifiers:[ "text" ]));
+  check int "log renderer does not slice sanitized timestamp bytes" 0
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs" ~callee:"String.sub");
+  check int "log renderer uses the safe clock projection once" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_logs"
+       ~callee:"Terminal_text.clock_timestamp");
+  check int "keeper detail uses safe short projections for every timestamp" 5
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_keeper_detail"
+       ~callee:"Terminal_text.short_timestamp");
+  check_identifiers ~module_path:"bin/masc_tui_loader.ml" ~binding:"report"
+    ~callees:[ "Masc_tui_ansi.Terminal_text.single_line" ] [ "path"; "err" ]
+;;
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -851,6 +1035,10 @@ let () =
           "render loop uses monotonic dirty scheduling"
           `Quick
           test_render_loop_uses_monotonic_dirty_schedule;
+        test_case
+          "renderers sanitize untrusted terminal fields"
+          `Quick
+          test_renderers_sanitize_untrusted_terminal_fields;
       ]
     )
   ]

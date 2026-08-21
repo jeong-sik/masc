@@ -99,6 +99,10 @@ module Terminal_text = struct
 
   let single_line_or ~default value =
     Option.value ~default (optional_single_line value)
+
+  let single_lines values = List.map single_line values
+  let short_timestamp text = Masc.Tui_decode.short_timestamp_for_terminal text
+  let clock_timestamp text = Masc.Tui_decode.clock_timestamp_for_terminal text
 end
 
 let is_keeper name =
@@ -150,12 +154,6 @@ let soul_color profile =
   | "balanced" -> Ansi.cyan
   | "creative" -> Ansi.yellow
   | _ -> Ansi.white
-
-(** Format a timestamp for display (show date portion or relative) *)
-let short_ts s =
-  if String.length s > 19 then String.sub s 0 19
-  else if String.length s = 0 then "(never)"
-  else s
 
 (** Context ratio color: green < 50%, yellow 50-80%, red > 80% *)
 let ctx_color ratio =

@@ -2556,7 +2556,8 @@
  (libraries alcotest ast_grep)
  (deps
   (source_tree ../lib)
-  (source_tree ../bin)))
+  (source_tree ../bin)
+  %{workspace_root}/test/fixtures/tui_terminal_text_ast_fixture.ml))
 
 (test
  (name test_tui_operator_projection)

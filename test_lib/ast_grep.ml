@@ -122,6 +122,82 @@ let count_calls_in_value_binding ~module_path ~binding_name ~callee =
   !total
 ;;
 
+let count_expressions_outside_calls_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callees
+      ~matches
+  =
+  let structure = parse_implementation_or_fail module_path in
+  let count_in_expr expression =
+    let protected_depth = ref 0 in
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self node ->
+             let enters_protected_call =
+               match node.pexp_desc with
+               | Pexp_apply
+                   ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
+                 List.mem (longident_to_string txt) callees
+               | _ -> false
+             in
+             if enters_protected_call then incr protected_depth;
+             if !protected_depth = 0 && matches node then incr count;
+             Ast_iterator.default_iterator.expr self node;
+             if enters_protected_call then decr protected_depth)
+      }
+    in
+    iter.expr iter expression;
+    !count
+  in
+  let total = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self binding ->
+           (match binding.pvb_pat.ppat_desc with
+            | Ppat_var { txt; _ } when String.equal txt binding_name ->
+              total := !total + count_in_expr binding.pvb_expr
+            | _ -> ());
+           Ast_iterator.default_iterator.value_binding self binding)
+    }
+  in
+  iter.structure iter structure;
+  !total
+;;
+
+let count_field_accesses_outside_calls_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callees
+      ~fields
+  =
+  count_expressions_outside_calls_in_value_binding ~module_path ~binding_name
+    ~callees
+    ~matches:(fun expression ->
+      match expression.pexp_desc with
+      | Pexp_field (_, { txt; _ }) ->
+        List.mem (longident_leaf txt) fields
+      | _ -> false)
+;;
+
+let count_identifiers_outside_calls_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callees
+      ~identifiers
+  =
+  count_expressions_outside_calls_in_value_binding ~module_path ~binding_name
+    ~callees
+    ~matches:(fun expression ->
+      match expression.pexp_desc with
+      | Pexp_ident { txt; _ } ->
+        List.mem (longident_to_string txt) identifiers
+      | _ -> false)
+;;
+
 let call_count_in_expression ~callee expression =
   let count = ref 0 in
   let iter =

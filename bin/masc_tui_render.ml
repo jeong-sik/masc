@@ -595,19 +595,8 @@ let render_board_read (state : state) (post : board_post) =
   (* Body lines *)
   let text_width = cols - 8 in
   let body_lines =
-    let words =
-      String.split_on_char ' ' (Terminal_text.single_line post.bp_body)
-    in
-    let rec wrap acc current = function
-      | [] -> List.rev (if current = "" then acc else current :: acc)
-      | w :: ws ->
-          let candidate = if current = "" then w else current ^ " " ^ w in
-          if String.length candidate <= text_width then
-            wrap acc candidate ws
-          else
-            wrap (current :: acc) w ws
-    in
-    wrap [] "" words
+    Message_layout.wrap_words ~max_cells:text_width
+      (Terminal_text.single_line post.bp_body)
   in
   let total_lines = List.length body_lines in
   let row_budget =
@@ -754,7 +743,8 @@ let render_planning_list (state : state) =
                  g.pg_priority
                  (fit_width
                     (Terminal_text.single_line g.pg_title)
-                    (cols - 30 - (depth * 2) - String.length due))
+                    (cols - 30 - (depth * 2)
+                   - Message_layout.display_width due))
                  (Ansi.dim ^ due ^ Ansi.reset)
              in
              let content =

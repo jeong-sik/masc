@@ -265,6 +265,30 @@ let split_cells ~max_cells text =
     in
     loop 0 0 0 [] (display_pieces text)
 
+let wrap_words ~max_cells text =
+  let max_cells = max 1 max_cells in
+  let rec loop rows current = function
+    | [] -> List.rev (if String.equal current "" then rows else current :: rows)
+    | word :: rest as words ->
+        let candidate =
+          if String.equal current "" then word else current ^ " " ^ word
+        in
+        if display_width candidate <= max_cells then loop rows candidate rest
+        else if not (String.equal current "") then
+          loop (current :: rows) "" words
+        else
+          let chunks = split_cells ~max_cells word in
+          (match List.rev chunks with
+           | [] -> loop rows "" rest
+           | last :: reversed_completed ->
+               let completed = List.rev reversed_completed in
+               let rows =
+                 List.fold_left (fun rows chunk -> chunk :: rows) rows completed
+               in
+               loop rows last rest)
+  in
+  loop [] "" (String.split_on_char ' ' text)
+
 let rows_of_entry ~inner_width entry =
   let metadata, _, _ =
     Printf.sprintf "[%s] %s %s" entry.timestamp entry.role_label

@@ -239,7 +239,16 @@ let test_history_wraps_by_cells_without_losing_bytes () =
     |> List.map (fun text -> String.sub text 2 (String.length text - 2))
     |> String.concat ""
   in
-  check string "cell wrapping preserves body bytes" body reconstructed
+  check string "cell wrapping preserves body bytes" body reconstructed;
+  check (list string) "word wrapping uses cells"
+    [ "A한"; "🙂B" ]
+    (Layout.wrap_words ~max_cells:4 "A한 🙂B");
+  let unbroken = "한한한" in
+  let wrapped = Layout.wrap_words ~max_cells:4 unbroken in
+  check (list string) "overlong word is split without an empty row"
+    [ "한한"; "한" ] wrapped;
+  check string "word splitting preserves bytes" unbroken
+    (String.concat "" wrapped)
 
 let test_history_never_splits_grapheme_clusters () =
   let body = "A👍🏽🇰🇷❤️B" in

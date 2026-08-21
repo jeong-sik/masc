@@ -90,18 +90,18 @@ Two independent full-fleet runs, identical to four decimals.
 |---|---|---|---|---|
 | logs | 0.996 | | approvals | 0.966 |
 | monitor | 0.995 | | registry | 0.955 |
-| ide | 0.995 | | schedule | 0.944 |
+| ide | 0.995 | | schedule | 0.945 |
 | lab | 0.987 | | keepers | 0.909 |
-| connectors | 0.986 | | work | 0.891 |
+| connectors | 0.986 | | work | 0.897 |
 | command | 0.979 | | board | 0.853 |
 | fusion | 0.978 | | overview | 0.842 |
-| | | | **mean** | **0.948** |
+| | | | **mean** | **0.949** |
 
 Ten of the fourteen sit at 0.95 or above. The four that do not — overview,
 board, work, keepers — are each held there by one named cause, ledgered
 underneath, and none of the four is skin drift. **Across the ten surfaces where
-the two sides agree on structure the mean is 0.978**; that is the figure to read
-as "does the skin match". The 0.948 fleet mean includes the four and is the
+the two sides agree on structure the mean is 0.979**; that is the figure to read
+as "does the skin match". The 0.949 fleet mean includes the four and is the
 figure to read as "how close is the whole dashboard to the mock".
 
 Style conformance — `getComputedStyle` compared property by property across every
@@ -129,7 +129,9 @@ this design drop, so it was put to the operator on 2026-08-22 with the
 measurement — the decision is to keep full width.
 
 Cost: overview measures **0.842**; restoring `max-width: 1280px; margin: 0 auto`
-takes it to **0.996**, and the fleet mean from 0.948 to 0.959 — over the bar. No other
+takes it to **0.996**, and the fleet mean from 0.949 to 0.960 — over the bar. It is
+the only remaining lever: a sixteen-agent sweep of the eight surfaces still short
+of parity found no other actionable drift. No other
 surface moves — `.ov-scroll` is the only centred container, and `work`,
 `approvals` and `board` render full-width in the design too.
 

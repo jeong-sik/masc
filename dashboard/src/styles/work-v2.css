@@ -848,7 +848,7 @@
  *   var(--volt)          → var(--color-volt, var(--color-accent))
  *   var(--status-ok)     → var(--color-status-ok)
  *   var(--status-warn)   → var(--color-status-warn)
- *   var(--status-bad)    → var(--color-status-bad)
+ *   var(--status-bad)    → var(--color-status-err)
  *   var(--radius-xs)     → var(--radius-xs, 3px)
  *   var(--radius-sm)     → var(--radius-sm, 4px)
  *   var(--radius-pill)   → var(--radius-pill, 999px)
@@ -1065,15 +1065,18 @@
 }
 
 .wka-h .n,
+/* No `margin-left: auto` here. The design gives that to `.wka-h .n` — a
+   different, plain count span, which this file's own headers also use — while
+   `.wka-h-n` is the pill badge that sits inline right after the heading text.
+   Applying it to the badge pushed it 242px to the far edge of the aside, away
+   from the heading it counts. The kit owns the badge's type and border. */
 .wka-h-n {
-  margin-left: auto;
-  font-size: var(--fs-11);
   color: var(--text-muted);
   letter-spacing: 0;
 }
 
 .wka-h-n.bad {
-  color: var(--color-status-bad);
+  color: var(--color-status-err);
 }
 
 .wka-h-n.dim {
@@ -1119,7 +1122,7 @@
 }
 
 .wka-flag.st-bad {
-  border-left-color: var(--color-status-bad);
+  border-left-color: var(--color-status-err);
 }
 
 .wka-flag.st-volt {
@@ -1145,8 +1148,8 @@
 }
 
 .wka-flag-tag.bad {
-  color: var(--color-status-bad);
-  border-color: color-mix(in oklab, var(--color-status-bad) 42%, transparent);
+  color: var(--color-status-err);
+  border-color: color-mix(in oklab, var(--color-status-err) 42%, transparent);
 }
 
 .wka-flag-tag.volt {
@@ -1173,36 +1176,24 @@
 }
 
 /* ── Todo items (verify / blockers / backlog) ── */
+/* `.wka-todo` and its status variants belong to the vendored kit
+   (keeper-v2/v2.css). A hand-port of the whole component sat here and lost to
+   the kit everywhere the two agreed — except on `.wka-todo.verify/.block/.claim`,
+   which are (0,2,0) where the kit's edge comes from a (0,1,0) `border` shorthand.
+   Those three painted a coloured stripe down the card that the design does not
+   have: the design carries the status on the kind chip and leaves the card edge
+   `--border-soft`. `.block` was worse than a stray stripe — it referenced
+   `--color-status-bad`, which is defined nowhere, so its `color-mix` background
+   collapsed to transparent and the card lost its ground entirely.
+   What remains here is what the kit has no counterpart for. */
 .wka-todo {
-  text-align: left;
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 3px 9px;
-  padding: 8px 11px;
-  border: 1px solid var(--color-border-subtle);
-  border-left-width: 2px;
-  border-radius: var(--radius-sm, 4px);
-  background: var(--color-bg-surface);
-  cursor: pointer;
-  transition: border-color 0.16s ease, background 0.16s ease;
+  /* Shrink-to-fit guard: the live consumers are real <button>s. */
   width: 100%;
 }
 
-.wka-todo.verify {
-  border-left-color: var(--color-status-info, var(--color-info));
-}
-
-.wka-todo.block {
-  border-left-color: var(--color-status-bad);
-  background: color-mix(in oklab, var(--color-status-bad) 7%, var(--color-bg-surface));
-}
-
-.wka-todo.claim {
-  border-left-color: var(--color-status-warn);
-  background: color-mix(in oklab, var(--color-status-warn) 6%, var(--color-bg-surface));
-}
-
-.wka-todo:hover,
+/* The kit states `:hover` but not `:focus-visible`; a static mock never had to
+   answer for keyboard focus. The `:hover` half is the kit's — it restates it
+   later at equal specificity. */
 .wka-todo:focus-visible {
   background: var(--color-bg-surface-hover, var(--color-bg-surface));
   border-color: var(--border-strong);
@@ -1220,20 +1211,8 @@
   white-space: nowrap;
 }
 
-.wka-todo.verify .wka-todo-k {
-  color: var(--color-volt-strong, var(--color-accent));
-  border: 1px solid var(--color-volt-dim, var(--color-accent-subtle));
-}
-
-.wka-todo.block .wka-todo-k {
-  color: var(--color-status-bad);
-  border: 1px solid color-mix(in oklab, var(--color-status-bad) 42%, transparent);
-}
-
-.wka-todo.claim .wka-todo-k {
-  color: var(--color-status-warn);
-  border: 1px solid color-mix(in oklab, var(--color-status-warn) 40%, transparent);
-}
+/* The kind-chip variants are the kit's, restated there at the same specificity
+   and later in the cascade, so this copy never won anything. */
 
 .wka-todo-t {
   grid-column: 2;
@@ -1323,7 +1302,7 @@
 }
 
 .wka-rail-stat.bad b {
-  color: var(--color-status-bad);
+  color: var(--color-status-err);
 }
 
 .wka-rail-lbl {

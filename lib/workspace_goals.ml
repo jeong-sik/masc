@@ -509,7 +509,7 @@ let validate_verification_run_id verification_run_id =
         ; message =
             "a verifier verdict must name the exact durable verification run"
         ; expected = Some "non-blank run ID"
-        ; received = Some (`String verification_run_id)
+        ; received = Some verification_run_id
         }
       ]
 ;;

@@ -148,6 +148,13 @@ let test_every_outside_field_has_one_classification () =
       (current_json () |> replace_field key (`String "ignored-value")))
 ;;
 
+let test_retired_active_goal_ids_requires_reset () =
+  expect_rejected
+    "retired active_goal_ids"
+    (current_json ()
+     |> replace_field "active_goal_ids" (`List [ `String "goal-a" ]))
+;;
+
 let test_retired_compaction_failure_authority_requires_reset () =
   expect_rejected
     "retired compaction failure authority"
@@ -171,6 +178,8 @@ let () =
             test_nullability_is_exact
         ; test_case "outside fields share one classification" `Quick
             test_every_outside_field_has_one_classification
+        ; test_case "retired active_goal_ids requires reset" `Quick
+            test_retired_active_goal_ids_requires_reset
         ; test_case
             "retired compaction failure authority requires reset"
             `Quick

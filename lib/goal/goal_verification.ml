@@ -47,11 +47,6 @@ type completion_state =
   | Proof_pending of { requested_at : string }
   | Proof_proven of verdict
   | Proof_refuted of verdict
-  | Human_confirmed of {
-      proof : verdict;
-      confirmed_by : string;
-      confirmed_at : string;
-    }
 
 type record = {
   goal_id : string;
@@ -234,13 +229,6 @@ let completion_state_to_yojson = function
   | Proof_refuted verdict ->
       `Assoc
         [ "state", `String "proof_refuted"; "verdict", verdict_to_yojson verdict ]
-  | Human_confirmed { proof; confirmed_by; confirmed_at } ->
-      `Assoc
-        [ "state", `String "human_confirmed"
-        ; "proof", verdict_to_yojson proof
-        ; "confirmed_by", `String confirmed_by
-        ; "confirmed_at", `String confirmed_at
-        ]
 
 let completion_state_of_yojson json =
   match Json_util.assoc_member_opt "state" json with
@@ -257,19 +245,6 @@ let completion_state_of_yojson json =
       match verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) with
       | Ok verdict -> Ok (Proof_refuted verdict)
       | Error _ as error -> error)
-  | Some (`String "human_confirmed") -> (
-      match
-        ( verdict_of_yojson (Yojson.Safe.Util.member "proof" json)
-        , Json_util.get_string json "confirmed_by"
-        , Json_util.assoc_member_opt "confirmed_at" json )
-      with
-      | Ok proof, Some confirmed_by, Some (`String confirmed_at) ->
-          Ok (Human_confirmed { proof; confirmed_by; confirmed_at })
-      | Error _ as error, _, _ -> error
-      | _ ->
-          Error
-            "goal_verification: human_confirmed needs proof, confirmed_by and \
-             confirmed_at")
   | Some (`String other) ->
       Error ("goal_verification: unknown completion state " ^ other)
   | _ -> Error "goal_verification: completion state missing"
@@ -579,7 +554,7 @@ let mark_proof_pending config ~goal_id =
             { current with
               completion = Proof_pending { requested_at = current.updated_at }
             }
-      | Proof_proven _ | Human_confirmed _ ->
+      | Proof_proven _ ->
           Error
             (Printf.sprintf
                "goal_verification: proof for %s is already proven; refusing \
@@ -603,8 +578,7 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
         | Proof_refuted _, Refuted _ -> true
         | ( Proof_proven _, Refuted _ )
         | ( Proof_refuted _, Proven )
-        | ( Completion_idle, _ )
-        | ( Human_confirmed _, _ ) -> false
+        | Completion_idle, _ -> false
       in
       if not committable
       then
@@ -630,26 +604,3 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
              "goal_verification: proof verdict for %s requires a viable \
               criterion"
              goal_id))
-
-let record_human_confirmation config ~goal_id ~confirmed_by =
-  update_record config ~goal_id (fun current ->
-      (* [Human_confirmed] is accepted alongside [Proof_proven]: the same
-         crash-between-writes recovery as [record_proof_verdict] — the ledger
-         committed but the phase write did not, and the stage-2 retried
-         confirm must reconcile rather than wedge the goal. *)
-      match current.completion with
-      | Proof_proven proof | Human_confirmed { proof; _ } ->
-          Ok
-            { current with
-              completion =
-                Human_confirmed
-                  { proof
-                  ; confirmed_by
-                  ; confirmed_at = current.updated_at
-                  }
-            }
-      | Completion_idle | Proof_pending _ | Proof_refuted _ ->
-          Error
-            (Printf.sprintf
-               "goal_verification: human confirmation for %s needs a proven proof"
-               goal_id))

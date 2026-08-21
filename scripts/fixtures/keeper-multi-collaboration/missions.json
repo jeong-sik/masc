@@ -2,6 +2,27 @@
   "schema": "masc.keeper_multi_collaboration_missions.v1",
   "acceptance_authority": "real_world_product_outcomes",
   "minimum_keeper_count": 5,
+  "approaches_apply_to_each_mission": true,
+  "execution_approaches": [
+    {
+      "id": "A",
+      "name": "hermetic_typed_contract",
+      "method": "Typed unit/integration tests plus deterministic fault injection verify the state machine, persistence ordering, strict codecs, and recovery invariants.",
+      "required_evidence": ["exact source SHA", "CI test target", "typed assertion or injected fault receipt"]
+    },
+    {
+      "id": "B",
+      "name": "isolated_exact_revision_realworld",
+      "method": "An isolated exact-revision server drives real providers, five roles, durable product state, and a real-backend browser without API interception.",
+      "required_evidence": ["binary/source digest", "raw tool and state receipts", "Dashboard screenshot"]
+    },
+    {
+      "id": "C",
+      "name": "shared_shadow_duration_canary",
+      "method": "A shared or shadow canary repeats the mission across 10 turns and 1h, 2h, 4h, and 24h tiers with restart/failover and per-occurrence receipts.",
+      "required_evidence": ["served_by attribution", "duration and restart receipts", "queue and Dashboard cross-check"]
+    }
+  ],
   "roles": [
     "coordinator",
     "builder-a",
@@ -19,6 +40,7 @@
     "masc_goal_upsert",
     "masc_goal_assign",
     "masc_goal_list",
+    "masc_goal_transition",
     "masc_add_task",
     "masc_tasks",
     "masc_task_history",
@@ -272,6 +294,16 @@
       "user_story": "선언한 대상 범위의 모든 케이스가 실제 동작으로 증명된다. 케이스는 서로 다른 변환이라 상수를 출력하는 스크립트는 아무것도 덮지 못한다. 구현자와 시험자가 각자 Task를 claim해 Goal에 연결하고 keeper_task_done으로 evidence를 제출하며, 독립 completion authority가 두 Task를 awaiting_verification에서 done으로 넘겨야 한다 — 제출은 완료가 아니다. 검증자는 선언된 범위와 실행이 낸 결과를 대조한다. 부분 실행은 통과하지 못한다.",
       "assertions": ["qa_coverage_execution_observed", "qa_coverage_passes_verification", "qa_coverage_review_matches_spec"],
       "evidence": ["observations/board-post.json", "observations/tool-calls-builder-b.json"]
+    },
+    {
+      "id": "RW23",
+      "phase": "goal_verification",
+      "name": "goal_verifier_refute_reenter_prove",
+      "actors": ["coordinator", "reviewer"],
+      "capabilities": ["Goal", "Verification", "Cross-Verification", "Sandbox", "Dashboard", "Browser", "Restart"],
+      "user_story": "Goal 완료는 독립 verifier가 owner playground의 실제 artifact를 읽은 판정으로만 일어난다. 실패 artifact는 Proof_refuted와 Executing 복귀를 만들고, 같은 Goal의 수정 artifact는 새 run으로 재진입해 Proof_proven과 Completed를 만든다. 최종 ledger run ID, durable evaluator/tool run, 실제 backend Dashboard의 펼친 verification_read_file 행과 screenshot이 같은 Goal/run을 가리켜야 한다.",
+      "assertions": ["goal_verifier_refutation_observed", "goal_verifier_reentry_proven", "goal_verifier_dashboard_browser_observed"],
+      "evidence": ["observations/goal-verifier-task-refuted.json", "observations/goal-verifier-task-proven.json", "observations/goal-verifier-refuted.json", "observations/goal-verifier-proven.json", "observations/goal-verification-runs.json", "browser/goal-verification-run-proof.json", "browser/goal-verification-run-proof.png"]
     }
   ]
 }

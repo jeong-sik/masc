@@ -71,7 +71,7 @@ goal 은 keeper 의 시야에서 사라지고 영원히 `Completed` 에 도달�
 - **Stage 2 (후속 PR)**: §3.2/§3.3/§4/§5 의 FSM 게이트 — phase 1종 + action 4종,
   `request_complete`의 `Verifying` 재라우팅, 생성 시 `Criterion_pending` durable 요청,
   `Criterion_unreachable`의 `request_complete` 차단 — 와 그 게이트를 실제로 부르는
-  **verifier caller**(B7 standalone lane + 사람 확인 경로) 를 함께 딴다. 게이트는 caller
+  **verifier caller**(B7 standalone lane) 를 함께 딴다. 게이트는 caller
   없이 머지하지 않는다.
 
 아래 §2–§6 은 최종 설계 전체를 기술한다. 각 절이 어느 stage 에 속하는지는 이 절의 분할을
@@ -196,14 +196,12 @@ ledger(저장소) 양쪽이 같은 전이를 이중으로 검증해 stale verifi
 기존 `Executing -(request_complete)-> Completed` 직행은 사라진다. `Paused`/`Blocked`에서의
 완료 요청은 종전대로 invalid다. `Completed`/`Dropped`에서 `reopen`/`drop` 동작은 불변이다.
 
-### 4.3 신분 바인딩의 한계 (명시)
+### 4.3 신분 바인딩
 
-MCP 표면은 caller를 인증하지 않으므로, `record_proof_*`의 authority는 호출자 세션 이름을 담은
-`System_llm_agent { agent_run_id = ctx.agent_name }`이다. Task 도메인이
-`completion_authority` 생성을 인증된 operator /
-typed system-LLM 결과로 제한하는 것(types_core.mli:86-90 주석)과 같은 강도의 바인딩 — standalone
-verifier lane이 자기 run id로 커밋하고, 사람 확인이 operator 인증 경로(dashboard HITL)를
-타는 것 — 은 B7 후속이다. 이 PR은 그 바인딩이 꽂힐 typed 슬롯을 만든다.
+`record_proof_*`는 public MCP action이 아니다. standalone verifier worker만 호출할 수 있는
+typed application boundary가 고정된 `verifier_exact` authority를 만들며, caller는 authority를
+인자로 공급하거나 Keeper/session 이름으로 가장할 수 없다. 각 verdict의
+`verification_run_id`는 같은 시도의 durable evaluator/tool 관측 row와 결합한다.
 
 ## 5. `Already` 의미론 확장
 
@@ -219,7 +217,7 @@ verifier lane이 자기 run id로 커밋하고, 사람 확인이 operator 인증
   갱신"의 legality 판정. `Completed`/`Dropped`에서는 invalid — 종료된 goal의 생성 시점
   선언은 확정된 역사다.
 
-proof/human action의 phase 밖 호출은 전부 invalid다(반증을 증거 없이 무시하는 Already를
+proof action의 phase 밖 호출은 전부 invalid다(반증을 증거 없이 무시하는 Already를
 만들지 않기 위해).
 
 ## 6. 관측성

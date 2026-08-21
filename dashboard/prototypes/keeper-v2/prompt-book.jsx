@@ -1,4 +1,4 @@
-/* MASC v2 — 注入書 (Injection Book) surface.
+/* MASC v2 — 프롬프트북 surface.
    Renders the keeper system prompt as a stacked, Paper-styled manuscript.
    Flip keepers (← →) to watch the same book re-fill its {{blanks}} and the
    conditional chapters appear/disappear — the prompt 적층 made legible.
@@ -75,7 +75,7 @@ function PbComposition({ stack, fill }) {
         style: { width: (p.bytes / total * 100) + '%', background: (PB_BLOCK_META[p.ch.id] || {}).color || 'var(--text-dim)' },
         title: `${(PB_BLOCK_META[p.ch.id] || {}).lbl || p.ch.id} · ${p.bytes}B`,
       }))),
-    React.createElement('div', { className: 'pb-comp-total mono' }, `${(total / 1024).toFixed(1)} KB · ${stack.length}장 주입`));
+    React.createElement('div', { className: 'pb-comp-total mono' }, `${(total / 1024).toFixed(1)} KB · ${stack.length}장`));
 }
 
 function PromptBook({ keepers }) {
@@ -110,17 +110,17 @@ function PromptBook({ keepers }) {
     // ── view toggle: the assembled book vs the full md library ──
     React.createElement('div', { className: 'pb-viewbar' },
       React.createElement('div', { className: 'pb-seg' },
-        React.createElement('button', { className: 'pb-seg-btn' + (view === 'book' ? ' on' : ''), onClick: () => setView('book') }, `조립 · ${stack.length}블록`),
-        React.createElement('button', { className: 'pb-seg-btn' + (view === 'full' ? ' on' : ''), onClick: () => setView('full') }, 'Full Text'),
+        React.createElement('button', { className: 'pb-seg-btn' + (view === 'book' ? ' on' : ''), onClick: () => setView('book') }, `조립 · ${stack.length}장`),
+        React.createElement('button', { className: 'pb-seg-btn' + (view === 'full' ? ' on' : ''), onClick: () => setView('full') }, '전체 텍스트'),
         React.createElement('button', { className: 'pb-seg-btn' + (view === 'map' ? ' on' : ''), onClick: () => setView('map') }, '치환 지도'),
-        React.createElement('button', { className: 'pb-seg-btn' + (view === 'catalog' ? ' on' : ''), onClick: () => setView('catalog') }, '전체 라이브러리')),
+        React.createElement('button', { className: 'pb-seg-btn' + (view === 'catalog' ? ' on' : ''), onClick: () => setView('catalog') }, '파일 전체')),
       React.createElement('div', { className: 'pb-viewbar-note' }, view === 'book'
-        ? '매 턴 이 블록들을 다시 이어붙여 주입한다'
+        ? '파일 3장 + 이번 턴에 해당되는 절만 이어붙입니다'
         : view === 'full'
-        ? `${stack.length}개 블록을 이어붙인 실제 주입 텍스트 · 그대로 복사 가능`
+        ? `${stack.length}장을 이어붙인 실제 텍스트`
         : view === 'map'
-        ? '각 {{빈칸}}이 어디서 오는지 · 출처별로 묶음'
-        : `config/prompts/*.md · frontmatter로 자동 등록`)),
+        ? '런타임 절의 빈칸이 어디서 채워지는지 봅니다'
+        : 'prompts/ · keepers/<name>/AGENT.md')),
 
     view === 'catalog' ? React.createElement(PbCatalog, null) :
     view === 'map' ? React.createElement(PbVarMap, { keeper, fill, slotVar, rt }) :
@@ -151,13 +151,13 @@ function PromptBook({ keepers }) {
         React.createElement('div', { className: 'pb-frontis-mark mono', style: { color: slotVar } }, keeper.sigil || 'KP'),
         React.createElement('div', { className: 'pb-frontis-t' },
           React.createElement('h1', null, '시스템 프롬프트'),
-          React.createElement('div', { className: 'pb-frontis-sub' }, `«${keeper.id}»${keeper.kr ? ` · ${keeper.kr}` : ''} 에게 이번 턴 주입되는 블록`),
+          React.createElement('div', { className: 'pb-frontis-sub' }, `«${keeper.id}»${keeper.kr ? ` · ${keeper.kr}` : ''} 에게 이번 턴 들어가는 프롬프트`),
           React.createElement('div', { className: 'pb-frontis-meta mono' }, `${stack.length}장 · ${keeper.phase} · ${rt}`)),
       ),
       React.createElement(PbComposition, { stack, fill }),
       React.createElement('div', { className: 'pb-envelope' },
-        React.createElement('b', null, 'override 영속화'),
-        ' — 사용자 오버라이드는 프롬프트 본문의 SHA256 revision 과 템플릿 변수 계약에 바인딩된 schema-versioned envelope 로 저장됩니다. legacy·손상 파일과 계약이 드리프한 항목은 fail-closed 로 기본문으로 떨어지며(관측 가능), 설정·해제는 영속화 성공 후에만 메모리에 커밋됩니다.'),
+        React.createElement('b', null, '수정한 프롬프트'),
+        ' — 대시보드에서 고친 프롬프트는 그때의 본문 판(rev)에 묶여 저장됩니다. 원본 파일이 바뀌어 판이 어긋나면 수정분을 버리고 파일 내용으로 돌아갑니다. keeper 프롬프트 자체는 keepers/<name>/AGENT.md 한 장이 저작 지점입니다.'),
 
       // chapters, in assembly order, with a running numeral
       React.createElement('div', { className: 'pb-chapters' },
@@ -171,36 +171,35 @@ function PromptBook({ keepers }) {
               React.createElement('span', { className: 'pb-ch-swatch', style: { background: meta.color } }),
               React.createElement('span', { className: 'pb-ch-title' }, meta.lbl),
               !ch.always && React.createElement('span', { className: 'pb-ch-cond' }, '조건부'),
+              ch.authored && React.createElement('span', { className: 'pb-ch-cond' }, '파일'),
               React.createElement('span', { className: 'pb-ch-src mono' }, ch.src),
-              React.createElement('span', { className: 'pb-ch-rev mono', title: '프롬프트 본문 + 템플릿 변수 계약의 SHA256 revision — 오버라이드는 이 revision 에 바인딩된다' }, 'rev ' + pbRev(ch)),
+              React.createElement('span', { className: 'pb-ch-rev mono', title: '이 블록 본문의 판 번호 — 수정분은 이 판에 묶입니다' }, 'rev ' + pbRev(ch)),
               React.createElement('span', { className: 'pb-ch-bytes mono' }, `${bytes}B`),
               React.createElement('span', { className: 'pb-ch-caret' }, open ? '▾' : '▸')),
             React.createElement('div', { className: 'pb-ch-gloss' }, ch.gloss),
             open && React.createElement('div', { className: 'pb-ch-body' }, pbRenderBody(ch, fill)),
             open && ch.vars.length > 0 && React.createElement('div', { className: 'pb-ch-vars' },
-              React.createElement('span', { className: 'pb-ch-vars-k' }, 'template_variables'),
+              React.createElement('span', { className: 'pb-ch-vars-k' }, '빈칸'),
               ch.vars.map(v => React.createElement('span', {
                 key: v, className: 'pb-var-chip mono' + (fill[v] == null ? ' empty' : ''),
               }, v))),
             open && ch.composed && ch.composed.length > 0 && React.createElement('div', { className: 'pb-ch-vars' },
-              React.createElement('span', { className: 'pb-ch-vars-k' }, '합성 · composed from'),
+              React.createElement('span', { className: 'pb-ch-vars-k' }, '합쳐진 파일'),
               ch.composed.map(f => React.createElement('span', { key: f, className: 'pb-src-chip mono' }, f))));
         })),
 
       React.createElement('div', { className: 'pb-colophon' },
-        React.createElement('span', null, '조립 순서 = ',
-          React.createElement('code', { className: 'pb-code' }, 'Prompt_block_id.t')),
-        React.createElement('span', { className: 'pb-colophon-note' }, '빈칸은 keeper마다 다르게 채워진다 · ← → 로 넘기기')))));
+        React.createElement('span', null, '앞 3장은 파일 · 뒤는 런타임이 이번 턴에 붙인 절'),
+        React.createElement('span', { className: 'pb-colophon-note' }, '← → 로 keeper 넘기기')))));
 }
 
 // ── the full md library, grouped by family — answers "왜 9개뽐임?" ──
 function PbCatalog() {
   const cat = window.PB_CATALOG || [];
-  const total = cat.reduce((s, g) => s + g.files.length, 0);
   return React.createElement('div', { className: 'pb-book pb-catalog', ref: null },
     React.createElement('div', { className: 'pb-cat-intro' },
-      React.createElement('h1', null, '전체 프롬프트 라이브러리'),
-      React.createElement('div', { className: 'pb-frontis-sub' }, `${total}개 md · 이 중 keeper 턴에 조립되는 것은 상단 세 계열뿐`)),
+      React.createElement('h1', null, '프롬프트 파일 전체'),
+      React.createElement('div', { className: 'pb-frontis-sub' }, '사람이 쓰는 파일은 무대 1장 + keeper 당 1장입니다. 나머지는 MASC 가 관리합니다.')),
     cat.map(g => React.createElement('section', { key: g.family, className: 'pb-cat-fam' + (g.feedsTurn ? ' feeds' : '') },
       React.createElement('div', { className: 'pb-cat-fam-head' },
         React.createElement('span', { className: 'pb-cat-dot' }),
@@ -208,7 +207,7 @@ function PbCatalog() {
         React.createElement('span', { className: 'pb-cat-fam-count mono' }, `${g.files.length}`),
         g.feedsTurn
           ? React.createElement('span', { className: 'pb-cat-tag feeds' }, 'keeper 턴')
-          : React.createElement('span', { className: 'pb-cat-tag' }, '별도 계열')),
+          : React.createElement('span', { className: 'pb-cat-tag' }, '내부 에이전트')),
       React.createElement('div', { className: 'pb-cat-fam-note' }, g.note),
       React.createElement('div', { className: 'pb-cat-files' },
         g.files.map(f => React.createElement('span', { key: f, className: 'pb-src-chip mono' }, f))))));
@@ -237,9 +236,9 @@ function PbFullText({ keeper, stack, fill, slotVar, rt }) {
   return React.createElement('div', { className: 'pb-book pb-full' },
     React.createElement('div', { className: 'pb-full-head' },
       React.createElement('div', { className: 'pb-full-head-t' },
-        React.createElement('h1', null, 'Full text'),
+        React.createElement('h1', null, '전체 텍스트'),
         React.createElement('div', { className: 'pb-full-head-meta mono' },
-          `«${keeper.id}» · ${(total / 1024).toFixed(1)} KB · ${lineCount}줄 · ${stack.length}블록`)),
+          `«${keeper.id}» · ${(total / 1024).toFixed(1)} KB · ${lineCount}줄 · ${stack.length}장`)),
       React.createElement('button', { className: 'pb-copy-btn' + (copied ? ' done' : ''), onClick: doCopy },
         copied ? '복사됨' : '전체 복사')),
     // one continuous document — the blocks concatenated as they are injected.
@@ -254,14 +253,14 @@ function PbFullText({ keeper, stack, fill, slotVar, rt }) {
           pbSubst(ch.body, fill).trim());
       })),
     React.createElement('div', { className: 'pb-colophon' },
-      React.createElement('span', null, '── 회색 줄은 블록 경계 표시 · 복사에는 포함되지 않는다'),
+      React.createElement('span', null, '회색 줄은 경계 표시입니다 · 복사에는 안 들어갑니다'),
       React.createElement('span', { className: 'pb-colophon-note' }, '← → 로 keeper 넘기기')));
 }
 
 // ── 치환 지도 (Substitution map): every {{template_variable}} grouped by the
 //    source it resolves FROM (turn / checkpoint / config / memory / gate),
 //    with this keeper's current filled value. Uses PB_VAR_SRC + PB_VAR_SRC_META.
-const PB_SRC_ORDER = ['config', 'turn', 'checkpoint', 'memory', 'gate'];
+const PB_SRC_ORDER = ['turn', 'checkpoint', 'memory', 'gate', 'workspace'];
 function pbUsedIn(varName) {
   return (window.PB_CHAPTERS || []).filter(ch => ch.body.indexOf('{{' + varName + '}}') !== -1);
 }
@@ -281,9 +280,9 @@ function PbVarMap({ keeper, fill, slotVar, rt }) {
     React.createElement('div', { className: 'pb-frontis' },
       React.createElement('div', { className: 'pb-frontis-mark mono', style: { color: slotVar } }, keeper.sigil || 'KP'),
       React.createElement('div', { className: 'pb-frontis-t' },
-        React.createElement('h1', null, '치환 지도'),
-        React.createElement('div', { className: 'pb-frontis-sub' }, `«${keeper.id}» 의 이번 턴 — 각 {{빈칸}}이 어디서 오는가`),
-        React.createElement('div', { className: 'pb-frontis-meta mono' }, `${filledCount}/${allVars.length} 치환됨 · ${keeper.phase} · ${rt}`))),
+        React.createElement('h1', null, '\uce58\ud658 \uc9c0\ub3c4'),
+        React.createElement('div', { className: 'pb-frontis-sub' }, `«${keeper.id}» 의 이번 턴 — 런타임 절의 빈칸`),
+        React.createElement('div', { className: 'pb-frontis-meta mono' }, `${filledCount}/${allVars.length} \uce58\ud658\ub428 \u00b7 ${keeper.phase} \u00b7 ${rt}`))),
 
     // source legend
     React.createElement('div', { className: 'pb-map-legend' },
@@ -308,20 +307,20 @@ function PbVarMap({ keeper, fill, slotVar, rt }) {
             React.createElement('span', { className: 'pb-map-var-name mono' }, `{{${v}}}`),
             React.createElement('div', { className: 'pb-map-used' },
               used.length === 0
-                ? React.createElement('span', { className: 'pb-map-used-none' }, '미사용')
+                ? React.createElement('span', { className: 'pb-map-used-none' }, '\ubbf8\uc0ac\uc6a9')
                 : used.map(ch => React.createElement('span', {
                     key: ch.id, className: 'pb-map-used-chip',
                     style: { '--bc': (window.PB_BLOCK_META[ch.id] || {}).color || 'var(--ink-4)' },
                   }, (window.PB_BLOCK_META[ch.id] || {}).lbl || ch.id)))),
-          React.createElement('div', { className: 'pb-map-arrow' }, '→'),
+          React.createElement('div', { className: 'pb-map-arrow' }, '\u2192'),
           empty
-            ? React.createElement('div', { className: 'pb-map-val empty' }, '이 keeper·턴엔 신호 없음 — 치환 안 됨')
+            ? React.createElement('div', { className: 'pb-map-val empty' }, '이번 턴에는 값이 없어 비어 있습니다')
             : React.createElement('div', { className: 'pb-map-val mono' }, String(val)));
       }))),
 
     React.createElement('div', { className: 'pb-colophon' },
-      React.createElement('span', null, '출처 = ', React.createElement('code', { className: 'pb-code' }, 'PB_VAR_SRC'), ' · config=keeper.toml · turn=이번 턴 · checkpoint=디스크 · memory=memory-os · gate=커넥터'),
-      React.createElement('span', { className: 'pb-colophon-note' }, '← → 로 keeper 넘기면 값이 다시 채워진다')));
+      React.createElement('span', null, '출처 · turn=이번 턴 · checkpoint=디스크 · memory=memory-os · gate=커넥터 · workspace=대화'),
+      React.createElement('span', { className: 'pb-colophon-note' }, '\u2190 \u2192 \ub85c keeper \ub118\uae30\uba74 \uac12\uc774 \ub2e4\uc2dc \ucc44\uc6cc\uc9c4\ub2e4')));
 }
 
 window.PromptBook = PromptBook;

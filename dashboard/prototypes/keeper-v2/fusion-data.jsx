@@ -52,9 +52,9 @@ const PANEL_FAIL = {
 
 // decision badge meta
 const FUSION_DECISION = {
-  Answer:       { lbl: '해결 답안', cls: 'ok',   glyph: '✓' },
-  Recommend:    { lbl: '권고 (advisory)', cls: 'volt', glyph: '▸' },
-  Insufficient: { lbl: '심의 무효 · 부족', cls: 'warn', glyph: '⚠' },
+  Answer:       { lbl: '해결 답안', cls: 'ok',   glyph: '\u2713' },
+  Recommend:    { lbl: '권고 (advisory)', cls: 'volt', glyph: '\u25B8' },
+  Insufficient: { lbl: '심의 무효 · 부족', cls: 'warn', glyph: '\u26A0' },
 };
 
 const DENY_REASON = {

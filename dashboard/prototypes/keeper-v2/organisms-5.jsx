@@ -69,7 +69,7 @@ function KeeperConfigPanel({
         <h3>keeper 설정</h3>
         <span className="tid">{keeper.id}</span>
         {keeper.phase ? <span className="kc-hd-phase"><StatusDot status={keeper.status} pulse={keeper.status === 'run'} />{keeper.phase}</span> : null}
-        {onClose ? <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button> : null}
+        {onClose ? <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button> : null}
       </div>
       <div className="turn-body">
         <TurnSec title="정체성 · 배정">

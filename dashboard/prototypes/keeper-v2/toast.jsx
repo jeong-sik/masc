@@ -26,7 +26,7 @@ function dismissToast(id) {
   _emitToasts();
 }
 
-const TOAST_GLYPH = { ok: '✓', warn: '⚠', bad: '✕', info: '◈' };
+const TOAST_GLYPH = { ok: '\u2713', warn: '\u26A0', bad: '\u2715', info: '\u25C8' };
 
 function ToastHost() {
   const [list, setList] = useToastS(_toasts);
@@ -49,7 +49,7 @@ function ToastHost() {
           {t.undo && (
             <button className="toast-undo" onClick={() => { t.undo(); dismissToast(t.id); }}>되돌리기</button>
           )}
-          <button className="toast-x" onClick={() => dismissToast(t.id)} aria-label="닫기">{'✕'}</button>
+          <button className="toast-x" onClick={() => dismissToast(t.id)} aria-label="닫기">{'\u2715'}</button>
         </div>
       ))}
     </div>

@@ -68,7 +68,7 @@ function IdeEditor({ file, findQ, onJumpAnn }) {
           <div key={ln} className={`cl ${cur ? 'hl-cursor' : ''} ${ann ? 'hl-ann' : ''}`}
             style={{ ...(k ? { '--kc': `var(--kp${k.slot})` } : null), ...(matched ? { background: 'var(--volt-wash)', boxShadow: 'inset 2.5px 0 0 var(--volt)' } : null) }}>
             <span className="ln">{ln}</span>
-            <span className="lc" dangerouslySetInnerHTML={{ __html: html || ' ' }}></span>
+            <span className="lc" dangerouslySetInnerHTML={{ __html: html || '\u00a0' }}></span>
             {cur && <CursorTag cur={cur} />}
             {ann && (
               <button className={`ann-pin ${ann.kind === 'risk' ? 'risk' : ''}`} onClick={() => onJumpAnn(ann.id)}>
@@ -96,7 +96,7 @@ function IdeDiff() {
         {IDE_DIFF.left.map(([ln, html, cls], i) => (
           <div key={i} className={`dl ${cls}`}>
             <span className="ln">{cls === 'pad' ? '' : ln}</span>
-            <span className="lc" dangerouslySetInnerHTML={{ __html: html || ' ' }}></span>
+            <span className="lc" dangerouslySetInnerHTML={{ __html: html || '\u00a0' }}></span>
           </div>
         ))}
       </div>
@@ -105,7 +105,7 @@ function IdeDiff() {
         {IDE_DIFF.right.map(([ln, html, cls], i) => (
           <div key={i} className={`dl ${cls}`}>
             <span className="ln">{cls === 'pad' ? '' : ln}</span>
-            <span className="lc" dangerouslySetInnerHTML={{ __html: html || ' ' }}></span>
+            <span className="lc" dangerouslySetInnerHTML={{ __html: html || '\u00a0' }}></span>
           </div>
         ))}
       </div>

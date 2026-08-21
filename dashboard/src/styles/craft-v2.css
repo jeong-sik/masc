@@ -31,6 +31,20 @@
   font-size: calc(var(--twk-font-scale, 100) * 1%);
 }
 
+/* ── Button leading ───────────────────────────────────────────── */
+/* The prototype ships no CSS reset, so its <button>s keep the UA metrics
+   (`line-height: normal`) while body copy runs at 1.55. Every dense chrome the
+   design builds out of buttons — log rows, nav items, stat chips, kanban cards
+   — is sized by that tight leading. The dashboard's Tailwind preflight makes
+   `button { font: inherit }`, so the same elements inherit 1.55 and every row
+   grows ~10% (a log row measured 41.7px against the design's 38.0px, and the
+   drift compounds down a list). Restoring proportional leading on the v2 shell's
+   buttons is what makes the row pitch match; a button that wants prose leading
+   states it. Scoped to `.v2-app` so non-v2 surfaces are untouched. */
+.v2-app button {
+  line-height: normal;
+}
+
 /* ── Density ──────────────────────────────────────────────────── */
 .v2-app[data-density="spacious"] {
   --twk-pad-surface: 32px 42px 60px;
@@ -58,8 +72,27 @@
   padding: var(--twk-pad-surface);
 }
 
-.v2-app[data-density] .card,
-.v2-app[data-density] [class*="-card"]:not(.twk-panel):not(.twk-panel *) {
+/* Density card padding — the card set is enumerated, not matched by substring.
+   `[class*="-card"]` also matched every element whose class merely CONTAINS
+   "-card": the `.ov-card-h` card headers, `.set-card-b-wide`, and — through the
+   Tailwind utility `rounded-card` — all ~100 chat avatars, each of which took on
+   card padding it was never meant to have. Its `:not(.twk-panel)` pair also
+   pushed it to (0,5,0), outranking the prototype's own density rules, so
+   `.ctx-card` rendered at 16px/18px where the design specifies 14px/15px.
+   `:is()` here keeps the rule at (0,3,0) so a component that states its own
+   density padding still wins. Guarded by craft-v2-card-density.test.ts: a new
+   `*-card` class either joins this list or states `padding: var(--pad-card)`. */
+.v2-app[data-density] :is(
+  .card, .agent-card, .ap-auto-card, .ap-card, .chat-artifact-card, .cmd-card, .cn-card,
+  .ctx-card, .drain-card, .focus-agent-card, .fus-panel-card, .fus-runs-card, .ia-card,
+  .ide-ann-card, .ide-annotation-rail-card, .ide-conversation-card, .ide-keeper-work-card,
+  .kti-ctx-card, .kw-card, .mem-trust-card, .mg-step-card, .mission-activity-card,
+  .mission-crew-card, .monitor-surface-card, .ops-card, .ov-card, .prompt-preset-card,
+  .rt-card, .rtc-card, .rw-pick-card, .sandbox-card, .sch-card, .sch-poll-card, .ss-card,
+  .ti-ctx-card, .tm-paused-card, .tps-card, .v2-command-card, .v2-ide-card, .v2-lab-card,
+  .v2-monitoring-card, .v2-overview-ticker-card, .v2-workspace-card, .verif-card, .vq-card,
+  .wka-card
+) {
   padding: var(--twk-pad-card);
 }
 
@@ -208,8 +241,17 @@
   --lift: -3px;
 }
 
-.v2-app[data-motion="lively"] .card:hover,
-.v2-app[data-motion="lively"] [class*="-card"]:not(.twk-panel):not(.twk-panel *):hover,
+.v2-app[data-motion="lively"] :is(
+  .card, .agent-card, .ap-auto-card, .ap-card, .chat-artifact-card, .cmd-card, .cn-card,
+  .ctx-card, .drain-card, .focus-agent-card, .fus-panel-card, .fus-runs-card, .ia-card,
+  .ide-ann-card, .ide-annotation-rail-card, .ide-conversation-card, .ide-keeper-work-card,
+  .kti-ctx-card, .kw-card, .mem-trust-card, .mg-step-card, .mission-activity-card,
+  .mission-crew-card, .monitor-surface-card, .ops-card, .ov-card, .prompt-preset-card,
+  .rt-card, .rtc-card, .rw-pick-card, .sandbox-card, .sch-card, .sch-poll-card, .ss-card,
+  .ti-ctx-card, .tm-paused-card, .tps-card, .v2-command-card, .v2-ide-card, .v2-lab-card,
+  .v2-monitoring-card, .v2-overview-ticker-card, .v2-workspace-card, .verif-card, .vq-card,
+  .wka-card
+):hover,
 .v2-app[data-motion="lively"] .ov-keeper:hover,
 .v2-app[data-motion="lively"] .cp-route:hover,
 .v2-app[data-motion="lively"] .cn-card:hover,

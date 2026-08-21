@@ -463,8 +463,8 @@ function CompactButton({ state = 'idle', onClick, labels, title }) {
       {state === 'busy'
         ? <React.Fragment><span className="cmp-spin"></span> {L.busy}</React.Fragment>
         : state === 'done'
-          ? <React.Fragment>{'✓'} {L.done}</React.Fragment>
-          : <React.Fragment>{'◉'} {L.idle}</React.Fragment>}
+          ? <React.Fragment>{'\u2713'} {L.done}</React.Fragment>
+          : <React.Fragment>{'\u25C9'} {L.idle}</React.Fragment>}
     </button>
   );
 }

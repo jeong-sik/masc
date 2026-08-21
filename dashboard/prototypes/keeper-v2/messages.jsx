@@ -66,13 +66,13 @@ function LinkCard({ b }) {
   try { host = new URL(b.url).hostname.replace(/^www\./, ''); } catch (e) {}
   return (
     <a className={`linkcard ${b.kind || ''}`} href={b.url} target="_blank" rel="noopener noreferrer">
-      <span className="linkcard-fav">{b.fav || (host ? host[0].toUpperCase() : '↗')}</span>
+      <span className="linkcard-fav">{b.fav || (host ? host[0].toUpperCase() : '\u2197')}</span>
       <span className="linkcard-body">
         <span className="linkcard-title">{b.title}</span>
         {b.desc && <span className="linkcard-desc">{b.desc}</span>}
         <span className="linkcard-meta mono">{b.meta || host}</span>
       </span>
-      <span className="linkcard-go">{'↗'}</span>
+      <span className="linkcard-go">{'\u2197'}</span>
     </a>
   );
 }
@@ -139,7 +139,7 @@ function Suggestions({ items, onPick }) {
       <span className="lbl">추천 후속 질문</span>
       <div className="suggest-row">
         {items.map((s, i) => (
-          <SuggestionChip key={i} pre={'›'} onClick={() => onPick && onPick(s)}>{s}</SuggestionChip>
+          <SuggestionChip key={i} pre={'\u203A'} onClick={() => onPick && onPick(s)}>{s}</SuggestionChip>
         ))}
       </div>
     </div>
@@ -166,7 +166,7 @@ function CtxFrom({ cf }) {
     </div>
   ) : null;
   return (
-    <window.KVM.Provenance icon={'⌘'} action="범위 보기" detail={detail}>
+    <window.KVM.Provenance icon={'\u2318'} action="범위 보기" detail={detail}>
       <span><b>{cf.channel}</b> 맥락 포함 · 메시지 {cf.msgs}개 · {cf.range}</span>
     </window.KVM.Provenance>
   );

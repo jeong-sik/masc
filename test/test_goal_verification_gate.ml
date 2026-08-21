@@ -375,21 +375,6 @@ let test_proof_verdict_requires_a_viable_criterion () =
       (String_util.contains_substring msg "requires a viable criterion")
 ;;
 
-let test_human_confirmation_requires_a_proven_proof () =
-  with_workspace
-  @@ fun config ->
-  match
-    Goal_verification.record_human_confirmation
-      config
-      ~goal_id:"goal-unproven"
-      ~confirmed_by:"operator-test"
-  with
-  | Ok _ -> fail "human confirmation committed without a proven proof"
-  | Error msg ->
-    check bool "the refusal names the missing proof" true
-      (String_util.contains_substring msg "needs a proven proof")
-;;
-
 (* Ledger: strict decode, fail-closed mutations, fail-loud reads *)
 
 let test_undecodable_ledger_fails_closed_and_loud () =
@@ -466,6 +451,42 @@ let test_unknown_ledger_field_is_a_decode_error () =
   | Error msg ->
     check bool "the unknown field is named" true
       (String_util.contains_substring msg "surprise_field")
+;;
+
+let test_retired_human_confirmation_state_is_a_decode_error () =
+  with_workspace
+  @@ fun config ->
+  mark_criterion_pending config "goal-no-human-legacy";
+  let path = Goal_verification.verifications_path config in
+  let json = Yojson.Safe.from_file path in
+  let poisoned =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "records", `List [ `Assoc row ] ->
+                let row =
+                  List.map
+                    (fun (field, value) ->
+                       if String.equal field "completion"
+                       then field, `Assoc [ "state", `String "human_confirmed" ]
+                       else field, value)
+                    row
+                in
+                key, `List [ `Assoc row ]
+              | _ -> key, value)
+           fields)
+    | _ -> fail "unexpected ledger shape"
+  in
+  Yojson.Safe.to_file path poisoned;
+  Yojson.Safe.to_file (path ^ ".last-good") poisoned;
+  match Goal_verification.get_record config ~goal_id:"goal-no-human-legacy" with
+  | Ok _ -> fail "retired human confirmation state decoded silently"
+  | Error msg ->
+    check bool "the retired state is rejected as unknown" true
+      (String_util.contains_substring msg "human_confirmed")
 ;;
 
 (* Observability: the read surfaces join the ledger *)
@@ -958,14 +979,14 @@ let () =
             test_proof_verdict_requires_a_pending_request
         ; test_case "proof verdict requires a viable criterion" `Quick
             test_proof_verdict_requires_a_viable_criterion
-        ; test_case "human confirmation requires a proven proof" `Quick
-            test_human_confirmation_requires_a_proven_proof
         ] )
     ; ( "store discipline"
       , [ test_case "undecodable ledger fails closed and loud" `Quick
             test_undecodable_ledger_fails_closed_and_loud
         ; test_case "unknown ledger field is a decode error" `Quick
             test_unknown_ledger_field_is_a_decode_error
+        ; test_case "retired human confirmation state is a decode error" `Quick
+            test_retired_human_confirmation_state_is_a_decode_error
         ] )
     ; ( "observability"
       , [ test_case "goal list joins the ledger" `Quick

@@ -691,9 +691,7 @@ let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~act
     (match record with
      | Some
          { Goal_verification.completion =
-             ( Goal_verification.Proof_pending _
-             | Goal_verification.Proof_proven _
-             | Goal_verification.Human_confirmed _ )
+             (Goal_verification.Proof_pending _ | Goal_verification.Proof_proven _)
          ; _
          } ->
        (* The durable request stands, or the verdict committed but the phase

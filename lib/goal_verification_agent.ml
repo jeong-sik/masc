@@ -90,7 +90,7 @@ let group_pending_by_goal work =
    ledger row lost the durable proof request is re-armed via
    [mark_proof_pending] and joins the work set, the same recovery
    [answer_verifying_repeat] performs on the MCP surface. A [Verifying] goal
-   with a committed verdict ([Proof_proven] / [Human_confirmed]) is the
+   with a committed [Proof_proven] verdict is the
    crash-between-writes case the keeper's repeated [request_complete]
    reconciles; the lane must not overwrite that verdict. *)
 
@@ -115,8 +115,7 @@ let collect_pending config : (pending_work list, string) result =
                [ { goal_id = record.goal_id; kind = Completion_proof } ]
              | Goal_verification.Completion_idle
              | Goal_verification.Proof_proven _
-             | Goal_verification.Proof_refuted _
-             | Goal_verification.Human_confirmed _ -> []
+             | Goal_verification.Proof_refuted _ -> []
            in
            criterion @ proof)
         records
@@ -142,9 +141,7 @@ let collect_pending config : (pending_work list, string) result =
           with
           | Some
               { Goal_verification.completion =
-                  ( Goal_verification.Proof_proven _
-                  | Goal_verification.Human_confirmed _
-                  | Goal_verification.Proof_pending _ )
+                  (Goal_verification.Proof_proven _ | Goal_verification.Proof_pending _)
               ; _
               } -> None
           | Some

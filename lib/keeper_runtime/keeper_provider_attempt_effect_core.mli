@@ -5,6 +5,5 @@ type t =
   | Effect_attempted
   | Observation_unavailable
 
-val allows_same_turn_retry : t -> bool
 val to_string : t -> string
 val of_string : string -> t option

@@ -162,11 +162,7 @@ val prepare_turn :
 
     The seed carries the projected history as-is. Nothing is cut here: the
     provider owns its context window and reports exceeding it as a typed
-    terminal, which the shrink sequence in
-    {!Keeper_turn_driver_try_provider.context_overflow_shrink_sequence}
-    consumes to retry with less. A second ceiling applied before that one
-    measured wire bytes instead of tokens and dropped the oldest atoms with no
-    copy kept. *)
+    terminal. *)
 
 val dynamic_tools :
   runtime_label:string ->

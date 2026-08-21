@@ -39,16 +39,8 @@ type try_provider_ctx =
     runtime_id : string
   ; error_runtime_id : string
   ; max_request_body_bytes : int
-  ; (* #27320: the model-input windowing budget consulted by
-       [budgeted_model_input_projection]. Starts at [max_request_body_bytes]
-       (the runtime's declared wire cap) but is independently shrinkable:
-       [run_try_provider_with_context_overflow_shrink] halves it on a typed
-       provider context overflow and retries the SAME candidate, while
-       [max_request_body_bytes] itself keeps reporting the real declared cap
-       to wire-error diagnostics ([observe_request_wire_error],
-       [pre_dispatch_serialization_observer]) so those never conflate a
-       voluntary MASC-side reduction with the provider's actual admission
-       limit. *)
+  ; (* Model-input windowing budget consulted by
+       [budgeted_model_input_projection]. *)
     model_input_capacity_bytes : int
   ; base_path : string
   ; keeper_name : string
@@ -189,28 +181,6 @@ let emit_runtime_manifest
       ?status ?decision ()
     |> append
   | _ -> ()
-
-(* #27320: records a same-runtime context-overflow shrink retry on the
-   existing per-attempt manifest channel (the same [Provider_lane_resolved]
-   event this module already emits for the ordinary "resolved" case) rather
-   than introducing a new [event_kind] for one narrow signal. *)
-let emit_context_overflow_shrink_manifest
-      (ctx : try_provider_ctx)
-      ~shrink_attempt
-      ~previous_capacity_bytes
-      ~capacity_bytes
-  =
-  emit_runtime_manifest ctx
-    ~status:"context_overflow_shrink_retry"
-    ~decision:
-      (`Assoc
-        [ "shrink_attempt", `Int shrink_attempt
-        ; "previous_model_input_capacity_bytes", `Int previous_capacity_bytes
-        ; "model_input_capacity_bytes", `Int capacity_bytes
-        ; "max_request_body_bytes", `Int ctx.max_request_body_bytes
-        ])
-    Keeper_runtime_manifest.Provider_lane_resolved
-;;
 
 let accept_rejected_error ~runtime_id ~(response : Agent_core.Types.api_response) =
   let rejection =
@@ -1009,158 +979,10 @@ let run_try_provider
     result, checkpoint_after, None
 ;;
 
-(* #27320: same-runtime retry stage for a typed provider context overflow,
-   inserted before [Keeper_turn_driver.attempt_runtime_candidates]' declared-
-   lane candidate walk and its cascade rotation. A ContextOverflow on a
-   request that already fit [max_request_body_bytes] (the declared wire cap)
-   means the byte cap under-bounds this target's token window, not that the
-   request was malformed: a smaller window of the SAME conversation can
-   still answer the same turn, so this retries the same candidate rather
-   than rotating runtimes immediately. *)
-let context_overflow_shrink_max_attempts = 3
-
-(* Halving needs no token/byte conversion constant: the provider is the
-   oracle for whether a window fits. Each retry is a content-free mechanical
-   convergence step consulted only after a typed overflow, not a size
-   estimate. *)
-let context_overflow_shrink_divisor = 2
-
-let default_context_overflow_shrink_capacity ~capacity_bytes =
-  capacity_bytes / context_overflow_shrink_divisor
-;;
-
-(* The shrink-retry policy is expressed over an injected [attempt] callback
-   rather than calling [run_try_provider] directly, so it stays testable
-   without an Eio-backed provider: [run_try_provider_with_context_overflow_shrink]
-   below wires the real attempt for production; tests can inject a canned
-   Ok/Error sequence to verify the halving sequence, the attempt cap, and the
-   same-run-retry-authority gate on their own.
-
-   Classifies with [Keeper_turn_driver_try_runtime.context_overflow_should_try_next]
-   rather than [Keeper_error_classify.is_context_overflow]: the latter
-   depends on [Keeper_turn_driver], which depends on this module (it calls
-   [run_try_provider]), so reaching it here would close a module cycle. Both
-   predicates match the identical single case
-   ([Agent_core.Error.Api (ContextOverflow _)] -> [true]); see that function's
-   doc comment for why the byte-axis and token-axis siblings are excluded.
-   [same_run_retry_authorized] mirrors the exact same-run authority gate
-   [Keeper_turn_driver]'s declared-lane walk applies before rotating
-   candidates ([checkpoint_allows_candidate_transition] / [checkpoint_stage_observed]): a
-   shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
-   mutated agent state at a durable checkpoint stage. *)
-let context_overflow_shrink_sequence
-      ?(shrink_capacity = fun ~capacity_bytes:_ ~default_capacity_bytes ->
-        default_capacity_bytes)
-      ?(final_shrink_capacity = fun ~capacity_bytes:_ -> None)
-      ~starting_capacity_bytes
-      ~same_run_retry_authorized
-      ~record_success
-      ~on_shrink_retry
-      ~(attempt : capacity_bytes:int -> ('ok, Agent_core.Error.t) result)
-      ()
-  : ('ok, Agent_core.Error.t) result
-  =
-  let rec go ~capacity_bytes ~shrink_attempt =
-    match attempt ~capacity_bytes with
-    | Ok _ as ok ->
-      record_success ~capacity_bytes;
-      ok
-    | Error error as failed ->
-      if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
-         && same_run_retry_authorized ()
-         && shrink_attempt < context_overflow_shrink_max_attempts
-      then (
-        let default_capacity_bytes =
-          default_context_overflow_shrink_capacity ~capacity_bytes
-        in
-        let ordinary_capacity_bytes =
-          shrink_capacity ~capacity_bytes ~default_capacity_bytes
-        in
-        let shrunk_capacity_bytes =
-          if shrink_attempt + 1 = context_overflow_shrink_max_attempts
-          then
-            Option.value
-              (final_shrink_capacity ~capacity_bytes)
-              ~default:ordinary_capacity_bytes
-          else ordinary_capacity_bytes
-        in
-        if shrunk_capacity_bytes >= capacity_bytes
-        then failed
-        else (
-          on_shrink_retry
-            ~shrink_attempt:(shrink_attempt + 1)
-            ~previous_capacity_bytes:capacity_bytes
-            ~capacity_bytes:shrunk_capacity_bytes;
-          go
-            ~capacity_bytes:shrunk_capacity_bytes
-            ~shrink_attempt:(shrink_attempt + 1)))
-      else failed
-  in
-  go ~capacity_bytes:starting_capacity_bytes ~shrink_attempt:0
-;;
-
-(** Same as [run_try_provider], except a typed provider context overflow
-    retries the SAME candidate with the model-input windowing capacity
-    halved (bounded by [context_overflow_shrink_max_attempts]) before
-    returning to the caller, which still owns declared-lane candidate
-    rotation and cascade fallback for every other error and for an overflow
-    that survives every shrink attempt.
-
-    The starting capacity for this (keeper, runtime) pair comes from
-    {!Keeper_context_overflow_shrink_state}: the capacity that last
-    completed a turn here, clamped to [ctx.max_request_body_bytes], so a
-    keeper that has already discovered a working window does not
-    rediscover it every turn. A successful attempt updates that memory. *)
-let run_try_provider_with_context_overflow_shrink
-      (ctx : try_provider_ctx)
-      ?enable_thinking_override
-      candidate
-  =
-  let starting_capacity_bytes =
-    Keeper_context_overflow_shrink_state.starting_capacity_bytes
-      ~keeper_name:ctx.keeper_name
-      ~runtime_id:ctx.runtime_id
-      ~max_capacity_bytes:ctx.max_request_body_bytes
-  in
-  let checkpoint_after = ref None in
-  let success_sample = ref None in
-  let result =
-    context_overflow_shrink_sequence
-      ~starting_capacity_bytes
-      ~same_run_retry_authorized:(fun () ->
-        checkpoint_allows_candidate_transition ctx.checkpoint_stage_observed)
-      ~record_success:(fun ~capacity_bytes ->
-        Keeper_context_overflow_shrink_state.record_success
-          ~keeper_name:ctx.keeper_name
-          ~runtime_id:ctx.runtime_id
-          ~capacity_bytes)
-      ~on_shrink_retry:(fun ~shrink_attempt ~previous_capacity_bytes ~capacity_bytes ->
-        emit_context_overflow_shrink_manifest
-          ctx
-          ~shrink_attempt
-          ~previous_capacity_bytes
-          ~capacity_bytes)
-      ~attempt:(fun ~capacity_bytes ->
-        let attempt_result, attempt_checkpoint_after, attempt_success_sample =
-          run_try_provider
-            { ctx with model_input_capacity_bytes = capacity_bytes }
-            ?enable_thinking_override
-            candidate
-        in
-        checkpoint_after := attempt_checkpoint_after;
-        success_sample := attempt_success_sample;
-        attempt_result)
-      ()
-  in
-  result, !checkpoint_after, !success_sample
-;;
-
 module For_testing = struct
   let apply_accept = apply_accept
   let observe_request_wire_error = observe_request_wire_error
   let memoize_message_measurement = memoize_message_measurement
   let plan_and_window_model_input = plan_and_window_model_input
   let offload_model_input_cpu = offload_model_input_cpu
-  let context_overflow_shrink_max_attempts = context_overflow_shrink_max_attempts
-  let context_overflow_shrink_divisor = context_overflow_shrink_divisor
 end

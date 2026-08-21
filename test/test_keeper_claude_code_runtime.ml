@@ -759,70 +759,7 @@ let history_uses_current_schema history =
     history
 ;;
 
-let test_keeper_shrinks_history_after_statusless_context_error () =
-  let base_path = temp_workspace () in
-  let first_prompt_marker = Filename.concat base_path "overflow-full-prompt.json" in
-  let second_prompt_marker = Filename.concat base_path "overflow-shrunk-prompt.json" in
-  let initial_messages =
-    List.init 240 (fun index ->
-      message
-        (if index mod 2 = 0 then User else Assistant)
-        (Printf.sprintf "%03d:%s" index (String.make 1_024 'x')))
-  in
-  let reset_shrink_state () =
-    Eio_main.run (fun _ ->
-      Keeper_context_overflow_shrink_state.For_testing.reset ())
-  in
-  reset_shrink_state ();
-  Fun.protect
-    ~finally:(fun () ->
-      reset_shrink_state ();
-      cleanup_tree base_path)
-    (fun () ->
-       with_fixture_sequence
-         ~first_prompt_marker
-         ~second_prompt_marker
-         [ Emit prompt_too_long_statusless_result ]
-         [ Emit (assistant ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
-         ; Emit (result ~turn_id:"turn-shrunk" "MASC_CLAUDE_SHRUNK")
-         ]
-         (fun cli_path ->
-            match
-              run_keeper_turn
-                ~initial_messages
-                ~base_path
-                ~cli_path
-                ~goal:"SHRINK_HISTORY"
-                ()
-            with
-            | Error error -> fail (Agent_core.Error.to_string error)
-            | Ok turn ->
-              check string
-                "Keeper response"
-                "MASC_CLAUDE_SHRUNK"
-                (keeper_response_text turn));
-       let full_history = prompt_history first_prompt_marker in
-       let shrunk_history = prompt_history second_prompt_marker in
-       let full_count = List.length full_history in
-       let shrunk_count = List.length shrunk_history in
-       check int "first attempt keeps full history" 240 full_count;
-       check bool "full history uses current codec" true
-         (history_uses_current_schema full_history);
-       check bool "retry keeps non-empty history" true (shrunk_count > 0);
-       check bool "retry history uses current codec" true
-         (history_uses_current_schema shrunk_history);
-       check bool
-         "retry shrinks provider-bound history"
-         true
-         (shrunk_count < full_count);
-       let state = load_state base_path in
-       check int "fresh retry settles as turn one" 1 state.turn_count;
-       match state.phase with
-       | Settled { turn_id = "turn-shrunk"; _ } -> ()
-       | _ -> fail "shrunk Claude Code retry did not settle")
-;;
-
-let test_post_effect_transport_enters_recovery () =
+ let test_post_effect_transport_enters_recovery () =
   let base_path = temp_workspace () in
   let call_count = ref 0 in
   let marker_param : Agent_core.Types.tool_param =
@@ -875,12 +812,6 @@ let test_post_effect_transport_enters_recovery () =
                    "the fence observed the transport interruption (fail-closed Observation_unavailable)"
                    "observation_unavailable"
                    (Keeper_provider_attempt_effect.to_string effect_disposition);
-                 check
-                   bool
-                   "post-effect failure is fenced against same-turn retry"
-                   false
-                   (Keeper_provider_attempt_effect.allows_same_turn_retry
-                      effect_disposition)
                | _ -> fail (Agent_core.Error.to_string error))
             | Ok _ -> fail "post-effect response failure completed the Keeper turn");
        check int "tool effect count" 1 !call_count;
@@ -933,12 +864,8 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
                | Some
                    (Keeper_internal_error.Provider_attempt_effect_fenced
                       { effect_disposition; _ }) ->
-                 check
-                   bool
-                   "post-effect overflow is fenced"
-                   false
-                   (Keeper_provider_attempt_effect.allows_same_turn_retry
-                      effect_disposition)
+                 check bool "post-effect overflow is fenced" true
+                   (effect_disposition <> Keeper_provider_attempt_effect.No_effect_observed)
                | _ -> fail (Agent_core.Error.to_string error))
             | Ok _ -> fail "post-effect context overflow completed the Keeper turn");
        check int "tool effect is not replayed" 1 !call_count;
@@ -1036,12 +963,8 @@ let test_quota_enters_typed_recovery () =
              | Some
                  (Keeper_internal_error.Provider_attempt_effect_fenced
                     { effect_disposition; diagnostic; _ }) ->
-               check
-                 bool
-                 "quota rejection is fenced against same-turn retry"
-                 false
-                 (Keeper_provider_attempt_effect.allows_same_turn_retry
-                    effect_disposition);
+               check bool "quota rejection is fenced" true
+                 (effect_disposition <> Keeper_provider_attempt_effect.No_effect_observed);
                check
                  bool
                  "the fenced envelope keeps the quota diagnostic"
@@ -1304,10 +1227,6 @@ let () =
             "Agent Core checkpoint starts official-client turn"
             `Quick
             test_agent_core_checkpoint_starts_official_client_turn
-        ; test_case
-            "shrinks history after statusless context error"
-            `Quick
-            test_keeper_shrinks_history_after_statusless_context_error
         ; test_case
             "projects typed tool history and lifecycle"
             `Quick

@@ -1,8 +1,7 @@
 (** Structured agent-core error types.
 
     Replaces [(_, string) result] with [(_, t) result] across agent core.
-    Provides human-readable [to_string] for stable error messages
-    and [is_retryable] for automated retry decisions.
+    Provides human-readable [to_string] for stable error messages.
 
     @stability Stable
     @since 0.93.1 *)
@@ -169,9 +168,6 @@ val category_label : category -> string
 
 (** Human-readable error message. *)
 val to_string : t -> string
-
-(** Whether the error is transient and the operation can be retried. *)
-val is_retryable : t -> bool
 
 val of_raised_exn : exn -> t
 (** Classify an exception that escaped a call. An Eio timeout — bare, or wrapped

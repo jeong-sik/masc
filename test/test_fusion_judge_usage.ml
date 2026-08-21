@@ -170,7 +170,7 @@ let test_judge_failure_classifies_timeouts () =
   let provider_5xx =
     Agent_core.Error.Provider
       (Llm_provider.Error.ServerError
-         { provider = "ollama"; code = 503; transient = true; detail = "unavailable" })
+         { provider = "ollama"; code = 503; detail = "unavailable" })
   in
   check string "outer Api timeout -> timeout tag" "timeout"
     (Fusion_types.judge_failure_tag (classify api_timeout));

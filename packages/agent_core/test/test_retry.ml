@@ -89,7 +89,6 @@ let test_classify_error_402_payment_required () =
    | Retry.PaymentRequired { message } ->
      check string "402 message" "Insufficient Balance" message
    | _ -> fail "expected PaymentRequired for 402");
-  check bool "402 is not retryable" false (Retry.is_retryable err);
   check
     string
     "402 error_message rendering"
@@ -109,8 +108,7 @@ let test_classify_error_403_authorization_denied () =
        "403 provider detail"
        "You've reached your usage limit for this billing cycle"
        message
-   | _ -> fail "expected AuthorizationError for 403");
-  check bool "403 is not retryable" false (Retry.is_retryable err)
+   | _ -> fail "expected AuthorizationError for 403")
 ;;
 
 (* #2644: a hostile or malformed 429 body may carry a non-finite or negative
@@ -140,55 +138,6 @@ let test_classify_error_429_retry_after_finite_guard () =
   match retry_after_of {|{"error":{"retry_after":3.0}}|} with
   | Some ra -> check (float 0.0) "valid retry_after preserved" 3.0 ra
   | None -> fail "expected retry_after Some 3.0 for a valid body"
-;;
-
-let test_is_retryable () =
-  check
-    bool
-    "rate limited retryable"
-    true
-    (Retry.is_retryable (Retry.RateLimited { retry_after = None; message = "" }));
-  check
-    bool
-    "overloaded retryable"
-    true
-    (Retry.is_retryable (Retry.Overloaded { message = "" }));
-  check
-    bool
-    "server retryable"
-    true
-    (Retry.is_retryable (Retry.ServerError { status = 500; message = "" }));
-  check
-    bool
-    "network retryable"
-    true
-    (Retry.is_retryable (Retry.NetworkError { message = ""; kind = Unknown }));
-  check
-    bool
-    "timeout retryable"
-    true
-    (Retry.is_retryable (Retry.Timeout { message = ""; phase = None }));
-  check
-    bool
-    "auth not retryable"
-    false
-    (Retry.is_retryable (Retry.AuthError { message = "" }));
-  check
-    bool
-    "invalid request not retryable"
-    false
-    (Retry.is_retryable
-       (Retry.InvalidRequest { message = ""; reason = Unknown_invalid_request }));
-  check
-    bool
-    "not found not retryable"
-    false
-    (Retry.is_retryable (Retry.NotFound { message = "" }));
-  check
-    bool
-    "payment required not retryable"
-    false
-    (Retry.is_retryable (Retry.PaymentRequired { message = "" }))
 ;;
 
 (* 413 states its cause in the status line. Before this it fell through the final
@@ -227,8 +176,7 @@ let test_payload_too_large_is_classified_from_the_status () =
 let test_invalid_request_reason_boundary () =
   let expect_unknown body =
     match Retry.classify_error ~retry_after_header:None ~status:400 ~body with
-    | Retry.InvalidRequest { reason = Unknown_invalid_request; _ } as err ->
-      check bool "generic invalid request is not retryable" false (Retry.is_retryable err)
+    | Retry.InvalidRequest { reason = Unknown_invalid_request; _ } -> ()
     | _ -> fail "expected Unknown_invalid_request"
   in
   List.iter
@@ -238,15 +186,12 @@ let test_invalid_request_reason_boundary () =
     ; {|{"error":{"message":"unexpected token in tool schema"}}|}
     ; "JSON parse error: unexpected token"
     ];
-  check
-    bool
-    "typed parser-boundary invalid request is retryable"
-    true
-    (Retry.is_retryable
-       (Retry.InvalidRequest
-          { message = "JSON parse error: unexpected token"
-          ; reason = Retry.Json_parse_error
-          }))
+  match
+    Retry.InvalidRequest
+      { message = "JSON parse error: unexpected token"; reason = Retry.Json_parse_error }
+  with
+  | Retry.InvalidRequest { reason = Retry.Json_parse_error; _ } -> ()
+  | _ -> fail "expected typed parser-boundary reason"
 ;;
 
 let test_error_message_all_variants () =
@@ -297,7 +242,6 @@ let () =
             "413 is classified from the status"
             `Quick
             test_payload_too_large_is_classified_from_the_status
-        ; test_case "retryable predicates" `Quick test_is_retryable
         ; test_case
             "invalid request reason boundary"
             `Quick

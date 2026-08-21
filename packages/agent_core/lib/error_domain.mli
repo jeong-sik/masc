@@ -129,7 +129,5 @@ val with_stage : string -> core_error_poly -> error_ctx
 val of_core_error : Error.t -> core_error_poly
 val to_core_error : core_error_poly -> Error.t
 val to_string : [< core_error_poly ] -> string
-val is_retryable : [< core_error_poly ] -> bool
-
 (** Context-aware to_string: includes stage if present. *)
 val ctx_to_string : error_ctx -> string

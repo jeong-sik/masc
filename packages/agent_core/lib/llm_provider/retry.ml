@@ -105,30 +105,6 @@ let error_message = function
   | Timeout r -> Printf.sprintf "Timeout: %s" r.message
 ;;
 
-let is_retryable = function
-  | RateLimited _ -> true
-  | Overloaded _ | ServerError _ | Timeout _ -> true
-  | NetworkError { kind; _ } ->
-    (* TLS errors are permanent (certificate/config issues).
-         Local resource exhaustion means the local machine is the bottleneck,
-         not the remote server — retrying won't help. *)
-    (match kind with
-     | Http_client.Tls_error -> false
-     | Http_client.Local_resource_exhaustion -> false
-     | Http_client.Connection_refused
-     | Http_client.Dns_failure
-     | Http_client.Timeout
-     | Http_client.End_of_file
-     | Http_client.Unknown -> true)
-  | InvalidRequest { reason = Json_parse_error; _ } ->
-    (* Malformed JSON from model output is transient — retry may produce valid JSON. *)
-    true
-  | InvalidRequest _ -> false
-  | AuthError _ | AuthorizationError _ | ContextOverflow _ | InputCapacity _ | NotFound _
-    -> false
-  | PaymentRequired _ -> false
-;;
-
 (** Verdict for a provider turn that produced no content blocks.
 
     An empty turn is never a normal outcome, and the correct recovery differs by
@@ -375,15 +351,14 @@ let%test "extract_error_message: malformed body falls back to prefix" =
   result = "not json at all"
 ;;
 
-let%test "is_retryable: flat Ollama provider prose is not retryable" =
+let%test "flat Ollama provider prose stays an unknown invalid request" =
   (* Before the extract_error_message fix, Ollama's flat-string error
      body was returned verbatim as the full JSON blob. The extracted message
      is still provider prose, so raw HTTP classification must not infer a typed
      parser-boundary reason from it. *)
   let body = {|{"error":"Value looks like object, but can't find closing '}' symbol"}|} in
   match classify_error ~retry_after_header:None ~status:400 ~body with
-  | InvalidRequest { reason = Unknown_invalid_request; _ } as err ->
-    not (is_retryable err)
+  | InvalidRequest { reason = Unknown_invalid_request; _ } -> true
   | InvalidRequest
       { reason =
           Json_parse_error | Attempt_rejected | Request_body_too_large _
@@ -591,97 +566,6 @@ let%test "classify_error returns Unknown InvalidRequest for non-overflow 400" =
   | Timeout _ -> false
 ;;
 
-let%test "ContextOverflow is not retryable" =
-  not (is_retryable (ContextOverflow { message = "overflow"; limit = Some 8192 }))
-;;
-
-let%test "InvalidRequest with malformed JSON is retryable (closing)" =
-  is_retryable
-    (InvalidRequest
-       { message = "Value looks like object, but can't find closing '}' symbol"
-       ; reason = Json_parse_error
-       })
-;;
-
-let%test "InvalidRequest with malformed JSON is retryable (can't find)" =
-  is_retryable
-    (InvalidRequest { message = "Can't find end of string"; reason = Json_parse_error })
-;;
-
-let%test "InvalidRequest with malformed JSON is retryable (unexpected)" =
-  is_retryable
-    (InvalidRequest
-       { message = "Unexpected character in JSON"; reason = Json_parse_error })
-;;
-
-let%test "InvalidRequest with parse error is retryable" =
-  is_retryable
-    (InvalidRequest { message = "Parse error at position 42"; reason = Json_parse_error })
-;;
-
-let%test "InvalidRequest with generic message is NOT retryable" =
-  not
-    (is_retryable
-       (InvalidRequest { message = "bad tool schema"; reason = Unknown_invalid_request }))
-;;
-
-let%test "InvalidRequest with unknown field is NOT retryable" =
-  not
-    (is_retryable
-       (InvalidRequest
-          { message = "Unknown field 'foo'"; reason = Unknown_invalid_request }))
-;;
-
-let%test "InvalidRequest with uppercase PARSE ERROR is retryable" =
-  is_retryable
-    (InvalidRequest { message = "PARSE ERROR at position 42"; reason = Json_parse_error })
-;;
-
-let%test "InvalidRequest with MixedCase is retryable" =
-  is_retryable
-    (InvalidRequest
-       { message = "Unexpected Character In JSON"; reason = Json_parse_error })
-;;
-
-let%test "InvalidRequest with unterminated string is retryable" =
-  is_retryable
-    (InvalidRequest { message = "Unterminated string literal"; reason = Json_parse_error })
-;;
-
-let%test "InvalidRequest with invalid json is retryable" =
-  is_retryable
-    (InvalidRequest
-       { message = "invalid json in tool call arguments"; reason = Json_parse_error })
-;;
-
-let%test "InvalidRequest with query parse error is NOT retryable" =
-  not
-    (is_retryable
-       (InvalidRequest
-          { message = "parse error in query parameters"
-          ; reason = Unknown_invalid_request
-          }))
-;;
-
-let%test "InvalidRequest can't-find tool is NOT retryable" =
-  not
-    (is_retryable
-       (InvalidRequest
-          { message = "Can't find the specified tool"; reason = Unknown_invalid_request }))
-;;
-
-let%test "InvalidRequest with empty message is NOT retryable" =
-  not (is_retryable (InvalidRequest { message = ""; reason = Unknown_invalid_request }))
-;;
-
-let%test "RateLimited retryability does not inspect provider prose" =
-  is_retryable
-    (RateLimited
-       { retry_after = None
-       ; message = "Insufficient balance or no resource package. Please recharge."
-       })
-;;
-
 let%test "classify_error 429 preserves structured retry_after regardless of prose" =
   let body =
     {|{"error":{"retry_after":5.0,"message":"Insufficient balance or no resource package"}}|}
@@ -805,12 +689,12 @@ let%test "classify_error 402 maps to PaymentRequired" =
   | Timeout _ -> false
 ;;
 
-let%test "classify_error 402 is not retryable" =
+let%test "classify_error 402 is PaymentRequired" =
   let body =
     {|{"error":{"message":"Insufficient Balance","type":"insufficient_balance_error"}}|}
   in
   match classify_error ~retry_after_header:None ~status:402 ~body with
-  | PaymentRequired _ as err -> not (is_retryable err)
+  | PaymentRequired _ -> true
   | RateLimited _
   | Overloaded _
   | ServerError _

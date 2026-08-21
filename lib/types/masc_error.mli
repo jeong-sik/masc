@@ -95,25 +95,3 @@ val dashboard_auth_error_code : t -> string option
        (["actor_mismatch"] / ["missing_token"] / ["unknown"]) for
        [Auth (Unauthorized _)];}
     {- ["unknown"] for all non-auth errors.} } *)
-
-val is_retryable : t -> bool
-(** [is_retryable err] — would replaying the same operation, without
-    additional caller action, have a chance of succeeding?
-
-    Mirrors the [Error.is_retryable] helper that AGENT_CORE exposes on
-    its [core_error]. Conservative: when in doubt the result is
-    [false] so callers don't loop on deterministic failures.
-
-    {ul
-    {- [Task _], [Agent _]: [false] (domain-state
-       errors — replaying changes nothing).}
-    {- [Auth (TokenExpired _)]: [true] (clears once
-       [masc_auth_refresh] runs); other [Auth] variants: [false].}
-    {- [System (IoError _ | StorageError _)]: [true] (transient
-       FS / backend); other [System] variants: [false]
-       (caller-provided invariants).}
-    {- [RateLimitExceeded _]: [true] (replays after the
-       advertised wait).}
-    {- [CacheError (CacheReadFailed _ | CacheWriteFailed _
-       | CacheExpired _)]: [true]; [CacheCorrupted _]: [false]
-       (persisted-data invariant violation).} } *)

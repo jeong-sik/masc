@@ -108,13 +108,7 @@ let test_http_transport_error () =
     Error.Mcp (HttpTransportFailed { url = "http://example.com"; detail = "timeout" })
   in
   let msg = Error.to_string err in
-  check bool "contains url" true (String.length msg > 0);
-  check
-    bool
-    "is not retryable for ServerStartFailed"
-    false
-    (Error.is_retryable (Error.Mcp (ServerStartFailed { command = "x"; detail = "y" })));
-  check bool "http transport is retryable" true (Error.is_retryable err)
+  check bool "contains url" true (String.length msg > 0)
 ;;
 
 (* ── Managed type integration ──────────────────────────── *)

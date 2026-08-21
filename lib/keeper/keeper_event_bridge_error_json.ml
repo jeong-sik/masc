@@ -406,12 +406,11 @@ let core_provider_error_fields error =
     ; "provider", `String provider
     ; "detail", `String detail
     ]
-  | Llm_provider.Error.ServerError { provider; code; transient; detail } ->
+  | Llm_provider.Error.ServerError { provider; code; detail } ->
     [ "variant", `String "server_error"
     ; "message", `String message
     ; "provider", `String provider
     ; "status", `Int code
-    ; "transient", `Bool transient
     ; "detail", `String detail
     ]
   | Llm_provider.Error.NetworkError

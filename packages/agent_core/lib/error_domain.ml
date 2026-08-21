@@ -260,56 +260,10 @@ type error_ctx =
 
 let with_stage stage error = { error; stage = Some stage; backtrace = None }
 
-(* ── String / retryable ─────────────────────────────────── *)
+(* ── String projection ──────────────────────────────────── *)
 
 let to_string (err : [< core_error_poly ]) : string =
   to_core_error (err :> core_error_poly) |> Error.to_string
-;;
-
-let is_retryable (err : [< core_error_poly ]) : bool =
-  match (err :> core_error_poly) with
-  | `Rate_limited _
-  | `Server_error _
-  | `Overloaded
-  | `Provider_timeout _
-  | `Streaming_timeout _
-  | `Network_error _ -> true
-  | `Mcp_init_failed _
-  | `Mcp_tool_list_failed _
-  | `Mcp_tool_call_failed _
-  | `Mcp_http_failed _ -> true
-  (* Non-retryable: enumerated explicitly (no [_] catch-all) so a future
-     core_error_poly tag triggers a partial-match compiler warning instead of
-     being silently treated as non-retryable. error_domain.mli's purpose is to
-     eliminate defensive catch-alls; this matches the exhaustive sibling
-     Error.is_retryable. *)
-  | `Auth_error _
-  | `Authorization_error _
-  | `Invalid_request _
-  | `Not_found _
-  | `Context_overflow _
-  | `Input_capacity _
-  | `Provider_wire_error _
-  | `Provider_reported_error _
-  | `Payment_required _
-  | `Tool_exec_failed _
-  | `Tool_timeout _
-  | `Guardrail_violation _
-  | `Tripwire_violation _
-  | `Input_required _
-  | `Hook_execution_failed _
-  | `Terminal_tool_effect_failed _
-  | `Terminal_tool_durability_failed _
-  | `Unrecognized_stop_reason _
-  | `Missing_env_var _
-  | `Unsupported_provider _
-  | `Invalid_config _
-  | `Sensitive_value_in_config _
-  | `Mcp_server_start_failed _
-  | `Serialization _
-  | `Io _
-  | `Orchestration _
-  | `Internal _ -> false
 ;;
 
 let ctx_to_string (ctx : error_ctx) : string =

@@ -239,9 +239,7 @@ let test_internal () =
 let test_wrapped_timeout_is_typed () =
   match Error.of_raised_exn (Eio.Cancel.Cancelled Eio.Time.Timeout) with
   | Error.Api (Retry.Timeout { phase; _ }) ->
-    check bool "no HTTP phase is claimed for a fiber timeout" true (phase = None);
-    check bool "is retryable" true
-      (Error.is_retryable (Error.of_raised_exn (Eio.Cancel.Cancelled Eio.Time.Timeout)))
+    check bool "no HTTP phase is claimed for a fiber timeout" true (phase = None)
   | other ->
     failf "expected Api (Timeout _), got %s" (Error.to_string other)
 ;;
@@ -270,65 +268,6 @@ let test_ordinary_exception_keeps_internal_wording () =
     check string "unchanged for a non-timeout" "Unhandled exception: Failure(\"boom\")"
       message
   | other -> failf "expected Internal, got %s" (Error.to_string other)
-;;
-
-(* ── is_retryable tests ───────────────────────────────────────────── *)
-
-let test_retryable_api_rate_limited () =
-  let err = Error.Api (Retry.RateLimited { retry_after = None; message = "" }) in
-  check bool "rate limited is retryable" true (Error.is_retryable err)
-;;
-
-let test_retryable_api_auth () =
-  let err = Error.Api (Retry.AuthError { message = "" }) in
-  check bool "auth is not retryable" false (Error.is_retryable err)
-;;
-
-let test_retryable_api_server_error () =
-  let err = Error.Api (Retry.ServerError { status = 500; message = "" }) in
-  check bool "server error is retryable" true (Error.is_retryable err)
-;;
-
-let test_retryable_agent () =
-  let err =
-    Error.Agent (GuardrailViolation { validator = "typed-input"; reason = "rejected" })
-  in
-  check bool "agent error not retryable" false (Error.is_retryable err)
-;;
-
-let test_retryable_provider_timeout () =
-  let err =
-    Error.Provider
-      (Llm_provider.Error.Timeout
-         { provider = "openai"
-         ; timeout_phase =
-             Some
-               (Llm_provider.Http_client.Stream_idle
-                  Llm_provider.Http_client.Streaming_answer)
-         ; detail = "stream stalled"
-         })
-  in
-  check bool "provider timeout is retryable" true (Error.is_retryable err)
-;;
-
-let test_retryable_mcp_init () =
-  let err = Error.Mcp (InitializeFailed { detail = "" }) in
-  check bool "mcp init is retryable" true (Error.is_retryable err)
-;;
-
-let test_retryable_mcp_start () =
-  let err = Error.Mcp (ServerStartFailed { command = "x"; detail = "" }) in
-  check bool "mcp start not retryable" false (Error.is_retryable err)
-;;
-
-let test_retryable_config () =
-  let err = Error.Config (MissingEnvVar { var_name = "X" }) in
-  check bool "config not retryable" false (Error.is_retryable err)
-;;
-
-let test_retryable_internal () =
-  let err = Error.Internal "x" in
-  check bool "internal not retryable" false (Error.is_retryable err)
 ;;
 
 (* ── Equality / pattern matching ──────────────────────────────────── *)
@@ -372,17 +311,6 @@ let () =
         ; test_case "Orchestration UnknownAgent" `Quick test_orchestration_unknown_agent
         ; test_case "Orchestration TaskTimeout" `Quick test_orchestration_timeout
         ; test_case "Internal" `Quick test_internal
-        ] )
-    ; ( "is_retryable"
-      , [ test_case "Api RateLimited" `Quick test_retryable_api_rate_limited
-        ; test_case "Api AuthError" `Quick test_retryable_api_auth
-        ; test_case "Api ServerError" `Quick test_retryable_api_server_error
-        ; test_case "Provider timeout" `Quick test_retryable_provider_timeout
-        ; test_case "Agent" `Quick test_retryable_agent
-        ; test_case "Mcp InitializeFailed" `Quick test_retryable_mcp_init
-        ; test_case "Mcp ServerStartFailed" `Quick test_retryable_mcp_start
-        ; test_case "Config" `Quick test_retryable_config
-        ; test_case "Internal" `Quick test_retryable_internal
         ] )
     ; ( "of_raised_exn"
       , [ test_case "cancel-wrapped timeout is typed" `Quick test_wrapped_timeout_is_typed

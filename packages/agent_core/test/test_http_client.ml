@@ -688,36 +688,8 @@ let test_error_domain_full_roundtrip () =
        Alcotest.(check bool)
          "roundtrip non-empty"
          true
-         (String.length s1 > 0 && String.length s2 > 0);
-       (* Verify is_retryable is preserved *)
-       Alcotest.(check bool)
-         "retryable preserved"
-         (Agent_core.Error.is_retryable err)
-         (Agent_core.Error.is_retryable back))
+         (String.length s1 > 0 && String.length s2 > 0))
     errors
-;;
-
-let test_error_domain_retryable () =
-  Alcotest.(check bool)
-    "rate limited retryable"
-    true
-    (Error_domain.is_retryable (`Rate_limited (Some 1.0, "slow down")));
-  Alcotest.(check bool)
-    "network retryable"
-    true
-    (Error_domain.is_retryable (`Network_error "oops"));
-  Alcotest.(check bool)
-    "mcp init retryable"
-    true
-    (Error_domain.is_retryable (`Mcp_init_failed "x"));
-  Alcotest.(check bool)
-    "auth not retryable"
-    false
-    (Error_domain.is_retryable (`Auth_error "bad"));
-  Alcotest.(check bool)
-    "guardrail violation not retryable"
-    false
-    (Error_domain.is_retryable (`Guardrail_violation ("typed-input", "rejected")))
 ;;
 
 let test_error_domain_context () =
@@ -849,7 +821,6 @@ let () =
         ] )
     ; ( "error_domain"
       , [ Alcotest.test_case "full roundtrip" `Quick test_error_domain_full_roundtrip
-        ; Alcotest.test_case "retryable classification" `Quick test_error_domain_retryable
         ; Alcotest.test_case "error context" `Quick test_error_domain_context
         ] )
     ]

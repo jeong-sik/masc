@@ -569,11 +569,7 @@ let test_provider_reported_overflow_types_as_context_overflow () =
          ; message = "Prompt exceeds max length"
          })
   with
-  | Error.Api (Llm_provider.Retry.ContextOverflow { limit = None; _ } as api) ->
-    check_bool
-      "overflow is not transport-retryable"
-      false
-      (Llm_provider.Retry.is_retryable api)
+  | Error.Api (Llm_provider.Retry.ContextOverflow { limit = None; _ }) -> ()
   | other -> Alcotest.failf "expected Api ContextOverflow, got %s" (Error.to_string other)
 ;;
 
@@ -587,13 +583,9 @@ let test_request_body_limit_preserves_typed_capacity_evidence () =
          { reason =
              Llm_provider.Retry.Request_body_too_large { actual_bytes; limit_bytes }
          ; _
-         } as api) ->
+         }) ->
     Alcotest.(check int) "actual serialized bytes" 2048 actual_bytes;
-    Alcotest.(check int) "resolved target limit" 1024 limit_bytes;
-    check_bool
-      "deterministic admission is not retried"
-      false
-      (Llm_provider.Retry.is_retryable api)
+    Alcotest.(check int) "resolved target limit" 1024 limit_bytes
   | other ->
     Alcotest.failf
       "expected typed Api InvalidRequest request-body evidence, got %s"
@@ -617,8 +609,8 @@ let test_empty_completion_end_turn_stays_provider_unavailable () =
    model must not be attributed to provider unavailability. That attribution is
    retried / rotated with the identical prompt, so an overflow reported with an
    unmodeled token would loop without ever raising an error or reaching the
-   consumer's compaction path. The failure must name the token and must not be
-   retryable. *)
+   consumer's compaction path. The failure must name the token and preserve its
+   typed invalid-request classification. *)
 let test_empty_completion_unmodeled_stop_reason_fails_loud () =
   let token = "provider_specific_overflow" in
   match
@@ -630,12 +622,11 @@ let test_empty_completion_unmodeled_stop_reason_fails_loud () =
   with
   | Error.Api
       (Llm_provider.Retry.InvalidRequest
-         { message; reason = Llm_provider.Retry.Unknown_invalid_request } as api) ->
+         { message; reason = Llm_provider.Retry.Unknown_invalid_request }) ->
     check_bool
       "names the unmodeled stop_reason token"
       true
-      (Util.string_contains ~needle:token message);
-    check_bool "not retryable" false (Llm_provider.Retry.is_retryable api)
+      (Util.string_contains ~needle:token message)
   | other ->
     Alcotest.failf
       "expected Api InvalidRequest naming the unmodeled token, got %s"

@@ -76,47 +76,6 @@ let test_roundtrip_internal () =
   | _ -> Alcotest.fail "roundtrip mismatch for Internal"
 ;;
 
-(* ── is_retryable ────────────────────────────────────────── *)
-
-let test_retryable_rate_limited () =
-  Alcotest.(check bool)
-    "rate_limited retryable"
-    true
-    (Error_domain.is_retryable (`Rate_limited (Some 1.0, "slow down")))
-;;
-
-let test_retryable_server_error () =
-  Alcotest.(check bool)
-    "server_error retryable"
-    true
-    (Error_domain.is_retryable (`Server_error (500, "oops")))
-;;
-
-let test_retryable_auth_error () =
-  Alcotest.(check bool)
-    "auth_error not retryable"
-    false
-    (Error_domain.is_retryable (`Auth_error "bad key"));
-  Alcotest.(check bool)
-    "authorization_error not retryable"
-    false
-    (Error_domain.is_retryable (`Authorization_error "forbidden"))
-;;
-
-let test_retryable_mcp_tool_call () =
-  Alcotest.(check bool)
-    "mcp_tool_call retryable"
-    true
-    (Error_domain.is_retryable (`Mcp_tool_call_failed ("x", "err")))
-;;
-
-let test_retryable_mcp_server_start () =
-  Alcotest.(check bool)
-    "mcp_server_start not retryable"
-    false
-    (Error_domain.is_retryable (`Mcp_server_start_failed ("cmd", "err")))
-;;
-
 (* ── to_string ───────────────────────────────────────────── *)
 
 let test_to_string_nonempty () =
@@ -372,15 +331,7 @@ let test_roundtrip_api_invalid_request_does_not_infer_malformed_json () =
      no-inference property is asserted separately below, starting from
      Unknown_invalid_request with the same malformed-JSON message. *)
   match Error_domain.to_core_error poly with
-  | Error.Api (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ } as err) ->
-    (* retry.ml:118-120 makes a supplied Json_parse_error retryable — malformed
-       model output may come back valid. The roundtrip used to erase the reason and
-       with it that judgement, so this asserted false; preserving the reason
-       restores the retryability the caller's classification implies. *)
-    Alcotest.(check bool)
-      "a preserved Json_parse_error stays retryable"
-      true
-      (Retry.is_retryable err)
+  | Error.Api (Retry.InvalidRequest { reason = Retry.Json_parse_error; _ }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for InvalidRequest"
 ;;
 
@@ -394,12 +345,7 @@ let test_roundtrip_api_invalid_request_keeps_unknown_reason_unknown () =
     Error.Api (Retry.InvalidRequest { message; reason = Retry.Unknown_invalid_request })
   in
   match Error_domain.to_core_error (Error_domain.of_core_error orig) with
-  | Error.Api (Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ } as err)
-    ->
-    Alcotest.(check bool)
-      "prose is not inferred after roundtrip"
-      false
-      (Retry.is_retryable err)
+  | Error.Api (Retry.InvalidRequest { reason = Retry.Unknown_invalid_request; _ }) -> ()
   | _ -> Alcotest.fail "an unknown reason must stay unknown"
 ;;
 
@@ -429,13 +375,6 @@ let test_roundtrip_api_context_overflow_no_limit () =
   | _ -> Alcotest.fail "roundtrip mismatch for ContextOverflow None"
 ;;
 
-let test_retryable_context_overflow () =
-  Alcotest.(check bool)
-    "context_overflow not retryable"
-    false
-    (Error_domain.is_retryable (`Context_overflow ("overflow", Some 8192)))
-;;
-
 let test_roundtrip_api_payment_required () =
   let orig = Error.Api (Retry.PaymentRequired { message = "Insufficient Balance" }) in
   let poly = Error_domain.of_core_error orig in
@@ -446,13 +385,6 @@ let test_roundtrip_api_payment_required () =
   match back with
   | Error.Api (Retry.PaymentRequired { message = "Insufficient Balance" }) -> ()
   | _ -> Alcotest.fail "roundtrip mismatch for PaymentRequired"
-;;
-
-let test_retryable_payment_required () =
-  Alcotest.(check bool)
-    "payment_required not retryable"
-    false
-    (Error_domain.is_retryable (`Payment_required "Insufficient Balance"))
 ;;
 
 let test_roundtrip_agent_unrecognized_stop () =
@@ -484,10 +416,6 @@ let test_roundtrip_agent_hook_execution_failed () =
        ("post_tool_use", "post_tool_use", Some "write", Some "tool-1", "observer failed")
      -> ()
    | _ -> Alcotest.fail "expected Hook_execution_failed");
-  Alcotest.(check bool)
-    "hook execution failure is not retryable"
-    false
-    (Error_domain.is_retryable poly);
   match Error_domain.to_core_error poly with
   | Error.Agent
       (HookExecutionFailed
@@ -606,133 +534,6 @@ let test_roundtrip_orchestration () =
   match back with
   | Error.Internal _ -> () (* Orchestration roundtrips to Internal *)
   | _ -> Alcotest.fail "roundtrip mismatch for Orchestration"
-;;
-
-(* ── is_retryable: cover remaining branches ─────────────── *)
-
-let test_retryable_overloaded () =
-  Alcotest.(check bool)
-    "overloaded retryable"
-    true
-    (Error_domain.is_retryable `Overloaded)
-;;
-
-let test_retryable_provider_timeout () =
-  Alcotest.(check bool)
-    "provider_timeout retryable"
-    true
-    (Error_domain.is_retryable (`Provider_timeout (None, "3s")))
-;;
-
-let test_retryable_streaming_timeout () =
-  Alcotest.(check bool)
-    "streaming_timeout retryable"
-    true
-    (Error_domain.is_retryable
-       (`Streaming_timeout (Http_client.Stream_idle Http_client.Streaming_answer, "idle")))
-;;
-
-let test_retryable_network_error () =
-  Alcotest.(check bool)
-    "network_error retryable"
-    true
-    (Error_domain.is_retryable (`Network_error "conn refused"))
-;;
-
-let test_retryable_mcp_init_failed () =
-  Alcotest.(check bool)
-    "mcp_init_failed retryable"
-    true
-    (Error_domain.is_retryable (`Mcp_init_failed "err"))
-;;
-
-let test_retryable_mcp_tool_list () =
-  Alcotest.(check bool)
-    "mcp_tool_list_failed retryable"
-    true
-    (Error_domain.is_retryable (`Mcp_tool_list_failed "err"))
-;;
-
-let test_retryable_mcp_http () =
-  Alcotest.(check bool)
-    "mcp_http_failed retryable"
-    true
-    (Error_domain.is_retryable (`Mcp_http_failed ("url", "err")))
-;;
-
-let test_retryable_invalid_request () =
-  Alcotest.(check bool)
-    "invalid_request not retryable"
-    false
-    (Error_domain.is_retryable
-       (`Invalid_request (Llm_provider.Retry.Unknown_invalid_request, "bad")))
-;;
-
-let test_retryable_tool_exec_failed () =
-  Alcotest.(check bool)
-    "tool_exec_failed not retryable"
-    false
-    (Error_domain.is_retryable (`Tool_exec_failed ("t", "d")))
-;;
-
-let test_retryable_tool_timeout () =
-  Alcotest.(check bool)
-    "tool_timeout not retryable"
-    false
-    (Error_domain.is_retryable (`Tool_timeout ("t", 1.0)))
-;;
-
-let test_retryable_unrecognized_stop () =
-  Alcotest.(check bool)
-    "unrecognized_stop not retryable"
-    false
-    (Error_domain.is_retryable (`Unrecognized_stop_reason "x"))
-;;
-
-let test_retryable_missing_env_var () =
-  Alcotest.(check bool)
-    "missing_env_var not retryable"
-    false
-    (Error_domain.is_retryable (`Missing_env_var "X"))
-;;
-
-let test_retryable_unsupported_provider () =
-  Alcotest.(check bool)
-    "unsupported_provider not retryable"
-    false
-    (Error_domain.is_retryable (`Unsupported_provider "x"))
-;;
-
-let test_retryable_invalid_config () =
-  Alcotest.(check bool)
-    "invalid_config not retryable"
-    false
-    (Error_domain.is_retryable (`Invalid_config ("f", "d")))
-;;
-
-let test_retryable_serialization () =
-  Alcotest.(check bool)
-    "serialization not retryable"
-    false
-    (Error_domain.is_retryable (`Serialization "x"))
-;;
-
-let test_retryable_io () =
-  Alcotest.(check bool) "io not retryable" false (Error_domain.is_retryable (`Io "x"))
-;;
-
-let test_retryable_orchestration () =
-  Alcotest.(check bool)
-    "orchestration not retryable"
-    false
-    (Error_domain.is_retryable (`Orchestration "x"))
-;;
-
-let test_retryable_internal () =
-  Alcotest.(check bool)
-    "internal not retryable"
-    false
-    (Error_domain.is_retryable (`Internal "x"))
 ;;
 
 (* ── with_stage / ctx_to_string ─────────────────────────── *)
@@ -903,36 +704,6 @@ let () =
         ; Alcotest.test_case "io" `Quick test_roundtrip_io
         ; Alcotest.test_case "orchestration" `Quick test_roundtrip_orchestration
         ; Alcotest.test_case "internal" `Quick test_roundtrip_internal
-        ] )
-    ; ( "retryable"
-      , [ Alcotest.test_case "rate_limited" `Quick test_retryable_rate_limited
-        ; Alcotest.test_case "server_error" `Quick test_retryable_server_error
-        ; Alcotest.test_case "overloaded" `Quick test_retryable_overloaded
-        ; Alcotest.test_case "provider_timeout" `Quick test_retryable_provider_timeout
-        ; Alcotest.test_case "streaming_timeout" `Quick test_retryable_streaming_timeout
-        ; Alcotest.test_case "network_error" `Quick test_retryable_network_error
-        ; Alcotest.test_case "auth_error" `Quick test_retryable_auth_error
-        ; Alcotest.test_case "invalid_request" `Quick test_retryable_invalid_request
-        ; Alcotest.test_case "context_overflow" `Quick test_retryable_context_overflow
-        ; Alcotest.test_case "payment_required" `Quick test_retryable_payment_required
-        ; Alcotest.test_case "unrecognized_stop" `Quick test_retryable_unrecognized_stop
-        ; Alcotest.test_case "missing_env_var" `Quick test_retryable_missing_env_var
-        ; Alcotest.test_case
-            "unsupported_provider"
-            `Quick
-            test_retryable_unsupported_provider
-        ; Alcotest.test_case "invalid_config" `Quick test_retryable_invalid_config
-        ; Alcotest.test_case "mcp_tool_call" `Quick test_retryable_mcp_tool_call
-        ; Alcotest.test_case "mcp_init_failed" `Quick test_retryable_mcp_init_failed
-        ; Alcotest.test_case "mcp_tool_list" `Quick test_retryable_mcp_tool_list
-        ; Alcotest.test_case "mcp_http" `Quick test_retryable_mcp_http
-        ; Alcotest.test_case "mcp_server_start" `Quick test_retryable_mcp_server_start
-        ; Alcotest.test_case "tool_exec_failed" `Quick test_retryable_tool_exec_failed
-        ; Alcotest.test_case "tool_timeout" `Quick test_retryable_tool_timeout
-        ; Alcotest.test_case "serialization" `Quick test_retryable_serialization
-        ; Alcotest.test_case "io" `Quick test_retryable_io
-        ; Alcotest.test_case "orchestration" `Quick test_retryable_orchestration
-        ; Alcotest.test_case "internal" `Quick test_retryable_internal
         ] )
     ; ( "context"
       , [ Alcotest.test_case "with_stage" `Quick test_with_stage

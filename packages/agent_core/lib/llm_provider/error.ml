@@ -58,7 +58,6 @@ type provider_error =
   | ServerError of
       { provider : string
       ; code : int
-      ; transient : bool
       ; detail : string
       }
   | NetworkError of
@@ -179,10 +178,9 @@ let to_string = function
     Printf.sprintf "Provider '%s' authorization error: %s" r.provider r.detail
   | ServerError r ->
     Printf.sprintf
-      "Provider '%s' server error %d (transient=%b): %s"
+      "Provider '%s' server error %d: %s"
       r.provider
       r.code
-      r.transient
       r.detail
   | NetworkError r ->
     Printf.sprintf
@@ -220,7 +218,6 @@ let of_retry_api_error ?provider err =
     ServerError
       { provider
       ; code = r.status
-      ; transient = Retry.is_retryable err
       ; detail = r.message
       }
   | Retry.AuthError r -> AuthError { provider; detail = r.message }
@@ -390,27 +387,4 @@ let of_http_error ?provider = function
     ProviderTerminal { provider = provider_name provider; reason; detail = message }
   | Http_client.ProviderFailure { kind; message } ->
     of_provider_failure ?provider kind message
-;;
-
-let is_retryable = function
-  | RateLimit _ -> true
-  | CapacityExhausted _ -> true
-  | ServerError r -> r.transient
-  | NetworkError { kind = Http_client.Tls_error; _ } -> false
-  | NetworkError { kind = Http_client.Local_resource_exhaustion; _ } -> false
-  | NetworkError _ -> true
-  | Timeout _ -> true
-  | MissingApiKey _
-  | InvalidConfig _
-  | ParseError _
-  | ProviderWireError _
-  | ProviderReportedError _
-  | UnknownVariant _
-  | ProviderUnavailable _
-  | HardQuota _
-  | AuthError _
-  | AuthorizationError _
-  | InvalidRequest _
-  | NotFound _
-  | ProviderTerminal _ -> false
 ;;

@@ -2007,7 +2007,6 @@
 
 (include stanzas/test_masc_error_dashboard_auth_code.inc)
 
-(include stanzas/test_masc_error_is_retryable.inc)
 
 (include stanzas/test_runtime_agent_core_eio_context_classify.inc)
 

@@ -360,9 +360,11 @@ Visible second-level routes:
 primary rail. Hidden diagnostics remain implementation routes and are not part
 of the user-visible navigation contract.
 
-Route examples: `/dashboard/#monitoring?section=runtime`,
-`/dashboard/#workspace?section=verification`, and
-`/dashboard/#lab?section=keeper-memory-health`.
+Route examples: `dashboard#monitoring?section=journey`,
+`dashboard#command?section=operations`,
+`dashboard#connectors?section=connector-status`, and
+`dashboard#workspace?section=verification`. The `journey` route is a hidden
+diagnostic; it is addressable but does not appear in the rail.
 
 The [dashboard screenshot inventory](docs/screenshots/dashboard/2026-08-21/README.md)
 contains the 13 primary screens plus visible Monitor, Work, and Lab sections

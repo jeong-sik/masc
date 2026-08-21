@@ -58,6 +58,7 @@ class GateClient(GateClientBase):
         username: str,
         channel_id: str,
         message_ts: str,
+        idempotency_key: str | None = None,
     ) -> GateResponse:
         """Send a message to a keeper with Slack context."""
         context = self._slack_context(
@@ -67,7 +68,11 @@ class GateClient(GateClientBase):
             keeper_name=keeper_name,
             content=content,
             context=context,
-            idempotency_key=f"slack-msg-{channel_id}-{message_ts}",
+            idempotency_key=(
+                idempotency_key
+                if idempotency_key is not None
+                else f"slack-msg-{channel_id}-{message_ts}"
+            ),
         )
 
     async def stream_message(

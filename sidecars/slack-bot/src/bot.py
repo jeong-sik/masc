@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +24,6 @@ from typing import Any
 from gate_shared import response_text
 from gate_shared.bindings_store import load_bindings, save_bindings
 from gate_shared.status_store import ConnectorRuntimeStatus, StatusStore
-
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
@@ -37,6 +37,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("slack-gate-bot")
 
+BLOCK_ACTION_ID_PATTERN = re.compile(r".+")
+
 
 def button_content(action_id: str, value: str = "") -> str:
     """Build the keeper message text for a Block Kit button press.
@@ -48,6 +50,13 @@ def button_content(action_id: str, value: str = "") -> str:
     if value:
         content += f" value={value}"
     return content
+
+
+def button_idempotency_key(*, channel_id: str, action_id: str, action_ts: str) -> str:
+    """Return a retry-stable identity for one Slack button interaction."""
+    if not channel_id or not action_id or not action_ts:
+        return ""
+    return f"slack-action-{channel_id}-{action_id}-{action_ts}"
 
 
 class SlackGateBot:
@@ -136,8 +145,6 @@ class SlackGateBot:
 
             # Strip the bot mention from the text
             # Format: <@BOT_USER_ID> message text
-            import re
-
             text = re.sub(r"<@[A-Z0-9]+>\s*", "", text).strip()
             if not text:
                 say("Send me a message after the mention.")
@@ -203,7 +210,7 @@ class SlackGateBot:
 
             self._handle_response(response, say, app, channel_id, thinking_ts)
 
-        @app.action(".*")
+        @app.action(BLOCK_ACTION_ID_PATTERN)
         def handle_block_action(ack: Any, body: dict[str, Any], say: Any) -> None:
             """Handle Block Kit button interactions (block_actions).
 
@@ -220,6 +227,7 @@ class SlackGateBot:
                 return
             action = actions[0]
             action_id = str(action.get("action_id", "")).strip()
+            action_ts = str(action.get("action_ts", "")).strip()
             value = str(action.get("value", "")).strip()
             user = body.get("user") or {}
             user_id = str(user.get("id", ""))
@@ -229,12 +237,22 @@ class SlackGateBot:
             container = body.get("container") or {}
             message_ts = str(container.get("message_ts", ""))
 
-            if not action_id:
+            idempotency_key = button_idempotency_key(
+                channel_id=channel_id,
+                action_id=action_id,
+                action_ts=action_ts,
+            )
+            if not idempotency_key:
+                logger.warning(
+                    "Ignoring malformed Slack block action: "
+                    "channel_id=%r action_id=%r action_ts=%r",
+                    channel_id,
+                    action_id,
+                    action_ts,
+                )
                 return
 
-            content = f"[button] {action_id}"
-            if value:
-                content += f" value={value}"
+            content = button_content(action_id, value)
 
             keeper = self._resolve_keeper(channel_id)
 
@@ -249,6 +267,7 @@ class SlackGateBot:
                     username=username,
                     channel_id=channel_id,
                     message_ts=message_ts,
+                    idempotency_key=idempotency_key,
                 )
             )
 

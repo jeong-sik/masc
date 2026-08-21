@@ -9,6 +9,11 @@
     "judge.effect.md",
     "keeper.md",
     "librarian.md",
-    "verification.md"
+    "verification.md",
+    "verification.contract.md",
+    "verification.lookup.none.md",
+    "verification.lookup.producer_forest.md",
+    "verification.lookup.producer_tree.md",
+    "verification.required_evidence.md"
   ]
 }

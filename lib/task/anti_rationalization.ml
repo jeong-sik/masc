@@ -92,171 +92,101 @@ type review_result =
 (* LLM verification prompt                                          *)
 (* ================================================================ *)
 
-let contract_section = function
-  | None | Some [] -> ""
-  | Some items ->
-    let render_item idx item =
-      sprintf "%d. %s" (idx + 1) item
-    in
-    sprintf
-      "\n\
-       <verification_contract>\n\
-       The completion notes must satisfy every contract item below. Reject if \
-       the notes do not provide concrete evidence for any item.\n\
-       %s\n\
-       </verification_contract>\n"
-      (items |> List.mapi render_item |> String.concat "\n")
+(* Review prose lives in [config/prompts/verification.*.md]. This module picks
+   the template and supplies the data it renders — a tool-name list, a root
+   listing, a numbered item list — and holds no review instructions of its own.
+   Two things go wrong when the prose sits here instead: a code change that
+   alters what the evaluator can do leaves the sentence describing it stale
+   (the required-evidence checklist kept saying artifacts were the only
+   readable thing for as long as the lookup surface existed), and an operator
+   cannot correct a sentence without a rebuild. *)
+
+let numbered items =
+  items |> List.mapi (fun index item -> sprintf "%d. %s" (index + 1) item)
+        |> String.concat "\n"
 ;;
 
-(* required_evidence + verify_gate_evidence are requirements from the task
-   contract, not evidence fetched by this reviewer.  Surface them as a
-   distinct checklist the evaluator judges item-by-item.  What counts as
-   inspectable depends on the surface: with no lookup tools the typed
-   submit-time snapshot is the only readable thing, and with them the
-   evaluator's own reads count too.  Saying "only [artifact:] content" in both
-   cases contradicted the lookup section, which tells the same evaluator to go
-   check the claims it can reach.  Order-preserving dedup keeps a requirement
-   listed in both source lists from appearing twice. *)
-let evidence_section ~lookup ~required_evidence ~verify_gate_evidence =
-  let inspectable_sources =
-    match lookup with
-    | No_lookup_surface ->
-      "only available, non-truncated [artifact:] content is inspectable proof"
-    | Lookup_tools _ ->
-      "inspectable proof is available, non-truncated [artifact:] content, or \
-       what you open yourself with the lookup tools described below"
-  in
+let render key vars =
+  match Prompt_registry.render_prompt_template key vars with
+  | Ok text -> Ok ("\n" ^ String.trim text ^ "\n")
+  | Error detail -> Error (sprintf "prompt %s: %s" key detail)
+;;
+
+let contract_section = function
+  | None | Some [] -> Ok ""
+  | Some items ->
+    render Prompt_names.verification_contract [ "contract_items", numbered items ]
+;;
+
+(* required_evidence items are requirements from the task contract, not
+   evidence this reviewer fetched. Order-preserving dedup keeps an item listed
+   twice from appearing twice. *)
+let evidence_section ~required_evidence =
   let items =
     List.fold_left
       (fun acc raw ->
          let item = String.trim raw in
          if item = "" || List.mem item acc then acc else acc @ [ item ])
       []
-      (required_evidence @ verify_gate_evidence)
+      required_evidence
   in
   match items with
-  | [] -> ""
+  | [] -> Ok ""
   | items ->
-    let render_item idx item =
-      sprintf "%d. %s" (idx + 1) item
-    in
-    sprintf
-      "\n\
-       <required_evidence>\n\
-       The task contract requires support for every item listed below. Judge each \
-       item independently: %s. A URL, host path, commit, board reference, command \
-       claim, or narrative note is not proof on its own — it names something \
-       rather than showing it. Reject if the required support is missing, \
-       unavailable, truncated, a placeholder, or unsubstantiated.\n\
-       %s\n\
-       </required_evidence>\n"
-      inspectable_sources
-      (items |> List.mapi render_item |> String.concat "\n")
+    render
+      Prompt_names.verification_required_evidence
+      [ "evidence_items", numbered items ]
 ;;
 
-(* What the evaluator is told it can see. The two branches are different claims
-   about the same review, and stating the wrong one is not cosmetic: telling a
-   toolless evaluator to go look produces an approval justified by a check it
-   never ran, and telling a tool-carrying one that the snapshot is all there is
-   reproduces the gap this surface was added to close. *)
-(* The tools resolve every path against one root, and that root is a sandbox
-   root: it holds a producer's checkouts under [repos/] alongside [artifacts/]
-   and the rest, not a repository. An evaluator told only that it holds "the
-   producer's tools" reads that as a repository and opens [dune-project],
-   [.git], [lib/] and [README.md] — 77 consecutive failed reads and no verdict
-   on masc task-403 (vrf-8bac5f46, 2026-08-21). The listing is a fact
-   available at review time, so it is stated. *)
-let root_layout_section = function
-  | [] ->
-    "The root these tools resolve against could not be listed, so its shape is \
-     unknown to you here. Establish it with a lookup before concluding that a \
-     path is absent.\n\n"
-  | entries ->
-    sprintf
-      "Every path you give them resolves against that root, which is a sandbox \
-       root and not a repository. These paths exist under it right now:\n%s\n\
-       A path the submitter wrote relative to a checkout therefore needs that \
-       checkout's prefix here. \"file is missing\" answers the path you asked \
-       for, not the question of whether the work exists.\n\n"
-      (entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n")
+(* The listing is data, so an unreadable root is reported as data too: the
+   template's prose covers both a listing and its absence, which keeps the
+   branch out of this module. *)
+let root_layout_lines = function
+  | [] -> "  (this root could not be read)"
+  | entries -> entries |> List.map (fun entry -> "  " ^ entry) |> String.concat "\n"
+;;
+
+let tool_names schemas =
+  schemas
+  |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
+  |> String.concat ", "
 ;;
 
 let lookup_section = function
-  | No_lookup_surface ->
-    "\n\
-     Inspectable proof exists only in the typed `submitted_evidence_access` \
-     snapshot inside `completion_notes`. You have no tool that opens anything \
-     else, so a reference you cannot read there is a reference you cannot \
-     verify.\n"
+  | No_lookup_surface -> render Prompt_names.verification_lookup_none []
   | Lookup_tools { schemas; dispatch = _; scope = Producer_tree; root_layout } ->
-    sprintf
-      "\n\
-       <live_lookup>\n\
-       You hold the producer's own tools, pointed at the producer's sandbox \
-       root: %s. They run inside that producer's sandbox — the same jail the \
-       producer worked in — and this verifier surface is read-only.\n\n\
-       %s\
-       The snapshot is what was true when the work was submitted. A lookup is what \
-       is true now. Both are evidence, and disagreement between them is also \
-       evidence: a file the snapshot shows and the tree no longer contains was \
-       not durable.\n\n\
-       A claim about behaviour is not settled by reading the code that makes it. \
-       If the submitter says a build or test passed, require an inspectable run \
-       receipt or log. This surface cannot execute that claim, so source text \
-       alone must not be upgraded into execution evidence.\n\n\
-       A note claiming a path, a commit, or a command result is still not proof by \
-       itself. The difference is that you can now check the claims that name \
-       something in the producer's tree, so approving without checking an \
-       available one is your omission rather than the submitter's.\n\
-       </live_lookup>\n"
-      (schemas
-       |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
-       |> String.concat ", ")
-      (root_layout_section root_layout)
+    render
+      Prompt_names.verification_lookup_producer_tree
+      [ "lookup_tools", tool_names schemas
+      ; "lookup_root_layout", root_layout_lines root_layout
+      ]
   | Lookup_tools
       { schemas
       ; dispatch = _
       ; scope = Producer_forest { producers }
       ; root_layout
       } ->
-    sprintf
-      "\n\
-       <live_lookup>\n\
-       This Goal is backed by linked Tasks performed in different owned trees. \
-       The closed producer set is: %s. Filesystem calls require one producer \
-       from that set; selecting a producer does not grant access to any other \
-       tree. The available tools are: %s.\n\n\
-       %s\
-       Read the linked-task rollup first, then inspect the submitted artifact \
-       in the tree of the Task performer that supplied it. A reference, a Task \
-       completion state, or another verifier's verdict is not a substitute for \
-       this Goal verifier's own inspection. Snapshot/live disagreement is \
-       evidence that the claimed result is not durable.\n\n\
-       These tools are read-only. Do not reinterpret a failed or refused call \
-       as empty output. If an artifact cannot be inspected in its producer \
-       tree, reject or defer rather than approving from the submitter's prose.\n\
-       </live_lookup>\n"
-      (String.concat ", " producers)
-      (schemas
-       |> List.map (fun (schema : Types_core.tool_schema) -> schema.name)
-       |> String.concat ", ")
-      (root_layout_section root_layout)
+    render
+      Prompt_names.verification_lookup_producer_forest
+      [ "lookup_producers", String.concat ", " producers
+      ; "lookup_tools", tool_names schemas
+      ; "lookup_root_layout", root_layout_lines root_layout
+      ]
 ;;
 
 let build_prompt ?(few_shot_block = "") ?completion_contract
-      ?(required_evidence = []) ?(verify_gate_evidence = [])
+      ?(required_evidence = [])
       ?(prompt_name = Prompt_names.verification)
       ~(lookup : lookup_surface)
       (req : review_request) : (string, string) result =
+  let ( let* ) = Result.bind in
   let desc = req.task_description in
   let calibration_section =
     if few_shot_block = "" then "" else "\n" ^ few_shot_block ^ "\n"
   in
-  let verification_contract_section = contract_section completion_contract in
-  let required_evidence_section =
-    (* same surface the lookup section describes, so the two agree *)
-    evidence_section ~lookup ~required_evidence ~verify_gate_evidence
-  in
+  let* verification_contract_section = contract_section completion_contract in
+  let* required_evidence_section = evidence_section ~required_evidence in
+  let* lookup_section = lookup_section lookup in
   let evidence_refs_json =
     req.evidence_refs
     |> List.map (fun reference -> `String reference)
@@ -270,7 +200,7 @@ let build_prompt ?(few_shot_block = "") ?completion_contract
     ; "verification_contract_section", verification_contract_section
     ; "evidence_section", required_evidence_section
     ; "evidence_refs", evidence_refs_json
-    ; "lookup_section", lookup_section lookup
+    ; "lookup_section", lookup_section
     ; "calibration_section", calibration_section
     ]
   in
@@ -383,7 +313,6 @@ let review
       ?generator_runtime
       ?(completion_contract : string list option)
       ?(required_evidence = [])
-      ?(verify_gate_evidence = [])
       ?(on_verdict : review_result -> unit = fun _ -> ())
       ?(on_tool_result : input:Yojson.Safe.t -> Tool_result.result -> unit = fun ~input:_ _ -> ())
       ?(few_shot_block = "")
@@ -444,7 +373,6 @@ let review
          ~few_shot_block
          ?completion_contract
          ~required_evidence
-         ~verify_gate_evidence
          ~prompt_name
          ~lookup
          req

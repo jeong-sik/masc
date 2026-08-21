@@ -91,7 +91,6 @@ val review
   -> ?generator_runtime:string
   -> ?completion_contract:string list
   -> ?required_evidence:string list
-  -> ?verify_gate_evidence:string list
   -> ?on_verdict:(review_result -> unit)
   -> ?on_tool_result:(input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?few_shot_block:string
@@ -124,7 +123,6 @@ val build_prompt
   :  ?few_shot_block:string
   -> ?completion_contract:string list
   -> ?required_evidence:string list
-  -> ?verify_gate_evidence:string list
   -> ?prompt_name:string
   -> lookup:lookup_surface
   -> review_request

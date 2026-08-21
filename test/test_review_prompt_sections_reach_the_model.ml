@@ -88,6 +88,56 @@ let test_lookup_section_reaches_every_review_prompt () =
     review_prompt_keys
 ;;
 
+(* Every section template the code can select must exist and render. A section
+   that cannot render is now an error rather than an empty string, so a renamed
+   or deleted template stops the review instead of quietly shrinking its
+   prompt — but only if something exercises each branch. *)
+let test_every_section_template_renders () =
+  Prompt_registry.set_markdown_dir (prompt_dir ());
+  Masc.Prompt_defaults.init ();
+  let schemas =
+    [ { Types_core.name = "tool_read_file"; description = "read"; input_schema = `Assoc [] } ]
+  in
+  let dispatch ~name:_ ~args:_ = Ok "" in
+  let cases =
+    [ ( "no lookup surface"
+      , AR.No_lookup_surface
+      , "You have no tool that opens anything else" )
+    ; ( "one producer tree"
+      , AR.Lookup_tools
+          { schemas; dispatch; scope = AR.Producer_tree; root_layout = [ "repos/masc" ] }
+      , "pointed at the producer's sandbox root" )
+    ; ( "a producer forest"
+      , AR.Lookup_tools
+          { schemas
+          ; dispatch
+          ; scope = AR.Producer_forest { producers = [ "keeper-a"; "keeper-b" ] }
+          ; root_layout = [ "keeper-a: repos/masc" ]
+          }
+      , "closed producer set is: keeper-a, keeper-b" )
+    ]
+  in
+  List.iter
+    (fun (label, lookup, affix) ->
+       match
+         AR.build_prompt
+           ~lookup
+           ~completion_contract:[ marker "contract_item" ]
+           ~required_evidence:[ marker "evidence_item" ]
+           ~prompt_name:Prompt_names.verification
+           request
+       with
+       | Error detail -> failf "%s: prompt render failed: %s" label detail
+       | Ok text ->
+         check bool (label ^ ": its lookup template rendered") true
+           (Astring.String.is_infix ~affix text);
+         check bool (label ^ ": the contract section rendered") true
+           (Astring.String.is_infix ~affix:(marker "contract_item") text);
+         check bool (label ^ ": the required-evidence section rendered") true
+           (Astring.String.is_infix ~affix:(marker "evidence_item") text))
+    cases
+;;
+
 let test_supplied_evidence_refs_reach_every_review_prompt () =
   Prompt_registry.set_markdown_dir (prompt_dir ());
   Masc.Prompt_defaults.init ();
@@ -117,6 +167,10 @@ let () =
             "evidence_refs is rendered where evidence is judged"
             `Quick
             test_supplied_evidence_refs_reach_every_review_prompt
+        ; test_case
+            "every section template renders"
+            `Quick
+            test_every_section_template_renders
         ] )
     ]
 ;;

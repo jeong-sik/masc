@@ -528,7 +528,6 @@ let process_task_once
              ~lookup
              ?completion_contract:prepared.completion_contract
              ~required_evidence:prepared.required_artifacts
-             ~verify_gate_evidence:[]
              ~on_tool_result
              prepared.review_request
          in

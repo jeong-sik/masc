@@ -406,12 +406,12 @@ let test_keeper_metrics_per_keeper () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "telem_keeper_metrics" in
-  let cheolsu_dir = Filename.concat dir ".masc/keepers/cheolsu/metrics" in
+  let beta_dir = Filename.concat dir ".masc/keepers/beta/metrics" in
   let alpha_dir = Filename.concat dir ".masc/keepers/alpha/metrics" in
-  Fs_compat.mkdir_p cheolsu_dir;
+  Fs_compat.mkdir_p beta_dir;
   Fs_compat.mkdir_p alpha_dir;
-  write_jsonl cheolsu_dir [
-    `Assoc [("ts_unix", `Float 3000.0); ("name", `String "cheolsu");
+  write_jsonl beta_dir [
+    `Assoc [("ts_unix", `Float 3000.0); ("name", `String "beta");
             ("channel", `String "turn")];
   ];
   write_jsonl alpha_dir [
@@ -423,10 +423,10 @@ let test_keeper_metrics_per_keeper () =
       ~sources:[Telemetry_unified.Keeper_metric] () in
   Alcotest.(check int) "two keeper entries" 2 (List.length all);
   (* Filter by keeper *)
-  let cheolsu_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
+  let beta_only = Telemetry_unified.read_unified ~base_path:dir ~masc_root:(masc_root dir)
       ~sources:[Telemetry_unified.Keeper_metric]
-      ~keeper_name:"cheolsu" () in
-  Alcotest.(check int) "one cheolsu entry" 1 (List.length cheolsu_only)
+      ~keeper_name:"beta" () in
+  Alcotest.(check int) "one beta entry" 1 (List.length beta_only)
 
 let test_keeper_metrics_fast_path_preserves_noisy_keeper_top_n () =
   Eio_main.run @@ fun env ->

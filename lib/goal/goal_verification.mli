@@ -140,11 +140,13 @@ val record_proof_verdict :
   goal_id:string ->
   verdict ->
   (record, string) result
-(** Commits the verifier's completion proof (B3). Requires [Proof_pending] —
-    the durable request the stage-2 gate persists before entering its
-    verifying phase — or the same outcome already committed (the
-    crash-between-writes retry); anything else is an [Error], not a silent
-    overwrite. *)
+(** Commits the verifier's completion proof (B3). Requires a durable
+    [Criterion_viable] verdict and [Proof_pending] — the request the stage-2
+    gate persists before entering its verifying phase — or the same proof
+    outcome already committed (the crash-between-writes retry). The criterion
+    check happens inside the same locked record mutation, so a racing
+    unreachable verdict cannot be followed by a proof commit. Anything else
+    is an [Error], not a silent overwrite. *)
 
 val record_human_confirmation :
   Workspace_utils.config ->

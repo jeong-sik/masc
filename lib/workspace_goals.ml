@@ -189,6 +189,24 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ])
 ;;
 
+(* RFC-0387 stage 2: wake the goal verifier lane after a durable
+   [Criterion_pending] / [Proof_pending] request committed. The wake is
+   scheduling only — the same discipline as the task-side
+   [verification_submitted_fn] call: a raised hook must not fail (or roll
+   back) a commit that already landed; the maintenance-pulse rescan is the
+   backstop. *)
+let notify_goal_verification_pending (ctx : context) ~goal_id =
+  try
+    (Atomic.get Workspace_hooks.goal_verification_pending_fn) ctx.config ~goal_id
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.error
+      "goal verification wake degraded after durable request commit goal_id=%s detail=%s"
+      goal_id
+      (Printexc.to_string exn)
+;;
+
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
@@ -294,7 +312,9 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `updated -> `String "not_applicable_update"
             | `created ->
               (match Goal_verification.mark_criterion_pending ctx.config ~goal_id:goal.id with
-               | Ok _ -> `String "criterion_pending"
+               | Ok _ ->
+                 notify_goal_verification_pending ctx ~goal_id:goal.id;
+                 `String "criterion_pending"
                | Error msg -> `Assoc [ "state", `String "criterion_check_failed"
                                      ; "detail", `String msg ])
           in
@@ -575,6 +595,7 @@ let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~act
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Internal_error msg
         | Ok record ->
+          notify_goal_verification_pending ctx ~goal_id;
           already_goal_response
             ~tool_name ~start_time ~goal_id ~action ~phase:Goal_phase.Verifying goal
             (Some record)))
@@ -685,6 +706,11 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                                 [ "phase", Goal_phase.to_yojson updated_goal.phase
                                 ; "actor", `String ctx.agent_name
                                 ]);
+                         (* The durable proof request AND the phase write both
+                            committed — wake the verifier lane to drain it
+                            (the task-side analogue fires after the same two
+                            commits). *)
+                         notify_goal_verification_pending ctx ~goal_id;
                          ok_result
                            ~tool_name
                            ~start_time

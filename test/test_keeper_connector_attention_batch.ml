@@ -13,8 +13,8 @@
    pending [Connector_attention] stimulus for the same conversation into the
    same turn, in arrival order (RFC-0377 S3) — and the durable queue
    lifecycle applies to every admitted member, not only the primary: a turn
-   completion acks the whole batch, a turn failure leaves the whole batch
-   queued (no partial ack). *)
+   completion acks the whole batch, while a continuation checkpoint moves the
+   whole batch behind independent work (no partial disposition). *)
 
 open Alcotest
 open Masc
@@ -92,11 +92,9 @@ let failed_outcome ~source_disposition ~route ~deferred_runtime_lane meta
     }
 ;;
 
-let transient_retry_route =
-  Keeper_runtime_failure_route.Retry_after_observed
-    { retry_class = Keeper_runtime_failure_route.Network_transient
-    ; retry_after = None
-    }
+let unavailable_runtime_route =
+  Keeper_runtime_failure_route.Rotate_now
+    { rotate = Keeper_runtime_failure_route.Network_unavailable }
 ;;
 
 let deterministic_route ~detail =
@@ -278,15 +276,15 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
        (Some
           (failed_outcome
              ~source_disposition:Keeper_unified_turn.Follow_failure_route
-             ~route:transient_retry_route
+             ~route:unavailable_runtime_route
              ~deferred_runtime_lane:None
              meta))
    with
-   | Keeper_heartbeat_loop.Batch_defer { reason = "transient_turn_failure" } -> ()
+   | Keeper_heartbeat_loop.Batch_quarantine
+       { detail = "runtime_successor_unavailable:network_unavailable" } -> ()
    | _ ->
      fail
-       "a transient retry route with no deferred lane must drive \
-        Batch_defer \"transient_turn_failure\"");
+       "an unavailable runtime with no configured successor must terminalize the source");
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
@@ -308,23 +306,34 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
              ~source_disposition:
                (Keeper_unified_turn.Pause_after_transcript_corruption
                   { detail = "corrupt transcript" })
-             ~route:transient_retry_route
+             ~route:unavailable_runtime_route
              ~deferred_runtime_lane:None
              meta))
    with
-   | Keeper_heartbeat_loop.Batch_no_action -> ()
-   | _ -> fail "transcript-corruption pause must drive Batch_no_action, not ack/defer/quarantine");
-  List.iter
-    (fun (outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option) ->
-       match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome outcome with
-       | Keeper_heartbeat_loop.Batch_no_action -> ()
-       | _ -> fail "a non-terminal or absent cycle outcome must drive Batch_no_action")
-    [ None
-    ; Some (Keeper_heartbeat_loop_cycle.Checkpointed meta)
-    ; Some (Keeper_heartbeat_loop_cycle.Input_required meta)
-    ; Some (Keeper_heartbeat_loop_cycle.Cancelled meta)
-    ; Some (Keeper_heartbeat_loop_cycle.Skipped meta)
-    ]
+   | Keeper_heartbeat_loop.Batch_preserve
+       { reason = Keeper_heartbeat_loop.Integrity_pause_owns_terminalization } -> ()
+   | _ -> fail "transcript-corruption pause must preserve the separately terminalized source");
+  (match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome None with
+   | Keeper_heartbeat_loop.Batch_preserve
+       { reason = Keeper_heartbeat_loop.No_cycle_outcome } -> ()
+   | _ -> fail "an absent cycle outcome must preserve ownership explicitly");
+  let expect_defer expected outcome =
+    match Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome (Some outcome) with
+    | Keeper_heartbeat_loop.Batch_defer { reason } when reason = expected -> ()
+    | _ -> fail "a nonterminal cycle outcome must carry its typed defer reason"
+  in
+  expect_defer
+    Keeper_heartbeat_loop.Continuation_checkpoint
+    (Keeper_heartbeat_loop_cycle.Checkpointed meta);
+  expect_defer
+    Keeper_heartbeat_loop.External_input_required
+    (Keeper_heartbeat_loop_cycle.Input_required meta);
+  expect_defer
+    Keeper_heartbeat_loop.Turn_cancelled
+    (Keeper_heartbeat_loop_cycle.Cancelled meta);
+  expect_defer
+    Keeper_heartbeat_loop.Turn_skipped
+    (Keeper_heartbeat_loop_cycle.Skipped meta)
 ;;
 
 (* RFC-0377 S5.1: channel A has 3 pending Connector_attention + channel B
@@ -449,10 +458,8 @@ let test_batch_skips_a_non_connector_entry_between_matches () =
          (Q.to_list queued)))
 ;;
 
-(* RFC-0377 S5.2: batch admitted, then the turn fails with a transient
-   provider failure. Unlike the earlier version of this test (which
-   assumed [Defer_to_queue_tail] and drove [defer_pending_result]
-   directly), the disposition here comes from a REAL
+(* RFC-0377 S5.2: batch admitted, then the turn produces a continuation
+   checkpoint. The disposition here comes from a REAL
    [Keeper_heartbeat_loop_cycle.cycle_outcome] fixture through
    [Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome] — the exact
    function [keeper_heartbeat_loop.ml] now calls. A regression in that
@@ -460,9 +467,9 @@ let test_batch_skips_a_non_connector_entry_between_matches () =
    this test even though nothing here re-implements the loop's own control
    flow (adversarial review P1-2). The action must run over every entry in
    [consumed_selections], not only the primary, or a companion is silently
-   stranded — acked by nobody, deferred by nobody, yet also never retried
+   stranded — acked by nobody, deferred by nobody, yet also never selected
    because it no longer looks "new". *)
-let test_batch_turn_failure_leaves_every_member_queued () =
+let test_batch_checkpoint_moves_every_member_to_tail () =
   with_ctx "connector-batch-failure" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let a1 =
       connector_attention_stimulus ~base_path ~keeper_name ~channel_id:"chan-A"
@@ -486,16 +493,12 @@ let test_batch_turn_failure_leaves_every_member_queued () =
     check int "all 3 admitted as one batch" 3 intake.consumed_stimulus_count;
     check int "consumed_selections mirrors the batch" 3
       (List.length intake.consumed_selections);
-    let failed_cycle_outcome =
-      failed_outcome
-        ~source_disposition:Keeper_unified_turn.Follow_failure_route
-        ~route:transient_retry_route
-        ~deferred_runtime_lane:None
-        meta
+    let checkpointed_cycle_outcome =
+      Keeper_heartbeat_loop_cycle.Checkpointed meta
     in
     (match
        Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
-         (Some failed_cycle_outcome)
+         (Some checkpointed_cycle_outcome)
      with
      | Keeper_heartbeat_loop.Batch_defer { reason } ->
        (* This is the loop's own application step (List.iter over
@@ -515,17 +518,20 @@ let test_batch_turn_failure_leaves_every_member_queued () =
             | Error detail ->
               failf "defer failed for %s: %s" selection.source.Q.post_id detail)
          intake.consumed_selections;
-       check string "deferred for the expected reason" "transient_turn_failure" reason
+       check string
+         "deferred for the expected reason"
+         "continuation_checkpoint"
+         (Keeper_heartbeat_loop.batch_defer_reason_label reason)
      | Keeper_heartbeat_loop.Batch_ack_completed _
      | Keeper_heartbeat_loop.Batch_quarantine _
-     | Keeper_heartbeat_loop.Batch_no_action ->
-       fail "the transient-failure fixture must drive Batch_defer");
+     | Keeper_heartbeat_loop.Batch_preserve _ ->
+       fail "the checkpoint fixture must drive Batch_defer");
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
       | Ok queue -> queue
       | Error detail -> failf "queue reload failed: %s" detail
     in
-    check int "turn failure loses nothing: all 3 batch members remain queued" 3
+    check int "checkpoint loses nothing: all 3 batch members remain queued" 3
       (Q.length queued);
     check
       (list string)
@@ -590,7 +596,7 @@ let test_batch_completion_acks_every_member () =
        check bool "every batch member acks cleanly" true acked
      | Keeper_heartbeat_loop.Batch_quarantine _
      | Keeper_heartbeat_loop.Batch_defer _
-     | Keeper_heartbeat_loop.Batch_no_action ->
+     | Keeper_heartbeat_loop.Batch_preserve _ ->
        fail "a completed, addressed outcome must drive Batch_ack_completed");
     let queued =
       match Keeper_registry_event_queue.snapshot_result ~base_path keeper_name with
@@ -615,9 +621,9 @@ let () =
             `Quick
             test_batch_skips_a_non_connector_entry_between_matches
         ; test_case
-            "turn failure defers the whole batch: no partial ack"
+            "checkpoint defers the whole batch: no partial disposition"
             `Quick
-            test_batch_turn_failure_leaves_every_member_queued
+            test_batch_checkpoint_moves_every_member_to_tail
         ; test_case
             "turn completion acks every batch member, not only the primary"
             `Quick

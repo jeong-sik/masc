@@ -18,8 +18,6 @@ type runtime =
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; wake : Eio.Condition.t
   ; pending : bool Atomic.t
-  ; retry_scheduled : bool Atomic.t
-  ; retry_interval_sec : float
   ; in_flight : review_key list Atomic.t
   ; review_slots : Eio.Semaphore.t
   }
@@ -608,15 +606,6 @@ let request_scan (runtime : runtime) =
   Eio.Condition.broadcast runtime.wake
 ;;
 
-let schedule_retry (runtime : runtime) =
-  if Atomic.compare_and_set runtime.retry_scheduled false true
-  then
-    Eio.Fiber.fork ~sw:runtime.sw (fun () ->
-      Eio.Time.sleep runtime.clock runtime.retry_interval_sec;
-      Atomic.set runtime.retry_scheduled false;
-      request_scan runtime)
-;;
-
 let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verification_id =
   let key = { task_id = task.id; verification_id } in
   if claim_review runtime key
@@ -644,9 +633,8 @@ let process_pending (runtime : runtime) =
   match Workspace_backlog.read_backlog_r runtime.config with
   | Error detail ->
     Log.Misc.error
-      "system LLM completion authority backlog read failed; pending tasks remain unresolved: %s"
-      detail;
-    schedule_retry runtime
+      "system LLM completion authority backlog read failed; waiting for the next explicit scan trigger: %s"
+      detail
   | Ok backlog ->
     List.iter
       (fun (task : Masc_domain.task) ->
@@ -708,8 +696,6 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
     ; clock
     ; wake = Eio.Condition.create ()
     ; pending = Atomic.make true
-    ; retry_scheduled = Atomic.make false
-    ; retry_interval_sec = Env_config.Timeouts.maintenance_pulse_interval_sec
     ; in_flight = Atomic.make []
     ; review_slots = Eio.Semaphore.make 4
     }

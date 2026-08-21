@@ -1,19 +1,17 @@
 (* Total typed failure routing. See keeper_runtime_failure_route.mli. *)
 
-type retry_class =
-  | Rate_limited
-  | Hard_quota
-  | Capacity_backpressure
-  | Server_error
-  | Network_transient
-  | Provider_timeout
-
 type rotate_class =
   | Auth_failed
   | Model_unavailable
   | Resumable_cli_session
   | Candidates_filtered
   | Runtime_exhausted
+  | Rate_window_unavailable
+  | Account_quota_unavailable
+  | Capacity_unavailable
+  | Provider_service_unavailable
+  | Network_unavailable
+  | Provider_timeout
   | No_progress_empty
   | No_progress_thinking_only
 
@@ -50,10 +48,6 @@ type error_boundary =
   | Agent_core_execution
 
 type route =
-  | Retry_after_observed of
-      { retry_class : retry_class
-      ; retry_after : float option
-      }
   | Rotate_now of { rotate : rotate_class }
   | Exhausted_visible_alive of
       { terminal : terminal_class
@@ -78,9 +72,6 @@ let core_error_is_hard_quota (err : Agent_core.Error.t) =
     false
 ;;
 
-let observe_retry ?retry_after retry_class =
-  Retry_after_observed { retry_class; retry_after }
-
 let rotate rotate_class = Rotate_now { rotate = rotate_class }
 
 let failure_detail err =
@@ -90,24 +81,20 @@ let exhaust ~err ~provenance terminal_class =
   Exhausted_visible_alive
     { terminal = terminal_class; provenance; detail = failure_detail err }
 
-let retry_after_of_capacity_hint = function
-  | Keeper_internal_error.Explicit sec -> Some sec
-  | Keeper_internal_error.No_retry_hint -> None
-
 let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_error) =
   let exhaust_failure = exhaust ~err ~provenance:Masc_internal_error in
   match internal with
   | Keeper_internal_error.Resumable_cli_session _ -> rotate Resumable_cli_session
-  | Keeper_internal_error.Capacity_backpressure { retry_after; _ } ->
-    observe_retry ?retry_after:(retry_after_of_capacity_hint retry_after) Capacity_backpressure
+  | Keeper_internal_error.Capacity_backpressure _ ->
+    rotate Capacity_unavailable
   | Keeper_internal_error.Runtime_exhausted { reason; _ } ->
     (match reason with
-     | Keeper_internal_error.Capacity_exhausted -> observe_retry Capacity_backpressure
+     | Keeper_internal_error.Capacity_exhausted -> rotate Capacity_unavailable
      | Keeper_internal_error.Candidates_filtered_after_cycles ->
        rotate Candidates_filtered
      | Keeper_internal_error.Connection_refused
      | Keeper_internal_error.Dns_failure ->
-       observe_retry Network_transient
+       rotate Network_unavailable
      | Keeper_internal_error.No_providers_available
      | Keeper_internal_error.All_providers_failed
      | Keeper_internal_error.Session_conflict
@@ -170,17 +157,16 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
 let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_api_error in
   match api with
-  | Llm_provider.Retry.RateLimited { retry_after; _ } ->
-    observe_retry ?retry_after Rate_limited
-  | Llm_provider.Retry.PaymentRequired _ -> observe_retry Hard_quota
-  | Llm_provider.Retry.Overloaded _ -> observe_retry Capacity_backpressure
-  | Llm_provider.Retry.ServerError _ -> observe_retry Server_error
+  | Llm_provider.Retry.RateLimited _ -> rotate Rate_window_unavailable
+  | Llm_provider.Retry.PaymentRequired _ -> rotate Account_quota_unavailable
+  | Llm_provider.Retry.Overloaded _ -> rotate Capacity_unavailable
+  | Llm_provider.Retry.ServerError _ -> rotate Provider_service_unavailable
   | Llm_provider.Retry.AuthError _
   | Llm_provider.Retry.AuthorizationError _ ->
     rotate Auth_failed
   | Llm_provider.Retry.NotFound _ -> rotate Model_unavailable
-  | Llm_provider.Retry.NetworkError _ -> observe_retry Network_transient
-  | Llm_provider.Retry.Timeout _ -> observe_retry Provider_timeout
+  | Llm_provider.Retry.NetworkError _ -> rotate Network_unavailable
+  | Llm_provider.Retry.Timeout _ -> rotate Provider_timeout
   | Llm_provider.Retry.InvalidRequest _ -> exhaust_failure Deterministic_request
   | Llm_provider.Retry.ContextOverflow _ -> exhaust_failure Context_overflow
   | Llm_provider.Retry.InputCapacity _ -> exhaust_failure Deterministic_request
@@ -188,17 +174,16 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   let exhaust_failure = exhaust ~err ~provenance:Agent_core_provider_error in
   match p with
-  | Llm_provider.Error.RateLimit { retry_after; _ } -> observe_retry ?retry_after Rate_limited
-  | Llm_provider.Error.HardQuota { retry_after; _ } -> observe_retry ?retry_after Hard_quota
-  | Llm_provider.Error.CapacityExhausted { retry_after; _ } ->
-    observe_retry ?retry_after Capacity_backpressure
-  | Llm_provider.Error.ProviderUnavailable _ -> observe_retry Server_error
+  | Llm_provider.Error.RateLimit _ -> rotate Rate_window_unavailable
+  | Llm_provider.Error.HardQuota _ -> rotate Account_quota_unavailable
+  | Llm_provider.Error.CapacityExhausted _ -> rotate Capacity_unavailable
+  | Llm_provider.Error.ProviderUnavailable _ -> rotate Provider_service_unavailable
   | Llm_provider.Error.ServerError { transient = true; _ } ->
-    observe_retry Server_error
+    rotate Provider_service_unavailable
   | Llm_provider.Error.ServerError { transient = false; _ } ->
     exhaust_failure Provider_integration
-  | Llm_provider.Error.NetworkError _ -> observe_retry Network_transient
-  | Llm_provider.Error.Timeout _ -> observe_retry Provider_timeout
+  | Llm_provider.Error.NetworkError _ -> rotate Network_unavailable
+  | Llm_provider.Error.Timeout _ -> rotate Provider_timeout
   | Llm_provider.Error.AuthError _
   | Llm_provider.Error.AuthorizationError _ ->
     rotate Auth_failed
@@ -252,23 +237,9 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
      | Agent_core_execution -> route_of_error_family ~boundary err)
   | None -> route_of_error_family ~boundary err
 
-let retry_after_of_route = function
-  | Retry_after_observed { retry_after; _ } -> retry_after
-  | Rotate_now _ -> None
-  | Exhausted_visible_alive _ -> None
-
 let route_kind_label = function
-  | Retry_after_observed _ -> "retry_after_observed"
   | Rotate_now _ -> "rotate_now"
   | Exhausted_visible_alive _ -> "exhausted_visible_alive"
-
-let retry_class_label = function
-  | Rate_limited -> "rate_limited"
-  | Hard_quota -> "hard_quota"
-  | Capacity_backpressure -> "capacity_backpressure"
-  | Server_error -> "server_error"
-  | Network_transient -> "network_transient"
-  | Provider_timeout -> "provider_timeout"
 
 let rotate_class_label = function
   | Auth_failed -> "auth_failed"
@@ -276,6 +247,12 @@ let rotate_class_label = function
   | Resumable_cli_session -> "resumable_cli_session"
   | Candidates_filtered -> "candidates_filtered"
   | Runtime_exhausted -> "runtime_exhausted"
+  | Rate_window_unavailable -> "rate_window_unavailable"
+  | Account_quota_unavailable -> "account_quota_unavailable"
+  | Capacity_unavailable -> "capacity_unavailable"
+  | Provider_service_unavailable -> "provider_service_unavailable"
+  | Network_unavailable -> "network_unavailable"
+  | Provider_timeout -> "provider_timeout"
   | No_progress_empty -> "no_progress_empty"
   | No_progress_thinking_only -> "no_progress_thinking_only"
 
@@ -295,6 +272,5 @@ let terminal_class_label = function
   | Internal_opaque -> "internal_opaque"
 
 let route_class_label = function
-  | Retry_after_observed { retry_class; _ } -> retry_class_label retry_class
   | Rotate_now { rotate } -> rotate_class_label rotate
   | Exhausted_visible_alive { terminal; _ } -> terminal_class_label terminal

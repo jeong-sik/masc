@@ -155,7 +155,6 @@ val compaction_outcomes_of_cycle_outcome :
 
 type failed_source_disposition =
   | Preserve_for_deferred_runtime
-  | Defer_to_queue_tail
   | Quarantine_source of { detail : string }
   | Pause_keeper_for_integrity of { detail : string }
 
@@ -163,8 +162,8 @@ val failed_source_disposition :
   Keeper_unified_turn.turn_failure -> failed_source_disposition
 (** Pure liveness policy for one failed source turn. Only transcript integrity
     corruption pauses the Keeper. A frozen successor runtime retains the exact
-    source, transient failures move it behind independent work, and deterministic
-    failures quarantine that source with its durable receipt. *)
+    source. Without an explicit successor runtime, every failed source receives
+    a durable terminal observation rather than being re-entered implicitly. *)
 
 type connector_attention_outcome =
   | Attention_resolved
@@ -174,13 +173,26 @@ type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
   | Batch_quarantine of { detail : string }
-  | Batch_defer of { reason : string }
-  | Batch_no_action
+  | Batch_defer of { reason : batch_defer_reason }
+  | Batch_preserve of { reason : batch_preserve_reason }
+
+and batch_defer_reason =
+  | Continuation_checkpoint
+  | External_input_required
+  | Turn_cancelled
+  | Turn_skipped
+
+and batch_preserve_reason =
+  | Deferred_runtime_owns_source
+  | Integrity_pause_owns_terminalization
+  | No_cycle_outcome
+
+val batch_defer_reason_label : batch_defer_reason -> string
 
 val batch_disposition_of_cycle_outcome :
   Keeper_heartbeat_loop_cycle.cycle_outcome option -> batch_disposition
 (** RFC-0377: the single queue action ([Batch_ack_completed] /
-    [Batch_quarantine] / [Batch_defer] / [Batch_no_action]) a turn's
+    [Batch_quarantine] / [Batch_defer] / [Batch_preserve]) a turn's
     [cycle_outcome] implies for every stimulus admitted into that turn — the
     primary selection plus any Connector_attention batch companions. The
     caller applies the returned action uniformly to every admitted
@@ -264,4 +276,3 @@ module For_testing : sig
     Keeper_turn_driver.deferred_runtime_lane ->
     bool
 end
-

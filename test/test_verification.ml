@@ -124,7 +124,7 @@ let test_verdict_event_preserves_typed_authority () =
      | _ -> Alcotest.fail "verdict event must be an object")
 
 (* The stalled-review board projection is the only surface that tells the
-   assignee a non-retryable deferral happened and how to move forward.
+   assignee that no verdict was produced and how to move forward.
    Pin the content naming both forward paths and the typed metadata. *)
 let test_stalled_projection_names_forward_paths () =
   let content =
@@ -357,7 +357,6 @@ let test_system_llm_review_notes_are_metadata_only () =
     ; generator_runtime = None
     ; gate = Masc.Task.Anti_rationalization.Structured_tool
     ; fallback_reason = None
-    ; evaluator_error_retryable = None
     }
   in
   let notes =

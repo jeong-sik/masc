@@ -524,7 +524,6 @@ let agent_failed_payload
       ~(error : string)
       ~(error_domain : string)
       ~(error_code : string)
-      ~(error_retryable : bool)
       ~(error_detail : Yojson.Safe.t)
   : Yojson.Safe.t
   =
@@ -535,7 +534,6 @@ let agent_failed_payload
     ; error
     ; error_domain
     ; error_code
-    ; error_retryable
     ; error_detail
     }
   in

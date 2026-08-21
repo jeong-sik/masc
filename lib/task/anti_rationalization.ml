@@ -85,7 +85,6 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
-  ; evaluator_error_retryable : bool option
   }
 
 (* ================================================================ *)
@@ -349,7 +348,6 @@ let review
       ; generator_runtime
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
-      ; evaluator_error_retryable = None
       }
   | Ok [] ->
     (* [resolve_evaluator_slots] never yields an empty list; this arm keeps the
@@ -365,7 +363,6 @@ let review
       ; generator_runtime
       ; gate = Evaluator_unavailable
       ; fallback_reason = Some reason
-      ; evaluator_error_retryable = None
       }
   | Ok (first_slot :: rest_slots) ->
     (match
@@ -391,7 +388,6 @@ let review
          ; generator_runtime
          ; gate = Evaluator_unavailable
          ; fallback_reason = Some detail
-         ; evaluator_error_retryable = None
          }
      | Ok prompt ->
        (match generator_runtime with
@@ -445,7 +441,6 @@ let review
              ; generator_runtime
              ; gate = Structured_tool
              ; fallback_reason = None
-             ; evaluator_error_retryable = None
              }
          | Ok None ->
            let detail =
@@ -470,28 +465,24 @@ let review
                 ; generator_runtime
                 ; gate = Invalid_verdict
                 ; fallback_reason = Some detail
-                ; evaluator_error_retryable = None
                 })
          | Error error ->
            let detail = Agent_core.Error.to_string error in
-           let retryable = Agent_core.Error.is_retryable error in
            (Atomic.get outcome_observer_fn)
              ~outcome:"unavailable"
              ~runtime:slot;
            (match remaining with
             | next :: rest ->
               task_warn
-                "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; failing over to next verifier_exact slot %s: %s"
+                "[task-completion-review] evaluator unavailable runtime=%s; failing over to next verifier_exact slot %s: %s"
                 slot
-                retryable
                 next
                 detail;
               attempt next rest
             | [] ->
               task_warn
-                "[task-completion-review] evaluator unavailable runtime=%s retryable=%b; task remains nonterminal: %s"
+                "[task-completion-review] evaluator unavailable runtime=%s; task remains nonterminal: %s"
                 slot
-                retryable
                 detail;
               emit
                 { verdict = None
@@ -499,7 +490,6 @@ let review
                 ; generator_runtime
                 ; gate = Evaluator_unavailable
                 ; fallback_reason = Some detail
-                ; evaluator_error_retryable = Some retryable
                 })
        in
        attempt first_slot rest_slots)

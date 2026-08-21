@@ -72,18 +72,6 @@ type review_result =
   ; generator_runtime : string option
   ; gate : gate
   ; fallback_reason : string option
-  ; evaluator_error_retryable : bool option
-        (** [Some b] only where a typed {!Agent_core.Error.t} existed to
-            classify — the [Error error] arm of [run_llm_reviewer_fn] — and
-            [b] is then [Agent_core.Error.is_retryable error]. [None]
-            everywhere else: a produced verdict, a reply without exactly one
-            verdict tool call, a prompt or slot resolution failure. [None] is
-            not "retry": nothing about those outcomes says a repeat of the
-            same request would end differently, and a caller that wants to
-            repeat one must say so on its own evidence. This was a plain
-            [bool] defaulting to [true], which is why an [Invalid_verdict]
-            review re-ran on the maintenance pulse forever without telling
-            anyone. *)
   }
 
 val review

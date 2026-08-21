@@ -4619,8 +4619,6 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  ; _
                  } ->
                ()
-             | Keeper_runtime_failure_route.Retry_after_observed _ ->
-               fail "unknown transient terminal effect was requeued"
              | _ -> fail "unknown transient terminal effect lost its exact route");
             (* A settlement assertion used to close this case: a failed
                terminal delivery must not Ack the source lease. #25969 replaced

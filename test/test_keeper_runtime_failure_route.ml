@@ -2,7 +2,7 @@
 
     Totality over [Agent_core.Error.t] is compiler-enforced (the
     route function has no catch-all); these tests pin the mapping opinion
-    per class and the typed retry_after extraction so a refactor cannot
+    per class so a refactor cannot
     silently move a class between routes. *)
 
 module KFR = Keeper_runtime_failure_route
@@ -21,10 +21,10 @@ let check_masc_route name expected err =
 let internal_err masc_internal =
   Keeper_internal_error.core_error_of_masc_internal_error masc_internal
 
-let test_api_rate_limited_threads_hint () =
+let test_api_rate_limited_is_runtime_unavailable () =
   check_route
-    "soft 429 preserves provider retry-after"
-    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = Some 30.0 })
+    "soft 429 requires a different configured runtime"
+    (KFR.Rotate_now { rotate = KFR.Rate_window_unavailable })
     (Agent_core.Error.Api
        (Llm_provider.Retry.RateLimited
           { retry_after = Some 30.0; message = "slow down" }))
@@ -37,30 +37,29 @@ let test_api_quota_message_does_not_override_rate_limit () =
   in
   check_route
     "rate-limit prose cannot invent hard quota"
-    (KFR.Retry_after_observed { retry_class = KFR.Rate_limited; retry_after = None })
+    (KFR.Rotate_now { rotate = KFR.Rate_window_unavailable })
     err;
   check_route
     "PaymentRequired is the typed API hard-quota signal"
-    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = None })
+    (KFR.Rotate_now { rotate = KFR.Account_quota_unavailable })
     (Agent_core.Error.Api
        (Llm_provider.Retry.PaymentRequired { message = "billing required" }))
 
 let test_api_overloaded_is_backpressure () =
   check_route
     "typed Overloaded stays transient backpressure (#23483)"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = None })
+    (KFR.Rotate_now { rotate = KFR.Capacity_unavailable })
     (Agent_core.Error.Api (Llm_provider.Retry.Overloaded { message = "overloaded" }))
 
 let test_api_server_error_uses_typed_variant () =
   check_route
     "ServerError does not reinterpret status codes"
-    (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
+    (KFR.Rotate_now { rotate = KFR.Provider_service_unavailable })
     (Agent_core.Error.Api
        (Llm_provider.Retry.ServerError { status = 524; message = "timeout" }));
   check_route
     "typed ServerError remains a server error for an unusual status"
-    (KFR.Retry_after_observed { retry_class = KFR.Server_error; retry_after = None })
+    (KFR.Rotate_now { rotate = KFR.Provider_service_unavailable })
     (Agent_core.Error.Api
        (Llm_provider.Retry.ServerError { status = 418; message = "teapot" }))
 
@@ -150,17 +149,16 @@ let test_api_input_capacity_is_terminal_judgment () =
        })
     measurement_unavailable
 
-let test_provider_quota_family_threads_hint () =
+let test_provider_quota_family_requires_another_runtime () =
   check_route
-    "provider HardQuota preserves retry-after"
-    (KFR.Retry_after_observed { retry_class = KFR.Hard_quota; retry_after = Some 3600.0 })
+    "provider HardQuota requires another configured account/runtime"
+    (KFR.Rotate_now { rotate = KFR.Account_quota_unavailable })
     (Agent_core.Error.Provider
        (Llm_provider.Error.HardQuota
           { provider = "glm"; retry_after = Some 3600.0; detail = "balance 0" }));
   check_route
     "provider CapacityExhausted stays typed"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = None })
+    (KFR.Rotate_now { rotate = KFR.Capacity_unavailable })
     (Agent_core.Error.Provider
        (Llm_provider.Error.CapacityExhausted
           { scope = Llm_provider.Error.CapacityUnknown
@@ -200,7 +198,7 @@ let test_provider_wire_error_is_provider_integration () =
     Alcotest.failf "provider wire error should exhaust provider integration, got %s"
       (KFR.route_kind_label other)
 
-let test_masc_internal_backpressure_hint () =
+let test_masc_internal_backpressure_requires_another_runtime () =
   let err =
     internal_err
       (Keeper_internal_error.Capacity_backpressure
@@ -212,14 +210,9 @@ let test_masc_internal_backpressure_hint () =
          })
   in
   check_masc_route
-    "masc backpressure carries typed Explicit hint"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = Some 45.0 })
-    err;
-  Alcotest.(check (option (float 1e-6)))
-    "retry_after_of_route extracts the hint"
-    (Some 45.0)
-    (KFR.retry_after_of_route (route_of_masc_error err))
+    "masc backpressure requires another configured runtime"
+    (KFR.Rotate_now { rotate = KFR.Capacity_unavailable })
+    err
 
 let test_masc_internal_terminal_classes () =
   (match
@@ -238,8 +231,7 @@ let test_masc_internal_terminal_classes () =
        (KFR.route_kind_label other));
   check_masc_route
     "capacity-exhausted runtime stays typed"
-    (KFR.Retry_after_observed
-       { retry_class = KFR.Capacity_backpressure; retry_after = None })
+    (KFR.Rotate_now { rotate = KFR.Capacity_unavailable })
     (internal_err
        (Keeper_internal_error.Runtime_exhausted
           { runtime_id = "r"; reason = Keeper_internal_error.Capacity_exhausted }));
@@ -279,7 +271,7 @@ let () =
   Alcotest.run
     "keeper_runtime_failure_route"
     [ ( "api"
-      , [ Alcotest.test_case "rate limited hint" `Quick test_api_rate_limited_threads_hint
+      , [ Alcotest.test_case "rate limited runtime unavailable" `Quick test_api_rate_limited_is_runtime_unavailable
         ; Alcotest.test_case
             "quota prose stays rate limited"
             `Quick
@@ -296,7 +288,7 @@ let () =
             test_api_input_capacity_is_terminal_judgment
         ] )
     ; ( "provider"
-      , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint
+      , [ Alcotest.test_case "quota family runtime selection" `Quick test_provider_quota_family_requires_another_runtime
         ; Alcotest.test_case "config exhausts" `Quick test_provider_config_judges
         ; Alcotest.test_case
             "wire error is provider integration"
@@ -304,7 +296,7 @@ let () =
             test_provider_wire_error_is_provider_integration
         ] )
     ; ( "masc_internal"
-      , [ Alcotest.test_case "backpressure hint" `Quick test_masc_internal_backpressure_hint
+      , [ Alcotest.test_case "backpressure runtime selection" `Quick test_masc_internal_backpressure_requires_another_runtime
         ; Alcotest.test_case "terminal classes" `Quick test_masc_internal_terminal_classes
         ] )
     ; ( "families"

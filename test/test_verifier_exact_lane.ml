@@ -150,10 +150,6 @@ let test_exhaustion_reports_the_last_attempt () =
          "the last attempted slot is the reported evaluator runtime"
          "slot-b"
          result.evaluator_runtime;
-       Alcotest.(check (option bool))
-         "the last attempt's non-retryable classification wins"
-         (Some false)
-         result.evaluator_error_retryable;
        Alcotest.(check bool) "no fabricated verdict" true (Option.is_none result.verdict))
 ;;
 
@@ -174,14 +170,6 @@ let test_unconfigured_lane_is_unavailable_not_rerouted () =
          "no runtime is invented for a missing lane"
          "unresolved"
          result.evaluator_runtime;
-       (* An unconfigured lane produces no evaluator call, so there is no
-          typed error to classify. That is [None], not "retry": the lane is
-          missing from configuration and repeating the review on a timer
-          would not add it. *)
-       Alcotest.(check (option bool))
-         "no evaluator error to classify"
-         None
-         result.evaluator_error_retryable;
        match result.fallback_reason with
        | Some detail ->
          Alcotest.(check bool)

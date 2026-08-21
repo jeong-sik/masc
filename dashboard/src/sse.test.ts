@@ -172,7 +172,6 @@ describe('server-push Agent Core typed-payload handlers', () => {
         error: 'boom',
         error_domain: 'api',
         error_code: 'rate_limited',
-        error_retryable: true,
         error_detail: { variant: 'rate_limited', message: 'slow down' },
       },
     })

@@ -8,7 +8,6 @@ type agent_failed_error_projection =
   { error : string
   ; error_domain : string
   ; error_code : string
-  ; error_retryable : bool
   ; error_detail : Yojson.Safe.t
   }
 

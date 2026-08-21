@@ -318,7 +318,6 @@ let record_compaction_outcome_metric ~keeper_name outcome =
    with a structurally invalid history can duplicate or misattribute effects. *)
 type failed_source_disposition =
   | Preserve_for_deferred_runtime
-  | Defer_to_queue_tail
   | Quarantine_source of { detail : string }
   | Pause_keeper_for_integrity of { detail : string }
 
@@ -344,8 +343,12 @@ let failed_source_disposition
           (match route with
            | Keeper_runtime_failure_route.Exhausted_visible_alive
                { detail; _ } -> Quarantine_source { detail }
-           | Keeper_runtime_failure_route.Retry_after_observed _
-           | Keeper_runtime_failure_route.Rotate_now _ -> Defer_to_queue_tail)))
+           | Keeper_runtime_failure_route.Rotate_now { rotate } ->
+             Quarantine_source
+               { detail =
+                   "runtime_successor_unavailable:"
+                   ^ Keeper_runtime_failure_route.rotate_class_label rotate
+               })))
 ;;
 
 (* RFC-0377 batch disposition: the queue action a turn outcome implies for
@@ -363,8 +366,26 @@ type batch_disposition =
   | Batch_ack_completed of
       { connector_attention_outcome : connector_attention_outcome }
   | Batch_quarantine of { detail : string }
-  | Batch_defer of { reason : string }
-  | Batch_no_action
+  | Batch_defer of { reason : batch_defer_reason }
+  | Batch_preserve of { reason : batch_preserve_reason }
+
+and batch_defer_reason =
+  | Continuation_checkpoint
+  | External_input_required
+  | Turn_cancelled
+  | Turn_skipped
+
+and batch_preserve_reason =
+  | Deferred_runtime_owns_source
+  | Integrity_pause_owns_terminalization
+  | No_cycle_outcome
+
+let batch_defer_reason_label = function
+  | Continuation_checkpoint -> "continuation_checkpoint"
+  | External_input_required -> "external_input_required"
+  | Turn_cancelled -> "turn_cancelled"
+  | Turn_skipped -> "turn_skipped"
+;;
 
 let batch_disposition_of_cycle_outcome
       (cycle_outcome : Keeper_heartbeat_loop_cycle.cycle_outcome option)
@@ -381,9 +402,10 @@ let batch_disposition_of_cycle_outcome
   | Some (Cycle.Failed { failure; _ }) ->
     (match failed_source_disposition failure with
      | Quarantine_source { detail } -> Batch_quarantine { detail }
-     | Defer_to_queue_tail -> Batch_defer { reason = "transient_turn_failure" }
-     | Preserve_for_deferred_runtime | Pause_keeper_for_integrity _ ->
-       Batch_no_action)
+     | Preserve_for_deferred_runtime ->
+       Batch_preserve { reason = Deferred_runtime_owns_source }
+     | Pause_keeper_for_integrity _ ->
+       Batch_preserve { reason = Integrity_pause_owns_terminalization })
   | Some (Cycle.Manual_compaction_failed { failure; _ }) ->
     Batch_quarantine { detail = Keeper_manual_compaction.failure_to_string failure }
   | Some (Cycle.Manual_compaction_not_applied { no_compaction; _ }) ->
@@ -392,13 +414,13 @@ let batch_disposition_of_cycle_outcome
           Keeper_post_turn.compaction_recovery_error_to_string
             (Keeper_post_turn.No_compaction no_compaction)
       }
-  | Some
-      ( Cycle.Checkpointed _
-      | Cycle.Input_required _
-      | Cycle.Cancelled _
-      | Cycle.Skipped _ )
-  | None ->
-    Batch_no_action
+  | Some (Cycle.Checkpointed _) ->
+    Batch_defer { reason = Continuation_checkpoint }
+  | Some (Cycle.Input_required _) ->
+    Batch_defer { reason = External_input_required }
+  | Some (Cycle.Cancelled _) -> Batch_defer { reason = Turn_cancelled }
+  | Some (Cycle.Skipped _) -> Batch_defer { reason = Turn_skipped }
+  | None -> Batch_preserve { reason = No_cycle_outcome }
 ;;
 
 
@@ -970,9 +992,12 @@ let run_keepalive_unified_turn
                selections
            | Batch_defer { reason } ->
              List.iter
-               (fun selection -> defer_selection_to_queue_tail ~selection ~reason)
+               (fun selection ->
+                  defer_selection_to_queue_tail
+                    ~selection
+                    ~reason:(batch_defer_reason_label reason))
                selections
-           | Batch_no_action -> ());
+           | Batch_preserve { reason = _ } -> ());
       (let compaction_outcomes =
          match !cycle_outcome_ref with
          | Some outcome -> compaction_outcomes_of_cycle_outcome outcome

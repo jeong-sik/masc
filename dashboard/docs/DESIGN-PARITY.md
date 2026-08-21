@@ -57,7 +57,33 @@ so it is not used for the metric.
 The harness writes `prototypes/keeper-v2/_parity/` and `_parity-vendored.html`;
 both are gitignored and regenerated.
 
+## Reproducibility
+
+The prototype is a live mock, not a static page, and three things in it moved a
+measurement between runs of the identical page:
+
+- `.thread` is bottom-anchored and its scroll-to-bottom races the layout. It
+  settles either at the bottom (`scrollTop` 1907 of 1907) or at an earlier
+  anchor (185), and nothing afterwards moves it. Those two states differ by the
+  height of the visible column, which is a 4pp swing on keepers — and a 15pp
+  swing when the two sides land on opposite states. The capture pins the thread
+  where the app means it to sit.
+- `alarm.jsx` fires an ambient notification five seconds after load and every
+  sixteen after that. It is switched off through the prototype's own
+  `window.MASC_NOTIFY` channel before any page script runs.
+- `shell.jsx` re-rolls a random tok/s figure every 1.1s, so the page never
+  reaches a state it can be compared in. Repeating timers of a second or more
+  are cut; the one-shot ones stay, because the FSM phase advance
+  (`act.ms || 1500`) is part of the state the design settles into.
+
+On top of that a frame is only accepted once two consecutive captures are
+byte-identical. With all four in place, four runs of the same page produce the
+same bytes and two independent full-fleet runs produce the same mean to four
+decimals. Without them, treat any difference under ~4pp as noise.
+
 ## Where it stands (2026-08-22, `Keeper Agent v5.html`, 1600×1000)
+
+Two independent full-fleet runs, identical to four decimals.
 
 | Surface | SSIM | | Surface | SSIM |
 |---|---|---|---|---|
@@ -78,7 +104,7 @@ as "does the skin match". The 0.948 fleet mean includes the four and is the
 figure to read as "how close is the whole dashboard to the mock".
 
 Style conformance — `getComputedStyle` compared property by property across every
-classed element on ten surfaces — is **96.89%** (41,182 of 42,504 declarations),
+classed element on ten surfaces — is **96.93%** (41,201 of 42,504 declarations),
 from 85.85% before this pass. The largest remaining group is `font-family` (263),
 which is the UA fallback the dashboard deliberately does not reproduce (see
 below); without it the figure is 97.6%.

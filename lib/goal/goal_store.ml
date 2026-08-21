@@ -98,15 +98,32 @@ and goal_of_yojson = function
             if List.mem field accepted_fields then None else Some field)
           fields
       in
+      let retired_owner =
+        match
+          List.filter_map
+            (fun (field, value) ->
+               if String.equal field "owner" then Some value else None)
+            fields
+        with
+        | [] -> Ok ()
+        | [ (`String _ | `Null) ] -> Ok ()
+        | [ value ] ->
+          Error
+            (Printf.sprintf
+               "goal_of_yojson: retired owner must retain its former string-or-null shape, got %s"
+               (Yojson.Safe.to_string value))
+        | _ -> Error "goal_of_yojson: duplicate retired owner field"
+      in
       let id_opt = Json_util.assoc_member_opt "id" json in
       let title_opt = Json_util.assoc_member_opt "title" json in
-      (match unknown_field, id_opt, title_opt with
-      | Some field, _, _ ->
+      (match unknown_field, retired_owner, id_opt, title_opt with
+      | Some field, _, _, _ ->
           Error
             (Printf.sprintf
                "goal_of_yojson: unknown Goal field %S is not accepted"
                field)
-      | None, Some (`String id), Some (`String title) ->
+      | None, Error detail, _, _ -> Error detail
+      | None, Ok (), Some (`String id), Some (`String title) ->
           let phase =
             (* Phase is required: a row without [phase] is a decode error, not
                a silent Active default. The silent default caused main red
@@ -149,7 +166,7 @@ and goal_of_yojson = function
            | Error msg, _, _ -> Error msg
            | _, Error msg, _ -> Error msg
            | _, _, Error msg -> Error msg)
-      | None, _, _ -> Error "goal_of_yojson: invalid goal")
+      | None, Ok (), _, _ -> Error "goal_of_yojson: invalid goal")
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
 

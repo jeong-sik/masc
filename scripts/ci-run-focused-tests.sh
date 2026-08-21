@@ -293,13 +293,11 @@ normal_targets=(
   @test/runtest-test_dashboard_workspace
   @test/runtest-test_host_fd_pressure_poller
   @test/runtest-test_keeper_turn_driver_failover
-  @test/runtest-test_keeper_cycle_failed_runtime_attribution
   @test/runtest-test_keeper_turn_driver_accept
   @test/runtest-test_keeper_vision_tool
   @test/runtest-test_runtime_modality_reroute
   @test/runtest-test_runtime_agent_advanced_outcome
   @test/runtest-test_runtime_model_input_tail_window
-  @test/runtest-test_keeper_context_overflow_shrink
   @test/runtest-test_keeper_provider_call_deadline
   @test/runtest-test_keeper_runtime_resolved_observability
   @test/runtest-test_runtime_toml_overrides

@@ -141,6 +141,7 @@ type finalization_evidence =
   }
 
 type supersession =
+  | Operator_blocked_purge_released of { actor : string }
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string
@@ -366,6 +367,15 @@ let validate operation =
        | ( Operator_stop_remove_meta
          | Supervisor_cleanup
          | Dashboard_keeper_purge _ ) as cleanup_reason ->
+         Error (Superseded_cleanup_reason_mismatch cleanup_reason))
+    | Superseded (Operator_blocked_purge_released _) ->
+      (* The mirror of the arm above: this release exists only for a purge, so
+         every other intent is as wrong here as a purge is there. *)
+      (match operation.cleanup_intent.reason with
+       | Dashboard_keeper_purge _ -> Ok ()
+       | ( Operator_stop_retain_meta
+         | Operator_stop_remove_meta
+         | Supervisor_cleanup ) as cleanup_reason ->
          Error (Superseded_cleanup_reason_mismatch cleanup_reason))
     | Prepared
     | Joining_lanes

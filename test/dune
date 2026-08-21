@@ -2061,6 +2061,7 @@
 (include stanzas/test_shutdown_flag.inc)
 
 (include stanzas/test_keeper_shutdown_reconciliation_settlement.inc)
+(include stanzas/test_keeper_shutdown_blocked_purge_release.inc)
 
 (include stanzas/test_keeper_shutdown_ownerless_admission_release.inc)
 

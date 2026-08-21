@@ -11,9 +11,9 @@
     "catalog_validation": "passed",
     "browser": "chromium_full_page",
     "screenshot_path": "docs/evidence/keeper-goal-verifier-matrix-2026-08-21.png",
-    "screenshot_sha256": "da6304e21fad590a36347948b137b1b1b5b739584a23a4592cc08590e815ce42",
+    "screenshot_sha256": "cbc15bdd56f1f546697a1afc90eba3601dc18c684a1a5b079382cf30ff09a25a",
     "screenshot_width_px": 1280,
-    "screenshot_height_px": 20649,
+    "screenshot_height_px": 20714,
     "screenshot_semantics": "Document-render evidence only; it is not product runtime or Goal verifier evidence."
   },
   "implementation": {
@@ -55,6 +55,13 @@
       "missions_total": 19,
       "assertions_passed": 33,
       "assertions_total": 37
+    },
+    "runtime_by_role_contract": {
+      "exact_role_count": 5,
+      "heterogeneous_mode_requires_distinct_runtime_count": 5,
+      "fallback_and_role_map_are_mutually_exclusive": true,
+      "bundle_projects_exact_mapping": true,
+      "execution_claim": "none"
     }
   },
   "live_goal_observation": {
@@ -75,7 +82,7 @@
     "Catalog validation proves definitions only, not a real execution.",
     "Historical green observations from different runs are not unioned.",
     "RW22 proves Task verification, not Goal verification.",
-    "The current five-role fleet builder assigns one runtime_id to every role.",
+    "The runner supports a strict five-distinct-runtime role map, but no heterogeneous execution bundle exists at this capture.",
     "No 22-of-22 tracked PASS bundle exists at this capture.",
     "No deployed standalone Goal-verifier verdict or Goal-verifier dashboard screenshot exists at this capture."
   ]

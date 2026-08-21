@@ -566,6 +566,86 @@ def load_catalog(path: pathlib.Path) -> dict[str, Any]:
     return catalog
 
 
+def parse_runtime_by_role(raw: str | None) -> dict[str, str]:
+    if raw is None or not raw.strip():
+        return {}
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise AcceptanceError(
+            f"--runtime-by-role-json is not valid JSON: {error}"
+        ) from error
+    if not isinstance(value, dict):
+        raise AcceptanceError("--runtime-by-role-json must be an object")
+    keys = set(value)
+    if keys != EXPECTED_ROLES:
+        raise AcceptanceError(
+            "--runtime-by-role-json must name the exact five roles: "
+            f"missing={sorted(EXPECTED_ROLES - keys)} extra={sorted(keys - EXPECTED_ROLES)}"
+        )
+    invalid = sorted(
+        role
+        for role, runtime_id in value.items()
+        if not isinstance(runtime_id, str) or not runtime_id.strip()
+    )
+    if invalid:
+        raise AcceptanceError(
+            f"--runtime-by-role-json has blank/non-string runtime ids: {invalid}"
+        )
+    return {role: value[role].strip() for role in sorted(EXPECTED_ROLES)}
+
+
+def validate_runtime_strategy(
+    *,
+    runtime_id: str | None,
+    runtime_by_role: dict[str, str],
+    require_heterogeneous: bool,
+) -> None:
+    if runtime_id and runtime_by_role:
+        raise AcceptanceError(
+            "--runtime-id and --runtime-by-role-json are mutually exclusive"
+        )
+    if require_heterogeneous:
+        distinct = set(runtime_by_role.values())
+        if (
+            len(runtime_by_role) != len(EXPECTED_ROLES)
+            or len(distinct) != len(EXPECTED_ROLES)
+        ):
+            raise AcceptanceError(
+                "--require-heterogeneous-runtimes needs five distinct runtime ids, "
+                f"one per role; observed={len(distinct)}"
+            )
+
+
+def runtime_strategy_receipt(
+    *,
+    runtime_id: str | None,
+    runtime_by_role: dict[str, str],
+    require_heterogeneous: bool,
+    roles: set[str] = EXPECTED_ROLES,
+) -> dict[str, Any]:
+    resolved = {
+        role: runtime_by_role.get(role, runtime_id) for role in sorted(roles)
+    }
+    if any(value is None for value in resolved.values()):
+        raise AcceptanceError(
+            "an exact runtime selection is required before a mutable run"
+        )
+    exact = {role: str(value) for role, value in resolved.items()}
+    distinct_count = len(set(exact.values()))
+    return {
+        "runtime_strategy": (
+            "heterogeneous_required"
+            if require_heterogeneous
+            else "role_map"
+            if runtime_by_role
+            else "shared_runtime"
+        ),
+        "runtime_by_role": exact,
+        "distinct_runtime_count": distinct_count,
+    }
+
+
 def default_health_url(mcp_url: str) -> str:
     parsed = urllib.parse.urlsplit(mcp_url)
     return urllib.parse.urlunsplit(
@@ -730,6 +810,8 @@ class MissionRun:
         timeout: float,
         run_id: str,
         runtime_id: str | None,
+        runtime_by_role: dict[str, str],
+        require_heterogeneous_runtimes: bool,
         token_file: pathlib.Path,
         browser_proof_script: pathlib.Path,
         expected_base_path: str,
@@ -763,6 +845,8 @@ class MissionRun:
             ("reverse", qa_inputs[2], f"reverse={qa_inputs[2][::-1]}"),
         )
         self.runtime_id = runtime_id
+        self.runtime_by_role = runtime_by_role
+        self.require_heterogeneous_runtimes = require_heterogeneous_runtimes
         self.token_file = token_file
         self.browser_proof_script = browser_proof_script
         self.expected_base_path = expected_base_path
@@ -784,6 +868,9 @@ class MissionRun:
         self.tool_call_rows: dict[str, list[dict[str, Any]]] = {}
         self.browser_proof: dict[str, Any] = {}
         self.persistence_browser_proof: dict[str, Any] = {}
+
+    def runtime_for_role(self, role: str) -> str | None:
+        return self.runtime_by_role.get(role, self.runtime_id)
 
     def call(self, label: str, tool: str, arguments: dict[str, Any]) -> ToolObservation:
         observation = self.client.call_tool(tool, arguments)
@@ -839,8 +926,9 @@ class MissionRun:
                 "proactive_enabled": False,
                 "autoboot_enabled": True,
             }
-            if self.runtime_id:
-                arguments["runtime_id"] = self.runtime_id
+            runtime_id = self.runtime_for_role(role)
+            if runtime_id:
+                arguments["runtime_id"] = runtime_id
             self.call(f"keeper-up-{role}", "masc_keeper_up", arguments)
 
     def wait_for_fleet(self, timeout: float = 90.0) -> None:
@@ -893,8 +981,9 @@ class MissionRun:
                 "name": keeper,
                 "active_goal_ids": [self.goal_id],
             }
-            if self.runtime_id:
-                arguments["runtime_id"] = self.runtime_id
+            runtime_id = self.runtime_for_role(role)
+            if runtime_id:
+                arguments["runtime_id"] = runtime_id
             self.call(f"keeper-goal-scope-{role}", "masc_keeper_up", arguments)
 
         task_specs = {
@@ -1431,8 +1520,9 @@ class MissionRun:
                 "90 seconds"
             )
         arguments: dict[str, Any] = {"name": self.roles["coordinator"]}
-        if self.runtime_id:
-            arguments["runtime_id"] = self.runtime_id
+        runtime_id = self.runtime_for_role("coordinator")
+        if runtime_id:
+            arguments["runtime_id"] = runtime_id
         self.call("keeper-restart-coordinator", "masc_keeper_up", arguments)
         deadline = time.monotonic() + 90.0
         while time.monotonic() < deadline:
@@ -2598,6 +2688,12 @@ def build_bundle(
         "preflight": preflight_result,
         "resources": {
             "keepers": run.roles,
+            **runtime_strategy_receipt(
+                runtime_id=run.runtime_id,
+                runtime_by_role=run.runtime_by_role,
+                require_heterogeneous=run.require_heterogeneous_runtimes,
+                roles=set(run.roles),
+            ),
             "goal_id": run.goal_id,
             "task_ids": run.task_ids,
             "board_post_id": post_id,
@@ -2649,6 +2745,42 @@ def verify_bundle(
             errors.append("bundle runner SHA does not match expected source SHA")
     if expected_base_path and bundle.get("effective_base_path") != expected_base_path:
         errors.append("bundle effective base path mismatch")
+    resources = bundle.get("resources")
+    runtime_by_role = (
+        resources.get("runtime_by_role") if isinstance(resources, dict) else None
+    )
+    runtime_strategy = (
+        resources.get("runtime_strategy") if isinstance(resources, dict) else None
+    )
+    valid_runtime_map = (
+        isinstance(runtime_by_role, dict)
+        and set(runtime_by_role) == EXPECTED_ROLES
+        and all(
+            isinstance(runtime_id, str) and bool(runtime_id.strip())
+            for runtime_id in runtime_by_role.values()
+        )
+    )
+    distinct_runtime_count = (
+        len(set(runtime_by_role.values())) if valid_runtime_map else 0
+    )
+    if not valid_runtime_map:
+        errors.append("bundle runtime map does not name all five roles")
+    if isinstance(resources, dict) and resources.get("distinct_runtime_count") != distinct_runtime_count:
+        errors.append("bundle distinct runtime count mismatch")
+    if runtime_strategy not in {
+        "shared_runtime",
+        "role_map",
+        "heterogeneous_required",
+    }:
+        errors.append(f"unknown runtime strategy: {runtime_strategy!r}")
+    if runtime_strategy == "heterogeneous_required" and distinct_runtime_count != len(
+        EXPECTED_ROLES
+    ):
+        errors.append(
+            "heterogeneous runtime strategy does not contain five distinct runtimes"
+        )
+    if runtime_strategy == "shared_runtime" and distinct_runtime_count != 1:
+        errors.append("shared runtime strategy does not contain one runtime id")
     artifacts = bundle.get("artifacts") or []
     if len(artifacts) < 20:
         errors.append("artifact manifest is unexpectedly small")
@@ -2769,6 +2901,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--expected-source-sha")
     parser.add_argument("--allow-mutation", action="store_true")
     parser.add_argument("--runtime-id")
+    parser.add_argument("--runtime-by-role-json")
+    parser.add_argument("--require-heterogeneous-runtimes", action="store_true")
     parser.add_argument("--run-id")
     parser.add_argument("--output-dir")
     parser.add_argument("--timeout", type=float, default=150.0)
@@ -2779,6 +2913,12 @@ def main() -> int:
     args = parse_args()
     try:
         catalog = load_catalog(pathlib.Path(args.catalog))
+        runtime_by_role = parse_runtime_by_role(args.runtime_by_role_json)
+        validate_runtime_strategy(
+            runtime_id=args.runtime_id,
+            runtime_by_role=runtime_by_role,
+            require_heterogeneous=args.require_heterogeneous_runtimes,
+        )
         if args.validate_catalog:
             print(
                 json.dumps(
@@ -2828,6 +2968,11 @@ def main() -> int:
 
         if not args.allow_mutation:
             raise AcceptanceError("--run requires explicit --allow-mutation")
+        runtime_receipt = runtime_strategy_receipt(
+            runtime_id=args.runtime_id,
+            runtime_by_role=runtime_by_role,
+            require_heterogeneous=args.require_heterogeneous_runtimes,
+        )
         if not args.expected_base_path:
             raise AcceptanceError("--run requires exact --expected-base-path")
         if not args.expected_source_sha:
@@ -2855,6 +3000,8 @@ def main() -> int:
             timeout=args.timeout,
             run_id=run_id,
             runtime_id=args.runtime_id,
+            runtime_by_role=runtime_by_role,
+            require_heterogeneous_runtimes=args.require_heterogeneous_runtimes,
             token_file=pathlib.Path(args.token_file).resolve(),
             browser_proof_script=pathlib.Path(args.browser_proof_script).resolve(),
             expected_base_path=args.expected_base_path,
@@ -2880,6 +3027,7 @@ def main() -> int:
                     },
                     "resources": {
                         "keepers": mission_run.roles,
+                        **runtime_receipt,
                         "goal_id": mission_run.goal_id,
                         "task_ids": mission_run.task_ids,
                         "schedule_id": mission_run.schedule_id,

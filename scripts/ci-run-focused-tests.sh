@@ -108,6 +108,7 @@ normal_targets=(
   @test/runtest-test_keeper_toml_accessor_matrix
   @test/runtest-test_keeper_tool_execute_stream_close
   @test/runtest-test_keeper_turn_dispatch_authority
+  @test/runtest-test_keeper_turn_interrupt
   @test/runtest-test_runtime_quota_window
   @test/runtest-test_subsystem_health_state
   @test/runtest-test_trailing_slash_rules

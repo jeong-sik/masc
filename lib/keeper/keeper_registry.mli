@@ -326,13 +326,6 @@ val set_turn_switch :
     keeper is not registered. *)
 val clear_turn_switch : base_path:string -> string -> unit
 
-(** Cancel the keeper's in-flight turn by failing its [Eio.Switch.t].
-    Returns [`Cancelled turn_id] when a live switch was held and
-    cancelled, or [`No_turn_in_flight] when there is no active turn or
-    no registered switch. *)
-val interrupt_current_turn :
-  base_path:string -> string -> [ `Cancelled of int | `No_turn_in_flight ]
-
 type exact_turn_interrupt_result =
   | Exact_turn_cancelled of int
   | Exact_no_turn_in_flight
@@ -341,10 +334,19 @@ type exact_turn_interrupt_result =
       ; detail : string
       }
 
-(** Cancel the turn switch retained by this exact registry entry. Unlike the
-    name-based compatibility API, failure is returned explicitly. *)
+(** Cancel the turn switch retained by this exact registry entry.
+
+    [Exact_turn_cancelled] states that the switch was failed, not that the
+    turn ended: the signal still has to reach the running fiber, and a fiber
+    parked in an uncancellable section never sees it. Callers must not report
+    it as a completed cancellation. *)
 val interrupt_current_turn_exact :
   registry_entry -> exact_turn_interrupt_result
+
+(** Same, resolved by name. Returns [Exact_turn_cancel_failed] when the entry
+    is absent, so a failure is never reported as an absent turn. *)
+val interrupt_current_turn :
+  base_path:string -> string -> exact_turn_interrupt_result
 
 (** Record the verdict reasons from a [keeper_cycle_decision] that
     chose to skip the next turn.  Stamps [last_skip_observation] with

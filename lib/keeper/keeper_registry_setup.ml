@@ -1359,18 +1359,24 @@ let interrupt_current_turn_exact observed_entry =
            })
 ;;
 
+(* A cancellation that failed used to collapse into [`No_turn_in_flight], which
+   reads as "there was nothing to cancel" — the opposite of what happened. The
+   metric and the warn line stay; the outcome now reaches the caller so an
+   operator surface can say which of the two it was. *)
 let interrupt_current_turn ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> `No_turn_in_flight
+  | None ->
+    Exact_turn_cancel_failed
+      { turn_id = None; detail = "no registry entry for this Keeper name" }
   | Some entry ->
     (match interrupt_current_turn_exact entry with
-     | Exact_turn_cancelled turn_id -> `Cancelled turn_id
-     | Exact_no_turn_in_flight -> `No_turn_in_flight
-     | Exact_turn_cancel_failed { detail; _ } ->
+     | Exact_turn_cancelled _ as cancelled -> cancelled
+     | Exact_no_turn_in_flight -> Exact_no_turn_in_flight
+     | Exact_turn_cancel_failed { detail; _ } as failed ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)
          ~labels:[ "keeper", name; "event", "turn_cancel_failed" ]
          ();
        Log.Keeper.warn "%s: turn cancellation failed: %s" name detail;
-       `No_turn_in_flight)
+       failed)
 ;;

@@ -328,24 +328,18 @@ let assert_ollama_cloud_seed_runtime runtimes case =
           dialect that can never be encoded: the format carries no effort value,
           runtime.toml has no key that supplies one, and runtime_adapter never
           sets reasoning_effort. Every enable_thinking=true turn is then rejected
-          as Enable_not_encodable — measured 25/25 on the acceptance harness
-          before this list, 0/25 after. Deployed config dropped the same five on
-          2026-08-04; the audit is oas#2716 (2026-07-20). *)
-       let inherent_reasoning_no_control =
-         [ "ollama_cloud.ollama-cloud-qwen3-5-397b"
-         ; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
-         ; "ollama_cloud.ollama-cloud-deepseek-v4-pro"
-         ]
-       in
-       let expected_reasoning_budget, expected_thinking_format =
-         if List.mem case.runtime_id inherent_reasoning_no_control
-         then false, Runtime_schema.No_thinking_control
-         else
-           ( case.thinking
-           , if case.thinking
-             then Runtime_schema.Reasoning_effort
-             else Runtime_schema.No_thinking_control )
-       in
+          as Enable_not_encodable — measured 25/25 on the acceptance harness,
+          0/25 after the first five models dropped the declaration. Deployed
+          config has carried none since 2026-08-04; the audit is oas#2716
+          (2026-07-20).
+
+          This is a property of the endpoint, not of individual models, and
+          every case in this list is an ollama.com /v1 model. Asserting it for
+          the whole list keeps a new model from declaring a dialect the
+          endpoint cannot read; a per-model exception set would admit one on
+          the next addition. *)
+       let expected_reasoning_budget = false
+       and expected_thinking_format = Runtime_schema.No_thinking_control in
        check bool (case.runtime_id ^ " forced tool_choice disabled") false
          caps.supports_tool_choice;
        check bool (case.runtime_id ^ " image input") case.vision
@@ -1206,7 +1200,7 @@ List.iter
             caps.supports_multimodal_inputs;
           (* ollama.com /v1 reasons inherently and takes no control field, so
              this model declares no thinking control. See the comment on
-             [inherent_reasoning_no_control] above for the measurement. *)
+             [expected_thinking_format] above for the measurement. *)
           check bool "Kimi K2.7 Code thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format

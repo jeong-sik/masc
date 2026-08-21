@@ -379,8 +379,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v3-1-671b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -396,8 +396,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v3-2.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -413,8 +413,8 @@ streaming = true
 [models.ollama-cloud-deepseek-v4-flash.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -518,8 +518,8 @@ streaming = true
 [models.ollama-cloud-gemini-3-flash-preview.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -586,8 +586,8 @@ streaming = true
 [models.ollama-cloud-gemma4-31b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -603,8 +603,8 @@ streaming = true
 [models.ollama-cloud-glm-4-7.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -620,8 +620,8 @@ streaming = true
 [models.ollama-cloud-glm-5.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -637,8 +637,8 @@ streaming = true
 [models.ollama-cloud-glm-5-1.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -654,8 +654,8 @@ streaming = true
 [models.ollama-cloud-glm-5-2.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -671,8 +671,8 @@ streaming = true
 [models.ollama-cloud-gpt-oss-20b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -688,8 +688,8 @@ streaming = true
 [models.ollama-cloud-gpt-oss-120b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -705,8 +705,8 @@ streaming = true
 [models.ollama-cloud-kimi-k2-5.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -722,8 +722,8 @@ streaming = true
 [models.ollama-cloud-kimi-k2-6.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -739,8 +739,8 @@ streaming = true
 [models.ollama-cloud-kimi-k2-7-code.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -756,8 +756,8 @@ streaming = true
 [models.ollama-cloud-minimax-m2-1.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -773,8 +773,8 @@ streaming = true
 [models.ollama-cloud-minimax-m2-5.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -790,8 +790,8 @@ streaming = true
 [models.ollama-cloud-minimax-m2-7.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -807,8 +807,8 @@ streaming = true
 [models.ollama-cloud-minimax-m3.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 # SSOT = agent-core models.toml per official MiniMax Chat documentation.
 supports-response-format-json = false
 supports-structured-output = false
@@ -897,8 +897,8 @@ streaming = true
 [models.ollama-cloud-nemotron-3-nano-30b.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -914,8 +914,8 @@ streaming = true
 [models.ollama-cloud-nemotron-3-super.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -931,8 +931,8 @@ streaming = true
 [models.ollama-cloud-nemotron-3-ultra.capabilities]
 supports-tool-choice = false
 supports-extended-thinking = true
-supports-reasoning-budget = true
-thinking-control-format = "reasoning-effort"
+supports-reasoning-budget = false
+thinking-control-format = "none"
 supports-image-input = false
 supports-multimodal-inputs = false
 

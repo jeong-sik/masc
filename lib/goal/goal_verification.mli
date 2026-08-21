@@ -133,7 +133,10 @@ val record_criterion_verdict :
   verdict ->
   (record, string) result
 (** Commits the verifier's creation-time feasibility judgment (B2). [Proven]
-    lands as [Criterion_viable], [Refuted] as [Criterion_unreachable]. *)
+    lands as [Criterion_viable], [Refuted] as [Criterion_unreachable]. Requires
+    a durable [Criterion_pending] request, or the same criterion outcome already
+    committed for an idempotent retry. An unchecked or opposite stale verdict
+    is refused inside the locked record mutation. *)
 
 val record_proof_verdict :
   Workspace_utils.config ->

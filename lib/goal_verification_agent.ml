@@ -8,10 +8,10 @@
     [Verifying] (B3) — judges each through
     {!Task.Anti_rationalization.review} (so provider selection is the
     [verifier_exact] exact-output lane with frozen-order failover), and
-    commits the verdict by riding the exact MCP commit path:
-    {!Workspace_goals.handle_goal_transition} with the gate action, so the
-    FSM decides, the ledger records, the phase writes, and the event emits —
-    none of that logic is duplicated here.
+    commits the verdict through the typed internal boundary
+    {!Workspace_goals.commit_verifier_decision}, so the FSM decides, the
+    ledger records, the phase writes, and the event emits — none of that
+    logic is duplicated here and no public MCP action can name a verdict.
 
     Authority is the fixed identity
     [System_llm_agent { agent_run_id = "verifier_exact" }] (RFC-0361 D7(b)):

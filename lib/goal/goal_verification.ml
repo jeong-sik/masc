@@ -487,12 +487,29 @@ let ledger_error_to_yojson detail =
 
 let record_criterion_verdict config ~goal_id (verdict : verdict) =
   update_record config ~goal_id (fun current ->
-      let criterion =
-        match verdict.outcome with
-        | Proven -> Criterion_viable verdict
-        | Refuted _ -> Criterion_unreachable verdict
+      let committable =
+        match current.criterion, verdict.outcome with
+        | Criterion_pending _, _ -> true
+        | Criterion_viable _, Proven -> true
+        | Criterion_unreachable _, Refuted _ -> true
+        | ( Criterion_viable _, Refuted _ )
+        | ( Criterion_unreachable _, Proven )
+        | ( Criterion_unchecked, _ ) -> false
       in
-      Ok { current with criterion })
+      if not committable
+      then
+        Error
+          (Printf.sprintf
+             "goal_verification: criterion verdict for %s has no matching pending \
+              criterion request"
+             goal_id)
+      else
+        let criterion =
+          match verdict.outcome with
+          | Proven -> Criterion_viable verdict
+          | Refuted _ -> Criterion_unreachable verdict
+        in
+        Ok { current with criterion })
 
 (* {1 Stage-2 durable requests (RFC-0387 §3.2 / §4.1)}
 

@@ -76,8 +76,8 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
   let table = Hashtbl.create 8 in
   List.iter
     (fun keeper ->
-      let keeper_name = String_util.trim_to_option (string_field "name" keeper) in
-      let agent_name = String_util.trim_to_option (string_field "agent_name" keeper) in
+      let keeper_name = String_util.trim_nonempty (string_field "name" keeper) in
+      let agent_name = String_util.trim_nonempty (string_field "agent_name" keeper) in
       match keeper_name, agent_name with
       | Some keeper_name, Some agent_name ->
           Hashtbl.replace table agent_name keeper_name
@@ -144,13 +144,13 @@ let build_agent_briefs config attention_queue (keepers : Yojson.Safe.t list) =
          in
          let last_activity_at =
            match agent with
-           | Some value -> String_util.trim_to_option value.last_seen
+           | Some value -> String_util.trim_nonempty value.last_seen
             | None -> None
          in
          let last_seen_ts =
            match agent with
             | Some value ->
-                Dashboard_utils.parse_iso_opt (String_util.trim_to_option value.last_seen) |> Option.value ~default:0.0
+                Dashboard_utils.parse_iso_opt (String_util.trim_nonempty value.last_seen) |> Option.value ~default:0.0
             | None -> 0.0
          in
          let last_activity_age_sec =

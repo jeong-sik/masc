@@ -39,7 +39,7 @@ function CopyBtn({ text, label = '복사' }) {
   };
   return (
     <button className={`ti-copy ${done ? 'done' : ''}`} onClick={onClick}>
-      {done ? '✓ 복사됨' : '⎘ ' + label}
+      {done ? '\u2713 복사됨' : '\u2398 ' + label}
     </button>
   );
 }
@@ -232,17 +232,17 @@ function MetaTab({ keeper, m, t }) {
       </div>
       <div className="ti-sec-h" style={{ marginTop: '16px' }}><h4>실행 메타데이터</h4></div>
       <div className="turn-kv">
-        <span className="k">model</span><span className="v">{keeper.model}</span>
-        <span className="k">runtime</span><span className="v">{keeper.runtime}</span>
-        <span className="k">fsm.state</span><span className="v">{keeper.phase}</span>
-        <span className="k">input tokens</span><span className="v">{t.tokIn.toLocaleString()}</span>
+        <span className="k">모델</span><span className="v">{keeper.model}</span>
+        <span className="k">런타임</span><span className="v">{keeper.runtime}</span>
+        <span className="k">상태</span><span className="v">{keeper.phase}</span>
+        <span className="k">입력 토큰</span><span className="v">{t.tokIn.toLocaleString()}</span>
         <span className="k">output tokens</span><span className="v">{t.tokOut.toLocaleString()}</span>
         <span className="k">ctx window</span><span className="v">{t.ctxPct}% / 200K</span>
         <span className="k">tool calls</span><span className="v">{t.tools.length}</span>
         <span className="k">duration</span><span className="v">{t.total.toFixed(2)}s</span>
         <span className="k">est. cost</span><span className="v">${t.cost.toFixed(3)}</span>
         <span className="k">finish_reason</span><span className="v">stop</span>
-        <span className="k">verified</span><span className="v">{m.verified ? 'pass ✓' : '—'}</span>
+        <span className="k">verified</span><span className="v">{m.verified ? 'pass \u2713' : '—'}</span>
         <span className="k">source</span><span className="v">{m.source}</span>
       </div>
     </div>
@@ -267,13 +267,13 @@ function TurnInspector({ keeper, m, onClose }) {
           <h3>턴 상세</h3>
           <span className="tid mono">{t.traceId}</span>
           <CopyBtn text={t.traceId} label="ID" />
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)" style={{ marginLeft: '8px' }}>{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)" style={{ marginLeft: '8px' }}>{'\u2715'}</button>
         </div>
 
         <div className="ti-sub">
-          <span className="ti-chip"><span className="sub-k">model</span>{keeper.model}</span>
+          <span className="ti-chip"><span className="sub-k">모델</span>{keeper.model}</span>
           <span className="ti-chip ok"><StatusDot status="run" />stop</span>
-          <span className="ti-chip"><span className="sub-k">runtime</span>{keeper.runtime.split('.')[0]}</span>
+          <span className="ti-chip"><span className="sub-k">런타임</span>{keeper.runtime.split('.')[0]}</span>
         </div>
 
         <div className="ti-summary">

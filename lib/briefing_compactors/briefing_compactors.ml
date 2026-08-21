@@ -27,7 +27,7 @@ let compact_agent_json (agent : Masc_domain.agent) =
     | Some task when String.trim task <> "" -> compact_text ~max_len:120 task
     | _ -> ""
   in
-  let current_focus_json = Json_util.string_opt_to_json (String_util.trim_to_option current_focus) in
+  let current_focus_json = Json_util.string_opt_to_json (String_util.trim_nonempty current_focus) in
   `Assoc
     [
       ("name", `String agent.name);

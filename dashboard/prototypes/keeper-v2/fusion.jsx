@@ -301,7 +301,7 @@ function FusResolved({ text }) {
       </div>
       {long && (
         <button type="button" className="fus-rich-more" onClick={() => setOpen(o => !o)}>
-          {open ? '접기 ▴' : '전문 펼치기 ▾'}
+          {open ? '접기 \u25B4' : '전문 펼치기 \u25BE'}
         </button>
       )}
     </React.Fragment>

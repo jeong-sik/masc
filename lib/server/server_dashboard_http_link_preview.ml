@@ -65,7 +65,7 @@ let collapse_whitespace value =
   |> String.trim
 
 let normalize_text value =
-  value |> collapse_whitespace |> String_util.trim_to_option
+  value |> collapse_whitespace |> String_util.trim_nonempty
 
 let is_http_scheme = function
   | Some "http" | Some "https" -> true
@@ -275,7 +275,7 @@ let rec fetch_response_following_redirects ~net ~url ~remaining_redirects =
   | Ok response when is_redirect_status response.status && remaining_redirects > 0
     ->
       (match list_header_ci response.headers "location" with
-       | Some location when Option.is_some (String_util.trim_to_option location) ->
+       | Some location when Option.is_some (String_util.trim_nonempty location) ->
            let next_url = resolve_relative_url ~base_url:url location in
            fetch_response_following_redirects ~net ~url:next_url
              ~remaining_redirects:(remaining_redirects - 1)

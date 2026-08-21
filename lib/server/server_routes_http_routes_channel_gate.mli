@@ -19,11 +19,9 @@ val record_validation_error_metric :
     Exposed so [test_channel_gate_metrics] can lock the request-metadata
     extraction contract independently from the HTTP route. *)
 
-val resolve_connector_status_name :
-  ?name:string -> ?channel:string -> unit -> string option
-(** Pick the connector identity for the [/connector/status] endpoint:
-    accepts the canonical [?name] form, falls back to the legacy
-    [?channel] alias, returns [None] when both are empty / blank.
-    Result is trimmed and lowercased. Exposed so
-    [test_channel_gate_connector_routes] can pin the legacy-fallback
-    contract. *)
+val resolve_connector_status_name : ?name:string -> unit -> string option
+(** Pick the connector identity for the [/connector/status] endpoint from the
+    canonical [?name] form; [None] when it is absent, empty, or blank. The
+    [?channel] alias it replaced is no longer read. Result is trimmed and
+    lowercased. Exposed so [test_channel_gate_connector_routes] can pin the
+    extraction contract. *)

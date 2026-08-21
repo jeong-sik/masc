@@ -65,7 +65,6 @@ type keeper_profile_defaults =
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
   autonomous_wake_prompt : string option;
-  active_goal_ids : string list option;
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;

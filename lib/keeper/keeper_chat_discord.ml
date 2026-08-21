@@ -282,6 +282,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
     | None -> None
   in
   let external_effect_completed = ref false in
+  let tool_trail = ref (Keeper_chat_tool_trail.create ()) in
   let activity_error_logged = ref false in
   let refresh_activity () =
     match show_activity with
@@ -302,7 +303,12 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         ?(last_edited_text = last_edited_text) () =
       loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text
     in
-    match Keeper_chat_events.subscribe events with
+    let event = Keeper_chat_events.subscribe events in
+    (* This adapter keeps tool activity off the channel as messages; the trail
+       collects the same events so the delivered reply can still name the work.
+       See keeper_chat_tool_trail.mli. *)
+    Keeper_chat_tool_trail.on_event !tool_trail event;
+    match event with
     | Text_delta text ->
         let acc_text = acc_text ^ text in
         let patch_content = streaming_patch_content acc_text in
@@ -349,6 +355,7 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                   continue ())
          | _ -> continue ())
     | Run_finished { run_id = _ } ->
+        let delivered_text = Keeper_chat_tool_trail.append_to !tool_trail ~text:acc_text in
         let final_result =
           match msg_id with
           | None when !external_effect_completed -> Ok ()
@@ -360,9 +367,9 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
                      ; reason = "primary final Discord reply contained no text"
                      ; body_bytes = 0
                      })
-              else send_message ~content:acc_text
+              else send_message ~content:delivered_text
           | Some mid ->
-              let head, overflow = final_head_and_overflow acc_text in
+              let head, overflow = final_head_and_overflow delivered_text in
               let patch_result = edit_message ~message_id:mid ~content:head in
               let overflow_result =
                 match overflow with
@@ -380,6 +387,9 @@ let adapter_loop_with_transport ~token ~channel_id ~events ~post_message
         on_send_result (send_message ~content:("Keeper error: " ^ message))
     | Run_started { run_id = _; thread_id = _ } ->
         refresh_activity ();
+        (* A new run's work is its own; the previous run's trail was delivered
+           with the previous run's reply. *)
+        tool_trail := Keeper_chat_tool_trail.create ();
         loop ~acc_text:"" ~msg_id:None ~last_edit_time:0.0
           ~last_edited_text:""
     | Text_message_start _ -> continue ()

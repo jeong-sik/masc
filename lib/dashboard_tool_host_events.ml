@@ -15,9 +15,9 @@ type report = {
 let stringish_member_opt json key =
   match Json_util.assoc_member_opt key json with
   | None | Some `Null -> None
-  | Some (`String value) -> String_util.trim_to_option value
+  | Some (`String value) -> String_util.trim_nonempty value
   | Some (`Int value) -> Some (Int.to_string value)
-  | Some (`Intlit value) -> String_util.trim_to_option value
+  | Some (`Intlit value) -> String_util.trim_nonempty value
   | Some (`Float value) -> Some (Printf.sprintf "%.0f" value)
   | Some _ -> None
 
@@ -48,7 +48,7 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
       let* tool_name = required_member json "tool_name" in
       let* message = required_member json "message" in
       let* cause = required_cause json in
-      let fallback_agent = Option.bind fallback_agent String_util.trim_to_option in
+      let fallback_agent = Option.bind fallback_agent String_util.trim_nonempty in
       (* DET-OK: pre-existing fallback semantics relocated from the match
          spelling; no new default introduced. *)
       let default_client_name = Option.value ~default:"tool-host" fallback_agent in

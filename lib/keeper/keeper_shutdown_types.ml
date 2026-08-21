@@ -455,7 +455,7 @@ let cleanup_reason_equal left right =
 let dashboard_purge_artifact_plan ~keeper_name context =
   let agent_aliases =
     [ context.requested_name; keeper_name; context.agent_name ]
-    |> List.filter_map String_util.trim_to_option
+    |> List.filter_map String_util.trim_nonempty
     |> List.sort_uniq String.compare
   in
   [ Keeper_metrics_store_artifact

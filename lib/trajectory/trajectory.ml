@@ -38,16 +38,6 @@ type tool_call_entry = {
           mint site. *)
 }
 
-type gate_decode_summary = {
-  parsed_gate_count : int;
-  legacy_default_count : int;
-}
-
-type entries_read_result = {
-  entries : tool_call_entry list;
-  gate_decode : gate_decode_summary;
-}
-
 type trajectory_outcome =
   | Completed
   | Failed of string
@@ -215,35 +205,40 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
 (* Decoders live next to the serializers above and are shared by the read
    paths. *)
 
+(* [None] when the row carries no readable gate object. It used to read as
+   [Pass], which is a verdict the row never recorded; rows that predate the
+   gate payload are dropped by the caller instead. *)
 let gate_decision_of_json = function
   | `Assoc fields -> (
       match List.assoc_opt "status" fields with
       | Some (`String status) -> (
           match String.lowercase_ascii status with
-          | "pass" | "passed" -> (Pass, true)
+          | "pass" | "passed" -> Some Pass
           | "reject" | "rejected" | "gated" ->
               let reason =
                 match List.assoc_opt "reason" fields with
                 | Some (`String value) when String.trim value <> "" -> value
                 | _ -> "persisted gate rejection"
               in
-              (Reject reason, true)
-          | _ -> (Pass, false))
-      | _ -> (Pass, false))
-  | _ -> (Pass, false)
+              Some (Reject reason)
+          | _ -> None)
+      | _ -> None)
+  | _ -> None
 
-let tool_call_entry_of_json (json : Yojson.Safe.t) :
-    (tool_call_entry * bool) option =
+let tool_call_entry_of_json (json : Yojson.Safe.t) : tool_call_entry option =
   try
     match Json_util.assoc_member_opt "type" json with
     | Some (`String "trajectory_summary") -> None
     | Some (`String "thinking") -> None
-    | _ ->
-        let gate_decision, parsed_gate =
-          gate_decision_of_json (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
-        in
+    | _ -> (
+        match
+          gate_decision_of_json
+            (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
+        with
+        | None -> None
+        | Some gate_decision ->
         Some
-          ( {
+          ({
               ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
               ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
               turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
@@ -266,8 +261,7 @@ let tool_call_entry_of_json (json : Yojson.Safe.t) :
                 (match Json_util.assoc_member_opt "execution_id" json with
                  | Some (`String s) -> Some s
                  | _ -> None);
-            },
-            parsed_gate )
+            }))
   with
   | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
@@ -782,16 +776,13 @@ let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
 
 (** Read all .jsonl trace files for a keeper. Filter entries with ts >= since.
     Scans the keeper's trajectory directory for all trace files. *)
-let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
-    ~(since : float) : entries_read_result =
+let read_entries_since ~(masc_root : string) ~(keeper_name : string)
+    ~(since : float) : tool_call_entry list =
   let dir = trajectories_dir masc_root keeper_name in
-  if not (Sys.file_exists dir) then
-    { entries = []; gate_decode = { parsed_gate_count = 0; legacy_default_count = 0 } }
+  if not (Sys.file_exists dir) then []
   else
     let files = Sys.readdir dir in
     let all_entries = ref [] in
-    let parsed_gate_count = ref 0 in
-    let legacy_default_count = ref 0 in
     Array.iter (fun fname ->
       if Filename.check_suffix fname ".jsonl" then begin
         let path = Filename.concat dir fname in
@@ -803,30 +794,16 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
                try
                  let json = Yojson.Safe.from_string line in
                  (match tool_call_entry_of_json json with
-                  | Some (entry, parsed_gate) when entry.ts >= since ->
-                      if parsed_gate then incr parsed_gate_count
-                      else incr legacy_default_count;
+                  | Some entry when entry.ts >= since ->
                       all_entries := entry :: !all_entries
                   | _ -> ())
                with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ())
          with Sys_error _ -> ())
       end
     ) files;
-    {
-      entries =
-        List.sort
-          (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
-          !all_entries;
-      gate_decode =
-        {
-          parsed_gate_count = !parsed_gate_count;
-          legacy_default_count = !legacy_default_count;
-        };
-    }
-
-let read_entries_since ~(masc_root : string) ~(keeper_name : string)
-    ~(since : float) : tool_call_entry list =
-  (read_entries_since_result ~masc_root ~keeper_name ~since).entries
+    List.sort
+      (fun (a : tool_call_entry) (b : tool_call_entry) -> compare a.ts b.ts)
+      !all_entries
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)
@@ -843,9 +820,7 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
     |> List.filter_map (fun line ->
         try
           let json = Yojson.Safe.from_string line in
-          match tool_call_entry_of_json json with
-          | Some (entry, _parsed_gate) -> Some entry
-          | None -> None
+          tool_call_entry_of_json json
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
 
 type trajectory_line_decode_result =
@@ -916,7 +891,7 @@ let trajectory_line_of_json json =
        | _ -> Malformed_line)
   | _ ->
       (match tool_call_entry_of_json json with
-       | Some (entry, _parsed_gate) -> Parsed_line (Tool_call entry)
+       | Some entry -> Parsed_line (Tool_call entry)
        | None -> Malformed_line)
 ;;
 

@@ -806,9 +806,9 @@ let test_unknown_tool_reports_available_tools_and_retries () =
     (string_contains ~needle:"Tool not found: MissingRead" result.content);
   check
     bool
-    "content includes available tools"
-    true
-    (string_contains ~needle:"Available tools: ReadFile" result.content);
+    "content withholds the registry the request already carries"
+    false
+    (string_contains ~needle:"Available tools" result.content);
   match List.rev !fired with
   | [ (detail, ctx) ] ->
     check
@@ -818,9 +818,9 @@ let test_unknown_tool_reports_available_tools_and_retries () =
       (string_contains ~needle:"Tool not found: MissingRead" detail);
     check
       bool
-      "detail includes available tools"
-      true
-      (string_contains ~needle:"Available tools: ReadFile" detail);
+      "detail withholds the registry too, since it is the same string"
+      false
+      (string_contains ~needle:"Available tools" detail);
     check string "context labels dispatch site" "agent_tools.find_and_execute_tool" ctx
   | [] -> fail "on_error hook not fired"
   | _ -> fail "on_error fired more than once"

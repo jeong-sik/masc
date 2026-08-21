@@ -6,7 +6,14 @@
 /* ════════ CHIP ════════
    Small inline capsule. Used for: tags, labels with value,
    anchored badges. Density over drama. */
-.chip {
+/* Renamed from `.chip`. The vendored keeper-v2 kit uses `.chip` for the design's
+   suggestion chip — a 13px pill with 8px/13px padding that wraps — and loaded
+   last, so it won on padding and type while inheriting this badge's
+   `display: inline-flex`, `align-items`, `gap` and fixed `height: 18px`. The
+   result clipped: 21px of content in a 16px box. One name, two components. The
+   badge takes the new name because the design owns `.chip` in the skin's
+   vocabulary; `ide-shell.ts` is its only renderer. */
+.tag-chip {
   display: inline-flex; align-items: center; gap: var(--sp-1);
   height: 18px; padding: 0 8px;
   font-family: var(--font-mono);
@@ -20,20 +27,20 @@
   border-radius: var(--r-1);
   white-space: nowrap;
 }
-.chip.is-brass { color: var(--brass-fg); border-color: var(--brass-border); background: var(--brass-soft); }
-.chip.is-ok    { color: var(--ok-fg);    border-color: var(--ok-border); background: var(--ok-soft); }
-.chip.is-warn  { color: var(--warn-fg);  border-color: var(--warn-border); background: var(--warn-soft); }
-.chip.is-err   { color: var(--err-fg);   border-color: var(--err-border); background: var(--err-soft); }
-.chip.is-info  { color: var(--info-fg);  border-color: var(--info-border); background: var(--info-soft); }
-.chip.is-stalled { color: var(--stalled-fg); border-color: var(--stalled-border); background: var(--stalled-soft); }
-.chip.is-ghost { background: transparent; border-color: var(--color-border-strong); color: var(--color-fg-secondary); }
+.tag-chip.is-brass { color: var(--brass-fg); border-color: var(--brass-border); background: var(--brass-soft); }
+.tag-chip.is-ok    { color: var(--ok-fg);    border-color: var(--ok-border); background: var(--ok-soft); }
+.tag-chip.is-warn  { color: var(--warn-fg);  border-color: var(--warn-border); background: var(--warn-soft); }
+.tag-chip.is-err   { color: var(--err-fg);   border-color: var(--err-border); background: var(--err-soft); }
+.tag-chip.is-info  { color: var(--info-fg);  border-color: var(--info-border); background: var(--info-soft); }
+.tag-chip.is-stalled { color: var(--stalled-fg); border-color: var(--stalled-border); background: var(--stalled-soft); }
+.tag-chip.is-ghost { background: transparent; border-color: var(--color-border-strong); color: var(--color-fg-secondary); }
 
 /* chip size variants */
-.chip.sm { height: 16px; padding: 0 6px; font-size: var(--fs-10); }
-.chip.lg { height: 22px; padding: 0 10px; font-size: var(--fs-12); }
+.tag-chip.sm { height: 16px; padding: 0 6px; font-size: var(--fs-10); }
+.tag-chip.lg { height: 22px; padding: 0 10px; font-size: var(--fs-12); }
 
 /* chip with leading dot */
-.chip .dot { width: 5px; height: 5px; }
+.tag-chip .dot { width: 5px; height: 5px; }
 
 /* ════════ PILL ════════
    Like chip but rounder; used in state-y contexts (running, paused). */

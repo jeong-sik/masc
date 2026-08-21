@@ -88,7 +88,7 @@ let worker_state_of_agent
   let key = String.lowercase_ascii (String.trim agent.name) in
   let message_opt = Hashtbl.find_opt messages_by_agent key in
   let last_seen_ts =
-    Dashboard_utils.parse_iso_opt (String_util.trim_to_option agent.last_seen) |> Option.value ~default:0.0
+    Dashboard_utils.parse_iso_opt (String_util.trim_nonempty agent.last_seen) |> Option.value ~default:0.0
   in
   let last_message_ts =
     match message_opt with
@@ -100,10 +100,10 @@ let worker_state_of_agent
     if last_signal_ts <= 0.0 then None
     else if last_message_ts >= last_seen_ts then
       match message_opt with
-      | Some (_, message) -> String_util.trim_to_option message.timestamp
-      | None -> String_util.trim_to_option agent.last_seen
+      | Some (_, message) -> String_util.trim_nonempty message.timestamp
+      | None -> String_util.trim_nonempty agent.last_seen
     else
-      String_util.trim_to_option agent.last_seen
+      String_util.trim_nonempty agent.last_seen
   in
   let signal_age_s =
     if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
@@ -128,11 +128,11 @@ let worker_state_of_agent
   let active_task_count = active_task_count tasks agent.name in
   let recent_output_preview =
     match message_opt with
-    | Some (_, message) -> String_util.trim_to_option (compact_text message.content)
+    | Some (_, message) -> String_util.trim_nonempty (compact_text message.content)
     | None -> None
   in
   let has_work =
-    Option.is_some (String_util.trim_to_option (Option.value ~default:"" agent.current_task))
+    Option.is_some (String_util.trim_nonempty (Option.value ~default:"" agent.current_task))
     || active_task_count > 0
   in
   let status_string = Masc_domain.string_of_agent_status agent.status in
@@ -158,7 +158,7 @@ let worker_state_of_agent
           ("watching", Tone_ok, "Standing by for the next task")
   in
   let focus =
-    match String_util.trim_to_option (Option.value ~default:"" agent.current_task) with
+    match String_util.trim_nonempty (Option.value ~default:"" agent.current_task) with
     | Some value -> value
     | None ->
         if active_task_count > 0 then
@@ -215,13 +215,13 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     member_assoc "context_metrics_unavailable" keeper
   in
   let last_action_at =
-    String_util.trim_to_option (string_field "last_autonomous_action_at" keeper)
+    String_util.trim_nonempty (string_field "last_autonomous_action_at" keeper)
   in
   let last_heartbeat_at =
     latest_iso_timestamp
       [
-        String_util.trim_to_option (string_field "updated_at" keeper);
-        String_util.trim_to_option (string_field "tool_audit_at" keeper);
+        String_util.trim_nonempty (string_field "updated_at" keeper);
+        String_util.trim_nonempty (string_field "tool_audit_at" keeper);
       ]
   in
   let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
@@ -319,11 +319,11 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     | [] -> "현재 활성 Goal 없음"
   in
   let recent_input_preview =
-    String_util.trim_to_option (string_field "recent_input_preview" keeper)
+    String_util.trim_nonempty (string_field "recent_input_preview" keeper)
   in
   let recent_output_preview =
-    String_util.trim_to_option (string_field "recent_output_preview" keeper)
-    |> option_or_else (fun () -> String_util.trim_to_option (string_field "last_proactive_preview" keeper))
+    String_util.trim_nonempty (string_field "recent_output_preview" keeper)
+    |> option_or_else (fun () -> String_util.trim_nonempty (string_field "last_proactive_preview" keeper))
   in
   let recent_tool_names =
     string_list_of_field "recent_tool_names" keeper |> cap_string_list
@@ -332,7 +332,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     string_list_of_field "latest_tool_names" keeper |> cap_string_list
   in
   let latest_action_source =
-    String_util.trim_to_option (string_field "latest_action_source" keeper)
+    String_util.trim_nonempty (string_field "latest_action_source" keeper)
   in
   let profile = get_agent_profile name in
   {
@@ -372,7 +372,7 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
             ("proactive_enabled", member_assoc "proactive_enabled" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ( "model",
-              Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)) );
+              Json_util.string_opt_to_json (String_util.trim_nonempty (string_field "active_model" keeper)) );
             ("emoji", `String profile.emoji);
             ("koreanName", `String profile.korean_name);
           ]);
@@ -411,7 +411,7 @@ let task_operation_updated_at (task : Masc_domain.task) =
 let task_operation_id (task : Masc_domain.task) =
   match task.execution_links.operation_id with
   | Some operation_id -> (
-      match String_util.trim_to_option operation_id with
+      match String_util.trim_nonempty operation_id with
       | Some operation_id -> operation_id
       | None -> task.id)
   | None -> task.id

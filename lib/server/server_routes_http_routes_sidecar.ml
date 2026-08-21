@@ -604,7 +604,6 @@ let sidecar_status_retention_json ~base_path ~id ~status_path =
     ; "status_path", `String status_path
     ; "default_status_path"
       , `String (Filename.concat base_path (Printf.sprintf ".gate/runtime/%s/status.json" id))
-    ; "legacy_status_path", `String (Filename.concat base_path (legacy_status_rel id))
     ; "lifecycle_desired_path", `String (sidecar_desired_path ~base_path id)
     ; "lifecycle_attempt_path", `String (sidecar_attempt_path ~base_path id)
     ; "binding_store_path"

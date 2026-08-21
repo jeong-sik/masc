@@ -17,12 +17,12 @@ const { useState } = React;
 
 /* ── token-driven tone table (the converged badge palette) ───────── */
 const PILL_TONES = {
-  neutral: { color: 'var(--text-mid)',     border: 'var(--border-main)',                                   bg: 'var(--bg-card)' },
-  ok:      { color: 'var(--status-ok)',    border: 'color-mix(in oklab, var(--status-ok) 45%, transparent)',   bg: 'color-mix(in oklab, var(--status-ok) 10%, var(--bg-card))' },
-  warn:    { color: 'var(--status-warn)',  border: 'color-mix(in oklab, var(--status-warn) 45%, transparent)', bg: 'color-mix(in oklab, var(--status-warn) 9%, var(--bg-card))' },
-  bad:     { color: 'var(--status-bad)',   border: 'color-mix(in oklab, var(--status-bad) 42%, transparent)',  bg: 'color-mix(in oklab, var(--status-bad) 10%, var(--bg-card))' },
-  volt:    { color: 'var(--volt-strong)',  border: 'var(--volt-dim)',                                      bg: 'var(--volt-wash)' },
-  info:    { color: 'var(--info)',         border: 'color-mix(in oklab, var(--info) 38%, transparent)',        bg: 'color-mix(in oklab, var(--info) 9%, var(--bg-card))' },
+  neutral: { color: 'var(--text-mid)',     border: 'var(--border-main)',                                   bg: 'var(--pill-bg-neutral, var(--bg-card))' },
+  ok:      { color: 'var(--status-ok)',    border: 'color-mix(in oklab, var(--status-ok) 45%, transparent)',   bg: 'var(--pill-bg-ok, color-mix(in oklab, var(--status-ok) 10%, var(--bg-card)))' },
+  warn:    { color: 'var(--status-warn)',  border: 'color-mix(in oklab, var(--status-warn) 45%, transparent)', bg: 'var(--pill-bg-warn, color-mix(in oklab, var(--status-warn) 9%, var(--bg-card)))' },
+  bad:     { color: 'var(--status-bad)',   border: 'color-mix(in oklab, var(--status-bad) 42%, transparent)',  bg: 'var(--pill-bg-bad, color-mix(in oklab, var(--status-bad) 10%, var(--bg-card)))' },
+  volt:    { color: 'var(--volt-strong)',  border: 'var(--volt-dim)',                                      bg: 'var(--pill-bg-volt, var(--volt-wash))' },
+  info:    { color: 'var(--info)',         border: 'color-mix(in oklab, var(--info) 38%, transparent)',        bg: 'var(--pill-bg-info, color-mix(in oklab, var(--info) 9%, var(--bg-card)))' },
 };
 
 /* ════════════════════════════════════════════════════════════════
@@ -145,7 +145,7 @@ function LogFilter({ active = false, children, ...rest }) {
 }
 // SuggestionChip — a keeper's proposed next action (.chip), with a leading
 // arrow affordance (.pre). Used under streamed replies and in the dock.
-function SuggestionChip({ pre = '→', children, ...rest }) {
+function SuggestionChip({ pre = '\u2192', children, ...rest }) {
   return React.createElement('button', { className: 'chip', ...rest },
     pre ? React.createElement('span', { className: 'pre' }, pre) : null, children);
 }

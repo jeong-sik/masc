@@ -1,25 +1,24 @@
 #!/usr/bin/env bash
-# quickstart.sh — one command to install, seed a keeper team, and open the MASC
-# dashboard on macOS or Linux.
+# quickstart.sh — seed a local workspace, start MASC, and prepare an MCP client
+# bearer on macOS or Linux.
 #
 # It seeds the runtime config (runtime.toml / agent-core-models-overlay.toml
 # / prompts) BEFORE seeding a keeper team, because the server only backfills a
 # config root it did not create — team-first would leave runtime.toml missing.
-# The team keepers inherit [runtime].default (ollama_cloud.deepseek-v4-flash),
-# so no model catalog is edited and config stays coherent with runtime.toml.
+# An optional team inherits [runtime].default, so no model catalog is edited
+# and config stays coherent with runtime.toml.
 #
 # Usage:
-#   ./quickstart.sh                       # native build+run, classic team, open dashboard
-#   ./quickstart.sh --docker              # run via docker compose instead
+#   ./quickstart.sh                       # build+run workspace server, open dashboard
 #   ./quickstart.sh --base-path DIR       # isolated runtime state dir (default: ~/masc-quickstart)
-#   ./quickstart.sh --team PRESET         # keeper team preset (default: classic; see presets/)
+#   ./quickstart.sh --team PRESET         # optional Keeper preset (for example: classic)
 #   ./quickstart.sh --port N              # HTTP port (default: 8935)
 #   ./quickstart.sh --no-open             # do not open the browser
 #   ./quickstart.sh --no-start            # seed only; do not start the server
 #
 # Env:
-#   OLLAMA_CLOUD_API_KEY  Required for the default flash model. Prompted if a TTY
-#                         and unset; otherwise the run aborts with instructions.
+#   OLLAMA_CLOUD_API_KEY  Required only when --team selects Keepers that use the
+#                         default flash model. Prompted if a TTY and unset.
 #   MASC_QUICKSTART_HOME  Default base path when --base-path is omitted.
 
 set -euo pipefail
@@ -35,17 +34,14 @@ die()  { printf '%serror:%s %s\n' "$c_red" "$c_off" "$*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-MODE="native"
 BASE_PATH="${MASC_QUICKSTART_HOME:-$HOME/masc-quickstart}"
-TEAM="classic"
+TEAM="none"
 PORT="8935"
 OPEN_BROWSER=1
 START_SERVER=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --docker)     MODE="docker"; shift ;;
-    --native)     MODE="native"; shift ;;
     --base-path)  BASE_PATH="${2:?}"; shift 2 ;;
     --team)       TEAM="${2:?}"; shift 2 ;;
     --port)       PORT="${2:?}"; shift 2 ;;
@@ -103,9 +99,36 @@ write_env_local() {
     grep -v '^export OLLAMA_CLOUD_API_KEY=' "$env_file" > "$env_file.tmp" 2>/dev/null || true
     mv "$env_file.tmp" "$env_file"
   fi
-  printf 'export OLLAMA_CLOUD_API_KEY=%s\n' "$OLLAMA_CLOUD_API_KEY" >> "$env_file"
+  printf 'export OLLAMA_CLOUD_API_KEY=%q\n' "$OLLAMA_CLOUD_API_KEY" >> "$env_file"
   chmod 600 "$env_file" 2>/dev/null || true
   log "wrote provider key to $env_file"
+}
+
+write_mcp_client_env() {
+  local env_file="$BASE_PATH/.masc/config/mcp-client.env"
+  local tmp_file="$env_file.tmp.$$"
+  local login_log="$BASE_PATH/.masc/quickstart-login.log"
+  local exe="$SCRIPT_DIR/_build/default/bin/main_eio.exe"
+
+  [ -x "$exe" ] || die "built MASC binary not found at $exe"
+  mkdir -p "$(dirname "$env_file")"
+  if ! (umask 077; MASC_BASE_PATH="$BASE_PATH" MASC_BASE_PATH_INPUT="$BASE_PATH" \
+    "$exe" login \
+      --base-path "$BASE_PATH" \
+      --host 127.0.0.1 \
+      --port "$PORT" \
+      --agent quickstart-mcp-client \
+      --role worker \
+      --client-env MASC_TOKEN \
+      --no-expiry \
+      --shell >"$tmp_file") 2>"$login_log"; then
+    rm -f "$tmp_file"
+    warn "could not mint the MCP client bearer; inspect $login_log"
+    return 1
+  fi
+  mv "$tmp_file" "$env_file"
+  chmod 600 "$env_file"
+  log "wrote MCP client exports to $env_file"
 }
 
 # ---- health wait -------------------------------------------------------------
@@ -130,6 +153,10 @@ open_browser() {
 }
 
 print_success() {
+  local team_summary="none (workspace server only)"
+  if [ "$TEAM" != "none" ]; then
+    team_summary="$TEAM keepers on the configured default runtime"
+  fi
   cat <<EOF
 
 ${c_grn}MASC is up.${c_off}
@@ -137,34 +164,43 @@ ${c_grn}MASC is up.${c_off}
   Dashboard:  ${c_cya}${DASHBOARD_URL}${c_off}
   Health:     http://127.0.0.1:${PORT}/health
   MCP:        http://127.0.0.1:${PORT}/mcp
-  Team:       ${TEAM} keepers on ollama_cloud.deepseek-v4-flash
+  Keepers:    ${team_summary}
   State dir:  ${BASE_PATH}/.masc
+  MCP auth:   source "${BASE_PATH}/.masc/config/mcp-client.env"
 
   ${c_dim}Stop (native): kill \$(lsof -ti tcp:${PORT} -sTCP:LISTEN)
-  Stop (docker): docker compose --profile oneclick down${c_off}
+  Client setup: docs/MCP-TEMPLATE.md${c_off}
 EOF
 }
 
-# ---- native mode -------------------------------------------------------------
-run_native() {
+# ---- run ---------------------------------------------------------------------
+run_quickstart() {
   command -v dune >/dev/null 2>&1 || warn "dune not found; start-masc.sh will fail if no prebuilt binary exists"
 
-  step "1/4  Seed runtime config catalogs"
+  step "Seed runtime config catalogs"
   seed_catalogs "$BASE_PATH"
 
-  step "2/4  Seed keeper team ('$TEAM')"
-  bash scripts/seed-team.sh --preset "$TEAM" --base-path "$BASE_PATH"
-
-  step "3/4  Write provider key"
-  write_env_local "$BASE_PATH"
+  if [ "$TEAM" != "none" ]; then
+    ensure_api_key
+    step "Seed Keeper team ('$TEAM')"
+    bash scripts/seed-team.sh --preset "$TEAM" --base-path "$BASE_PATH"
+    step "Write provider key"
+    write_env_local "$BASE_PATH"
+  else
+    log "no Keeper preset requested"
+  fi
 
   if [ "$START_SERVER" -eq 0 ]; then
     log "seed complete; skipping server start (--no-start)"
-    log "start later with: ./start-masc.sh --http --base-path '$BASE_PATH' --port $PORT"
+    if [ "$TEAM" != "none" ]; then
+      log "start later with: source '$BASE_PATH/.masc/config/.env.local' && ./start-masc.sh --http --base-path '$BASE_PATH' --port $PORT"
+    else
+      log "start later with: ./start-masc.sh --http --base-path '$BASE_PATH' --port $PORT"
+    fi
     return 0
   fi
 
-  step "4/4  Build + start server (this can take a while on first build)"
+  step "Build + start server (this can take a while on first build)"
   MASC_LOG_FILE="$BASE_PATH/.masc/quickstart-server.log"
   export MASC_LOG_FILE
   # start-masc.sh builds main_eio.exe if missing, seeds nothing over our config
@@ -176,6 +212,7 @@ run_native() {
   log "server starting (pid $SERVER_PID, log: $MASC_LOG_FILE)"
 
   if wait_for_health "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-180}"; then
+    write_mcp_client_env
     print_success
     open_browser
   else
@@ -185,39 +222,6 @@ run_native() {
   fi
 }
 
-# ---- docker mode -------------------------------------------------------------
-run_docker() {
-  command -v docker >/dev/null 2>&1 || die "docker not found; install Docker Desktop or docker engine"
-  docker compose version >/dev/null 2>&1 || die "docker compose v2 not found"
-
-  step "1/2  Build + start via docker compose (profile: oneclick)"
-  log "self-contained image builds from source; first build is slow (OCaml 5.5 + deps)"
-  log "OLLAMA_CLOUD_API_KEY and MASC_TEAM_PRESET=$TEAM are passed to the container"
-  # Name the service explicitly so the always-on observability services (jaeger,
-  # loki, victoriametrics — no `profiles:` key) are NOT pulled in; only the
-  # self-contained masc-oneclick container starts.
-  OLLAMA_CLOUD_API_KEY="$OLLAMA_CLOUD_API_KEY" MASC_TEAM_PRESET="$TEAM" MASC_HOST_PORT="$PORT" \
-    docker compose --profile oneclick up -d --build masc-oneclick
-
-  step "2/2  Wait for health"
-  if wait_for_health "$PORT" "${MASC_QUICKSTART_HEALTH_TIMEOUT:-300}"; then
-    print_success
-    printf '%s  Note: the container binds a network address, so the dashboard shows its\n' "$c_dim"
-    printf '  shell but its live data needs an admin token. For the zero-auth\n'
-    printf '  dashboard, use the native path: ./quickstart.sh%s\n' "$c_off"
-    open_browser
-  else
-    warn "container did not report healthy in time; inspect logs:"
-    warn "  docker compose logs -f masc"
-    exit 1
-  fi
-}
-
 # ---- main --------------------------------------------------------------------
-printf '%sMASC quickstart%s  (mode=%s, team=%s, port=%s)\n' "$c_grn" "$c_off" "$MODE" "$TEAM" "$PORT"
-ensure_api_key
-case "$MODE" in
-  native) run_native ;;
-  docker) run_docker ;;
-  *) die "unknown mode: $MODE" ;;
-esac
+printf '%sMASC quickstart%s  (team=%s, port=%s)\n' "$c_grn" "$c_off" "$TEAM" "$PORT"
+run_quickstart

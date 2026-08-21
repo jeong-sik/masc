@@ -710,6 +710,7 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
 let test_goal_reconciliation_targets_exact_producer
       ?(unrelated_paused = false)
       ?(corrupt_unrelated_meta = false)
+      ?(producer_persisted_only = false)
       () =
   let dir = temp_dir "registry_goal_reconciliation_producer" in
   Fun.protect
@@ -721,10 +722,15 @@ let test_goal_reconciliation_targets_exact_producer
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        KR.For_testing.clear ();
        let config = Masc.Workspace.default_config dir in
-       let completing_agent_name = "keeper-executor-agent-agent" in
+       let producer_name = "producer" in
+       let completing_agent_name =
+         if producer_persisted_only
+         then Masc.Keeper_identity.keeper_agent_name producer_name
+         else "keeper-executor-agent-agent"
+       in
        ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
        let producer_meta =
-         { (make_meta "producer") with agent_name = completing_agent_name }
+         { (make_meta producer_name) with agent_name = completing_agent_name }
        in
        let goal, _ =
          match
@@ -772,11 +778,17 @@ let test_goal_reconciliation_targets_exact_producer
        in
        finish "task-001";
        finish "task-002";
-       ignore
-         (KR.register_offline
-            ~base_path:config.base_path
-            producer_meta.name
-            producer_meta);
+       if producer_persisted_only
+       then
+         (match Masc.Keeper_meta_store.replace_snapshot config producer_meta with
+          | Ok () -> ()
+          | Error detail -> failf "persist producer metadata failed: %s" detail)
+       else
+         ignore
+           (KR.register_offline
+              ~base_path:config.base_path
+              producer_meta.name
+              producer_meta);
        let assigned_meta =
          { (make_goal_reconciler_meta ()) with
            paused = unrelated_paused
@@ -787,6 +799,14 @@ let test_goal_reconciliation_targets_exact_producer
             ~base_path:config.base_path
             assigned_meta.name
             assigned_meta);
+       if producer_persisted_only
+       then
+         check
+           (option string)
+           "producer has no live registry entry"
+           None
+           (KR.get ~base_path:config.base_path producer_meta.name
+            |> Option.map (fun (entry : KR.registry_entry) -> entry.name));
        if corrupt_unrelated_meta
        then
          write_text_file
@@ -833,6 +853,12 @@ let test_goal_reconciliation_ignores_unrelated_paused_keeper () =
 let test_goal_reconciliation_ignores_unrelated_corrupt_meta () =
   test_goal_reconciliation_targets_exact_producer
     ~corrupt_unrelated_meta:true
+    ()
+;;
+
+let test_goal_reconciliation_resolves_persisted_only_producer () =
+  test_goal_reconciliation_targets_exact_producer
+    ~producer_persisted_only:true
     ()
 ;;
 
@@ -1465,6 +1491,10 @@ let () =
             "unrelated corrupt metadata does not affect producer routing"
             `Quick
             test_goal_reconciliation_ignores_unrelated_corrupt_meta
+        ; test_case
+            "goal reconciliation resolves a persisted-only producer"
+            `Quick
+            test_goal_reconciliation_resolves_persisted_only_producer
         ; test_case
             "restart scan retries missed reconciliation exactly once"
             `Quick

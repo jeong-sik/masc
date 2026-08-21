@@ -214,13 +214,13 @@ function AttentionIndicator({ attention, onNav }) {
     { k: 'stale', n: a.stale, lbl: 'stale 게이트', sev: 'warn', nav: 'connectors' },
   ].filter(r => r.n > 0);
   if (!a.total) {
-    return <span className="v2-statchip live" title="처리할 항목 없음">{'✓'} 정상</span>;
+    return <span className="v2-statchip live" title="처리할 항목 없음">{'\u2713'} 정상</span>;
   }
   const tone = a.approvals > 0 || a.dead > 0 ? 'bad' : 'warn';
   return (
     <div className="attn-wrap" onClick={(e) => e.stopPropagation()}>
       <button className={`v2-statchip attn ${tone}`} onClick={() => setOpen(o => !o)} title="지금 나를 필요로 하는 것">
-        {'⚑'} 주의 <b>{a.total}</b>
+        {'\u2691'} 주의 <b>{a.total}</b>
       </button>
       {open && (
         <div className="attn-menu">
@@ -251,7 +251,7 @@ function TopBar({ surface, keeper, onToggleDock, dockOpen, openApprovals, attent
       <span className="v2-statchip live"><StatusDot status="run" pulse />4 실행 중</span>
       <AttentionIndicator attention={attention} onNav={onNav} />
       <button className={`v2-statchip attn ${schedWarn ? 'warn' : ''}`} onClick={() => onNav('schedule')} title="예약 자동화 큐 — keeper 예약 · operator 승인 (lib/schedule)">
-        {'◷'} 예약 {s.pending > 0 ? <b>승인 {s.pending}</b> : s.due > 0 ? <b>due {s.due}</b> : <b>정상</b>}
+        {'\u25F7'} 예약 {s.pending > 0 ? <b>승인 {s.pending}</b> : s.due > 0 ? <b>due {s.due}</b> : <b>정상</b>}
       </button>
       <button className={`topbar-copilot ${dockOpen ? 'on' : ''}`} onClick={onToggleDock} title="Chat 열기/닫기 (⌘J)">
         <span className="spark">{DOCK_SPARK}</span>Chat<kbd>⌘J</kbd>
@@ -276,7 +276,7 @@ function ChatHeader({ keeper, mobile, onBack, onOpenCtx, onOpenConfig, onAction 
   const fire = (a) => { onAction && onAction(keeper.id, a); };
   return (
     <div className={`chat-head ${mobile ? 'is-mobile' : ''}`}>
-      {mobile && <button className="chat-back" onClick={onBack} title="Keeper 목록">{'◂'}</button>}
+      {mobile && <button className="chat-back" onClick={onBack} title="Keeper 목록">{'\u25C2'}</button>}
       <Avatar k={keeper} baseClass="chat-av" size={mobile ? 38 : 40} />
       <div className="chat-id">
         <div className="name-row">
@@ -290,13 +290,13 @@ function ChatHeader({ keeper, mobile, onBack, onOpenCtx, onOpenConfig, onAction 
             <button key={a.id} className={`act icon ${a.danger ? 'danger' : ''}`} title={`${a.label} — ${a.hint}`} onClick={() => fire(a)}>{a.glyph}</button>
           ))}
           {actions.length === 0 && <span className="act-quiet" title={PHASE_INFO[keeper.phase]}>{keeper.phase === 'Dead' ? '복구 불가' : '전이 중…'}</span>}
-          <button className="act icon" title="keeper 설정 — 성격·지침·모델·도구 권한" onClick={() => onOpenConfig(keeper)}>{'⚙'}</button>
+          <button className="act icon" title="keeper 설정 — 성격·지침·모델·도구 권한" onClick={() => onOpenConfig(keeper)}>{'\u2699'}</button>
         </div>
       )}
       {mobile && (
         <div className="chat-head-mob">
-          <button className="chat-ovf" title="keeper 명령" onClick={(e) => { e.stopPropagation(); setOvf(o => !o); }}>{'⋯'}</button>
-          <button className="chat-ctx-btn" onClick={onOpenCtx} title="컨텍스트·주의 패널">{'ⓘ'}</button>
+          <button className="chat-ovf" title="keeper 명령" onClick={(e) => { e.stopPropagation(); setOvf(o => !o); }}>{'\u22EF'}</button>
+          <button className="chat-ctx-btn" onClick={onOpenCtx} title="컨텍스트·주의 패널">{'\u24D8'}</button>
           {ovf && (
             <div className="chat-ovf-menu" onClick={(e) => e.stopPropagation()}>
               {actions.map(a => (
@@ -304,7 +304,7 @@ function ChatHeader({ keeper, mobile, onBack, onOpenCtx, onOpenConfig, onAction 
               ))}
               {actions.length === 0 && <div className="kp-menu-note">{keeper.phase === 'Dead' ? '복구 불가 — 명령 없음' : '전이 중 — 잠시 후 가능'}</div>}
               <div className="kp-menu-sep"></div>
-              <button className="kp-menu-i" onClick={() => { onOpenConfig(keeper); setOvf(false); }}>{'⚙'} keeper 설정</button>
+              <button className="kp-menu-i" onClick={() => { onOpenConfig(keeper); setOvf(false); }}>{'\u2699'} keeper 설정</button>
             </div>
           )}
         </div>
@@ -316,7 +316,7 @@ function ChatHeader({ keeper, mobile, onBack, onOpenCtx, onOpenConfig, onAction 
 function EmptyThread() {
   return (
     <div className="empty2">
-      <div className="ico">{'◈'}</div>
+      <div className="ico">{'\u25C8'}</div>
       <h3>대화를 시작하세요</h3>
       <div style={{ maxWidth: '320px', fontSize: '13px', lineHeight: 1.6 }}>
         질문하거나 작업을 위임하세요 — 도구 호출과 trace가 여기 기록됩니다.

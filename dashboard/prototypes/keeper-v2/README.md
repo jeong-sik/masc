@@ -1,4 +1,4 @@
-# Keeper Agent v3 / v4 — design prototype (reference only)
+# Keeper Agent v3 / v4 / v5 — design prototype (reference only)
 
 Byte-faithful export of the `keeper-v2/Keeper Agent v*.html` prototypes from the
 Claude Design project (https://claude.ai/design/p/6e69560a-2558-4572-9baa-59a7252efc76).
@@ -8,22 +8,30 @@ hardcoded roster/threads in `data*.jsx`.
 
 ## Entry points
 
-Both HTML files load the identical JSX set and the identical base CSS. They
-differ only in which tone layer is active:
+All four entry points load the same JSX set and the same base CSS; they differ
+only in which tone layer is active (v2 predates the lanes/journey surfaces, so
+its script list is shorter):
 
 | File | Root attribute | Tone layer |
 |---|---|---|
+| `Keeper Agent v2.html` | (none) | base v2 skin, pre-lanes surface set |
 | `Keeper Agent v3.html` | (none) | base v2 skin |
 | `Keeper Agent v4.html` | `data-tone="instrument"` | `styles/instrument.css` |
+| `Keeper Agent v5.html` | `data-tone="tempered"` | `styles/tempered.css` |
 
 `instrument.css` is scoped entirely to `[data-tone="instrument"]` and loads
 last, so it cannot affect v3. It restates the skin's tokens (flat surfaces, a
 neutral gray ink ladder, one brass accent, mono chrome type) and then walks
 parts of that back in two revision passes the file documents inline.
 
-The Design project also carries a `Keeper Agent v5.html` (`data-tone="tempered"`,
-`styles/tempered.css`) — a sibling tone over the same components, not a
-successor to v4. It is not exported here.
+`tempered.css` is the sibling tone to `instrument.css`, not its successor: it
+keeps the brass/bone identity and edits three things — the ink ladder is widened
+so hierarchy reads at a glance, the brass glow is halved, and status chips lose
+their filled grounds so colour survives as text and a pip. The dashboard runs
+this tone (`data-tone="tempered"` in `dashboard/index.html`), so of the four
+entry points `Keeper Agent v5.html` is the one that matches what ships.
+
+`instrument.css` is exported but not vendored — the dashboard runs one tone.
 
 Purpose: reference material for the real `dashboard/` implementation. The FSM
 states, Gate dispositions (Always / LLM Judge / HITL), schedule approval flow,

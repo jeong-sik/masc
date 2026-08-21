@@ -30,13 +30,13 @@ function AttachDraft({ a, onRemove }) {
   return (
     <div className="cdraft att">
       <div className="cdraft-thumb">
-        {a.src ? <img src={a.src} alt={a.name} /> : <span className="cdraft-glyph">{'◫'}</span>}
+        {a.src ? <img src={a.src} alt={a.name} /> : <span className="cdraft-glyph">{'\u25EB'}</span>}
       </div>
       <div className="cdraft-meta">
         <span className="cdraft-name mono">{a.name}</span>
         <span className="cdraft-sub mono">{[a.dims, a.size].filter(Boolean).join(' · ')}</span>
       </div>
-      <button className="cdraft-x" title="첨부 제거" onClick={onRemove}>{'✕'}</button>
+      <button className="cdraft-x" title="첨부 제거" onClick={onRemove}>{'\u2715'}</button>
     </div>
   );
 }
@@ -45,7 +45,7 @@ function AttachDraft({ a, onRemove }) {
 function VoiceDraft({ v, onRemove }) {
   return (
     <div className="cdraft voice">
-      <span className="cdraft-glyph mic">{'◌'}</span>
+      <span className="cdraft-glyph mic">{'\u25CC'}</span>
       <div className="cdraft-wave">
         {v.wave.map((h, i) => <span key={i} className="vbar on" style={{ height: `${Math.round(4 + h * 18)}px` }}></span>)}
       </div>
@@ -54,7 +54,7 @@ function VoiceDraft({ v, onRemove }) {
         <span className="cdraft-tx-k">받아쓰기</span>
         <span className="cdraft-tx-v">{v.transcript}</span>
       </div>
-      <button className="cdraft-x" title="음성 제거" onClick={onRemove}>{'✕'}</button>
+      <button className="cdraft-x" title="음성 제거" onClick={onRemove}>{'\u2715'}</button>
     </div>
   );
 }
@@ -80,7 +80,7 @@ function RecordBar({ onStop, onCancel }) {
         {wave.map((h, i) => <span key={i} className="rbar" style={{ height: `${Math.round(3 + h * 20)}px` }}></span>)}
       </div>
       <button className="rec-btn cancel" title="취소" onClick={onCancel}>취소</button>
-      <button className="rec-btn stop" title="녹음 종료 — 받아쓰기" onClick={() => onStop(Math.max(1, secs))}>{'■'} 완료</button>
+      <button className="rec-btn stop" title="녹음 종료 — 받아쓰기" onClick={() => onStop(Math.max(1, secs))}>{'\u25A0'} 완료</button>
     </div>
   );
 }
@@ -227,12 +227,12 @@ function Composer({ keeper, onSend, onAction, onNav }) {
                 <input ref={fileRef} type="file" accept="image/*,.pdf,.txt,.log,.json,.csv,.md" multiple
                   style={{ display: 'none' }} onChange={onPick} />
                 <button className="ctool" title="이미지·파일 첨부 — 멀티모달 입력 (스크린샷, 로그, 다이어그램)"
-                  onClick={() => fileRef.current && fileRef.current.click()}>{'⊕'}</button>
+                  onClick={() => fileRef.current && fileRef.current.click()}>{'\u2295'}</button>
                 <button className="ctool" title="음성 입력 — 받아쓰기로 메시지 작성"
                   onClick={() => setRecording(true)}>
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/></svg>
                 </button>
-                <button className="send" disabled={!canSend} onClick={send}>전송 {'↑'}</button>
+                <button className="send" disabled={!canSend} onClick={send}>전송 {'\u2191'}</button>
               </div>
             </React.Fragment>
           )}

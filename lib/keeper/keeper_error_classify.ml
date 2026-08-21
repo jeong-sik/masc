@@ -240,8 +240,8 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_core.Error.t) : boo
          { reason = Keeper_turn_driver.Capacity_exhausted; _ }) ->
       true
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-      (* Legacy [cooldown_cause] values are diagnostic-only. A decoded receipt
-         from the retired pre-dispatch gate must not regain lifecycle authority. *)
+      (* A decoded receipt from the retired pre-dispatch gate carries no
+         lifecycle authority. *)
       true
   | Some (Keeper_turn_driver.Runtime_exhausted _) ->
       false

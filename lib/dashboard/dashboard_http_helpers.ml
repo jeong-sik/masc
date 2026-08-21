@@ -78,5 +78,5 @@ let count_where items predicate =
     identical forks. *)
 let normalize_text raw =
   raw |> String.trim |> String.split_on_char '\n'
-  |> List.filter_map String_util.trim_to_option
+  |> List.filter_map String_util.trim_nonempty
   |> String.concat " " |> String.trim

@@ -85,8 +85,9 @@ type panel_failure =
 [@@deriving to_yojson, show, eq]
 
 val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
-(** Accepts the current ppx-style tagged-list encoding and the legacy bare
-    string encodings for [Timeout] / [Empty_response]. *)
+(** Accepts the ppx-style tagged-list encoding only. The bare string forms of
+    [Timeout] / [Empty_response], and an [`Int] in the [Invalid_timeout_s]
+    float slot, are rejected like any other unsupported shape. *)
 
 (** 성공한 패널 한 명의 답. (variant inline record는 ppx_deriving_yojson 비호환이라
     named record로 분리한다.) *)

@@ -32,6 +32,7 @@ import {
   attainmentTargetProblem,
   attainmentUnitSuffix,
   attainmentVerdict,
+  completionRequestText,
 } from '../lib/goal-attainment'
 import { statusLabel } from '../lib/status-label'
 import { GoalCreateForm } from './goals/goal-create-form'
@@ -588,9 +589,7 @@ function GoalCompletionCriteria({ node }: { node: GoalTreeNode }) {
           tone=${summary.ready_to_request_completion ? 'ok' : undefined}
           testHook="ready"
         >
-          ${summary.ready_to_request_completion
-            ? '지금 완료를 요청할 수 있어요.'
-            : '아직 조건을 채우지 못했어요.'}
+          ${completionRequestText(summary.state)}
         <//>
       ` : null}
     <//>

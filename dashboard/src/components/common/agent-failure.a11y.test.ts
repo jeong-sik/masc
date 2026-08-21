@@ -16,23 +16,21 @@ describe('AgentFailure a11y', () => {
     document.body.removeChild(container)
   })
 
-  it('renders accessibly for retryable failure', async () => {
+  it('renders accessibly for blocked failure', async () => {
     render(
       html`<${AgentFailure}
-        type="retryable"
+        type="blocked"
         message="Connection timeout"
-        retryCount=${1}
-        maxRetries=${3}
       />`,
       container,
     )
     expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('renders accessibly for non_retryable failure', async () => {
+  it('renders accessibly for non_blocked failure', async () => {
     render(
       html`<${AgentFailure}
-        type="non_retryable"
+        type="blocked"
         message="Invalid API key"
       />`,
       container,
@@ -65,7 +63,7 @@ describe('AgentFailure a11y', () => {
   it('renders accessibly without retry info', async () => {
     render(
       html`<${AgentFailure}
-        type="retryable"
+        type="blocked"
         message="Will retry automatically"
       />`,
       container,

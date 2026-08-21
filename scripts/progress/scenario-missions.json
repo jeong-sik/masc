@@ -1,0 +1,22 @@
+{
+  "comment": [
+    "Maps each product-scenario row of the feature-state matrix to the RW missions",
+    "that judge it.  The mapping is a planning decision; whether a listed mission",
+    "actually exists is measured against missions.json by the renderer, which marks",
+    "any absent id as planned rather than pretending it runs."
+  ],
+  "scenarios": [
+    { "row": "협업", "missions": ["RW01", "RW02", "RW03", "RW04", "RW16"] },
+    { "row": "PoC", "missions": ["RW20"] },
+    { "row": "QA 100% coverage", "missions": ["RW22"] },
+    { "row": "동작 증명 팀", "missions": ["RW23"] },
+    { "row": "연작 소설", "missions": ["RW24"] },
+    { "row": "정부 지침 반론", "missions": ["RW25"] },
+    { "row": "논문·개념 실측", "missions": ["RW26"] },
+    { "row": "새 연구주제 발견", "missions": ["RW27"] },
+    { "row": "과학·수학·CS 난제", "missions": ["RW28"] },
+    { "row": "웹 연구", "missions": ["RW29"] },
+    { "row": "기고문 작성", "missions": ["RW30"] },
+    { "row": "상호 반론·이해·피드백·도구 사용", "missions": ["RW21"] }
+  ]
+}

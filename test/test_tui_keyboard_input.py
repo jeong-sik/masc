@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import errno
 import fcntl
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -14,15 +16,70 @@ import subprocess
 import sys
 import tempfile
 import termios
+import threading
 import time
 from typing import Any
 
 Interaction = Callable[[subprocess.Popen[bytes], int, int, bytearray, str], None]
+HttpFixtures = dict[str, tuple[int, object]]
+WorkspaceSetup = Callable[[str], None]
 WORKSPACE_PAYLOAD = "workspace\x1b]8;;https://attacker.invalid\x07owned"
 WORKSPACE_RENDERED = b"workspace\\x1B]8;;https://attacker.invalid\\x07owned"
 FRAME_END = b"\x1b[?7h"
 FULL_REDRAW = b"\x1b[2J"
 CONSOLE_DIAGNOSTIC = b"[masc-tui] decode failed for "
+
+
+@contextmanager
+def test_http_endpoint(
+    fixtures: HttpFixtures | None,
+) -> Iterator[tuple[int, Callable[[], None]]]:
+    if fixtures is None:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stalled_endpoint:
+            stalled_endpoint.bind(("127.0.0.1", 0))
+            stalled_endpoint.listen(1)
+
+            def start_endpoint() -> None:
+                pass
+
+            yield int(stalled_endpoint.getsockname()[1]), start_endpoint
+        return
+
+    class FixtureHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            status, payload = fixtures.get(
+                self.path,
+                (503, {"error": "fixture endpoint unavailable"}),
+            )
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), FixtureHandler) as server:
+        thread: threading.Thread | None = None
+
+        def start_endpoint() -> None:
+            nonlocal thread
+            if thread is not None:
+                raise AssertionError("fixture HTTP server started twice")
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+
+        try:
+            yield int(server.server_address[1]), start_endpoint
+        finally:
+            if thread is not None:
+                server.shutdown()
+                thread.join(timeout=2.0)
+                if thread.is_alive():
+                    raise AssertionError("fixture HTTP server did not stop")
 
 
 def assert_workspace_payload_is_inert(output: bytearray) -> None:
@@ -111,10 +168,27 @@ def resize_and_wait(
         termios.TIOCSWINSZ,
         struct.pack("HHHH", rows, columns, 0, 0),
     )
-    wait_for_output(process, master_fd, output, needle, start=start, timeout=3.0)
-    needle_end = output.find(needle, start) + len(needle)
+    frame_start = start
     for control in controls:
-        wait_for_output(process, master_fd, output, control, start=start, timeout=3.0)
+        wait_for_output(
+            process,
+            master_fd,
+            output,
+            control,
+            start=frame_start,
+            timeout=3.0,
+        )
+        if control == FULL_REDRAW:
+            frame_start = output.find(control, frame_start)
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        needle,
+        start=frame_start,
+        timeout=3.0,
+    )
+    needle_end = output.find(needle, frame_start) + len(needle)
     if final_cursor is not None:
         wait_for_output(
             process,
@@ -124,7 +198,7 @@ def resize_and_wait(
             start=needle_end,
             timeout=3.0,
         )
-        cursor_start = output.rfind(final_cursor, needle_end)
+        cursor_start = output.find(final_cursor, needle_end)
         wait_for_output(
             process,
             master_fd,
@@ -133,7 +207,8 @@ def resize_and_wait(
             start=cursor_start,
             timeout=3.0,
         )
-        segment = bytes(output[start:])
+        frame_end = output.find(FRAME_END, cursor_start) + len(FRAME_END)
+        segment = bytes(output[frame_start:frame_end])
         last_hidden = segment.rfind(b"\x1b[?25l")
         last_visible = segment.rfind(b"\x1b[?25h")
         actual_cursor = b"\x1b[?25h" if last_visible > last_hidden else b"\x1b[?25l"
@@ -142,7 +217,8 @@ def resize_and_wait(
                 f"resize ended in {actual_cursor!r}, expected {final_cursor!r}: "
                 f"{segment!r}"
             )
-    return bytes(output[start:])
+        return segment
+    return bytes(output[frame_start:])
 
 
 def kill_process_group(process: subprocess.Popen[bytes]) -> None:
@@ -251,6 +327,85 @@ def seed_workspace(base_path: str) -> None:
     )
 
 
+def seed_row_budget_workspace(base_path: str) -> None:
+    tasks = [
+        {
+            "id": f"task-{index}",
+            "title": f"Task task-{index}",
+            "status": "todo",
+            "priority": index,
+            "created_at": "2026-08-22T00:00:00Z",
+        }
+        for index in range(1, 6)
+    ]
+    backlog_path = Path(base_path) / ".masc" / "tasks" / "backlog.json"
+    backlog_path.write_text(
+        json.dumps(
+            {
+                "tasks": tasks,
+                "last_updated": "2026-08-22T00:00:00Z",
+                "version": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def row_budget_http_fixtures() -> HttpFixtures:
+    attention_items = [
+        {
+            "kind": "incident",
+            "severity": "warning",
+            "summary": f"attention-{index}",
+            "target_type": "task",
+            "target_id": f"task-{index}",
+        }
+        for index in range(1, 7)
+    ]
+    post = {
+        "id": "post-1",
+        "author": "board-author",
+        "title": "Row budget fixture",
+        "body": "board-body",
+        "votes": 1,
+        "comment_count": 5,
+        "created_at_iso": "2026-08-22T00:00:00Z",
+    }
+    comments = [
+        {
+            "id": f"comment-{index}",
+            "author": f"author-{index}",
+            "content": f"comment-{index}",
+            "created_at_iso": "2026-08-22T00:00:00Z",
+        }
+        for index in range(1, 6)
+    ]
+    return {
+        "/api/v1/dashboard/briefing": (
+            200,
+            {
+                "summary": {
+                    "workspace_health": "ok",
+                    "cluster": "cluster-a",
+                    "project": "project-a",
+                    "active_agents": 2,
+                    "incident_count": 6,
+                },
+                "generated_at": "2026-08-22T00:00:00Z",
+                "incidents": attention_items,
+                "attention_queue": [],
+                "attention_items": [],
+                "agent_briefs": [],
+            },
+        ),
+        "/api/v1/board": (200, {"posts": [post]}),
+        "/api/v1/board/post-1?format=flat": (
+            200,
+            {"post": post, "comments": comments},
+        ),
+    }
+
+
 def wait_for_stop(
     process: subprocess.Popen[bytes],
     master_fd: int,
@@ -284,6 +439,8 @@ def run_terminal_scenario(
     description: str,
     interact: Interaction,
     refresh: float = 60.0,
+    http_fixtures: HttpFixtures | None = None,
+    prepare_workspace: WorkspaceSetup | None = None,
 ) -> None:
     master_fd, slave_fd = os.openpty()
     output = bytearray()
@@ -291,12 +448,11 @@ def run_terminal_scenario(
     try:
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         os.set_blocking(master_fd, False)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as stalled_endpoint:
-            stalled_endpoint.bind(("127.0.0.1", 0))
-            stalled_endpoint.listen(1)
-            stalled_port = int(stalled_endpoint.getsockname()[1])
+        with test_http_endpoint(http_fixtures) as (server_port, start_http_endpoint):
             with tempfile.TemporaryDirectory(prefix="masc-tui-keyboard-") as base_path:
                 seed_workspace(base_path)
+                if prepare_workspace is not None:
+                    prepare_workspace(base_path)
                 environment = os.environ.copy()
                 environment.pop("LINES", None)
                 environment.pop("COLUMNS", None)
@@ -321,7 +477,7 @@ def run_terminal_scenario(
                         "--workspace",
                         WORKSPACE_PAYLOAD,
                         "--port",
-                        str(stalled_port),
+                        str(server_port),
                         "--refresh",
                         str(refresh),
                     ],
@@ -340,6 +496,7 @@ def run_terminal_scenario(
                     description="pre-exec terminal snapshot",
                 )
                 original_termios: list[Any] = termios.tcgetattr(slave_fd)
+                start_http_endpoint()
                 os.kill(process.pid, signal.SIGCONT)
                 wait_for_output(
                     process,
@@ -604,7 +761,100 @@ def repair_after_console_diagnostic(
     os.write(master_fd, b"q")
 
 
+def assert_row_budgeted_surfaces(
+    process: subprocess.Popen[bytes],
+    master_fd: int,
+    _slave_fd: int,
+    output: bytearray,
+    _base_path: str,
+) -> None:
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"attention-6",
+        start=0,
+        timeout=10.0,
+    )
+    wait_for_output(
+        process,
+        master_fd,
+        output,
+        b"task-5",
+        start=0,
+        timeout=3.0,
+    )
+
+    overview = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"MASC Overview",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for expected in (b"attention-1", b"attention-2", b"task-1", b"q:quit"):
+        if expected not in overview:
+            raise AssertionError(f"14-row Overview omitted {expected!r}: {overview!r}")
+    if b"attention-3" in overview:
+        raise AssertionError(f"14-row Overview exceeded its row budget: {overview!r}")
+    if "└".encode() not in overview:
+        raise AssertionError(f"14-row Overview omitted its bottom border: {overview!r}")
+
+    resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=30,
+        columns=100,
+        needle=b"MASC Overview",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Keepers")
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Approvals")
+    send_and_wait(process, master_fd, output, b"\t", b"MASC Board")
+    send_and_wait(process, master_fd, output, b"\r", b"comment-5")
+
+    board = resize_and_wait(
+        process,
+        master_fd,
+        output,
+        rows=14,
+        columns=100,
+        needle=b"MASC Board",
+        controls=(FULL_REDRAW,),
+        final_cursor=b"\x1b[?25l",
+    )
+    for expected in (
+        b"board-body",
+        b"comment-1",
+        b"comment-2",
+        b"comment-3",
+        b"j/k:scroll",
+    ):
+        if expected not in board:
+            raise AssertionError(f"14-row Board omitted {expected!r}: {board!r}")
+    if b"comment-4" in board or b"comment-5" in board:
+        raise AssertionError(f"14-row Board exceeded its row budget: {board!r}")
+    if "└".encode() not in board:
+        raise AssertionError(f"14-row Board omitted its bottom border: {board!r}")
+
+    send_and_wait(process, master_fd, output, b"j", b"comment-4")
+    send_and_wait(process, master_fd, output, b"j", b"comment-5")
+    os.write(master_fd, b"q")
+
+
 def run_keyboard_regression(executable: str) -> None:
+    run_terminal_scenario(
+        executable,
+        description="row-budgeted Overview and Board",
+        interact=assert_row_budgeted_surfaces,
+        http_fixtures=row_budget_http_fixtures(),
+        prepare_workspace=seed_row_budget_workspace,
+    )
     run_terminal_scenario(
         executable,
         description="console diagnostic repair",

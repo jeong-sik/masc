@@ -120,6 +120,84 @@ module Viewport = struct
   let requires_compact_frame ~rows = rows < minimum_fixed_chrome_rows
 end
 
+type overview_allocation = {
+  attention_rows : int;
+  task_error_rows : int;
+  task_rows : int;
+}
+
+let allocate_overview ~terminal_rows ~has_cluster ~attention_count ~task_count
+    ~has_task_error =
+  (* Ten rows are invariant chrome; the cluster/project row is present only
+     after a briefing has loaded. Reserve one row for a nonempty task block,
+     then preserve the existing Attention-first priority. *)
+  let fixed_rows = 10 + (if has_cluster then 1 else 0) in
+  let available = max 0 (terminal_rows - fixed_rows) in
+  let desired_attention_rows = min 6 (max 1 attention_count) in
+  let desired_task_error_rows = if has_task_error then 1 else 0 in
+  let desired_task_rows =
+    if task_count <= 0 then
+      if has_task_error then 0 else 1
+    else
+      min (if has_task_error then 4 else 5) task_count
+  in
+  let desired_task_block_rows =
+    desired_task_error_rows + desired_task_rows
+  in
+  let reserved_task_rows = min 1 desired_task_block_rows in
+  let attention_rows =
+    min desired_attention_rows (max 0 (available - reserved_task_rows))
+  in
+  let task_block_rows =
+    min desired_task_block_rows (max 0 (available - attention_rows))
+  in
+  let task_error_rows = min desired_task_error_rows task_block_rows in
+  let task_rows =
+    min desired_task_rows (max 0 (task_block_rows - task_error_rows))
+  in
+  { attention_rows; task_error_rows; task_rows }
+
+type board_read_allocation = {
+  body_rows : int;
+  comment_rows : int;
+}
+
+let allocate_board_read ~terminal_rows ~body_line_count ~comment_count =
+  (* Eight rows are invariant chrome. A visible Comments section adds its
+     divider and heading; keep one body row when the post has body text, then
+     give comments their existing five-row cap. *)
+  let comment_count = max 0 comment_count in
+  let comment_chrome_rows = if comment_count > 0 then 2 else 0 in
+  let available = max 0 (terminal_rows - 8 - comment_chrome_rows) in
+  let minimum_body_rows = if body_line_count > 0 then 1 else 0 in
+  let comment_rows =
+    min (min 5 comment_count) (max 0 (available - minimum_body_rows))
+  in
+  let body_rows = max 0 (available - comment_rows) in
+  { body_rows; comment_rows }
+
+type board_read_scroll = {
+  normalized_scroll : int;
+  body_offset : int;
+  comment_offset : int;
+}
+
+let project_board_read_scroll ~body_line_count ~body_rows ~comment_count
+    ~comment_rows scroll =
+  let body_line_count = max 0 body_line_count in
+  let body_rows = max 0 body_rows in
+  let comment_count = max 0 comment_count in
+  let comment_rows = max 0 comment_rows in
+  let maximum_body_offset = max 0 (body_line_count - body_rows) in
+  let maximum_comment_offset = max 0 (comment_count - comment_rows) in
+  let maximum_scroll = maximum_body_offset + maximum_comment_offset in
+  let normalized_scroll = max 0 (min scroll maximum_scroll) in
+  let body_offset = min normalized_scroll maximum_body_offset in
+  let comment_offset =
+    min maximum_comment_offset (normalized_scroll - body_offset)
+  in
+  { normalized_scroll; body_offset; comment_offset }
+
 module Terminal_size_cache = struct
   type t = {
     fallback : int * int;

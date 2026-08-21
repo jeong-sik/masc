@@ -261,6 +261,14 @@ let render_overview (state : state) =
     | None -> []
     | Some o -> o.ov_attention_items
   in
+  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
+  let row_budget =
+    Render_schedule.allocate_overview ~terminal_rows:rows
+      ~has_cluster:(Option.is_some ov)
+      ~attention_count:(List.length attention_items)
+      ~task_count:(List.length state.tasks)
+      ~has_task_error:(Option.is_some tasks_error)
+  in
   let panel_width = (cols - 3) / 2 in
   let attention_title = " Attention " in
   let events_title = " Recent Events " in
@@ -273,8 +281,7 @@ let render_overview (state : state) =
     (String.make (max 0 (panel_width - String.length events_title)) ' ')
     (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
 
-  let attention_rows = min 6 (max 1 (List.length attention_items)) in
-  for i = 0 to attention_rows - 1 do
+  for i = 0 to row_budget.attention_rows - 1 do
     let attention_str =
       if i < List.length attention_items then
         let a = List.nth attention_items i in
@@ -312,22 +319,18 @@ let render_overview (state : state) =
     (String.make (max 0 (cols - 10)) ' ')
     Ansi.gray Ansi.box_v Ansi.reset);
 
-  let tasks_error = Terminal_text.optional_single_line state.tasks_error in
-  let task_capacity =
-    match tasks_error with
-    | None -> 5
-    | Some err ->
+  (match tasks_error with
+   | Some err when row_budget.task_error_rows > 0 ->
         box_line buf cols
           (Ansi.red ^ "  "
           ^ fit_width err (cols - 8)
-          ^ Ansi.reset);
-        4
-  in
-  let task_rows = min task_capacity (List.length state.tasks) in
-  if task_rows = 0 && Option.is_none tasks_error then
+          ^ Ansi.reset)
+   | None | Some _ -> ());
+  if row_budget.task_rows > 0 && List.is_empty state.tasks
+     && Option.is_none tasks_error then
     box_line buf cols (Ansi.dim ^ "  (no tasks)" ^ Ansi.reset)
   else
-    for i = 0 to task_rows - 1 do
+    for i = 0 to row_budget.task_rows - 1 do
       let t = List.nth state.tasks i in
       box_line buf cols (task_line t)
     done;
@@ -606,23 +609,34 @@ let render_board_read (state : state) (post : board_post) =
     in
     wrap [] "" words
   in
-  let content_height = rows - 10 in
   let total_lines = List.length body_lines in
-  let scroll = min state.board_scroll (max 0 (total_lines - content_height)) in
+  let row_budget =
+    Render_schedule.allocate_board_read ~terminal_rows:rows
+      ~body_line_count:total_lines
+      ~comment_count:(List.length state.board_comments)
+  in
+  let content_height = row_budget.body_rows in
+  let comment_height = row_budget.comment_rows in
+  let scroll =
+    Render_schedule.project_board_read_scroll ~body_line_count:total_lines
+      ~body_rows:content_height
+      ~comment_count:(List.length state.board_comments)
+      ~comment_rows:comment_height state.board_scroll
+  in
+  state.board_scroll <- scroll.normalized_scroll;
   for i = 0 to content_height - 1 do
-    let idx = i + scroll in
+    let idx = i + scroll.body_offset in
     if idx < total_lines then
       box_line buf cols ("  " ^ List.nth body_lines idx)
     else
       box_empty buf cols
   done;
 
-  if List.length state.board_comments > 0 then begin
+  if comment_height > 0 then begin
     box_divider buf cols;
     box_line buf cols (Ansi.bold ^ "  Comments" ^ Ansi.reset);
-    let comment_height = min 5 (List.length state.board_comments) in
     for i = 0 to comment_height - 1 do
-      let c = List.nth state.board_comments i in
+      let c = List.nth state.board_comments (i + scroll.comment_offset) in
       let line = Printf.sprintf "  %s: %s"
         (fit_width (Terminal_text.single_line c.bc_author) 16)
         (fit_width (Terminal_text.single_line c.bc_content) (cols - 24))

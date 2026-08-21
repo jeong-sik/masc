@@ -665,6 +665,31 @@ let test_render_loop_uses_monotonic_dirty_schedule () =
     (Ast_grep.count_calls_in_value_binding
        ~module_path:"bin/masc_tui_render.ml" ~binding_name:"render"
        ~callee:"render_surface");
+  let render_path = "bin/masc_tui_render.ml" in
+  check int "overview consumes one shared row allocation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_overview"
+       ~callee:"Render_schedule.allocate_overview");
+  check int "overview bounds each variable section from that allocation" 4
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_overview" ~callees:[]
+       ~fields:[ "attention_rows"; "task_error_rows"; "task_rows" ]);
+  check int "board read consumes one shared row allocation" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_board_read"
+       ~callee:"Render_schedule.allocate_board_read");
+  check int "board body and comments share the allocation" 2
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_board_read" ~callees:[]
+       ~fields:[ "body_rows"; "comment_rows" ]);
+  check int "board read projects one scroll across body and comments" 1
+    (Ast_grep.count_calls_in_value_binding ~module_path:render_path
+       ~binding_name:"render_board_read"
+       ~callee:"Render_schedule.project_board_read_scroll");
+  check int "board renderer consumes normalized body and comment offsets" 3
+    (Ast_grep.count_field_accesses_outside_calls_in_value_binding
+       ~module_path:render_path ~binding_name:"render_board_read" ~callees:[]
+       ~fields:[ "normalized_scroll"; "body_offset"; "comment_offset" ]);
   check int "resize invalidation and Force request share one boundary" 1
     (Ast_grep.count_calls_in_value_binding ~module_path:main_path
        ~binding_name:"invalidate_frame_for_resize"

@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-08-22T02:20:00+09:00",
+  "kind": "keeper_goal_verifier_protected_main_attempts",
+  "authority": "exact_source_ci_live_execution_separated",
+  "completion_claim": "failed_no_complete_cell",
+  "implementation": {
+    "ownerless_rw23_pr": 29305,
+    "ownerless_rw23_merge_sha": "a67038505534837f175c4e0a10c6d1a35802e83a",
+    "task_verifier_retry_pr": 29318,
+    "task_verifier_retry_merge_sha": "61e2f04b7fb69a6662edcfc6c103208bcbc518f4",
+    "retryability_aggregation_pr": 29321,
+    "retryability_aggregation_merge_sha": "f4c974e8549d4811f0e1ff0d063ebfe58291c237",
+    "exact_head_ci": [
+      {
+        "pr": 29318,
+        "run_id": 32493127392,
+        "status": "passed"
+      },
+      {
+        "pr": 29321,
+        "run_id": 32499028564,
+        "status": "passed"
+      }
+    ]
+  },
+  "protected_main_attempts": [
+    {
+      "attempt": 1,
+      "source_sha": "a67038505534837f175c4e0a10c6d1a35802e83a",
+      "workflow_run_id": 32488329492,
+      "evidence_artifact_id": 9450333174,
+      "trusted_macos_artifact_id": 9449617687,
+      "status": "failed",
+      "reached": [
+        "goal_criterion_viable",
+        "task_bad_artifact_rejected",
+        "goal_proof_refuted",
+        "task_corrected_artifact_submitted"
+      ],
+      "task_rejection_verification_id": "vrf-589ed90543974f765c021566f951976b",
+      "corrected_task_verification_id": "vrf-f84164400a0186da0558548354035bed",
+      "blocker": "The corrected Task review exhausted unauthorized and rate-limited verifier slots. The typed result was retryable, but the Task completion-authority daemon did not re-arm a maintenance retry before PR 29318."
+    },
+    {
+      "attempt": 2,
+      "source_sha": "61e2f04b7fb69a6662edcfc6c103208bcbc518f4",
+      "workflow_run_id": 32495075086,
+      "evidence_artifact_id": 9452587557,
+      "trusted_macos_artifact_id": 9452284631,
+      "status": "failed",
+      "reached": [
+        "rw23_verifier_goal_created"
+      ],
+      "blocker": "The verifier_exact ladder saw a retryable GLM 429 followed by a terminal unauthorized fallback. The pre-29321 review result copied only the last error, emitted retryable=false, and left the Goal criterion pending for the five-minute wait."
+    },
+    {
+      "attempt": 3,
+      "source_sha": "f4c974e8549d4811f0e1ff0d063ebfe58291c237",
+      "workflow_run_id": 32501162788,
+      "evidence_artifact_id": 9455543468,
+      "trusted_macos_artifact_id": 9454480761,
+      "status": "failed",
+      "reached": [
+        "goal_criterion_viable",
+        "task_bad_artifact_rejected",
+        "goal_proof_refuted",
+        "task_corrected_artifact_rejected"
+      ],
+      "task_bad_artifact_verification_id": "vrf-26892a4d76593973abe01cd7facc77a7",
+      "task_corrected_artifact_verification_id": "vrf-224484108066b18a40c9922b8a1de3e3",
+      "blocker": "The producer released task-009, created task-010, and wrote the claimed PASS artifact outside the canonical producer artifact path. The independent verifier correctly rejected the second task-009 submission because the required artifact was missing."
+    }
+  ],
+  "verifier_conclusions": {
+    "independent_task_rejection_observed": true,
+    "independent_goal_criterion_observed": true,
+    "independent_goal_refutation_observed": true,
+    "goal_proof_proven_observed": false,
+    "same_run_browser_observed": false,
+    "retry_live_execution_observed": false,
+    "note": "Attempt 3 did not need the retry branch: the admitted GLM verifier returned verdicts. Source and exact-head CI cover retry classification, but no protected-main bundle yet proves a transient deferral followed by a retry commit."
+  },
+  "five_provider_ten_turn": {
+    "best_single_run": "five-provider-canary-64e02b2-r6",
+    "passed_roles": 4,
+    "required_roles": 5,
+    "status": "failed",
+    "codex_attempts": [
+      {
+        "model": "terra",
+        "facts_recalled": 8,
+        "facts_required": 9,
+        "exact_serving_receipts": 10
+      },
+      {
+        "model": "sol",
+        "facts_recalled": 7,
+        "facts_required": 9,
+        "exact_serving_receipts": 10
+      },
+      {
+        "model": "luna",
+        "facts_recalled": 8,
+        "facts_required": 9,
+        "exact_serving_receipts": 10
+      }
+    ],
+    "rule": "Runs are not unioned. Exact serving without exact recall is not a pass."
+  },
+  "duration_tiers": {
+    "integrated_current_source": {
+      "1h": "missing",
+      "2h": "missing",
+      "4h": "missing",
+      "24h": "missing"
+    },
+    "historical_evidence_policy": "Historical duration receipts remain observations and are not promoted into the current Goal-verifier cell."
+  },
+  "completion_rule": "A cell is complete only when implementation, exact-head CI, isolated live execution, independent Goal verifier verdict, and real-backend browser evidence share the same source SHA, run ID, and Goal ID."
+}

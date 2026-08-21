@@ -52,7 +52,6 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
         handoff_active: false,
         operator_paused: false,
         stop_requested: false,
-        dead_tombstone_latched: false,
         restart_requested: false,
         drain_complete: false,
         credential_archived: false,
@@ -74,6 +73,14 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
       duration_ms: 1000,
       error: null,
       runtime: null,
+      claim_attempt: {
+        present: false,
+        source: 'keeper_task_claim_tool_call',
+        status: 'not_observed',
+        result: null,
+        claimed_task_id: null,
+        claimed_goal_id: null,
+      },
     },
     runtime_attention: {
       state: 'ok',

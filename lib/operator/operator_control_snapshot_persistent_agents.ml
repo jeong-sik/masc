@@ -10,10 +10,8 @@
       through `field_or_null`, no field synthesis).
     - When [keeper_rows] is absent, walks
       [Keeper_meta_store.persistent_agent_names config] (or the explicit
-      [?keeper_names]), reads each keeper meta, asks
-      [Dashboard_cache.get_or_compute] for a 2s-cached
-      [Keeper_status_runtime.parse_agent_status] view, and assembles the
-      operator schema rows from disk meta + the cached agent status.
+      [?keeper_names]), reads each keeper meta, and derives the canonical
+      keeper status from its diagnostic projection.
 
     Both paths emit the same wire shape — `runtime_class="keeper"`
     plus the standard operator-dashboard keeper fields. *)
@@ -91,22 +89,30 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
         | Some names -> names
         | None -> Keeper_meta_store.persistent_agent_names config
       in
-      let agent_status_cache_ttl_s = 2.0 in
       List.filter_map
         (fun name ->
            match Keeper_meta_store.read_meta config name with
            | Error _ | Ok None -> None
            | Ok (Some meta) ->
-             let agent_json =
-               let cache_key = "kas:" ^ meta.agent_name in
-               Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
-                 Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name)
+             let keepalive_running =
+               Keeper_status_bridge.runtime_keepalive_running config meta
              in
-             let agent_status =
-               match agent_json with
-               | `Assoc _ ->
-                 Json_util.get_string agent_json "status" |> Option.value ~default:"unknown"
-               | _ -> "unknown"
+             let now_ts = Time_compat.now () in
+             let diagnostic =
+               Keeper_status_runtime.keeper_diagnostic_json
+                 ~config
+                 ~meta
+                 ~keepalive_running
+                 ~history_items:[]
+                 ~now_ts
+               |> Keeper_status_runtime.augment_keeper_diagnostic_json
+                    ~keepalive_running
+                    ~keepalive_started_at:
+                      (Keeper_status_bridge.runtime_keepalive_started_at config meta)
+                    ~now_ts
+             in
+             let status =
+               Keeper_status_runtime.keeper_surface_status ~diagnostic
              in
              Some
                (`Assoc
@@ -115,7 +121,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "agent_name", `String meta.agent_name
                     ; ( "trace_id"
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                    ; "status", `String agent_status
+                    ; "status", `String status
                     ; "generation", `Int meta.runtime.nonce
                     ; "turn_count", `Int meta.runtime.usage.total_turns
                     ; "last_model_used", `Null

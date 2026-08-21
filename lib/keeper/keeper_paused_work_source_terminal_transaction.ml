@@ -18,7 +18,6 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
   | Durable_owner_nonce_changed of
       { expected : int
       ; actual : int
@@ -79,8 +78,6 @@ let failure_to_string = function
     "Ack_source_terminal durable Keeper metadata is missing"
   | Durable_owner_not_paused ->
     "Ack_source_terminal requires a paused Keeper"
-  | Durable_owner_dead_tombstone ->
-    "Ack_source_terminal cannot use a Dead tombstone"
   | Durable_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "Ack_source_terminal generation changed: expected %d, actual %d"
@@ -136,8 +133,6 @@ let validate_paused_owner request (meta : Keeper_meta_contract.keeper_meta) =
       ~latched_reason:meta.latched_reason
   with
   | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
-  | Keeper_lifecycle_admission.Dead_tombstone ->
-    Error Durable_owner_dead_tombstone
   | Keeper_lifecycle_admission.Paused _ ->
     if Int.equal meta.runtime.nonce request.owner_nonce
     then Ok meta

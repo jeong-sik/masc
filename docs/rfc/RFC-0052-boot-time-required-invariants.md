@@ -78,7 +78,7 @@ let start_probe ~sw ~base_path ~interval_sec =
 | `keeper_unified_turn.ml` | 402, 730, 886 | `Some -> sleep` / `None -> ()` |
 | `keeper_turn_runtime_budget.ml` | 754 | `Some -> sleep` / `None -> ()` |
 | `agent_tool_execute_runtime.ml` | 748 | conditional clock access |
-| `keeper_agent_run.ml` | 478 | optional arg to OAS callback |
+| `keeper_agent_run.ml` | 478 | optional arg to agent_core callback |
 
 **핵심**: 모든 keeper 모듈이 개별적으로 `match Some/None`을 처리. 중앙 집중식 enforcement 없음.
 

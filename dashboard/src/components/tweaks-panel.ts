@@ -3,7 +3,12 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useCallback, useEffect, useRef } from 'preact/hooks'
 import { persistentSignal } from '../lib/persistent-signal'
-import { chatShowAutonomous, chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+import {
+  chatExpandAutonomousRuns,
+  chatShowAutonomous,
+  chatShowInternal,
+  chatShowMetadata,
+} from '../lib/chat-view-prefs'
 import { ringFocusClasses } from './common/ring'
 import { Settings2, X } from 'lucide-preact'
 
@@ -627,6 +632,11 @@ export function TweaksPanel() {
           label="자율턴"
           value=${chatShowAutonomous.value}
           onChange=${(v: boolean) => { chatShowAutonomous.value = v }}
+        />
+        <${TweakToggle}
+          label="자율턴 펼침"
+          value=${chatExpandAutonomousRuns.value}
+          onChange=${(v: boolean) => { chatExpandAutonomousRuns.value = v }}
         />
 
         <${TweakSection} label="타이포" />

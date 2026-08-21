@@ -433,7 +433,13 @@ let matches_filters ?(kinds = []) (value : event) =
     [latest_store_seq] is the max of the persisted sequence counter and the
     JSONL rows so a stale [_seq] file cannot make dashboard cursors move
     backward. *)
-let list_events_with_meta config ?(kinds = []) ~after_seq ~limit
+(* [keep] runs with the other filters, BEFORE [limit] pages the result, so
+   [limit] counts events the caller wanted. Applying it afterwards discards
+   part of the page and leaves the caller unable to say how wide a page it
+   needs — the read already loads the whole log, so a caller that filtered
+   later had to inflate [limit] and still lost its oldest events to a busier
+   agent. *)
+let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ~keep
     ?since_ms () =
   let stored = read_all_events config in
   let latest_store_seq = max (read_current_seq config) (max_event_seq stored) in
@@ -442,6 +448,7 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit
     |> List.filter (fun value ->
            value.seq > after_seq
            && matches_filters ~kinds value
+           && keep value
            && (match since_ms with
                | None -> true
                | Some ms -> value.ts_ms >= ms))
@@ -460,13 +467,14 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit
 let list_events_with_total config ?(kinds = []) ~after_seq ~limit
     ?since_ms () =
   let page, total, _latest_store_seq, _latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ?since_ms ()
+    list_events_with_meta config ~kinds ~after_seq ~limit
+      ~keep:(fun _ -> true) ?since_ms ()
   in
   (page, total)
 
-let list_events config ?(kinds = []) ~after_seq ~limit () =
+let list_events config ?(kinds = []) ~after_seq ~limit ~keep () =
   let page, _total, _latest_store_seq, _latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ()
+    list_events_with_meta config ~kinds ~after_seq ~limit ~keep ()
   in
   page
 
@@ -536,7 +544,8 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
 
 let json_response config ?(kinds = []) ~after_seq ~limit () =
   let events, total_matching, latest_store_seq, latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ()
+    list_events_with_meta config ~kinds ~after_seq ~limit
+      ~keep:(fun _ -> true) ()
   in
   let next_after_seq =
     match List.rev events with

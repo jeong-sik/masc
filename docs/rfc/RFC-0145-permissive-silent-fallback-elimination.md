@@ -164,7 +164,7 @@ error is the operator-visible signal.
   audit findings).
 - Yojson protocol-level enforcement at the write side (RFC-0107 +
   RFC-0109 family).
-- Removing catch-all `_ ->` arms in non-parse code (RFC-OAS Cluster C
+- Removing catch-all `_ ->` arms in non-parse code (RFC-agent_core Cluster C
   candidate).
 
 ## 8a. Complementary wildcard-narrowing sweep (2026-05-22)

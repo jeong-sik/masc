@@ -66,8 +66,8 @@ type register_restarting_error =
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the
-    replacement fiber launches. Durable pause or Dead-tombstone admission is
-    checked by the caller before this registration CAS. *)
+    replacement fiber launches. Durable pause admission is checked by the
+    caller before this registration CAS. *)
 val register_restarting :
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result
@@ -326,13 +326,6 @@ val set_turn_switch :
     keeper is not registered. *)
 val clear_turn_switch : base_path:string -> string -> unit
 
-(** Cancel the keeper's in-flight turn by failing its [Eio.Switch.t].
-    Returns [`Cancelled turn_id] when a live switch was held and
-    cancelled, or [`No_turn_in_flight] when there is no active turn or
-    no registered switch. *)
-val interrupt_current_turn :
-  base_path:string -> string -> [ `Cancelled of int | `No_turn_in_flight ]
-
 type exact_turn_interrupt_result =
   | Exact_turn_cancelled of int
   | Exact_no_turn_in_flight
@@ -341,10 +334,19 @@ type exact_turn_interrupt_result =
       ; detail : string
       }
 
-(** Cancel the turn switch retained by this exact registry entry. Unlike the
-    name-based compatibility API, failure is returned explicitly. *)
+(** Cancel the turn switch retained by this exact registry entry.
+
+    [Exact_turn_cancelled] states that the switch was failed, not that the
+    turn ended: the signal still has to reach the running fiber, and a fiber
+    parked in an uncancellable section never sees it. Callers must not report
+    it as a completed cancellation. *)
 val interrupt_current_turn_exact :
   registry_entry -> exact_turn_interrupt_result
+
+(** Same, resolved by name. Returns [Exact_turn_cancel_failed] when the entry
+    is absent, so a failure is never reported as an absent turn. *)
+val interrupt_current_turn :
+  base_path:string -> string -> exact_turn_interrupt_result
 
 (** Record the verdict reasons from a [keeper_cycle_decision] that
     chose to skip the next turn.  Stamps [last_skip_observation] with
@@ -387,13 +389,8 @@ val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 val is_running : base_path:string -> string -> bool
 
 (** Check if a keeper has ANY registry entry (regardless of state).
-    Used by reconcile to skip Crashed/Dead keepers. *)
+    Used by reconcile to skip keepers already owned by the registry. *)
 val is_registered : base_path:string -> string -> bool
-
-(** Restore an already-authoritative durable Dead tombstone into the in-memory
-    registry. Runtime failures, cancellation, retry exhaustion, and resource
-    observations must never call this function. *)
-val mark_dead : base_path:string -> string -> at:float -> unit
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option

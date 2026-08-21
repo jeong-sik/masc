@@ -5,7 +5,7 @@
 // strip (keeper-phase-strip.ts):
 //   • Phase strip   — records FSM transitions (prev_phase → new_phase)
 //   • Lifecycle     — records higher-level supervisor events
-//     (Started, Reconciled, Restarted, Dead_cleaned, etc.)
+//     (Started, Reconciled, Restarted, Supervisor_cleaned, etc.)
 //
 // Both are useful together: the lifecycle timeline shows *why* a phase
 // sequence happened (operator action, restart burst) while
@@ -31,14 +31,14 @@ const loading = signal(false)
 
 // ── Lifecycle event categorisation ───────────────────────────────────────
 
-type EventTone = 'ok' | 'warn' | 'bad' | 'info'
+type EventTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
 
 /** Map well-known lifecycle event strings to a semantic tone. */
 export function lifecycleEventTone(event: string): EventTone {
   const e = event.trim().toLowerCase()
   if (e === 'started' || e === 'reconciled') return 'ok'
   if (e === 'restarted') return 'warn'
-  if (e === 'dead_cleaned') return 'bad'
+  if (e === 'supervisor_cleaned') return 'neutral'
   if (e === 'purged') return 'info'
   return 'info'
 }
@@ -49,6 +49,7 @@ function toneStyle(tone: EventTone): { dot: string; label: string } {
     case 'warn': return { dot: 'var(--color-status-warn)', label: 'text-[var(--color-status-warn)]' }
     case 'bad':  return { dot: 'var(--bad-light)',         label: 'text-[var(--bad-light)]' }
     case 'info':
+    case 'neutral':
     default:     return { dot: 'var(--color-fg-muted)',    label: 'text-[var(--color-fg-muted)]' }
   }
 }
@@ -59,7 +60,7 @@ export function lifecycleEventLabel(event: string): string {
     case 'started':           return '기동됨'
     case 'reconciled':        return '재조정됨'
     case 'restarted':         return '재시작됨'
-    case 'dead_cleaned':      return '종료 정리됨'
+    case 'supervisor_cleaned': return '부재 Keeper 정리됨'
     case 'purged':            return '완전 삭제됨'
     default:                  return event.replace(/_/g, ' ')
   }

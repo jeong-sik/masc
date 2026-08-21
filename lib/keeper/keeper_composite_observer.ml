@@ -203,8 +203,7 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
        | Keeper_state_machine.Paused
        | Keeper_state_machine.Stopped
        | Keeper_state_machine.Crashed
-       | Keeper_state_machine.Restarting
-       | Keeper_state_machine.Dead ->
+       | Keeper_state_machine.Restarting ->
            Keeper_registry.Packed Turn_idle)
 
 let live_decision_stage (entry : Keeper_registry.registry_entry) =
@@ -260,8 +259,7 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
   | Keeper_state_machine.Paused
   | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Restarting
-  | Keeper_state_machine.Dead ->
+  | Keeper_state_machine.Restarting ->
     Suspended entry.phase
 
 (* [wake_kind] + [stimulus_kinds] pair shared by [run_state_to_json]'s
@@ -557,9 +555,6 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
     { key; label; priority; value; phase }
   in
   [
-    row "dead_tombstone" "Dead: durable tombstone" 1
-      c.dead_tombstone_latched
-      Keeper_state_machine.Dead;
     row "stopped_clean_drain" "Stopped: clean drain complete" 2
       (c.stop_requested && c.drain_complete
        && not c.compaction_active && not c.handoff_active)

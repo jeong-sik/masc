@@ -79,7 +79,6 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Stopped:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
-  Dead:         'bg-[var(--color-bg-elevated)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Offline:      'bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)] border-[var(--color-border-default)]',
   // KTC (unique keys — shared keys like idle/exhausted/compacting/donelisten under KCL/KMC below)
   prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',

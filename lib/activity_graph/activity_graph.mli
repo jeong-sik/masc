@@ -88,14 +88,21 @@ val list_events :
   ?kinds:string list ->
   after_seq:int ->
   limit:int ->
+  keep:(event -> bool) ->
   unit ->
   event list
-(** Reads the persisted log, applies the [kinds] filter, and
-    returns the page of events strictly after [after_seq] up
-    to [limit] entries.  When [after_seq = 0] the page is
-    the {b last} [limit] entries (newest-first dashboard
-    initial load); otherwise it is the next [limit] forward
-    (catch-up tail). *)
+(** Reads the persisted log, applies the [kinds] filter and
+    [keep], and returns the page of events strictly after
+    [after_seq] up to [limit] entries.  When [after_seq = 0]
+    the page is the {b last} [limit] entries (newest-first
+    dashboard initial load); otherwise it is the next [limit]
+    forward (catch-up tail).
+
+    [keep] runs before the page is cut, so [limit] counts
+    events the caller asked for rather than events the log
+    happened to hold. A caller that filters afterwards has no
+    value of [limit] that means "this agent's newest N": the
+    page fills with whatever the workspace was busy doing. *)
 
 (** {1 JSON projections} *)
 

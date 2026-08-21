@@ -46,21 +46,18 @@ let requested_names ~(config : Workspace.config) args =
 
 let status ~(config : Workspace.config) (meta : keeper_meta) =
   let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
-  let agent_status =
-    Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name
-  in
   let now_ts = Time_compat.now () in
   let diagnostic =
     Keeper_status_runtime.keeper_diagnostic_json
       ~config
-      ~meta ~agent_status ~keepalive_running ~history_items:[] ~now_ts
+      ~meta ~keepalive_running ~history_items:[] ~now_ts
     |> Keeper_status_runtime.augment_keeper_diagnostic_json
          ~keepalive_running
          ~keepalive_started_at:
            (Keeper_status_bridge.runtime_keepalive_started_at config meta)
          ~now_ts
   in
-  Keeper_status_runtime.keeper_surface_status ~agent_status ~diagnostic
+  Keeper_status_runtime.keeper_surface_status ~diagnostic
 
 type active_goal_scope_audit = {
   active_goal_ids : string list;

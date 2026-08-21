@@ -122,6 +122,40 @@ val set_append_guard : ((unit -> unit) -> unit) -> unit
     runtimes can install resource accounting/backpressure without making this
     low-level storage library depend on those policy modules. *)
 
+val collect_matching :
+  ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
+(** [collect_matching ?offset t n ~f] returns the newest [n] values [f]
+    produced. Where {!filter_map_recent} counts rows read, this counts values
+    selected, so [n] means what a filtering caller intended by it.
+
+    Use it whenever [f] rejects rows. With {!filter_map_recent} such a caller
+    has no value of [n] that means "the newest [n] matches": the budget fills
+    with whatever was written last, and unrelated writes can consume all of it.
+    Multiplying [n] to compensate only moves the write rate at which the answer
+    goes empty.
+
+    Day files are walked newest-first and scanned backwards in fixed-size
+    chunks. The scan stops at the [n]-th match and never materialises a whole
+    day file; memory is bounded by the current chunk/line fragment plus the
+    selected values.
+
+    [offset] skips selected values, not rows. Ordering and malformed-row
+    skipping match {!filter_map_recent}, including that {b [f] is called
+    newest-first}. *)
+
+val collect_matching_range :
+  ?offset:int ->
+  t ->
+  since:string ->
+  until:string ->
+  int ->
+  f:(Yojson.Safe.t -> 'a option) ->
+  'a list
+(** Range-bounded {!collect_matching}. Only day files in the inclusive
+    [[since, until]] UTC date range are opened. Invalid or reversed dates
+    return [[]], matching {!filter_map_range_recent}; row-level [f] remains
+    responsible for exact timestamp boundaries within the edge days. *)
+
 val filter_map_recent :
   ?offset:int -> t -> int -> f:(Yojson.Safe.t -> 'a option) -> 'a list
 (** [filter_map_recent ?offset t n ~f] is [List.filter_map f (read_recent

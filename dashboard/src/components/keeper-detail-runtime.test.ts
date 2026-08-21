@@ -25,7 +25,6 @@ import {
   KeeperSecretProjectionPanel,
   filterSignalGroups,
   deriveKeeperLiveTruth,
-  resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
 import {
   resolveKeeperObservedToolAudit,
@@ -211,59 +210,6 @@ describe('resolveKeeperObservedToolAudit', () => {
   })
 })
 
-describe('resolveKeeperCurrentTaskLabel', () => {
-  it('shows the active task when one is bound', () => {
-    const keeper: Keeper = {
-      name: 'config-provenance',
-      status: 'busy',
-      agent: {
-        name: 'keeper-config-provenance-agent',
-        current_task: 'task-046',
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('task-046')
-  })
-
-  it('shows unassigned when the runtime reported no bound task', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-      agent: {
-        name: 'keeper-sangsu-agent',
-        current_task: null,
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('unassigned')
-  })
-
-  it('treats an empty current task string as unassigned', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-      agent: {
-        name: 'keeper-sangsu-agent',
-        current_task: '   ',
-      },
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('unassigned')
-  })
-
-  it('returns unlinked when no keeper payload is available', () => {
-    expect(resolveKeeperCurrentTaskLabel(null)).toBe('unlinked')
-  })
-
-  it('keeps not_collected for online keepers without linked agent payload', () => {
-    const keeper: Keeper = {
-      name: 'sangsu',
-      status: 'active',
-    }
-
-    expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
-  })
-})
 
 describe('RuntimeSignals', () => {
   it('renders metrics_window top lists as visual distributions', () => {
@@ -443,21 +389,6 @@ describe('RuntimeLensSection', () => {
           source_clock: {
             counts: {},
           },
-          claim_scope: {
-            present: false,
-            source: 'tool_call_log',
-            status: 'not_observed',
-            result: null,
-            mode: null,
-            scoped: null,
-            active_goal_ids: [],
-            effective_goal_ids: [],
-            fallback_reason: null,
-            matched_goal_id: null,
-            excluded_count: null,
-            claimed_task_id: null,
-            claimed_goal_id: null,
-          },
           config_drift: {
             present: false,
             status: 'ok',
@@ -616,7 +547,6 @@ describe('RuntimeLensSection', () => {
           handoff_active: false,
           operator_paused: false,
           stop_requested: false,
-          dead_tombstone_latched: false,
           restart_requested: false,
           drain_complete: false,
           credential_archived: false,
@@ -640,6 +570,14 @@ describe('RuntimeLensSection', () => {
         duration_ms: 16000,
         error: null,
         runtime: null,
+        claim_attempt: {
+          present: false,
+          source: 'keeper_task_claim_tool_call',
+          status: 'not_observed',
+          result: null,
+          claimed_task_id: null,
+          claimed_goal_id: null,
+        },
       },
       runtime_attention: {
         state: 'blocked',

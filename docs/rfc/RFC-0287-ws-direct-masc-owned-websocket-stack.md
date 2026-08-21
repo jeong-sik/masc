@@ -200,7 +200,7 @@ unrelated merged RFC (fusion-judge-of-judges); ws-direct uses RFC-0287.
 
 - `httpun` / `httpun-eio` / `gluten` — only the WS protocol is replaced; the HTTP
   server and the gluten upgrade boundary stay.
-- `cohttp` / `cohttp-eio` — used by OAS/GraphQL/telemetry; the Discord client
+- `cohttp` / `cohttp-eio` — used by agent_core/GraphQL/telemetry; the Discord client
   stops using `Cohttp_eio.Private.IO`, but the dep remains for other users.
 - TLS setup (`tls-eio` / `ca-certs`) — reused for the Discord connection.
 - The [[RFC-0281]] driving SSOT and session protocol.

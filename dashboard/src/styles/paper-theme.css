@@ -225,7 +225,7 @@
   --warn-20: var(--ember-fill);
   --warn-bright: var(--ember-line);
 
-  /* bad — Crashed / Dead, red-group */
+  /* bad — Crashed, red-group */
   --bad: var(--brick);
   --bad-10: var(--brick-fill);
   --bad-15: var(--brick-fill);

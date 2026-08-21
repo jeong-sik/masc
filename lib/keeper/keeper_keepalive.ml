@@ -83,9 +83,7 @@ let transcript_corruption_reset_required (meta : keeper_meta) =
       (Keeper_lifecycle_admission.Classified
         Keeper_latched_reason.Transcript_corruption_reset_required) ->
     true
-  | Keeper_lifecycle_admission.Active
-  | Keeper_lifecycle_admission.Paused _
-  | Keeper_lifecycle_admission.Dead_tombstone ->
+  | Keeper_lifecycle_admission.Active | Keeper_lifecycle_admission.Paused _ ->
     false
 ;;
 
@@ -890,8 +888,7 @@ let start_keepalive
       | Keeper_state_machine.Compacting
       | Keeper_state_machine.HandingOff
       | Keeper_state_machine.Draining
-      | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Dead -> finished
+      | Keeper_state_machine.Crashed -> finished
       | Keeper_state_machine.Running
       | Keeper_state_machine.Paused
       | Keeper_state_machine.Restarting

@@ -206,7 +206,6 @@ const BACKEND_PHASE_LOWERCASE_MAP = {
   stopped: 'Stopped',
   crashed: 'Crashed',
   restarting: 'Restarting',
-  dead: 'Dead',
 } as const satisfies Record<string, KeeperPhase>
 
 /** Forward-compat PascalCase passthrough — accepts already-typed values from
@@ -224,7 +223,6 @@ const BACKEND_PHASE_PASCAL_PASSTHROUGH = {
   Stopped: 'Stopped',
   Crashed: 'Crashed',
   Restarting: 'Restarting',
-  Dead: 'Dead',
 } as const satisfies Record<KeeperPhase, KeeperPhase>
 
 // Compile-time coverage check: every KeeperPhase variant must appear as a
@@ -292,7 +290,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
     return raw
   }
   if (raw === 'in_progress' || raw === 'claimed') return 'busy'
-  if (raw === 'dead' || raw === 'left') return 'offline'
+  if (raw === 'left') return 'offline'
   return 'offline'
 }
 
@@ -303,7 +301,7 @@ function normalizeKeeperAgentStatus(value: unknown): Keeper['status'] {
 const KEEPER_LIFECYCLE_STATES: ReadonlySet<KeeperLifecycleState> = new Set<KeeperLifecycleState>([
   'active', 'compacting', 'preparing', 'handoff-imminent',
   'idle', 'offline', 'unbooted', 'stopped',
-  'paused', 'crashed', 'dead', 'unknown',
+  'paused', 'crashed', 'unknown',
 ])
 
 // Typed parse: replaces the `as KeeperLifecycleState` cast that
@@ -322,7 +320,7 @@ export function toKeeperLifecycleState(raw: string | null | undefined): KeeperLi
 export function deriveLifecycleState(keeper: Keeper): KeeperLifecycleState {
   // RFC-0139 PR-2: strict-superset migration off `isOfflineStatus`
   // (status-only). `isKeeperOffline` adds the terminal-FSM-phase axis
-  // (Offline/Stopped/Dead/Crashed) so a keeper crashed mid-tick
+  // (Offline/Stopped/Crashed) so a keeper crashed mid-tick
   // is caught even when its wire-format status hasn't transitioned yet.
   if (isKeeperOffline(keeper)) {
     // Keep offline-detail labels on a typed display axis. Unknown future
@@ -615,7 +613,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
   return rows
     .map((row): Keeper | null => {
       if (!isRecord(row)) return null
-      const agentRaw = isRecord(row.agent) ? row.agent : null
       const contextRaw = isRecord(row.context) ? row.context : null
       const metricsWindow = normalizeMetricsWindow(row.metrics_window)
 
@@ -631,7 +628,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
       const topContextSource = asString(row.context_source) ?? null
       const topContextMeasured = topContextSource === 'turn_record'
       const contextRatio = topContextMeasured ? asNumber(row.context_ratio) ?? null : null
-      const statusRaw = asString(row.status) ?? asString(agentRaw?.status) ?? 'offline'
+      const statusRaw = asString(row.status) ?? 'offline'
       const model = undefined
       const metricsSeries = normalizeMetricsSeries(row.metrics_series)
 
@@ -650,21 +647,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
               request_body_bytes: nestedContextMeasured ? asNumber(contextRaw.request_body_bytes) ?? null : null,
               message_count: asNumber(contextRaw.message_count),
               has_checkpoint: typeof contextRaw.has_checkpoint === 'boolean' ? contextRaw.has_checkpoint : undefined,
-            }
-          : undefined
-
-      const normalizedAgent =
-        agentRaw
-          ? {
-              name: asString(agentRaw.name),
-              error: asString(agentRaw.error),
-              agent_type: asString(agentRaw.agent_type),
-              status: asString(agentRaw.status),
-              current_task: asString(agentRaw.current_task) ?? null,
-              session_bound_at: asString(agentRaw.session_bound_at),
-              last_seen: asString(agentRaw.last_seen),
-              last_seen_ago_s: asNumber(agentRaw.last_seen_ago_s),
-              capabilities: asStringArray(agentRaw.capabilities),
             }
           : undefined
 
@@ -758,7 +740,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         updated_at: toIsoTimestamp(row.updated_at) ?? asString(row.updated_at),
         last_heartbeat: asString(row.heartbeat_observation_error)
           ? undefined
-          : (asString(row.last_heartbeat) ?? asString(agentRaw?.last_seen)),
+          : asString(row.last_heartbeat),
         heartbeat_observation_error: asString(row.heartbeat_observation_error) ?? null,
         last_autonomous_action_at: toIsoTimestamp(row.last_autonomous_action_at) ?? asString(row.last_autonomous_action_at) ?? null,
         generation: asNumber(row.generation),
@@ -809,7 +791,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_compaction_decision: asString(row.last_compaction_decision) ?? null,
         metrics_series: metricsSeries.length > 0 ? metricsSeries : undefined,
         metrics_window: metricsWindow,
-        agent: normalizedAgent,
         provider_health: providerHealth,
       }
     })

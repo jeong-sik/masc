@@ -52,7 +52,7 @@ let validation_error_result
 let goal_phase_strings = List.map Goal_phase.to_string Goal_phase.all
 
 let goal_transition_action_strings =
-  List.map Goal_phase.action_to_string Goal_phase.all_actions
+  List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all
 ;;
 
 let make_enum_field_error ~field ~allowed ~received =
@@ -144,7 +144,7 @@ let parse_optional_transition_action args field =
   match Json_util.assoc_member_opt field args with
   | None | Some `Null -> Ok None
   | Some (`String raw) ->
-    (match Goal_phase.parse_action raw with
+    (match Goal_phase.Public_action.parse raw with
      | Some action -> Ok (Some action)
      | None ->
        Error
@@ -187,6 +187,24 @@ let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
        ; "event_type", `String event_type
        ; "payload", payload
        ])
+;;
+
+(* RFC-0387 stage 2: wake the goal verifier lane after a durable
+   [Criterion_pending] / [Proof_pending] request committed. The wake is
+   scheduling only — the same discipline as the task-side
+   [verification_submitted_fn] call: a raised hook must not fail (or roll
+   back) a commit that already landed; the maintenance-pulse rescan is the
+   backstop. *)
+let notify_goal_verification_pending (ctx : context) ~goal_id =
+  try
+    (Atomic.get Workspace_hooks.goal_verification_pending_fn) ctx.config ~goal_id
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.error
+      "goal verification wake degraded after durable request commit goal_id=%s detail=%s"
+      goal_id
+      (Printexc.to_string exn)
 ;;
 
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
@@ -283,12 +301,30 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             | `created -> "created"
             | `updated -> "updated"
           in
+          (* RFC-0387 §3.2 (B2): creation records the durable criterion-check
+             request BEFORE any verifier model call consumes it. The goal is
+             already committed, so a failed write does not fail the creation
+             (the cross-file best-effort precedent of [delete_goal]) — it is
+             reported in [criterion_check] instead. Updates carry no hook:
+             the declaration obligation is creation-time only. *)
+          let criterion_check =
+            match action with
+            | `updated -> `String "not_applicable_update"
+            | `created ->
+              (match Goal_verification.mark_criterion_pending ctx.config ~goal_id:goal.id with
+               | Ok _ ->
+                 notify_goal_verification_pending ctx ~goal_id:goal.id;
+                 `String "criterion_pending"
+               | Error msg -> `Assoc [ "state", `String "criterion_check_failed"
+                                     ; "detail", `String msg ])
+          in
           ok_result
             ~tool_name
             ~start_time
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
+            ; "criterion_check", criterion_check
             ; ( "task_goal_id_example"
               , `String
                   (Printf.sprintf
@@ -411,6 +447,393 @@ let handle_goal_assign ~tool_name ~start_time (ctx : context) args
              ]))
 ;;
 
+(* RFC-0387 stage 2 — the completion gate.
+
+   Ordering for every gated action: [Goal_phase.decide_transition] first (the
+   FSM is the ONLY transition decider), then the ledger commit, then the phase
+   write, then the event. The ledger never judges a transition — it records
+   durable requests ([mark_*_pending]) and verdicts, and its commit failure
+   vetoes the phase write (persist-before-model-call), which is what keeps a
+   crashed write reconcilable instead of wedged (stage-2 review P0-2). *)
+
+(* The four gate actions carry a verdict; a verdict without evidence is not a
+   judgment, so [evidence] is required non-blank (RFC-0387 §3.3/§4). *)
+let gate_action_requires_evidence = function
+  | Goal_phase.Record_proof_proven
+  | Goal_phase.Record_proof_refuted
+  | Goal_phase.Record_criterion_viable
+  | Goal_phase.Record_criterion_unreachable -> true
+  | Goal_phase.Request_complete
+  | Goal_phase.Pause
+  | Goal_phase.Resume
+  | Goal_phase.Block
+  | Goal_phase.Unblock
+  | Goal_phase.Drop
+  | Goal_phase.Reopen -> false
+;;
+
+let validate_gate_evidence args action =
+  if not (gate_action_requires_evidence action)
+  then Ok ""
+  else
+    match get_string_opt args "evidence" with
+    | Some evidence when String.trim evidence <> "" -> Ok evidence
+    | received ->
+      Error
+        [ { field = "evidence"
+          ; constraint_violated = Required
+          ; message =
+              Printf.sprintf
+                "%s requires non-blank evidence — a verdict without evidence \
+                 is not a judgment (RFC-0387)"
+                (Goal_phase.action_to_string action)
+          ; expected = Some "non-blank string"
+          ; received
+          }
+        ]
+;;
+
+type verifier_decision =
+  | Criterion_viable
+  | Criterion_unreachable of { reason : string }
+  | Proof_proven
+  | Proof_refuted of { reason : string }
+
+type proof_reconciliation =
+  | No_committed_proof
+  | Reconciled of Goal_phase.t
+  | Reconciliation_not_needed of Goal_phase.t
+
+let validate_verification_run_id verification_run_id =
+  if String.trim verification_run_id <> ""
+  then Ok verification_run_id
+  else
+    Error
+      [ { field = "verification_run_id"
+        ; constraint_violated = Required
+        ; message =
+            "a verifier verdict must name the exact durable verification run"
+        ; expected = Some "non-blank run ID"
+        ; received = Some verification_run_id
+        }
+      ]
+;;
+
+(* The authority is constructed inside the application boundary. It is not a
+   field accepted from an MCP caller and cannot be replaced by a Keeper/session
+   name. [Runtime.verifier_exact_lane_id] is the runtime configuration SSOT. *)
+let gate_verdict
+      (outcome : Goal_verification.verdict_outcome)
+      ~verification_run_id
+      ~evidence
+    : Goal_verification.verdict
+  =
+  { Goal_verification.outcome
+  ; verification_run_id
+  ; authority =
+      Masc_domain.System_llm_agent
+        { agent_run_id = Runtime.verifier_exact_lane_id }
+  ; evidence
+  ; recorded_at = Masc_domain.now_iso ()
+  }
+;;
+
+let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdict) =
+  let outcome_fields =
+    match verdict.outcome with
+    | Goal_verification.Proven -> [ "outcome", `String "proven" ]
+    | Goal_verification.Refuted { reason } ->
+      [ "outcome", `String "refuted"; "reason", `String reason ]
+  in
+  `Assoc
+    ([ "phase", Goal_phase.to_yojson phase
+     ; "actor", `String ctx.agent_name
+     ; "verification_run_id", `String verdict.verification_run_id
+     ; "evidence", `String verdict.evidence
+     ]
+     @ outcome_fields)
+;;
+
+let already_goal_response ~tool_name ~start_time ~goal_id ~action ~phase goal verification =
+  ok_result
+    ~tool_name
+    ~start_time
+    ([ "goal_id", `String goal_id
+     ; "action", `String (Goal_phase.action_to_string action)
+     ; "noop", `Bool true
+     ; "phase", Goal_phase.to_yojson phase
+     ; "goal", Goal_store.goal_to_yojson goal
+     ]
+     @
+     match verification with
+     | Some (record : Goal_verification.record) ->
+       [ "verification", Goal_verification.record_to_yojson record ]
+     | None -> [])
+;;
+
+(* Phase-neutral criterion commit (RFC-0387 §3.3): the FSM answered [Already]
+   for a non-terminal phase, so there is no phase write and no phase event —
+   the ledger is the whole effect. *)
+let commit_criterion_verdict_response
+      ~tool_name ~start_time (ctx : context) ~goal_id ~action ~phase goal verdict
+  =
+  match Goal_verification.record_criterion_verdict ctx.config ~goal_id verdict with
+  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Conflict msg
+  | Ok record ->
+    already_goal_response
+      ~tool_name ~start_time ~goal_id ~action ~phase goal (Some record)
+;;
+
+let verifier_decision_parts = function
+  | Criterion_viable ->
+    Goal_phase.Record_criterion_viable, Goal_verification.Proven, None
+  | Criterion_unreachable { reason } ->
+    ( Goal_phase.Record_criterion_unreachable
+    , Goal_verification.Refuted { reason }
+    , Some reason )
+  | Proof_proven ->
+    Goal_phase.Record_proof_proven, Goal_verification.Proven, None
+  | Proof_refuted { reason } ->
+    ( Goal_phase.Record_proof_refuted
+    , Goal_verification.Refuted { reason }
+    , Some reason )
+;;
+
+let commit_verifier_decision
+      ~tool_name
+      ~start_time
+      config
+      ~goal_id
+      ~verification_run_id
+      ~decision
+      ~evidence
+  =
+  let ctx : context =
+    { config; agent_name = Runtime.verifier_exact_lane_id }
+  in
+  let action, verdict_outcome, note = verifier_decision_parts decision in
+  match
+    ( validate_verification_run_id verification_run_id
+    , validate_gate_evidence (`Assoc [ "evidence", `String evidence ]) action )
+  with
+  | Error errors, _ | _, Error errors ->
+    validation_error_result ~tool_name ~start_time errors
+  | Ok verification_run_id, Ok evidence ->
+    (match Goal_store.get_goal config ~goal_id with
+     | None ->
+       error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
+     | Some goal ->
+       (match Goal_phase.decide_transition ~phase:goal.phase ~action with
+        | Error msg ->
+          error_result_typed ~tool_name ~start_time ~code:Conflict msg
+        | Ok (Goal_phase.Already phase) ->
+          (match decision with
+           | Criterion_viable | Criterion_unreachable _ ->
+             commit_criterion_verdict_response
+               ~tool_name
+               ~start_time
+               ctx
+               ~goal_id
+               ~action
+               ~phase
+               goal
+               (gate_verdict verdict_outcome ~verification_run_id ~evidence)
+           | Proof_proven | Proof_refuted _ ->
+             error_result_typed
+               ~tool_name
+               ~start_time
+               ~code:Conflict
+               "proof verdict did not name a phase transition")
+        | Ok (Goal_phase.Move_to phase) ->
+          (match decision with
+           | Criterion_viable | Criterion_unreachable _ ->
+             error_result_typed
+               ~tool_name
+               ~start_time
+               ~code:Internal_error
+               "criterion verdicts are phase-neutral; decide_transition never moves"
+           | Proof_proven | Proof_refuted _ ->
+             let verdict =
+               gate_verdict verdict_outcome ~verification_run_id ~evidence
+             in
+             (match Goal_verification.record_proof_verdict config ~goal_id verdict with
+              | Error msg ->
+                error_result_typed ~tool_name ~start_time ~code:Conflict msg
+              | Ok record ->
+                (match update_goal_phase ctx goal ~phase ?note () with
+                 | Error msg ->
+                   error_result_typed
+                     ~tool_name
+                     ~start_time
+                     ~code:Internal_error
+                     msg
+                 | Ok updated_goal ->
+                   emit_goal_event
+                     ctx
+                     ~goal_id
+                     ~event_type:"goal_phase"
+                     ~payload:(gate_event_payload ctx ~phase verdict);
+                   ok_result
+                     ~tool_name
+                     ~start_time
+                     [ "goal_id", `String goal_id
+                     ; "action", `String (Goal_phase.action_to_string action)
+                     ; "goal", Goal_store.goal_to_yojson updated_goal
+                     ; "verification", Goal_verification.record_to_yojson record
+                     ])))))
+;;
+
+let reconcile_committed_proof config ~goal_id =
+  let ctx : context =
+    { config; agent_name = Runtime.verifier_exact_lane_id }
+  in
+  match Goal_store.get_goal config ~goal_id with
+  | None -> Error (Printf.sprintf "goal not found: %s" goal_id)
+  | Some goal when goal.phase <> Goal_phase.Verifying ->
+    Ok (Reconciliation_not_needed goal.phase)
+  | Some goal ->
+    (match Goal_verification.get_record config ~goal_id with
+     | Error _ as error -> error
+     | Ok None -> Ok No_committed_proof
+     | Ok
+         (Some
+           { Goal_verification.completion =
+               Goal_verification.Proof_proven
+                 { outcome = Goal_verification.Refuted _; _ }
+           ; _
+           }) ->
+       Error "proof_proven ledger state carries a refuted verdict"
+     | Ok
+         (Some
+           { Goal_verification.completion =
+               Goal_verification.Proof_refuted
+                 { outcome = Goal_verification.Proven; _ }
+           ; _
+           }) ->
+       Error "proof_refuted ledger state carries a proven verdict"
+     | Ok (Some record) ->
+       let transition =
+         match record.completion with
+         | Goal_verification.Proof_proven verdict ->
+           Some (Goal_phase.Record_proof_proven, verdict, None)
+         | Goal_verification.Proof_refuted
+             ({ outcome = Goal_verification.Refuted { reason }; _ } as verdict) ->
+           Some (Goal_phase.Record_proof_refuted, verdict, Some reason)
+         | Goal_verification.Proof_refuted
+             { outcome = Goal_verification.Proven; _ } ->
+           (* Rejected by the explicit malformed-ledger guard above. This arm
+              keeps the closed sum exhaustive at the use site. *)
+           None
+         | Goal_verification.Completion_idle
+         | Goal_verification.Proof_pending _ -> None
+       in
+       match transition with
+       | None -> Ok No_committed_proof
+       | Some (action, verdict, note) ->
+         (match Goal_phase.decide_transition ~phase:goal.phase ~action with
+          | Error msg -> Error msg
+          | Ok (Goal_phase.Already _) ->
+            Error "committed proof reconciliation did not name a phase transition"
+          | Ok (Goal_phase.Move_to phase) ->
+            let update (current : Goal_store.goal) =
+              let last_review_note, last_review_at =
+                match note with
+                | Some note -> Some note, Some (Masc_domain.now_iso ())
+                | None -> current.last_review_note, current.last_review_at
+              in
+              { current with phase; last_review_note; last_review_at }
+            in
+            (match
+               Goal_store.update_goal_if_phase
+                 config
+                 ~goal_id
+                 ~expected_phase:Goal_phase.Verifying
+                 update
+             with
+             | Error _ as error -> error
+             | Ok (Goal_store.Goal_phase_mismatch current_phase) ->
+               Ok (Reconciliation_not_needed current_phase)
+             | Ok (Goal_store.Goal_updated _) ->
+               emit_goal_event
+                 ctx
+                 ~goal_id
+                 ~event_type:"goal_phase"
+                 ~payload:(gate_event_payload ctx ~phase verdict);
+               Ok (Reconciled phase))))
+;;
+
+(* A repeated [request_complete] on [Verifying] is the explicit retry that
+   replaces wall-clock expiry (RFC-0387 §5). A missing durable request is
+   re-armed; a committed verdict whose phase/event write was interrupted is
+   reconciled from that exact ledger row without another model call. *)
+let answer_verifying_repeat ~tool_name ~start_time (ctx : context) ~goal_id ~action goal =
+  match Goal_verification.get_record ctx.config ~goal_id with
+  | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+  | Ok record ->
+    (match record with
+     | Some
+         { Goal_verification.completion = Goal_verification.Proof_pending _; _ } ->
+       already_goal_response
+         ~tool_name ~start_time ~goal_id ~action ~phase:Goal_phase.Verifying goal
+         record
+     | Some
+         ({ Goal_verification.completion =
+              (Goal_verification.Proof_proven _ | Goal_verification.Proof_refuted _)
+          ; _
+          } as committed_record) ->
+       (match reconcile_committed_proof ctx.config ~goal_id with
+        | Error msg ->
+          error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+        | Ok No_committed_proof ->
+          error_result_typed
+            ~tool_name
+            ~start_time
+            ~code:Internal_error
+            "committed proof disappeared during phase reconciliation"
+        | Ok (Reconciliation_not_needed phase) ->
+          (match Goal_store.get_goal ctx.config ~goal_id with
+           | None ->
+             error_result_typed
+               ~tool_name ~start_time ~code:Internal_error "goal disappeared"
+           | Some current_goal ->
+             already_goal_response
+               ~tool_name
+               ~start_time
+               ~goal_id
+               ~action
+               ~phase
+               current_goal
+               (Some committed_record))
+        | Ok (Reconciled phase) ->
+          (match Goal_store.get_goal ctx.config ~goal_id with
+           | None ->
+             error_result_typed
+               ~tool_name ~start_time ~code:Internal_error "goal disappeared"
+           | Some updated_goal ->
+             ok_result
+               ~tool_name
+               ~start_time
+               [ "goal_id", `String goal_id
+               ; "action", `String (Goal_phase.action_to_string action)
+               ; "noop", `Bool false
+               ; "reconciled", `Bool true
+               ; "phase", Goal_phase.to_yojson phase
+               ; "goal", Goal_store.goal_to_yojson updated_goal
+               ; ( "verification"
+                 , Goal_verification.record_to_yojson committed_record )
+               ]))
+     | Some { Goal_verification.completion = Goal_verification.Completion_idle; _ }
+     | None ->
+       (match Goal_verification.mark_proof_pending ctx.config ~goal_id with
+        | Error msg ->
+          error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+        | Ok record ->
+          notify_goal_verification_pending ctx ~goal_id;
+          already_goal_response
+            ~tool_name ~start_time ~goal_id ~action ~phase:Goal_phase.Verifying goal
+            (Some record)))
+;;
+
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args
     : Tool_result.result =
   match
@@ -419,7 +842,8 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
   with
   | Error err, _ | _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
-  | Ok goal_id, Ok (Some action) ->
+  | Ok goal_id, Ok (Some public_action) ->
+    let action = Goal_phase.Public_action.to_action public_action in
     let note = get_string_opt args "note" in
     (match Goal_store.get_goal ctx.config ~goal_id with
      | None ->
@@ -428,41 +852,118 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
-        (* The goal already occupies the phase this action targets. Writing it
-           and emitting a phase event would turn a repeated report — a duplicate
-           reconciliation, a stale racing event — into repeated history, so the
-           request is answered from the goal as it stands. *)
+        (* The goal already occupies the phase this public lifecycle request
+           targets. Verifier verdicts cannot enter this branch because they
+           are absent from [Goal_phase.Public_action]. *)
         | Ok (Goal_phase.Already phase) ->
-          ok_result
-            ~tool_name
-            ~start_time
-            [ "goal_id", `String goal_id
-            ; "action", `String (Goal_phase.action_to_string action)
-            ; "noop", `Bool true
-            ; "phase", Goal_phase.to_yojson phase
-            ; "goal", Goal_store.goal_to_yojson goal
-            ]
+          (match public_action with
+           | Goal_phase.Public_action.Request_complete ->
+             (match phase with
+              | Goal_phase.Verifying ->
+                answer_verifying_repeat
+                  ~tool_name ~start_time ctx ~goal_id ~action goal
+              | Goal_phase.Executing
+              | Goal_phase.Blocked
+              | Goal_phase.Paused
+              | Goal_phase.Completed
+              | Goal_phase.Dropped ->
+                already_goal_response
+                  ~tool_name ~start_time ~goal_id ~action ~phase goal None)
+           | Goal_phase.Public_action.Pause
+           | Goal_phase.Public_action.Resume
+           | Goal_phase.Public_action.Block
+           | Goal_phase.Public_action.Unblock
+           | Goal_phase.Public_action.Drop
+           | Goal_phase.Public_action.Reopen ->
+             already_goal_response
+               ~tool_name ~start_time ~goal_id ~action ~phase goal None)
         | Ok (Goal_phase.Move_to phase) ->
-          (match update_goal_phase ctx goal ~phase ?note () with
-           | Error msg ->
-             error_result_typed ~tool_name ~start_time ~code:Internal_error msg
-           | Ok updated_goal ->
-             emit_goal_event
-               ctx
-               ~goal_id
-               ~event_type:"goal_phase"
-               ~payload:
-                 (`Assoc
-                    [ "phase", Goal_phase.to_yojson updated_goal.phase
-                    ; "actor", `String ctx.agent_name
-                    ]);
-             ok_result
-               ~tool_name
-               ~start_time
-               [ "goal_id", `String goal_id
-               ; "action", `String (Goal_phase.action_to_string action)
-               ; "goal", Goal_store.goal_to_yojson updated_goal
-               ])))
+          (match public_action with
+           | Goal_phase.Public_action.Request_complete ->
+                (* Executing -> Verifying (RFC-0387 §4): gate on the criterion
+                   verdict, then persist the proof request BEFORE the phase
+                   write — if the ledger write fails the phase does not move.
+                   A ledger that does not decode is a typed error, never read
+                   as "not unreachable" (P1-1). *)
+                (match Goal_verification.get_record ctx.config ~goal_id with
+                 | Error msg ->
+                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                 | Ok
+                     (Some
+                       { Goal_verification.criterion =
+                           Goal_verification.Criterion_unreachable _
+                       ; _
+                       }) ->
+                   error_result_typed
+                     ~tool_name
+                     ~start_time
+                     ~code:Conflict
+                     (Printf.sprintf
+                        "goal %s criterion was judged unreachable; \
+                         request_complete is refused (RFC-0387 B2)"
+                        goal_id)
+                 | Ok _ ->
+                   (match
+                      Goal_verification.mark_proof_pending ctx.config ~goal_id
+                    with
+                    | Error msg ->
+                      error_result_typed
+                        ~tool_name ~start_time ~code:Internal_error msg
+                    | Ok record ->
+                      (match update_goal_phase ctx goal ~phase ?note () with
+                       | Error msg ->
+                         error_result_typed
+                           ~tool_name ~start_time ~code:Internal_error msg
+                       | Ok updated_goal ->
+                         emit_goal_event
+                           ctx
+                           ~goal_id
+                           ~event_type:"goal_phase"
+                           ~payload:
+                             (`Assoc
+                                [ "phase", Goal_phase.to_yojson updated_goal.phase
+                                ; "actor", `String ctx.agent_name
+                                ]);
+                         (* The durable proof request AND the phase write both
+                            committed — wake the verifier lane to drain it
+                            (the task-side analogue fires after the same two
+                            commits). *)
+                         notify_goal_verification_pending ctx ~goal_id;
+                         ok_result
+                           ~tool_name
+                           ~start_time
+                           [ "goal_id", `String goal_id
+                           ; "action", `String (Goal_phase.action_to_string action)
+                           ; "goal", Goal_store.goal_to_yojson updated_goal
+                           ; ( "verification"
+                             , Goal_verification.record_to_yojson record )
+                           ])))
+           | Goal_phase.Public_action.Pause
+           | Goal_phase.Public_action.Resume
+           | Goal_phase.Public_action.Block
+           | Goal_phase.Public_action.Unblock
+           | Goal_phase.Public_action.Drop
+           | Goal_phase.Public_action.Reopen ->
+                (match update_goal_phase ctx goal ~phase ?note () with
+                 | Error msg ->
+                   error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                 | Ok updated_goal ->
+                   emit_goal_event
+                     ctx
+                     ~goal_id
+                     ~event_type:"goal_phase"
+                     ~payload:
+                       (`Assoc
+                          [ "phase", Goal_phase.to_yojson updated_goal.phase
+                          ; "actor", `String ctx.agent_name
+                          ]);
+                   ok_result
+                     ~tool_name
+                     ~start_time
+                     [ "goal_id", `String goal_id
+                     ; "action", `String (Goal_phase.action_to_string action)
+                     ; "goal", Goal_store.goal_to_yojson updated_goal
+                     ]))))
   | Ok _, Ok None ->
     validation_error_result
       ~tool_name

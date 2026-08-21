@@ -14,7 +14,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('stopped')).toBe('Stopped')
     expect(toKeeperPhase('crashed')).toBe('Crashed')
     expect(toKeeperPhase('restarting')).toBe('Restarting')
-    expect(toKeeperPhase('dead')).toBe('Dead')
   })
 
   it('accepts PascalCase input for forward compatibility', () => {

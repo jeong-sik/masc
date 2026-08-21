@@ -267,17 +267,35 @@ let handle_keeper_turn_interrupt state request reqd =
         respond_json_value_with_cors ~status:`Not_found request reqd
           (keeper_chat_stream_error_json "keeper not registered")
       else (
+        (* The server fails the turn switch and learns nothing more within this
+           request: whether the signal reaches the running fiber, and whether
+           that fiber then terminates, are later events. [signalled] reports
+           what happened here. A turn parked in an uncancellable section keeps
+           running after a [signalled: true] response, so an operator has to
+           read the turn state to know the outcome. The former [cancelled:
+           true] read as that outcome and hid a 63-minute hang (#29229). *)
         match Keeper_registry.interrupt_current_turn ~base_path keeper_name with
-        | `Cancelled turn_id ->
+        | Keeper_registry.Exact_turn_cancelled turn_id ->
           Log.Keeper.info "keeper_turn_interrupt: keeper=%s turn_id=%d" keeper_name turn_id;
           respond_json_value_with_cors ~status:`OK request reqd
-            (`Assoc [ ("cancelled", `Bool true); ("turn_id", `Int turn_id) ])
-        | `No_turn_in_flight ->
+            (`Assoc [ ("signalled", `Bool true); ("turn_id", `Int turn_id) ])
+        | Keeper_registry.Exact_no_turn_in_flight ->
           respond_json_value_with_cors ~status:`OK request reqd
             (`Assoc
-               [ ("cancelled", `Bool false)
+               [ ("signalled", `Bool false)
                ; ("reason", `String "no_in_flight_turn")
-               ])))
+               ])
+        | Keeper_registry.Exact_turn_cancel_failed { turn_id; detail } ->
+          respond_json_value_with_cors ~status:`OK request reqd
+            (`Assoc
+               ([ ("signalled", `Bool false)
+                ; ("reason", `String "cancel_failed")
+                ; ("detail", `String detail)
+                ]
+                @
+                match turn_id with
+                | Some turn_id -> [ ("turn_id", `Int turn_id) ]
+                | None -> []))))
 ;;
 
 (* No cumulative timeout or work budget for keeper_msg. Keeper calls AGENT_CORE with

@@ -1571,11 +1571,13 @@ let goal_list_output_schema =
             ~properties:
               [ "active_count", `Assoc [ "type", `String "integer" ]
               ; "paused_count", `Assoc [ "type", `String "integer" ]
+              ; "verifying_count", `Assoc [ "type", `String "integer" ]
               ; "done_count", `Assoc [ "type", `String "integer" ]
               ; "dropped_count", `Assoc [ "type", `String "integer" ]
               ]
             ~required:
-              [ "active_count"; "paused_count"; "done_count"; "dropped_count" ] )
+              [ "active_count"; "paused_count"; "verifying_count"; "done_count"
+              ; "dropped_count" ] )
       ]
     ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
 ;;

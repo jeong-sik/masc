@@ -257,7 +257,6 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   stopped: 'clean terminal stop',
   crashed: 'crash 후 재시작 또는 조사 필요',
   restarting: 'supervisor 재시작 흐름 활성',
-  dead: '재시작 예산 소진',
 }
 
 export function HeroPhase({

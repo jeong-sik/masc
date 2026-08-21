@@ -6,10 +6,10 @@
     the [Goal_store.goal] record is constructed by literal in external callers,
     so verification state gets its own store.
 
-    RFC-0387 stage 1 ships this module as a RECORD-ONLY evidence store: the
-    dashboard read paths render it, but no workflow reads it for control and
-    no caller writes it yet. Stage 2 (the verifier gate) adds the writers —
-    the durable [*_pending] requests and the verifier-lane verdict commits.
+    RFC-0387 stage 1 shipped this module as a RECORD-ONLY evidence store;
+    stage 2 (the verifier gate) wires the writers — the durable
+    [mark_*_pending] requests and the verdict commits — and the reader that
+    gates [request_complete] on [Criterion_unreachable].
 
     Two state machines per goal, both closed sum types:
 
@@ -17,8 +17,8 @@
       declared success condition. [Criterion_unchecked] is the explicit
       default for pre-RFC-0387 goals, not a silent fallback.
     - [completion_state] (B3) — the completion-time proof chain. A gated
-      [Completed] goal carries [Human_confirmed { proof; … }], so "verifier
-      proof plus human confirmation" reads back as one durable record.
+      [Completed] goal carries [Proof_proven verdict], so the verifier's exact
+      run, authority, evidence, and timestamp read back as one durable record.
 
     Mutation discipline mirrors [Goal_store]: locked read-modify-write, strict
     decode, and a store that does not decode refuses every mutation (the
@@ -32,6 +32,9 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  verification_run_id : string;
+      (** Exact Goal-verifier attempt whose durable run record contains the
+          evaluator and tool observations supporting this verdict. *)
   authority : Masc_domain.completion_authority;
       (** Typed provenance, reused from the Task completion protocol. The
           stage-2 verifier lane commits with its own run identity
@@ -51,11 +54,6 @@ type completion_state =
   | Proof_pending of { requested_at : string }
   | Proof_proven of verdict
   | Proof_refuted of verdict
-  | Human_confirmed of {
-      proof : verdict;
-      confirmed_by : string;
-      confirmed_at : string;
-    }
 
 type record = {
   goal_id : string;
@@ -103,8 +101,29 @@ val ledger_error_to_yojson : string -> Yojson.Safe.t
 (** {1 Mutations}
 
     All are locked read-modify-writes that refuse an undecodable store.
-    Stage 1 wires no caller; these are the surface the stage-2 verifier gate
-    commits through. *)
+    Stage 2 wires them: [mark_*_pending] are the durable requests the gate
+    persists before any model call, and the verdict commits are what the
+    verifier lane (or a manual [masc_goal_transition] with evidence) writes. *)
+
+val mark_criterion_pending :
+  Workspace_utils.config ->
+  goal_id:string ->
+  (record, string) result
+(** Records the durable creation-time criterion check (RFC-0387 §3.2, B2):
+    [Criterion_unchecked -> Criterion_pending]. Idempotent when already
+    pending; refuses to overwrite a committed [Criterion_viable] /
+    [Criterion_unreachable] verdict. *)
+
+val mark_proof_pending :
+  Workspace_utils.config ->
+  goal_id:string ->
+  (record, string) result
+(** Records the durable completion-proof request (RFC-0387 §4.1, B3):
+    [Completion_idle -> Proof_pending], persisted BEFORE the phase enters
+    [Verifying] (persist-before-model-call). Idempotent when already pending —
+    a repeated [request_complete] re-arms the request. A standing
+    [Proof_refuted] is superseded by the new request; a committed
+    [Proof_proven] verdict is never overwritten. *)
 
 val record_criterion_verdict :
   Workspace_utils.config ->
@@ -112,24 +131,20 @@ val record_criterion_verdict :
   verdict ->
   (record, string) result
 (** Commits the verifier's creation-time feasibility judgment (B2). [Proven]
-    lands as [Criterion_viable], [Refuted] as [Criterion_unreachable]. *)
+    lands as [Criterion_viable], [Refuted] as [Criterion_unreachable]. Requires
+    a durable [Criterion_pending] request, or the same criterion outcome already
+    committed for an idempotent retry. An unchecked or opposite stale verdict
+    is refused inside the locked record mutation. *)
 
 val record_proof_verdict :
   Workspace_utils.config ->
   goal_id:string ->
   verdict ->
   (record, string) result
-(** Commits the verifier's completion proof (B3). Requires [Proof_pending] —
-    the durable request the stage-2 gate persists before entering its
-    verifying phase — or the same outcome already committed (the
-    crash-between-writes retry); anything else is an [Error], not a silent
-    overwrite. *)
-
-val record_human_confirmation :
-  Workspace_utils.config ->
-  goal_id:string ->
-  confirmed_by:string ->
-  (record, string) result
-(** Commits the human's final confirmation (B3). Requires [Proof_proven]; the
-    proof is carried into [Human_confirmed] so the completed goal retains the
-    whole chain. *)
+(** Commits the verifier's completion proof (B3). Requires a durable
+    [Criterion_viable] verdict and [Proof_pending] — the request the stage-2
+    gate persists before entering its verifying phase — or the same proof
+    outcome already committed (the crash-between-writes retry). The criterion
+    check happens inside the same locked record mutation, so a racing
+    unreachable verdict cannot be followed by a proof commit. Anything else
+    is an [Error], not a silent overwrite. *)

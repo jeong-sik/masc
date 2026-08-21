@@ -1,15 +1,22 @@
 (** Goal_phase — state machine SSOT for goal lifecycle.
 
-    Encodes the five phases a goal can be in, the operator/system
+    Encodes the six phases a goal can be in, the operator/system
     actions that drive transitions, and the deterministic decision
     function {!decide_transition}. Used by the goal subsystem to keep
-    transition logic out of caller code. *)
+    transition logic out of caller code.
+
+    RFC-0387 stage 2: [Verifying] sits between [Executing] and
+    [Completed] — [Request_complete] enters it, and only the verifier's
+    [Record_proof_proven] leaves it for [Completed]. *)
 
 (** Goal lifecycle phases. *)
 type t =
   | Executing
   | Blocked
   | Paused
+  | Verifying
+      (** Completion requested; the proof verdict is pending out-of-band
+          (RFC-0387 B3). *)
   | Completed
   | Dropped
 
@@ -31,7 +38,9 @@ val all : t list
     string set (MCP schema enum, validator) via [List.map to_string all]. *)
 
 val admits_self_directed_progress : t -> bool
-(** Whether a keeper waking on this goal can make progress on it. *)
+(** Whether a keeper waking on this goal can make progress on it. [Verifying]
+    admits continued progress on the linked tasks while the completion proof
+    is judged out-of-band: the gate holds the phase, not the work. *)
 
 (** Operator / system actions that may drive a transition. *)
 type action =
@@ -42,14 +51,46 @@ type action =
   | Unblock
   | Drop
   | Reopen
+  | Record_proof_proven
+      (** Verifier commit: the completion proof held. [Verifying ->
+          Completed]. Requires non-blank evidence at the tool boundary. *)
+  | Record_proof_refuted
+      (** Verifier commit: the completion proof failed. [Verifying ->
+          Executing]; the refutation reason stays in the ledger and
+          goal_events. *)
+  | Record_criterion_viable
+  | Record_criterion_unreachable
+      (** Phase-neutral creation-time criterion verdicts (RFC-0387 B2): legal
+          in every non-terminal phase as [Already <same phase>] — the handler
+          commits the ledger and never writes the phase. *)
 
 val action_to_string : action -> string
 val action_of_string : string -> action option
 val parse_action : string -> action option
 
 val all_actions : action list
-(** Every action in declaration order. SSOT for the schema/validator action
-    enum via [List.map action_to_string all_actions]. *)
+(** Every internal action in declaration order. Includes verifier-only ledger
+    commits and is the SSOT for the exhaustive transition matrix. *)
+
+module Public_action : sig
+  (** Lifecycle requests exposed by [masc_goal_transition]. Verifier verdicts
+      are deliberately absent: they enter through the application-owned typed
+      authority boundary, never through an MCP caller. *)
+  type t =
+    | Request_complete
+    | Pause
+    | Resume
+    | Block
+    | Unblock
+    | Drop
+    | Reopen
+
+  val to_action : t -> action
+  val to_string : t -> string
+  val of_string : string -> t option
+  val parse : string -> t option
+  val all : t list
+end
 
 (** What a transition request resolves to.
 

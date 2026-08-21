@@ -24,14 +24,14 @@ const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
 /** Terminal statuses for waterfall priority — does NOT include 'crashed'
  *  (a crashed keeper was recently active, so it gets priority 2, not 3). */
 const PRIORITY_TERMINAL_STATUSES: ReadonlySet<string> = new Set([
-  'offline', 'inactive', 'stopped', 'dead',
+  'offline', 'inactive', 'stopped',
 ])
 
 /** Offline display statuses — includes 'crashed' (keeper is not running
  *  but was recently active) and 'unbooted'/'stopped' (lifecycle terminal).
  *  Used for UI contextual messages, not sorting. */
 const OFFLINE_DISPLAY_STATUSES: ReadonlySet<string> = new Set([
-  'offline', 'inactive', 'dead', 'crashed', 'unbooted', 'stopped',
+  'offline', 'inactive', 'crashed', 'unbooted', 'stopped',
 ])
 
 /** Classify keeper status into a priority tier for waterfall display ordering.

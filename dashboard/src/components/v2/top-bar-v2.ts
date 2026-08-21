@@ -1,7 +1,7 @@
 // MASC v2 — top bar (ported from prototype shell.jsx TopBar + AttentionIndicator).
 // Emits the prototype `.v2-top` DOM (crumb · live statchip · attention ·
 // schedule · Copilot). Wired to live signals: running count + attention
-// aggregate (Gate approvals, needs-attention keepers, dead/overflowed,
+// aggregate (Gate approvals, needs-attention keepers, crashed/overflowed,
 // stale connectors). The Copilot button reuses the existing dock controller.
 
 import { html } from 'htm/preact'
@@ -34,7 +34,7 @@ import {
   subscribeDashboardFullHealthRefresh,
 } from '../dashboard-full-health-state'
 
-const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead'])
+const FAILURE_PHASES = new Set(['Overflowed', 'Crashed'])
 
 type TopBarKeeperCount =
   | { kind: 'executable'; count: number }
@@ -82,7 +82,7 @@ interface AttentionAgg {
   approvals: number | null
   approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | null
   keepers: number
-  dead: number
+  failures: number
   stale: number
   health: DashboardCompositeHealthVerdict
   total: number
@@ -96,17 +96,17 @@ function computeAttention(): AttentionAgg {
       ? gateData.value?.approval_queue?.length ?? null
       : null
   const attKeepers = ks.filter((k) => k.needs_attention === true).length
-  const dead = ks.filter((k) => !!k.lifecycle_phase && DEAD_PHASES.has(k.lifecycle_phase)).length
+  const failures = ks.filter((k) => !!k.lifecycle_phase && FAILURE_PHASES.has(k.lifecycle_phase)).length
   const stale = staleKeepers.value.size
   const health = projectDashboardCompositeHealth(dashboardFullHealth.value)
   return {
     approvals,
     approvalQueueState,
     keepers: attKeepers,
-    dead,
+    failures,
     stale,
     health,
-    total: (approvals ?? 0) + attKeepers + dead + stale + health.issueCount,
+    total: (approvals ?? 0) + attKeepers + failures + stale + health.issueCount,
   }
 }
 
@@ -178,7 +178,7 @@ export function AttentionIndicatorV2() {
   }
   if (a.approvals !== null && a.approvals > 0) rows.push({ k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' })
   if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' })
-  if (a.dead > 0) rows.push({ k: 'dead', n: a.dead, lbl: '죽음·넘침', sev: 'bad', nav: 'monitoring' })
+  if (a.failures > 0) rows.push({ k: 'failures', n: a.failures, lbl: '충돌·넘침', sev: 'bad', nav: 'monitoring' })
   if (a.stale > 0) rows.push({ k: 'stale', n: a.stale, lbl: 'stale 게이트', sev: 'warn', nav: 'connectors' })
   if (a.health.state === 'attention') {
     rows.push(...a.health.issues.map(issue => ({
@@ -213,7 +213,7 @@ export function AttentionIndicatorV2() {
   }
   const healthIsBad = (a.health.state === 'attention' || a.health.state === 'status')
     && a.health.severity === 'bad'
-  const tone = (a.approvals ?? 0) > 0 || a.dead > 0 || healthIsBad
+  const tone = (a.approvals ?? 0) > 0 || a.failures > 0 || healthIsBad
     || (a.approvalQueueState?.state !== 'ready' && a.approvalQueueState?.severity === 'bad')
     ? 'bad'
     : 'warn'

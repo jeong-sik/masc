@@ -106,26 +106,55 @@ let format_goals (goal_ids : string list) : string =
   String.concat "\n"
     (List.map (fun gid -> Printf.sprintf "- %s" gid) goal_ids)
 
+(* What the prompt knows about one active goal. [phase] is [None] only when the
+   id does not resolve in the store (a dangling assignment — kept visible, per
+   [active_goal_summaries]). RFC-0387 stage 2 carries the phase so a [Verifying]
+   goal is annotated rather than reading as ordinary open work — the gate must
+   not make the goal disappear from the keeper's view (review P0-1). *)
+type goal_summary =
+  { summary_goal_id : string
+  ; summary_title : string
+  ; summary_phase : Goal_phase.t option
+  }
+
 (** Format active goals with their titles (RFC-0315). Falls back to
-    [format_goals] at the call site when the caller did not resolve titles. *)
-let format_goal_summaries (summaries : (string * string) list) : string =
+    [format_goals] at the call site when the caller did not resolve titles.
+    A [Verifying] goal is annotated: completion is requested and the proof is
+    being judged out-of-band, so the keeper keeps working the linked tasks
+    instead of re-requesting completion. *)
+let format_goal_summaries (summaries : goal_summary list) : string =
   String.concat "\n"
     (List.map
-       (fun (gid, title) ->
-         if title = "" then Printf.sprintf "- %s" gid
-         else Printf.sprintf "- %s — %s" gid title)
+       (fun summary ->
+         let base =
+           if summary.summary_title = ""
+           then Printf.sprintf "- %s" summary.summary_goal_id
+           else
+             Printf.sprintf "- %s — %s" summary.summary_goal_id summary.summary_title
+         in
+         match summary.summary_phase with
+         | Some Goal_phase.Verifying ->
+           base ^ " [증명 대기 중 — verifier가 proof를 검토 중]"
+         | Some
+             ( Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused
+             | Goal_phase.Completed | Goal_phase.Dropped )
+         | None -> base)
        summaries)
 
 let format_goal_summaries_for_active_goals
     ~(active_goal_ids : string list)
-    (summaries : (string * string) list) : string =
-  let title_for goal_id =
-    match List.assoc_opt goal_id summaries with
-    | Some title -> title
-    | None -> ""
+    (summaries : goal_summary list) : string =
+  let summary_for goal_id =
+    match
+      List.find_opt
+        (fun (s : goal_summary) -> String.equal s.summary_goal_id goal_id)
+        summaries
+    with
+    | Some summary -> summary
+    | None ->
+      { summary_goal_id = goal_id; summary_title = ""; summary_phase = None }
   in
-  format_goal_summaries
-    (List.map (fun goal_id -> (goal_id, title_for goal_id)) active_goal_ids)
+  format_goal_summaries (List.map summary_for active_goal_ids)
 
 (** Render the keeper's own claimed task as standing context (RFC-0315).
     The scheduled cycle always runs when proactive lifecycle is enabled, and
@@ -777,11 +806,14 @@ let effective_instructions ~(meta : Keeper_meta_contract.keeper_meta)
   effective_autonomous_instructions ~meta ?profile_defaults ?channel ()
 ;;
 
-(* Titles for the goals the world observation already narrowed to the ones a
-   keeper can still progress. [meta.active_goal_ids] records assignment and is
-   never cleared when a goal reaches a terminal phase, so this resolves the
-   same phase question the observation does — a keeper must not be handed a
-   Completed goal under a heading that calls it available. *)
+(* Titles and phases for the goals the world observation already narrowed to
+   the ones a keeper can still progress. [meta.active_goal_ids] records
+   assignment and is never cleared when a goal reaches a terminal phase, so
+   this resolves the same phase question the observation does — a keeper must
+   not be handed a Completed goal under a heading that calls it available. The
+   phase rides along so the Active Goals block can annotate a [Verifying] goal
+   (RFC-0387 stage 2: the gate must not make the goal read as ordinary open
+   work, nor disappear — review P0-1). *)
 let active_goal_summaries
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
@@ -791,9 +823,19 @@ let active_goal_summaries
        match Goal_store.get_goal config ~goal_id with
        | Some { Goal_store.title; phase; _ } ->
          if Goal_phase.admits_self_directed_progress phase
-         then Some (goal_id, title)
+         then
+           Some
+             { summary_goal_id = goal_id
+             ; summary_title = title
+             ; summary_phase = Some phase
+             }
          else None
-       | None -> Some (goal_id, ""))
+       | None ->
+         Some
+           { summary_goal_id = goal_id
+           ; summary_title = ""
+           ; summary_phase = None
+           })
     meta.active_goal_ids
 ;;
 
@@ -823,7 +865,17 @@ let executing_goals_without_tasks ~(config : Workspace.config) ~owner_matches =
     let index = Workspace_goal_index.build_goal_task_index_for_config config tasks in
     List.filter
       (fun (g : Goal_store.goal) ->
-         Goal_phase.admits_self_directed_progress g.phase
+         (* Deliberately [Executing] only, not [admits_self_directed_progress]:
+            that predicate also admits [Verifying] (RFC-0387 stage 2), but a
+            goal awaiting its proof verdict is not "work with no Task yet" —
+            nudging the keeper to start new tasks on it would race the gate. *)
+         (match g.phase with
+          | Goal_phase.Executing -> true
+          | Goal_phase.Blocked
+          | Goal_phase.Paused
+          | Goal_phase.Verifying
+          | Goal_phase.Completed
+          | Goal_phase.Dropped -> false)
          &&
          match Hashtbl.find_opt index g.id with
          | Some (_ :: _) -> false
@@ -869,14 +921,25 @@ let build_system_prompt ~(meta : Keeper_meta_contract.keeper_meta)
     ~(config : Workspace.config)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ?(channel : Keeper_world_observation.keeper_cycle_channel option)
-    ?(active_goal_summaries : (string * string) list option)
+    ?(active_goal_summaries : goal_summary list option)
     ()
   =
   let instructions = effective_instructions ~meta ?profile_defaults ?channel () in
+  (* [Keeper_prompt.build_keeper_system_prompt] renders id+title only; the
+     phase stays on the [goal_summary] for the Active Goals layer. *)
   let active_goals =
-    Option.value
-      ~default:(List.map (fun goal_id -> (goal_id, "")) meta.active_goal_ids)
-      active_goal_summaries
+    List.map
+      (fun (s : goal_summary) -> s.summary_goal_id, s.summary_title)
+      (Option.value
+         ~default:
+           (List.map
+              (fun goal_id ->
+                 { summary_goal_id = goal_id
+                 ; summary_title = ""
+                 ; summary_phase = None
+                 })
+              meta.active_goal_ids)
+         active_goal_summaries)
   in
   let base_system_prompt =
     Keeper_prompt.build_keeper_system_prompt
@@ -936,7 +999,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ~(turn_decision : Keeper_world_observation.keeper_cycle_decision option)
     ~(current_task : Keeper_world_observation_inputs.current_task_observation)
-    ?(active_goal_summaries : (string * string) list option)
+    ?(active_goal_summaries : goal_summary list option)
     ~(observation : Keeper_world_observation.world_observation)
     () : turn_prompt_parts
   =

@@ -1586,6 +1586,11 @@ let test_keeper_does_not_retry_context_error_after_tool_effect () =
               (Keeper_internal_error.Provider_attempt_effect_fenced
                  { effect_disposition; diagnostic; _ }) ->
             check
+              string
+              "the fence observed a tool effect (not Observation_unavailable)"
+              "effect_attempted"
+              (Keeper_provider_attempt_effect.to_string effect_disposition);
+            check
               bool
               "the fence forbids same-turn retry"
               false

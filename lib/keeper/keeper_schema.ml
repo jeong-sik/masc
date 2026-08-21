@@ -357,8 +357,12 @@ let schemas : tool_schema list = [
 
   {
     name = "masc_keeper_reset";
-    description = "Reset a keeper's runtime state (usage counters, last_model_used, token stats). \
-Clears stale data from previous sessions. Does not affect configuration, goals, or Keeper instructions.";
+    description = "Clear a keeper's lifecycle latch: drops the pause bit, the latched \
+reason, and runtime.last_blocker in one durable write. This is the operator recovery path \
+for a keeper the generic resume transform refuses to unpause — Keeper_meta_contract.mark_resumed \
+deliberately leaves Transcript_corruption_reset_required unchanged, so resume alone cannot \
+free it. Does not touch usage counters, token stats, configuration, \
+goals, or Keeper instructions.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

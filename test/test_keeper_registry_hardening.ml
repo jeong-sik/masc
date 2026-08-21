@@ -364,8 +364,6 @@ let test_wakeup_running_exact_reports_deferred_outcomes () =
    | KR.Exact_wake_missing
    | KR.Exact_wake_replaced
    | KR.Exact_wake_not_running _
-   | KR.Exact_wake_lifecycle_denied
-       Keeper_lifecycle_admission.Autonomous_dead_tombstone
    | KR.Exact_wake_lifecycle_reserved _ ->
      fail "paused exact owner did not report lifecycle denial")
 ;;
@@ -442,38 +440,6 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
     (Atomic.get replacement.fiber_wakeup)
 ;;
 
-let test_wakeup_denies_paused_and_dead_without_signaling () =
-  KR.For_testing.clear ();
-  let paused_meta = { (make_meta "paused-wakeup") with paused = true } in
-  let paused_entry = KR.For_testing.register ~base_path paused_meta.name paused_meta in
-  Atomic.set paused_entry.fiber_wakeup false;
-  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path paused_meta.name with
-   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
-   | KR.Signaled
-   | KR.Deferred_unregistered
-   | KR.Deferred_not_running _
-   | KR.Deferred_lifecycle Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
-     fail "paused wake was not lifecycle-deferred");
-  check bool "paused wake flag remains false" false (Atomic.get paused_entry.fiber_wakeup);
-  let meta =
-    { (make_meta "dead-wakeup") with
-      paused = true
-    ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
-    }
-  in
-  let entry = KR.For_testing.register ~base_path meta.name meta in
-  Atomic.set entry.fiber_wakeup false;
-  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path meta.name with
-   | KR.Deferred_lifecycle
-       Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
-   | KR.Signaled
-   | KR.Deferred_unregistered
-   | KR.Deferred_not_running _
-   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) ->
-     fail "dead tombstone wake was not lifecycle-deferred");
-  check bool "dead tombstone wake flag remains false" false
-    (Atomic.get entry.fiber_wakeup)
-;;
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -1478,10 +1444,6 @@ let () =
             "reports signaled and deferred outcomes"
             `Quick
             test_wakeup_running_reports_typed_outcome
-        ; test_case
-            "paused and dead keepers never receive runnable signal"
-            `Quick
-            test_wakeup_denies_paused_and_dead_without_signaling
         ; test_case
             "exact wake signals only the captured owner lane"
             `Quick

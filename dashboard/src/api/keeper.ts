@@ -65,7 +65,6 @@ export type {
   KeeperRuntimeLensProviderAttemptAxis,
   KeeperRuntimeLensPayloadRoleAxis,
   KeeperRuntimeLensSourceClockAxis,
-  KeeperRuntimeLensClaimScopeAxis,
   KeeperRuntimeLensConfigDriftAxis,
   KeeperRuntimeLensContextAxis,
   KeeperRuntimeLensMemoryAxis,
@@ -114,9 +113,13 @@ export {
 // --- Types ---
 
 export interface KeeperTurnInterruptResult {
-  cancelled: boolean
+  /** The server failed the turn switch. Whether the signal reached the running
+   *  fiber, and whether that fiber then ended, are later events this response
+   *  cannot report. Read the turn state for the outcome. */
+  signalled: boolean
   turn_id?: number
   reason?: string
+  detail?: string
 }
 
 export async function interruptKeeperTurn(
@@ -138,9 +141,10 @@ export async function interruptKeeperTurn(
   }
   const data = (await resp.json()) as Record<string, unknown>
   return {
-    cancelled: data.cancelled === true,
+    signalled: data.signalled === true,
     turn_id: typeof data.turn_id === 'number' ? data.turn_id : undefined,
     reason: asString(data.reason),
+    detail: asString(data.detail),
   }
 }
 

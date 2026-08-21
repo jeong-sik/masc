@@ -292,7 +292,7 @@ type FleetBand = 'attention' | 'active' | 'paused' | 'offline'
 // (line below), not a hard offline. This is an intentional semantic
 // divergence, not drift.
 const FLEET_OFFLINE_STATUSES: ReadonlySet<string> = new Set([
-  'offline', 'unbooted', 'stopped', 'dead', 'crashed',
+  'offline', 'unbooted', 'stopped', 'crashed',
 ])
 
 function normalizedDiagnosticHealthState(row: FleetRow): string | null {
@@ -300,7 +300,7 @@ function normalizedDiagnosticHealthState(row: FleetRow): string | null {
 }
 
 export function isOfflineDiagnosticHealthState(state: string | null): boolean {
-  return state === 'offline' || state === 'dead'
+  return state === 'offline'
 }
 
 function isAttentionDiagnosticHealthState(state: string | null): boolean {
@@ -404,7 +404,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           const toolQualityForKeeper = toolStats.get(keeper.name)
           const recentTools = keeperRecentTools(keeper)
           const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
-          const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+          const activity = keeperActivityDisplay(keeper)
           const runtimeBlockerSummary = normalizeKeeperBlockerText(
             firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker),
           )

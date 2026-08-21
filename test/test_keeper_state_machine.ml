@@ -4,7 +4,7 @@
     - derive_phase priority ordering
     - apply_event valid/invalid transitions
     - can_transition matrix completeness
-    - Terminal state properties (Stopped, Dead) *)
+    - Terminal state properties (Stopped) *)
 
 open Alcotest
 module SM = Keeper_state_machine
@@ -57,17 +57,6 @@ let test_derive_offline () =
   check phase_t "launch pending = Offline" SM.Offline (SM.derive_phase c)
 ;;
 
-let test_derive_dead_highest_priority () =
-  let c =
-    { running_conditions with
-      fiber_alive = false
-    ; dead_tombstone_latched = true
-    ; (* Even with another active lifecycle operation, explicit Dead wins *)
-      compaction_active = true
-    }
-  in
-  check phase_t "Dead wins over everything" SM.Dead (SM.derive_phase c)
-;;
 
 let test_derive_restarting () =
   let c =
@@ -493,23 +482,6 @@ let test_apply_paused_stop_drain_lifecycle () =
 
 (* ── Terminal state tests ──────────────────────────────── *)
 
-let test_dead_rejects_all_events () =
-  let dead_conds =
-    { SM.default_conditions with fiber_alive = false; dead_tombstone_latched = true }
-  in
-  List.iter
-    (fun event ->
-       let err = apply_err ~current_phase:SM.Dead ~conditions:dead_conds ~event in
-       match err with
-       | SM.Terminal_state { current; _ } -> check phase_t "Dead" SM.Dead current
-       | _ -> fail "expected Terminal_state error")
-    [ SM.Heartbeat_ok
-    ; SM.Fiber_started
-    ; SM.Operator_resume
-    ; SM.Compaction_started
-    ; SM.Handoff_started
-    ]
-;;
 
 let test_stopped_rejects_all_events () =
   let stopped_conds =
@@ -562,11 +534,6 @@ let test_can_transition_running_to_buffer_states () =
 let test_can_transition_running_invalid () =
   check
     bool
-    "hard-stop -> Dead"
-    true
-    (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Dead);
-  check
-    bool
     "-> Crashed (fiber death)"
     true
     (SM.can_transition ~from_phase:SM.Running ~to_phase:SM.Crashed);
@@ -589,22 +556,16 @@ let test_can_transition_terminal_nothing () =
          bool
          "Stopped -> nothing"
          false
-         (SM.can_transition ~from_phase:SM.Stopped ~to_phase);
-       check
-         bool
-         "Dead -> nothing"
-         false
-         (SM.can_transition ~from_phase:SM.Dead ~to_phase))
+         (SM.can_transition ~from_phase:SM.Stopped ~to_phase))
     SM.all_phases
 ;;
 
-let test_can_transition_crashed_only_restart_or_dead () =
+let test_can_transition_crashed_only_restart () =
   check
     bool
     "-> Restarting"
     true
     (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Restarting);
-  check bool "-> Dead" true (SM.can_transition ~from_phase:SM.Crashed ~to_phase:SM.Dead);
   check
     bool
     "no -> Running"
@@ -681,13 +642,6 @@ let test_can_transition_restarting_to_crashed () =
     (SM.can_transition ~from_phase:SM.Restarting ~to_phase:SM.Crashed)
 ;;
 
-let test_can_transition_restarting_to_dead () =
-  check
-    bool
-    "-> Dead"
-    true
-    (SM.can_transition ~from_phase:SM.Restarting ~to_phase:SM.Dead)
-;;
 
 let test_can_transition_paused_to_draining () =
   check
@@ -741,7 +695,6 @@ let test_can_execute_turn_blocks_other_phases () =
     ; SM.Stopped
     ; SM.Crashed
     ; SM.Restarting
-    ; SM.Dead
     ]
 ;;
 
@@ -1111,68 +1064,7 @@ let test_chain_stop_during_handoff () =
   check phase_t "handoff completes then Stopped" SM.Stopped final_phase
 ;;
 
-(** 18. The Phoenix that can't rise: complete lifecycle to Dead,
-    verify nothing can revive it. Then verify Stopped is equally terminal. *)
-let test_chain_no_phoenix () =
-  let dead_conds =
-    { SM.default_conditions with dead_tombstone_latched = true }
-  in
-  (* Every conceivable event must fail on Dead *)
-  let all_events =
-    [ SM.Heartbeat_ok
-    ; SM.Heartbeat_failed { consecutive = 1 }
-    ; SM.Turn_succeeded
-    ; SM.Turn_failed { consecutive = 1 }
-    ; SM.Context_measured
-        { context_ratio = 0.5
-        ; message_count = 10
-        ; token_count = 5000
-        ; context_actions = { compact = false; handoff = false }
-        }
-    ; SM.Compaction_started
-    ; SM.Compaction_completed
-    ; SM.Compaction_failed { reason = "test" }
-    ; SM.Handoff_started
-    ; SM.Handoff_completed { new_trace_id = "x"; generation = 99 }
-    ; SM.Handoff_failed { reason = "test" }
-    ; SM.Operator_pause
-    ; SM.Operator_resume
-    ; SM.Operator_stop { remove_meta = true }
-    ; SM.Stop_requested
-    ; SM.Drain_complete
-    ; SM.Fiber_started
-    ; SM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }
-    ; SM.Supervisor_restart_attempt { attempt = 99 }
-    ]
-  in
-  List.iter
-    (fun ev ->
-       match
-         SM.apply_event
-           ~current_phase:SM.Dead
-           ~conditions:dead_conds
-           ~event:ev
-           ~now:9999.0
-       with
-       | Error (SM.Terminal_state _) -> ()
-       | Error e ->
-         fail
-           (Printf.sprintf
-              "Dead: wrong error for %s: %s"
-              (SM.event_to_string ev)
-              (SM.transition_error_to_string e))
-       | Ok tr ->
-         fail
-           (Printf.sprintf
-              "Dead accepted %s -> %s"
-              (SM.event_to_string ev)
-              (SM.phase_to_string tr.new_phase)))
-    all_events
-;;
-
-(** 19. Triple crash-restart cycle: the keeper barely survives three crashes
-    before stabilizing. Tests that Fiber_started resets are correct across
-    multiple consecutive restart cycles. *)
+(** 18. Repeated crashes remain recoverable; Stopped alone is terminal. *)
 let test_chain_triple_restart_survives () =
   let final_phase, _ =
     chain_apply
@@ -1323,7 +1215,6 @@ let test_invariant_derive_phase_idempotent () =
     ; ( "dead"
       , { SM.default_conditions with
           fiber_alive = false
-        ; dead_tombstone_latched = true
         } )
     ]
   in
@@ -1335,12 +1226,9 @@ let test_invariant_derive_phase_idempotent () =
     scenarios
 ;;
 
-(** INV-2: Terminal states are absorbing.
-    Once Dead or Stopped, derive_phase always returns the same terminal. *)
+(** INV-2: the terminal state is absorbing.
+    Once Stopped, derive_phase always returns the same terminal. *)
 let test_invariant_terminal_absorbing () =
-  let dead_conds =
-    { SM.default_conditions with fiber_alive = false; dead_tombstone_latched = true }
-  in
   let stopped_conds =
     { running_conditions with stop_requested = true; drain_complete = true }
   in
@@ -1354,13 +1242,6 @@ let test_invariant_terminal_absorbing () =
     | `Comp -> { c with compaction_active = not c.compaction_active }
     | `Hand -> { c with handoff_active = not c.handoff_active }
   in
-  let non_critical_fields = [ `Hb; `Turn; `Hand_need; `Comp; `Hand ] in
-  (* Dead: toggling non-critical fields should keep Dead *)
-  List.iter
-    (fun field ->
-       let mutated = toggle dead_conds field in
-       check phase_t "Dead absorbs field toggle" SM.Dead (SM.derive_phase mutated))
-    non_critical_fields;
   (* Stopped: toggling non-critical fields should keep Stopped.
      TLA+ fix: compaction_active and handoff_active are NOW critical for
      Stopped — toggling them ON breaks the Stopped condition (→ Draining).
@@ -1403,7 +1284,6 @@ let test_invariant_fiber_started_reset_exhaustive () =
     ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
-    ; dead_tombstone_latched = false
     ; restart_requested = true
     ; drain_complete = true
     ; credential_archived = true
@@ -1634,7 +1514,7 @@ let test_invariant_derive_matches_matrix () =
     ]
   in
   let non_terminal_phases =
-    List.filter (fun p -> p <> SM.Stopped && p <> SM.Dead) SM.all_phases
+    List.filter (fun p -> p <> SM.Stopped) SM.all_phases
   in
   List.iter
     (fun phase ->
@@ -1662,7 +1542,7 @@ let test_invariant_derive_matches_matrix () =
                   fiber_alive = false
                 ; restart_requested = true
                 }
-              | SM.Stopped | SM.Dead -> running_conditions (* unreachable *)
+              | SM.Stopped -> running_conditions (* unreachable *)
             in
             (* Verify conditions produce the expected phase *)
             if SM.derive_phase conds <> phase
@@ -1704,7 +1584,6 @@ let test_invariant_priority_chain () =
     ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
-    ; dead_tombstone_latched = false
     ; restart_requested = true
     ; drain_complete = true
     ; credential_archived = false
@@ -1742,7 +1621,7 @@ let test_invariant_priority_chain () =
 
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
-let test_all_phases_covered () = check int "12 phases" 12 (List.length SM.all_phases)
+let test_all_phases_covered () = check int "11 phases" 11 (List.length SM.all_phases)
 
 (* ── Set/Clear Coverage ────────────────────────────────── *)
 
@@ -1767,7 +1646,6 @@ let test_setclear_coverage () =
     ; ("handoff_active", fun c -> c.handoff_active)
     ; ("operator_paused", fun c -> c.operator_paused)
     ; ("stop_requested", fun c -> c.stop_requested)
-    ; ("dead_tombstone_latched", fun c -> c.dead_tombstone_latched)
     ; ("restart_requested", fun c -> c.restart_requested)
     ; ("drain_complete", fun c -> c.drain_complete)
     ; ("credential_archived", fun c -> c.credential_archived)
@@ -1784,7 +1662,6 @@ let test_setclear_coverage () =
     ; handoff_active = false
     ; operator_paused = false
     ; stop_requested = false
-    ; dead_tombstone_latched = false
     ; restart_requested = false
     ; drain_complete = false
     ; credential_archived = false
@@ -1801,7 +1678,6 @@ let test_setclear_coverage () =
     ; handoff_active = true
     ; operator_paused = true
     ; stop_requested = true
-    ; dead_tombstone_latched = true
     ; restart_requested = true
     ; drain_complete = true
     ; credential_archived = true
@@ -1884,13 +1760,9 @@ let test_setclear_coverage () =
          fields)
     all_events;
   (* Fields managed outside the ordinary FSM event loop are exempt. *)
-  let exempt_from_clearer = [ "credential_archived"; "dead_tombstone_latched" ] in
+  let exempt_from_clearer = [ "credential_archived" ] in
   let exempt_from_setter =
-    [ "launch_pending"
-    ; (* set externally before Fiber_started *)
-      "dead_tombstone_latched"
-      (* durable lifecycle store *)
-    ]
+    [ "launch_pending" (* set externally before Fiber_started *) ]
   in
   (* Print coverage report for diagnostics *)
   let buf = Buffer.create 512 in
@@ -1967,7 +1839,6 @@ let () =
       , [ test_case "healthy = Running" `Quick test_derive_healthy
         ; test_case "default = Crashed" `Quick test_derive_default_crashed
         ; test_case "Offline in all_phases" `Quick test_derive_offline
-        ; test_case "Dead highest priority" `Quick test_derive_dead_highest_priority
         ; test_case "Restarting" `Quick test_derive_restarting
         ; test_case "Crashed" `Quick test_derive_crashed
         ; test_case "Stopped" `Quick test_derive_stopped
@@ -2052,8 +1923,7 @@ let () =
             test_apply_paused_stop_drain_lifecycle
         ] )
     ; ( "terminal"
-      , [ test_case "Dead rejects all" `Quick test_dead_rejects_all_events
-        ; test_case "Stopped rejects all" `Quick test_stopped_rejects_all_events
+      , [ test_case "Stopped rejects all" `Quick test_stopped_rejects_all_events
         ] )
     ; ( "can_transition"
       , [ test_case
@@ -2063,9 +1933,9 @@ let () =
         ; test_case "Running invalid targets" `Quick test_can_transition_running_invalid
         ; test_case "terminal -> nothing" `Quick test_can_transition_terminal_nothing
         ; test_case
-            "Crashed -> Restarting|Dead only"
+            "Crashed -> Restarting only"
             `Quick
-            test_can_transition_crashed_only_restart_or_dead
+            test_can_transition_crashed_only_restart
         ; test_case
             "Compacting -> Failing"
             `Quick
@@ -2089,7 +1959,6 @@ let () =
             "Restarting -> Crashed"
             `Quick
             test_can_transition_restarting_to_crashed
-        ; test_case "Restarting -> Dead" `Quick test_can_transition_restarting_to_dead
         ; test_case "Paused -> Draining" `Quick test_can_transition_paused_to_draining
         ; test_case
             "Paused -> latent buffer states"
@@ -2107,7 +1976,7 @@ let () =
         ] )
     ; ( "roundtrip"
       , [ test_case "phase string roundtrip" `Quick test_phase_string_roundtrip
-        ; test_case "12 phases" `Quick test_all_phases_covered
+        ; test_case "11 phases" `Quick test_all_phases_covered
         ] )
     ; ( "lifecycle_chain"
       , [ test_case
@@ -2156,7 +2025,6 @@ let () =
             `Quick
             test_chain_double_failure_recovery
         ; test_case "operator stop during handoff" `Quick test_chain_stop_during_handoff
-        ; test_case "no phoenix (all events rejected on Dead)" `Quick test_chain_no_phoenix
         ; test_case "triple restart survives" `Quick test_chain_triple_restart_survives
         ; test_case
             "pause while failing then stop"
@@ -2257,10 +2125,6 @@ let () =
             "Stopped without drain/stop flags → StoppedRequiresDrain"
             `Quick
             KSP.test_snapshot_stopped_requires_drain
-        ; test_case
-            "Dead without tombstone → DeadRequiresTombstone"
-            `Quick
-            KSP.test_snapshot_dead_requires_tombstone
         ; test_case
             "phase ≠ derive_phase(conditions) → DerivePhaseAgreement"
             `Quick

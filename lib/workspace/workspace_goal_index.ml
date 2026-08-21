@@ -488,6 +488,16 @@ let tasks_for_goal (index : (string, task list) Hashtbl.t) ~goal_id : task list 
   Option.value (Hashtbl.find_opt index goal_id) ~default:[]
 ;;
 
+(** Find all goals linked to a specific task — the reverse of
+    {!tasks_for_goal}, over the index {!build_task_goal_index_for_config}
+    builds. Returns [[]] when no goals are linked to the given [task_id]. *)
+let goals_for_task (index : (string, string list) Hashtbl.t) ~task_id :
+  string list =
+  (* DET-OK: an absent bucket is the documented no-linked-goals result, the
+     mirror of [tasks_for_goal] over the same registry. *)
+  Option.value (Hashtbl.find_opt index task_id) ~default:[]
+;;
+
 (** Count open (non-terminal) tasks for a goal using a pre-built index.
     O(k) where k = tasks linked to the goal, instead of O(n) full scan. *)
 let open_task_count_for_goal_indexed

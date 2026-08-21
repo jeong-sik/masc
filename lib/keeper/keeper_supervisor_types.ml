@@ -61,21 +61,3 @@ let iter_supervision_cohorts ?(yield_between = Eio_guard.fair_yield) cohorts ~f 
   in
   loop cohorts
 ;;
-
-let should_cleanup_dead ~now ~dead_ttl_sec (entry : Keeper_registry.registry_entry) =
-  match entry.phase, entry.dead_since_ts with
-  | Keeper_state_machine.Dead, Some dead_since -> now -. dead_since >= dead_ttl_sec
-  | Keeper_state_machine.Dead, None -> false
-  | ( ( Keeper_state_machine.Offline
-      | Keeper_state_machine.Running
-      | Keeper_state_machine.Failing
-      | Keeper_state_machine.Overflowed
-      | Keeper_state_machine.Compacting
-      | Keeper_state_machine.HandingOff
-      | Keeper_state_machine.Draining
-      | Keeper_state_machine.Paused
-      | Keeper_state_machine.Stopped
-      | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Restarting )
-    , _ ) -> false
-;;

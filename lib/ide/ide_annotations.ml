@@ -22,7 +22,7 @@ let store_file ~base_dir ~codebase () =
 ;;
 
 
-let tombstone_key = "__tombstone"
+let deletion_key = "__tombstone"
 let compact_key = "__compact"
 let compact_begin_tag = "begin"
 let compact_end_tag = "end"
@@ -63,9 +63,9 @@ let next_compaction_id () =
 
 let annotation_kind_of_string = Ide_annotation_types.annotation_kind_of_string
 
-let tombstone_json id keeper_id ts =
+let deletion_json id keeper_id ts =
   `Assoc
-    [ tombstone_key, `Bool true
+    [ deletion_key, `Bool true
     ; "id", `String id
     ; "keeper_id", `String keeper_id
     ; "deleted_at_ms", `Intlit (Int64.to_string ts)
@@ -128,7 +128,7 @@ let parse_compact_annotations ~path ~line_no = function
 
 type annotation_log_record =
   | Annotation of annotation
-  | Tombstone of string
+  | Deleted of string
   | Compact_begin of string
   | Compact_end of string * annotation list
   | Ignored
@@ -159,12 +159,12 @@ let record_of_json ~path ~line_no json =
        warn_malformed_record ~path ~line_no "compact marker has unknown tag";
        Ignored
      | None ->
-       (match List.assoc_opt tombstone_key fields with
+       (match List.assoc_opt deletion_key fields with
         | Some (`Bool true) ->
           (match string_field fields "id" with
-           | Some id -> Tombstone id
+           | Some id -> Deleted id
            | None ->
-             warn_malformed_record ~path ~line_no "tombstone marker missing string id";
+             warn_malformed_record ~path ~line_no "deletion marker missing string id";
              Ignored)
         | _ ->
           (match annotation_of_json json with
@@ -180,7 +180,7 @@ let record_of_json ~path ~line_no json =
        Ignored)
 ;;
 
-let rec apply_log_record ?(capture = true) annotations tombstoned active = function
+let rec apply_log_record ?(capture = true) annotations deleted_ids active = function
   | Annotation annotation as record ->
     annotations := annotation :: !annotations;
     if capture
@@ -188,8 +188,8 @@ let rec apply_log_record ?(capture = true) annotations tombstoned active = funct
       match !active with
       | Some (id, buffered) -> active := Some (id, record :: buffered)
       | None -> ())
-  | Tombstone id as record ->
-    tombstoned := String_set.add id !tombstoned;
+  | Deleted id as record ->
+    deleted_ids := String_set.add id !deleted_ids;
     if capture
     then (
       match !active with
@@ -203,10 +203,10 @@ let rec apply_log_record ?(capture = true) annotations tombstoned active = funct
     (match !active with
      | Some (active_id, buffered) when String.equal active_id id ->
        annotations := List.rev snapshot;
-       tombstoned := String_set.empty;
+       deleted_ids := String_set.empty;
        active := None;
        List.iter
-         (apply_log_record ~capture:false annotations tombstoned active)
+         (apply_log_record ~capture:false annotations deleted_ids active)
          (List.rev buffered)
      | _ -> ())
   | Ignored -> ()
@@ -217,14 +217,14 @@ let load_all_for_codebase ?stop_before_compact_begin_id ~base_dir codebase =
   if not (Sys.file_exists path)
   then []
   else (
-    (* task-1744/task-1738: the log is append-only. Tombstones suppress
+    (* task-1744/task-1738: the log is append-only. Deletion records suppress
        earlier annotation rows by id, and compaction is represented by
        begin/end markers rather than an atomic-rename rewrite. Rows
        appended between a compact begin and compact end are buffered and
        replayed after the compact snapshot, so creates/deletes do not
        block on a full-file rewrite and are not lost. *)
     let annotations = ref [] in
-    let tombstoned = ref String_set.empty in
+    let deleted_ids = ref String_set.empty in
     let active_compaction = ref None in
     let stopped = ref false in
     let () =
@@ -241,7 +241,7 @@ let load_all_for_codebase ?stop_before_compact_begin_id ~base_dir codebase =
                 (match record with
                  | Compact_begin id -> String.equal stop_id id
                  | Annotation _
-                 | Tombstone _
+                 | Deleted _
                  | Compact_end _
                  | Ignored -> false)
               | None -> false
@@ -252,13 +252,13 @@ let load_all_for_codebase ?stop_before_compact_begin_id ~base_dir codebase =
             else
               apply_log_record
                 annotations
-                tombstoned
+                deleted_ids
                 active_compaction
                 record))
         path
     in
     List.rev !annotations
-    |> List.filter (fun (a : annotation) -> not (String_set.mem a.id !tombstoned)))
+    |> List.filter (fun (a : annotation) -> not (String_set.mem a.id !deleted_ids)))
 ;;
 
 let create
@@ -373,7 +373,7 @@ let compact ~base_dir ~codebase () =
 ;;
 
 let delete ~base_dir ~codebase ~id ~keeper_id ?expected_version () =
-  (* No ensure_store: a delete that finds its target appends a tombstone to
+  (* No ensure_store: a delete that finds its target appends a deletion record to
      a file that already exists; a miss must not seed the directory. *)
   let all = load_all_for_codebase ~base_dir codebase in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with
@@ -396,6 +396,6 @@ let delete ~base_dir ~codebase ~id ~keeper_id ?expected_version () =
        let ts = now_ms () in
        Fs_compat.append_jsonl
          (annotations_file_for ~base_dir codebase)
-         (tombstone_json id keeper_id ts);
+         (deletion_json id keeper_id ts);
        Ok ())
 ;;

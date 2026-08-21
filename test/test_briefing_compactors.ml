@@ -67,7 +67,7 @@ let keeper_fixture ?(name = "k-1") ?(status = "active")
             ("last_reply_status", json_string last_reply_status);
             ("last_reply_preview", json_string last_reply_preview);
           ] );
-      ("agent", `Assoc [ ("current_task", json_string current_task) ]);
+      ("current_task_id", json_string current_task);
     ]
 
 let agent_fixture ?(name = "a-1") ?(agent_type = "claude")

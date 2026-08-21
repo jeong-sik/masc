@@ -130,7 +130,10 @@ function verificationStatus(value: unknown, context: string): VerificationRunSta
   return value as VerificationRunStatusLabel
 }
 
-function parseTool(raw: unknown, context: string): VerificationToolObservation {
+export function parseVerificationToolObservation(
+  raw: unknown,
+  context: string,
+): VerificationToolObservation {
   if (!isRecord(raw)) protocolError(`${context} must be an object`)
   exactFields(raw, [
     'tool_name',
@@ -217,7 +220,7 @@ function parseRun(raw: unknown, index: number): VerificationRunRecord {
   const tools = status === 'running'
     ? undefined
     : Array.isArray(raw.tools)
-      ? raw.tools.map((tool, toolIndex) => parseTool(tool, `${context}.tools[${toolIndex}]`))
+      ? raw.tools.map((tool, toolIndex) => parseVerificationToolObservation(tool, `${context}.tools[${toolIndex}]`))
       : protocolError(`${context}.tools must be an array`)
   return {
     verificationId: nonEmptyString(raw.verification_id, `${context}.verification_id`),

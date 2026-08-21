@@ -29,8 +29,8 @@ describe('lifecycleEventTone', () => {
     expect(lifecycleEventTone('restarted')).toBe('warn')
   })
 
-  it('dead_cleaned returns bad', () => {
-    expect(lifecycleEventTone('dead_cleaned')).toBe('bad')
+  it('supervisor_cleaned returns neutral', () => {
+    expect(lifecycleEventTone('supervisor_cleaned')).toBe('neutral')
   })
 
   it('purged returns info', () => {
@@ -57,8 +57,8 @@ describe('lifecycleEventLabel', () => {
     expect(lifecycleEventLabel('restarted')).toBe('재시작됨')
   })
 
-  it('maps dead_cleaned to Korean label', () => {
-    expect(lifecycleEventLabel('dead_cleaned')).toBe('종료 정리됨')
+  it('maps supervisor_cleaned to Korean label', () => {
+    expect(lifecycleEventLabel('supervisor_cleaned')).toBe('부재 Keeper 정리됨')
   })
 
   it('maps purged to Korean label', () => {

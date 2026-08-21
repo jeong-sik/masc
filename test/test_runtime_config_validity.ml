@@ -328,24 +328,18 @@ let assert_ollama_cloud_seed_runtime runtimes case =
           dialect that can never be encoded: the format carries no effort value,
           runtime.toml has no key that supplies one, and runtime_adapter never
           sets reasoning_effort. Every enable_thinking=true turn is then rejected
-          as Enable_not_encodable — measured 25/25 on the acceptance harness
-          before this list, 0/25 after. Deployed config dropped the same five on
-          2026-08-04; the audit is oas#2716 (2026-07-20). *)
-       let inherent_reasoning_no_control =
-         [ "ollama_cloud.ollama-cloud-qwen3-5-397b"
-         ; "ollama_cloud.ollama-cloud-deepseek-v4-flash-0731"
-         ; "ollama_cloud.ollama-cloud-deepseek-v4-pro"
-         ]
-       in
-       let expected_reasoning_budget, expected_thinking_format =
-         if List.mem case.runtime_id inherent_reasoning_no_control
-         then false, Runtime_schema.No_thinking_control
-         else
-           ( case.thinking
-           , if case.thinking
-             then Runtime_schema.Reasoning_effort
-             else Runtime_schema.No_thinking_control )
-       in
+          as Enable_not_encodable — measured 25/25 on the acceptance harness,
+          0/25 after the first five models dropped the declaration. Deployed
+          config has carried none since 2026-08-04; the audit is oas#2716
+          (2026-07-20).
+
+          This is a property of the endpoint, not of individual models, and
+          every case in this list is an ollama.com /v1 model. Asserting it for
+          the whole list keeps a new model from declaring a dialect the
+          endpoint cannot read; a per-model exception set would admit one on
+          the next addition. *)
+       let expected_reasoning_budget = false
+       and expected_thinking_format = Runtime_schema.No_thinking_control in
        check bool (case.runtime_id ^ " forced tool_choice disabled") false
          caps.supports_tool_choice;
        check bool (case.runtime_id ^ " image input") case.vision
@@ -705,7 +699,6 @@ let test_repo_runtime_bindings_resolve_through_agent_core_provider_config () =
       ( runtimes
       , _default
       , _assignments
-      , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
     List.iter
@@ -992,7 +985,6 @@ let test_repo_runtime_toml_loads () =
       ( runtimes
       , default
       , assignments
-      , cross_verifier
       , media_failover
       , lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
@@ -1031,11 +1023,10 @@ check
        || String.equal lane_id "hitl_auto_judge")
      lane_signatures);
 (* RFC-0361 D7(a): the completion-authority judgement lane is the single
-   provider-selection SSOT; slot 1 absorbs the retired [runtime].cross_verifier
-   binding and failover follows declaration order. *)
+   provider-selection SSOT and failover follows declaration order. *)
 check
   (option (list string))
-  "verifier_exact absorbs cross_verifier as its first slot"
+  "verifier_exact slot order is frozen"
   (Some [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ])
   (match
      List.find_opt
@@ -1044,11 +1035,6 @@ check
    with
    | Some (_, slot_ids) -> Some slot_ids
    | None -> None);
-check
-  (option string)
-  "cross_verifier is absorbed into the verifier_exact lane"
-  None
-  cross_verifier;
 List.iter
   (fun (lane : Runtime_schema.exact_output_lane_decl) ->
      check bool
@@ -1065,7 +1051,6 @@ List.iter
       Runtime.For_testing.keeper_dispatch_runtime_ids
         ~default_runtime_id:default.id
         ~assignments
-        ~cross_verifier_runtime_id:cross_verifier
         ~verifier_exact_slot_ids:
           (* pinned to the seed by the verifier_exact lane check above *)
           [ "deepseek.deepseek-v4-pro"; "glm-coding.glm-5-turbo" ]
@@ -1215,7 +1200,7 @@ List.iter
             caps.supports_multimodal_inputs;
           (* ollama.com /v1 reasons inherently and takes no control field, so
              this model declares no thinking control. See the comment on
-             [inherent_reasoning_no_control] above for the measurement. *)
+             [expected_thinking_format] above for the measurement. *)
           check bool "Kimi K2.7 Code thinking control" true
             (Runtime_schema.equal_thinking_control_format
                caps.thinking_control_format
@@ -1489,19 +1474,6 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
                   target_ref)
            lane.slot_ids)
       config.exact_output_lane_decls
-
-let test_toml_catalog_resolves_lifecycle_keys () =
-  let doc =
-    parse_or_fail
-      "[lifecycle]\n\
-       dead_ttl_sec = 86400\n"
-  in
-  let count, overrides =
-    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
-  in
-  check int "applied lifecycle overrides" 1 count;
-  check (option string) "dead ttl" (Some "86400")
-    (List.assoc_opt "MASC_KEEPER_DEAD_TTL_SEC" overrides)
 
 let test_toml_catalog_resolves_web_search_keys () =
   let doc =
@@ -1869,7 +1841,6 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     Runtime.For_testing.keeper_dispatch_runtime_ids
       ~default_runtime_id:"default-a"
       ~assignments:[ "keeper-a", "assigned-b" ]
-      ~cross_verifier_runtime_id:(Some "cross-e")
       ~verifier_exact_slot_ids:[ "verifier-a"; "lane-b" ]
       ~media_failover:[ "media-c"; "lane-a" ]
       ~lanes
@@ -1878,13 +1849,12 @@ let test_keeper_dispatch_runtime_graph_enumeration () =
     (list string)
     "routed lane candidates, special routes, verifier_exact slots, and media \
      failover are deduplicated without admitting a dormant lane"
-    [ "lane-a"
-    ; "lane-b"
-    ; "assigned-b"
-    ; "media-c"
-    ; "cross-a"
-    ; "verifier-a"
-    ]
+    (* [cross-e] is declared but nothing routes to it: no assignment, no
+       verifier_exact slot, no media failover entry names it. #29197 removed
+       the cross_verifier route that used to pull it in, so its member
+       [cross-a] is no longer enumerated — same reason [dormant-lane] never
+       was. *)
+    [ "lane-a"; "lane-b"; "assigned-b"; "media-c"; "verifier-a" ]
     actual
 ;;
 
@@ -2030,56 +2000,6 @@ let test_runtime_config_validation_admits_undeclared_official_client_seed () =
          "[local.sample].max-request-body-bytes");
     check bool "the diagnostic does not demand the seed key" false
       (String_util.contains_substring detail "max-prompt-bytes")
-;;
-
-let test_runtime_config_validation_rejects_uncapped_special_runtime () =
-  let content route =
-    Printf.sprintf
-      "[providers.local]\n\
-       protocol = \"openai-compatible-http\"\n\
-       endpoint = \"http://127.0.0.1:1/v1\"\n\
-       \n\
-       [models.default]\n\
-       api-name = \"default\"\n\
-       max-context = 1024\n\
-       \n\
-       [models.special]\n\
-       api-name = \"special\"\n\
-       max-context = 1024\n\
-       \n\
-       [local.default]\n\
-       max-request-body-bytes = 65536\n\
-       \n\
-       [local.special]\n\
-       \n\
-       [runtime]\n\
-       default = \"local.default\"\n\
-       %s = \"local.special\"\n"
-      route
-  in
-  List.iter
-    (fun route ->
-       let snapshot = Runtime.For_testing.snapshot () in
-       let path = Filename.temp_file "uncapped_special_runtime_" ".toml" in
-       let config = content route in
-       let oc = open_out path in
-       output_string oc config;
-       close_out oc;
-       Fun.protect
-         ~finally:(fun () ->
-           Runtime.For_testing.restore snapshot;
-           try Sys.remove path with
-           | Sys_error _ -> ())
-         (fun () ->
-            match Runtime.save_config_text ~runtime_config_path:path config with
-            | Ok () ->
-              failf "uncapped %s runtime must fail runtime config validation" route
-            | Error detail ->
-              check bool "typed config diagnostic names the cap" true
-                (String_util.contains_substring detail "max-request-body-bytes");
-              check bool "typed config diagnostic names the special runtime" true
-                (String_util.contains_substring detail "local.special")))
-    [ "cross_verifier" ]
 ;;
 
 let test_runtime_config_validation_allows_uncapped_dormant_lane_candidate () =
@@ -2464,7 +2384,7 @@ let test_runtime_provider_disable_excludes_its_bindings () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "disabled provider should not block active runtime: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "active.sample" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
 ;;
@@ -2493,7 +2413,7 @@ let test_runtime_binding_disable_excludes_only_that_binding () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "disabled binding should not block active runtime: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "materialized runtime ids" [ "local.good" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes));
   let referenced_runtime_toml =
@@ -2545,7 +2465,7 @@ let test_declared_uncapped_runtime_reports_its_dispatch_blocker () =
     match Runtime.load_list ~config_path:path with
     | Error msg ->
       failf "an unassigned uncapped runtime must not fail the load: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "both runtimes materialize"
         [ "local.sample"; "local.dormant" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes);
@@ -2609,7 +2529,7 @@ let test_official_client_runtime_is_dispatchable_without_a_body_cap () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "official-client runtime should load: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "no runtime is reported blocked" []
         (List.map
            (fun ((runtime : Runtime.t), _) -> runtime.id)
@@ -2641,7 +2561,7 @@ let test_binding_naming_an_undeclared_model_fails_the_load () =
   in
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       failf
         "binding naming an undeclared model must fail the load; got runtimes [%s]"
         (String.concat "; " (List.map (fun (r : Runtime.t) -> r.id) runtimes))
@@ -2684,7 +2604,7 @@ let test_non_provider_namespaces_are_not_bindings () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "non-provider namespaces must not be bindings: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "only the declared provider binds a runtime"
         [ "local.good" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
@@ -2724,7 +2644,7 @@ let test_deliberate_disable_is_still_a_tolerated_drop () =
   with_temp_runtime_toml runtime_toml (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "deliberate disables must not fail the load: %s" msg
-    | Ok (runtimes, _, _, _, _, _) ->
+    | Ok (runtimes, _, _, _, _) ->
       check (list string) "disabled binding and disabled provider are excluded"
         [ "local.good" ]
         (List.map (fun (runtime : Runtime.t) -> runtime.id) runtimes))
@@ -2740,7 +2660,6 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; models = []
     ; bindings = []
     ; default_runtime_id = None
-    ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
@@ -2842,13 +2761,6 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
   in
   check bool "assignment diagnostic names the keeper's table entry" true
     (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"local.typo\"");
-  let route =
-    load_error_of_runtime_toml
-      ~what:"a route naming an unknown runtime"
-      (routing_reference_base ^ "cross_verifier = \"local.typo\"\n")
-  in
-  check bool "route diagnostic names the route field" true
-    (String_util.contains_substring route "[runtime].cross_verifier = \"local.typo\"");
   let media =
     load_error_of_runtime_toml
       ~what:"a media_failover entry naming an unknown runtime"
@@ -2861,15 +2773,6 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
 
 let test_routing_reference_domains_stay_distinct () =
   let lane = "\n[runtime.lanes.safe]\nstrategy = \"ordered\"\ncandidates = [\"local.good\"]\n" in
-  (* A route resolves lane-first, mirroring [resolve_assignment], so naming a lane
-     is valid config. *)
-  with_temp_runtime_toml
-    (routing_reference_base ^ "cross_verifier = \"safe\"\n" ^ lane)
-    (fun path ->
-      match Runtime.load_list ~config_path:path with
-      | Error msg -> failf "a route may name a lane: %s" msg
-      | Ok (_, _, _, cross_verifier, _, _) ->
-        check (option string) "route keeps the lane id" (Some "safe") cross_verifier);
   (* An assignment resolves among runtimes only. runtime.mli documents the
      assignment snapshot as ids that resolve to a configured runtime, so admitting
      a lane here would load a config the assignment consumer cannot look up. *)
@@ -3218,7 +3121,6 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         ( runtimes
         , _default
         , _assignments
-        , _cross_verifier
         , _media_failover
         , _lanes ) ->
       let expect id expected =
@@ -3250,8 +3152,6 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
       expect "local.no-cap" None;
       expect "local.capped" (Some 5))
 
-(* [runtime].cross_verifier resolves to a configured JSON-capable runtime,
-   defaults to None, and rejects unknown or incapable targets. *)
 let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
   with_fake_runtime_model_catalog @@ fun () ->
   let base =
@@ -3298,71 +3198,6 @@ let test_load_allows_a_lane_that_mixes_checkpoint_owners () =
       | Ok _ -> ()
       | Error msg -> failf "a mixed-owner failover lane must load: %s" msg)
 
-let test_cross_verifier_runtime_routing () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let base =
-    "[providers.local]\n\
-     display-name = \"Local\"\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://localhost:11434\"\n\
-     \n\
-     [models.chat]\n\
-     api-name = \"chat\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.libr]\n\
-     api-name = \"libr\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.libr.capabilities]\n\
-     supports-response-format-json = true\n\
-     \n\
-     [local.chat]\n\
-     \n\
-     [local.libr]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.chat\"\n"
-  in
-  with_temp_runtime_toml (base ^ "cross_verifier = \"local.libr\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "cross_verifier routing should load: %s" msg
-    | Ok
-        ( _runtimes
-        , _default
-        , _assignments
-        , cross_verifier
-        , _media_failover , _lanes ) ->
-      check (option string) "cross_verifier runtime id" (Some "local.libr")
-        cross_verifier);
-  with_temp_runtime_toml base (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "absent cross_verifier should load: %s" msg
-    | Ok
-        ( _
-        , _
-        , _
-        , cross_verifier
-        , _media_failover
-        , _lanes ) ->
-      check (option string) "cross_verifier unset is None" None cross_verifier);
-  with_temp_runtime_toml (base ^ "cross_verifier = \"local.nope\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Ok _ -> failf "unknown [runtime].cross_verifier id must be rejected at load"
-    | Error _ -> ());
-  (* The verdict travels as a report_review_verdict tool call and no wire response
-     format is requested (anti_rationalization.ml:243-248), so the JSON-mode
-     requirement was on the wrong axis. The right one — can this model call a tool
-     — is not declarable: Runtime_schema.model_capabilities carries the shapes of
-     tool CHOICE, not tool support. A candidate that cannot serve the tool channel
-     is refused by AGENT_CORE at dispatch instead, which is failover-eligible. So a model
-     declaring nothing now resolves for this route. *)
-  with_temp_runtime_toml (base ^ "cross_verifier = \"local.chat\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg ->
-      failf "[runtime].cross_verifier must accept a capability-free model: %s" msg
-    | Ok _ -> ())
-
 let test_structured_judge_runtime_key_is_rejected () =
   match
     Runtime_toml.parse_string
@@ -3376,131 +3211,6 @@ let test_structured_judge_runtime_key_is_rejected () =
             String.equal error.path "runtime.structured_judge"
             && String_util.contains_substring error.message "unknown [runtime] key")
          errors)
-
-(* The live cross_verifier route accepts a [runtime.lanes] id, following
-   [resolve_assignment]'s lane-over-runtime precedence. *)
-let judge_lane_base =
-  "[providers.local]\n\
-   display-name = \"Local\"\n\
-   protocol = \"ollama-http\"\n\
-   endpoint = \"http://localhost:11434\"\n\
-   \n\
-   [models.chat]\n\
-   api-name = \"chat\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.judge]\n\
-   api-name = \"judge\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.judge.capabilities]\n\
-   supports-response-format-json = true\n\
-   supports-structured-output = true\n\
-   \n\
-   [models.judge2]\n\
-   api-name = \"judge2\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.judge2.capabilities]\n\
-   supports-response-format-json = true\n\
-   supports-structured-output = true\n\
-   \n\
-   [models.jsononly]\n\
-   api-name = \"jsononly\"\n\
-   max-context = 1024\n\
-   \n\
-   [models.jsononly.capabilities]\n\
-   supports-response-format-json = true\n\
-   supports-structured-output = false\n\
-   \n\
-   [local.chat]\n\
-   \n\
-   [local.judge]\n\
-   \n\
-   [local.judge2]\n\
-   \n\
-   [local.jsononly]\n\
-   \n\
-   [runtime]\n\
-   default = \"local.chat\"\n"
-
-let test_cross_verifier_lane_target () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let json_capable_lane =
-    judge_lane_base
-    ^ "cross_verifier = \"verifiers\"\n\
-       \n\
-       [runtime.lanes.verifiers]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.judge\", \"local.jsononly\"]\n"
-  in
-  with_temp_runtime_toml json_capable_lane (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, cross_verifier, _, _) ->
-      check
-        (option string)
-        "cross_verifier keeps the lane id"
-        (Some "verifiers")
-        cross_verifier);
-  let json_incapable_lane =
-    judge_lane_base
-    ^ "cross_verifier = \"verifiers\"\n\
-       \n\
-       [runtime.lanes.verifiers]\n\
-       strategy = \"ordered\"\n\
-       candidates = [\"local.judge\", \"local.chat\"]\n"
-  in
-  (* Formerly rejected because local.chat declares no JSON mode. The route requests
-     no wire format, so the lane resolves and AGENT_CORE refuses an unusable candidate at
-     dispatch instead — pre-dispatch and failover-eligible. *)
-  with_temp_runtime_toml json_incapable_lane (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "cross_verifier lane should resolve: %s" msg
-    | Ok (_, _, _, cross_verifier, _, lanes) ->
-      check (option string) "cross_verifier keeps the lane id" (Some "verifiers")
-        cross_verifier;
-      check bool "verifiers lane is materialized" true
-        (List.exists
-           (fun lane -> String.equal (Runtime_lane.id lane) "verifiers")
-           lanes))
-
-let test_save_config_text_refreshes_cross_verifier_runtime () =
-  with_fake_runtime_model_catalog @@ fun () ->
-  let content =
-    "[providers.local]\n\
-     display-name = \"Local\"\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://localhost:11434\"\n\
-     \n\
-     [models.chat]\n\
-     api-name = \"chat\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.libr]\n\
-     api-name = \"libr\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.libr.capabilities]\n\
-     supports-response-format-json = true\n\
-     \n\
-     [local.chat]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [local.libr]\n\
-     max-request-body-bytes = 65536\n\
-     \n\
-     [runtime]\n\
-     default = \"local.chat\"\n\
-     cross_verifier = \"local.libr\"\n"
-  in
-  with_temp_runtime_toml content (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path content with
-    | Error msg -> failf "save_config_text should validate and reload: %s" msg
-    | Ok () ->
-      check (option string) "saved cross_verifier runtime id"
-        (Some "local.libr")
-        (Runtime.cross_verifier_runtime_id ()))
 
 let test_save_config_text_commits_exact_registry_with_runtime_state () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -4034,7 +3744,7 @@ let test_codex_app_server_materializes_as_turn_runtime () =
   with_temp_runtime_toml (codex_app_server_runtime_toml ()) (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error error -> failf "codex-app-server runtime should load: %s" error
-    | Ok (runtimes, default, _, _, _, _) ->
+    | Ok (runtimes, default, _, _, _) ->
       check int "one runtime" 1 (List.length runtimes);
       check string "default id" "codex.codex" default.id;
       (match default.execution with
@@ -4089,7 +3799,7 @@ let test_antigravity_cli_materializes_typed_process_options () =
     (fun path ->
        match Runtime.load_list ~config_path:path with
        | Error error -> failf "antigravity-cli runtime should load: %s" error
-       | Ok (runtimes, default, _, _, _, _) ->
+       | Ok (runtimes, default, _, _, _) ->
          check int "one runtime" 1 (List.length runtimes);
          check string "default id" "antigravity.gemini" default.id;
          (match default.execution with
@@ -4256,23 +3966,11 @@ let () =
             `Quick
             test_deployment_exact_output_catalog_admits_seed_lanes;
           test_case
-            "[runtime].cross_verifier resolves, defaults to None, rejects unknown"
-            `Quick test_cross_verifier_runtime_routing;
-          test_case
             "retired [runtime].structured_judge key is rejected"
             `Quick test_structured_judge_runtime_key_is_rejected;
           test_case
-            "[runtime].cross_verifier accepts JSON-capable lanes"
-            `Quick test_cross_verifier_lane_target;
-          test_case
-            "save_config_text validates and refreshes cross_verifier runtime"
-            `Quick test_save_config_text_refreshes_cross_verifier_runtime;
-          test_case
             "save_config_text commits exact registry with runtime state"
             `Quick test_save_config_text_commits_exact_registry_with_runtime_state;
-          test_case
-            "lifecycle TOML keys resolve through the declarative catalog"
-            `Quick test_toml_catalog_resolves_lifecycle_keys;
           test_case
             "web_search TOML keys resolve through the declarative catalog"
             `Quick test_toml_catalog_resolves_web_search_keys;
@@ -4350,10 +4048,6 @@ let () =
           test_case
             "runtime config rejects uncapped keeper candidate"
             `Quick test_runtime_config_validation_rejects_uncapped_keeper_candidate;
-          test_case
-            "runtime config rejects an uncapped cross-verifier runtime"
-            `Quick
-            test_runtime_config_validation_rejects_uncapped_special_runtime;
           test_case
             "runtime config admits an undeclared official-client seed"
             `Quick

@@ -6,10 +6,10 @@
    criterion/completion verification state gets its own store, the same way
    [Workspace_goal_index] keeps goal-task links out of goals.json.
 
-   RFC-0387 stage 1 ships this as a RECORD-ONLY evidence store: no workflow
-   reads it for control and no caller writes it yet — the stage-2 verifier
-   gate adds the writers ([mark_*_pending] durable requests, verdict commits
-   from the verifier lane) and the readers that gate transitions.
+   RFC-0387 stage 1 shipped this as a RECORD-ONLY evidence store; stage 2
+   (the verifier gate) wires the writers: [mark_*_pending] durable requests
+   (creation hook, and before the phase enters [Verifying]) and verdict
+   commits from the verifier lane via [masc_goal_transition].
 
    Invariants carried here:
 
@@ -30,6 +30,7 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  verification_run_id : string;
   authority : Masc_domain.completion_authority;
   evidence : string;
   recorded_at : string;
@@ -46,11 +47,6 @@ type completion_state =
   | Proof_pending of { requested_at : string }
   | Proof_proven of verdict
   | Proof_refuted of verdict
-  | Human_confirmed of {
-      proof : verdict;
-      confirmed_by : string;
-      confirmed_at : string;
-    }
 
 type record = {
   goal_id : string;
@@ -107,7 +103,8 @@ let verdict_to_yojson (v : verdict) =
   in
   `Assoc
     (outcome_fields
-     @ [ "authority", authority_to_yojson v.authority
+     @ [ "verification_run_id", `String v.verification_run_id
+       ; "authority", authority_to_yojson v.authority
        ; "evidence", `String v.evidence
        ; "recorded_at", `String v.recorded_at
        ])
@@ -119,7 +116,13 @@ let verdict_of_yojson = function
           (fun (field, _) ->
             (* strict wire-boundary decoder: rejects unknown fields. STR-OK *)
             if List.mem field
-                 [ "outcome"; "reason"; "authority"; "evidence"; "recorded_at" ]
+                 [ "outcome"
+                 ; "reason"
+                 ; "verification_run_id"
+                 ; "authority"
+                 ; "evidence"
+                 ; "recorded_at"
+                 ]
             then None
             else Some field)
           fields
@@ -133,21 +136,37 @@ let verdict_of_yojson = function
           let json = `Assoc fields in
           match
             ( Json_util.assoc_member_opt "outcome" json
+            , Json_util.get_string json "verification_run_id"
             , Json_util.get_string json "evidence"
             , Json_util.assoc_member_opt "recorded_at" json )
           with
-          | Some (`String outcome), Some evidence, Some (`String recorded_at) -> (
+          | ( Some (`String outcome)
+            , Some verification_run_id
+            , Some evidence
+            , Some (`String recorded_at) ) -> (
+              if String.trim verification_run_id = ""
+              then
+                Error
+                  "goal_verification.verdict_of_yojson: verification_run_id is blank"
+              else
               match authority_of_yojson (Yojson.Safe.Util.member "authority" json) with
               | Error _ as error -> error
               | Ok authority -> (
                   match outcome with
                   | "proven" ->
-                      Ok { outcome = Proven; authority; evidence; recorded_at }
+                      Ok
+                        { outcome = Proven
+                        ; verification_run_id
+                        ; authority
+                        ; evidence
+                        ; recorded_at
+                        }
                   | "refuted" -> (
                       match Json_util.get_string json "reason" with
                       | Some reason ->
                           Ok
                             { outcome = Refuted { reason }
+                            ; verification_run_id
                             ; authority
                             ; evidence
                             ; recorded_at
@@ -162,8 +181,8 @@ let verdict_of_yojson = function
                          ^ other)))
           | _ ->
               Error
-                "goal_verification.verdict_of_yojson: outcome, evidence and \
-                 recorded_at are required"))
+                "goal_verification.verdict_of_yojson: outcome, \
+                 verification_run_id, evidence and recorded_at are required"))
   | json ->
       Error ("goal_verification.verdict_of_yojson: " ^ Yojson.Safe.to_string json)
 
@@ -210,13 +229,6 @@ let completion_state_to_yojson = function
   | Proof_refuted verdict ->
       `Assoc
         [ "state", `String "proof_refuted"; "verdict", verdict_to_yojson verdict ]
-  | Human_confirmed { proof; confirmed_by; confirmed_at } ->
-      `Assoc
-        [ "state", `String "human_confirmed"
-        ; "proof", verdict_to_yojson proof
-        ; "confirmed_by", `String confirmed_by
-        ; "confirmed_at", `String confirmed_at
-        ]
 
 let completion_state_of_yojson json =
   match Json_util.assoc_member_opt "state" json with
@@ -233,19 +245,6 @@ let completion_state_of_yojson json =
       match verdict_of_yojson (Yojson.Safe.Util.member "verdict" json) with
       | Ok verdict -> Ok (Proof_refuted verdict)
       | Error _ as error -> error)
-  | Some (`String "human_confirmed") -> (
-      match
-        ( verdict_of_yojson (Yojson.Safe.Util.member "proof" json)
-        , Json_util.get_string json "confirmed_by"
-        , Json_util.assoc_member_opt "confirmed_at" json )
-      with
-      | Ok proof, Some confirmed_by, Some (`String confirmed_at) ->
-          Ok (Human_confirmed { proof; confirmed_by; confirmed_at })
-      | Error _ as error, _, _ -> error
-      | _ ->
-          Error
-            "goal_verification: human_confirmed needs proof, confirmed_by and \
-             confirmed_at")
   | Some (`String other) ->
       Error ("goal_verification: unknown completion state " ^ other)
   | _ -> Error "goal_verification: completion state missing"
@@ -487,12 +486,80 @@ let ledger_error_to_yojson detail =
 
 let record_criterion_verdict config ~goal_id (verdict : verdict) =
   update_record config ~goal_id (fun current ->
-      let criterion =
-        match verdict.outcome with
-        | Proven -> Criterion_viable verdict
-        | Refuted _ -> Criterion_unreachable verdict
+      let committable =
+        match current.criterion, verdict.outcome with
+        | Criterion_pending _, _ -> true
+        | Criterion_viable _, Proven -> true
+        | Criterion_unreachable _, Refuted _ -> true
+        | ( Criterion_viable _, Refuted _ )
+        | ( Criterion_unreachable _, Proven )
+        | ( Criterion_unchecked, _ ) -> false
       in
-      Ok { current with criterion })
+      if not committable
+      then
+        Error
+          (Printf.sprintf
+             "goal_verification: criterion verdict for %s has no matching pending \
+              criterion request"
+             goal_id)
+      else
+        let criterion =
+          match verdict.outcome with
+          | Proven -> Criterion_viable verdict
+          | Refuted _ -> Criterion_unreachable verdict
+        in
+        Ok { current with criterion })
+
+(* {1 Stage-2 durable requests (RFC-0387 §3.2 / §4.1)}
+
+   These are the writers the verifier gate persists BEFORE any model call:
+   [mark_criterion_pending] runs at goal creation, [mark_proof_pending] runs
+   before the phase enters [Verifying]. Both are locked read-modify-writes via
+   [update_record], idempotent on an already-pending state (a repeated
+   [request_complete] re-arms rather than failing), and refuse to overwrite a
+   committed verdict — except that a new proof request supersedes a standing
+   [Proof_refuted], per this module's header: a refuted verdict stays on the
+   record until the next request supersedes it, and the refuted goal returns
+   to [Executing] where re-requesting completion is the way forward. *)
+
+let mark_criterion_pending config ~goal_id =
+  update_record config ~goal_id (fun current ->
+      match current.criterion with
+      | Criterion_pending _ -> Ok current
+      | Criterion_unchecked ->
+          Ok
+            { current with
+              criterion = Criterion_pending { requested_at = current.updated_at }
+            }
+      | Criterion_viable _ | Criterion_unreachable _ ->
+          Error
+            (Printf.sprintf
+               "goal_verification: criterion verdict for %s is already \
+                committed; refusing to overwrite it with a pending request"
+               goal_id))
+
+let mark_proof_pending config ~goal_id =
+  update_record config ~goal_id (fun current ->
+      match current.completion with
+      | Proof_pending _ -> Ok current
+      | Completion_idle ->
+          Ok
+            { current with
+              completion = Proof_pending { requested_at = current.updated_at }
+            }
+      | Proof_refuted _ ->
+          (* The next request supersedes the standing refutation; the verdict
+             itself remains readable in the state history until this write. *)
+          Ok
+            { current with
+              completion = Proof_pending { requested_at = current.updated_at }
+            }
+      | Proof_proven _ ->
+          Error
+            (Printf.sprintf
+               "goal_verification: proof for %s is already proven; refusing \
+                to overwrite the verdict with a pending request"
+               goal_id))
 
 (* A proof verdict is only committable against a pending proof — or against
    the same outcome already committed. The latter is the crash-between-writes
@@ -501,8 +568,7 @@ let record_criterion_verdict config ~goal_id (verdict : verdict) =
    identical outcome rather than wedge the goal. A commit in the OPPOSITE
    direction of a standing verdict is a stale verifier answer and stays an
    [Error]. The [Proof_pending] rows this matches against are written by the
-   stage-2 gate ([mark_proof_pending], persist-before-model-call); stage 1
-   has no writer, so until then this only ever answers the error. *)
+   stage-2 gate ([mark_proof_pending], persist-before-model-call). *)
 let record_proof_verdict config ~goal_id (verdict : verdict) =
   update_record config ~goal_id (fun current ->
       let committable =
@@ -512,43 +578,29 @@ let record_proof_verdict config ~goal_id (verdict : verdict) =
         | Proof_refuted _, Refuted _ -> true
         | ( Proof_proven _, Refuted _ )
         | ( Proof_refuted _, Proven )
-        | ( Completion_idle, _ )
-        | ( Human_confirmed _, _ ) -> false
+        | Completion_idle, _ -> false
       in
-      if committable
+      if not committable
       then
+        Error
+          (Printf.sprintf
+             "goal_verification: proof verdict for %s has no pending proof \
+              request"
+             goal_id)
+      else
+        match current.criterion with
+        | Criterion_viable _ ->
         let completion =
           match verdict.outcome with
           | Proven -> Proof_proven verdict
           | Refuted _ -> Proof_refuted verdict
         in
         Ok { current with completion }
-      else
-        Error
-          (Printf.sprintf
-             "goal_verification: proof verdict for %s has no pending proof \
-              request"
-             goal_id))
-
-let record_human_confirmation config ~goal_id ~confirmed_by =
-  update_record config ~goal_id (fun current ->
-      (* [Human_confirmed] is accepted alongside [Proof_proven]: the same
-         crash-between-writes recovery as [record_proof_verdict] — the ledger
-         committed but the phase write did not, and the stage-2 retried
-         confirm must reconcile rather than wedge the goal. *)
-      match current.completion with
-      | Proof_proven proof | Human_confirmed { proof; _ } ->
-          Ok
-            { current with
-              completion =
-                Human_confirmed
-                  { proof
-                  ; confirmed_by
-                  ; confirmed_at = current.updated_at
-                  }
-            }
-      | Completion_idle | Proof_pending _ | Proof_refuted _ ->
+        | Criterion_unchecked
+        | Criterion_pending _
+        | Criterion_unreachable _ ->
           Error
-            (Printf.sprintf
-               "goal_verification: human confirmation for %s needs a proven proof"
-               goal_id))
+          (Printf.sprintf
+             "goal_verification: proof verdict for %s requires a viable \
+              criterion"
+             goal_id))

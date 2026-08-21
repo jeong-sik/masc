@@ -1,5 +1,5 @@
-(** RFC-0387 stage 1 — B1 creation requirement + verification ledger
-    (record-only evidence store) + its observability join.
+(** RFC-0387 — B1 creation requirement + verification ledger + the stage-2
+    completion gate.
 
     B1: creation without a declared success condition ([metric] +
     [target_value]) is a typed rejection; updates of an existing row are not
@@ -10,9 +10,14 @@
     that does not decode refuses every mutation AND fails every read loudly —
     never a silent "not verified yet".
 
-    Stage 1 has no lifecycle gate: [request_complete] still completes a Goal
-    directly, and no caller writes the ledger. The gate phases/actions and
-    the verifier caller are stage 2 (RFC-0387 §Staging). *)
+    Stage 2 gate: [request_complete] moves Executing -> Verifying and persists
+    the durable proof request BEFORE the phase write. Public MCP callers cannot
+    name verifier commits. Only the application-owned typed verifier boundary
+    can prove/refute completion or criterion viability, with non-blank
+    evidence and fixed [verifier_exact] authority. A repeated
+    [request_complete] on Verifying answers [Already] and re-arms the proof
+    request when the ledger lost it (the P0-2 wedge). The FSM is the only
+    transition decider; the ledger records. *)
 
 open Alcotest
 open Masc
@@ -84,12 +89,26 @@ let json_state json path =
   |> Yojson.Safe.Util.to_string
 ;;
 
+let json_bool json path =
+  List.fold_left
+    (fun acc key -> Yojson.Safe.Util.member key acc)
+    json path
+  |> Yojson.Safe.Util.to_bool
+;;
+
 let verdict ?(evidence = "observed by the verifier") outcome : Goal_verification.verdict =
   { Goal_verification.outcome
+  ; verification_run_id = "goal-verifier-test-run"
   ; authority = Masc_domain.System_llm_agent { agent_run_id = "test-verifier" }
   ; evidence
   ; recorded_at = Masc_domain.now_iso ()
   }
+;;
+
+let mark_criterion_pending config goal_id =
+  match Goal_verification.mark_criterion_pending config ~goal_id with
+  | Ok _ -> ()
+  | Error msg -> fail msg
 ;;
 
 (* Poison the authoritative store AND its recovery mirror; the fail-closed
@@ -210,6 +229,7 @@ let test_undecodable_goal_store_reports_corruption_not_b1 () =
 let test_criterion_verdict_round_trips () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-roundtrip";
   let committed =
     match
       Goal_verification.record_criterion_verdict
@@ -238,6 +258,7 @@ let test_criterion_verdict_round_trips () =
 let test_refuted_criterion_keeps_its_reason () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-refuted";
   match
     Goal_verification.record_criterion_verdict
       config
@@ -260,6 +281,52 @@ let test_refuted_criterion_keeps_its_reason () =
      | Error msg -> fail msg)
 ;;
 
+let test_criterion_verdict_requires_pending_or_same_outcome () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = "goal-criterion-discipline" in
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict Goal_verification.Proven)
+   with
+   | Ok _ -> fail "criterion verdict committed without a pending request"
+   | Error msg ->
+     check bool "the refusal names the missing request" true
+       (String_util.contains_substring msg "no matching pending"));
+  mark_criterion_pending config goal_id;
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail ("same-outcome retry was refused: " ^ msg));
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict (Goal_verification.Refuted { reason = "stale result" }))
+   with
+   | Ok _ -> fail "opposite stale criterion verdict overwrote the committed outcome"
+   | Error _ -> ());
+  match Goal_verification.get_record config ~goal_id with
+  | Ok (Some { criterion = Goal_verification.Criterion_viable _; _ }) -> ()
+  | Ok (Some _) -> fail "opposite stale verdict changed the committed criterion"
+  | Ok None -> fail "criterion row disappeared"
+  | Error msg -> fail msg
+;;
+
 (* Ledger: record-only discipline (stage 1 pins the preconditions the stage-2
    gate relies on) *)
 
@@ -278,19 +345,34 @@ let test_proof_verdict_requires_a_pending_request () =
       (String_util.contains_substring msg "no pending proof request")
 ;;
 
-let test_human_confirmation_requires_a_proven_proof () =
+let test_proof_verdict_requires_a_viable_criterion () =
   with_workspace
   @@ fun config ->
+  let goal_id = "goal-unreachable-proof" in
+  (match Goal_verification.mark_criterion_pending config ~goal_id with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match Goal_verification.mark_proof_pending config ~goal_id with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict (Goal_verification.Refuted { reason = "not measurable" }))
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
   match
-    Goal_verification.record_human_confirmation
+    Goal_verification.record_proof_verdict
       config
-      ~goal_id:"goal-unproven"
-      ~confirmed_by:"operator-test"
+      ~goal_id
+      (verdict Goal_verification.Proven)
   with
-  | Ok _ -> fail "human confirmation committed without a proven proof"
+  | Ok _ -> fail "proof committed after the criterion became unreachable"
   | Error msg ->
-    check bool "the refusal names the missing proof" true
-      (String_util.contains_substring msg "needs a proven proof")
+    check bool "the refusal names the criterion invariant" true
+      (String_util.contains_substring msg "requires a viable criterion")
 ;;
 
 (* Ledger: strict decode, fail-closed mutations, fail-loud reads *)
@@ -298,6 +380,7 @@ let test_human_confirmation_requires_a_proven_proof () =
 let test_undecodable_ledger_fails_closed_and_loud () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-corrupt";
   ignore
     (match
        Goal_verification.record_criterion_verdict
@@ -334,6 +417,7 @@ let test_undecodable_ledger_fails_closed_and_loud () =
 let test_unknown_ledger_field_is_a_decode_error () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-strict";
   ignore
     (match
        Goal_verification.record_criterion_verdict
@@ -369,6 +453,42 @@ let test_unknown_ledger_field_is_a_decode_error () =
       (String_util.contains_substring msg "surprise_field")
 ;;
 
+let test_retired_human_confirmation_state_is_a_decode_error () =
+  with_workspace
+  @@ fun config ->
+  mark_criterion_pending config "goal-no-human-legacy";
+  let path = Goal_verification.verifications_path config in
+  let json = Yojson.Safe.from_file path in
+  let poisoned =
+    match json with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "records", `List [ `Assoc row ] ->
+                let row =
+                  List.map
+                    (fun (field, value) ->
+                       if String.equal field "completion"
+                       then field, `Assoc [ "state", `String "human_confirmed" ]
+                       else field, value)
+                    row
+                in
+                key, `List [ `Assoc row ]
+              | _ -> key, value)
+           fields)
+    | _ -> fail "unexpected ledger shape"
+  in
+  Yojson.Safe.to_file path poisoned;
+  Yojson.Safe.to_file (path ^ ".last-good") poisoned;
+  match Goal_verification.get_record config ~goal_id:"goal-no-human-legacy" with
+  | Ok _ -> fail "retired human confirmation state decoded silently"
+  | Error msg ->
+    check bool "the retired state is rejected as unknown" true
+      (String_util.contains_substring msg "human_confirmed")
+;;
+
 (* Observability: the read surfaces join the ledger *)
 
 let test_goal_list_joins_the_ledger () =
@@ -391,8 +511,9 @@ let test_goal_list_joins_the_ledger () =
   let goals = Yojson.Safe.Util.member "goals" listed |> Yojson.Safe.Util.to_list in
   (match goals with
    | [ goal_json ] ->
-     (* No writer has run: the explicit pre-verification default renders. *)
-     check string "criterion renders unchecked" "unchecked"
+     (* The creation hook ran (stage 2): the durable criterion check request
+        renders, not the pre-verification default. *)
+     check string "criterion renders pending" "pending"
        (json_state goal_json [ "verification"; "criterion"; "state" ]);
      check string "completion renders idle" "idle"
        (json_state goal_json [ "verification"; "completion"; "state" ])
@@ -441,9 +562,337 @@ let test_goal_list_renders_a_ledger_error_state () =
   | _ -> fail "expected one listed goal"
 ;;
 
-(* Stage 1 changes no lifecycle semantics: request_complete still completes. *)
+(* {1 Stage 2 — the completion gate (RFC-0387 §3.2/§3.3/§4/§5)} *)
 
-let test_request_complete_still_completes_directly () =
+let create_goal ctx title =
+  let created =
+    must_succeed
+      "create goal"
+      (dispatch
+         ctx
+         ~name:"masc_goal_upsert"
+         [ "title", `String title
+         ; "metric", `String "m"
+         ; "target_value", `String "1"
+         ])
+  in
+  json_state created [ "goal_id" ]
+;;
+
+let transition ctx goal_id ?note ?evidence action =
+  let args =
+    [ "goal_id", `String goal_id; "action", `String action ]
+    @ (match note with
+       | Some note -> [ "note", `String note ]
+       | None -> [])
+    @ (match evidence with
+       | Some evidence -> [ "evidence", `String evidence ]
+       | None -> [])
+  in
+  dispatch ctx ~name:"masc_goal_transition" args
+;;
+
+let verifier_transition config goal_id decision evidence =
+  Workspace_goals.commit_verifier_decision
+    ~tool_name:"goal_verifier_commit"
+    ~start_time:0.
+    config
+    ~goal_id
+    ~verification_run_id:"goal-verifier-test-run"
+    ~decision
+    ~evidence
+;;
+
+let mark_criterion_viable ctx goal_id =
+  ignore
+    (must_succeed
+       "typed criterion viable"
+       (verifier_transition
+          ctx.config
+          goal_id
+          Workspace_goals.Criterion_viable
+          "criterion is measurable"))
+;;
+
+let stored_phase config goal_id =
+  match Goal_store.get_goal config ~goal_id with
+  | Some goal -> Goal_phase.to_string goal.Goal_store.phase
+  | None -> fail ("goal not found: " ^ goal_id)
+;;
+
+let ledger_record config goal_id =
+  match Goal_verification.get_record config ~goal_id with
+  | Ok (Some record) -> record
+  | Ok None -> fail ("no ledger row for " ^ goal_id)
+  | Error msg -> fail msg
+;;
+
+let goal_events_text config =
+  let path =
+    Filename.concat
+      (Filename.dirname (Goal_verification.verifications_path config))
+      "goal_events.jsonl"
+  in
+  if Sys.file_exists path
+  then (
+    let ic = open_in_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         let b = Buffer.create 256 in
+         (try
+            while true do
+              Buffer.add_string b (input_line ic);
+              Buffer.add_char b '\n'
+            done
+          with
+          | End_of_file -> ());
+         Buffer.contents b))
+  else ""
+;;
+
+(* (a) The completion request enters the gate; the durable proof request is
+   visible in the response and in the ledger. *)
+let test_request_complete_enters_verifying_with_proof_pending () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Gated completion" in
+  let entered =
+    must_succeed "request_complete" (transition ctx goal_id "request_complete")
+  in
+  check string "phase moved to verifying" "verifying"
+    (json_state entered [ "goal"; "phase" ]);
+  check string "the request is persisted before the phase" "proof_pending"
+    (json_state entered [ "verification"; "completion"; "state" ]);
+  check string "the store agrees" "verifying" (stored_phase config goal_id);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "ledger must hold the durable proof request")
+;;
+
+(* (b) Public callers cannot self-verify. Only the typed verifier boundary can
+   complete the goal, with mandatory evidence and fixed authority. *)
+let test_proof_proven_completes_with_authority_and_evidence () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Proof-gated goal" in
+  mark_criterion_viable ctx goal_id;
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let public_refusal =
+    must_fail "public record_proof_proven"
+      (transition
+         ctx
+         goal_id
+         ~evidence:"caller-provided evidence"
+         "record_proof_proven")
+  in
+  check string "verifier action is not in the public enum" "validation_error"
+    (json_state public_refusal [ "error_code" ]);
+  let blank =
+    must_fail "typed proof verdict with blank evidence"
+      (verifier_transition config goal_id Workspace_goals.Proof_proven "   ")
+  in
+  check string "typed validation error" "validation_error"
+    (json_state blank [ "error_code" ]);
+  check string "a refused verdict does not move the phase" "verifying"
+    (stored_phase config goal_id);
+  let unbound_attempt =
+    must_fail "typed proof verdict with blank run ID"
+      (Workspace_goals.commit_verifier_decision
+         ~tool_name:"goal_verifier_commit"
+         ~start_time:0.
+         config
+         ~goal_id
+         ~verification_run_id:"   "
+         ~decision:Workspace_goals.Proof_proven
+         ~evidence:"metric observed at target")
+  in
+  check string "blank run ID is a typed validation error" "validation_error"
+    (json_state unbound_attempt [ "error_code" ]);
+  check string "an unbound verdict does not move the phase" "verifying"
+    (stored_phase config goal_id);
+  let completed =
+    must_succeed "typed proof proven"
+      (verifier_transition
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "metric observed at target")
+  in
+  check string "completed via proof" "completed"
+    (json_state completed [ "goal"; "phase" ]);
+  check string "ledger shows the proven verdict" "proof_proven"
+    (json_state completed [ "verification"; "completion"; "state" ]);
+  check string "the evidence is on the verdict" "metric observed at target"
+    (json_state completed [ "verification"; "completion"; "verdict"; "evidence" ]);
+  check string "the verdict retains its exact verifier attempt"
+    "goal-verifier-test-run"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "verification_run_id" ]);
+  check string "the caller cannot impersonate the typed authority" "verifier_exact"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "authority"; "actor" ]);
+  check string "authority kind is the system-llm slot" "system_llm_agent"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "authority"; "kind" ])
+;;
+
+(* (c) A refuted proof returns the goal to Executing; the reason survives in
+   the ledger and in goal_events.jsonl. *)
+let test_proof_refuted_returns_to_executing_with_reason () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Refutable goal" in
+  mark_criterion_viable ctx goal_id;
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let refuted =
+    must_succeed "typed proof refuted"
+      (verifier_transition
+         config
+         goal_id
+         (Workspace_goals.Proof_refuted { reason = "metric moved under the claim" })
+         "coverage run attached")
+  in
+  check string "back to executing" "executing"
+    (json_state refuted [ "goal"; "phase" ]);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_refuted
+       { outcome = Goal_verification.Refuted { reason }; _ } ->
+     check string "the refutation reason is preserved"
+       "metric moved under the claim" reason
+   | _ -> fail "ledger must hold the refuted verdict");
+  let events = goal_events_text config in
+  check bool "the refutation reason reaches goal_events.jsonl" true
+    (String_util.contains_substring events "metric moved under the claim");
+  check bool "the event names the outcome" true
+    (String_util.contains_substring events "refuted");
+  (* Failure keeps its evidence but does not wedge the goal: the next request
+     supersedes the refuted verdict and re-enters the gate. *)
+  let reentered =
+    must_succeed "request_complete again"
+      (transition ctx goal_id "request_complete")
+  in
+  check string "re-request re-enters verifying" "verifying"
+    (json_state reentered [ "goal"; "phase" ]);
+  check string "a fresh proof request supersedes the refutation"
+    "proof_pending"
+    (json_state reentered [ "verification"; "completion"; "state" ])
+;;
+
+(* (d) The P0-2 wedge — phase=Verifying with the ledger at Completion_idle —
+   is re-armed by the repeated request_complete: the FSM answers [Already]
+   and the handler re-writes the durable request before answering. *)
+let test_verifying_repeat_rearms_a_missing_proof_request () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Wedged goal" in
+  mark_criterion_viable ctx goal_id;
+  (* Simulate the crash window: the phase is Verifying but the ledger never
+     recorded the proof request. *)
+  (match
+     Goal_store.upsert_goal config ~id:goal_id ~phase:Goal_phase.Verifying ()
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Completion_idle -> ()
+   | _ -> fail "test setup: the wedge needs an idle ledger");
+  let answered =
+    must_succeed "repeated request_complete"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "answered as Already (noop)" true
+    (json_bool answered [ "noop" ]);
+  check string "still verifying" "verifying" (json_state answered [ "phase" ]);
+  check string "the proof request is re-armed" "proof_pending"
+    (json_state answered [ "verification"; "completion"; "state" ]);
+  (match (ledger_record config goal_id).completion with
+   | Goal_verification.Proof_pending _ -> ()
+   | _ -> fail "the re-arm must be durable, not just reported");
+  (* And the gate drains from there. *)
+  let completed =
+    must_succeed "typed proof proven"
+      (verifier_transition
+         config
+         goal_id
+         Workspace_goals.Proof_proven
+         "verified after re-arm")
+  in
+  check string "the re-armed gate completes" "completed"
+    (json_state completed [ "goal"; "phase" ])
+;;
+
+let test_verifying_repeat_reconciles_a_committed_proof () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Proof committed before crash" in
+  mark_criterion_viable ctx goal_id;
+  ignore
+    (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  (match
+     Goal_verification.record_proof_verdict
+       config
+       ~goal_id
+       (verdict ~evidence:"artifact inspected before crash" Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  check string "phase write is the simulated missing effect" "verifying"
+    (stored_phase config goal_id);
+  let answered =
+    must_succeed "repeated request reconciles proof"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "response exposes recovery" true
+    (json_bool answered [ "reconciled" ]);
+  check string "the committed proof converges to completed" "completed"
+    (json_state answered [ "goal"; "phase" ]);
+  match (ledger_record config goal_id).completion with
+  | Goal_verification.Proof_proven proof ->
+    check string "recovery preserves the original proof run"
+      "goal-verifier-test-run" proof.verification_run_id
+  | _ -> fail "recovery rewrote the committed proof"
+;;
+
+(* (e) A criterion judged unreachable blocks the completion request with a
+   typed conflict; the criterion commit itself is phase-neutral. *)
+let test_unreachable_criterion_blocks_request_complete () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Impossible goal" in
+  let committed =
+    must_succeed "typed criterion unreachable"
+      (verifier_transition
+         config
+         goal_id
+         (Workspace_goals.Criterion_unreachable { reason = "no such API exists" })
+         "the named API does not exist")
+  in
+  check string "phase-neutral: still executing" "executing"
+    (json_state committed [ "phase" ]);
+  check string "the verdict is on the ledger" "unreachable"
+    (json_state committed [ "verification"; "criterion"; "state" ]);
+  let refused =
+    must_fail "request_complete against an unreachable criterion"
+      (transition ctx goal_id "request_complete")
+  in
+  check string "typed conflict" "conflict"
+    (json_state refused [ "error_code" ]);
+  check string "the phase did not move" "executing"
+    (stored_phase config goal_id)
+;;
+
+(* (f) Creation records the durable criterion-check request (B2 hook). *)
+let test_creation_writes_criterion_pending () =
   with_workspace
   @@ fun config ->
   let ctx = workspace_ctx config in
@@ -453,23 +902,88 @@ let test_request_complete_still_completes_directly () =
       (dispatch
          ctx
          ~name:"masc_goal_upsert"
-         [ "title", `String "Ungated completion"
+         [ "title", `String "Checked goal"
          ; "metric", `String "m"
          ; "target_value", `String "1"
          ])
   in
+  check string "the hook is reported in the response" "criterion_pending"
+    (json_state created [ "criterion_check" ]);
   let goal_id = json_state created [ "goal_id" ] in
-  let completed =
-    must_succeed
-      "request_complete"
-      (dispatch
-         ctx
-         ~name:"masc_goal_transition"
-         [ "goal_id", `String goal_id; "action", `String "request_complete" ])
+  match (ledger_record config goal_id).criterion with
+  | Goal_verification.Criterion_pending _ -> ()
+  | _ -> fail "creation must record the durable criterion request"
+;;
+
+(* (g) A keeper holding a Verifying goal keeps seeing it: the runtime-contract
+   cross-check keeps it, the world observation keeps it, and the prompt names
+   it with the proof-pending annotation (P0-1). *)
+let test_keeper_keeps_and_sees_a_verifying_goal () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Goal under proof" in
+  ignore (must_succeed "request_complete" (transition ctx goal_id "request_complete"));
+  let meta =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+           [ "name", `String "gate-keeper"
+           ; "trace_id", `String "gate-keeper-trace"
+           ; "active_goal_ids", `List [ `String goal_id ]
+           ])
+    with
+    | Ok meta -> meta
+    | Error e -> fail ("meta_of_json_fixture: " ^ e)
   in
-  check string "completed directly (stage 1 keeps main's lifecycle)"
-    "completed"
-    (json_state completed [ "goal"; "phase" ])
+  check
+    (list string)
+    "the cross-check keeps the verifying goal"
+    [ goal_id ]
+    (Keeper_runtime_contract.validate_active_goal_ids ~config ~meta ());
+  let observation =
+    Keeper_world_observation.observe ~pending_board_events:(Some []) ~config ~meta
+  in
+  check
+    (list string)
+    "the world observation keeps the verifying goal"
+    [ goal_id ]
+    observation.Keeper_world_observation.active_goals;
+  let summaries = Keeper_unified_prompt.active_goal_summaries ~config ~meta in
+  let { Keeper_unified_prompt.world_state; _ } =
+    Keeper_unified_prompt.build_prompt
+      ~meta
+      ~config
+      ~turn_decision:(Keeper_world_observation.keeper_cycle_decision ~meta observation)
+      ~current_task:Keeper_world_observation_inputs.No_current_task
+      ~active_goal_summaries:summaries
+      ~observation
+      ()
+  in
+  check bool "the Active Goals block names the goal" true
+    (String_util.contains_substring world_state goal_id);
+  check bool "with the proof-pending annotation" true
+    (String_util.contains_substring world_state "증명 대기 중")
+;;
+
+(* (h) A corrupt ledger during request_complete is a typed error, never a
+   silent pass — and the phase does not move. *)
+let test_corrupt_ledger_fails_request_complete_loudly () =
+  with_workspace
+  @@ fun config ->
+  let ctx = workspace_ctx config in
+  let goal_id = create_goal ctx "Goal beside a poisoned ledger" in
+  poison_ledger config;
+  let refused =
+    must_fail "request_complete over a corrupt ledger"
+      (transition ctx goal_id "request_complete")
+  in
+  check bool "the decode failure is named" true
+    (String_util.contains_substring
+       (Yojson.Safe.to_string refused)
+       "did not decode");
+  check string "the phase did not move" "executing"
+    (stored_phase config goal_id)
 ;;
 
 let () =
@@ -492,16 +1006,20 @@ let () =
             test_refuted_criterion_keeps_its_reason
         ] )
     ; ( "ledger record-only discipline"
-      , [ test_case "proof verdict requires a pending request" `Quick
+      , [ test_case "criterion verdict requires pending or same outcome" `Quick
+            test_criterion_verdict_requires_pending_or_same_outcome
+        ; test_case "proof verdict requires a pending request" `Quick
             test_proof_verdict_requires_a_pending_request
-        ; test_case "human confirmation requires a proven proof" `Quick
-            test_human_confirmation_requires_a_proven_proof
+        ; test_case "proof verdict requires a viable criterion" `Quick
+            test_proof_verdict_requires_a_viable_criterion
         ] )
     ; ( "store discipline"
       , [ test_case "undecodable ledger fails closed and loud" `Quick
             test_undecodable_ledger_fails_closed_and_loud
         ; test_case "unknown ledger field is a decode error" `Quick
             test_unknown_ledger_field_is_a_decode_error
+        ; test_case "retired human confirmation state is a decode error" `Quick
+            test_retired_human_confirmation_state_is_a_decode_error
         ] )
     ; ( "observability"
       , [ test_case "goal list joins the ledger" `Quick
@@ -509,9 +1027,25 @@ let () =
         ; test_case "goal list renders a ledger-error state" `Quick
             test_goal_list_renders_a_ledger_error_state
         ] )
-    ; ( "lifecycle unchanged"
-      , [ test_case "request_complete still completes directly" `Quick
-            test_request_complete_still_completes_directly
+    ; ( "stage 2 gate"
+      , [ test_case "request_complete enters verifying with proof pending" `Quick
+            test_request_complete_enters_verifying_with_proof_pending
+        ; test_case "proof proven completes with authority and evidence" `Quick
+            test_proof_proven_completes_with_authority_and_evidence
+        ; test_case "proof refuted returns to executing with reason" `Quick
+            test_proof_refuted_returns_to_executing_with_reason
+        ; test_case "verifying repeat re-arms a missing proof request" `Quick
+            test_verifying_repeat_rearms_a_missing_proof_request
+        ; test_case "verifying repeat reconciles a committed proof" `Quick
+            test_verifying_repeat_reconciles_a_committed_proof
+        ; test_case "unreachable criterion blocks request_complete" `Quick
+            test_unreachable_criterion_blocks_request_complete
+        ; test_case "creation writes criterion pending" `Quick
+            test_creation_writes_criterion_pending
+        ; test_case "keeper keeps and sees a verifying goal" `Quick
+            test_keeper_keeps_and_sees_a_verifying_goal
+        ; test_case "corrupt ledger fails request_complete loudly" `Quick
+            test_corrupt_ledger_fails_request_complete_loudly
         ] )
     ]
 ;;

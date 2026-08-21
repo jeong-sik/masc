@@ -46,6 +46,66 @@ type run =
   ; status : run_status
   }
 
+let tool_observation_to_yojson tool =
+  `Assoc
+    [ "tool_name", `String tool.tool_name
+    ; "input", tool.input
+    ; "disposition", `String (Tool_result.string_of_disposition tool.disposition)
+    ; "output_excerpt", `String tool.output_excerpt
+    ; "output_truncated", `Bool tool.output_truncated
+    ; "duration_ms", `Float tool.duration_ms
+    ; "finished_at", `Float tool.finished_at
+    ]
+;;
+
+let tool_observation_of_yojson json =
+  let ( let* ) = Result.bind in
+  let* fields = Run_registry_core.Json.object_fields json in
+  let* () =
+    Run_registry_core.Json.exact_fields
+      ~required:
+        [ "tool_name"
+        ; "input"
+        ; "disposition"
+        ; "output_excerpt"
+        ; "output_truncated"
+        ; "duration_ms"
+        ; "finished_at"
+        ]
+      fields
+  in
+  let* tool_name = Run_registry_core.Json.string_field "tool_name" fields in
+  let* input =
+    match List.assoc_opt "input" fields with
+    | Some value -> Ok value
+    | None -> Error "missing field input"
+  in
+  let* disposition_wire =
+    Run_registry_core.Json.string_field "disposition" fields
+  in
+  let* disposition = Tool_result.unit_disposition_of_string disposition_wire in
+  let* output_excerpt =
+    Run_registry_core.Json.string_field "output_excerpt" fields
+  in
+  let* output_truncated =
+    match List.assoc_opt "output_truncated" fields with
+    | Some (`Bool value) -> Ok value
+    | Some _ -> Error "field output_truncated must be a boolean"
+    | None -> Error "missing field output_truncated"
+  in
+  let* duration_ms = Run_registry_core.Json.float_field "duration_ms" fields in
+  let* finished_at = Run_registry_core.Json.float_field "finished_at" fields in
+  Ok
+    { tool_name
+    ; input
+    ; disposition
+    ; output_excerpt
+    ; output_truncated
+    ; duration_ms
+    ; finished_at
+    }
+;;
+
 let outcome_label = function
   | Approved -> "approved"
   | Rejected _ -> "rejected"
@@ -128,21 +188,10 @@ module Payload = struct
   ;;
 
   let completion_to_yojson completion =
-    let tool_to_yojson tool =
-      `Assoc
-        [ "tool_name", `String tool.tool_name
-        ; "input", tool.input
-        ; "disposition", `String (Tool_result.string_of_disposition tool.disposition)
-        ; "output_excerpt", `String tool.output_excerpt
-        ; "output_truncated", `Bool tool.output_truncated
-        ; "duration_ms", `Float tool.duration_ms
-        ; "finished_at", `Float tool.finished_at
-        ]
-    in
     let fields =
       [ "outcome", `String (outcome_label completion.outcome)
       ; "elapsed_s", `Float completion.elapsed_s
-      ; "tools", `List (List.map tool_to_yojson completion.tools)
+      ; "tools", `List (List.map tool_observation_to_yojson completion.tools)
       ]
       @ outcome_fields completion.outcome
       @
@@ -183,56 +232,10 @@ module Payload = struct
       | Some _ -> Error "field tools must be an array"
       | None -> Error "missing field tools"
     in
-    let tool_of_yojson json =
-      let* fields = Run_registry_core.Json.object_fields json in
-      let* () =
-        Run_registry_core.Json.exact_fields
-          ~required:
-            [ "tool_name"
-            ; "input"
-            ; "disposition"
-            ; "output_excerpt"
-            ; "output_truncated"
-            ; "duration_ms"
-            ; "finished_at"
-            ]
-          fields
-      in
-      let* tool_name = Run_registry_core.Json.string_field "tool_name" fields in
-      let* input =
-        match List.assoc_opt "input" fields with
-        | Some value -> Ok value
-        | None -> Error "missing field input"
-      in
-      let* disposition_wire =
-        Run_registry_core.Json.string_field "disposition" fields
-      in
-      let* disposition = Tool_result.unit_disposition_of_string disposition_wire in
-      let* output_excerpt =
-        Run_registry_core.Json.string_field "output_excerpt" fields
-      in
-      let* output_truncated =
-        match List.assoc_opt "output_truncated" fields with
-        | Some (`Bool value) -> Ok value
-        | Some _ -> Error "field output_truncated must be a boolean"
-        | None -> Error "missing field output_truncated"
-      in
-      let* duration_ms = Run_registry_core.Json.float_field "duration_ms" fields in
-      let* finished_at = Run_registry_core.Json.float_field "finished_at" fields in
-      Ok
-        { tool_name
-        ; input
-        ; disposition
-        ; output_excerpt
-        ; output_truncated
-        ; duration_ms
-        ; finished_at
-        }
-    in
     let rec parse_tools acc = function
       | [] -> Ok (List.rev acc)
       | tool :: rest ->
-        let* tool = tool_of_yojson tool in
+        let* tool = tool_observation_of_yojson tool in
         parse_tools (tool :: acc) rest
     in
     let* tools = parse_tools [] tools_json in

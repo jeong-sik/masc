@@ -90,7 +90,7 @@ let test_mermaid_buffer_class () =
 ;;
 
 let test_mermaid_terminal_class () =
-  let terminal_phases = [ SM.Stopped; SM.Dead ] in
+  let terminal_phases = [ SM.Stopped ] in
   List.iter
     (fun phase ->
        let lines = mermaid_lines phase in

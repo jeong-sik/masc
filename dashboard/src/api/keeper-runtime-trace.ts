@@ -136,22 +136,6 @@ export interface KeeperRuntimeLensSourceClockAxis {
   counts: Record<string, number>
 }
 
-export interface KeeperRuntimeLensClaimScopeAxis {
-  present: boolean
-  source: string
-  status: string
-  result: string | null
-  mode: string | null
-  scoped: boolean | null
-  active_goal_ids: string[]
-  effective_goal_ids: string[]
-  fallback_reason: string | null
-  matched_goal_id: string | null
-  excluded_count: number | null
-  claimed_task_id: string | null
-  claimed_goal_id: string | null
-}
-
 export interface KeeperRuntimeLensConfigDriftAxis {
   present: boolean
   status: string
@@ -185,7 +169,6 @@ export interface KeeperRuntimeLensAxes {
   provider_attempt: KeeperRuntimeLensProviderAttemptAxis
   payload_role: KeeperRuntimeLensPayloadRoleAxis
   source_clock: KeeperRuntimeLensSourceClockAxis
-  claim_scope: KeeperRuntimeLensClaimScopeAxis
   config_drift: KeeperRuntimeLensConfigDriftAxis
   context: KeeperRuntimeLensContextAxis
   memory: KeeperRuntimeLensMemoryAxis
@@ -613,25 +596,6 @@ function parseRuntimeLensSourceClockAxis(raw: unknown): KeeperRuntimeLensSourceC
   return { counts }
 }
 
-function parseRuntimeLensClaimScopeAxis(raw: unknown): KeeperRuntimeLensClaimScopeAxis {
-  const obj = isRecord(raw) ? raw : {}
-  return {
-    present: obj.present === true,
-    source: stringField(obj, 'source') || '(unknown source)',
-    status: stringField(obj, 'status') || 'not_observed',
-    result: nullableStringField(obj, 'result'),
-    mode: nullableStringField(obj, 'mode'),
-    scoped: nullableBooleanField(obj, 'scoped'),
-    active_goal_ids: stringListField(obj, 'active_goal_ids'),
-    effective_goal_ids: stringListField(obj, 'effective_goal_ids'),
-    fallback_reason: nullableStringField(obj, 'fallback_reason'),
-    matched_goal_id: nullableStringField(obj, 'matched_goal_id'),
-    excluded_count: nullableNumberField(obj, 'excluded_count'),
-    claimed_task_id: nullableStringField(obj, 'claimed_task_id'),
-    claimed_goal_id: nullableStringField(obj, 'claimed_goal_id'),
-  }
-}
-
 function parseRuntimeLensConfigDriftAxis(raw: unknown): KeeperRuntimeLensConfigDriftAxis {
   const obj = isRecord(raw) ? raw : {}
   return {
@@ -671,7 +635,6 @@ function parseRuntimeLensAxes(raw: unknown): KeeperRuntimeLensAxes {
     provider_attempt: parseRuntimeLensProviderAttemptAxis(obj.provider_attempt),
     payload_role: parseRuntimeLensPayloadRoleAxis(obj.payload_role),
     source_clock: parseRuntimeLensSourceClockAxis(obj.source_clock),
-    claim_scope: parseRuntimeLensClaimScopeAxis(obj.claim_scope),
     config_drift: parseRuntimeLensConfigDriftAxis(obj.config_drift),
     context: parseRuntimeLensContextAxis(obj.context),
     memory: parseRuntimeTraceMemory(obj.memory),

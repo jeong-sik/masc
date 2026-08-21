@@ -9,14 +9,14 @@ include Keeper_state_machine_types
 
 (** [is_terminal phase] is true iff [phase] cannot accept new turns.
 
-    Stopped and Dead are terminal: in [can_transition] every
-    outgoing edge from these sources is denied. Centralized here so the
-    FSM, health surfaces, and the mermaid renderer share one source of
-    truth instead of re-matching the terminal triple at each consumer.
+    Stopped is terminal: in [can_transition] every outgoing edge from that
+    source is denied. Centralized here so the FSM, health surfaces, and the
+    mermaid renderer share one source of truth instead of re-matching the
+    terminal phase at each consumer.
     Exhaustive (no [_] wildcard) so adding a phase variant surfaces a
     compile-time warning here. *)
 let is_terminal = function
-  | Stopped | Dead -> true
+  | Stopped -> true
   | Offline
   | Running
   | Failing
@@ -50,10 +50,8 @@ let derive_phase (c : conditions) : phase =
      which includes buffer operations. Guard Stopped against active buffer
      ops so the keeper stays in Draining until compaction/handoff exits. *)
 
-  (* 0. Explicit durable terminal state. Runtime failures cannot synthesize it. *)
-  if c.dead_tombstone_latched
-  then Dead (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
-  else if
+  (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
+  if
     c.stop_requested
     && c.drain_complete
     && (not c.compaction_active)
@@ -184,12 +182,6 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
   | Compacting -> [ Start_compaction; lifecycle "compaction_started" "" ]
   | HandingOff -> [ Start_handoff; lifecycle "handoff_started" "" ]
   | Draining -> [ Start_drain; lifecycle "draining" "" ]
-  | Dead ->
-    [ Mark_dead_tombstone
-    ; lifecycle "dead" (event_to_string event)
-    ; Trigger_immediate_cleanup
-    ; Cancel_pending_agent_core
-    ]
   | Stopped ->
     [ Cleanup_and_unregister
     ; lifecycle
@@ -268,8 +260,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | Draining
      | Paused
      | Stopped
-     | Restarting
-     | Dead ->
+     | Restarting ->
        (* Direct transitions to Restarting from non-Crashed phases are not
           a normal lifecycle path; the supervisor / registry owns publishing
           for those rare corner cases. Intentional no-op (matches the
@@ -316,8 +307,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
      | HandingOff
      | Draining
      | Stopped
-     | Crashed
-     | Dead ->
+     | Crashed ->
        (* [register] takes Init → Running without traversing this function
           (it uses [register_with_state] directly). For other prevs (e.g.
           Compacting → Running on auto-compact success, Overflowed →
@@ -449,7 +439,7 @@ let apply_event ~current_phase ~conditions ~event ~now =
      (which is wrong if the new phase is itself intended terminal).
      Mirrors the [can_transition] exhaustive refactor in #16747. *)
   match current_phase with
-  | Stopped | Dead ->
+  | Stopped ->
     Error
       (Terminal_state { current = current_phase; attempted_event = event_to_string event })
   | Offline

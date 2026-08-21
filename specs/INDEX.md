@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-08-17T11:44:35Z (HEAD: b8d27b2c6f)
+Generated: 2026-08-21T02:25:29Z (HEAD: 070f0c5e0a)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,11 +13,11 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 43 |
-| Manual specs | 43 |
+| Total .tla files | 42 |
+| Manual specs | 42 |
 | TTrace (auto-generated) | 0 |
 | Directories | 12 |
-| Total .cfg files | 90 |
+| Total .cfg files | 89 |
 | Buggy .cfg (bug-model pair) | 47 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
@@ -34,7 +34,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} | c56bf6b4a336 |
+| AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:AutoTickReadOnly} | 693e4344e4bd |
 | AutonomousPhase.tla | AutonomousPhase | manual | 2 | 1 | clean={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} buggy={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} | 54e3dc0e6baa |
 
 ### specs/boundary (7 specs)
@@ -67,19 +67,18 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | baa8b016ef40 |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 5d3029adffa6 |
 
-### specs/keeper-state-machine (10 specs)
+### specs/keeper-state-machine (9 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| KeeperDeadRevivalTransaction.tla | KeeperDeadRevivalTransaction | manual | 1 | 0 | clean={inv:TypeOK, inv:SingleOwner, inv:NoUnjournaledPartialCommit, inv:LiveMatchesDurable, inv:NewerGenerationPreserved} | 4d80b169aa92 |
 | KeeperDecisionPipeline.tla | KeeperDecisionPipeline | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:DecisionBoundaryRequiresMeasurement} | 2f736860c52f |
-| KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | eb079ef5c342 |
+| KeeperDwellMonotone.tla | KeeperDwellMonotone | manual | 2 | 1 | clean={inv:Safety} buggy={inv:DwellNonNegative} | 8aeb85fd761e |
 | KeeperEventQueue.tla | KeeperEventQueue | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | cf9b1da37ed0 |
 | KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | d143b5beae39 |
 | KeeperHitlDeferred.tla | KeeperHitlDeferred | manual | 4 | 3 | clean={inv:Safety, prop:UnrelatedLaneKeepsProgressing, prop:ResolutionEventuallyConsumed} blocking-buggy={inv:DeferredImmediately} consume-buggy={inv:ResolutionConsumedAtMostOnce} wake-buggy={inv:ResolutionWakesOriginOnly} | b5b3c09a5b2e |
 | KeeperLastBlockerLatch.tla | KeeperLastBlockerLatch | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 853f5fe4c394 |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 3e90e9343f92 |
-| KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, inv:DeadRequiresTombstone, inv:PausedRequiresOperator, inv:StoppedRequiresOperatorStop, inv:RestartingRequiresTypedIntent, prop:DeadIsForever, prop:StoppedIsForever, prop:TombstoneNeverClears} buggy={inv:TypeOK, inv:StoppedRequiresOperatorStop} | d1dee755cd34 |
+| KeeperStateMachine.tla | KeeperStateMachine | manual | 2 | 1 | clean={inv:TypeOK, inv:PausedRequiresOperator, inv:StoppedRequiresOperatorStop, inv:RestartingRequiresTypedIntent, prop:StoppedIsForever} buggy={inv:TypeOK, inv:StoppedRequiresOperatorStop} | 380b7f7ff91c |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | f17bf704fc3b |
 
 ### specs/keeper-switch-hierarchy (3 specs)

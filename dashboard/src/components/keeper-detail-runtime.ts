@@ -73,19 +73,6 @@ import {
 
 // ── Utility functions ────────────────────────────────────
 
-export function resolveKeeperCurrentTaskLabel(
-  keeper: Keeper | null | undefined,
-): string {
-  const runtimeState = linkedRuntimeState(keeper)
-  if (!keeper) return 'unlinked'
-  if (runtimeState === 'offline') return 'offline'
-  if (!keeper.agent) return 'not_collected'
-  if (typeof keeper.agent.current_task === 'string' && keeper.agent.current_task.trim() !== '') {
-    return keeper.agent.current_task
-  }
-  return 'unassigned'
-}
-
 // ── Shared row component ─────────────────────────────────
 
 function SignalRow({ label, value, title }: { label: string; value: string | number; title?: string }) {
@@ -1333,7 +1320,6 @@ export function RuntimeLensSection({
 
   const lens = trace.runtime_lens
   const lane = lens.axes.provider_lane
-  const claim = lens.axes.claim_scope
   const drift = lens.axes.config_drift
   const context = lens.axes.context
   const memory = lens.axes.memory
@@ -1364,9 +1350,6 @@ export function RuntimeLensSection({
         <${SignalRow} label="runtime lane" value=${lane.resolved_lane ?? lane.status ?? 'unknown'} />
         <${SignalRow} label="payload role" value=${formatPayloadRole(lens.axes.payload_role)} />
         <${SignalRow} label="source clock" value=${formatSourceClock(lens.axes.source_clock)} />
-        <${SignalRow} label="claim scope" value=${claim.present ? `${claim.mode ?? 'unknown'} / ${claim.status}` : 'not observed'} />
-        <${SignalRow} label="claim excluded" value=${claim.excluded_count === null ? '-' : String(claim.excluded_count)} />
-        <${SignalRow} label="claim goals" value=${formatLensList(claim.effective_goal_ids)} />
         <${SignalRow} label="runtime drift" value=${drift.runtime_override ? `${drift.default_runtime_id ?? '-'} -> ${drift.live_runtime_id ?? '-'}` : drift.status} />
         <${SignalRow} label="override fields" value=${formatLensList(drift.override_fields)} />
         <${SignalRow} label="context compaction" value=${formatRatioPair({ numerator: context.context_compacted_count, denominator: context.context_compact_started_count })} />
@@ -1470,7 +1453,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
-  const currentTaskLabel = resolveKeeperCurrentTaskLabel(keeper)
   const openToolsQuery = observedTools[0] ?? null
 
   return html`
@@ -1478,7 +1460,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="프로젝트 범위" value=${namespaceName} />
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
-      <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
       <div class="flex justify-end mt-1">
         <${ActionButton}

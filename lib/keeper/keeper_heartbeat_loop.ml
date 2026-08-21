@@ -1245,13 +1245,6 @@ let run_heartbeat_loop
           | Intake_lifecycle_blocked _ -> true
           | Intake_admitted -> false
         in
-        let terminal_lifecycle_blocked =
-          match intake_admission with
-          | Intake_lifecycle_blocked
-              Keeper_lifecycle_admission.Autonomous_dead_tombstone -> true
-          | Intake_lifecycle_blocked (Keeper_lifecycle_admission.Autonomous_paused _) -> false
-          | Intake_admitted -> false
-        in
         (match intake_admission with
          | Intake_admitted -> ()
          | Intake_lifecycle_blocked denial ->
@@ -1274,15 +1267,12 @@ let run_heartbeat_loop
              "%s: heartbeat intake denied by lifecycle admission: %s"
              meta_current.name
              reason;
-           if terminal_lifecycle_blocked
-           then
-             (* A dead tombstone owns no runnable lane. Ordinary pause keeps
-                its lane parked so an explicit resume remains local. *)
-             Atomic.set stop true
-           else
-             Keeper_registry.touch_last_turn_ts
-               ~base_path:ctx.config.base_path
-               meta_current.name
+           (* [autonomous_denial] carries one variant, an ordinary pause, which
+              keeps the lane parked so an explicit resume stays local. The loop
+              therefore never stops itself here. *)
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name
          );
         let pending_board_events, meta_after_triage =
           if admitted_turn

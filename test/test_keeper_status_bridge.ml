@@ -72,6 +72,76 @@ let defaults_with_prompt_fields =
     (Keeper_status_bridge.live_override_fields meta defaults_with_prompt_fields)
 ;;
 
+let test_shutdown_phase_names_are_pinned () =
+  (* These strings go on the wire in keeper_status. A consumer waits for a
+     terminal by comparing against them, so renaming one silently breaks that
+     wait — the compiler cannot see a string comparison in a Python runner
+     (#29181). Exhaustiveness is the compiler's job; this pins the values. *)
+  let check expected phase =
+    Alcotest.(check string)
+      expected
+      expected
+      (Keeper_shutdown_types.phase_to_string phase)
+  in
+  check "prepared" Keeper_shutdown_types.Prepared;
+  check "joining_lanes" Keeper_shutdown_types.Joining_lanes;
+  check "joined_idle" Keeper_shutdown_types.Joined_idle
+;;
+
+let shutdown_operation_with_phase phase =
+  let trace_id =
+    match Keeper_id.Trace_id.of_string "trace-status-bridge-fence-test" with
+    | Ok trace_id -> trace_id
+    | Error detail -> Alcotest.failf "trace id rejected: %s" detail
+  in
+  { Keeper_shutdown_types.schema_version =
+      Keeper_shutdown_types.schema_version
+  ; revision = 1
+  ; operation_id = Keeper_shutdown_types.Operation_id.generate ()
+  ; keeper_name = "verifier"
+  ; lane_ownership = Keeper_shutdown_types.Dormant_meta
+  ; trace_id
+  ; generation = 1
+  ; actor = "test"
+  ; cleanup_intent =
+      { Keeper_shutdown_types.reason =
+          Keeper_shutdown_types.Operator_stop_remove_meta
+      ; remove_session = true
+      }
+  ; turn_disposition = Keeper_shutdown_types.No_inflight_turn
+  ; expected_backlog_version = 0
+  ; owned_task_ids = []
+  ; join_evidence = None
+  ; phase
+  ; created_at = Masc_domain.now_iso ()
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+let test_admission_fence_is_any_not_latest () =
+  (* keeper_status projects List.exists over the records, not the newest one:
+     admission is refused while any record still fences, so a consumer that
+     read only the latest phase would restart into a fence (#29181). *)
+  let fencing =
+    shutdown_operation_with_phase Keeper_shutdown_types.Joined_idle
+  in
+  let settled =
+    shutdown_operation_with_phase
+      (Keeper_shutdown_types.Superseded
+         (Keeper_shutdown_types.Operator_metadata_update { actor = "test" }))
+  in
+  Alcotest.(check bool)
+    "a settled record alone does not fence"
+    false
+    (List.exists Keeper_shutdown_types.requires_admission_fence [ settled ]);
+  Alcotest.(check bool)
+    "one fencing record fences the whole set"
+    true
+    (List.exists
+       Keeper_shutdown_types.requires_admission_fence
+       [ settled; fencing ])
+;;
+
 let test_nonempty_live_meta_still_reports_profile_override () =
   init_runtime_default_for_tests ();
   let meta =
@@ -304,6 +374,17 @@ let () =
             "non-empty live identity still reports override"
             `Quick
             test_nonempty_live_meta_still_reports_profile_override;
+        ] );
+      ( "shutdown operation phase projection",
+        [
+          Alcotest.test_case
+            "phase names are pinned for wire consumers"
+            `Quick
+            test_shutdown_phase_names_are_pinned;
+          Alcotest.test_case
+            "admission fence is any-record, not latest"
+            `Quick
+            test_admission_fence_is_any_not_latest;
         ] );
     ]
 ;;

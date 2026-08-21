@@ -73,7 +73,7 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0077 | Write-side silent failure — typed propagation | Implemented | - |
 | 0079 | Log row typed encoder + silent-drop removal | Implemented | - |
 | 0080 | Registered descriptors are the tool-surface SSOT | Implemented | - |
-| 0081 | OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | - |
+| 0081 | agent_core Telemetry Envelope Context & Keeper/Goal Pivot Timeline | Implemented | - |
 | 0083 | Dashboard system-actor convention typed unification | Implemented | - |
 | 0084 | Tool dispatch handler and observation unification | Implemented | - |
 | 0086 | Keeper namespace bulk promotion to sub-library | Implemented | - |
@@ -231,9 +231,10 @@ implementation 머지가 아니므로 다수 RFC 가 `Draft` 로 남아있다.
 | 0382 | 런타임별 KV/prompt cache 재사용과 reasoning 연속성 | Draft | - |
 | 0383 | 웹 아티팩트는 쌓이기만 한다 — 오프로드 파일을 재질의 가능한 코퍼스로 | Draft | - |
 | 0384 | In-process Telegram connector (long polling) | Proposed | - |
-| 0385 | 자율턴은 대화가 아니다 | Draft | - |
+| 0385 | 자율턴은 대화가 아니다 | Active | - |
 | 0386 | 툴 종류(tool kind)는 닫힌 합타입으로 선언한다 | Draft | - |
 | 0387 | Goal verifier 게이트 — 성공조건 필수화, 생성 시 실재성 검증, 완료의 2단계 증명 | Draft | - |
+| 0388 | awaiting_tool 대기의 liveness — 취소 도달과 시간 기반 만료 | Draft | - |
 | RFC-async-log-sink-durable-append-offload | Offload the structured-log durable append off the emitting fiber | Draft | - |
 | RFC-checkpoint-pinned-root-containment | Immutable boot-pinned root capability for checkpoint containment | Draft | - |
 | RFC-claude-code-context-overflow-bounded-restart | Admit Claude Code bootstrap input without replaying rejected episodes | Draft | - |

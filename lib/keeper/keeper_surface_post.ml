@@ -17,7 +17,7 @@ let max_user_mentions = 100
 
 (* Slack chat.postMessage rejects more than 50 top-level blocks per message
    (official Block Kit limit). *)
-let max_rich_blocks = 50
+let max_rich_blocks = Tool_shard_types.max_rich_blocks
 
 let is_ascii_upper_or_digit = function
   | 'A' .. 'Z' | '0' .. '9' -> true

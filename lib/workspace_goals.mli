@@ -42,11 +42,44 @@ val handle_goal_assign
 
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
-    {!goal_transition_action_strings}). [request_complete] moves an executing
-    Goal directly to [Completed]. *)
+    {!Goal_phase.Public_action.all}). [request_complete] moves an executing
+    Goal to [Verifying]; verifier verdicts are not public actions. *)
 val handle_goal_transition
   :  tool_name:string
   -> start_time:float
   -> Workspace_types.context
   -> Yojson.Safe.t
   -> Tool_result.result
+
+type verifier_decision =
+  | Criterion_viable
+  | Criterion_unreachable of { reason : string }
+  | Proof_proven
+  | Proof_refuted of { reason : string }
+
+type proof_reconciliation =
+  | No_committed_proof
+  | Reconciled of Goal_phase.t
+  | Reconciliation_not_needed of Goal_phase.t
+
+(** Commit one verdict from the application-owned Goal verifier. The fixed
+    [verifier_exact] authority is constructed inside this boundary; callers
+    cannot supply or impersonate it. The ledger commit precedes any phase
+    write, and a stale/non-pending verdict is refused. *)
+val commit_verifier_decision
+  :  tool_name:string
+  -> start_time:float
+  -> Workspace_utils_backend_setup.config
+  -> goal_id:string
+  -> verification_run_id:string
+  -> decision:verifier_decision
+  -> evidence:string
+  -> Tool_result.result
+
+val reconcile_committed_proof :
+  Workspace_utils_backend_setup.config ->
+  goal_id:string ->
+  (proof_reconciliation, string) result
+(** Converges the Goal phase after a crash between the durable proof verdict
+    write and the phase/event write. The existing verdict is reused without a
+    model call or ledger rewrite. *)

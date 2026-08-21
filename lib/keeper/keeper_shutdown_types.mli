@@ -13,7 +13,6 @@ end
 
 type meta_disposition =
   | Retain_operator_pause
-  | Retain_dead_tombstone
   | Remove_meta
 
 type dashboard_purge_context =
@@ -24,11 +23,11 @@ type dashboard_purge_context =
 type cleanup_reason =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup
+  | Supervisor_cleanup
   | Dashboard_keeper_purge of dashboard_purge_context
 
 type completion_action =
-  | Dead_tombstone_reaped
+  | Supervisor_cleaned
   | Dashboard_keeper_purged
 
 type dashboard_purge_artifact =
@@ -217,5 +216,14 @@ val immutable_fields_equal : t -> t -> bool
     evidence, phase, and [updated_at]) are intentionally excluded. *)
 val admission_lane_to_string : admission_lane -> string
 val admission_lane_of_string : string -> (admission_lane, string) result
+val phase_to_string : phase -> string
+(** Phase name only, for status surfaces. [keepalive_running] answers whether
+    the Keeper fiber is up, which is a different question from whether its
+    shutdown operation reached a terminal: a Keeper can read as stopped while
+    the operation still sits in [Finalizing_tasks] or [Cleanup_ready], and
+    those phases are outside the supersedable set, so a restart is refused
+    (#29181). *)
+
+
 val failure_stage_to_string : failure_stage -> string
 val failure_stage_of_string : string -> (failure_stage, string) result

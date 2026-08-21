@@ -7,7 +7,6 @@
 
 type t =
   | Operator_paused of { operator_actor : operator_actor }
-  | Dead_tombstone
   | Transcript_corruption_reset_required
 
 and operator_actor =

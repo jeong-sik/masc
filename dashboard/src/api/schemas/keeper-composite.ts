@@ -93,7 +93,6 @@ const KeeperPhaseDiagnosisSchema = object({
     handoff_active: boolean(),
     operator_paused: boolean(),
     stop_requested: boolean(),
-    dead_tombstone_latched: boolean(),
     restart_requested: boolean(),
     drain_complete: boolean(),
     credential_archived: boolean(),
@@ -143,6 +142,15 @@ const KeeperBoardCursorSchema = object({
   post_id: nullable(string()),
 })
 
+const KeeperCompositeClaimAttemptSchema = object({
+  present: boolean(),
+  source: string(),
+  status: string(),
+  result: nullable(string()),
+  claimed_task_id: nullable(string()),
+  claimed_goal_id: nullable(string()),
+})
+
 const KeeperCompositeExecutionSchema = object({
   latest_receipt_present: boolean(),
   recorded_at: nullable(string()),
@@ -172,7 +180,7 @@ const KeeperCompositeExecutionSchema = object({
       fallback_reason: nullable(string()),
     }),
   ),
-  claim_scope: optional(unknown()),
+  claim_attempt: KeeperCompositeClaimAttemptSchema,
   config_drift: optional(unknown()),
 })
 

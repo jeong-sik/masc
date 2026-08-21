@@ -166,8 +166,8 @@ RFC-0312 (**Accepted**, PR #23359) 가 "keeper repo 매핑은 advisory default s
       so no repos/<repo> cwd exists yet
 변경: no git checkout found under your workspace root
 
-현재: available repo cwds: repos/masc, repos/oas
-변경: git checkouts under your workspace root: masc, work/oas, .tmp/task-12
+현재: available repo cwds: repos/masc, repos/agent_core
+변경: git checkouts under your workspace root: masc, work/agent_core, .tmp/task-12
 ```
 
 앞의 것은 **어디에 있어야 하는지를 주장**하고 뒤의 것은 **어디에 있는지를 보고**한다. 앞은 틀릴 수 있고(379건/24h 틀렸다) 뒤는 틀릴 수 없다.

@@ -111,7 +111,6 @@ export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReas
   const nextAction = nextHumanActionLabel(nextActionRaw) ?? undefined
 
   const isCritical = hasCriticalAttentionBlocker(blockerClass)
-    || keeper.lifecycle_phase === 'Dead'
     || keeper.lifecycle_phase === 'Crashed'
 
   if (isCritical) {
@@ -802,7 +801,6 @@ function keeperTickerTone(status?: string | null): FleetTickerEvent['tone'] {
     case 'executing':
       return 'info'
     case 'offline':
-    case 'dead':
     case 'stopped':
     case 'unbooted':
       return 'err'

@@ -11,7 +11,6 @@ type phase =
   | Stopped
   | Crashed
   | Restarting
-  | Dead
 val phase_to_string : Keeper_state_machine_phase.phase -> string
 val phase_of_string :
   string -> Keeper_state_machine_phase.phase option
@@ -26,7 +25,6 @@ type conditions = {
   handoff_active : bool;
   operator_paused : bool;
   stop_requested : bool;
-  dead_tombstone_latched : bool;
   restart_requested : bool;
   drain_complete : bool;
   credential_archived : bool;
@@ -70,7 +68,6 @@ type entry_action =
   | Start_drain
   | Schedule_restart of { delay_sec : float; }
   | Publish_lifecycle of { event_name : string; detail : string; }
-  | Mark_dead_tombstone
   | Cleanup_and_unregister
   | Trigger_immediate_cleanup
   | Cancel_pending_agent_core

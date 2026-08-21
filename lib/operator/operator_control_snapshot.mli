@@ -1,5 +1,5 @@
 (** Operator_control_snapshot — operator dashboard snapshot
-    + audit cache + runtime-status alignment helpers.
+    + audit cache.
 
     The .ml is 1446 lines.  Runtime-includes
     {!Operator_pending_confirm} and {!Operator_digest} so
@@ -18,8 +18,6 @@
       {!snapshot_view_of_string_opt}, {!snapshot_view}
       (consumed by the [tool_operator] tool schema; no suite pins
       the view vocabulary today).
-    - {!align_keeper_runtime_status}
-      (test-only direct caller).
     - {!get_payload} (runtime-include
       consumer {!Operator_control_action} reaches it
       unqualified).
@@ -92,23 +90,6 @@ val snapshot_view_of_string_opt : string -> snapshot_view option
 (** Trim- and case-insensitive parser ({!Summary} ↔
     [summary], etc).  Returns [None] for inputs not in
     {!valid_snapshot_view_strings}. *)
-
-(** {1 Runtime-status alignment} *)
-
-val align_keeper_runtime_status :
-  surface_status:string ->
-  diagnostic:Yojson.Safe.t ->
-  agent_status_json:Yojson.Safe.t ->
-  keepalive_running:bool ->
-  string
-(** Aligns the keeper's surface status (stored on the
-    runtime record) with the live signal extracted from
-    [agent_status_json] when [keepalive_running = true]
-    and the [diagnostic] health state allows the
-    override.  Returns the input [surface_status]
-    unchanged when keepalive is off or the live signal
-    does not promote.  Specifically lifts [inactive] /
-    [offline] surface labels to the live runtime status. *)
 
 (** {1 Runtime-include consumer re-exports} *)
 

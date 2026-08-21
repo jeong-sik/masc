@@ -11,7 +11,7 @@ val string_has_prefix : prefix:string -> string -> bool
 val tool_call_output_text : Yojson.Safe.t -> string option
 val parse_tool_call_output : Yojson.Safe.t -> Yojson.Safe.t option
 val claim_status_of_output : Yojson.Safe.t -> string
-val composite_claim_scope_absent :
+val composite_claim_attempt_absent :
   [> `Assoc of
        (string *
         [> `Bool of bool | `List of 'a list | `Null | `String of string ])
@@ -37,7 +37,7 @@ val latest_task_claim_row :
 (** The keeper's most recent [Keeper_tooling.Name.Task_claim] row within the
     window, by row order, or [None] if it did not claim inside it. *)
 
-val composite_claim_scope_json :
+val composite_claim_attempt_json :
   claim_window:claim_window ->
   keeper_name:string -> [> `Assoc of (string * Yojson.Safe.t) list ]
 val find_override_field_source :

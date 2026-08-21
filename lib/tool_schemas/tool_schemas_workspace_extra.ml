@@ -5,7 +5,7 @@ open Masc_domain
 let goal_phase_enum = List.map Goal_phase.to_string Goal_phase.all
 
 let goal_transition_action_enum =
-  List.map Goal_phase.action_to_string Goal_phase.all_actions
+  List.map Goal_phase.Public_action.to_string Goal_phase.Public_action.all
 ;;
 
 let enum_schema ?description values =
@@ -106,7 +106,12 @@ let schemas : tool_schema list =
     }
   ; { name = "masc_goal_transition"
     ; description =
-        "Apply an explicit Goal lifecycle transition. request_complete completes the Goal directly."
+        "Apply an explicit Goal lifecycle transition (RFC-0387 stage 2 gate). \
+         request_complete no longer completes the Goal directly: it moves \
+         executing -> verifying and persists a durable proof request. Verifier \
+         verdicts are application-owned typed commits and are deliberately not \
+         accepted by this MCP tool. A Goal whose criterion was judged \
+         unreachable is refused on request_complete."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

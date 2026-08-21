@@ -7,6 +7,11 @@
 
 open Result.Syntax
 
+(* RFC-0361 D7(b): fixed authority identity — every judgement carries the
+   same actor string (the [verifier_exact] lane id) so verdicts aggregate by
+   actor; run identity stays with the per-review [verification_id]. *)
+let authority_actor = Runtime.verifier_exact_lane_id
+
 type runtime =
   { config : Workspace_utils_backend_setup.config
   ; sw : Eio.Switch.t
@@ -458,8 +463,9 @@ let process_task_once
       ~assignee
       ~verification_id
   =
-  let agent_run_id = Random_id.prefixed ~prefix:"system-llm-agent-" ~bytes:16 in
-  let authority = Masc_domain.System_llm_agent { agent_run_id } in
+  (* RFC-0361 D7(b): fixed identity, not a per-judgement random mint — see
+     [authority_actor] above. *)
+  let authority = Masc_domain.System_llm_agent { agent_run_id = authority_actor } in
   (* Register before any work. Every exit below records through [complete],
      including paths that produce no semantic verdict. *)
   let registry = Verification_run_registry.global () in
@@ -525,6 +531,7 @@ let process_task_once
            Task.Anti_rationalization.Lookup_tools
              { schemas = Verification_authority_tools.schemas lookup_tools
              ; dispatch = Verification_authority_tools.dispatch lookup_tools
+             ; scope = Task.Anti_rationalization.Producer_tree
              }
          in
          let result =
@@ -747,6 +754,7 @@ let start ~sw ~clock ~(config : Workspace_utils_backend_setup.config) =
 ;;
 
 module For_testing = struct
+  let authority_actor = authority_actor
   let evidence_refs_of_output = evidence_refs_of_output
   let completion_verdict_of_review = completion_verdict_of_review
   let review_notes = review_notes

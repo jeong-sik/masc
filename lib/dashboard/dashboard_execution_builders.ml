@@ -204,7 +204,6 @@ let worker_state_of_agent
 
 let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
   let name = string_field "name" keeper in
-  let agent = member_assoc "agent" keeper in
   let status = string_field "status" keeper in
   let context_ratio =
     match member_assoc "context_ratio" keeper with
@@ -222,7 +221,6 @@ let continuity_row_of_keeper ~(now_ts : float) keeper : continuity_context =
     latest_iso_timestamp
       [
         String_util.trim_to_option (string_field "updated_at" keeper);
-        String_util.trim_to_option (string_field "last_seen" agent);
         String_util.trim_to_option (string_field "tool_audit_at" keeper);
       ]
   in

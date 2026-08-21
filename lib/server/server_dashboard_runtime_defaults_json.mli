@@ -17,7 +17,6 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
   }

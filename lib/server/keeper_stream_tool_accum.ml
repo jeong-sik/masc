@@ -81,7 +81,7 @@ let replace_fragments t index snapshot =
    independent of whether identity fields are populated. Keeping that check
    separate from the identity check below lets the malformed-but-tool-typed
    case (deliverable, no id/name) be told apart from a genuinely non-tool
-   start (not deliverable): the bridge tombstones the former
+   start (not deliverable): the bridge voids the former
    (Tool_start_missing_identity, keeper_chat_agent_core_stream_bridge.ml's
    ContentBlockStart handler) and leaves the latter's index untouched. *)
 let stream_start_is_tool_progress (evt : Agent_core.Types.sse_event) =
@@ -150,7 +150,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
     else if stream_start_is_tool_progress evt
     then
       (* Deliverable tool-use content type but missing/blank identity: the
-         live bridge tombstones this index (Tool_start_missing_identity)
+         live bridge voids this index (Tool_start_missing_identity)
          until its terminator, so a later valid start at the same index must
          not resurrect it as a fresh block. *)
       invalidate_index t index
@@ -160,7 +160,7 @@ let on_event t (evt : Agent_core.Types.sse_event) =
          (* An identity-free non-tool block leaves occupancy untouched. *)
          ()
        | Some _, _ | _, Some _ ->
-         (* The live bridge tombstones a non-tool block carrying tool identity
+         (* The live bridge voids a non-tool block carrying tool identity
             until its stop, so it cannot be reopened as a valid tool block. *)
          invalidate_index t index)
   | Agent_core.Types.ContentBlockDelta

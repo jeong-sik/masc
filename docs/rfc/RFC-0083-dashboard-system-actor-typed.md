@@ -15,7 +15,7 @@ related: ["RFC-0077"]
 src/types/core.ts:                  KeeperConversationRole = ... | 'system' | ...
 src/types/core.ts:                  KeeperConversationSource = ... | 'system' | ...
 src/types/core.ts:                  post_kind?: 'direct' | 'automation' | 'system'
-src/types/sse.ts:                   kind?: ... | 'system' | 'oas'
+src/types/sse.ts:                   kind?: ... | 'system' | 'agent_core'
 src/live-store.ts:                  LiveFilterKind = 'broadcast' | 'tasks' | 'keepers' | 'system'
 src/live-store.ts:                  new Set(['broadcast', 'tasks', 'keepers', 'system'])
 src/store.ts:                       new Set(['system'])  // boardHiddenCategories

@@ -68,7 +68,12 @@ import {
   subscribeKeeperWaitingInventory,
 } from '../keeper-waiting-inventory-store'
 import { registerKeeperWaitingInventoryRefresh } from '../sse-store'
-import { chatShowAutonomous, chatShowInternal, chatShowMetadata } from '../lib/chat-view-prefs'
+import {
+  chatExpandAutonomousRuns,
+  chatShowAutonomous,
+  chatShowInternal,
+  chatShowMetadata,
+} from '../lib/chat-view-prefs'
 import {
   cancelKeeperChatOperation,
   editQueuedKeeperChatOperation,
@@ -1045,6 +1050,7 @@ export function KeeperConversationPanel({
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
               toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
               unreadAfterTs=${unreadAfterTs}
+              expandAutonomousRuns=${chatExpandAutonomousRuns.value}
               onSeenBottom=${markTranscriptSeen}
               action=${inspectAction}
             />
@@ -1158,6 +1164,7 @@ export function KeeperConversationPanel({
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
           toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
           unreadAfterTs=${unreadAfterTs}
+          expandAutonomousRuns=${chatExpandAutonomousRuns.value}
           onSeenBottom=${markTranscriptSeen}
           action=${inspectAction}
         />
@@ -1263,6 +1270,7 @@ export function KeeperConversationPanel({
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
             toolOutputHydrationContract=${toolCallOutputHydrationContract(keeperName)}
             unreadAfterTs=${unreadAfterTs}
+            expandAutonomousRuns=${chatExpandAutonomousRuns.value}
             onSeenBottom=${markTranscriptSeen}
             action=${inspectAction}
           />

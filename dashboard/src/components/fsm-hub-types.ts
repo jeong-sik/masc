@@ -196,7 +196,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   stopped: PHASE_LABEL_KO.stopped,
   crashed: PHASE_LABEL_KO.crashed,
   restarting: PHASE_LABEL_KO.restarting,
-  dead: PHASE_LABEL_KO.dead,
   Running: PHASE_LABEL_KO.running,
   Overflowed: PHASE_LABEL_KO.overflowed,
   Compacting: PHASE_LABEL_KO.compacting,
@@ -208,7 +207,6 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   Stopped: PHASE_LABEL_KO.stopped,
   Draining: PHASE_LABEL_KO.draining,
   Restarting: PHASE_LABEL_KO.restarting,
-  Dead: PHASE_LABEL_KO.dead,
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */

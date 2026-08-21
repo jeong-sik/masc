@@ -39,7 +39,6 @@ type pause_kind =
   | Active
   | Operator_paused
   | Unclassified_paused
-  | Dead_tombstone
   | Transcript_corruption_reset_required
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
@@ -64,8 +63,6 @@ type t =
 val of_meta : Keeper_meta_contract.keeper_meta -> t
 
 val ready_for_unclaimed_backlog : Keeper_meta_contract.keeper_meta -> bool
-
-val autonomous_check_value : autonomous_activation -> string
 
 val autonomous_blocker_to_wire : autonomous_blocker -> string
 

@@ -1,5 +1,6 @@
 import hashlib
 import importlib.util
+import json
 import sys
 import tempfile
 import unittest
@@ -40,10 +41,81 @@ acceptance = load_acceptance_module()
 
 
 class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
+    def test_runtime_by_role_requires_exact_five_role_object(self):
+        mapping = {
+            "coordinator": "runtime-a",
+            "builder-a": "runtime-b",
+            "builder-b": "runtime-c",
+            "reviewer": "runtime-d",
+            "researcher": "runtime-e",
+        }
+
+        parsed = acceptance.parse_runtime_by_role(json.dumps(mapping))
+
+        self.assertEqual(parsed, mapping)
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "exact five roles"):
+            acceptance.parse_runtime_by_role(
+                json.dumps({"coordinator": "runtime-a"})
+            )
+
+    def test_heterogeneous_runtime_mode_refuses_duplicates_and_fallback_mix(self):
+        mapping = {
+            "coordinator": "runtime-a",
+            "builder-a": "runtime-b",
+            "builder-b": "runtime-c",
+            "reviewer": "runtime-d",
+            "researcher": "runtime-e",
+        }
+        acceptance.validate_runtime_strategy(
+            runtime_id=None,
+            runtime_by_role=mapping,
+            require_heterogeneous=True,
+        )
+        duplicate = dict(mapping)
+        duplicate["researcher"] = "runtime-a"
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "five distinct"):
+            acceptance.validate_runtime_strategy(
+                runtime_id=None,
+                runtime_by_role=duplicate,
+                require_heterogeneous=True,
+            )
+        with self.assertRaisesRegex(acceptance.AcceptanceError, "mutually exclusive"):
+            acceptance.validate_runtime_strategy(
+                runtime_id="fallback",
+                runtime_by_role=mapping,
+                require_heterogeneous=False,
+            )
+
+    def test_runtime_strategy_receipt_is_exact_and_fail_closed(self):
+        mapping = {
+            "coordinator": "runtime-a",
+            "builder-a": "runtime-b",
+            "builder-b": "runtime-c",
+            "reviewer": "runtime-d",
+            "researcher": "runtime-e",
+        }
+        receipt = acceptance.runtime_strategy_receipt(
+            runtime_id=None,
+            runtime_by_role=mapping,
+            require_heterogeneous=True,
+        )
+        self.assertEqual(receipt["runtime_strategy"], "heterogeneous_required")
+        self.assertEqual(receipt["runtime_by_role"], mapping)
+        self.assertEqual(receipt["distinct_runtime_count"], 5)
+
+        with self.assertRaisesRegex(
+            acceptance.AcceptanceError, "exact runtime selection"
+        ):
+            acceptance.runtime_strategy_receipt(
+                runtime_id=None,
+                runtime_by_role={},
+                require_heterogeneous=False,
+            )
+
     def test_catalog_has_exact_rw19_persistence_projection_mission(self):
         catalog = acceptance.load_catalog(CATALOG_PATH)
 
-        self.assertEqual(len(catalog["missions"]), 22)
+        self.assertEqual(len(catalog["missions"]), 23)
         self.assertEqual(catalog["missions"][18]["id"], "RW19")
         self.assertEqual(
             catalog["missions"][18]["assertions"],
@@ -86,6 +158,28 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
         self.assertIn("tool_execute", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_claim", catalog["keeper_required_tools"])
         self.assertIn("keeper_task_done", catalog["keeper_required_tools"])
+
+    def test_catalog_has_exact_rw23_goal_verifier_mission(self):
+        catalog = acceptance.load_catalog(CATALOG_PATH)
+
+        goal_verifier = catalog["missions"][22]
+        self.assertEqual(goal_verifier["id"], "RW23")
+        self.assertEqual(
+            goal_verifier["assertions"],
+            [
+                "goal_verifier_refutation_observed",
+                "goal_verifier_reentry_proven",
+                "goal_verifier_dashboard_browser_observed",
+            ],
+        )
+        self.assertIn("Goal", goal_verifier["capabilities"])
+        self.assertIn("Browser", goal_verifier["capabilities"])
+        self.assertIn("masc_goal_transition", catalog["operator_required_tools"])
+        self.assertTrue(catalog["approaches_apply_to_each_mission"])
+        self.assertEqual(
+            [approach["id"] for approach in catalog["execution_approaches"]],
+            ["A", "B", "C"],
+        )
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}

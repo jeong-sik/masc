@@ -828,8 +828,6 @@ let prevalidate_config_update
       (parsed : Keeper_turn_up_args.parsed_args)
   =
   match old.latched_reason with
-  | Some Keeper_latched_reason.Dead_tombstone ->
-    Error "keeper identity is terminal; create a fresh Keeper"
   | Some
       ( Keeper_latched_reason.Operator_paused _
       | Keeper_latched_reason.Transcript_corruption_reset_required )
@@ -1331,7 +1329,6 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Durable_owner_nonce_changed _
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
   | Durable_owner_transcript_reset_required
   | Registry_owner_nonce_changed _
   | Registry_owner_identity_changed

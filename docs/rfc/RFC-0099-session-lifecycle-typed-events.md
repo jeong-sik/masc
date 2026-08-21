@@ -21,7 +21,7 @@ Out of scope: execution-boundary ownership (defined by the typed source
 contracts in `lib/tool_types/tool_result.mli` and
 `lib/keeper/keeper_gate_replay.mli`), Streamable HTTP migration
 (IMPROVE-02, awaits in-flight #15722/#15725), FD accounting (IMPROVE-03)
-Series: **IMPROVE-05** of the masc + oas improvement series. Sibling RFCs: [[RFC-0098]] (typed envelope, IMPROVE-01).
+Series: **IMPROVE-05** of the masc + agent_core improvement series. Sibling RFCs: [[RFC-0098]] (typed envelope, IMPROVE-01).
 
 ## 1. Problem
 

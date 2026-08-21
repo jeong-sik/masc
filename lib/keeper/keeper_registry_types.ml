@@ -148,7 +148,6 @@ type registry_entry =
   ; done_r : done_resolution Eio.Promise.u
   ; restart_count : int
   ; last_restart_ts : float
-  ; dead_since_ts : float option
   ; crash_log : (float * string) list
   ; last_error : string option
   ; last_failure_reason : failure_reason option

@@ -493,7 +493,6 @@ let register_with_state_result
     ; done_r
     ; restart_count = 0
     ; last_restart_ts = 0.0
-    ; dead_since_ts = None
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = None
@@ -735,7 +734,6 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; done_r
     ; restart_count = 0
     ; last_restart_ts = 0.0
-    ; dead_since_ts = None
     ; crash_log = []
     ; last_error = None
     ; last_failure_reason = None
@@ -1032,15 +1030,6 @@ let all ?base_path () =
 ;;
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
-
-let mark_dead ~base_path name ~at =
-  Error_tracking.mark_dead
-    ~base_path
-    name
-    ~at
-    ~decr_running_count_clamped
-    ~update_entry:update_entry_unit
-;;
 
 let record_restart ~base_path name =
   Error_tracking.record_restart ~base_path name ~update_entry:update_entry_unit
@@ -1370,18 +1359,24 @@ let interrupt_current_turn_exact observed_entry =
            })
 ;;
 
+(* A cancellation that failed used to collapse into [`No_turn_in_flight], which
+   reads as "there was nothing to cancel" — the opposite of what happened. The
+   metric and the warn line stay; the outcome now reaches the caller so an
+   operator surface can say which of the two it was. *)
 let interrupt_current_turn ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> `No_turn_in_flight
+  | None ->
+    Exact_turn_cancel_failed
+      { turn_id = None; detail = "no registry entry for this Keeper name" }
   | Some entry ->
     (match interrupt_current_turn_exact entry with
-     | Exact_turn_cancelled turn_id -> `Cancelled turn_id
-     | Exact_no_turn_in_flight -> `No_turn_in_flight
-     | Exact_turn_cancel_failed { detail; _ } ->
+     | Exact_turn_cancelled _ as cancelled -> cancelled
+     | Exact_no_turn_in_flight -> Exact_no_turn_in_flight
+     | Exact_turn_cancel_failed { detail; _ } as failed ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)
          ~labels:[ "keeper", name; "event", "turn_cancel_failed" ]
          ();
        Log.Keeper.warn "%s: turn cancellation failed: %s" name detail;
-       `No_turn_in_flight)
+       failed)
 ;;

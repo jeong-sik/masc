@@ -132,7 +132,7 @@ Recommendation: mtime threshold + a process-local flag (`Atomic.t` with timestam
 
 ## Out of scope
 
-- **Phase 3** (cost-aware boost via OAS `cost_tracker` token usage) — separate RFC.
+- **Phase 3** (cost-aware boost via agent_core `cost_tracker` token usage) — separate RFC.
 - **Cross-host trust sync** — every host has its own `<base_path>/.masc`; no fleet-level reputation in this RFC.
 - **Auto-disable of dead runtime** — operator decides; the recommendation only suggests.
 

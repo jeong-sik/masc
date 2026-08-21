@@ -82,11 +82,13 @@ paused_targets=(
   @test/runtest-test_keeper_paused_work_transfer_transaction
   @test/runtest-test_keeper_paused_work_source_terminal_transaction
   @test/runtest-test_keeper_paused_work_operator
+  @test/runtest-test_keeper_event_queue_health_actionable
 )
 
 normal_targets=(
   @test/runtest-test_board_dispatch
   @test/runtest-test_keeper_latched_reason_wiring
+  @test/runtest-test_keeper_status_bridge
   @test/runtest-test_dedup_rules
   @test/runtest-test_exec_command_gate_log_sink
   @test/runtest-test_file_kind_vocabulary
@@ -106,6 +108,7 @@ normal_targets=(
   @test/runtest-test_keeper_toml_accessor_matrix
   @test/runtest-test_keeper_tool_execute_stream_close
   @test/runtest-test_keeper_turn_dispatch_authority
+  @test/runtest-test_keeper_turn_interrupt
   @test/runtest-test_runtime_quota_window
   @test/runtest-test_subsystem_health_state
   @test/runtest-test_trailing_slash_rules

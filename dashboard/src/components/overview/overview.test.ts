@@ -416,7 +416,6 @@ describe('deriveFleetTickerEvents', () => {
           phase: 'Paused',
           pipeline_stage: 'paused',
           last_heartbeat: localIsoAt(4),
-          agent: { exists: true, status: 'busy' },
         }),
       ],
     })
@@ -570,8 +569,8 @@ describe('deriveKeeperAttentionReason', () => {
 
   it('marks critical lifecycle states as bad', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
-      name: 'dead',
-      lifecycle_phase: 'Dead',
+      name: 'crashed',
+      lifecycle_phase: 'Crashed',
       runtime_blocker_class: 'exception',
     }))
     expect(reason.sev).toBe('bad')

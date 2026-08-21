@@ -169,6 +169,10 @@ let test_goal_list_includes_rollup () =
            ~target_value:"1" () with
    | Ok _ -> ()
    | Error msg -> fail msg);
+  (match Goal_store.upsert_goal config ~title:"Verifying goal" ~metric:"m"
+           ~target_value:"1" ~phase:Goal_phase.Verifying () with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
   let listed =
     Tool_workspace.dispatch
       (workspace_ctx config)
@@ -182,7 +186,9 @@ let test_goal_list_includes_rollup () =
   in
   let rollup = Yojson.Safe.Util.member "rollup" listed_json in
   check int "active goal is counted" 1
-    (Yojson.Safe.Util.member "active_count" rollup |> Yojson.Safe.Util.to_int)
+    (Yojson.Safe.Util.member "active_count" rollup |> Yojson.Safe.Util.to_int);
+  check int "verifying goal is counted" 1
+    (Yojson.Safe.Util.member "verifying_count" rollup |> Yojson.Safe.Util.to_int)
 ;;
 let test_goal_list_ignores_blank_optional_filters () =
   with_workspace
@@ -320,6 +326,20 @@ let request_complete config goal_id =
          ])
 ;;
 
+(* RFC-0387 stage 2: [request_complete] enters [Verifying]; [Completed] is
+   reached only through the verifier's proof. *)
+let prove_complete config goal_id =
+  Some
+    (Workspace_goals.commit_verifier_decision
+       ~tool_name:"goal_verifier_commit"
+       ~start_time:0.
+       config
+       ~goal_id
+       ~verification_run_id:"goal-verifier-test-run"
+       ~decision:Workspace_goals.Proof_proven
+       ~evidence:"observed by the test verifier")
+;;
+
 let test_goal_completion_accepts_goal_without_tasks () =
   with_workspace
   @@ fun config ->
@@ -331,8 +351,10 @@ let test_goal_completion_accepts_goal_without_tasks () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "completed directly" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "completion request enters verifying" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 
 let test_goal_completion_ignores_open_task_count () =
@@ -353,8 +375,10 @@ let test_goal_completion_ignores_open_task_count () =
        ~title:"Still open"
        ~priority:3
        ~description:"open");
-  check string "open task does not gate Goal completion" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "open task does not gate the completion request" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 
 let test_goal_completion_ignores_metric_text () =
@@ -372,8 +396,10 @@ let test_goal_completion_ignores_metric_text () =
     | Ok payload -> payload
     | Error msg -> fail msg
   in
-  check string "metric text does not gate Goal completion" "completed"
-    (transition_phase (request_complete config goal.id))
+  check string "metric text does not gate the completion request" "verifying"
+    (transition_phase (request_complete config goal.id));
+  check string "proof completes the goal" "completed"
+    (transition_phase (prove_complete config goal.id))
 ;;
 let test_goal_block_and_unblock_have_no_operator_hierarchy () =
   with_workspace

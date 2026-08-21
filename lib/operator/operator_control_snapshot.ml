@@ -24,10 +24,9 @@ let merge_json_objects left right =
   | _, _ -> `Assoc []
 ;;
 
-(* remote_confirm_ttl_seconds + runtime-status alignment helpers
+(* remote_confirm_ttl_seconds + context helpers
    extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
 let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds
-let align_keeper_runtime_status = Operator_control_snapshot_runtime_status.align_keeper_runtime_status
 let remote_client_type_of_context = Operator_control_snapshot_runtime_status.remote_client_type_of_context
 let operator_server_profile_json = Operator_control_snapshot_runtime_status.operator_server_profile_json
 
@@ -180,7 +179,6 @@ let keepers_json
             (* Per-sub-op timing for #8822: attribute ~3100ms snapshot cost.
               Threshold 300ms — lower than outer 500ms for more data. *)
             let dt_meta = ref 0.0 in
-            let dt_agent = ref 0.0 in
             let dt_ka = ref 0.0 in
             let dt_audit = ref 0.0 in
             let dt_profile = ref 0.0 in
@@ -191,12 +189,11 @@ let keepers_json
             if total_work > 0.3
             then
               Log.Dashboard.info
-                "[keepers_json:%s] sub-op: meta=%.0fms agent=%.0fms ka=%.0fms \
+                "[keepers_json:%s] sub-op: meta=%.0fms ka=%.0fms \
                  audit=%.0fms profile=%.0fms phase=%.0fms trust=%.0fms activity=%.0fms \
                  total=%.0fms"
                 name
                 (!dt_meta *. 1000.0)
-                (!dt_agent *. 1000.0)
                 (!dt_ka *. 1000.0)
                 (!dt_audit *. 1000.0)
                 (!dt_profile *. 1000.0)
@@ -272,16 +269,6 @@ let keepers_json
                            @ Keeper_status_bridge.attention_fields_json config meta
                            @ [ "runtime_trust", runtime_trust ])))
                   else (
-                    let t_agent = Time_compat.now () in
-                    let agent_status_cache_ttl_s = 2.0 in
-                    let agent_json =
-                      let cache_key = "kas:" ^ meta.agent_name in
-                      Dashboard_cache.get_or_compute cache_key ~ttl:agent_status_cache_ttl_s (fun () ->
-                        Keeper_status_runtime.parse_agent_status
-                          config
-                          ~agent_name:meta.agent_name)
-                    in
-                    dt_agent := Time_compat.now () -. t_agent;
                     let t_ka = Time_compat.now () in
                     let keepalive_running =
                       Keeper_status_bridge.runtime_keepalive_running config meta
@@ -325,7 +312,6 @@ let keepers_json
                       Keeper_status_runtime.keeper_diagnostic_json
                         ~config
                         ~meta
-                        ~agent_status:agent_json
                         ~keepalive_running
                         ~history_items:[]
                         ~now_ts
@@ -362,22 +348,13 @@ let keepers_json
                       Json_util.get_string audit_json "tool_audit_at"
                     in
                     dt_audit := Time_compat.now () -. t_audit;
-                    let surface_status =
-                      Keeper_status_runtime.keeper_surface_status
-                        ~agent_status:agent_json
-                        ~diagnostic
-                    in
-                    let aligned_status =
+                    let status =
                       if meta.paused
                       then
                         Keeper_status_runtime.control_plane_status_to_string
                           Keeper_status_runtime.Cp_paused
                       else
-                        align_keeper_runtime_status
-                          ~surface_status
-                          ~diagnostic
-                          ~agent_status_json:agent_json
-                          ~keepalive_running
+                        Keeper_status_runtime.keeper_surface_status ~diagnostic
                     in
                     let t_phase = Time_compat.now () in
                     let registry_phase =
@@ -435,10 +412,9 @@ let keepers_json
                          ; ( "trace_id"
                            , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                            )
-                         ; "status", `String aligned_status
+                         ; "status", `String status
                          ; "paused", `Bool meta.paused
                          ; "pause_state", `String (if meta.paused then "paused" else "active")
-                         ; "agent", agent_json
                          ; "generation", `Int meta.runtime.nonce
                          ; "turn_count", `Int meta.runtime.usage.total_turns
                          ; ( "keeper_keepalive_interval_s"

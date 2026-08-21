@@ -96,7 +96,7 @@ After the body merged (PR #18726 → renumber #18731), a 5-prong dead/live audit
 | Verdict | Tools | Decision |
 |---|---|---|
 | **dead** (no handler, no live caller) | `masc_execute`, `masc_execute_dry_run`, `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_workspace_delete`, `masc_force_unbind` | delete tool_catalog metadata; do not migrate |
-| **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to OAS domain"` at `mcp_tool_runtime.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
+| **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to agent_core domain"` at `mcp_tool_runtime.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
 | **live at audit time** | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate`, `masc_set_param` plus one subsequently retired membership mutation entry | migrate surviving entries to `Tool_spec.register`; descriptor projection added |
 | **deferred** (separate RFC) | `masc_portal_open`, `masc_portal_close`, `masc_portal_send` | live, but dispatch is at `mcp_server_eio_protocol.ml` protocol level — not in-process. This RFC's cluster-variant pattern does not fit. Tracked for a separate RFC (RFC-0183 candidate). Excluded from this RFC's scope. |
 
@@ -170,7 +170,7 @@ masc_workspace_delete        — no handler, no dispatch, no live caller
 masc_force_unbind        — no handler, no dispatch, no live caller
 masc_spawn              — dispatch explicitly removed (mcp_tool_runtime.ml:287
                           comment `"masc_spawn removed: vendor-specific agent
-                          spawning belongs to OAS domain"`), metadata+test left
+                          spawning belongs to agent_core domain"`), metadata+test left
                           behind. This RFC completes the cleanup.
 ```
 

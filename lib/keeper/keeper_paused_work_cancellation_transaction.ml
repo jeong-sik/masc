@@ -10,7 +10,6 @@ type failure =
   | Durable_meta_read_failed of string
   | Durable_meta_missing
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
   | Durable_owner_nonce_changed of
       { expected : int
       ; actual : int
@@ -41,7 +40,6 @@ let failure_to_string = function
   | Durable_meta_read_failed detail -> "durable Keeper metadata read failed: " ^ detail
   | Durable_meta_missing -> "durable Keeper metadata is missing"
   | Durable_owner_not_paused -> "durable Keeper owner is not paused"
-  | Durable_owner_dead_tombstone -> "durable Keeper owner is a terminal dead tombstone"
   | Durable_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "durable Keeper owner generation changed: expected %d, actual %d"
@@ -109,8 +107,6 @@ let validate_durable_owner config ~keeper_name ~expected_generation =
          ~latched_reason:meta.latched_reason
      with
      | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
-     | Keeper_lifecycle_admission.Dead_tombstone ->
-       Error Durable_owner_dead_tombstone
      | Keeper_lifecycle_admission.Paused _ ->
        if meta.runtime.nonce <> expected_generation
        then

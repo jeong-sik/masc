@@ -24,7 +24,6 @@ let conditions_to_json (c : conditions) =
     ; "handoff_active", `Bool c.handoff_active
     ; "operator_paused", `Bool c.operator_paused
     ; "stop_requested", `Bool c.stop_requested
-    ; "dead_tombstone_latched", `Bool c.dead_tombstone_latched
     ; "restart_requested", `Bool c.restart_requested
     ; "drain_complete", `Bool c.drain_complete
     ; "credential_archived", `Bool c.credential_archived

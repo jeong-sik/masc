@@ -22,7 +22,6 @@ type failure =
       }
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
-  | Durable_owner_dead_tombstone
   | Durable_owner_transcript_reset_required
   | Registry_owner_missing
   | Registry_owner_nonce_changed of
@@ -86,8 +85,6 @@ let failure_to_string = function
       actual
   | Durable_owner_identity_changed -> "Resume_owner durable trace identity changed"
   | Durable_owner_not_paused -> "Resume_owner requires a durably paused Keeper"
-  | Durable_owner_dead_tombstone ->
-    "Resume_owner cannot revive a Dead tombstone; use the dead-revival transaction"
   | Durable_owner_transcript_reset_required ->
     "Resume_owner cannot replay a structurally corrupted checkpoint; reset the \
      Keeper checkpoint first"
@@ -174,18 +171,6 @@ type transcript_recovery =
   | Transcript_closed_open_tail of Agent_core.Types.message list
   | Transcript_unrecoverable
 
-(* Downgrade to Operator_paused instead of clearing outright: the keeper stays
-   paused and the generic resume path below still owns that transition. Only the
-   classification changes, from "cannot replay" to "an operator stopped this". *)
-let downgraded_transcript_latch (meta : Keeper_meta_contract.keeper_meta) =
-  { meta with
-    Keeper_meta_contract.latched_reason =
-      Some
-        (Keeper_latched_reason.Operator_paused
-           { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-  }
-;;
-
 (* The latch records that the transcript was broken when it was written, not
    that it is broken now. A keeper whose checkpoint has since become
    dispatchable is held by a stale record, so re-read the checkpoint and let its
@@ -210,7 +195,29 @@ let classify_transcript messages =
      | Ok closure -> Transcript_closed_open_tail closure.Keeper_compaction_unit.messages)
 ;;
 
-let recover_transcript_latch config (meta : Keeper_meta_contract.keeper_meta) =
+(* Commit the downgrade instead of returning a meta nobody stores. Pause with
+   an Operator_paused reason keeps [paused = true] and only replaces the
+   classification, so the existing resume path below sees an ordinary operator
+   pause and mark_resumed clears it. Reset_latch would drop the pause bit too,
+   and resume then refuses the keeper as Durable_owner_not_paused. *)
+let commit_transcript_latch_downgrade config ~keeper_name =
+  match
+    Keeper_owner_registry.apply_meta
+      ~base_path:config.Workspace.base_path
+      ~keeper_name
+      (Keeper_owner_reducer.Pause
+         { reason =
+             Keeper_latched_reason.Operator_paused
+               { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive }
+         ; updated_at = Keeper_meta_contract.now_iso ()
+         })
+  with
+  | Ok (Some _) -> Ok ()
+  | Ok None | Error _ -> Error Durable_owner_transcript_reset_required
+;;
+
+let recover_transcript_latch config ~keeper_name (meta : Keeper_meta_contract.keeper_meta)
+  =
   let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let session_dir = Keeper_fs.keeper_session_dir config session_id in
   match Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir ~session_id with
@@ -218,7 +225,8 @@ let recover_transcript_latch config (meta : Keeper_meta_contract.keeper_meta) =
   | Ok (checkpoint, source_ref) ->
     (match classify_transcript checkpoint.Agent_core.Checkpoint.messages with
      | Transcript_unrecoverable -> Error Durable_owner_transcript_reset_required
-     | Transcript_already_dispatchable -> Ok (downgraded_transcript_latch meta)
+     | Transcript_already_dispatchable ->
+       commit_transcript_latch_downgrade config ~keeper_name
      | Transcript_closed_open_tail messages ->
        (match
           Keeper_checkpoint_store.save_agent_core_if_source
@@ -228,23 +236,21 @@ let recover_transcript_latch config (meta : Keeper_meta_contract.keeper_meta) =
         with
         | Keeper_checkpoint_store.Not_installed _ ->
           Error Durable_owner_transcript_reset_required
-        | Keeper_checkpoint_store.Installed _ -> Ok (downgraded_transcript_latch meta)))
+        | Keeper_checkpoint_store.Installed _ ->
+          commit_transcript_latch_downgrade config ~keeper_name))
 ;;
 
-let paused_meta config receipt (meta : Keeper_meta_contract.keeper_meta) =
+let paused_meta receipt (meta : Keeper_meta_contract.keeper_meta) =
   match
     Keeper_lifecycle_admission.state
       ~paused:meta.paused
       ~latched_reason:meta.latched_reason
   with
-  | Keeper_lifecycle_admission.Dead_tombstone -> Error Durable_owner_dead_tombstone
   | Keeper_lifecycle_admission.Active -> Error Durable_owner_not_paused
   | Keeper_lifecycle_admission.Paused
       (Keeper_lifecycle_admission.Classified
         Keeper_latched_reason.Transcript_corruption_reset_required) ->
-    let* recovered = recover_transcript_latch config meta in
-    let* () = validate_identity receipt recovered in
-    Ok recovered
+    Error Durable_owner_transcript_reset_required
   | Keeper_lifecycle_admission.Paused _ ->
     let* () = validate_identity receipt meta in
     Ok meta
@@ -307,7 +313,7 @@ let project_receipt token config (receipt : Keeper_paused_work_disposition_recei
   let* committed =
     if current.paused
     then
-      let* _paused = paused_meta config receipt current in
+      let* _paused = paused_meta receipt current in
       let* committed =
         match
           Keeper_owner_registry.apply_meta
@@ -349,6 +355,22 @@ let create_receipt config ~keeper_name request =
     | None -> Error Durable_meta_missing
     | Some current -> Ok current
   in
+  (* A transcript latch is a record of the transcript that was written, not a
+     claim about the one on disk now. Re-read it before honouring the latch: if
+     the checkpoint dispatches today, downgrade the classification durably and
+     continue through the ordinary resume path. An unparseable checkpoint keeps
+     the latch and this returns the same error it always did. *)
+  let* current =
+    match current.latched_reason with
+    | Some Keeper_latched_reason.Transcript_corruption_reset_required ->
+      let* () = recover_transcript_latch config ~keeper_name current in
+      let* refreshed = read_meta config keeper_name in
+      (match refreshed with
+       | None -> Error Durable_meta_missing
+       | Some refreshed -> Ok refreshed)
+    | Some (Keeper_latched_reason.Operator_paused _)
+    | None -> Ok current
+  in
   let receipt : Keeper_paused_work_disposition_receipt.t =
     { keeper_name
     ; expected_trace_id = current.runtime.trace_id
@@ -358,7 +380,7 @@ let create_receipt config ~keeper_name request =
     ; operation = Keeper_paused_work_disposition_receipt.Resume_owner
     }
   in
-  let* _ = paused_meta config receipt current in
+  let* _ = paused_meta receipt current in
   let* entry = registered_owner_opt config receipt in
   match entry with
   | None -> Ok receipt

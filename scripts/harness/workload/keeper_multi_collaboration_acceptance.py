@@ -62,7 +62,7 @@ KNOWN_ASSERTIONS = {
     "role_identity_preserved",
     "runtime_assignment_serving_observed",
     "goal_visible",
-    "goal_assignment_visible",
+    "goal_shared_open_set_visible",
     "tasks_linked_to_goal",
     "parallel_wave_completed",
     "parallel_keeper_overlap_observed",
@@ -1289,32 +1289,6 @@ class MissionRun:
                 "priority": 1,
             },
         )
-        self.call(
-            "goal-assign",
-            "masc_goal_assign",
-            {"goal_id": self.goal_id, "owner": self.roles["coordinator"]},
-        )
-        self.call(
-            "goal-verifier-upsert",
-            "masc_goal_upsert",
-            {
-                "id": self.verifier_goal_id,
-                "title": f"Artifact-gated Goal verifier mission {self.marker}",
-                "metric": (
-                    f"owner artifact {self.verifier_artifact} contains the exact "
-                    f"token {self.verifier_success_token}"
-                ),
-                "target_value": self.verifier_success_token,
-                "priority": 1,
-            },
-        )
-        for role, keeper in self.roles.items():
-            arguments: dict[str, Any] = {"name": keeper}
-            runtime_id = self.runtime_for_role(role)
-            if runtime_id:
-                arguments["runtime_id"] = runtime_id
-            self.call(f"keeper-goal-scope-{role}", "masc_keeper_up", arguments)
-
         task_specs = {
             "builder-a": "Build the first durable collaboration artifact",
             "builder-b": "Build the second durable collaboration artifact",
@@ -1817,6 +1791,20 @@ class MissionRun:
         )
 
     def run_goal_verifier_refute_reenter_prove(self) -> None:
+        self.call(
+            "goal-verifier-upsert",
+            "masc_goal_upsert",
+            {
+                "id": self.verifier_goal_id,
+                "title": f"Artifact-gated Goal verifier mission {self.marker}",
+                "metric": (
+                    f"producer artifact {self.verifier_artifact} contains the exact "
+                    f"token {self.verifier_success_token}"
+                ),
+                "target_value": self.verifier_success_token,
+                "priority": 1,
+            },
+        )
         self.wait_for_goal_state(
             phase="executing",
             criterion_state="viable",
@@ -1854,14 +1842,6 @@ class MissionRun:
         self.writer.write_json(
             "observations/goal-verifier-task-refuted.json",
             rejected_task_verdict,
-        )
-        self.call(
-            "goal-verifier-assign",
-            "masc_goal_assign",
-            {
-                "goal_id": self.verifier_goal_id,
-                "owner": self.roles["coordinator"],
-            },
         )
         self.call(
             "goal-verifier-request-refute",
@@ -2253,6 +2233,15 @@ class MissionRun:
         board_text = json.dumps(board, ensure_ascii=False)
         task_text = json.dumps(tasks, ensure_ascii=False)
         goal_text = json.dumps(goals, ensure_ascii=False)
+        goal_rows = goals.get("goals", []) if isinstance(goals, dict) else []
+        shared_goal = next(
+            (
+                row
+                for row in goal_rows
+                if isinstance(row, dict) and row.get("id") == self.goal_id
+            ),
+            None,
+        )
         history_text = json.dumps(histories, ensure_ascii=False)
         qa_verdicts = [
             self._completion_verdict(key) for key in ("qa-implement", "qa-test")
@@ -2768,9 +2757,9 @@ class MissionRun:
                 ),
             ),
             "goal_visible": (self.goal_id.lower() in goal_text.lower(), self.goal_id),
-            "goal_assignment_visible": (
-                self.roles["coordinator"].lower() in goal_text.lower(),
-                self.roles["coordinator"],
+            "goal_shared_open_set_visible": (
+                isinstance(shared_goal, dict) and "owner" not in shared_goal,
+                "shared Goal is present and the removed owner field is absent",
             ),
             "tasks_linked_to_goal": (
                 # Goal linkage is judged from the creation receipts (the

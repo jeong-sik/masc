@@ -241,7 +241,6 @@ function LogsSurface({ onNav }) {
     <main className="lg">
       <header className="lg-head">
         <div className="lg-head-l">
-          <span className="ov-eyebrow">Observatory</span>
           <h1>이벤트 로그</h1>
         </div>
         <div className="lg-stats">

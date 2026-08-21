@@ -72,7 +72,7 @@ function RailRuntime({ keeper }) {
     <div className={`rtc-card ${open ? 'open' : ''}`}>
       <button className="rtc-head" onClick={() => setOpen(o => !o)} title={open ? '접기' : '런타임 상세 펼치기'}>
         <span className="rtc-id mono">{cap.runtimeId}</span>
-        <span className="rtc-chev">{'▸'}</span>
+        <span className="rtc-chev">{'\u25B8'}</span>
       </button>
       {open && (
         <div className="rtc-detail">
@@ -196,12 +196,12 @@ function Roster({ keepers, selected, onSelect, mini, onConfig, onAction }) {
         <div className="kp-name">{k.id}</div>
         <div className="kp-sub">
           <span className="kp-state"><StatusDot status={(window.PHASE_TONE && PHASE_TONE[k.phase]) || 'idle'} pulse={!!(window.PHASE_PULSE && PHASE_PULSE[k.phase])} />{k.phase}</span>
-          {k.sandbox && <span className="kp-sandbox" title="git worktree 격리 · localhost-trust (OS sandbox 없음)">⬡</span>}
+          {k.sandbox && <span className="kp-sandbox" title="이 keeper 전용 작업 폴더 — git worktree 로 갈라 놔서 다른 keeper 와 파일이 섞이지 않습니다 (OS·컨테이너 샌드박스는 아님)">⬡</span>}
         </div>
       </div>
       <div className="kp-right">
         <span className="kp-time">{k.last}</span>
-        {k.att > 0 && <span className="kp-att" title={`주의 ${k.att}건 — 컨텍스트 레일에서 확인`}>{'▲'} {k.att}</span>}
+        {k.att > 0 && <span className="kp-att" title={`주의 ${k.att}건 — 컨텍스트 레일에서 확인`}>{'\u25B2'} {k.att}</span>}
       </div>
       <button className="kp-more" title="명령 메뉴" onClick={(e) => openMenu(e, k)}>⋯</button>
     </div>
@@ -232,8 +232,8 @@ function Roster({ keepers, selected, onSelect, mini, onConfig, onAction }) {
             {lbl}<span className="n">{counts[key]}</span>
           </button>
         ))}
-        <button className={`rfilter-icon ${searchOpen ? 'on' : ''}`} title="검색" onClick={() => { setSearchOpen(v => !v); if (searchOpen) setQ(''); }}>{'⌕'}</button>
-        <button className="rfilter-icon" title="전체 브로드캐스트 — 모든 keeper에게 동일 메시지" onClick={() => setBcast(true)}>{'⊚'}</button>
+        <button className={`rfilter-icon ${searchOpen ? 'on' : ''}`} title="검색" onClick={() => { setSearchOpen(v => !v); if (searchOpen) setQ(''); }}>{'\u2315'}</button>
+        <button className="rfilter-icon" title="전체 브로드캐스트 — 모든 keeper에게 동일 메시지" onClick={() => setBcast(true)}>{'\u229A'}</button>
         <select className="roster-sort" value={sort} onChange={e => setSort(e.target.value)} title="정렬 기준">
           <option value="status">상태순</option>
           <option value="name">이름순</option>
@@ -273,22 +273,22 @@ function Roster({ keepers, selected, onSelect, mini, onConfig, onAction }) {
               <div className="kpf-phase"><StatusDot status={(window.PHASE_TONE && PHASE_TONE[hover.k.phase]) || 'idle'} />{hover.k.phase}</div>
             </div>
           </div>
-          <div className="kpf-row"><span className="kpf-k">sandbox</span><span className="mono">{hover.k.sandbox ? `${hover.k.sandbox} 격리` : '—'}</span></div>
-          <div className="kpf-row"><span className="kpf-k">runtime</span><span className="mono">{hover.k.runtime}</span></div>
-          {hover.k.att > 0 && <div className="kpf-att">{'⚠'} 주의 {hover.k.att}건</div>}
+          <div className="kpf-row"><span className="kpf-k">작업 폴더</span><span className="mono">{hover.k.sandbox ? `${hover.k.sandbox} 격리` : '—'}</span></div>
+          <div className="kpf-row"><span className="kpf-k">런타임</span><span className="mono">{hover.k.runtime}</span></div>
+          {hover.k.att > 0 && <div className="kpf-att">{'\u26A0'} 주의 {hover.k.att}건</div>}
         </div>
       )}
       {bcast && <BroadcastComposer keepers={keepers} onClose={() => setBcast(false)} />}
       {menu && (
         <div className="kp-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <div className="kp-menu-h"><SigilBadge k={menu.keeper} size={20} /><span className="mono">{menu.keeper.id}</span></div>
-          <button className="kp-menu-i" onClick={() => { onSelect(menu.keeper.id); setMenu(null); }}>{'◈'} 대화 열기</button>
+          <button className="kp-menu-i" onClick={() => { onSelect(menu.keeper.id); setMenu(null); }}>{'\u25C8'} 대화 열기</button>
           {((window.FSM_ACTIONS && FSM_ACTIONS[menu.keeper.phase]) || []).map(a => (
             <button key={a.id} className={`kp-menu-i ${a.danger ? 'danger' : ''}`} onClick={() => { onAction && onAction(menu.keeper.id, a); setMenu(null); }}>{a.glyph} {a.label}</button>
           ))}
           {!((window.FSM_ACTIONS && FSM_ACTIONS[menu.keeper.phase]) || []).length && <div className="kp-menu-note">{menu.keeper.phase === 'Dead' ? '복구 불가 — 명령 없음' : '전이 중 — 잠시 후'}</div>}
           <div className="kp-menu-sep"></div>
-          <button className="kp-menu-i" onClick={() => { onConfig && onConfig(menu.keeper); setMenu(null); }}>{'⚙'} keeper 설정</button>
+          <button className="kp-menu-i" onClick={() => { onConfig && onConfig(menu.keeper); setMenu(null); }}>{'\u2699'} keeper 설정</button>
         </div>
       )}
     </aside>
@@ -330,7 +330,7 @@ function BroadcastComposer({ keepers, onClose }) {
           <h3>전체 브로드캐스트</h3>
           <span className="tid mono">masc_broadcast</span>
           <span style={{ marginLeft: 'auto' }}></span>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
         <div className="turn-body">
           <div className="turn-sec">
@@ -358,7 +358,7 @@ function BroadcastComposer({ keepers, onClose }) {
             <div className="bcc-hint mono">keeper는 board에서 broadcast를 읽고 ack합니다 · 비가역 행동 지시는 승인 큐를 거칩니다</div>
           </div>
           <div className="turn-sec bcc-actions">
-            <button className="bcc-send" disabled={!msg.trim() || !recipients.length} onClick={send}>{'⊚'} {recipients.length}명에게 보내기</button>
+            <button className="bcc-send" disabled={!msg.trim() || !recipients.length} onClick={send}>{'\u229A'} {recipients.length}명에게 보내기</button>
             <button className="sch-act ghost" onClick={onClose}>취소</button>
           </div>
         </div>
@@ -427,7 +427,7 @@ function CompactionInspector({ keeper, onClose }) {
         <div className="turn-hd">
           <h3>컴팩션 스냅샷</h3>
           <span className="tid">{keeper.id}</span>
-          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'✕'}</button>
+          <button className="turn-close" onClick={onClose} title="닫기 (Esc)">{'\u2715'}</button>
         </div>
 
         {events.length === 0 ? (
@@ -446,9 +446,9 @@ function CompactionInspector({ keeper, onClose }) {
               <div className="cmp-trigger"><span className="sub-k">압축 수행 모델</span><span className="mono">{ev.runtime}</span></div>
               <div className="cmp-rollback-row">
                 {rolledBack === ev.id
-                  ? <span className="cmp-rolled">{'↩'} 롤백 예약됨 · 압축 전 {(ev.before.tok / 1000).toFixed(1)}k 컨텍스트로 복원</span>
+                  ? <span className="cmp-rolled">{'\u21A9'} 롤백 예약됨 · 압축 전 {(ev.before.tok / 1000).toFixed(1)}k 컨텍스트로 복원</span>
                   : <button className="cmp-rollback" onClick={doRollback} title="이 압축을 되돌려 압축 전 컨텍스트를 복원">
-                      {'↩'} 이 지점으로 롤백<span className="cmp-rollback-sub">압축 전 {(ev.before.tok / 1000).toFixed(1)}k 상태 복원</span>
+                      {'\u21A9'} 이 지점으로 롤백<span className="cmp-rollback-sub">압축 전 {(ev.before.tok / 1000).toFixed(1)}k 상태 복원</span>
                     </button>}
               </div>
 
@@ -456,9 +456,9 @@ function CompactionInspector({ keeper, onClose }) {
                 <h4>Before → After</h4>
                 <div className="cmp-headline">
                   <span className="mono">{(ev.before.tok / 1000).toFixed(1)}k</span>
-                  <span className="cmp-arrow">{'→'}</span>
+                  <span className="cmp-arrow">{'\u2192'}</span>
                   <span className="mono" style={{ color: 'var(--status-ok)' }}>{(ev.after.tok / 1000).toFixed(1)}k</span>
-                  <span className="cmp-reduce">{'−'}{reduction}%</span>
+                  <span className="cmp-reduce">{'\u2212'}{reduction}%</span>
                 </div>
                 <CmpStat label="토큰" a={ev.before.tok} b={ev.after.tok} unit="k" max={200000} />
                 <CmpStat label="메시지" a={ev.before.msgs} b={ev.after.msgs} max={Math.max(ev.before.msgs, 1)} />
@@ -466,7 +466,7 @@ function CompactionInspector({ keeper, onClose }) {
                 <div className="cmp-regrow">
                   <span className="sub-k">이후 재증가</span>
                   <span className="mono">{(ev.after.tok / 1000).toFixed(1)}k</span>
-                  {regrewTo != null && <React.Fragment><span className="cmp-arrow">{'→'}</span><span className="mono cmp-regrow-now">{(regrewTo / 1000).toFixed(1)}k</span></React.Fragment>}
+                  {regrewTo != null && <React.Fragment><span className="cmp-arrow">{'\u2192'}</span><span className="mono cmp-regrow-now">{(regrewTo / 1000).toFixed(1)}k</span></React.Fragment>}
                   <span className="cmp-regrow-lbl">{regrowLbl}</span>
                 </div>
               </div>
@@ -475,15 +475,15 @@ function CompactionInspector({ keeper, onClose }) {
                 <h4>유지 · 요약 · 폐기</h4>
                 <div className="cmp-diff">
                   <div className="cmp-col kept">
-                    <div className="cmp-col-h">{'◈'} 유지</div>
+                    <div className="cmp-col-h">{'\u25C8'} 유지</div>
                     {ev.kept.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}
                   </div>
                   <div className="cmp-col summ">
-                    <div className="cmp-col-h">{'◉'} 요약</div>
+                    <div className="cmp-col-h">{'\u25C9'} 요약</div>
                     {ev.summarized.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}
                   </div>
                   <div className="cmp-col drop">
-                    <div className="cmp-col-h">{'◌'} 폐기</div>
+                    <div className="cmp-col-h">{'\u25CC'} 폐기</div>
                     {ev.dropped.map((x, i) => <div key={i} className="cmp-li">{x}</div>)}
                   </div>
                 </div>
@@ -513,7 +513,7 @@ function RecentTool({ t }) {
         <StatusDot status={t.status === 'ok' ? 'run' : t.status === 'bad' ? 'bad' : 'run'} />
         <span className="ci-name">{t.name}</span>
         <span className="ci-meta">{t.dur} · {t.ago}</span>
-        {hasDetail && <span className="ci-chev">{'▸'}</span>}
+        {hasDetail && <span className="ci-chev">{'\u25B8'}</span>}
       </div>
       {open && hasDetail && (
         <div className="ci-detail">
@@ -618,7 +618,7 @@ function ContextRail({ keeper, onAction, onNav }) {
               {keeper.phase === 'Draining' && evq && (evq.draining || []).length > 0 && (
                 <div className="drain-eventq">
                   <div className="drain-eventq-h">대기 자극 flush</div>
-                  {(evq.draining || []).map((e, i) => { const m = EK[e.kind] || { lbl: e.kind, glyph: '·' }; return (
+                  {(evq.draining || []).map((e, i) => { const m = EK[e.kind] || { lbl: e.kind, glyph: '\u00B7' }; return (
                     <div key={i} className="drain-ev">
                       <span className="drain-ev-gl mono">{m.glyph}</span>
                       <span className="drain-ev-kind mono">{m.lbl}</span>
@@ -665,10 +665,10 @@ function ContextRail({ keeper, onAction, onNav }) {
               )}
             </div>
             <button className="cmp-open" onClick={() => setCmpOpen(true)}>
-              {'◉'} 컴팩션 스냅샷{cmps.length ? ` · ${cmps.length}` : ''} <span className="cmp-open-sub">before/after 보기</span>
+              {'\u25C9'} 컴팩션 스냅샷{cmps.length ? ` · ${cmps.length}` : ''} <span className="cmp-open-sub">before/after 보기</span>
             </button>
             <button className="cmp-open" onClick={() => setMemOpen(true)}>
-              {'◈'} 메모리 보기 <span className="cmp-open-sub">스토어 {(mem.store || []).length} · 에피소드 {(mem.episodes || []).length}</span>
+              {'\u25C8'} 메모리 보기 <span className="cmp-open-sub">스토어 {(mem.store || []).length} · 에피소드 {(mem.episodes || []).length}</span>
             </button>
           </div>
         </div>

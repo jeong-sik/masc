@@ -707,11 +707,12 @@ let test_goal_reconciliation_enqueues_once_after_last_terminal_task () =
        | None -> fail "Goal disappeared")
 ;;
 
-let test_goal_reconciliation_prefers_authoritative_assignment
-      ?(assigned_paused = false)
-      ?(corrupt_persisted_assignment = false)
+let test_goal_reconciliation_targets_exact_producer
+      ?(unrelated_paused = false)
+      ?(corrupt_unrelated_meta = false)
+      ?(producer_persisted_only = false)
       () =
-  let dir = temp_dir "registry_goal_reconciliation_assignment" in
+  let dir = temp_dir "registry_goal_reconciliation_producer" in
   Fun.protect
     ~finally:(fun () ->
       KR.For_testing.clear ();
@@ -721,17 +722,22 @@ let test_goal_reconciliation_prefers_authoritative_assignment
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        KR.For_testing.clear ();
        let config = Masc.Workspace.default_config dir in
-       let completing_agent_name = "keeper-executor-agent-agent" in
+       let producer_name = "producer" in
+       let completing_agent_name =
+         if producer_persisted_only
+         then Masc.Keeper_identity.keeper_agent_name producer_name
+         else "keeper-executor-agent-agent"
+       in
        ignore (Masc.Workspace.init config ~agent_name:(Some completing_agent_name));
        let producer_meta =
-         { (make_meta "producer") with agent_name = completing_agent_name }
+         { (make_meta producer_name) with agent_name = completing_agent_name }
        in
        let goal, _ =
          match
            Goal_store.upsert_goal
              config
              ~id:"goal-reconciliation-assignment"
-             ~title:"Use the assigned Keeper"
+             ~title:"Wake the exact Task producer"
              ~metric:"m"
              ~target_value:"1"
              ()
@@ -743,14 +749,14 @@ let test_goal_reconciliation_prefers_authoritative_assignment
          (Workspace_task.add_task
             ~goal_id:goal.id
             config
-            ~title:"first assigned task"
+            ~title:"first producer task"
             ~priority:2
             ~description:"first linked task");
        ignore
          (Workspace_task.add_task
             ~goal_id:goal.id
             config
-            ~title:"second assigned task"
+            ~title:"second producer task"
             ~priority:2
             ~description:"second linked task");
        let transition task_id action =
@@ -772,14 +778,20 @@ let test_goal_reconciliation_prefers_authoritative_assignment
        in
        finish "task-001";
        finish "task-002";
-       ignore
-         (KR.register_offline
-            ~base_path:config.base_path
-            producer_meta.name
-            producer_meta);
+       if producer_persisted_only
+       then
+         (match Masc.Keeper_meta_store.replace_snapshot config producer_meta with
+          | Ok () -> ()
+          | Error detail -> failf "persist producer metadata failed: %s" detail)
+       else
+         ignore
+           (KR.register_offline
+              ~base_path:config.base_path
+              producer_meta.name
+              producer_meta);
        let assigned_meta =
          { (make_goal_reconciler_meta ()) with
-           paused = assigned_paused
+           paused = unrelated_paused
          }
        in
        ignore
@@ -787,10 +799,18 @@ let test_goal_reconciliation_prefers_authoritative_assignment
             ~base_path:config.base_path
             assigned_meta.name
             assigned_meta);
-       if corrupt_persisted_assignment
+       if producer_persisted_only
+       then
+         check
+           (option string)
+           "producer has no live registry entry"
+           None
+           (KR.get ~base_path:config.base_path producer_meta.name
+            |> Option.map (fun (entry : KR.registry_entry) -> entry.name));
+       if corrupt_unrelated_meta
        then
          write_text_file
-           (Masc.Keeper_types_profile.keeper_meta_path config "corrupt-assignment")
+           (Masc.Keeper_types_profile.keeper_meta_path config "corrupt-unrelated")
            "{ malformed Keeper metadata";
        (match
           Masc.Keeper_goal_reconciliation_wake.enqueue_if_ready
@@ -799,34 +819,17 @@ let test_goal_reconciliation_prefers_authoritative_assignment
             ~task_id:"task-002"
         with
         | Masc.Keeper_goal_reconciliation_wake.Enqueued { keeper_name } ->
-          if corrupt_persisted_assignment
-          then fail "incomplete assignment scan was treated as routable"
-          else
-            check string
-              "assigned Keeper owns reconciliation wake"
-              assigned_meta.name
-              keeper_name
-        | Masc.Keeper_goal_reconciliation_wake.Keeper_target_lookup_failed
-            { goal_id; detail = _ } ->
-          if not corrupt_persisted_assignment
-          then fail "authoritative Goal assignment lookup unexpectedly failed"
-          else check string "incomplete scan remains a typed failure" goal.id goal_id
-        | _ -> fail "authoritative Goal assignment did not produce a durable wake");
-       check int "producer does not receive an assignment-owned wake" 0
+          check string
+            "Task producer receives reconciliation wake"
+            producer_meta.name
+            keeper_name
+        | _ -> fail "exact Task producer did not receive a durable wake");
+       check int "producer receives one reconciliation wake" 1
          (registry_snapshot ~base_path:config.base_path producer_meta.name
           |> Keeper_event_queue.length);
-       if corrupt_persisted_assignment
-       then
-         check int "assigned Keeper does not receive a partial-scan wake" 0
-           (registry_snapshot ~base_path:config.base_path assigned_meta.name
-            |> Keeper_event_queue.length);
-       if corrupt_persisted_assignment
-       then (
-         let summary =
-           Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
-         in
-         check int "assignment scan error is classified as failed" 1 summary.failed_count;
-         check int "assignment scan error is not unresolved" 0 summary.unresolved_count);
+       check int "unrelated Keeper receives no reconciliation wake" 0
+         (registry_snapshot ~base_path:config.base_path assigned_meta.name
+          |> Keeper_event_queue.length);
        let discovery =
          Keeper_event_queue_persistence.discover_keeper_names_with_durable_state
            ~base_path:config.base_path
@@ -836,20 +839,26 @@ let test_goal_reconciliation_prefers_authoritative_assignment
        | None ->
          check
            (list string)
-           "only the assigned canonical Keeper receives the wake"
-           (if corrupt_persisted_assignment then [] else [ assigned_meta.name ])
+           "only the exact producer receives the wake"
+           [ producer_meta.name ]
            discovery.keeper_names)
 ;;
 
-let test_goal_reconciliation_keeps_paused_assignment_authoritative () =
-  test_goal_reconciliation_prefers_authoritative_assignment
-    ~assigned_paused:true
+let test_goal_reconciliation_ignores_unrelated_paused_keeper () =
+  test_goal_reconciliation_targets_exact_producer
+    ~unrelated_paused:true
     ()
 ;;
 
-let test_goal_reconciliation_fails_closed_on_assignment_scan_error () =
-  test_goal_reconciliation_prefers_authoritative_assignment
-    ~corrupt_persisted_assignment:true
+let test_goal_reconciliation_ignores_unrelated_corrupt_meta () =
+  test_goal_reconciliation_targets_exact_producer
+    ~corrupt_unrelated_meta:true
+    ()
+;;
+
+let test_goal_reconciliation_resolves_persisted_only_producer () =
+  test_goal_reconciliation_targets_exact_producer
+    ~producer_persisted_only:true
     ()
 ;;
 
@@ -1051,10 +1060,11 @@ let test_goal_reconciliation_retry_after_keeper_registration () =
        let retried =
          Masc.Keeper_goal_reconciliation_wake.reconcile_startup ~config
        in
-       check int "later registered owner receives durable event" 1 retried.enqueued_count;
-       check bool "later reconciliation emits wake" true
+       check int "unrelated Keeper does not acquire producer wake" 0 retried.enqueued_count;
+       check int "missing producer remains unresolved" 1 retried.unresolved_count;
+       check bool "unrelated Keeper is not woken" false
          (Atomic.get entry.fiber_wakeup);
-       check int "later reconciliation enqueues once" 1
+       check int "unrelated Keeper queue stays empty" 0
          (registry_snapshot ~base_path:config.base_path meta.name
           |> Keeper_event_queue.length))
 ;;
@@ -1470,17 +1480,21 @@ let () =
             `Quick
             test_goal_reconciliation_enqueues_once_after_last_terminal_task
         ; test_case
-            "goal reconciliation prefers authoritative assignment"
+            "goal reconciliation targets exact Task producer"
             `Quick
-            test_goal_reconciliation_prefers_authoritative_assignment
+            test_goal_reconciliation_targets_exact_producer
         ; test_case
-            "paused Goal assignment remains authoritative"
+            "unrelated paused Keeper does not affect producer routing"
             `Quick
-            test_goal_reconciliation_keeps_paused_assignment_authoritative
+            test_goal_reconciliation_ignores_unrelated_paused_keeper
         ; test_case
-            "Goal reconciliation fails closed on assignment scan error"
+            "unrelated corrupt metadata does not affect producer routing"
             `Quick
-            test_goal_reconciliation_fails_closed_on_assignment_scan_error
+            test_goal_reconciliation_ignores_unrelated_corrupt_meta
+        ; test_case
+            "goal reconciliation resolves a persisted-only producer"
+            `Quick
+            test_goal_reconciliation_resolves_persisted_only_producer
         ; test_case
             "restart scan retries missed reconciliation exactly once"
             `Quick

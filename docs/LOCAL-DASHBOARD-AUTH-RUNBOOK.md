@@ -59,38 +59,43 @@ For dashboard-side keeper lifecycle control, the target shape is:
 }
 ```
 
-## 3. Run auth login diagnostics
+## 3. Mint an Admin Dashboard Bearer
 
-Use login JSON before editing tokens or role files:
+The Dashboard lifecycle routes in this runbook need an admin bearer. Mint one
+for a dedicated local operator identity, then open the emitted Dashboard URL:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
-MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json
+eval "$(MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login \
+  --base-path "$BASE_PATH" \
+  --agent local-dashboard-admin \
+  --role admin \
+  --client-env MASC_ADMIN_TOKEN \
+  --no-expiry \
+  --shell)"
+open "$MASC_DASHBOARD_URL"
 ```
 
-Useful interpretations:
+Use `xdg-open` instead of `open` on Linux. The URL contains the bearer, so do
+not paste it into logs, chat, or issue trackers.
 
-- `agent-code is role=worker, so requests authenticated as agent-code cannot satisfy CanAdmin.`
-  - your bearer is valid, but it is the wrong role for admin-only routes
-- `agent-code-mcp-client is role=worker, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/runtime/config/raw.`
-  - the dashboard is presenting a worker bearer, so raw runtime save is expected to 403
-- `token_bound_admin_http_ready: no`
-  - workspace auth may be enabled, but no usable admin bearer source was found
-- `dashboard_dev_token: available=yes`
-  - the browser can bootstrap its loopback-only `dashboard` Worker credential;
-    this credential cannot satisfy admin-only lifecycle routes
-- `codex_mcp.token_status=unset` or `invalid_or_expired`
-  - Agent-Code MCP is missing a live bearer token; this is not fixed by `agent-code mcp login`
-- `codex_mcp.config.stages[]`
-  - Agent-Code config pipeline checks for `[mcp_servers.masc]`, `bearer_token_env_var`,
-    missing hardcoded `Authorization`, and the Streamable HTTP `Accept` header
-
-If you want structured output for automation:
+To inspect the machine-readable login result without inventing diagnostic
+fields, run the same mint with `--json`:
 
 ```bash
-MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json \
-  | jq '{status,codex_mcp:{token_status:.codex_mcp.token_status,config:.codex_mcp.config},warnings,next_actions}'
+MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login \
+  --base-path "$BASE_PATH" \
+  --agent local-dashboard-admin \
+  --role admin \
+  --client-env MASC_ADMIN_TOKEN \
+  --no-expiry \
+  --json \
+  | jq '{status,auth_change,agent_name,role,raw_token_file,dashboard_url,mcp_url,mcp_client}'
 ```
+
+Expected invariants are `status == "ok"`, `role == "admin"`, and
+`mcp_client.token_env_var == "MASC_ADMIN_TOKEN"`. `auth_change` reports whether
+login found bearer auth already required or enabled it during this mint.
 
 ## 4. Agent-Code MCP Bearer or OAuth Login
 
@@ -114,11 +119,13 @@ when bootstrapping or rotating the bearer; export the printed value as
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
-./_build/default/bin/main_eio.exe login \
+eval "$(./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
   --agent agent-code-mcp-client \
   --role worker \
-  --shell
+  --client-env MASC_TOKEN \
+  --no-expiry \
+  --shell)"
 ```
 
 Confirm the Agent-Code-side registration points at the bearer env var:
@@ -135,14 +142,21 @@ Bearer Token Env Var: MASC_TOKEN
 ```
 
 If Agent-Code still reports that `masc` is not logged in while using static
-bearer mode, check the pipeline projection:
+bearer mode, compare its registration above with the login contract:
 
 ```bash
-MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login --json \
-  | jq '.codex_mcp.config.stages'
+MASC_BASE_PATH="$BASE_PATH" ./_build/default/bin/main_eio.exe login \
+  --base-path "$BASE_PATH" \
+  --agent agent-code-mcp-client \
+  --role worker \
+  --client-env MASC_TOKEN \
+  --no-expiry \
+  --json \
+  | jq '{mcp_url,mcp_client}'
 ```
 
-Every required static-bearer config stage should be `pass`.
+The URLs must match, and `mcp_client.token_env_var` must be the same env var
+named by Agent-Code. `login --json` does not inspect Agent-Code's config.
 
 ### OAuth mode
 
@@ -212,43 +226,44 @@ neither ships one nor repairs `~/.agent-code/config.toml` on startup.
 
 Each local MCP client must mint its own worker identity so its bearer is
 distinct from the Agent-Code bearer. Pick a per-client env var name (e.g.
-`MASC_AGENT-LLM-A_MCP_TOKEN`, `MASC_PROVIDER-F_MCP_TOKEN`) and pass it in via
+`MASC_AGENT_LLM_A_MCP_TOKEN`, `MASC_PROVIDER_F_MCP_TOKEN`) and pass it in via
 `--client-env`. Long-running local MCP daemons typically want `--no-expiry` so
 their bearer survives across daemon restarts.
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 
-./_build/default/bin/main_eio.exe login \
+eval "$(./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
   --agent agent-llm-a \
   --role worker \
-  --client-env MASC_AGENT-LLM-A_MCP_TOKEN \
+  --client-env MASC_AGENT_LLM_A_MCP_TOKEN \
   --no-expiry \
-  --shell
+  --shell)"
 
-./_build/default/bin/main_eio.exe login \
+eval "$(./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
   --agent provider-f \
   --role worker \
-  --client-env MASC_PROVIDER-F_MCP_TOKEN \
+  --client-env MASC_PROVIDER_F_MCP_TOKEN \
   --no-expiry \
-  --shell
+  --shell)"
 
-~/me/scripts/mcp-sync.sh
 ```
 
 Manual `login` is for first-time setup or explicit rotation; after that,
-`~/me/scripts/mcp-sync.sh` projects the token files into client config.
+the client launcher can read the private token files under
+`$BASE_PATH/.masc/auth/` into the matching environment variables.
 
 **Provider-F and Agent-LLM-A configs should use `bearer_token_env_var` (not a
-hardcoded `Authorization` header).** The `mcp-sync.sh` pattern should export
-`MASC_AGENT-LLM-A_MCP_TOKEN` and `MASC_PROVIDER-F_MCP_TOKEN` from the respective token
-files rather than embedding literal tokens in the config.
+hardcoded `Authorization` header).** Export
+`MASC_AGENT_LLM_A_MCP_TOKEN` and `MASC_PROVIDER_F_MCP_TOKEN` from the respective
+private token files rather than embedding literal tokens in the config.
 
 Recommended local convention (enforced by the operator's wrapper, not the
-server): `agent-llm-a` should use `MASC_AGENT-LLM-A_MCP_TOKEN` / `X-MASC-Agent: agent-llm-a`,
-and `provider-f` should use `MASC_PROVIDER-F_MCP_TOKEN` / `X-MASC-Agent: provider-f`.
+server): `agent-llm-a` should use `MASC_AGENT_LLM_A_MCP_TOKEN` /
+`X-MASC-Agent: agent-llm-a`, and `provider-f` should use
+`MASC_PROVIDER_F_MCP_TOKEN` / `X-MASC-Agent: provider-f`.
 
 `login --json` no longer exposes a `.mcp_clients[]` section; compose
 per-client readiness checks externally over the raw login output and your
@@ -277,10 +292,13 @@ The shortest local CLI path is:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
-./_build/default/bin/main_eio.exe login \
+eval "$(./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
   --agent agent-code-local-admin \
-  --role admin
+  --role admin \
+  --client-env MASC_ADMIN_TOKEN \
+  --no-expiry \
+  --shell)"
 ```
 
 The command prints the raw bearer once, writes the matching private raw-token

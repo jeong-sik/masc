@@ -116,11 +116,6 @@ export function StatusDot({ status, pulse = false }: { status: string; pulse?: b
   return html`<${Dot} state=${state} pulse=${pulse} />`
 }
 
-/** Keeper's proposed next action chip (`.chip` + leading arrow). */
-export function SuggestionChip({ pre = '→', onClick, children }: { pre?: string; onClick?: () => void; children?: unknown }) {
-  return html`<button class="chip" onClick=${onClick}>${pre ? html`<span class="pre">${pre}</span>` : null}${children}</button>`
-}
-
 /** Linear meter (`.meter` + optional hot). */
 export function Meter({ pct = 0, hot = false }: { pct?: number; hot?: boolean }) {
   return html`<div class=${'meter' + (hot ? ' hot' : '')}><span style=${{ width: Math.max(0, Math.min(100, pct)) + '%' }}></span></div>`

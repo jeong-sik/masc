@@ -297,8 +297,8 @@ function ToolMonitorPanel() {
   return (
     <div className="ia-wrap">
       <div className="ia-head">
-        <h3>Tool Monitor</h3>
-        <span className="ia-count mono">최근 {TM_WINDOW_H}h</span>
+        <h3>도구 실행</h3>
+        <span className="ia-count mono">최근 {TM_WINDOW_H}시간</span>
         <span className="ia-route mono">monitoring?section=fleet-health{view === 'default' ? '' : `&view=${view}`}</span>
       </div>
       <p className="ia-lede">도구 품질 · 도구 이벤트 증거 · Gate 지표 · keeper 비교를 한 섹션에서 봅니다. 구 <span className="mono">telemetry · fleet · tool-quality · gate · attribution</span> 라우트는 모두 이 섹션의 view 로 정규화됩니다.</p>
@@ -460,8 +460,8 @@ function ObservatoryPanel() {
   return (
     <div className="ia-wrap">
       <div className="ia-head">
-        <h3>Observatory</h3>
-        <span className="ia-count mono">{data.events.length} events</span>
+        <h3>관측</h3>
+        <span className="ia-count mono">이벤트 {data.events.length}건</span>
         <span className="ia-route mono">monitoring?section=observatory&range={range}</span>
       </div>
       <p className="ia-lede">전체 keeper · {range} 창. 하나의 시간축 위에 텔레메트리 이벤트 · 도구 호출 · 성공률 지표를 겹쳐 봅니다. 갱신은 필터 변경 시 폴링이며, 라이브 스트리밍은 아직 없습니다.</p>

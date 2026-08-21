@@ -21,7 +21,7 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
+let make_keeper_meta ?agent_name ?current_task_id name =
   let agent_name =
     Option.value agent_name
       ~default:(Masc.Keeper_identity.keeper_agent_name name)
@@ -36,12 +36,6 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
     (match current_task_id with
      | Some task_id -> [ ("current_task_id", `String task_id) ]
      | None -> [])
-    @
-    (match goal_ids with
-     | [] -> []
-     | ids ->
-         [
-         ])
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
@@ -638,7 +632,6 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-123"
-      ~goal_ids:[ "goal-1"; "goal-2" ]
       keeper_name
   in
   Fun.protect
@@ -728,7 +721,6 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-456"
-      ~goal_ids:[ "goal-runtime" ]
       keeper_name
   in
   let subscriber_id = "test-runtime-mcp-tool-trace" in

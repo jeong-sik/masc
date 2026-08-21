@@ -445,7 +445,10 @@ code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
 
 /* Buttons — minimal chrome */
 button, .btn {
-  font: inherit;
+  /* No `font: inherit` here. Tailwind's preflight already gives every <button>
+     the inherited font, and the shorthand's line-height component pinned the
+     button to the 1.55 prose leading, which is what made the design's dense
+     button-built rows (log lines, chips, kanban cards) grow ~10%. */
   background: transparent;
   color: var(--fg-2);
   border: 1px solid var(--line-2);

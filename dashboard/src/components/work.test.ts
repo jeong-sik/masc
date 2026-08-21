@@ -1530,9 +1530,17 @@ describe('Work', () => {
         expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
       })
 
-      it('renders Goal Store projection dossier evidence on matching goal cards', () => {
+      it('renders the declared completion criteria and the operator context on a goal card', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+          {
+            id: 'G-1',
+            title: 'Goal One',
+            priority: 5,
+            phase: 'executing',
+            created_at: '2026-01-01',
+            updated_at: '2026-01-04',
+            last_review_note: 'metric 미충족 — merged PR은 1건뿐',
+          },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1542,25 +1550,48 @@ describe('Work', () => {
               title: 'Goal One',
               priority: 5,
               phase: 'executing',
-              goal_fsm: {
-                state: 'executing',
-                source: 'goal.phase',
-                next_actions: ['request completion'],
-                activity_observation: 'task',
+              owner: 'dancer',
+              metric: 'merged PR count',
+              target_value: '5 PRs',
+              attainment: {
+                state: 'attained',
+                basis: 'metric_target_count',
+                metric: 'merged PR count',
+                metric_evaluation: 'unevaluated',
+                target_value: '5 PRs',
+                target_parse_status: 'parseable',
+                unit: 'count',
+                observed_value: 6,
+                target_numeric: 5,
+                attainment_pct: 100,
+                task_done_count: 3,
+                task_count: 4,
+                note: 'Derived from completed linked tasks against a count target.',
+              },
+              task_summary: {
+                total: 4,
+                done: 3,
+                open: 0,
+                terminal: 4,
+                awaiting_verification: 0,
+                cancelled: 1,
+                unassigned: 0,
+                completion_pct: 75,
+                by_status: {},
               },
               completion_summary: {
-                state: 'in_progress',
-                pct: 75,
-                pct_source: 'goal_store',
-                attainment_state: 'in_progress',
-                attainment_basis: 'linked_tasks',
-                metric_evaluation: 'absent',
+                state: 'ready_for_completion',
+                pct: 100,
+                pct_source: 'attainment',
+                attainment_state: 'attained',
+                attainment_basis: 'metric_target_count',
+                metric_evaluation: 'unevaluated',
                 task_total: 4,
                 task_done: 3,
-                task_open: 1,
+                task_open: 0,
                 is_complete: false,
                 is_terminal: false,
-                ready_to_request_completion: false,
+                ready_to_request_completion: true,
               },
               timeline_events: [{
                 ts: '2026-01-04T10:00:00Z',
@@ -1574,7 +1605,6 @@ describe('Work', () => {
               stagnation_seconds: 3600,
               linked_keeper_names: ['sangsu'],
               pending_approval_count: 2,
-              owner: 'dancer',
               latest_keeper_ref: 'sangsu',
               latest_turn_ref: 42,
             }),
@@ -1589,19 +1619,244 @@ describe('Work', () => {
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         expect(dossier).toHaveAttribute('data-goal-dossier', 'G-1')
-        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'executing')
+        expect(dossier).toHaveAttribute('data-goal-dossier-attainment-state', 'attained')
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
-        expect(dossier.textContent).toContain('state executing')
-        expect(dossier.textContent).toContain('request completion')
-        expect(dossier.textContent).toContain('state in_progress')
-        expect(dossier.textContent).toContain('tasks 3/4')
-        expect(dossier.textContent).toContain('owner dancer')
-        expect(dossier.textContent).toContain('keeper sangsu')
-        expect(dossier.textContent).toContain('turn 42')
-        expect(dossier.textContent).toContain('approvals 2')
+
+        const text = dossier.textContent ?? ''
+        // What the goal is.
+        expect(text).toContain('G-1')
+        expect(text).toContain('dancer')
+        // What counts as done — declared metric, target, observed value.
+        expect(text).toContain('merged PR count')
+        expect(text).toContain('5 PRs')
+        expect(text).toContain('숫자로는 5건')
+        expect(text).toContain('6건')
+        expect(text).toContain('지표 목표치(건수) 대비')
+        expect(text).toContain('Derived from completed linked tasks against a count target.')
+        // Cancelled tasks are named so the done/total gap is not a mystery.
+        expect(text).toContain('끝남 3 · 남음 0 · 취소 1 · 전체 4')
+        expect(text).toContain('지금 완료를 요청할 수 있어요.')
+        // Why the goal sits where it does.
+        expect(text).toContain('metric 미충족 — merged PR은 1건뿐')
+        // Where to go next.
+        expect(text).toContain('sangsu')
+        expect(text).toContain('턴 42')
+        expect(text).toContain('2건 승인 대기')
       })
 
-      it('expands the goal dossier timeline events behind the toggle', () => {
+      it('gives the phase reason a goal cannot request completion, not a conditions verdict', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              phase: 'blocked',
+              completion_summary: {
+                state: 'blocked',
+                pct: null,
+                pct_source: 'none',
+                attainment_state: 'unmeasured',
+                attainment_basis: 'unmeasured',
+                metric_evaluation: 'absent',
+                task_total: 0,
+                task_done: 0,
+                task_open: 0,
+                is_complete: false,
+                is_terminal: false,
+                ready_to_request_completion: false,
+              },
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        // The backend's `ready_to_request_completion` is `phase = Executing`
+        // and nothing else — no metric, target, or task count is consulted.
+        // Rendering its false branch as "conditions unmet" would state a check
+        // that never ran.
+        const row = screen.getByTestId('goal-dossier')
+          .querySelector('[data-goal-detail-row="ready"]')
+        expect(row?.textContent).toContain('막혀 있는 동안에는 완료를 요청할 수 없어요.')
+        expect(row?.textContent).not.toContain('조건')
+      })
+
+      it('marks a declared-but-unmeasured metric as unevaluated instead of attained', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              metric: 'merged PR count',
+              target_value: '5 PRs',
+              attainment: {
+                state: 'attained',
+                basis: 'metric_target_count',
+                metric: 'merged PR count',
+                metric_evaluation: 'unevaluated',
+                target_value: '5 PRs',
+                target_parse_status: 'parseable',
+                unit: 'count',
+                observed_value: 6,
+                target_numeric: 5,
+                attainment_pct: 100,
+                task_done_count: 6,
+                task_count: 7,
+                note: 'Derived from completed linked tasks against a count target.',
+              },
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        const dossier = screen.getByTestId('goal-dossier')
+        // The backend calls this goal attained on a task-derived count. The
+        // panel must not present that as a metric result: the verdict reads
+        // 미평가 and carries the reason.
+        const verdict = dossier.querySelector('[data-goal-detail-row="verdict"]')!
+        expect(verdict.className).toContain('warn')
+        expect(verdict.textContent).toContain('미평가')
+        // The backend's own state token is `attained`; printing it would state
+        // a measurement that was never taken.
+        expect(verdict.textContent).not.toContain('달성')
+        expect(verdict.textContent).toContain('하위 작업 기준으로는 100%')
+        const caveat = dossier.querySelector('[data-goal-detail-caveat]')
+        expect(caveat?.textContent).toContain('직접 잰 값이 아니라')
+      })
+
+      it('states the problem when the declared target cannot drive completion', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              phase: 'blocked',
+              metric: 'unclaimed_tasks',
+              target_value: '0',
+              attainment: {
+                state: 'unmeasured',
+                basis: 'unmeasured',
+                metric: 'unclaimed_tasks',
+                metric_evaluation: 'unevaluated',
+                target_value: '0',
+                target_parse_status: 'invalid_target',
+                unit: 'unknown',
+                observed_value: null,
+                target_numeric: null,
+                attainment_pct: null,
+                task_done_count: 1,
+                task_count: 2,
+                note: 'Target value must be greater than zero.',
+              },
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        const dossier = screen.getByTestId('goal-dossier')
+        const target = dossier.querySelector('[data-goal-detail-row="target"]')!
+        expect(target.className).toContain('warn')
+        expect(target.textContent).toContain('목표치가 완료 판정에 쓸 수 없는 값이에요.')
+        expect(dossier.querySelector('[data-goal-detail-caveat]')?.textContent)
+          .toContain('완료 여부를 아직 판정하지 못했어요')
+        expect(dossier.textContent).toContain('Target value must be greater than zero.')
+      })
+
+      it('says a metricless goal is finished by its linked tasks instead of listing three empty fields', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [goalTreeNode({ id: 'G-1' })],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        const dossier = screen.getByTestId('goal-dossier')
+        expect(dossier.querySelector('[data-goal-detail-row="metric"]')?.textContent)
+          .toContain('완료 지표가 정해져 있지 않아요')
+        expect(dossier.querySelector('[data-goal-detail-row="target"]')).toBeNull()
+        expect(dossier.querySelector('[data-goal-detail-row="observed"]')).toBeNull()
+      })
+
+      it('drops the goal_fsm projection tokens from the goal detail panel', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              phase: 'blocked',
+              goal_fsm: {
+                state: 'blocked',
+                source: 'goal.phase',
+                next_actions: ['unblock', 'drop'],
+                activity_observation: 'runtime',
+              },
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        // `source` was the constant `goal.phase` on every node, and the
+        // next_actions strings named transitions this panel does not perform.
+        const text = screen.getByTestId('goal-dossier').textContent ?? ''
+        expect(text).not.toContain('goal.phase')
+        expect(text).not.toContain('unblock')
+        expect(text).not.toContain('drop')
+        expect(text).not.toContain('activity runtime')
+      })
+
+      it('opens the keeper workspace from a linked keeper in the goal detail panel', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [goalTreeNode({ id: 'G-1', linked_keeper_names: ['polisher', 'rondo'] })],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        const link = screen.getByTestId('goal-dossier')
+          .querySelector<HTMLButtonElement>('[data-goal-detail-keeper="rondo"]')
+        expect(link).not.toBeNull()
+        fireEvent.click(link!)
+
+        expect(navigateMock).toHaveBeenCalledWith(
+          'monitoring',
+          { section: 'agents', view: 'keepers', keeper: 'rondo' },
+        )
+      })
+
+      it('expands the goal detail timeline events behind the toggle', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
         ]
@@ -1635,6 +1890,7 @@ describe('Work', () => {
         const toggle = dossier.querySelector('[data-goal-dossier-timeline-toggle="G-1"]')
         expect(toggle).not.toBeNull()
         expect(toggle).toHaveAttribute('aria-expanded', 'false')
+        expect(toggle!.textContent).toContain('기록 1건 보기')
         expect(dossier.querySelectorAll('[data-goal-dossier-timeline-event]')).toHaveLength(0)
 
         fireEvent.click(toggle!)
@@ -1645,9 +1901,8 @@ describe('Work', () => {
         expect(rows[0]!.textContent).toContain('goal_owner')
         expect(rows[0]!.textContent).toContain('2026-01-04T10:00:00Z')
         expect(rows[0]!.textContent).toContain('owner: <unassigned> -> dancer by operator')
-        // The count chip and its hook stay put while the list opens.
+        // The count hook stays put while the list opens.
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
-        expect(dossier.textContent).toContain('events 1')
       })
 
       it('renders tree-only Goal Store goals in the list without an execution goal mirror', () => {
@@ -1660,12 +1915,6 @@ describe('Work', () => {
               title: 'Tree Only Goal',
               priority: 4,
               phase: 'blocked',
-              goal_fsm: {
-                state: 'blocked',
-                source: 'goal.phase',
-                next_actions: ['unblock linked task'],
-                activity_observation: 'task',
-              },
               tasks: [goalTreeTask({ id: 'T-tree', goal_id: 'G-tree', status: 'todo' })],
             }),
           ],
@@ -1680,11 +1929,9 @@ describe('Work', () => {
         fireEvent.click(goalCard.querySelector('.wk-goal-h')!)
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
-        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'blocked')
-        expect(dossier.textContent).toContain('unblock linked task')
+        expect(dossier).toHaveAttribute('data-goal-dossier', 'G-tree')
         expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
       })
-
       it('preserves blocked and unknown Goal Store task statuses instead of remapping them', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

@@ -64,8 +64,8 @@ let nullable_field_names =
 
 let test_current_writer_roundtrip_and_keyset () =
   check int
-    "current schema has 53 fields"
-    53
+    "current schema has 52 fields"
+    52
     (List.length Keeper_meta_json.current_field_names);
   let meta =
     match Keeper_meta_json_parse.meta_of_json (current_json ()) with
@@ -161,11 +161,11 @@ let () =
     [ ( "current-schema"
       , [ test_case "writer roundtrip and keyset" `Quick
             test_current_writer_roundtrip_and_keyset
-        ; test_case "all 53 fields are required" `Quick
+        ; test_case "all 52 fields are required" `Quick
             test_every_current_field_is_required
-        ; test_case "all 53 duplicate fields reject" `Quick
+        ; test_case "all 52 duplicate fields reject" `Quick
             test_every_duplicate_is_rejected
-        ; test_case "all 53 fields reject a wrong type" `Quick
+        ; test_case "all 52 fields reject a wrong type" `Quick
             test_every_field_rejects_a_wrong_type
         ; test_case "nullability is exact" `Quick
             test_nullability_is_exact

@@ -229,6 +229,43 @@ let test_serializer_omits_status () =
           check bool "serializer omits status" false (List.mem_assoc "status" fields)
       | _ -> fail "goal_to_yojson: expected object")
 
+let add_goal_field config key value =
+  match Yojson.Safe.from_file (Goal_store.goals_path config) with
+  | `Assoc state_fields ->
+    let goals =
+      match List.assoc_opt "goals" state_fields with
+      | Some (`List [ `Assoc goal_fields ]) ->
+        `List [ `Assoc ((key, value) :: goal_fields) ]
+      | _ -> fail "expected one persisted goal"
+    in
+    Workspace.write_json
+      config
+      (Goal_store.goals_path config)
+      (`Assoc (("goals", goals) :: List.remove_assoc "goals" state_fields));
+    Workspace.write_json
+      config
+      (goals_recovery_path config)
+      (`Assoc (("goals", goals) :: List.remove_assoc "goals" state_fields))
+  | _ -> fail "expected persisted goal state object"
+
+let test_other_unknown_goal_field_still_fails () =
+  with_workspace @@ fun config ->
+  let goal = make_goal "unknown-field" "unknown field fails" in
+  Goal_store.write_state config
+    { version = 1; updated_at = iso_now (); goals = [ goal ] };
+  add_goal_field config "unexpected_assignment" (`String "still-closed");
+  check int
+    "unrelated unknown field keeps store undecodable"
+    0
+    (List.length (Goal_store.read_state config).goals);
+  match Goal_store.update_goal config ~goal_id:goal.id Fun.id with
+  | Ok _ -> fail "unknown field licensed a write"
+  | Error detail ->
+    check bool
+      "unknown field write remains fail-closed"
+      true
+      (String_util.contains_substring detail "refusing to write")
+
 let test_phaseless_row_no_longer_decodes () =
   with_workspace @@ fun config ->
   (* Counterfactual for the removed status->phase inference: a status-only
@@ -373,6 +410,8 @@ let () =
             test_status_field_no_longer_decodes;
           test_case "serializer omits status" `Quick
             test_serializer_omits_status;
+          test_case "other unknown goal field still fails" `Quick
+            test_other_unknown_goal_field_still_fails;
           test_case "phase-less row no longer decodes" `Quick
             test_phaseless_row_no_longer_decodes;
           test_case "blocked phase serializes without status" `Quick

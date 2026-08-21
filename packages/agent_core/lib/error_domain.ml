@@ -10,7 +10,7 @@ type provider_error =
   | `Server_error of int * string
   | `Network_error of string
   | `Provider_timeout of Http_client.timeout_phase option * string
-  | `Streaming_timeout of Http_client.timeout_phase * string
+  | `Streaming_timeout of Http_client.timeout_phase * string * string option
   | `Overloaded
   | `Invalid_request of Llm_provider.Retry.invalid_request_reason * string
   | `Not_found of string
@@ -94,7 +94,7 @@ let of_api_error (err : Retry.api_error) : provider_error =
   | Retry.Timeout r ->
     (match r.phase with
      | Some phase when is_streaming_timeout_phase phase ->
-       `Streaming_timeout (phase, r.message)
+       `Streaming_timeout (phase, r.message, None)
      | phase -> `Provider_timeout (phase, r.message))
   | Retry.Overloaded _ -> `Overloaded
   | Retry.InvalidRequest r -> `Invalid_request (r.reason, r.message)
@@ -115,7 +115,7 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
   | Llm_provider.Error.Timeout r ->
     (match r.timeout_phase with
      | Some phase when is_streaming_timeout_phase phase ->
-       `Streaming_timeout (phase, r.detail)
+       `Streaming_timeout (phase, r.detail, Some r.provider)
      | phase -> `Provider_timeout (phase, r.detail))
   | Llm_provider.Error.CapacityExhausted _ -> `Overloaded
   | Llm_provider.Error.InvalidRequest r ->
@@ -181,10 +181,21 @@ let provider_to_error : provider_error -> Error.t = function
   | `Server_error (status, msg) -> Error.Api (Retry.ServerError { status; message = msg })
   | `Network_error msg -> Error.Api (Retry.NetworkError { message = msg; kind = Unknown })
   | `Provider_timeout (phase, msg) -> Error.Api (Retry.Timeout { message = msg; phase })
-  | `Streaming_timeout (phase, msg) ->
+  (* The provider rides along so the round trip does not have to invent one.
+     It used to be dropped here and reconstructed as the literal "unknown",
+     which is how a stalled stream reached the route stage naming no provider
+     while every other surface named it. An API-level timeout genuinely has no
+     provider, and says so by converting back to the API error it came from. *)
+  | `Streaming_timeout (phase, msg, Some provider) ->
     Error.Provider
       (Llm_provider.Error.Timeout
-         { provider = "unknown"; timeout_phase = Some phase; detail = msg })
+         { provider; timeout_phase = Some phase; detail = msg })
+  | `Streaming_timeout (phase, msg, None) ->
+    (* No provider to name, so it stays the API error it arrived as. That used
+       to lose the phase, because [Retry.to_string] dropped it; the phase is
+       rendered there now, so this no longer has to borrow a provider error to
+       stay diagnostic. *)
+    Error.Api (Retry.Timeout { message = msg; phase = Some phase })
   | `Overloaded -> Error.Api (Retry.Overloaded { message = "overloaded" })
   (* The reverse direction used to overwrite the reason with
      Unknown_invalid_request, so a round trip through this module erased a typed

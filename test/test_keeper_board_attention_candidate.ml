@@ -122,8 +122,8 @@ let keeper_context ?(mention_keeper_ids = [ "sangsu" ]) () =
     ; "keeper_runtime_uid", `Null
     ; "instructions", `String "continue"
     ; "current_task_id", `Null
-    ; "mention_keeper_ids"
-      , `List (List.map (fun id -> `String id) mention_keeper_ids)
+    ; ( "mention_keeper_ids"
+      , `List (List.map (fun id -> `String id) mention_keeper_ids) )
     ]
 ;;
 
@@ -253,7 +253,7 @@ let load_one ~base_path =
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
-      ~context:(keeper_context ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "sangsu"; "peer" ] ())
       (signal "post-codec")
   in
   let encoded = A.candidate_to_json original in
@@ -280,7 +280,7 @@ let test_codec_and_context_identity_are_strict () =
   let reordered =
     candidate
       ~context:
-        (match keeper_context () with
+        (match keeper_context ~mention_keeper_ids:[ "sangsu"; "peer" ] () with
          | `Assoc fields -> `Assoc (List.rev fields)
          | _ -> assert false)
       (signal "post-reordered")
@@ -293,7 +293,7 @@ let test_codec_and_context_identity_are_strict () =
     (A.Context_key.equal left reordered);
   let changed_list =
     candidate
-      ~context:(keeper_context ~mention_keeper_ids:[ "sangsu"; "rondo" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "peer"; "sangsu" ] ())
       (signal "post-list-order")
     |> A.Context_key.of_candidate
     |> ok "changed list context"
@@ -344,6 +344,47 @@ let set_assoc_field key value = function
            fields)
     else `Assoc (fields @ [ key, value ])
   | _ -> Alcotest.fail ("expected object while setting field " ^ key)
+;;
+
+let append_assoc_field key value = function
+  | `Assoc fields -> `Assoc (fields @ [ key, value ])
+  | _ -> Alcotest.fail ("expected object while appending field " ^ key)
+;;
+
+let insert_assoc_field_after anchor key value = function
+  | `Assoc fields ->
+    let rec insert reversed = function
+      | [] -> Alcotest.fail ("missing object field " ^ anchor)
+      | ((name, _) as field) :: rest ->
+        if String.equal name anchor
+        then `Assoc (List.rev_append reversed (field :: (key, value) :: rest))
+        else insert (field :: reversed) rest
+    in
+    insert [] fields
+  | _ -> Alcotest.fail ("expected object while inserting field " ^ key)
+;;
+
+let rewrite_candidate_keeper_context rewrite candidate =
+  A.candidate_to_json candidate
+  |> rewrite_assoc_field "judgment_request" (fun request ->
+    rewrite_assoc_field "keeper_context" rewrite request)
+;;
+
+let ledger_path ~base_path =
+  Filename.concat
+    (Filename.concat
+       (Common.masc_dir_from_base_path ~base_path)
+       "board_attention_candidates")
+    "sangsu.jsonl"
+;;
+
+let write_ledger_rows ~base_path rows =
+  Out_channel.with_open_bin (ledger_path ~base_path) (fun channel ->
+    List.iter
+      (fun row ->
+         output_string channel (Yojson.Safe.to_string row);
+         output_char channel '\n')
+      rows)
 ;;
 
 let rewrite_first_comment rewrite = function

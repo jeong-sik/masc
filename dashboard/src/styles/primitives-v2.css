@@ -122,22 +122,25 @@
 /* ════════════════════════════════════════════════════════════════
    SuggestionChip — keeper's proposed next action
    ════════════════════════════════════════════════════════════════ */
+/* Metrics from the design's `.chip` (keeper-v2/v2.css): 13px on the UI face,
+   8px/13px padding, and text that wraps. `white-space: nowrap` used to force a
+   suggestion onto one line, which pushed longer proposals out of the bubble
+   instead of letting them run to a second line. */
 .suggestion-chip {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  font-family: var(--font-sans);
-  font-size: var(--fs-12);
+  font-family: var(--font-ui);
+  font-size: var(--fs-13);
   line-height: 1.3;
   text-align: left;
-  padding: 8px 14px;
+  padding: 8px 13px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--color-border);
   background: var(--color-card);
   color: var(--color-text-primary);
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-  white-space: nowrap;
 }
 
 .suggestion-chip:hover {

@@ -82,7 +82,30 @@ let test_login_with_expiry_uses_caller_env_var () =
       let json = Auth_login.to_yojson report in
       check string "json status" "ok"
         (Yojson.Safe.Util.member "status" json
-        |> Yojson.Safe.Util.to_string)
+        |> Yojson.Safe.Util.to_string);
+      check (list string) "json login schema"
+        [ "agent_name"
+        ; "auth_change"
+        ; "auth_config_path"
+        ; "base_path"
+        ; "bearer_token"
+        ; "dashboard_url"
+        ; "mcp_client"
+        ; "mcp_url"
+        ; "raw_token_file"
+        ; "role"
+        ; "status"
+        ]
+        (json
+         |> Yojson.Safe.Util.to_assoc
+         |> List.map fst
+         |> List.sort String.compare);
+      check string "json raw token file" report.raw_token_file
+        (Yojson.Safe.Util.member "raw_token_file" json
+         |> Yojson.Safe.Util.to_string);
+      check string "json mcp url" report.mcp_url
+        (Yojson.Safe.Util.member "mcp_url" json
+         |> Yojson.Safe.Util.to_string)
 
 (* Long_lived path: caller passes an arbitrary env var name and
    asks for a no-expiry credential. The server passes the name

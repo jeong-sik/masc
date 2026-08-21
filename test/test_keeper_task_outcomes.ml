@@ -27,7 +27,7 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let meta_with_active_goals goal_ids =
+let keeper_meta () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -46,7 +46,7 @@ let test_tasks_list_reports_truncation () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        for index = 1 to 4 do
          ignore
            (Task.handle_keeper_task_tool
@@ -89,7 +89,7 @@ let test_tasks_list_returns_snapshot_and_unchanged () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let execution =
          Task.handle_keeper_task_tool_with_outcome
            ~config
@@ -152,7 +152,7 @@ let test_tasks_list_recovery_is_degraded_and_never_unchanged () =
             ~description:"");
        Out_channel.with_open_text (Masc.Workspace.backlog_path config) (fun oc ->
          output_string oc "{not valid json");
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let execute args =
          Task.handle_keeper_task_tool_with_outcome
            ~config
@@ -191,7 +191,7 @@ let test_tasks_list_revision_covers_projected_contents () =
             ~title:"First workspace task"
             ~priority:1
             ~description:"");
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let snapshot () =
          match
            (Task.handle_keeper_task_tool_with_outcome
@@ -285,7 +285,7 @@ let test_done_missing_task_id_emits_typed_error () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        (* task_id omitted -> early workflow_rejection path. *)
        match
          rejected_done_typed_outcome ~base_path config meta
@@ -307,7 +307,7 @@ let test_done_missing_evidence_refs_emits_typed_error () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        match
          rejected_done_typed_outcome ~base_path config meta
            (`Assoc
@@ -331,7 +331,7 @@ let test_done_failed_transition_emits_typed_error () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        (* A done on a task that does not exist fails the transition -> the
           [else] branch must emit a typed [Error], not [None]. *)
        match
@@ -408,7 +408,7 @@ let test_strict_done_submits_for_verification () =
         | Error error ->
           fail
             ("claim failed: " ^ Masc_domain.masc_error_to_string error));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        ignore
          (Task.handle_keeper_task_tool
             ~config
@@ -463,7 +463,7 @@ let test_default_done_is_terminal () =
         | Error error ->
           fail
             ("claim failed: " ^ Masc_domain.masc_error_to_string error));
-       let meta = meta_with_active_goals [] in
+       let meta = keeper_meta () in
        let execution =
          Task.handle_keeper_task_tool_with_outcome
            ~config

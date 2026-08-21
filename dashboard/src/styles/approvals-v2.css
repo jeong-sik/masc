@@ -33,14 +33,20 @@
    ════════════════════════════════════════════════════════════════ */
 
 .ap-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; }
-.ap-viewseg { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-sunken); }
-.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border: 0; border-radius: var(--radius-xs); background: transparent; color: var(--text-dim); font-size: var(--fs-12); font-family: var(--font-ui); cursor: pointer; }
-.ap-viewbtn:hover { color: var(--text-primary); background: var(--bg-panel); }
-.ap-viewbtn.on { color: var(--text-bright); background: var(--volt-wash); box-shadow: inset 0 0 0 1px var(--volt-dim); }
-.ap-viewbtn-n { min-width: 16px; padding: 1px 5px; border-radius: var(--radius-pill); color: var(--status-bad); background: color-mix(in oklab, var(--status-bad) 12%, transparent); }
-/* The queue badge is red because a waiting queue is a problem. The history
-   badge counts decisions already made, so it stays neutral. */
-.ap-viewbtn-n.neutral { color: var(--text-dim); background: color-mix(in oklab, var(--text-dim) 12%, transparent); }
+/* Queue / history segmented control, from the design's surfaces.css: one pill
+   outline with hairline dividers between the segments, not a rounded box of
+   separately rounded buttons. The count is plain text at 10.5px — under the
+   tempered tone a chip's colour survives as text, not as a filled ground.
+   The queue count is `warn`, not `bad`: the design reserves the failure colour
+   for failure, and a queue that is waiting has not failed. The history count
+   counts decisions already made, so it stays neutral. */
+.ap-viewseg { display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-pill); overflow: hidden; flex: none; }
+.ap-viewbtn { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 15px; background: transparent; border: 0; color: var(--text-dim); cursor: pointer; transition: 0.14s; }
+.ap-viewbtn + .ap-viewbtn { border-left: 1px solid var(--border-main); }
+.ap-viewbtn:hover { color: var(--text-mid); }
+.ap-viewbtn.on { background: var(--volt-wash); color: var(--volt-strong); }
+.ap-viewbtn-n { font-size: 10.5px; color: var(--status-warn); }
+.ap-viewbtn-n.neutral { color: var(--text-dim); }
 
 /* Queue ↔ detail-rail two-column workspace (live surface; not in the prototype,
    which uses a right operations aside instead). */

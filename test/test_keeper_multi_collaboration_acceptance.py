@@ -343,21 +343,31 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
         )
 
-        # The success-token Task and Goal assignment both used to be visible
-        # during fleet setup. A capable coordinator completed them autonomously
-        # before RW23 could write the failing artifact. Keep both inside the
-        # directed RW23 phase and the verifier Goal out of ordinary fleet scope.
+        # The success-token Task and verifier Goal both used to be visible
+        # during fleet setup. The autonomous fleet completed them before RW23
+        # could write the failing artifact. Create the Goal only inside the
+        # directed RW23 phase. Goals are now an ownerless shared open set, so
+        # no removed assignment/scope compatibility call may return.
         self.assertNotIn("goal-verifier-task-create", setup_source)
+        self.assertNotIn("goal-verifier-upsert", setup_source)
         self.assertNotIn("goal-verifier-assign", setup_source)
+        self.assertNotIn("masc_goal_assign", setup_source)
+        self.assertNotIn("active_goal_ids", setup_source)
         self.assertIn("goal-verifier-task-create", rw23_source)
-        self.assertIn("goal-verifier-assign", rw23_source)
+        self.assertIn("goal-verifier-upsert", rw23_source)
+        self.assertNotIn("goal-verifier-assign", rw23_source)
+        self.assertNotIn("masc_goal_assign", rw23_source)
+        self.assertLess(
+            rw23_source.index("goal-verifier-upsert"),
+            rw23_source.index('criterion_state="viable"'),
+        )
+        self.assertLess(
+            rw23_source.index('criterion_state="viable"'),
+            rw23_source.index("goal-verifier-task-create"),
+        )
         self.assertLess(
             rw23_source.index("goal-verifier-task-create"),
             rw23_source.index("goal-verifier-refute-artifact"),
-        )
-        self.assertLess(
-            rw23_source.index('wait_for_verifier_task_verdict("in_progress")'),
-            rw23_source.index("goal-verifier-assign"),
         )
 
     def test_rw23_uses_durable_verdict_without_parsing_board_text(self):

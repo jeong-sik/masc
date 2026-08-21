@@ -34,6 +34,11 @@ type tool_observation =
   ; finished_at : float
   }
 
+val tool_observation_to_yojson : tool_observation -> Yojson.Safe.t
+
+val tool_observation_of_yojson :
+  Yojson.Safe.t -> (tool_observation, string) result
+
 type run_status =
   | Running
   | Completed of

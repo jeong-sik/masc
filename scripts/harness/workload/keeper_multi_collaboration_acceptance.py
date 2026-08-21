@@ -60,6 +60,7 @@ TOOL_ALIASES = {
 KNOWN_ASSERTIONS = {
     "all_keepers_live",
     "role_identity_preserved",
+    "runtime_assignment_serving_observed",
     "goal_visible",
     "goal_assignment_visible",
     "tasks_linked_to_goal",
@@ -150,6 +151,15 @@ def safe_slug(value: str, limit: int = 24) -> str:
     if not slug:
         raise AcceptanceError("run id does not contain a usable slug")
     return slug[:limit].rstrip("-")
+
+
+def campaign_identity_slug(value: str, limit: int = 16) -> str:
+    """Keep a readable prefix without discarding the full run identity."""
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:8]
+    prefix_limit = limit - len(digest) - 1
+    if prefix_limit < 1:
+        raise AcceptanceError("campaign slug limit is too small for identity hash")
+    return f"{safe_slug(value, prefix_limit)}-{digest}"
 
 
 def json_bytes(value: Any) -> bytes:
@@ -669,6 +679,175 @@ def runtime_strategy_receipt(
     }
 
 
+def collect_runtime_serving_evidence(
+    *,
+    base_path: pathlib.Path,
+    keepers_by_role: dict[str, str],
+    expected_runtime_by_role: dict[str, str],
+    manifest_line_cursors_by_keeper: dict[str, dict[str, int]],
+) -> dict[str, Any]:
+    """Read durable runtime receipts and prove each configured role actually served.
+
+    A configured runtime ID is not execution evidence.  Only a terminal
+    ``receipt_appended`` row for the requested runtime, with a completed
+    no-fallback outcome, proves that role reached the provider and returned.
+    """
+    role_evidence: dict[str, Any] = {}
+    parse_errors: list[str] = []
+    observed_runtime_ids: set[str] = set()
+
+    for role in sorted(keepers_by_role):
+        keeper = keepers_by_role[role]
+        expected_runtime = expected_runtime_by_role[role]
+        manifest_root = (
+            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
+        )
+        exact_receipts: list[dict[str, Any]] = []
+        fallback_receipts: list[dict[str, Any]] = []
+        current_run_row_count = 0
+        manifest_files = sorted(manifest_root.glob("*.jsonl"))
+        if keeper not in manifest_line_cursors_by_keeper:
+            parse_errors.append(f"{keeper}:missing campaign manifest cursor")
+        keeper_cursors = manifest_line_cursors_by_keeper.get(keeper, {})
+        for manifest_path in manifest_files:
+            relative_path = str(manifest_path.relative_to(base_path))
+            baseline_line_count = keeper_cursors.get(relative_path, 0)
+            observed_line_count = 0
+            with manifest_path.open(encoding="utf-8") as handle:
+                for line_number, raw_line in enumerate(handle, 1):
+                    observed_line_count = line_number
+                    if line_number <= baseline_line_count:
+                        continue
+                    stripped = raw_line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        row = json.loads(stripped)
+                    except json.JSONDecodeError as error:
+                        parse_errors.append(
+                            f"{relative_path}:{line_number}:{error.msg}"
+                        )
+                        continue
+                    if not isinstance(row, dict) or row.get("event") != "receipt_appended":
+                        continue
+                    current_run_row_count += 1
+                    decision = row.get("decision")
+                    if not isinstance(decision, dict):
+                        parse_errors.append(
+                            f"{relative_path}:{line_number}:missing decision object"
+                        )
+                        continue
+                    schema_errors: list[str] = []
+                    if row.get("schema_version") != 1:
+                        schema_errors.append("schema_version must be 1")
+                    if row.get("keeper_name") != keeper:
+                        schema_errors.append("keeper_name mismatch")
+                    if not isinstance(row.get("trace_id"), str) or not row.get(
+                        "trace_id"
+                    ):
+                        schema_errors.append("trace_id must be non-empty")
+                    keeper_turn_id = row.get("keeper_turn_id")
+                    if (
+                        not isinstance(keeper_turn_id, int)
+                        or isinstance(keeper_turn_id, bool)
+                        or keeper_turn_id < 1
+                    ):
+                        schema_errors.append("keeper_turn_id must be a positive int")
+                    if row.get("runtime_id") != decision.get("runtime_id"):
+                        schema_errors.append(
+                            "top-level runtime_id does not match decision"
+                        )
+                    if schema_errors:
+                        parse_errors.append(
+                            f"{relative_path}:{line_number}:"
+                            + "; ".join(schema_errors)
+                        )
+                        continue
+                    receipt = {
+                        "path": relative_path,
+                        "line": line_number,
+                        "ts": row.get("ts"),
+                        "trace_id": row.get("trace_id"),
+                        "keeper_turn_id": row.get("keeper_turn_id"),
+                        "runtime_id": decision.get("runtime_id"),
+                        "runtime_attempt_count": decision.get("runtime_attempt_count"),
+                        "runtime_fallback_applied": decision.get(
+                            "runtime_fallback_applied"
+                        ),
+                        "runtime_outcome": decision.get("runtime_outcome"),
+                        "outcome": decision.get("outcome"),
+                        "status": row.get("status"),
+                    }
+                    is_exact_success = (
+                        row.get("status") == "ok"
+                        and decision.get("outcome") == "ok"
+                        and decision.get("runtime_outcome") == "completed"
+                        and decision.get("runtime_id") == expected_runtime
+                        and decision.get("runtime_fallback_applied") is False
+                    )
+                    if is_exact_success:
+                        exact_receipts.append(receipt)
+                        observed_runtime_ids.add(expected_runtime)
+                    elif (
+                        decision.get("runtime_fallback_applied") is True
+                        or decision.get("runtime_id") != expected_runtime
+                    ):
+                        fallback_receipts.append(receipt)
+            if observed_line_count < baseline_line_count:
+                parse_errors.append(
+                    f"{relative_path}:manifest shortened after campaign cursor "
+                    f"({observed_line_count} < {baseline_line_count})"
+                )
+
+        role_evidence[role] = {
+            "keeper": keeper,
+            "expected_runtime_id": expected_runtime,
+            "manifest_file_count": len(manifest_files),
+            "baseline_manifest_line_count": sum(keeper_cursors.values()),
+            "current_run_receipt_row_count": current_run_row_count,
+            "exact_success_count": len(exact_receipts),
+            "fallback_receipt_count": len(fallback_receipts),
+            "exact_success_receipts": exact_receipts,
+            "fallback_receipts": fallback_receipts,
+            "served": bool(exact_receipts),
+        }
+
+    all_roles_served = all(
+        evidence["served"] for evidence in role_evidence.values()
+    )
+    return {
+        "schema": "masc.keeper_runtime_serving_evidence.v1",
+        "status": "passed" if all_roles_served and not parse_errors else "failed",
+        "all_roles_served": all_roles_served,
+        "role_count": len(role_evidence),
+        "served_role_count": sum(
+            evidence["served"] for evidence in role_evidence.values()
+        ),
+        "distinct_served_runtime_count": len(observed_runtime_ids),
+        "observed_runtime_ids": sorted(observed_runtime_ids),
+        "parse_errors": parse_errors,
+        "roles": role_evidence,
+    }
+
+
+def capture_runtime_manifest_line_cursors(
+    *, base_path: pathlib.Path, keepers_by_role: dict[str, str]
+) -> dict[str, dict[str, int]]:
+    """Snapshot manifest append positions before the campaign mutates Keepers."""
+    cursors: dict[str, dict[str, int]] = {}
+    for keeper in sorted(set(keepers_by_role.values())):
+        manifest_root = (
+            base_path / ".masc" / "keepers" / keeper / "runtime-manifests"
+        )
+        keeper_cursors: dict[str, int] = {}
+        for manifest_path in sorted(manifest_root.glob("*.jsonl")):
+            relative_path = str(manifest_path.relative_to(base_path))
+            with manifest_path.open(encoding="utf-8") as handle:
+                keeper_cursors[relative_path] = sum(1 for _ in handle)
+        cursors[keeper] = keeper_cursors
+    return cursors
+
+
 def default_health_url(mcp_url: str) -> str:
     parsed = urllib.parse.urlsplit(mcp_url)
     return urllib.parse.urlunsplit(
@@ -846,7 +1025,7 @@ class MissionRun:
         self.token = token
         self.timeout = timeout
         self.run_id = run_id
-        self.slug = safe_slug(run_id, 16)
+        self.slug = campaign_identity_slug(run_id, 16)
         self.marker = f"keeper-collab-{self.slug}"
         # RW20/RW21 tokens. Deterministic per run so evaluators match them
         # exactly; the debate tokens are handed only to their originator's
@@ -886,6 +1065,10 @@ class MissionRun:
             "reviewer": f"rw-{self.slug}-review",
             "researcher": f"rw-{self.slug}-research",
         }
+        self.runtime_manifest_line_cursors = capture_runtime_manifest_line_cursors(
+            base_path=pathlib.Path(self.expected_base_path),
+            keepers_by_role=self.roles,
+        )
         self.task_ids: dict[str, str] = {}
         self.verifier_task_id = ""
         self.task_create_receipts: dict[str, ToolObservation] = {}
@@ -897,6 +1080,7 @@ class MissionRun:
         self.persistence_browser_proof: dict[str, Any] = {}
         self.goal_verifier_browser_proof: dict[str, Any] = {}
         self.goal_verifier_evidence: dict[str, Any] = {}
+        self.runtime_serving_evidence: dict[str, Any] = {}
 
     def runtime_for_role(self, role: str) -> str | None:
         return self.runtime_by_role.get(role, self.runtime_id)
@@ -1987,6 +2171,22 @@ class MissionRun:
             self.writer.write_json(
                 f"observations/tool-calls-{role}.json", tool_calls
             )
+        runtime_receipt = runtime_strategy_receipt(
+            runtime_id=self.runtime_id,
+            runtime_by_role=self.runtime_by_role,
+            require_heterogeneous=self.require_heterogeneous_runtimes,
+            roles=set(self.roles),
+        )
+        self.runtime_serving_evidence = collect_runtime_serving_evidence(
+            base_path=pathlib.Path(self.expected_base_path),
+            keepers_by_role=self.roles,
+            expected_runtime_by_role=runtime_receipt["runtime_by_role"],
+            manifest_line_cursors_by_keeper=self.runtime_manifest_line_cursors,
+        )
+        self.writer.write_json(
+            "observations/runtime-serving-by-role.json",
+            self.runtime_serving_evidence,
+        )
         calls = {
             "goals": ("masc_goal_list", {}),
             "tasks": ("masc_tasks", {"include_done": True, "include_cancelled": True}),
@@ -2578,6 +2778,19 @@ class MissionRun:
             for path in self.writer.output_dir.rglob("*.json")
             if path.name not in {"bundle.json", "assertions.json"}
         ]
+        expected_runtime_ids = {
+            runtime_id
+            for role in self.roles
+            for runtime_id in [self.runtime_for_role(role)]
+            if isinstance(runtime_id, str) and runtime_id
+        }
+        runtime_serving_passed = (
+            self.runtime_serving_evidence.get("status") == "passed"
+            and self.runtime_serving_evidence.get("served_role_count")
+            == len(self.roles)
+            and self.runtime_serving_evidence.get("distinct_served_runtime_count")
+            == len(expected_runtime_ids)
+        )
         checks: dict[str, tuple[bool, str]] = {
             "all_keepers_live": (
                 len(self.statuses) == len(self.roles)
@@ -2589,6 +2802,16 @@ class MissionRun:
             "role_identity_preserved": (
                 all(self.roles[role].lower() in self._status_text(role) for role in self.roles),
                 "each final status contains its exact Keeper identity",
+            ),
+            "runtime_assignment_serving_observed": (
+                runtime_serving_passed,
+                (
+                    "durable no-fallback runtime receipts served "
+                    f"{self.runtime_serving_evidence.get('served_role_count', 0)}/"
+                    f"{len(self.roles)} roles across "
+                    f"{self.runtime_serving_evidence.get('distinct_served_runtime_count', 0)}/"
+                    f"{len(expected_runtime_ids)} configured runtimes"
+                ),
             ),
             "goal_visible": (self.goal_id.lower() in goal_text.lower(), self.goal_id),
             "goal_assignment_visible": (

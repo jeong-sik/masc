@@ -75,8 +75,8 @@
       "actors": ["coordinator", "builder-a", "builder-b", "reviewer", "researcher"],
       "capabilities": ["Keeper", "Goal"],
       "user_story": "서로 다른 책임을 가진 다섯 Keeper가 같은 Goal 범위에서 모두 실행 가능하다.",
-      "assertions": ["all_keepers_live", "role_identity_preserved"],
-      "evidence": ["health.json", "keeper-status/*.json"]
+      "assertions": ["all_keepers_live", "role_identity_preserved", "runtime_assignment_serving_observed"],
+      "evidence": ["health.json", "keeper-status/*.json", "observations/runtime-serving-by-role.json"]
     },
     {
       "id": "RW02",

@@ -373,7 +373,7 @@ let build_review_request config (goal : Goal_store.goal) kind
    callers can request lifecycle changes but cannot name verifier verdicts or
    impersonate the fixed verifier authority. *)
 
-let commit_gate_verdict config ~goal_id ~decision ~evidence
+let commit_gate_verdict config ~goal_id ~verification_run_id ~decision ~evidence
   : (unit, string) result
   =
   let result =
@@ -382,6 +382,7 @@ let commit_gate_verdict config ~goal_id ~decision ~evidence
       ~start_time:(Time_compat.now ())
       config
       ~goal_id
+      ~verification_run_id
       ~decision
       ~evidence
   in
@@ -428,6 +429,8 @@ let process_pending_work_inner
       ?(sw : Eio.Switch.t option = None)
       ~observe_tool
       ~observe_evaluator_runtime
+      ~persist_reviewed
+      ~verification_run_id
       config
       (work : pending_work)
   : process_outcome
@@ -516,10 +519,12 @@ let process_pending_work_inner
                   | Criterion_check, Task.Anti_rationalization.Reject reason ->
                     Workspace_goals.Criterion_unreachable { reason }
                 in
+                persist_reviewed ();
                 (match
                    commit_gate_verdict
                      config
                      ~goal_id:work.goal_id
+                     ~verification_run_id
                      ~decision
                      ~evidence
                  with
@@ -611,6 +616,17 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
       :: !tools
   in
   let observe_evaluator_runtime runtime = evaluator_runtime := Some runtime in
+  let persist outcome =
+    Goal_verification_run_registry.mark_completed
+      registry
+      ~run_id
+      ~outcome
+      ~tools:(List.rev !tools)
+      ?evaluator_runtime:!evaluator_runtime
+      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
+      ()
+  in
+  let persist_reviewed () = persist Goal_verification_run_registry.Reviewed in
   let complete outcome =
     let registry_outcome =
       match outcome with
@@ -618,14 +634,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
       | Deferred { retryable; reason } ->
         Goal_verification_run_registry.Deferred { retryable; detail = reason }
     in
-    Goal_verification_run_registry.mark_completed
-      registry
-      ~run_id
-      ~outcome:registry_outcome
-      ~tools:(List.rev !tools)
-      ?evaluator_runtime:!evaluator_runtime
-      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
-      ()
+    persist registry_outcome
   in
   try
     let outcome =
@@ -633,6 +642,8 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
         ~sw
         ~observe_tool
         ~observe_evaluator_runtime
+        ~persist_reviewed
+        ~verification_run_id:run_id
         config
         work
     in

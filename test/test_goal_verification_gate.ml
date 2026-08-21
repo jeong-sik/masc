@@ -98,6 +98,7 @@ let json_bool json path =
 
 let verdict ?(evidence = "observed by the verifier") outcome : Goal_verification.verdict =
   { Goal_verification.outcome
+  ; verification_run_id = "goal-verifier-test-run"
   ; authority = Masc_domain.System_llm_agent { agent_run_id = "test-verifier" }
   ; evidence
   ; recorded_at = Masc_domain.now_iso ()
@@ -576,6 +577,7 @@ let verifier_transition config goal_id decision evidence =
     ~start_time:0.
     config
     ~goal_id
+    ~verification_run_id:"goal-verifier-test-run"
     ~decision
     ~evidence
 ;;
@@ -675,6 +677,21 @@ let test_proof_proven_completes_with_authority_and_evidence () =
     (json_state blank [ "error_code" ]);
   check string "a refused verdict does not move the phase" "verifying"
     (stored_phase config goal_id);
+  let unbound_attempt =
+    must_fail "typed proof verdict with blank run ID"
+      (Workspace_goals.commit_verifier_decision
+         ~tool_name:"goal_verifier_commit"
+         ~start_time:0.
+         config
+         ~goal_id
+         ~verification_run_id:"   "
+         ~decision:Workspace_goals.Proof_proven
+         ~evidence:"metric observed at target")
+  in
+  check string "blank run ID is a typed validation error" "validation_error"
+    (json_state unbound_attempt [ "error_code" ]);
+  check string "an unbound verdict does not move the phase" "verifying"
+    (stored_phase config goal_id);
   let completed =
     must_succeed "typed proof proven"
       (verifier_transition
@@ -689,6 +706,11 @@ let test_proof_proven_completes_with_authority_and_evidence () =
     (json_state completed [ "verification"; "completion"; "state" ]);
   check string "the evidence is on the verdict" "metric observed at target"
     (json_state completed [ "verification"; "completion"; "verdict"; "evidence" ]);
+  check string "the verdict retains its exact verifier attempt"
+    "goal-verifier-test-run"
+    (json_state
+       completed
+       [ "verification"; "completion"; "verdict"; "verification_run_id" ]);
   check string "the caller cannot impersonate the typed authority" "verifier_exact"
     (json_state
        completed

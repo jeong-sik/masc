@@ -10,7 +10,7 @@ import {
 } from './dashboard-verification-runs'
 
 export type GoalVerificationReviewKind = 'criterion' | 'proof'
-export type GoalVerificationRunStatus = 'running' | 'committed' | 'deferred' | 'raised'
+export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | 'deferred' | 'raised'
 
 export interface GoalVerificationRunRecord {
   runId: string
@@ -68,7 +68,7 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
   const context = `runs[${index}]`
   if (!isRecord(raw)) protocolError(`${context} must be an object`)
   const status = raw.status
-  if (status !== 'running' && status !== 'committed' && status !== 'deferred' && status !== 'raised') {
+  if (status !== 'running' && status !== 'reviewed' && status !== 'committed' && status !== 'deferred' && status !== 'raised') {
     protocolError(`${context}.status has unknown value ${JSON.stringify(status)}`)
   }
   const reviewKind = raw.review_kind
@@ -85,7 +85,7 @@ function parseRun(raw: unknown, index: number): GoalVerificationRunRecord {
   ] as const
   const outcomeFields = status === 'running'
     ? []
-    : status === 'committed'
+    : status === 'reviewed' || status === 'committed'
       ? ['elapsed_s', 'tools']
       : status === 'deferred'
         ? ['elapsed_s', 'tools', 'retryable', 'detail']

@@ -66,6 +66,7 @@ val commit_verifier_decision
   -> start_time:float
   -> Workspace_utils_backend_setup.config
   -> goal_id:string
+  -> verification_run_id:string
   -> decision:verifier_decision
   -> evidence:string
   -> Tool_result.result

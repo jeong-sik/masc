@@ -21,6 +21,7 @@ import { StatusBadge, type StatusBadgeTone } from './common/status-badge'
 export function goalVerificationRunTone(status: GoalVerificationRunStatus): StatusBadgeTone {
   switch (status) {
     case 'running': return 'warn'
+    case 'reviewed': return 'info'
     case 'committed': return 'ok'
     case 'deferred': return 'info'
     case 'raised': return 'bad'
@@ -30,6 +31,7 @@ export function goalVerificationRunTone(status: GoalVerificationRunStatus): Stat
 export function goalVerificationRunLabel(status: GoalVerificationRunStatus): string {
   switch (status) {
     case 'running': return '판정 중'
+    case 'reviewed': return '판정 기록됨'
     case 'committed': return '커밋됨'
     case 'deferred': return '보류'
     case 'raised': return '예외'

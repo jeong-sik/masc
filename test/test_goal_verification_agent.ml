@@ -425,11 +425,17 @@ let test_goal_proof_reads_linked_task_producer_artifact () =
       | Goal_verification_run_registry.Criterion -> false)
   in
   match proof_runs with
-  | [ { Goal_verification_run_registry.status =
+  | [ { Goal_verification_run_registry.run_id
+      ; status =
           Goal_verification_run_registry.Completed
             { outcome = Goal_verification_run_registry.Committed; tools; _ }
       ; _
       } ] ->
+    (match (ledger_record config goal_id).completion with
+     | Goal_verification.Proof_proven verdict ->
+       check string "ledger verdict joins the exact Dashboard run" run_id
+         verdict.Goal_verification.verification_run_id
+     | _ -> fail "Goal proof ledger did not retain a proven verdict");
     check bool "Dashboard run retains the artifact read" true
       (List.exists
          (fun (tool : Verification_run_registry.tool_observation) ->

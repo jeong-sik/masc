@@ -3,6 +3,7 @@ type review_kind =
   | Proof
 
 type outcome =
+  | Reviewed
   | Committed
   | Deferred of
       { retryable : bool
@@ -42,6 +43,7 @@ let review_kind_of_label = function
 ;;
 
 let outcome_label = function
+  | Reviewed -> "reviewed"
   | Committed -> "committed"
   | Deferred _ -> "deferred"
   | Raised _ -> "raised"
@@ -94,6 +96,7 @@ module Payload = struct
   let completion_to_yojson completion =
     let outcome_fields =
       match completion.outcome with
+      | Reviewed -> []
       | Committed -> []
       | Deferred { retryable; detail } ->
         [ "retryable", `Bool retryable; "detail", `String detail ]
@@ -121,6 +124,7 @@ module Payload = struct
     let* outcome_label = Run_registry_core.Json.string_field "outcome" fields in
     let detail_fields =
       match outcome_label with
+      | "reviewed" -> Ok []
       | "committed" -> Ok []
       | "deferred" -> Ok [ "retryable"; "detail" ]
       | "raised" -> Ok [ "detail" ]
@@ -152,6 +156,7 @@ module Payload = struct
     let* tools = parse_tools [] tools_json in
     let* outcome =
       match outcome_label with
+      | "reviewed" -> Ok Reviewed
       | "committed" -> Ok Committed
       | "deferred" ->
         let* retryable =
@@ -242,6 +247,7 @@ let run_to_yojson run =
     | Completed { outcome; evaluator_runtime; elapsed_s; tools } ->
       let detail_fields =
         match outcome with
+        | Reviewed -> []
         | Committed -> []
         | Deferred { retryable; detail } ->
           [ "retryable", `Bool retryable; "detail", `String detail ]

@@ -120,6 +120,7 @@ goal 은 keeper 의 시야에서 사라지고 영원히 `Completed` 에 도달�
 ```ocaml
 type verdict =
   { outcome : Proven | Refuted of { reason : string }
+  ; verification_run_id : string
   ; authority : Masc_domain.completion_authority
   ; evidence : string
   ; recorded_at : string

@@ -32,6 +32,9 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  verification_run_id : string;
+      (** Exact Goal-verifier attempt whose durable run record contains the
+          evaluator and tool observations supporting this verdict. *)
   authority : Masc_domain.completion_authority;
       (** Typed provenance, reused from the Task completion protocol. The
           stage-2 verifier lane commits with its own run identity

@@ -30,6 +30,7 @@ type verdict_outcome =
 
 type verdict = {
   outcome : verdict_outcome;
+  verification_run_id : string;
   authority : Masc_domain.completion_authority;
   evidence : string;
   recorded_at : string;
@@ -107,7 +108,8 @@ let verdict_to_yojson (v : verdict) =
   in
   `Assoc
     (outcome_fields
-     @ [ "authority", authority_to_yojson v.authority
+     @ [ "verification_run_id", `String v.verification_run_id
+       ; "authority", authority_to_yojson v.authority
        ; "evidence", `String v.evidence
        ; "recorded_at", `String v.recorded_at
        ])
@@ -119,7 +121,13 @@ let verdict_of_yojson = function
           (fun (field, _) ->
             (* strict wire-boundary decoder: rejects unknown fields. STR-OK *)
             if List.mem field
-                 [ "outcome"; "reason"; "authority"; "evidence"; "recorded_at" ]
+                 [ "outcome"
+                 ; "reason"
+                 ; "verification_run_id"
+                 ; "authority"
+                 ; "evidence"
+                 ; "recorded_at"
+                 ]
             then None
             else Some field)
           fields
@@ -133,21 +141,37 @@ let verdict_of_yojson = function
           let json = `Assoc fields in
           match
             ( Json_util.assoc_member_opt "outcome" json
+            , Json_util.get_string json "verification_run_id"
             , Json_util.get_string json "evidence"
             , Json_util.assoc_member_opt "recorded_at" json )
           with
-          | Some (`String outcome), Some evidence, Some (`String recorded_at) -> (
+          | ( Some (`String outcome)
+            , Some verification_run_id
+            , Some evidence
+            , Some (`String recorded_at) ) -> (
+              if String.trim verification_run_id = ""
+              then
+                Error
+                  "goal_verification.verdict_of_yojson: verification_run_id is blank"
+              else
               match authority_of_yojson (Yojson.Safe.Util.member "authority" json) with
               | Error _ as error -> error
               | Ok authority -> (
                   match outcome with
                   | "proven" ->
-                      Ok { outcome = Proven; authority; evidence; recorded_at }
+                      Ok
+                        { outcome = Proven
+                        ; verification_run_id
+                        ; authority
+                        ; evidence
+                        ; recorded_at
+                        }
                   | "refuted" -> (
                       match Json_util.get_string json "reason" with
                       | Some reason ->
                           Ok
                             { outcome = Refuted { reason }
+                            ; verification_run_id
                             ; authority
                             ; evidence
                             ; recorded_at
@@ -162,8 +186,8 @@ let verdict_of_yojson = function
                          ^ other)))
           | _ ->
               Error
-                "goal_verification.verdict_of_yojson: outcome, evidence and \
-                 recorded_at are required"))
+                "goal_verification.verdict_of_yojson: outcome, \
+                 verification_run_id, evidence and recorded_at are required"))
   | json ->
       Error ("goal_verification.verdict_of_yojson: " ^ Yojson.Safe.to_string json)
 

@@ -499,13 +499,32 @@ type verifier_decision =
   | Proof_proven
   | Proof_refuted of { reason : string }
 
+let validate_verification_run_id verification_run_id =
+  if String.trim verification_run_id <> ""
+  then Ok verification_run_id
+  else
+    Error
+      [ { field = "verification_run_id"
+        ; constraint_violated = Required
+        ; message =
+            "a verifier verdict must name the exact durable verification run"
+        ; expected = Some "non-blank run ID"
+        ; received = Some (`String verification_run_id)
+        }
+      ]
+;;
+
 (* The authority is constructed inside the application boundary. It is not a
    field accepted from an MCP caller and cannot be replaced by a Keeper/session
    name. [Runtime.verifier_exact_lane_id] is the runtime configuration SSOT. *)
-let gate_verdict (outcome : Goal_verification.verdict_outcome) ~evidence
+let gate_verdict
+      (outcome : Goal_verification.verdict_outcome)
+      ~verification_run_id
+      ~evidence
     : Goal_verification.verdict
   =
   { Goal_verification.outcome
+  ; verification_run_id
   ; authority =
       Masc_domain.System_llm_agent
         { agent_run_id = Runtime.verifier_exact_lane_id }
@@ -524,6 +543,7 @@ let gate_event_payload (ctx : context) ~phase (verdict : Goal_verification.verdi
   `Assoc
     ([ "phase", Goal_phase.to_yojson phase
      ; "actor", `String ctx.agent_name
+     ; "verification_run_id", `String verdict.verification_run_id
      ; "evidence", `String verdict.evidence
      ]
      @ outcome_fields)
@@ -579,6 +599,7 @@ let commit_verifier_decision
       ~start_time
       config
       ~goal_id
+      ~verification_run_id
       ~decision
       ~evidence
   =
@@ -586,9 +607,13 @@ let commit_verifier_decision
     { config; agent_name = Runtime.verifier_exact_lane_id }
   in
   let action, verdict_outcome, note = verifier_decision_parts decision in
-  match validate_gate_evidence (`Assoc [ "evidence", `String evidence ]) action with
-  | Error errors -> validation_error_result ~tool_name ~start_time errors
-  | Ok evidence ->
+  match
+    ( validate_verification_run_id verification_run_id
+    , validate_gate_evidence (`Assoc [ "evidence", `String evidence ]) action )
+  with
+  | Error errors, _ | _, Error errors ->
+    validation_error_result ~tool_name ~start_time errors
+  | Ok verification_run_id, Ok evidence ->
     (match Goal_store.get_goal config ~goal_id with
      | None ->
        error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
@@ -607,7 +632,7 @@ let commit_verifier_decision
                ~action
                ~phase
                goal
-               (gate_verdict verdict_outcome ~evidence)
+               (gate_verdict verdict_outcome ~verification_run_id ~evidence)
            | Proof_proven | Proof_refuted _ ->
              error_result_typed
                ~tool_name
@@ -623,7 +648,9 @@ let commit_verifier_decision
                ~code:Internal_error
                "criterion verdicts are phase-neutral; decide_transition never moves"
            | Proof_proven | Proof_refuted _ ->
-             let verdict = gate_verdict verdict_outcome ~evidence in
+             let verdict =
+               gate_verdict verdict_outcome ~verification_run_id ~evidence
+             in
              (match Goal_verification.record_proof_verdict config ~goal_id verdict with
               | Error msg ->
                 error_result_typed ~tool_name ~start_time ~code:Conflict msg

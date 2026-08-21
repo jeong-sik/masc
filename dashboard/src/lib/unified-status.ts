@@ -140,7 +140,7 @@ export function resolveUnifiedStatus(
   // Every keeper lifecycle token the hand-written arms above do not
   // special-case. Without this the arms covered 4 of the 12 `KeeperPhase`
   // values, and `Failing` / `Overflowed` / `Draining` / `Stopped` /
-  // `Crashed` / `Restarting` / `Dead` / `unbooted` all fell to `unknown` —
+  // `Crashed` / `Restarting` / `unbooted` all fell to `unknown` —
   // so the agent detail header rendered `확인 필요` next to a phase badge
   // that said `중지` or `종료됨` for the same keeper (`agent-detail.ts`
   // renders both badges on one line). Measured 2026-07-27: 8 of 12.

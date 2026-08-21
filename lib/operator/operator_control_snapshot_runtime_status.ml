@@ -41,7 +41,7 @@ let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
   | None | Some None -> false
   | Some (Some kh) ->
     (match kh with
-     | Keeper_types.KH_stale | KH_degraded | KH_zombie | KH_dead -> false
+     | Keeper_types.KH_stale | KH_degraded | KH_zombie -> false
      | KH_healthy | KH_idle | KH_offline -> true)
 ;;
 

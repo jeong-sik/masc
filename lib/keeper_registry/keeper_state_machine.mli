@@ -18,7 +18,7 @@
     Key invariant: given the same [conditions] and [event], [apply_event]
     always produces the same [transition_result]. *)
 
-(** {1 Phase (13-State Enum)} *)
+(** {1 Phase (11-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
     Buffer states ([Failing], [Overflowed], [Compacting], [HandingOff],
@@ -236,10 +236,8 @@ val transition_error_to_string : transition_error -> string
     12. Running (fiber_alive)
     13. Offline (default fallback for inconsistent zero-state)
 
-    Drift note: prior to this revision the docstring listed Dead as
-    priority 1; the actual implementation has always checked Stopped
-    first (the TLA+ spec agrees).  The order above is the ground truth
-    enforced by [keeper_state_machine.ml] and TLC. *)
+    The order above is the ground truth enforced by
+    [keeper_state_machine.ml] and TLC. *)
 val derive_phase : conditions -> phase
 
 (** Pure condition updater: given current conditions and an event,

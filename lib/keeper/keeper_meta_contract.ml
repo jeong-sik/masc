@@ -431,10 +431,10 @@ type keeper_meta =
     active_goal_ids : string list
   ; paused : bool
   ; latched_reason : Keeper_latched_reason.t option
-    (** Typed companion to [paused]. Explicit operator pause, terminal
-        dead-tombstone, and transcript-corruption reset-required paths may write
-        it. [None] while paused is a fail-closed unclassified state that
-        requires operator action. *)
+    (** Typed companion to [paused]. Explicit operator pause and
+        transcript-corruption reset-required paths may write it. [None] while
+        paused is a fail-closed unclassified state that requires operator
+        action. *)
   ; autoboot_enabled : bool
   ; current_task_id : Keeper_id.Task_id.t option
     (** Currently claimed task ID for cost attribution.
@@ -450,9 +450,8 @@ type keeper_meta =
   ; agent_core_env : (string * string) list
   }
 
-(* Sanctioned generic unpause transform. Reset-required transcript and terminal
-   dead-tombstone latches are deliberately immutable here. A dead identity is
-   deleted and recreated rather than revived. *)
+(* Sanctioned generic unpause transform. A reset-required transcript latch is
+   deliberately immutable here and must cross the explicit reset boundary. *)
 let mark_resumed (m : keeper_meta) : keeper_meta =
   match m.latched_reason with
   | Some Keeper_latched_reason.Transcript_corruption_reset_required ->
@@ -466,7 +465,7 @@ let mark_resumed (m : keeper_meta) : keeper_meta =
     }
 ;;
 
-(* Write-boundary invariant: terminal/reset-required latches must co-occur
+(* Write-boundary invariant: reset-required latches must co-occur
    with [paused = true]. Admission denies them by latch identity even if a
    stale writer cleared [paused], so reject that split instead of repairing it
    silently. *)

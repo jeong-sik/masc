@@ -4,7 +4,7 @@
     - derive_phase priority ordering
     - apply_event valid/invalid transitions
     - can_transition matrix completeness
-    - Terminal state properties (Stopped, Dead) *)
+    - Terminal state properties (Stopped) *)
 
 open Alcotest
 module SM = Keeper_state_machine
@@ -1064,8 +1064,7 @@ let test_chain_stop_during_handoff () =
   check phase_t "handoff completes then Stopped" SM.Stopped final_phase
 ;;
 
-(** 18. The Phoenix that can't rise: complete lifecycle to Dead,
-    verify nothing can revive it. Then verify Stopped is equally terminal. *)
+(** 18. Repeated crashes remain recoverable; Stopped alone is terminal. *)
 let test_chain_triple_restart_survives () =
   let final_phase, _ =
     chain_apply
@@ -1934,7 +1933,7 @@ let () =
         ; test_case "Running invalid targets" `Quick test_can_transition_running_invalid
         ; test_case "terminal -> nothing" `Quick test_can_transition_terminal_nothing
         ; test_case
-            "Crashed -> Restarting|Dead only"
+            "Crashed -> Restarting only"
             `Quick
             test_can_transition_crashed_only_restart
         ; test_case

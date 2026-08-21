@@ -801,7 +801,6 @@ function keeperTickerTone(status?: string | null): FleetTickerEvent['tone'] {
     case 'executing':
       return 'info'
     case 'offline':
-    case 'dead':
     case 'stopped':
     case 'unbooted':
       return 'err'

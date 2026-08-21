@@ -105,14 +105,13 @@ export interface KeeperOfflineInput {
 }
 
 /** Operator considers the keeper offline / down on any of: terminal
- *  FSM phases (Offline/Stopped/Dead/Crashed) or one of the
+ *  FSM phases (Offline/Stopped/Crashed) or one of the
  *  off-tokens emitted in `keeper.status`. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   const phase = lowerToken(keeper.lifecycle_phase ?? keeper.phase)
   if (
     phase === 'offline'
     || phase === 'stopped'
-    || phase === 'dead'
     || phase === 'crashed'
   ) {
     return true

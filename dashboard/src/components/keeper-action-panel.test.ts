@@ -151,7 +151,7 @@ describe('keeperActionVisibility', () => {
     })
   })
 
-  describe('dead keeper', () => {
+  describe('stopped keeper', () => {
     it('can boot, cannot pause/resume/shutdown', () => {
       const k = makeKeeper({ status: 'offline', phase: 'Stopped', paused: false })
       const v = keeperActionVisibility(k)

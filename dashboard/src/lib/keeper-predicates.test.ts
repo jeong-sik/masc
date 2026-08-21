@@ -58,7 +58,7 @@ describe('isKeeperOffline', () => {
   it('lifecycle_phase overrides stale phase for offline classification', () => {
     expect(isKeeperOffline(k({ lifecycle_phase: 'Offline', phase: 'Running' }))).toBe(true)
   })
-  it.each(['offline', 'stopped', 'dead', 'crashed'])('lowercase phase=%s ⇒ offline', (phase) => {
+  it.each(['offline', 'stopped', 'crashed'])('lowercase phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline({ phase })).toBe(true)
   })
   it.each([['offline'], ['inactive'], ['unbooted'], ['stopped']])('status=%s ⇒ offline', (status) => {

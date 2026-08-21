@@ -5,7 +5,7 @@
     behavioral contracts between modules:
 
     1. Structured crash flow (3 catch branches)
-    2. Dead tombstone lifecycle
+    2. Supervisor ownership and cleanup lifecycle
     3. Reconcile predicate logic (sweep-owned vs reconcile-eligible)
 
     @since Phase 2 post-merge improvement *)
@@ -370,12 +370,11 @@ let test_crash_fiber_unresolved () =
     check string "state" "crashed" (KSM.phase_to_string e.phase)
 
 (* ══════════════════════════════════════════════════════════
-   2. Dead tombstone lifecycle
+   2. Supervisor ownership and cleanup lifecycle
    ══════════════════════════════════════════════════════════ *)
 
-(** Full lifecycle: Running → Crashed → explicit tombstone → Dead.
-    Verifies: Dead is terminal, is_registered=true, Dead→Running blocked,
-    only unregister can remove an entry. *)
+(** Running and Crashed entries remain sweep-owned; only explicit cleanup
+    unregisters an absent Keeper. *)
 let test_reconcile_predicate_sweep_owned () =
   R.For_testing.clear ();
   (* Running = sweep-owned *)
@@ -3222,7 +3221,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
        let label =
          match mode with
          | `Remove -> "remove"
-         | `Dead -> "dead"
+         | `Supervisor_cleanup -> "supervisor-cleanup"
          | `Purge -> "purge"
        in
        let base_dir = temp_dir ("shutdown-summary-retirement-" ^ label) in
@@ -3274,7 +3273,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
             let cleanup_intent =
               match mode with
               | `Remove -> { remove_meta_cleanup with remove_session = true }
-              | `Dead ->
+              | `Supervisor_cleanup ->
                 { Shutdown_types.reason =
                     Shutdown_types.Supervisor_cleanup
                 ; remove_session = true
@@ -3370,7 +3369,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
                  (R.get ~base_path:config.base_path meta.name));
             check bool "session removed after settlement" false
               (Sys.file_exists session_dir)))
-    [ `Remove; `Dead; `Purge ]
+    [ `Remove; `Supervisor_cleanup; `Purge ]
 ;;
 
 let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =

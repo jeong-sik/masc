@@ -23,7 +23,6 @@ type keeper_health =
   | KH_stale
   | KH_degraded
   | KH_zombie
-  | KH_dead
 
 type keeper_continuity =
   | Continuity_healthy

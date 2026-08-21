@@ -3,7 +3,7 @@
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
 //
 // Color mapping follows the Anyang Sleepers design system (#8177,
-// #8235): the 13 phases collapse into 6 visual groups so that across
+// #8235): the 11 phases collapse into 6 visual groups so that across
 // a row of 40 keepers the palette reads as 6 semantic categories
 // rather than 13 similar-but-subtly-different hues. Individual phase
 // is still distinguished by its icon and Korean label — the color
@@ -42,7 +42,7 @@ interface PhaseStyle {
 //   inactive offline · stopped · dead                        → --text-muted / --bad-light
 //
 // Restarting sits with "working" — operators read a restart as
-// recovery-in-progress, not a fresh failure. Dead keeps the bad-light
+// recovery-in-progress, not a fresh failure. Crashed keeps the bad-light
 // hue (brick) because it indicates a terminated agent, distinct from
 // Stopped (intentional) and Offline (never connected).
 const SOFT_GLOW = '0 0 8px color-mix(in srgb, currentColor 25%, transparent)'

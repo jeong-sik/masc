@@ -643,7 +643,7 @@ let start_supervisor_sweep ctx =
               (* Enumerate every phase so the compiler flags any new
                  variant added to [Keeper_state_machine.phase]. TOML
                  hot-reload only reconciles Running keepers; the other
-                 other phases skip (a Stopped/Crashed/Dead
+                 other phases skip (a Stopped/Crashed
                  keeper has no in-memory meta to update; a Compacting
                  or HandingOff keeper is mid-transition and reconcile
                  would race; Offline / Paused / Failing / Overflowed /

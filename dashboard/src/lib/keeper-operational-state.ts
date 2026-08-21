@@ -25,7 +25,7 @@
 //      an explicitly-stale marker.
 //
 //   paused   ⇐ keeper.paused | phase==='Paused' | pause_state==='paused'
-//   offline  ⇐ phase ∈ Offline/Stopped/Dead/Crashed  OR
+//   offline  ⇐ phase ∈ Offline/Stopped/Crashed  OR
 //              status ∈ offline/inactive/unbooted
 //   stuck    ⇐ (runtime_blocker_class set AND NOT explicitlyStale
 //                 AND class is execution-blocking)
@@ -418,8 +418,7 @@ export function derivePreferredPhase(
 // The extra keys beyond the 4 kinds cover the legacy flat `keeper.status`
 // wire tokens (overview fleet ticker) that are finer-grained than the
 // typed sum: active/live/busy/executing collapse onto the `running`
-// label, while dead/stopped/unbooted keep the distinct words the former
-// English labels (Dead/Stopped/Unbooted) carried — reused from the
+// label, while stopped/unbooted keep distinct words — reused from the
 // fleet-tone phase vocabulary so one backend state cannot surface two
 // different Korean words.
 export type KeeperStatusLabelKey =

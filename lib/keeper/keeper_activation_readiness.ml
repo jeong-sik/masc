@@ -208,12 +208,9 @@ let classify_owner_execution_with
         | None ->
           (match runtime with
            | Owner_unregistered -> Recoverable
-           (* [Keeper_state_machine.is_terminal] is [Stopped | Dead]. This arm
-              listed [Dead] and not [Stopped], so a stopped keeper that still
-              held a live fiber fell through to [Executable] below and the
-              health projection counted it as capacity an operator could use.
-              [Paused] is here for a different reason — not terminal, but not
-              executable either. *)
+           (* [Stopped] is terminal. [Paused] is not terminal, but it is also
+              not executable. Both must be excluded before the live-fiber
+              fast path below. *)
            | Owner_registered
                { phase =
                    ( Keeper_state_machine.Paused

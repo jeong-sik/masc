@@ -65,14 +65,11 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Paused --> Stopped : stop requested\n";
   p "    Paused --> Crashed : fiber death\n";
   p "    Crashed --> Restarting : backoff elapsed\n";
-  p "    Crashed --> Dead : explicit durable tombstone\n";
   p "    Restarting --> Running : fiber started\n";
   p "    Restarting --> Crashed : launch fail\n";
-  p "    Restarting --> Dead : explicit durable tombstone\n";
   p "    Restarting --> Draining : stop requested\n";
   p "    Restarting --> Paused : operator pause\n";
   p "    Stopped --> [*]\n";
-  p "    Dead --> [*]\n";
   (* Highlight current phase with classDef *)
   p "\n";
   p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";

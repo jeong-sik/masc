@@ -105,7 +105,7 @@ export function keeperStateTone(state: string): StatusChipTone {
     case 'preparing':
     case 'listening':
       return 'info'
-    // warn — degraded but not yet dead
+    // warn — degraded but not crashed
     case 'failing':
     case 'overflowed':
     case 'restarting':
@@ -116,7 +116,6 @@ export function keeperStateTone(state: string): StatusChipTone {
       return 'paused'
     // error — crash / lost
     case 'crashed':
-    case 'dead':
       return 'bad'
     // inactive — offline / stopped / never started
     case 'stopped':

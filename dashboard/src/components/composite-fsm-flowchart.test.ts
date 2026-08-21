@@ -39,7 +39,7 @@ describe('buildCompositeFsmMermaid', () => {
     expect(src).toContain('kcl_idle["idle"]')
   })
 
-  it('covers the full KSM state surface (13 phases)', () => {
+  it('covers the full KSM state surface (11 phases)', () => {
     const ksm = [
       'Offline', 'Running', 'Failing', 'Overflowed', 'Compacting',
       'HandingOff', 'Draining', 'Paused', 'Stopped', 'Crashed',
@@ -50,7 +50,7 @@ describe('buildCompositeFsmMermaid', () => {
     }
   })
 
-  it('tags Stopped and Dead as terminal states', () => {
+  it('tags Stopped as the terminal state', () => {
     expect(src).toMatch(/class .*ksm_stopped.*terminal/)
   })
 

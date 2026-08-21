@@ -727,7 +727,7 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
 (* ── Sweep and recover ───────────────────────────────────── *)
 
 (** Reconcile only orphaned or cleanly stopped durable keepers.
-    Running/Paused/Crashed/Dead entries are actively managed by sweep
+    Running/Paused/Crashed entries are actively managed by sweep
     and must NOT be re-launched by reconcile. Stopped entries with
     unresolved fibers (done_p = None) are also skipped — sweep will
     handle them once the fiber terminates. *)

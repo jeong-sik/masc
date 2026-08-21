@@ -4,8 +4,8 @@
 \* This model contains only typed intent and durable lifecycle state.
 \* Runtime observations may select an observable phase, but only explicit
 \* operator intent may pause or stop a Keeper. Failing, Overflowed,
-\* Compacting, and HandingOff remain work-capable; they do not grant or deny effects. External effects
-\* are authorized independently by the Gate.
+\* Compacting, and HandingOff remain work-capable; they do not grant or deny
+\* effects. External effects are authorized independently by the Gate.
 \*
 \* Mirrors the lifecycle authority subset of
 \* lib/keeper_registry/keeper_state_machine.{ml,mli}.
@@ -33,7 +33,7 @@ PhaseSet == {
     "Paused",
     "Stopped",
     "Crashed",
-    "Restarting",
+    "Restarting"
 }
 
 \* These phases remain eligible to continue lane-local work. The set has no
@@ -107,20 +107,20 @@ DrainComplete ==
     /\ stop_requested
     /\ phase' = "Stopped"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 \* Failure is an observation. It does not pause, stop, or kill the Keeper.
 FailureObserved ==
     /\ phase \in WorkCapable
     /\ phase' = "Failing"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 FailureCleared ==
     /\ phase = "Failing"
     /\ phase' = "Running"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 \* Context overflow is telemetry. It carries no lifecycle authority.
 ContextOverflowObserved ==
@@ -133,25 +133,25 @@ CompactionStarted ==
     /\ phase \in WorkCapable
     /\ phase' = "Compacting"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 CompactionFinished ==
     /\ phase = "Compacting"
     /\ phase' = "Running"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 HandoffStarted ==
     /\ phase \in WorkCapable
     /\ phase' = "HandingOff"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 HandoffFinished ==
     /\ phase = "HandingOff"
     /\ phase' = "Running"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 TerminalStutter ==
     /\ phase \in Terminal
@@ -193,7 +193,7 @@ BuggyFailureStops ==
     /\ ~stop_requested
     /\ phase' = "Stopped"
     /\ UNCHANGED << fiber_alive, operator_paused, stop_requested,
-                    restart_requested, >>
+                    restart_requested >>
 
 NextBuggy == Next \/ BuggyFailureStops
 SpecBuggy == Init /\ [][NextBuggy]_vars

@@ -9,7 +9,7 @@ import {
 } from './keeper-fsm-specs'
 
 // State alphabets the dashboard renders. These must stay in lockstep with
-// the OCaml runtime: KSM ← keeper_state_machine.ml `type phase` (13 ctors),
+// the OCaml runtime: KSM ← keeper_state_machine.ml `type phase` (11 ctors),
 // KTC ← keeper_registry.ml `type turn_phase` (7 ctors), KDP/KCL/KMC ← the
 // matching keeper_registry.ml sub-FSM types. If you change one of these
 // arrays you almost certainly need a matching change on the OCaml side and
@@ -17,7 +17,7 @@ import {
 const KSM_STATES = [
   'offline', 'running', 'failing', 'overflowed', 'compacting',
   'handing_off', 'draining', 'paused', 'stopped', 'crashed',
-  'restarting', 'dead',
+  'restarting',
 ]
 const KTC_STATES = ['idle', 'prompting', 'routing', 'executing', 'compacting', 'finalizing', 'exhausted']
 const KDP_STATES = ['undecided', 'guard_ok', 'tool_policy_selected']
@@ -39,7 +39,7 @@ describe('buildCompositeFsmSpec', () => {
     expect(parentIds).toEqual(['KSM', 'KTC', 'KDP', 'KCL', 'KMC'])
   })
 
-  it('creates the KSM cluster with all 13 keeper-phase states', () => {
+  it('creates the KSM cluster with all 11 keeper-phase states', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const ids = spec.nodes.filter(n => n.parent === 'KSM').map(n => n.id.split(':')[1])
     expect(ids).toEqual(KSM_STATES)
@@ -69,11 +69,11 @@ describe('buildCompositeFsmSpec', () => {
     expect(ids).toEqual(KMC_STATES)
   })
 
-  it('total node count = 5 parents + 30 children = 35', () => {
+  it('total node count = 5 parents + 29 children = 34', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
     const childCount = KSM_STATES.length + KTC_STATES.length + KDP_STATES.length
       + KCL_STATES.length + KMC_STATES.length
-    expect(childCount).toBe(30)
+    expect(childCount).toBe(29)
     expect(spec.nodes).toHaveLength(5 + childCount)
   })
 
@@ -109,7 +109,7 @@ describe('buildCompositeFsmSpec', () => {
 
   it('marks inactive KSM children as dim', () => {
     const spec = buildCompositeFsmSpec(defaultParams)
-    expect(spec.nodes.find(n => n.id === 'KSM:dead')!.type).toBe('dim')
+    expect(spec.nodes.find(n => n.id === 'KSM:stopped')!.type).toBe('dim')
   })
 
   it('marks an exhausted runtime as err', () => {

@@ -1,8 +1,8 @@
 (** Cleanup completion delivery.
 
     Meta mutation, lane join, registry removal, and accumulator removal are
-    owned by [Keeper_shutdown_finalize]. [Dead_cleaned] and
-    [Supervisor_cleaned] are delivered from the durable completion receipt after
+    owned by [Keeper_shutdown_finalize]. The [Supervisor_cleaned] lifecycle
+    event and hook are delivered from the durable completion receipt after
     finalization, never from the sweep that observed the old entry. *)
 
 open Keeper_shutdown_types
@@ -55,7 +55,7 @@ let handle_completion config operation = function
        Keeper_supervisor_publish_lifecycle.publish_lifecycle
          ~event:
            (Keeper_lifecycle_events.Custom_event
-              { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
+              { verb = Keeper_lifecycle_events.Supervisor_cleaned; phase = None })
          operation.keeper_name
          ("shutdown_operation=" ^ operation_id)
          ();

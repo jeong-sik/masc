@@ -89,8 +89,7 @@ PhaseSet == {
     "Paused",
     "Stopped",
     "Crashed",
-    "Restarting",
-    "Dead"
+    "Restarting"
 }
 
 TypeOK ==

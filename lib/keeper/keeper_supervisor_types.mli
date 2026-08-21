@@ -43,5 +43,3 @@ val iter_supervision_cohorts :
   f:(supervision_cohort -> unit) ->
   unit
 (** Iterate cohorts in order and yield only between cohort boundaries. *)
-
-(** True when a Dead tombstone has exceeded the configured TTL. *)

@@ -141,7 +141,7 @@ describe('deriveKeeperOperationalState — paused branch', () => {
 })
 
 describe('deriveKeeperOperationalState — offline branch', () => {
-  it.each<[Keeper['phase'], 'crashed' | 'dead' | 'shutdown' | 'unbooted']>([
+  it.each<[Keeper['phase'], 'crashed' | 'shutdown' | 'unbooted']>([
     ['Crashed', 'crashed'],
     ['Stopped', 'shutdown'],
     ['Offline', 'unbooted'],

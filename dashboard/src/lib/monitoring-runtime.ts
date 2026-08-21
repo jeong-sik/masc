@@ -338,9 +338,7 @@ function agentBand(status: string | undefined | null): RuntimeBand {
   // Active|Busy|Listening|Inactive, plus `dashboard_mission_agents.ml:206-207`
   // adds `"offline" | "unknown"` via typed-union bypass.
   //
-  // Wire-format audit 2026-05-20: `rg -n '"dead"|"left"' lib/` returned
-  // zero hits in the `agent.status` slot — `"dead"` belongs to
-  // `Fiber_dead`/`KH_dead`/`subsystem_health`, `"left"` belongs to
+  // Wire-format audit 2026-05-20: `"left"` belongs to
   // `Span_left` (different axis vocabularies). Defensive arms for
   // those tokens dropped.
   //

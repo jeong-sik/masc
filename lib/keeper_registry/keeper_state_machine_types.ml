@@ -311,8 +311,7 @@ let can_transition ~from_phase ~to_phase =
       | Offline
       | Restarting ) ) -> true
   | Paused, Paused -> false
-  (* Crashed -> Restarting (backoff done). Dead is covered by the global
-     hard-stop/budget terminal transition above. *)
+  (* Crashed -> Restarting (backoff done). *)
   | Crashed, Restarting -> true
   | ( Crashed
     , ( Offline

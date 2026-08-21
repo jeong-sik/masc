@@ -15,9 +15,9 @@
      (update_conditions + derive_phase + can_transition), so any silent
      drift between the spec's [Next] action and the OCaml runtime
      pipeline is caught at the result level.
-   - The "forbidden transition" picks a terminal source phase: every TLA+
+   - The "forbidden transition" picks the terminal source phase: every TLA+
      [Next]-action conjunct includes [NotTerminal], so any event from
-     [Dead]/[Stopped] is *not* in the relation.  The OCaml
+     [Stopped] is *not* in the relation.  The OCaml
      [apply_event] mirror is the explicit [Terminal_state] reject at the
      top of [lib/keeper_state/keeper_state_machine.ml §apply_event].
    - Hand-curated mapping: see [tla_phase_names] below.  Line refs into
@@ -162,16 +162,6 @@ let test_running_to_compacting_via_compaction_started () =
     ~event:SM.Compaction_started
     ~expected:Compacting
 ;;
-
-(* ── Smoke test 3: One known-forbidden transition ────────────
-   The TLA+ [Next] disjunction conjoins [NotTerminal] into every action,
-   so any (Dead, _, _) → _ pair is absent from the relation.  OCaml
-   mirrors this by returning [Error (Terminal_state _)] at the top of
-   [apply_event].  We pick Dead --Heartbeat_ok--> ? because the event
-   itself is otherwise unconditional and harmless — failure here proves
-   the terminal-reject gate, not an unrelated precondition. *)
-
-
 
 let () =
   Alcotest.run

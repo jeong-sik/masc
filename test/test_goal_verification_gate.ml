@@ -104,6 +104,12 @@ let verdict ?(evidence = "observed by the verifier") outcome : Goal_verification
   }
 ;;
 
+let mark_criterion_pending config goal_id =
+  match Goal_verification.mark_criterion_pending config ~goal_id with
+  | Ok _ -> ()
+  | Error msg -> fail msg
+;;
+
 (* Poison the authoritative store AND its recovery mirror; the fail-closed
    rule mirrors Goal_store: no mutation may proceed on a store that did not
    decode. (Poisoning the primary alone recovers from the mirror — that is
@@ -222,6 +228,7 @@ let test_undecodable_goal_store_reports_corruption_not_b1 () =
 let test_criterion_verdict_round_trips () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-roundtrip";
   let committed =
     match
       Goal_verification.record_criterion_verdict
@@ -250,6 +257,7 @@ let test_criterion_verdict_round_trips () =
 let test_refuted_criterion_keeps_its_reason () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-refuted";
   match
     Goal_verification.record_criterion_verdict
       config
@@ -270,6 +278,52 @@ let test_refuted_criterion_keeps_its_reason () =
      | Ok (Some _) -> fail "refuted verdict must land as Criterion_unreachable"
      | Ok None -> fail "committed record did not survive a fresh read"
      | Error msg -> fail msg)
+;;
+
+let test_criterion_verdict_requires_pending_or_same_outcome () =
+  with_workspace
+  @@ fun config ->
+  let goal_id = "goal-criterion-discipline" in
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict Goal_verification.Proven)
+   with
+   | Ok _ -> fail "criterion verdict committed without a pending request"
+   | Error msg ->
+     check bool "the refusal names the missing request" true
+       (String_util.contains_substring msg "no matching pending"));
+  mark_criterion_pending config goal_id;
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail msg);
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict Goal_verification.Proven)
+   with
+   | Ok _ -> ()
+   | Error msg -> fail ("same-outcome retry was refused: " ^ msg));
+  (match
+     Goal_verification.record_criterion_verdict
+       config
+       ~goal_id
+       (verdict (Goal_verification.Refuted { reason = "stale result" }))
+   with
+   | Ok _ -> fail "opposite stale criterion verdict overwrote the committed outcome"
+   | Error _ -> ());
+  match Goal_verification.get_record config ~goal_id with
+  | Ok (Some { criterion = Goal_verification.Criterion_viable _; _ }) -> ()
+  | Ok (Some _) -> fail "opposite stale verdict changed the committed criterion"
+  | Ok None -> fail "criterion row disappeared"
+  | Error msg -> fail msg
 ;;
 
 (* Ledger: record-only discipline (stage 1 pins the preconditions the stage-2
@@ -340,6 +394,7 @@ let test_human_confirmation_requires_a_proven_proof () =
 let test_undecodable_ledger_fails_closed_and_loud () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-corrupt";
   ignore
     (match
        Goal_verification.record_criterion_verdict
@@ -376,6 +431,7 @@ let test_undecodable_ledger_fails_closed_and_loud () =
 let test_unknown_ledger_field_is_a_decode_error () =
   with_workspace
   @@ fun config ->
+  mark_criterion_pending config "goal-strict";
   ignore
     (match
        Goal_verification.record_criterion_verdict
@@ -874,7 +930,9 @@ let () =
             test_refuted_criterion_keeps_its_reason
         ] )
     ; ( "ledger record-only discipline"
-      , [ test_case "proof verdict requires a pending request" `Quick
+      , [ test_case "criterion verdict requires pending or same outcome" `Quick
+            test_criterion_verdict_requires_pending_or_same_outcome
+        ; test_case "proof verdict requires a pending request" `Quick
             test_proof_verdict_requires_a_pending_request
         ; test_case "proof verdict requires a viable criterion" `Quick
             test_proof_verdict_requires_a_viable_criterion

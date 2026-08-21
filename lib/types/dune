@@ -8,6 +8,7 @@
   rate_limit_types
   masc_error
   ids
+  evidence_ref
   prompt_block_id
   turn_record
   health_status

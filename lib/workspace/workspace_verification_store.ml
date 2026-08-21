@@ -425,7 +425,12 @@ let load_request_for_evidence base_path req_id =
     | exn ->
       Error (Request_load_error (Printexc.to_string exn))
 
-let verification_evidence_max_bytes = 20_000
+(* Bounded snapshot cap for producer-owned evidence artifacts. Raised from
+   20_000 to 200_000 so contract artifacts in the observed 40-128KB range are
+   persisted in full (truncated=false) instead of being marked unusable by the
+   completion authority. The cap stays bounded to bound verifier memory and
+   backlog storage. *)
+let verification_evidence_max_bytes = 200_000
 
 type utf8_scan =
   | Utf8_valid
@@ -552,6 +557,43 @@ let valid_producer_relative_path path =
            || String.equal segment "."
            || String.equal segment "..")))
 
+(* Resolve a producer-relative artifact path against the producer's repository
+   checkouts when the direct [ownership_root / relative_path] read misses.
+
+   A producer may reference a file checkout-relative (e.g. [lib/foo.ml] rather
+   than [repos/masc/lib/foo.ml]). The direct concat then points at a path that
+   does not exist under the ownership root, so we fall back to enumerating the
+   [repos/*] checkouts and resolving the path inside each. We only accept the
+   resolution when exactly one checkout contains the file; zero matches is a
+   plain miss and multiple matches is ambiguous, both of which we refuse rather
+   than silently picking an arbitrary checkout. *)
+let resolve_checkout_relative_artifact ~ownership_root ~reference relative_path =
+  let repos_dir = Filename.concat ownership_root "repos" in
+  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir) then
+    None
+  else
+    let is_regular_file path =
+      try (Unix.stat path).Unix.st_kind = Unix.S_REG
+      with Unix.Unix_error _ | Sys_error _ -> false
+    in
+    let candidates =
+      Sys.readdir repos_dir
+      |> Array.to_list
+      |> List.filter (fun name ->
+        let candidate =
+          Filename.concat (Filename.concat repos_dir name) relative_path
+        in
+        is_regular_file candidate)
+    in
+    match candidates with
+    | [ name ] ->
+      let target = Filename.concat (Filename.concat repos_dir name) relative_path in
+      (match read_regular_file_prefix ~ownership_root target with
+       | Ok (content, bytes, truncated) ->
+         Some (Evidence_artifact { reference; content; bytes; truncated })
+       | Error _ -> None)
+    | [] | _ :: _ :: _ -> None
+
 let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)
   then Evidence_invalid_reference
@@ -565,10 +607,25 @@ let inspect_producer_relative_artifact ~base_path ~worker ~reference relative_pa
     in
     let target = Filename.concat ownership_root relative_path in
     match read_regular_file_prefix ~ownership_root target with
-    | Error reason ->
-      Evidence_artifact_unreadable { reference; reason }
     | Ok (content, bytes, truncated) ->
       Evidence_artifact { reference; content; bytes; truncated }
+    | Error (Evidence_missing as reason) ->
+      (* Direct path missed: try checkout-relative resolution before giving up. *)
+      (match
+         resolve_checkout_relative_artifact
+           ~ownership_root
+           ~reference
+           relative_path
+       with
+       | Some artifact -> artifact
+       | None -> Evidence_artifact_unreadable { reference; reason })
+    | Error (Evidence_not_regular_file as reason)
+    | Error (Evidence_outside_worker_playground as reason)
+    | Error (Evidence_invalid_utf8 as reason)
+    | Error (Evidence_symbolic_link as reason)
+    | Error (Evidence_changed_during_read as reason)
+    | Error (Evidence_read_error _ as reason) ->
+      Evidence_artifact_unreadable { reference; reason }
 
 let snapshot_submitted_evidence_item ~base_path ~worker reference =
   match classify_evidence_reference reference with

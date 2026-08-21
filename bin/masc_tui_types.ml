@@ -83,22 +83,37 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
-(** Approval / pending confirmation item *)
-type approval_item = {
+(** Actor-scoped pending confirmation from the exact operator projection. *)
+type approval_item = Masc_tui_operator_projection.approval_item
+  = {
   ap_token: string;
+  ap_trace_id: string;
   ap_actor: string;
   ap_action_type: string;
   ap_target_type: string;
   ap_target_id: string option;
+  ap_payload: Yojson.Safe.t;
   ap_delegated_tool: string;
+  ap_created_at: string;
+  ap_expires_at: string option;
   ap_summary: string;
 }
 
-type approval_decision =
+type approval_snapshot = Masc_tui_operator_projection.approval_snapshot
+  = {
+  aps_items: approval_item list;
+  aps_actor_filter: string option;
+  aps_filter_active: bool;
+  aps_visible_count: int;
+  aps_total_count: int;
+  aps_hidden_count: int;
+}
+
+type approval_decision = Masc_tui_operator_projection.approval_decision =
   | Confirm
   | Deny
 
-type pending_approval_action = {
+type pending_approval_action = Masc_tui_operator_projection.pending_approval_action = {
   paa_token: string;
   paa_decision: approval_decision;
 }
@@ -119,11 +134,9 @@ type overview_snapshot = {
   ov_cluster: string;
   ov_project: string;
   ov_active_agents: int;
-  ov_pending_approvals: int;
   ov_incident_count: int;
   ov_attention_items: attention_item list;
   ov_top_attention: attention_item option;
-  ov_pending_confirms: approval_item list;
   ov_generated_at: string;
 }
 
@@ -220,6 +233,9 @@ type state = {
   mutable live_message_count: int;
   mutable overview: overview_snapshot option;
   mutable overview_error: string option;
+  mutable approval_snapshot: approval_snapshot option;
+  mutable approvals_error: string option;
+  mutable approval_flow: Masc_tui_operator_projection.Flow.t;
   mutable approval_cursor: int;
   mutable pending_approval_action: pending_approval_action option;
   mutable board_posts: board_post list;
@@ -262,6 +278,9 @@ let create_state ~workspace ~port ~refresh_interval = {
   live_message_count = 0;
   overview = None;
   overview_error = None;
+  approval_snapshot = None;
+  approvals_error = None;
+  approval_flow = Masc_tui_operator_projection.Flow.initial;
   approval_cursor = 0;
   pending_approval_action = None;
   board_posts = [];
@@ -283,3 +302,8 @@ let create_state ~workspace ~port ~refresh_interval = {
   port;
   refresh_interval;
 }
+
+let approval_items (state : state) =
+  match state.approval_snapshot with
+  | Some snapshot -> snapshot.aps_items
+  | None -> []

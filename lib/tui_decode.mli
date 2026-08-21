@@ -101,7 +101,6 @@ val required_string_field : Yojson.Safe.t -> string -> (string, string) result
 val optional_string_field :
   Yojson.Safe.t -> string -> (string option, string) result
 val required_int_field : Yojson.Safe.t -> string -> (int, string) result
-val required_int_any_field : Yojson.Safe.t -> string list -> (int, string) result
 val int_field_or : Yojson.Safe.t -> string -> default:int -> (int, string) result
 val required_display_field : Yojson.Safe.t -> string -> (string, string) result
 val required_display_any_field :

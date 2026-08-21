@@ -39,10 +39,33 @@
    `button { font: inherit }`, so the same elements inherit 1.55 and every row
    grows ~10% (a log row measured 41.7px against the design's 38.0px, and the
    drift compounds down a list). Restoring proportional leading on the v2 shell's
-   buttons is what makes the row pitch match; a button that wants prose leading
-   states it. Scoped to `.v2-app` so non-v2 surfaces are untouched. */
-.v2-app button {
-  line-height: normal;
+   buttons is what makes the row pitch match. It sits in a layer because the rule
+   it needs is "unless a component says otherwise", and specificity cannot say
+   that: at (0,1,1) it overrode the kit's own `.fl-act { line-height: 12px }`,
+   and at (0,0,1) it lost to whichever unlayered sheet happened to load later.
+   Layered rules always yield to unlayered ones, so a component that states its
+   leading keeps it and everything else takes proportional leading. Scoped to
+   `.v2-app`; other surfaces untouched. */
+@layer v2-button-leading {
+  .v2-app button {
+    line-height: normal;
+  }
+}
+
+/* ── Square edges the design gets from the UA ─────────────────── */
+/* `tokens.css` gives every button a 3px radius so an unstyled one still looks
+   like a control, and 1,309 of the dashboard's 1,783 buttons take it. These do
+   not: in the design they are rows and segments inside a container that already
+   owns the corner — a log line, a goal header, a segment in a pill — and the
+   prototype leaves them square because a bare <button> has no radius. The
+   dashboard's default rounds them, which reads as a second corner inside the
+   first. Stated per component rather than by dropping the default, which the
+   other 1,309 rely on. */
+.v2-app :is(
+.ap-klink, .ap-viewbtn, .cn-bind-row, .fus-rich-more, .fus-sink-to, .fus-who,
+  .ide-remote, .lg-line, .ov-dlink, .ov-link, .sch-sig-id, .sch-viewbtn, .wk-goal-h
+) {
+  border-radius: 0;
 }
 
 /* ── Surface subtitle spacing ─────────────────────────────────── */

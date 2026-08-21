@@ -27,8 +27,9 @@ const craftRules = craft.replace(/\/\*[\s\S]*?\*\//g, '')
 
 function enumeratedCards(): Set<string> {
   const match = craft.match(/\.v2-app\[data-density\] :is\(([\s\S]*?)\)\s*\{/)
-  if (!match) throw new Error('density card rule not found in craft-v2.css')
-  return new Set(match[1].split(',').map((s) => s.trim().replace(/^\./, '')).filter(Boolean))
+  const list = match?.[1]
+  if (!list) throw new Error('density card rule not found in craft-v2.css')
+  return new Set(list.split(',').map((s) => s.trim().replace(/^\./, '')).filter(Boolean))
 }
 
 /** Classes whose name ends in `-card` (plus bare `card`) — the container names. */
@@ -37,8 +38,11 @@ function declaredCardClasses(): Map<string, Set<string>> {
   for (const file of cssFiles(stylesDir)) {
     const css = readFileSync(file, 'utf-8')
     for (const m of css.matchAll(/\.([a-zA-Z][\w-]*-card)\b(?![\w-])/g)) {
-      if (!byClass.has(m[1])) byClass.set(m[1], new Set())
-      byClass.get(m[1])!.add(file)
+      const cls = m[1]
+      if (!cls) continue
+      const files = byClass.get(cls) ?? new Set<string>()
+      files.add(file)
+      byClass.set(cls, files)
     }
   }
   return byClass
@@ -52,8 +56,9 @@ function statesOwnPadding(cls: string, files: Set<string>): boolean {
     // on commas would read each listed class as its own padded selector.
     const css = readFileSync(file, 'utf-8').replace(/\.v2-app\[data-[^\]]+\] :is\([\s\S]*?\)[^{]*\{[^{}]*\}/g, '')
     for (const block of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-      if (!/(^|[\s;])padding\s*:/.test(block[2])) continue
-      if (block[1].split(',').map((s) => s.trim()).some((s) => endsWithClass.test(s))) return true
+      const [, selector = '', body = ''] = block
+      if (!/(^|[\s;])padding\s*:/.test(body)) continue
+      if (selector.split(',').map((s) => s.trim()).some((s) => endsWithClass.test(s))) return true
     }
   }
   return false

@@ -41,7 +41,7 @@ let review_prompt_keys =
 let marker name = Printf.sprintf "@@SECTION_%s_REACHED@@" (String.uppercase_ascii name)
 
 let request : AR.review_request =
-  { agent_name = "keeper-taskmaster-agent"
+  { agent_name = "keeper-fixture-agent"
   ; task_title = marker "task_title"
   ; task_description = marker "task_description"
   ; completion_notes = marker "completion_notes"

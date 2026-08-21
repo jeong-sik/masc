@@ -1114,7 +1114,7 @@ let build_prompt_internal ~(meta : Keeper_meta_contract.keeper_meta)
            is the set the last turn described. A keeper that concluded "nothing
            actionable" reads "3 unclaimed" the same way whether those are the
            same three tasks or three different ones, so the conclusion outlives
-           whatever made it true. [taskmaster] -- whose instructions are to take
+           whatever made it true. A Keeper instructed to take
            unclaimed work on sight -- repeated one verbatim across every turn of
            a day while its stated reason, that the three were blocked, appeared
            nowhere in the backlog (#27629).

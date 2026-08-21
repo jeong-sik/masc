@@ -124,3 +124,27 @@ export function attainmentVerdict(attainment: GoalAttainmentProjection): Attainm
     tone,
   }
 }
+
+/** What the goal's completion-request state actually means.
+ *
+ *  `completion_summary.ready_to_request_completion` is the goal phase and
+ *  nothing else — the backend returns `phase = Executing` (see
+ *  dashboard_goals_types_attainment.ml `ready_to_request_completion`), and no
+ *  metric, target, or task count is consulted. Rendering its false branch as
+ *  "the completion conditions are unmet" states a check that never ran: a
+ *  blocked goal with every condition satisfied would still read that way.
+ *  The completion `state` token carries the real reason, so the row reports
+ *  that instead. An unrecognised token surfaces itself rather than collapsing
+ *  into whichever sentence happens to look plausible. */
+const COMPLETION_REQUEST_TEXT: Record<string, string> = {
+  ready_for_completion: '지금 완료를 요청할 수 있어요.',
+  verifying: '완료 요청이 접수돼서 검증 결과를 기다리는 중이에요.',
+  blocked: '막혀 있는 동안에는 완료를 요청할 수 없어요.',
+  paused: '멈춰 있는 동안에는 완료를 요청할 수 없어요.',
+  completed: '완료됐어요.',
+  dropped: '폐기된 목표예요.',
+}
+
+export function completionRequestText(state: string): string {
+  return COMPLETION_REQUEST_TEXT[state] ?? state
+}

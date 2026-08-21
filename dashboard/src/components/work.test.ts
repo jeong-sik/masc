@@ -1580,7 +1580,7 @@ describe('Work', () => {
                 by_status: {},
               },
               completion_summary: {
-                state: 'in_progress',
+                state: 'ready_for_completion',
                 pct: 100,
                 pct_source: 'attainment',
                 attainment_state: 'attained',
@@ -1591,7 +1591,7 @@ describe('Work', () => {
                 task_open: 0,
                 is_complete: false,
                 is_terminal: false,
-                ready_to_request_completion: false,
+                ready_to_request_completion: true,
               },
               timeline_events: [{
                 ts: '2026-01-04T10:00:00Z',
@@ -1635,13 +1635,55 @@ describe('Work', () => {
         expect(text).toContain('Derived from completed linked tasks against a count target.')
         // Cancelled tasks are named so the done/total gap is not a mystery.
         expect(text).toContain('끝남 3 · 남음 0 · 취소 1 · 전체 4')
-        expect(text).toContain('아직 조건을 채우지 못했어요.')
+        expect(text).toContain('지금 완료를 요청할 수 있어요.')
         // Why the goal sits where it does.
         expect(text).toContain('metric 미충족 — merged PR은 1건뿐')
         // Where to go next.
         expect(text).toContain('sangsu')
         expect(text).toContain('턴 42')
         expect(text).toContain('2건 승인 대기')
+      })
+
+      it('gives the phase reason a goal cannot request completion, not a conditions verdict', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-04' },
+        ]
+        tasks.value = []
+        goalTreeData.value = {
+          tree: [
+            goalTreeNode({
+              id: 'G-1',
+              phase: 'blocked',
+              completion_summary: {
+                state: 'blocked',
+                pct: null,
+                pct_source: 'none',
+                attainment_state: 'unmeasured',
+                attainment_basis: 'unmeasured',
+                metric_evaluation: 'absent',
+                task_total: 0,
+                task_done: 0,
+                task_open: 0,
+                is_complete: false,
+                is_terminal: false,
+                ready_to_request_completion: false,
+              },
+            }),
+          ],
+          summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
+        }
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('goal-card').querySelector('.wk-goal-h')!)
+
+        // The backend's `ready_to_request_completion` is `phase = Executing`
+        // and nothing else — no metric, target, or task count is consulted.
+        // Rendering its false branch as "conditions unmet" would state a check
+        // that never ran.
+        const row = screen.getByTestId('goal-dossier')
+          .querySelector('[data-goal-detail-row="ready"]')
+        expect(row?.textContent).toContain('막혀 있는 동안에는 완료를 요청할 수 없어요.')
+        expect(row?.textContent).not.toContain('조건')
       })
 
       it('marks a declared-but-unmeasured metric as unevaluated instead of attained', () => {

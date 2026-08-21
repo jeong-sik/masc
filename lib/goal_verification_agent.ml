@@ -39,11 +39,14 @@ type pending_work =
 
 type process_outcome =
   | Committed
-  | Deferred of { retryable : bool }
+  | Deferred of
+      { retryable : bool
+      ; reason : string
+      }
 
 let should_schedule_retry = function
   | Committed -> false
-  | Deferred { retryable } -> retryable
+  | Deferred { retryable; reason = _ } -> retryable
 ;;
 
 let pending_kind_to_string = function
@@ -396,7 +399,7 @@ let defer ~goal_id ~kind ~retryable ~reason =
     (pending_kind_to_string kind)
     retryable
     reason;
-  Deferred { retryable }
+  Deferred { retryable; reason }
 ;;
 
 let admit_proof_against_criterion config (work : pending_work) =
@@ -421,7 +424,12 @@ let admit_proof_against_criterion config (work : pending_work) =
             , "proof refused because the durable criterion is unreachable" )))
 ;;
 
-let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
+let process_pending_work_inner
+      ?(sw : Eio.Switch.t option = None)
+      ~observe_tool
+      ~observe_evaluator_runtime
+      config
+      (work : pending_work)
   : process_outcome
   =
   match admit_proof_against_criterion config work with
@@ -454,6 +462,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
              (a slot that recorded a verdict never fails over). *)
           let stated_reason = ref None in
           let on_tool_result ~input result =
+            observe_tool ~input result;
             if Tool_result.is_success result
             then
               match
@@ -475,6 +484,7 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
               ~on_tool_result
               review_request
           in
+          observe_evaluator_runtime result.evaluator_runtime;
           (match result.verdict with
            | None ->
              let detail =
@@ -570,6 +580,78 @@ let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pendi
          ~kind:work.kind
          ~retryable:false
          ~reason:"criterion request pending on a terminal goal; left durable")
+;;
+
+let registry_review_kind = function
+  | Criterion_check -> Goal_verification_run_registry.Criterion
+  | Completion_proof -> Goal_verification_run_registry.Proof
+;;
+
+let process_pending_work ?(sw : Eio.Switch.t option = None) config (work : pending_work)
+  : process_outcome
+  =
+  let registry = Goal_verification_run_registry.global () in
+  let run_id = Random_id.uuid_v7 () in
+  let started_at = Time_compat.now () in
+  let tools = ref [] in
+  let evaluator_runtime = ref None in
+  Goal_verification_run_registry.register_running
+    registry
+    ~run_id
+    ~goal_id:work.goal_id
+    ~review_kind:(registry_review_kind work.kind)
+    ~authority_actor:Runtime.verifier_exact_lane_id
+    ~started_at;
+  let observe_tool ~input result =
+    tools :=
+      Verification_run_registry.observe_tool_result
+        ~input
+        ~finished_at:(Time_compat.now ())
+        result
+      :: !tools
+  in
+  let observe_evaluator_runtime runtime = evaluator_runtime := Some runtime in
+  let complete outcome =
+    let registry_outcome =
+      match outcome with
+      | Committed -> Goal_verification_run_registry.Committed
+      | Deferred { retryable; reason } ->
+        Goal_verification_run_registry.Deferred { retryable; detail = reason }
+    in
+    Goal_verification_run_registry.mark_completed
+      registry
+      ~run_id
+      ~outcome:registry_outcome
+      ~tools:(List.rev !tools)
+      ?evaluator_runtime:!evaluator_runtime
+      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
+      ()
+  in
+  try
+    let outcome =
+      process_pending_work_inner
+        ~sw
+        ~observe_tool
+        ~observe_evaluator_runtime
+        config
+        work
+    in
+    complete outcome;
+    outcome
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Goal_verification_run_registry.mark_completed
+      registry
+      ~run_id
+      ~outcome:
+        (Goal_verification_run_registry.Raised
+           { detail = Printexc.to_string exn })
+      ~tools:(List.rev !tools)
+      ?evaluator_runtime:!evaluator_runtime
+      ~elapsed_s:(max 0.0 (Time_compat.now () -. started_at))
+      ();
+    raise exn
 ;;
 
 let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, string) result =
@@ -677,7 +759,7 @@ let process_goal_work (runtime : runtime) work =
                       item
                   with
                   | Committed -> loop rest
-                  | Deferred { retryable } -> retryable)
+                  | Deferred { retryable; reason = _ } -> retryable)
              in
              loop work))
     in
@@ -814,7 +896,10 @@ module For_testing = struct
 
   type nonrec process_outcome = process_outcome =
     | Committed
-    | Deferred of { retryable : bool }
+    | Deferred of
+        { retryable : bool
+        ; reason : string
+        }
 
   let should_schedule_retry = should_schedule_retry
   let group_pending_by_goal = group_pending_by_goal

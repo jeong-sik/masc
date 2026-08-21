@@ -413,7 +413,29 @@ let test_goal_proof_reads_linked_task_producer_artifact () =
     (fun () -> drain config);
   check int "the proof review performed one linked-tree read" 1 !forest_reads;
   check string "inspected proof completed the Goal" "completed"
-    (stored_phase config goal_id)
+    (stored_phase config goal_id);
+  let proof_runs =
+    Goal_verification_run_registry.list_runs
+      (Goal_verification_run_registry.global ())
+    |> List.filter (fun run ->
+      String.equal run.Goal_verification_run_registry.goal_id goal_id
+      &&
+      match run.review_kind with
+      | Goal_verification_run_registry.Proof -> true
+      | Goal_verification_run_registry.Criterion -> false)
+  in
+  match proof_runs with
+  | [ { Goal_verification_run_registry.status =
+          Goal_verification_run_registry.Completed
+            { outcome = Goal_verification_run_registry.Committed; tools; _ }
+      ; _
+      } ] ->
+    check bool "Dashboard run retains the artifact read" true
+      (List.exists
+         (fun (tool : Verification_run_registry.tool_observation) ->
+            String.equal tool.tool_name "verification_read_file")
+         tools)
+  | _ -> fail "Goal proof run was not durably projected as committed"
 ;;
 
 (* (b) A refuted proof returns the goal to Executing; the reason is preserved
@@ -496,7 +518,7 @@ let test_lane_unavailable_keeps_the_pending_row () =
        List.iter
          (fun outcome ->
             match outcome with
-            | Agent.Deferred { retryable = true } ->
+            | Agent.Deferred { retryable = true; reason = _ } ->
               check bool "retry scheduled for a retryable deferral" true
                 (Agent.should_schedule_retry outcome)
             | _ -> fail "an unavailable evaluator must defer retryable")

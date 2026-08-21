@@ -671,6 +671,30 @@ let create_meta ?intake_token ~base_path meta =
                (Keeper_shutdown_types.Operation_id.to_string operation_id))))
 ;;
 
+let create_meta_for_shutdown ~base_path ~operation_id meta =
+  match
+    Keeper_shutdown_intake_fence.run_durable_intake_for_shutdown
+      ~base_path
+      ~keeper_name:meta.Keeper_meta_contract.name
+      ~operation_id
+      (fun intake_token -> create_meta ~intake_token ~base_path meta)
+  with
+  | Keeper_shutdown_intake_fence.Shutdown_owned_intake_committed result -> result
+  | Shutdown_owned_intake_not_reserved ->
+    Error
+      (shutdown_fence_error
+         (Printf.sprintf
+            "keeper=%s shutdown recovery intake is not reserved"
+            meta.name))
+  | Shutdown_owned_intake_reserved_by_other existing ->
+    Error
+      (shutdown_fence_error
+         (Printf.sprintf
+            "keeper=%s shutdown recovery intake is reserved by %s"
+            meta.name
+            (Keeper_shutdown_types.Operation_id.to_string existing)))
+;;
+
 let all_projections ~base_path =
   match find_pool base_path with
   | Error _ as error -> error

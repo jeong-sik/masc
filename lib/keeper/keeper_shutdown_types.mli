@@ -92,11 +92,21 @@ type failure =
   ; detail : string
   }
 
+type operator_purge_reissue =
+  { actor : string
+  ; reason : string
+  ; expected_revision : int
+  }
+(** Exact operator intent that moved a failed purge back into its cleanup
+    state machine without releasing admission. Stored in [join_evidence] so it
+    remains authoritative through finalization and retry reconciliation. *)
+
 type lane_outcome =
   | Lane_completed
   | Lane_shutdown_requested
   | Lane_cancelled_by_parent of string
   | Lane_failed of string
+  | Lane_operator_purge_reissue of operator_purge_reissue
 
 type terminal =
   | Terminal_stopped
@@ -124,19 +134,19 @@ type finalization_evidence =
   }
 
 type supersession =
-  | Operator_blocked_purge_released of
-      { actor : string
-      ; reason : string
-      ; expected_revision : int
-      }
-      (** The operator released a [Blocked] dashboard purge whose worker died
+  | Operator_blocked_purge_released of { actor : string }
+      (** Legacy #29295 wire state for an operator-released [Blocked] dashboard
+          purge. No current public producer writes this variant: opening the
+          fence before exact reissue admitted supervisor autoboot. The safe
+          route records [Lane_operator_purge_reissue] and keeps the same
+          operation fenced through finalization.
+
+          Historically, the operator released a purge whose worker died
           before it finished. Like {!Operator_metadata_update} this carries no
           effect-duplication risk -- the work failed -- but it is not a
           metadata update: a purge leaves no metadata to update, and the
           admission fence it holds is what stops the purge being reissued.
           Kept apart so the durable record says which release was signed off.
-          [expected_revision] and [reason] are the operator's exact CAS input,
-          not values inferred after the mutation.
 
           Without this the pair ([Blocked], [Dashboard_keeper_purge]) had no
           exit: the fence blocks meta materialization, {!val:resolve} needs

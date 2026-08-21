@@ -1,6 +1,7 @@
-(** Authenticated operator command for releasing one exact blocked dashboard
-    purge. The HTTP adapter owns authentication; this module owns strict input,
-    store CAS, durable release audit, and admission-fence release. *)
+(** Authenticated operator command for reissuing one exact blocked dashboard
+    purge without opening admission. The HTTP adapter owns authentication;
+    this module owns strict input, paused recovery materialization, store CAS,
+    durable intent/audit, and synchronous finalization. *)
 
 val command_schema : string
 val result_schema : string
@@ -24,14 +25,16 @@ type input_error =
   | Unsupported_schema of string
 
 type error =
-  | Store_release_failed of Keeper_shutdown_store.error
-  | Successor_lookup_failed of Keeper_shutdown_store.error
-  | Admission_reserved_by_other of Keeper_shutdown_types.Operation_id.t
-  | Admission_release_failed of string
+  | Operation_load_failed of Keeper_shutdown_store.error
+  | Profile_materialization_failed of string
+  | Metadata_materialization_failed of string
+  | Store_reissue_failed of Keeper_shutdown_store.error
+  | Finalization_failed of Keeper_shutdown_finalize.error
+  | Injected_after_reissue of string
 
 type released =
   { operation : Keeper_shutdown_types.t
-  ; already_released : bool
+  ; already_reissued : bool
   }
 
 val input_error_to_string : input_error -> string
@@ -56,3 +59,9 @@ val success_json :
   audit:Yojson.Safe.t -> command -> released -> Yojson.Safe.t
 
 val error_json : audit:Yojson.Safe.t -> error -> Yojson.Safe.t
+
+module For_testing : sig
+  val fail_next_audit_write : string -> unit
+  val fail_next_after_reissue : string -> unit
+  val reset_audit_writer : unit -> unit
+end

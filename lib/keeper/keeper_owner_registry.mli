@@ -138,6 +138,14 @@ val create_meta
     already-open exact-name intake transaction is reused instead of reacquiring
     the same fence. *)
 
+val create_meta_for_shutdown :
+  base_path:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  Keeper_meta_contract.keeper_meta ->
+  (Keeper_meta_contract.keeper_meta option, command_error) result
+(** Recovery-only metadata materialization while [operation_id] remains the
+    exact shutdown admission owner. Ordinary intake stays fenced throughout. *)
+
 val exact_operation
   :  base_path:string
   -> keeper_name:string

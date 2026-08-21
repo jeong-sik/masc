@@ -52,8 +52,9 @@ let resolve_error_to_string = function
   | Keeper_purge_blocked { keeper_name; operation_id; detail } ->
     Printf.sprintf
       "keeper purge %s is blocked and will not resume on its own: keeper=%s \
-       failure=%s; release the admission fence with an operator supersession, \
-       then reissue the purge"
+       failure=%s; invoke the authenticated exact purge reissue, which keeps \
+       admission fenced while it materializes paused recovery metadata and \
+       finishes the purge"
       (Keeper_shutdown_types.Operation_id.to_string operation_id)
       keeper_name
       detail

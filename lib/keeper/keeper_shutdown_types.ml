@@ -109,11 +109,18 @@ type failure =
   ; detail : string
   }
 
+type operator_purge_reissue =
+  { actor : string
+  ; reason : string
+  ; expected_revision : int
+  }
+
 type lane_outcome =
   | Lane_completed
   | Lane_shutdown_requested
   | Lane_cancelled_by_parent of string
   | Lane_failed of string
+  | Lane_operator_purge_reissue of operator_purge_reissue
 
 type terminal =
   | Terminal_stopped
@@ -141,11 +148,7 @@ type finalization_evidence =
   }
 
 type supersession =
-  | Operator_blocked_purge_released of
-      { actor : string
-      ; reason : string
-      ; expected_revision : int
-      }
+  | Operator_blocked_purge_released of { actor : string }
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string
@@ -484,7 +487,7 @@ let dashboard_purge_artifact_plan ~keeper_name context =
   ]
 ;;
 
-let cleanup_intent_equal left right =
+let cleanup_intent_equal (left : cleanup_intent) (right : cleanup_intent) =
   cleanup_reason_equal left.reason right.reason
   && Bool.equal left.remove_session right.remove_session
 ;;

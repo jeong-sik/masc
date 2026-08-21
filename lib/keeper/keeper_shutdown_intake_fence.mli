@@ -33,6 +33,12 @@ type 'a durable_intake_result =
   | Intake_committed of 'a
   | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
+type 'a shutdown_owned_intake_result =
+  | Shutdown_owned_intake_committed of 'a
+  | Shutdown_owned_intake_not_reserved
+  | Shutdown_owned_intake_reserved_by_other of
+      Keeper_shutdown_types.Operation_id.t
+
 type 'a transfer_intake_result =
   | Transfer_intake_committed of 'a
   | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -81,6 +87,17 @@ val run_durable_intake_if_open
   -> keeper_name:string
   -> (intake_token -> 'a)
   -> 'a durable_intake_result
+
+(** Run one recovery-only intake while the exact shutdown operation continues
+    to own the fence. This never opens admission. It exists so an operator can
+    materialize the paused metadata needed to finish a remove-meta purge
+    without admitting create, keepalive, or ordinary durable intake. *)
+val run_durable_intake_for_shutdown :
+  base_path:string ->
+  keeper_name:string ->
+  operation_id:Keeper_shutdown_types.Operation_id.t ->
+  (intake_token -> 'a) ->
+  'a shutdown_owned_intake_result
 
 val run_transfer_intake_if_open
   :  base_path:string

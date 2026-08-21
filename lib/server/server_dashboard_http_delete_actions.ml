@@ -547,17 +547,22 @@ let keeper_purge_submit_status = function
   | Existing_operation_intent_mismatch _ -> `Conflict
 ;;
 
-let blocked_purge_release_status =
+let blocked_purge_reissue_status =
   let open Keeper_shutdown_blocked_purge_release in
   function
-  | Keeper_shutdown_blocked_purge_release.Store_release_failed
-      (Keeper_shutdown_store.Not_found _) -> `Not_found
-  | Store_release_failed
+  | Keeper_shutdown_blocked_purge_release.Operation_load_failed
+      (Keeper_shutdown_store.Not_found _)
+  | Store_reissue_failed (Keeper_shutdown_store.Not_found _) -> `Not_found
+  | Store_reissue_failed
       ( Keeper_shutdown_store.Revision_conflict _
       | Supersession_phase_mismatch _
       | Supersession_intent_mismatch _ )
-  | Admission_reserved_by_other _ -> `Conflict
-  | Store_release_failed
+  -> `Conflict
+  | Operation_load_failed
+      ( Keeper_shutdown_store.Revision_conflict _
+      | Supersession_phase_mismatch _
+      | Supersession_intent_mismatch _ ) -> `Conflict
+  | Operation_load_failed
       ( Keeper_shutdown_store.Already_exists _
       | Io_error _
       | Decode_error _
@@ -565,8 +570,18 @@ let blocked_purge_release_status =
       | Identity_mismatch _
       | Invalid_supersession_actor _
       | Invalid_supersession_reason _ )
-  | Successor_lookup_failed _
-  | Admission_release_failed _ -> `Internal_server_error
+  | Store_reissue_failed
+      ( Keeper_shutdown_store.Already_exists _
+      | Io_error _
+      | Decode_error _
+      | Invalid_operation _
+      | Identity_mismatch _
+      | Invalid_supersession_actor _
+      | Invalid_supersession_reason _ )
+  | Profile_materialization_failed _
+  | Metadata_materialization_failed _
+  | Finalization_failed _
+  | Injected_after_reissue _ -> `Internal_server_error
 ;;
 
 let respond_keeper_purge_operation_accepted ~request reqd operation =
@@ -744,7 +759,7 @@ let add_delete_action_routes router =
          )
        ) request reqd)
 
-  |> Http.Router.post "/api/v1/dashboard/agents/purge/release" (fun request reqd ->
+  |> Http.Router.post "/api/v1/dashboard/agents/purge/reissue" (fun request reqd ->
        with_token_permission_auth ~permission:Masc_domain.CanAdmin
          (fun state actor req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -766,22 +781,35 @@ let add_delete_action_routes router =
                      command
                  with
                  | Ok released ->
-                   let audit =
-                     Keeper_shutdown_blocked_purge_release.audit
-                       config
-                       ~actor
-                       command
-                       ~outcome:Audit_log.Success
-                     |> Audit_log.write_result_to_json
-                   in
-                   Http.Response.json_value
-                     ~compress:true
-                     ~request:req
-                     (Keeper_shutdown_blocked_purge_release.success_json
-                        ~audit
+                   (match
+                      Keeper_shutdown_blocked_purge_release.audit
+                        config
+                        ~actor
                         command
-                        released)
-                     reqd
+                        ~outcome:Audit_log.Success
+                    with
+                    | Ok () as audit_result ->
+                      Http.Response.json_value
+                        ~compress:true
+                        ~request:req
+                        (Keeper_shutdown_blocked_purge_release.success_json
+                           ~audit:(Audit_log.write_result_to_json audit_result)
+                           command
+                           released)
+                        reqd
+                    | Error detail as audit_result ->
+                      Http.Response.json_value
+                        ~status:`Internal_server_error
+                        ~request:req
+                        (`Assoc
+                          [ "ok", `Bool false
+                          ; "error", `String "blocked_purge_reissue_audit_failed"
+                          ; "message", `String detail
+                          ; "retryable", `Bool true
+                          ; "operation_audit_durable", `Bool true
+                          ; "audit", Audit_log.write_result_to_json audit_result
+                          ])
+                        reqd)
                  | Error error ->
                    let audit =
                      Keeper_shutdown_blocked_purge_release.audit
@@ -794,7 +822,7 @@ let add_delete_action_routes router =
                      |> Audit_log.write_result_to_json
                    in
                    Http.Response.json_value
-                     ~status:(blocked_purge_release_status error)
+                     ~status:(blocked_purge_reissue_status error)
                      ~request:req
                      (Keeper_shutdown_blocked_purge_release.error_json ~audit error)
                      reqd))

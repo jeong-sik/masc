@@ -28,6 +28,10 @@ type supersede_blocked_result =
   | Superseded_persisted of Keeper_shutdown_types.t
   | Superseded_already_persisted of Keeper_shutdown_types.t
 
+type reissue_blocked_purge_result =
+  | Purge_reissue_persisted of Keeper_shutdown_types.t
+  | Purge_reissue_already_persisted of Keeper_shutdown_types.t
+
 type operator_metadata_supersession_token
 
 type corrupt_record =
@@ -94,11 +98,11 @@ val supersede_blocked_operator_stop :
   now:(unit -> string) ->
   (supersede_blocked_result, error) result
 
-(** CAS one exact [Blocked] dashboard purge to its typed operator release.
-    The command is idempotent only when actor, reason, and the originally
-    observed revision all match the persisted supersession. Other cleanup
-    intents and phases fail closed. *)
-val release_blocked_dashboard_purge :
+(** CAS one exact [Blocked] dashboard purge back into [Joined_idle] while the
+    same operation continues to own admission. The typed operator intent is
+    persisted in [join_evidence] and remains through finalization. An exact
+    retry observes the same intent and reconciles from the current phase. *)
+val reissue_blocked_dashboard_purge :
   config:Workspace.config ->
   keeper_name:string ->
   operation_id:Keeper_shutdown_types.Operation_id.t ->
@@ -106,7 +110,7 @@ val release_blocked_dashboard_purge :
   actor:string ->
   reason:string ->
   now:(unit -> string) ->
-  (supersede_blocked_result, error) result
+  (reissue_blocked_purge_result, error) result
 
 (** Read the latest durable revision and persist [Blocked failure] while
     holding the operation's write lock. Existing [Finalized], [Blocked], and

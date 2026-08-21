@@ -28,6 +28,12 @@ type 'a durable_intake_result =
   | Intake_committed of 'a
   | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
 
+type 'a shutdown_owned_intake_result =
+  | Shutdown_owned_intake_committed of 'a
+  | Shutdown_owned_intake_not_reserved
+  | Shutdown_owned_intake_reserved_by_other of
+      Keeper_shutdown_types.Operation_id.t
+
 type 'a transfer_intake_result =
   | Transfer_intake_committed of 'a
   | Transfer_intake_source_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
@@ -37,6 +43,7 @@ type slot =
   { base_path : string
   ; keeper_name : string
   ; intake_mu : Eio.Mutex.t
+  ; transition_mu : Cross_context_mutex.t
   ; state_mu : Stdlib.Mutex.t
   ; mutable shutdown_operation_id : Keeper_shutdown_types.Operation_id.t option
   }
@@ -60,6 +67,7 @@ let slot_for ~base_path ~keeper_name =
         { base_path
         ; keeper_name
         ; intake_mu = Eio.Mutex.create ()
+        ; transition_mu = Cross_context_mutex.create ()
         ; state_mu = Stdlib.Mutex.create ()
         ; shutdown_operation_id = None
         }
@@ -80,38 +88,42 @@ let peek_shutdown slot =
 
 let begin_shutdown ~base_path ~keeper_name ~operation_id =
   let slot = slot_for ~base_path ~keeper_name in
-  Stdlib.Mutex.protect slot.state_mu (fun () ->
-    match slot.shutdown_operation_id with
-    | None ->
-      slot.shutdown_operation_id <- Some operation_id;
-      Reserved { operation_id }
-    | Some existing -> Already_reserved { operation_id = existing })
+  Cross_context_mutex.with_durable_lock slot.transition_mu (fun () ->
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      match slot.shutdown_operation_id with
+      | None ->
+        slot.shutdown_operation_id <- Some operation_id;
+        Reserved { operation_id }
+      | Some existing -> Already_reserved { operation_id = existing }))
 ;;
 
 let rollback_shutdown ~base_path ~keeper_name ~operation_id =
   match find_slot ~base_path ~keeper_name with
   | None -> Not_reserved
   | Some slot ->
-    Stdlib.Mutex.protect slot.state_mu (fun () ->
-      match slot.shutdown_operation_id with
-      | None -> Not_reserved
-      | Some existing
-        when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
-        slot.shutdown_operation_id <- None;
-        Rolled_back
-      | Some existing -> Reserved_by_other existing)
+    Cross_context_mutex.with_durable_lock slot.transition_mu (fun () ->
+      Stdlib.Mutex.protect slot.state_mu (fun () ->
+        match slot.shutdown_operation_id with
+        | None -> Not_reserved
+        | Some existing
+          when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+          slot.shutdown_operation_id <- None;
+          Rolled_back
+        | Some existing -> Reserved_by_other existing))
 ;;
 
 let restore_shutdown ~base_path ~keeper_name ~operation_id =
   let slot = slot_for ~base_path ~keeper_name in
-  Stdlib.Mutex.protect slot.state_mu (fun () ->
-    match slot.shutdown_operation_id with
-    | None ->
-      slot.shutdown_operation_id <- Some operation_id;
-      Restored
-    | Some existing when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
-      Already_restored
-    | Some existing -> Restore_conflict existing)
+  Cross_context_mutex.with_durable_lock slot.transition_mu (fun () ->
+    Stdlib.Mutex.protect slot.state_mu (fun () ->
+      match slot.shutdown_operation_id with
+      | None ->
+        slot.shutdown_operation_id <- Some operation_id;
+        Restored
+      | Some existing
+        when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
+        Already_restored
+      | Some existing -> Restore_conflict existing))
 ;;
 
 let transition_shutdown
@@ -128,20 +140,23 @@ let transition_shutdown
   match slot with
   | None -> Transition_already_applied
   | Some slot ->
-    Stdlib.Mutex.protect slot.state_mu (fun () ->
-      match slot.shutdown_operation_id, to_operation_id with
-      | Some existing, _
-        when Keeper_shutdown_types.Operation_id.equal existing from_operation_id ->
-        slot.shutdown_operation_id <- to_operation_id;
-        Transition_applied
-      | None, None -> Transition_already_applied
-      | Some existing, Some successor
-        when Keeper_shutdown_types.Operation_id.equal existing successor ->
-        Transition_already_applied
-      | None, Some successor ->
-        slot.shutdown_operation_id <- Some successor;
-        Transition_applied
-      | Some existing, _ -> Transition_reserved_by_other existing)
+    Cross_context_mutex.with_durable_lock slot.transition_mu (fun () ->
+      Stdlib.Mutex.protect slot.state_mu (fun () ->
+        match slot.shutdown_operation_id, to_operation_id with
+        | Some existing, _
+          when Keeper_shutdown_types.Operation_id.equal
+                 existing
+                 from_operation_id ->
+          slot.shutdown_operation_id <- to_operation_id;
+          Transition_applied
+        | None, None -> Transition_already_applied
+        | Some existing, Some successor
+          when Keeper_shutdown_types.Operation_id.equal existing successor ->
+          Transition_already_applied
+        | None, Some successor ->
+          slot.shutdown_operation_id <- Some successor;
+          Transition_applied
+        | Some existing, _ -> Transition_reserved_by_other existing))
 ;;
 
 let shutdown_operation_id ~base_path ~keeper_name =
@@ -177,6 +192,33 @@ let run_durable_intake_if_open ~base_path ~keeper_name intake =
        token.intake_active <- false;
        release ();
        raise exn)
+;;
+
+let run_durable_intake_for_shutdown
+      ~base_path
+      ~keeper_name
+      ~operation_id
+      intake
+  =
+  let slot = slot_for ~base_path ~keeper_name in
+  Eio.Mutex.lock slot.intake_mu;
+  Fun.protect
+    ~finally:(fun () -> Eio.Mutex.unlock slot.intake_mu)
+    (fun () ->
+       Cross_context_mutex.with_durable_lock slot.transition_mu (fun () ->
+         match peek_shutdown slot with
+         | None -> Shutdown_owned_intake_not_reserved
+         | Some existing
+           when not
+                  (Keeper_shutdown_types.Operation_id.equal
+                     existing
+                     operation_id) ->
+           Shutdown_owned_intake_reserved_by_other existing
+         | Some _ ->
+           let token = { intake_slot = slot; intake_active = true } in
+           Fun.protect
+             ~finally:(fun () -> token.intake_active <- false)
+             (fun () -> Shutdown_owned_intake_committed (intake token))))
 ;;
 
 let run_transfer_intake_if_open

@@ -26,6 +26,10 @@ type supersede_blocked_result =
   | Superseded_persisted of Keeper_shutdown_types.t
   | Superseded_already_persisted of Keeper_shutdown_types.t
 
+type reissue_blocked_purge_result =
+  | Purge_reissue_persisted of Keeper_shutdown_types.t
+  | Purge_reissue_already_persisted of Keeper_shutdown_types.t
+
 (* What the operator is releasing. [Blocked_operator_stop] carries no
    effect-duplication risk: the shutdown worker failed, so the turn it was
    finalizing did not proceed. [Unreconciled_turn] does: the process ended
@@ -36,7 +40,6 @@ type supersede_blocked_result =
    recovered from the record afterwards. *)
 type superseded_admission =
   | Blocked_operator_stop
-  | Blocked_dashboard_purge
   | Unreconciled_turn of Keeper_shutdown_types.active_turn
 
 type operator_metadata_supersession_token =
@@ -282,12 +285,10 @@ let finalization_evidence_to_json evidence =
 ;;
 
 let supersession_to_json = function
-  | Operator_blocked_purge_released { actor; reason; expected_revision } ->
+  | Operator_blocked_purge_released { actor } ->
     `Assoc
       [ "kind", `String "operator_blocked_purge_released"
       ; "actor", `String actor
-      ; "reason", `String reason
-      ; "expected_revision", `Int expected_revision
       ]
   | Operator_metadata_update { actor } ->
     `Assoc
@@ -374,6 +375,13 @@ let lane_outcome_to_json = function
     `Assoc
       [ "kind", `String "failed"
       ; "detail", `String detail
+      ]
+  | Lane_operator_purge_reissue { actor; reason; expected_revision } ->
+    `Assoc
+      [ "kind", `String "operator_purge_reissue"
+      ; "actor", `String actor
+      ; "reason", `String reason
+      ; "expected_revision", `Int expected_revision
       ]
 ;;
 
@@ -605,9 +613,7 @@ let supersession_of_json json =
   match kind with
   | "operator_blocked_purge_released" ->
     let* actor = string "actor" json in
-    let* reason = string "reason" json in
-    let* expected_revision = int "expected_revision" json in
-    Ok (Operator_blocked_purge_released { actor; reason; expected_revision })
+    Ok (Operator_blocked_purge_released { actor })
   | "operator_metadata_update" ->
     let* actor = string "actor" json in
     Ok (Operator_metadata_update { actor })
@@ -665,6 +671,13 @@ let lane_outcome_of_json json =
   | "failed" ->
     let* detail = string "detail" json in
     Ok (Lane_failed detail)
+  | "operator_purge_reissue" ->
+    let* actor = string "actor" json in
+    let* reason = string "reason" json in
+    let* expected_revision = int "expected_revision" json in
+    Ok
+      (Lane_operator_purge_reissue
+         { actor; reason; expected_revision })
   | value -> Error (Decode_error (Printf.sprintf "unknown lane outcome: %S" value))
 ;;
 
@@ -944,20 +957,6 @@ let prepare_operator_metadata_supersession
       ; superseded_admission = Unreconciled_turn turn
       }
   | Ok
-      ({ phase = Superseded (Operator_blocked_purge_released _)
-       ; revision
-       ; _ } as _operation) ->
-    (* Idempotent: a second release of the same purge re-mints the same token
-       rather than reporting a phase mismatch. *)
-    Ok
-      { base_path
-      ; keeper_name
-      ; operation_id
-      ; expected_revision = revision
-      ; actor
-      ; superseded_admission = Blocked_dashboard_purge
-      }
-  | Ok
       ({ phase = Superseded (Operator_metadata_update _ | Operator_reconciliation_accepted _)
        ; revision
        ; _ } as _operation) ->
@@ -968,25 +967,6 @@ let prepare_operator_metadata_supersession
       ; expected_revision = revision
       ; actor
       ; superseded_admission = Blocked_operator_stop
-      }
-  (* A purge whose worker died in [Joining_lanes] holds the admission fence,
-     and that fence is what stops its own reissue: meta cannot be materialized
-     while it is held, and [Keeper_dashboard_purge.resolve] needs that meta to
-     build a target. Releasing it is the only exit, and it is as safe here as
-     for an operator stop -- the phase, not the intent, is what says the work
-     failed. *)
-  | Ok
-      ({ phase = Blocked _
-       ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
-       ; revision
-       ; _ } as _operation) ->
-    Ok
-      { base_path
-      ; keeper_name
-      ; operation_id
-      ; expected_revision = revision
-      ; actor
-      ; superseded_admission = Blocked_dashboard_purge
       }
   | Ok ({ phase = Blocked _; _ } as operation) ->
     Error (Supersession_intent_mismatch operation)
@@ -1032,18 +1012,12 @@ let supersede_blocked_operator_stop ~config ~token ~now =
          | Ok
              ({ phase =
                   Superseded
-                    ( Operator_metadata_update _
-                    | Operator_reconciliation_accepted _
-                    | Operator_blocked_purge_released _ )
+                    (Operator_metadata_update _ | Operator_reconciliation_accepted _)
               ; _ } as existing) ->
            Ok (Superseded_already_persisted existing)
          | Ok
              ({ phase = Blocked _ | Reconciliation_required _
               ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
-              ; _ } as existing)
-         | Ok
-             ({ phase = Blocked _
-              ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
               ; _ } as existing) ->
            if not (Int.equal existing.revision token.expected_revision)
            then
@@ -1058,12 +1032,6 @@ let supersede_blocked_operator_stop ~config ~token ~now =
                match token.superseded_admission with
                | Blocked_operator_stop ->
                  Operator_metadata_update { actor = token.actor }
-               | Blocked_dashboard_purge ->
-                 Operator_blocked_purge_released
-                   { actor = token.actor
-                   ; reason = "operator released blocked dashboard purge"
-                   ; expected_revision = token.expected_revision
-                   }
                | Unreconciled_turn unreconciled_turn ->
                  Operator_reconciliation_accepted
                    { actor = token.actor; unreconciled_turn }
@@ -1083,7 +1051,7 @@ let supersede_blocked_operator_stop ~config ~token ~now =
          | Ok existing -> Error (Supersession_phase_mismatch existing)))
 ;;
 
-let release_blocked_dashboard_purge
+let reissue_blocked_dashboard_purge
       ~config
       ~keeper_name
       ~operation_id
@@ -1114,20 +1082,28 @@ let release_blocked_dashboard_purge
          with
          | Error _ as error -> error
          | Ok
-             ({ phase =
-                  Superseded
-                    (Operator_blocked_purge_released
-                       { actor = persisted_actor
-                       ; reason = persisted_reason
-                       ; expected_revision = persisted_revision
-                       })
+             ({ join_evidence =
+                  Some
+                    { lane_outcome =
+                        Lane_operator_purge_reissue
+                          { actor = persisted_actor
+                          ; reason = persisted_reason
+                          ; expected_revision = persisted_revision
+                          }
+                    ; _
+                    }
+              ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
+              ; phase =
+                  ( Joined_idle
+                  | Finalizing_tasks _
+                  | Cleanup_ready _
+                  | Finalized _
+                  | Blocked _ )
               ; _ } as existing)
            when String.equal actor persisted_actor
                 && String.equal reason persisted_reason
                 && Int.equal expected_revision persisted_revision ->
-           Ok (Superseded_already_persisted existing)
-         | Ok ({ phase = Superseded (Operator_blocked_purge_released _); _ } as existing) ->
-           Error (Supersession_phase_mismatch existing)
+           Ok (Purge_reissue_already_persisted existing)
          | Ok
              ({ phase = Blocked _
               ; cleanup_intent = { reason = Dashboard_keeper_purge _; _ }
@@ -1138,19 +1114,24 @@ let release_blocked_dashboard_purge
                (Revision_conflict
                   { expected = expected_revision; actual = existing.revision })
            else
-             let superseded =
+             let reissued =
                { existing with
                  revision = existing.revision + 1
-               ; phase =
-                   Superseded
-                     (Operator_blocked_purge_released
-                        { actor; reason; expected_revision })
+               ; phase = Joined_idle
+               ; join_evidence =
+                   Some
+                     { lane_outcome =
+                         Lane_operator_purge_reissue
+                           { actor; reason; expected_revision }
+                     ; terminal = Terminal_stopped
+                     ; cleanup_error = None
+                     }
                ; updated_at = now ()
                }
              in
-             Keeper_fs.save_json_atomic operation_path (to_json superseded)
+             Keeper_fs.save_json_atomic operation_path (to_json reissued)
              |> Result.map_error (fun detail -> Io_error detail)
-             |> Result.map (fun () -> Superseded_persisted superseded)
+             |> Result.map (fun () -> Purge_reissue_persisted reissued)
          | Ok ({ phase = Blocked _; _ } as existing) ->
            Error (Supersession_intent_mismatch existing)
          | Ok existing -> Error (Supersession_phase_mismatch existing)))

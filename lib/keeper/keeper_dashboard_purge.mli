@@ -54,8 +54,9 @@ type resolve_error =
           flight and no retry advances it: the fence stops the Keeper's meta
           being materialized, and {!resolve} needs that meta. Reporting it as
           an accepted operation told the dashboard a purge was running that
-          had already stopped for good. The exit is an operator supersession,
-          which releases the fence and lets the purge be reissued. *)
+          had already stopped for good. The exit is the authenticated exact
+          purge reissue, which keeps the same fence through paused recovery
+          materialization and finalization. *)
       (** The lane is still taking turns. Purge deletes the Keeper and every
           store it owns, so a Keeper that can still execute is refused here
           rather than raced: stop or pause it first. The dashboard hides the

@@ -870,17 +870,17 @@ let test_shutdown_fence_rejects_schedule_intake_before_enqueue () =
           check string
             "dispatch reports exact shutdown fence"
             (Printf.sprintf
-               "retryable schedule dispatch failure: scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
+               "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
                keeper_name
                (Keeper_shutdown_types.Operation_id.to_string operation_id))
             detail
-        | _ -> fail "shutdown-fenced dispatch did not remain retryable");
+        | _ -> fail "shutdown-fenced dispatch did not fail");
        check int "shutdown-fenced dispatch writes no queue entry" 0
          (Keeper_registry_event_queue.snapshot ~base_path keeper_name
           |> Keeper_event_queue.length);
        match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
        | Some stored ->
-         check string "shutdown-fenced schedule remains due" "due"
+         check string "shutdown-fenced schedule is terminal" "failed"
            (Schedule_domain.schedule_status_to_string stored.status)
        | None -> fail "shutdown-fenced schedule disappeared")
 ;;
@@ -951,109 +951,7 @@ let test_shutdown_fence_covers_direct_durable_queue_producers () =
           |> Keeper_event_queue.length))
 ;;
 
-let test_transferred_retry_uses_resolved_owner_shutdown_fence () =
-  with_workspace
-  @@ fun config ->
-  let source_keeper = "schedule-transfer-source" in
-  let target_keeper = "schedule-transfer-target" in
-  let base_path = config.Workspace_utils.base_path in
-  let source_ledger = reaction_ledger_dir ~base_path ~keeper_name:source_keeper in
-  mkdir_p (Filename.dirname source_ledger);
-  write_empty_file source_ledger;
-  let request =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"resolved-owner-fence"
-      ~keeper_name:source_keeper
-  in
-  let first = tick_ok config ~now:201.0 in
-  check string "first dispatch remains retryable" "failed"
-    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
-  Sys.remove source_ledger;
-  mkdir_p source_ledger;
-  let selection = pending_selection_exn ~base_path ~keeper_name:source_keeper in
-  let target_meta = persist_keeper_meta config target_keeper in
-  let transfer : Keeper_registry_event_queue.accepted_transfer =
-    { source = selection.source
-    ; source_incarnation = selection.admitted_revision
-    ; owner_nonce = 53
-    ; operator_operation_id = "resolved-owner-fence-transfer"
-    ; from_keeper = source_keeper
-    ; to_keeper = target_keeper
-    ; target_generation = target_meta.runtime.nonce
-    ; target_trace_id = target_meta.runtime.trace_id
-    }
-  in
-  (match
-     Keeper_registry_event_queue.transfer_pending_accepted_result
-       ~base_path
-       source_keeper
-       ~current_owner_nonce:53
-       ~applied_at:201.5
-       ~transfer
-   with
-   | Ok (Keeper_registry_event_queue.Transition_applied _) -> ()
-   | Ok (Keeper_registry_event_queue.Transition_already_applied _) ->
-     fail "first resolved-owner transfer was already applied"
-   | Ok
-       (Keeper_registry_event_queue.Transition_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail ->
-     fail (Keeper_registry_event_queue.transfer_pending_error_to_string detail));
-  (match
-     Keeper_event_queue_recovery.project_owner_result
-       ~base_path
-       ~keeper_name:source_keeper
-   with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok _ -> fail "resolved-owner transfer projection did not converge"
-   | Error error ->
-     fail (Keeper_event_queue_recovery.projection_error_to_string error));
-  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-  (match
-     Keeper_shutdown_intake_fence.begin_shutdown
-       ~base_path
-       ~keeper_name:target_keeper
-       ~operation_id
-   with
-   | Keeper_shutdown_intake_fence.Reserved _ -> ()
-   | Keeper_shutdown_intake_fence.Already_reserved _ ->
-     fail "fresh target shutdown fence was already reserved");
-  Fun.protect
-    ~finally:(fun () ->
-      ignore
-        (Keeper_shutdown_intake_fence.rollback_shutdown
-           ~base_path
-           ~keeper_name:target_keeper
-           ~operation_id
-         : Keeper_shutdown_intake_fence.rollback_result))
-    (fun () ->
-       let retried = tick_ok config ~now:202.0 in
-       (match retried.dispatches with
-        | [ { status = Schedule_runner.Dispatch_failed
-            ; error = Some detail
-            ; _
-            } ] ->
-          check string
-            "retry reports the resolved owner fence"
-            (Printf.sprintf
-               "retryable schedule dispatch failure: scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
-               target_keeper
-               (Keeper_shutdown_types.Operation_id.to_string operation_id))
-            detail
-        | _ -> fail "transferred retry bypassed the resolved owner fence");
-       check int "target occurrence remains durable" 1
-         (Keeper_registry_event_queue.snapshot ~base_path target_keeper
-          |> Keeper_event_queue.length);
-       match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-       | Some stored ->
-         check string "resolved-owner fence leaves retry due" "due"
-           (Schedule_domain.schedule_status_to_string stored.status)
-       | None -> fail "resolved-owner schedule disappeared")
-;;
-
-let test_shutdown_join_waits_for_inflight_schedule_intake () =
+ let test_shutdown_join_waits_for_inflight_schedule_intake () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
@@ -1091,11 +989,11 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
              Eio.Promise.resolve intake_started_u ();
              Eio.Promise.await release_intake;
              Error
-               (Schedule_runner.Retryable_dispatch_failure
+               (Schedule_runner.Dispatch_infrastructure_failure
                   "test releases schedule acceptance"))
        with
-       | Error (Schedule_runner.Retryable_dispatch_failure _) -> ()
-       | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
+       | Error (Schedule_runner.Dispatch_infrastructure_failure _) -> ()
+       | Error (Schedule_runner.Dispatch_rejection detail) ->
          fail ("schedule intake became terminal: " ^ detail)
        | Ok _ -> fail "test acceptance unexpectedly committed")
     (fun () ->
@@ -1132,7 +1030,7 @@ let test_shutdown_join_waits_for_inflight_schedule_intake () =
                  Eio.Promise.await join_completed)))
 ;;
 
-let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
+let test_keeper_wake_durable_state_failure_is_terminal () =
   with_workspace
   @@ fun config ->
   let keeper_owner_path =
@@ -1146,7 +1044,6 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
   mkdir_p queue_path;
   let request = create_keeper_wake_schedule config in
   let result = tick_ok config ~now:201.0 in
-  let occurrence_id = single_occurrence_id result in
   (match List.hd result.dispatches with
    | { status = Schedule_runner.Dispatch_failed; error = Some message; _ } ->
      check bool "storage failure is explicit" true
@@ -1157,7 +1054,7 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing"
    | Some stored ->
-     check string "schedule remains retryable" "due"
+     check string "storage failure terminalizes schedule" "failed"
        (Schedule_domain.schedule_status_to_string stored.status));
   Unix.rmdir queue_path;
   check int "failed commit leaves no queued wake after storage repair" 0
@@ -1165,19 +1062,9 @@ let test_keeper_wake_durable_state_failure_retries_same_occurrence () =
        (Keeper_registry_event_queue.snapshot
           ~base_path:config.Workspace_utils.base_path
           "schedule-keeper"));
-  let retried = tick_ok config ~now:202.0 in
-  check int "signal log is not duplicated" 0 (List.length retried.emitted);
-  (match List.hd retried.dispatches with
-   | { status = Schedule_runner.Dispatch_succeeded; _ } -> ()
-   | _ -> fail "next sequential tick did not retry the durable enqueue");
-  let queued =
-    Keeper_registry_event_queue.snapshot
-      ~base_path:config.Workspace_utils.base_path
-      "schedule-keeper"
-    |> Keeper_event_queue.to_list
-  in
-  check (list string) "retry preserves occurrence id" [ occurrence_id ]
-    (List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id) queued)
+  let next = tick_ok config ~now:202.0 in
+  check int "signal log is not duplicated" 0 (List.length next.emitted);
+  check int "failed occurrence is not redispatched" 0 (List.length next.dispatches)
 ;;
 
 let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
@@ -1215,12 +1102,12 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
            running
            ~commit_acceptance:(fun _detail ->
              Error
-               (Schedule_runner.Retryable_dispatch_failure
+               (Schedule_runner.Dispatch_infrastructure_failure
                   "simulate crash before schedule acceptance"))
        with
        | Ok _ -> ()
-       | Error (Schedule_runner.Retryable_dispatch_failure _) -> ()
-       | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
+       | Error (Schedule_runner.Dispatch_infrastructure_failure _) -> ()
+       | Error (Schedule_runner.Dispatch_rejection detail) ->
          fail ("initial schedule occurrence dispatch was terminal: " ^ detail));
       check bool "initial cancelled dispatch wakes lane" true
         (Atomic.get entry.fiber_wakeup);
@@ -1368,190 +1255,7 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_again () =
              error))
 ;;
 
-let test_terminal_retry_repairs_missing_stimulus_ledger () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let keeper_dir =
-    Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-      keeper_name
-  in
-  mkdir_p keeper_dir;
-  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
-  mkdir_p (Filename.dirname ledger_dir);
-  write_empty_file ledger_dir;
-  ignore (create_keeper_wake_schedule config : Schedule_domain.schedule_request);
-  let first = tick_ok config ~now:201.0 in
-  let stimulus_id = single_occurrence_id first in
-  check string "first dispatch is retryable failure" "failed"
-    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
-  Sys.remove ledger_dir;
-  mkdir_p ledger_dir;
-  let selection = pending_selection_exn ~base_path ~keeper_name in
-  (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-       ~base_path
-       keeper_name
-       ~current_owner_nonce:91
-       ~applied_at:201.5
-       ~selection
-       ~detail:"terminal before schedule retry"
-   with
-   | Ok (Keeper_registry_event_queue.Acked _)
-   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
-   | Ok
-       (Keeper_registry_event_queue.Ack_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail -> fail detail);
-  let retried = tick_ok config ~now:202.0 in
-  (match List.hd retried.dispatches with
-   | { status = Schedule_runner.Dispatch_succeeded
-     ; detail = Some detail
-     ; _
-     } ->
-     check string "retry observes terminal failure" "already_failed"
-       Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
-     check string "terminal retry needs no activation" "not_required"
-       Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
-   | _ -> fail "terminal retry did not preserve the failed disposition");
-  check int "terminal retry enqueues no second occurrence" 0
-    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
-     |> Keeper_event_queue.length);
-  let durable_state =
-    match Keeper_registry_event_queue.durable_state_result ~base_path keeper_name with
-    | Ok state -> state
-    | Error detail -> fail detail
-  in
-  check int "terminal retry retires the reaction outbox" 0
-    (Keeper_event_queue_state.transition_outbox durable_state |> List.length);
-  match
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id
-  with
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-    check bool "terminal retry repairs missing stimulus" true evidence.stimulus_seen;
-    check bool "terminal reaction remains recorded" true evidence.event_queue_ack_seen;
-    check int "one stimulus and one terminal reaction remain" 2
-      evidence.matched_record_count
-  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-    fail "terminal retry evidence was quarantined"
-  | Error error ->
-    fail
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
-;;
-
-let test_terminal_retry_requires_acceptance_commit () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "terminal-acceptance-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let ledger_path = reaction_ledger_dir ~base_path ~keeper_name in
-  mkdir_p (Filename.dirname ledger_path);
-  write_empty_file ledger_path;
-  let request =
-    create_named_keeper_wake_schedule
-      config
-      ~schedule_id:"terminal-acceptance-commit"
-      ~keeper_name
-  in
-  let first = tick_ok config ~now:201.0 in
-  let signal =
-    match first.emitted with
-    | [ signal ] -> signal
-    | signals -> failf "expected one terminal retry signal, got %d" (List.length signals)
-  in
-  Sys.remove ledger_path;
-  mkdir_p ledger_path;
-  let selection = pending_selection_exn ~base_path ~keeper_name in
-  (match
-     Keeper_registry_event_queue.terminalize_pending_turn_attempt_result
-       ~base_path
-       keeper_name
-       ~current_owner_nonce:97
-       ~applied_at:201.5
-       ~selection
-       ~detail:"terminal acceptance evidence"
-   with
-   | Ok (Keeper_registry_event_queue.Acked _)
-   | Ok (Keeper_registry_event_queue.Already_acked _) -> ()
-   | Ok
-       (Keeper_registry_event_queue.Ack_committed_followup_failed
-          { detail; _ }) ->
-     fail detail
-   | Error detail -> fail detail);
-  let running =
-    match
-      Schedule_store.start_due_candidate
-        config
-        ~now:202.0
-        ~schedule_id:request.schedule_id
-    with
-    | Ok running -> running
-    | Error error -> fail (Schedule_store.store_error_to_string error)
-  in
-  let commit_calls = Atomic.make 0 in
-  (match
-     Server_schedule_consumers.consumer.dispatch
-       config
-       ~now:202.0
-       signal
-       running
-       ~commit_acceptance:(fun _detail ->
-         Atomic.incr commit_calls;
-         Error
-           (Schedule_runner.Retryable_dispatch_failure
-              "terminal acceptance commit probe"))
-   with
-   | Error (Schedule_runner.Retryable_dispatch_failure detail) ->
-     check string "terminal result waits for acceptance commit"
-       "terminal acceptance commit probe"
-       detail
-   | Error (Schedule_runner.Terminal_dispatch_rejection detail) ->
-     fail ("terminal retry became a payload rejection: " ^ detail)
-   | Ok _ -> fail "terminal retry returned before acceptance commit");
-  check int "terminal retry invokes one acceptance commit" 1
-    (Atomic.get commit_calls)
-;;
-
-let test_retry_before_terminal_reconciliation_retains_wake () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
-  mkdir_p ledger_dir;
-  Unix.chmod ledger_dir 0o500;
-  ignore (create_keeper_wake_schedule config);
-  let first = tick_ok config ~now:201.0 in
-  Unix.chmod ledger_dir 0o755;
-  check string "first dispatch is retryable failure" "failed"
-    (Schedule_runner.dispatch_status_to_string (List.hd first.dispatches).status);
-  rm_rf ledger_dir;
-  let retried = tick_ok config ~now:202.0 in
-  check string "retry dispatch succeeds" "succeeded"
-    (Schedule_runner.dispatch_status_to_string (List.hd retried.dispatches).status);
-  let selection = pending_selection_exn ~base_path ~keeper_name in
-  (match
-     Keeper_heartbeat_stimulus_intake.reconcile_spent_selection
-       ~config
-       ~keeper_name
-       selection
-   with
-   | Ok Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
-   | Ok Keeper_heartbeat_stimulus_intake.Spent_grant_replay_acknowledged ->
-     fail "schedule selection was reconciled as a spent grant replay"
-   | Error detail -> fail detail);
-  check int "retry wake remains pending" 1
-    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
-     |> Keeper_event_queue.length)
-;;
-
-let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
+ let test_due_schedule_wakes_live_keeper_with_proactive_disabled () =
   with_workspace
   @@ fun config ->
   let keeper_name = "schedule-keeper" in
@@ -1717,59 +1421,6 @@ let test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported
     (evidence |> member "matched_schedule_ids" |> to_list |> List.length)
 ;;
 
- let test_keeper_wake_ledger_failure_is_retryable () =
-  with_workspace
-  @@ fun config ->
-  let keeper_name = "schedule-keeper" in
-  let base_path = config.Workspace_utils.base_path in
-  let keeper_dir =
-    Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
-      keeper_name
-  in
-  mkdir_p keeper_dir;
-  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
-  mkdir_p (Filename.dirname ledger_dir);
-  write_empty_file ledger_dir;
-  let request = create_keeper_wake_schedule config in
-  let result = tick_ok config ~now:201.0 in
-  let occurrence_id = single_occurrence_id result in
-  check int "one dispatch" 1 (List.length result.dispatches);
-  check string "dispatch reports retryable failure" "failed"
-    (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
-  (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
-   | None -> fail "schedule missing"
-   | Some stored ->
-     check string "schedule remains due" "due"
-       (Schedule_domain.schedule_status_to_string stored.status));
-  (match (List.hd result.dispatches).error with
-   | Some detail ->
-     check bool "ledger failure is explicit" true
-       (String_util.contains_substring detail "keeper reaction ledger")
-   | None -> fail "ledger failure detail missing");
-  Sys.remove ledger_dir;
-  mkdir_p ledger_dir;
-  let retried = tick_ok config ~now:202.0 in
-  check string "retry repairs ledger then succeeds" "succeeded"
-    (Schedule_runner.dispatch_status_to_string (List.hd retried.dispatches).status);
-  check int "retry reuses the pending queue entry" 1
-    (Keeper_registry_event_queue.snapshot ~base_path keeper_name
-     |> Keeper_event_queue.length);
-  match
-    Keeper_reaction_ledger.event_queue_reaction_evidence_result
-      ~base_path
-      ~keeper_name
-      ~stimulus_id:occurrence_id
-  with
-  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-    check int "repair writes one canonical stimulus row" 1 evidence.matched_record_count
-  | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-    fail "repaired occurrence evidence was quarantined"
-  | Error error ->
-    fail
-      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
-         error)
-;;
 
 let test_unattributed_ledger_damage_does_not_block_occurrences () =
   with_workspace
@@ -2126,23 +1777,13 @@ let () =
             test_shutdown_fence_rejects_schedule_intake_before_enqueue
         ; test_case "shutdown fence covers direct durable queue producers" `Quick
             test_shutdown_fence_covers_direct_durable_queue_producers
-        ; test_case "transferred retry uses resolved owner shutdown fence" `Quick
-            test_transferred_retry_uses_resolved_owner_shutdown_fence
         ; test_case "shutdown join waits for in-flight schedule intake" `Quick
             test_shutdown_join_waits_for_inflight_schedule_intake
-        ; test_case "keeper wake durable state failure retries same occurrence" `Quick
-            test_keeper_wake_durable_state_failure_retries_same_occurrence
+        ; test_case "keeper wake durable state failure is terminal" `Quick
+            test_keeper_wake_durable_state_failure_is_terminal
         ; test_case "cancelled occurrence recovery does not enqueue again"
             `Quick
             test_cancelled_occurrence_recovery_does_not_enqueue_again
-        ; test_case "terminal retry repairs missing stimulus ledger"
-            `Quick
-            test_terminal_retry_repairs_missing_stimulus_ledger
-        ; test_case "terminal retry requires acceptance commit" `Quick
-            test_terminal_retry_requires_acceptance_commit
-        ; test_case "retry before terminal reconciliation retains wake"
-            `Quick
-            test_retry_before_terminal_reconciliation_retains_wake
         ; test_case "due wake bypasses proactive policy" `Quick
             test_due_schedule_wakes_live_keeper_with_proactive_disabled
         ; test_case "keeper wake queue evidence rejects stale occurrence" `Quick
@@ -2153,8 +1794,6 @@ let () =
         ; test_case "dashboard live supported non-terminal evidence reports absent supported payloads"
             `Quick
             test_dashboard_live_supported_non_terminal_evidence_reports_absent_supported_payloads
-        ; test_case "keeper wake ledger failure is retryable" `Quick
-            test_keeper_wake_ledger_failure_is_retryable
         ; test_case "unattributed ledger damage does not block occurrences" `Quick
             test_unattributed_ledger_damage_does_not_block_occurrences
         ; test_case "dashboard keeps unattributed damage out of exact evidence" `Quick

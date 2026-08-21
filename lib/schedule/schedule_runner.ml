@@ -38,8 +38,8 @@ and dispatch_result =
   }
 
 type consumer_dispatch_error =
-  | Retryable_dispatch_failure of string
-  | Terminal_dispatch_rejection of string
+  | Dispatch_infrastructure_failure of string
+  | Dispatch_rejection of string
 
 type acceptance_commit = Acceptance_committed
 
@@ -272,26 +272,11 @@ let finish_terminal_dispatch config ~now ~occurrence_id ~schedule_id error =
     dispatch_result ~error occurrence_id schedule_id Dispatch_failed
 ;;
 
-let finish_retryable_dispatch config ~now ~occurrence_id ~schedule_id detail =
-  let reason = Schedule_store.Retryable_dispatch_failure detail in
-  let error = Schedule_store.running_recovery_reason_to_string reason in
-  match Schedule_store.retry_running config ~now ~schedule_id ~reason with
-  | Ok _ -> dispatch_result ~error occurrence_id schedule_id Dispatch_failed
-  | Error err ->
-    let error =
-      Printf.sprintf
-        "%s; failed to return schedule to due: %s"
-        error
-        (Schedule_store.store_error_to_string err)
-    in
-    dispatch_result ~error occurrence_id schedule_id Dispatch_failed
-;;
-
 let safe_consumer_dispatch config ~now consumer signal request =
   Cancel_safe.protect
     ~on_exn:(fun exn ->
       Error
-        (Retryable_dispatch_failure
+        (Dispatch_infrastructure_failure
            ("consumer dispatch raised: " ^ Printexc.to_string exn)))
     (fun () ->
        consumer.dispatch
@@ -311,7 +296,7 @@ let safe_consumer_dispatch config ~now consumer signal request =
            | Ok _ -> Ok Acceptance_committed
            | Error error ->
              Error
-               (Retryable_dispatch_failure
+               (Dispatch_infrastructure_failure
                   ("schedule acceptance commit failed: "
                    ^ Schedule_store.store_error_to_string error))))
 ;;
@@ -345,9 +330,8 @@ let dispatch_candidate
          schedule_id Dispatch_start_rejected
      | Ok running_request ->
        (match safe_consumer_dispatch config ~now consumer signal running_request with
-        | Error (Retryable_dispatch_failure detail) ->
-          finish_retryable_dispatch config ~now ~occurrence_id ~schedule_id detail
-        | Error (Terminal_dispatch_rejection detail) ->
+        | Error (Dispatch_infrastructure_failure detail)
+        | Error (Dispatch_rejection detail) ->
           finish_terminal_dispatch config ~now ~occurrence_id ~schedule_id detail
         | Ok (Work_accepted { detail; acceptance_commit = Acceptance_committed }) ->
           dispatch_result ~detail occurrence_id schedule_id Dispatch_succeeded))

@@ -20,9 +20,7 @@ type store_error =
       ; recovery_err : string option
       }
 
-type running_recovery_reason =
-  | Retryable_dispatch_failure of string
-  | Interrupted_by_process_restart
+type running_recovery_reason = Interrupted_by_process_restart
 
 type read_error =
   | Corrupt_read_ledger of
@@ -95,8 +93,6 @@ let store_error_to_string = function
 ;;
 
 let running_recovery_reason_to_string = function
-  | Retryable_dispatch_failure detail ->
-    "retryable schedule dispatch failure: " ^ detail
   | Interrupted_by_process_restart ->
     "schedule wake interrupted by process restart"
 ;;
@@ -628,26 +624,6 @@ let fail_running config ~now ~schedule_id ~error =
                ; detail = None
                ; error = Some error
                })
-        in
-        let next_state = bump_state state ~schedules ~wakes in
-        let* () = write_state config next_state in
-        Ok updated)
-;;
-
-let retry_running config ~now ~schedule_id ~reason =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    match find_schedule state schedule_id with
-    | None -> Error Schedule_not_found
-    | Some request ->
-      if request.status <> Running then
-        Error Schedule_not_running
-      else
-        let updated = { request with status = Due } in
-        let schedules = replace_schedule state.schedules updated in
-        let* wakes =
-          update_latest_running_wake state.wakes ~schedule_id
-            (fail_wake_for_recovery ~now ~reason)
         in
         let next_state = bump_state state ~schedules ~wakes in
         let* () = write_state config next_state in

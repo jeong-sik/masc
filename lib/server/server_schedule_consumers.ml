@@ -12,7 +12,7 @@ let ( let* ) = Result.bind
 
 let terminal_dispatch_result result =
   Result.map_error
-    (fun detail -> Schedule_runner.Terminal_dispatch_rejection detail)
+    (fun detail -> Schedule_runner.Dispatch_rejection detail)
     result
 ;;
 
@@ -560,8 +560,8 @@ let log_activation_outcome ~schedule_id ~keeper_name = function
          detail)
 ;;
 
-let retryable_dispatch_failure detail =
-  Error (Schedule_runner.Retryable_dispatch_failure detail)
+let dispatch_infrastructure_failure detail =
+  Error (Schedule_runner.Dispatch_infrastructure_failure detail)
 ;;
 
 let accept_with_recorded_stimulus
@@ -580,7 +580,7 @@ let accept_with_recorded_stimulus
   with
   | Keeper_wake_reaction_ledger_recorded -> Ok acceptance
   | Keeper_wake_reaction_ledger_record_failed detail ->
-    retryable_dispatch_failure detail
+    dispatch_infrastructure_failure detail
 ;;
 
 type durable_occurrence_state =
@@ -860,7 +860,7 @@ let accept_keeper_wake_occurrence
           ~keeper_name:owner
           ~expected_transition_id:transition_id
         |> Result.map_error (fun detail ->
-          Schedule_runner.Retryable_dispatch_failure detail)
+          Schedule_runner.Dispatch_infrastructure_failure detail)
     in
     accept_with_recorded_stimulus
       ~base_path
@@ -872,19 +872,19 @@ let accept_keeper_wake_occurrence
   match
     resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id
   with
-  | Error detail -> retryable_dispatch_failure detail
+  | Error detail -> dispatch_infrastructure_failure detail
   | Ok disposition
     when not
            (String.equal
               expected_owner
               (resolved_occurrence_owner disposition)) ->
-    retryable_dispatch_failure
+    dispatch_infrastructure_failure
       (Printf.sprintf
          "scheduled keeper wake owner changed while acquiring intake fence expected=%s actual=%s"
          expected_owner
          (resolved_occurrence_owner disposition))
   | Ok (Transfer_projecting_at (source, target)) ->
-    retryable_dispatch_failure
+    dispatch_infrastructure_failure
       (Printf.sprintf
          "scheduled keeper wake transfer projection pending source=%s target=%s"
          source
@@ -910,7 +910,7 @@ let accept_keeper_wake_occurrence
   | Ok (Terminal_cancelled_at (owner, durable_stimulus, _, evidence)) ->
     accept_terminal ~owner ~durable_stimulus ~evidence Already_cancelled
   | Ok (Absent_at owner) when not (String.equal owner keeper_name) ->
-    retryable_dispatch_failure
+    dispatch_infrastructure_failure
       (Printf.sprintf
          "scheduled keeper wake transferred owner is missing occurrence owner=%s occurrence=%s"
          owner
@@ -924,14 +924,14 @@ let accept_keeper_wake_occurrence
          stimulus
      with
      | Keeper_registry_event_queue.Stimulus_storage_error detail ->
-       retryable_dispatch_failure
+       dispatch_infrastructure_failure
          ("scheduled keeper wake durable enqueue failed: " ^ detail)
      | Keeper_registry_event_queue.Stimulus_enqueued
      | Keeper_registry_event_queue.Stimulus_already_present ->
        (match record_keeper_wake_stimulus ~base_path ~keeper_name stimulus with
         | Keeper_wake_reaction_ledger_recorded -> Ok Wake_required
         | Keeper_wake_reaction_ledger_record_failed detail ->
-          retryable_dispatch_failure detail))
+          dispatch_infrastructure_failure detail))
 ;;
 
 let dispatch_keeper_wake
@@ -986,7 +986,7 @@ let dispatch_keeper_wake
   let* initial_disposition =
     match resolve_keeper_wake_occurrence ~base_path ~keeper_name ~stimulus_id with
     | Ok disposition -> Ok disposition
-    | Error detail -> retryable_dispatch_failure detail
+    | Error detail -> dispatch_infrastructure_failure detail
   in
   let intake_owner = resolved_occurrence_owner initial_disposition in
   let dispatch_while_fenced intake_token =
@@ -1071,7 +1071,7 @@ let dispatch_keeper_wake
   with
   | Keeper_shutdown_intake_fence.Intake_committed result -> result
   | Keeper_shutdown_intake_fence.Intake_shutdown_reserved operation_id ->
-    retryable_dispatch_failure
+    dispatch_infrastructure_failure
       (Printf.sprintf
          "scheduled keeper wake rejected by shutdown fence keeper=%s operation=%s"
          intake_owner
@@ -1082,7 +1082,7 @@ let dispatch config ~now signal request ~commit_acceptance =
   match Schedule_payload_projection.dispatch_view_detailed request with
   | Error rejection ->
     Error
-      (Schedule_runner.Terminal_dispatch_rejection
+      (Schedule_runner.Dispatch_rejection
          (Schedule_payload_projection.dispatch_rejection_message rejection))
   | Ok (kind, payload) ->
     (match kind with

@@ -1,8 +1,8 @@
 (** Exact identity of one scheduled occurrence.
 
     The identity is derived only from persisted schedule facts, including the
-    durable schedule creation identity. Dispatch attempts may fail and retry,
-    but they retain the same occurrence identity. *)
+    durable schedule creation identity. The identity remains stable while an
+    occurrence moves through its persisted states. *)
 
 type t = private string
 

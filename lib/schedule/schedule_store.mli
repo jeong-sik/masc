@@ -28,9 +28,7 @@ type store_error =
           exists. The mutation is refused so the surviving bytes are NOT
           overwritten. *)
 
-type running_recovery_reason =
-  | Retryable_dispatch_failure of string
-  | Interrupted_by_process_restart
+type running_recovery_reason = Interrupted_by_process_restart
 
 val running_recovery_reason_to_string : running_recovery_reason -> string
 
@@ -131,16 +129,6 @@ val fail_running :
   error:string ->
   (Schedule_domain.schedule_request, store_error) result
 (** Marks a [Running] request and its matching wake attempt [Failed]. *)
-
-val retry_running :
-  Workspace_utils.config ->
-  now:float ->
-  schedule_id:string ->
-  reason:running_recovery_reason ->
-  (Schedule_domain.schedule_request, store_error) result
-(** Finishes the current wake attempt as [Failed] while returning only the
-    matching schedule to [Due]. Its due time and payload remain unchanged, so
-    the next runner tick retries the same occurrence identity. *)
 
 val recover_running_on_startup :
   Workspace_utils.config ->

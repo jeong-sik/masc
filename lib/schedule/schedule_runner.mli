@@ -41,8 +41,8 @@ and dispatch_result =
   }
 
 type consumer_dispatch_error =
-  | Retryable_dispatch_failure of string
-  | Terminal_dispatch_rejection of string
+  | Dispatch_infrastructure_failure of string
+  | Dispatch_rejection of string
 
 type acceptance_commit
 (** Opaque proof that the schedule ledger accepted the durable consumer work.
@@ -94,6 +94,6 @@ val tick :
   (tick_result, runner_error) result
 (** Refresh due state and append at-most-once generic wake signals for newly
     observable due work. A durable consumer acceptance completes that wake
-    occurrence immediately. Consumer payload rejection is terminal. A retryable
-    dispatch failure finishes only its current wake attempt and leaves the
-    schedule [Due] for the next tick. *)
+    occurrence immediately. Every consumer rejection is terminal for that
+    schedule occurrence; only startup recovery may return an interrupted
+    [Running] occurrence to [Due]. *)

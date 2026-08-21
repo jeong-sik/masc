@@ -386,7 +386,7 @@ let test_tick_marks_terminal_dispatch_rejection_failed () =
     tick_ok config ~now:201.0
       ~consumer:
         (accepting_consumer
-           ~dispatch_result:(Error (Terminal_dispatch_rejection "boom"))
+           ~dispatch_result:(Error (Dispatch_rejection "boom"))
            calls)
   in
   check int "one dispatch" 1 (List.length result.dispatches);
@@ -409,32 +409,26 @@ let test_tick_marks_terminal_dispatch_rejection_failed () =
        wake.error)
 ;;
 
-let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
+let test_tick_terminalizes_infrastructure_failure_without_blocking_peer () =
   with_workspace
   @@ fun config ->
-  let retry_request = create_ok ~schedule_id:"retry-1" config in
+  let failed_request = create_ok ~schedule_id:"failed-1" config in
   let healthy_request = create_ok ~schedule_id:"healthy-1" config in
-  let retry_first_attempt = ref true in
-  let retry_signal_ids = ref [] in
+  let failed_calls = ref 0 in
   let healthy_calls = ref 0 in
   let consumer : Schedule_runner.consumer =
     { accepts = (fun _request -> Ok ())
     ; dispatch =
-        (fun _config ~now:_ signal request ~commit_acceptance ->
+        (fun _config ~now:_ _signal request ~commit_acceptance ->
            let accept detail =
              Result.map
                (fun acceptance_commit ->
                   Work_accepted { detail; acceptance_commit })
                (commit_acceptance detail)
            in
-           if String.equal request.schedule_id retry_request.schedule_id then (
-             retry_signal_ids :=
-               Schedule_occurrence_id.to_string signal.occurrence_id
-               :: !retry_signal_ids;
-             if !retry_first_attempt then (
-               retry_first_attempt := false;
-               Error (Retryable_dispatch_failure "queue storage unavailable"))
-             else accept (`Assoc [ "retried", `Bool true ]))
+           if String.equal request.schedule_id failed_request.schedule_id then (
+             incr failed_calls;
+             Error (Dispatch_infrastructure_failure "queue storage unavailable"))
            else (
              incr healthy_calls;
              accept (`Assoc [ "healthy", `Bool true ])))
@@ -442,36 +436,26 @@ let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
   in
   let first = tick_ok config ~now:201.0 ~consumer in
   check int "both schedules dispatched" 2 (List.length first.dispatches);
+  check int "failed schedule dispatched once" 1 !failed_calls;
   check int "healthy schedule dispatched once" 1 !healthy_calls;
-  let occurrence_id =
-    match !retry_signal_ids with
-    | [ occurrence_id ] -> occurrence_id
-    | _ -> fail "retry schedule did not dispatch exactly once"
-  in
-  (match Schedule_store.get_schedule config ~schedule_id:retry_request.schedule_id with
-   | Some stored -> check string "retry schedule remains due" "due"
+  (match Schedule_store.get_schedule config ~schedule_id:failed_request.schedule_id with
+   | Some stored -> check string "infrastructure failure is terminal" "failed"
                       (schedule_status_to_string stored.status)
-   | None -> fail "retry schedule missing");
+   | None -> fail "failed schedule missing");
   (match Schedule_store.get_schedule config ~schedule_id:healthy_request.schedule_id with
    | Some stored -> check string "other schedule succeeded" "succeeded"
                       (schedule_status_to_string stored.status)
    | None -> fail "healthy schedule missing");
   let second = tick_ok config ~now:202.0 ~consumer in
   check int "durable signal is not duplicated" 0 (List.length second.emitted);
-  check int "only retry schedule dispatched" 1 (List.length second.dispatches);
-  check Alcotest.(list string) "same occurrence identity reused"
-    [ occurrence_id; occurrence_id ]
-    (List.rev !retry_signal_ids);
-  check int "healthy schedule not replayed" 1 !healthy_calls;
-  (match Schedule_store.get_schedule config ~schedule_id:retry_request.schedule_id with
-   | Some stored -> check string "retry eventually succeeded" "succeeded"
-                      (schedule_status_to_string stored.status)
-   | None -> fail "retry schedule missing after success");
-  check Alcotest.(list string) "failed attempt remains beside successful retry"
-    [ "succeeded"; "failed" ]
+  check int "failed occurrence is not redispatched" 0 (List.length second.dispatches);
+  check int "failed schedule remains single-shot" 1 !failed_calls;
+  check int "healthy schedule remains single-shot" 1 !healthy_calls;
+  check Alcotest.(list string) "one failed wake is retained"
+    [ "failed" ]
     ((Schedule_store.read_state config).wakes
      |> List.filter (fun (wake : wake_record) ->
-       String.equal wake.schedule_id retry_request.schedule_id)
+       String.equal wake.schedule_id failed_request.schedule_id)
      |> List.map (fun (wake : wake_record) ->
        wake_status_to_string wake.status))
 ;;
@@ -654,8 +638,8 @@ let () =
             test_tick_dispatches_every_recurring_occurrence
         ; test_case "marks terminal dispatch rejection failed" `Quick
             test_tick_marks_terminal_dispatch_rejection_failed
-        ; test_case "retries same occurrence without blocking other schedule" `Quick
-            test_tick_retries_same_occurrence_without_blocking_other_schedule
+        ; test_case "terminalizes infrastructure failure without blocking peer" `Quick
+            test_tick_terminalizes_infrastructure_failure_without_blocking_peer
         ; test_case "occurrence decode rejects tampered facts" `Quick
             test_occurrence_decode_rejects_tampered_facts
         ] )

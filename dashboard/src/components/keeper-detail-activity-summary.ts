@@ -9,7 +9,7 @@ import type { Keeper } from '../types'
 // 같은 helper를 소비해 다른 timestamp field가 동시에 렌더링되는
 // "26초 전 / 18시간 전 / 27일 전" 3중 표시 모순을 봉인한다.
 export function KeeperActivitySummary({ keeper }: { keeper: Keeper }) {
-  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const activity = keeperActivityDisplay(keeper)
   const workPreview = keeperWorkPreview(keeper)
   const hasActivitySignal = activity.source !== 'none' && activity.source !== 'created'
   const hasActivity =

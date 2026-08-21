@@ -295,14 +295,10 @@ let keeper_list_row_json ~runtime_class config name =
   | Ok (Some (meta : keeper_meta)) ->
       let now_ts = Time_compat.now () in
       let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
-      let agent_status =
-        Keeper_status_runtime.parse_agent_status config ~agent_name:meta.agent_name
-      in
       let diagnostic =
         Keeper_status_runtime.keeper_diagnostic_json
           ~config
           ~meta
-          ~agent_status
           ~keepalive_running ~history_items:[] ~now_ts
         |> Keeper_status_runtime.augment_keeper_diagnostic_json
              ~keepalive_running
@@ -310,9 +306,7 @@ let keeper_list_row_json ~runtime_class config name =
                (Keeper_status_bridge.runtime_keepalive_started_at config meta)
              ~now_ts
       in
-      let status =
-        Keeper_status_runtime.keeper_surface_status ~agent_status ~diagnostic
-      in
+      let status = Keeper_status_runtime.keeper_surface_status ~diagnostic in
       Some
         (`Assoc (
           [

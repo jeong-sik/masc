@@ -73,19 +73,6 @@ import {
 
 // ── Utility functions ────────────────────────────────────
 
-export function resolveKeeperCurrentTaskLabel(
-  keeper: Keeper | null | undefined,
-): string {
-  const runtimeState = linkedRuntimeState(keeper)
-  if (!keeper) return 'unlinked'
-  if (runtimeState === 'offline') return 'offline'
-  if (!keeper.agent) return 'not_collected'
-  if (typeof keeper.agent.current_task === 'string' && keeper.agent.current_task.trim() !== '') {
-    return keeper.agent.current_task
-  }
-  return 'unassigned'
-}
-
 // ── Shared row component ─────────────────────────────────
 
 function SignalRow({ label, value, title }: { label: string; value: string | number; title?: string }) {
@@ -1466,7 +1453,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
-  const currentTaskLabel = resolveKeeperCurrentTaskLabel(keeper)
   const openToolsQuery = observedTools[0] ?? null
 
   return html`
@@ -1474,7 +1460,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="프로젝트 범위" value=${namespaceName} />
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
-      <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
       <div class="flex justify-end mt-1">
         <${ActionButton}

@@ -193,7 +193,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const hbStale = hbAgeMs != null
     && hbAgeMs > keeperHeartbeatStaleMs(keeper.heartbeat_stale_after_s)
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
-  const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+  const activity = keeperActivityDisplay(keeper)
   const hasActivitySignal = activity.timestamp != null || activity.ageSeconds != null
   const hasRuntimeIdentitySignal =
     Boolean(runtimeLabel)

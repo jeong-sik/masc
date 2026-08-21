@@ -101,62 +101,6 @@ let test_keeper_subop_timing_log_after_profile_activity () =
   Alcotest.(check bool) "activity timing computed before non-paused log" true
     (activity_idx < emit_idx)
 
-let test_align_keeper_runtime_status_promotes_fresh_runtime_signal () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "busy");
-            ("last_seen_ago_s", `Float 5.0);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "fresh runtime signal promotes keeper status" "busy"
-    status
-
-let test_align_keeper_runtime_status_ignores_legacy_zombie_flag () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "busy");
-            ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool true);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "legacy zombie flag has no authority" "busy" status
-
-let test_align_keeper_runtime_status_preserves_attention_health () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "degraded") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "active");
-            ("last_seen_ago_s", `Float 5.0);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "degraded health remains inactive" "inactive" status
-
-let test_align_keeper_runtime_status_tolerates_null_status_json () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive" ~diagnostic:`Null ~agent_status_json:`Null
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "null runtime status keeps surface status" "inactive"
-    status
-
 let test_usage_does_not_create_context_snapshot () =
   let model_budget = 256_000 in
   let base =
@@ -381,6 +325,10 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
         | Some keeper -> keeper
         | None -> Alcotest.fail "expected keeper in snapshot"
       in
+      Alcotest.(check bool) "keeper row omits dead agent projection" false
+        (match keeper with
+         | `Assoc fields -> List.mem_assoc "agent" fields
+         | _ -> true);
       Alcotest.(check bool) "unowned ratio is ignored" true
         Yojson.Safe.Util.(keeper |> member "context_ratio" = `Null);
       Alcotest.(check bool) "unowned tokens are ignored" true
@@ -687,17 +635,12 @@ let test_diagnostic_uses_persisted_heartbeat_freshness () =
         Keeper_status_runtime.keeper_diagnostic_json
           ~config
           ~meta
-          ~agent_status:
-            (`Assoc
-              [ "status", `String "active"
-              ; "last_seen_ago_s", `Float 900.0
-              ])
           ~keepalive_running:true
           ~history_items:[]
           ~now_ts
       in
       let open Yojson.Safe.Util in
-      Alcotest.(check string) "fresh heartbeat overrides stale agent presence"
+      Alcotest.(check string) "fresh heartbeat keeps runtime healthy"
         "healthy"
         (diagnostic |> member "health_state" |> to_string);
       Alcotest.(check string) "diagnostic exposes persisted heartbeat"
@@ -719,17 +662,12 @@ let test_diagnostic_uses_persisted_heartbeat_freshness () =
         Keeper_status_runtime.keeper_diagnostic_json
           ~config
           ~meta:active_meta
-          ~agent_status:
-            (`Assoc
-              [ "status", `String "active"
-              ; "last_seen_ago_s", `Float 5.0
-              ])
           ~keepalive_running:true
           ~history_items:[]
           ~now_ts
       in
-      Alcotest.(check string) "fresh live presence also prevents false stale"
-        "healthy"
+      Alcotest.(check string) "stale heartbeat stays visible"
+        "stale"
         (active_diagnostic |> member "health_state" |> to_string))
 
 let test_digest_workspace_includes_keeper_runtime_attention () =
@@ -1594,22 +1532,6 @@ let () =
     [
       ( "runtime status"
       , [
-          Alcotest.test_case
-            "fresh runtime signal promotes status"
-            `Quick
-            test_align_keeper_runtime_status_promotes_fresh_runtime_signal;
-          Alcotest.test_case
-            "legacy zombie flag has no authority"
-            `Quick
-            test_align_keeper_runtime_status_ignores_legacy_zombie_flag;
-          Alcotest.test_case
-            "attention health blocks promotion"
-            `Quick
-            test_align_keeper_runtime_status_preserves_attention_health;
-          Alcotest.test_case
-            "null runtime signal preserves surface status"
-            `Quick
-            test_align_keeper_runtime_status_tolerates_null_status_json;
           Alcotest.test_case
             "diagnostic uses persisted heartbeat freshness"
             `Quick

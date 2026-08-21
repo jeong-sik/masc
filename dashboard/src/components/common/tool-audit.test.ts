@@ -31,7 +31,7 @@ describe('linkedRuntimeState', () => {
   })
 
   it('returns offline when agent exists=false', () => {
-    const keeper = makeKeeper({ agent: { exists: false } })
+    const keeper = makeKeeper({ status: 'offline' })
     expect(linkedRuntimeState(keeper)).toBe('offline')
   })
 

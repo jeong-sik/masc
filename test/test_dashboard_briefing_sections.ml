@@ -182,7 +182,7 @@ let test_compact_keeper_json_normalizes_missing_fields () =
         ("status", `Null);
         ("agent_name", `Null);
         ("diagnostic", `Assoc []);
-        ("agent", `Assoc [ ("current_task", `Null) ]);
+        ("current_task_id", `Null);
       ]
   in
   let compact = Briefing.compact_keeper_json json in
@@ -221,7 +221,7 @@ let test_collect_metadata_gaps_separates_null_like_inputs () =
           [
             ("name", `String "keeper-gap");
             ("diagnostic", `Assoc []);
-            ("agent", `Assoc [ ("current_task", `Null) ]);
+            ("current_task_id", `Null);
           ]);
     ]
   in

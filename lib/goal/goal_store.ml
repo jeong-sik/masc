@@ -72,11 +72,6 @@ and state_of_yojson = function
 
 and goal_of_yojson = function
   | `Assoc fields as json ->
-      (* [owner] was persisted by the immediately preceding schema.  It no
-         longer has any runtime meaning, but existing stores must remain
-         readable across the hard cut.  Keep this as a read-only tombstone:
-         the decoder accepts and drops it, while [goal_to_yojson] never writes
-         it again.  Every other field remains closed-schema strict. *)
       let accepted_fields =
         [ "id"
         ; "title"
@@ -87,7 +82,6 @@ and goal_of_yojson = function
         ; "phase"
         ; "last_review_note"
         ; "last_review_at"
-        ; "owner"
         ; "created_at"
         ; "updated_at"
         ]

@@ -230,6 +230,7 @@
   fs_compat
   time_compat
   masc_log
+  masc_goal
   masc_workspace
   masc_backend
   masc_process

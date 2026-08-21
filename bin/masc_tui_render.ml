@@ -45,6 +45,21 @@ let attention_severity_color = function
   | Attention_warning -> Ansi.yellow
   | Attention_info -> Ansi.cyan
 
+let task_line (task : task) =
+  let status = Masc_domain.task_status_to_string task.status in
+  let assignee =
+    match Masc_domain.task_assignee_of_status task.status with
+    | Some name -> Printf.sprintf " @%s" name
+    | None -> ""
+  in
+  Printf.sprintf "  %s [%s] %s (%s%s) %s"
+    (task_status_icon task.status)
+    task.id
+    task.title
+    status
+    assignee
+    (priority_indicator task.priority)
+
 (** Render the dashboard (original view) *)
 let render_dashboard (state : state) =
   let (rows, cols) = get_terminal_size () in
@@ -144,21 +159,9 @@ let render_dashboard (state : state) =
   else
     for i = 0 to task_rows - 1 do
       let t = List.nth state.tasks i in
-      let claimed_str = match t.claimed_by with
-        | Some a -> Printf.sprintf " @%s" a
-        | None -> ""
-      in
-      let task_line = Printf.sprintf "  %s [%s] %s (%s%s) %s"
-        (task_status_icon t.status)
-        t.id
-        t.title
-        t.status
-        claimed_str
-        (priority_indicator t.priority)
-      in
       Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
         Ansi.gray Ansi.box_v Ansi.reset
-        (fit_width task_line (cols - 4))
+        (fit_width (task_line t) (cols - 4))
         Ansi.gray Ansi.box_v Ansi.reset)
     done;
 
@@ -281,25 +284,21 @@ let render_overview (state : state) =
     (String.make (max 0 (cols - 10)) ' ')
     Ansi.gray Ansi.box_v Ansi.reset);
 
-  let task_rows = min 5 (List.length state.tasks) in
-  if task_rows = 0 then
+  let task_capacity =
+    match state.tasks_error with
+    | None -> 5
+    | Some err ->
+        box_line buf cols
+          (Ansi.red ^ "  " ^ fit_width err (cols - 8) ^ Ansi.reset);
+        4
+  in
+  let task_rows = min task_capacity (List.length state.tasks) in
+  if task_rows = 0 && Option.is_none state.tasks_error then
     box_line buf cols (Ansi.dim ^ "  (no tasks)" ^ Ansi.reset)
   else
     for i = 0 to task_rows - 1 do
       let t = List.nth state.tasks i in
-      let claimed_str = match t.claimed_by with
-        | Some a -> Printf.sprintf " @%s" a
-        | None -> ""
-      in
-      let task_line = Printf.sprintf "  %s [%s] %s (%s%s) %s"
-        (task_status_icon t.status)
-        t.id
-        t.title
-        t.status
-        claimed_str
-        (priority_indicator t.priority)
-      in
-      box_line buf cols task_line
+      box_line buf cols (task_line t)
     done;
 
   box_bottom buf cols;
@@ -554,17 +553,15 @@ let render_board_read (state : state) (post : board_post) =
   print_string (Buffer.contents buf);
   flush stdout
 
-let planning_status_label = function
-  | Planning_goal_active -> "active"
-  | Planning_goal_paused -> "paused"
-  | Planning_goal_done -> "done"
-  | Planning_goal_dropped -> "dropped"
+let planning_phase_label phase = Goal_phase.to_string phase
 
-let planning_status_color = function
-  | Planning_goal_active -> Ansi.cyan
-  | Planning_goal_paused -> Ansi.yellow
-  | Planning_goal_done -> Ansi.green
-  | Planning_goal_dropped -> Ansi.red
+let planning_phase_color = function
+  | Goal_phase.Executing -> Ansi.cyan
+  | Goal_phase.Blocked -> Ansi.red
+  | Goal_phase.Paused -> Ansi.yellow
+  | Goal_phase.Verifying -> Ansi.magenta
+  | Goal_phase.Completed -> Ansi.green
+  | Goal_phase.Dropped -> Ansi.gray
 
 (** Render the Planning surface (list view). *)
 let render_planning_list (state : state) =
@@ -607,8 +604,11 @@ let render_planning_list (state : state) =
        done
    | Some p ->
        let rollup =
-         Printf.sprintf "  Active: %d  Paused: %d  Done: %d  Dropped: %d"
-           p.pl_rollup.pr_active p.pl_rollup.pr_paused p.pl_rollup.pr_done p.pl_rollup.pr_dropped
+         Printf.sprintf
+           "  Executing: %d  Paused/Blocked: %d  Verifying: %d  Done: %d  Dropped: %d"
+           p.pl_rollup.pr_active p.pl_rollup.pr_paused
+           p.pl_rollup.pr_verifying p.pl_rollup.pr_done
+           p.pl_rollup.pr_dropped
        in
        let backlog =
          Printf.sprintf "  Backlog: todo=%d  claimed=%d  running=%d  done=%d  cancelled=%d"
@@ -639,8 +639,8 @@ let render_planning_list (state : state) =
              let depth = planning_goal_depth p.pl_goals g in
              let indent = String.make (depth * 2) ' ' in
              let branch = if depth > 0 then "└─ " else "  " in
-             let status_color = planning_status_color g.pg_status in
-             let status_label = planning_status_label g.pg_status in
+             let status_color = planning_phase_color g.pg_phase in
+             let status_label = planning_phase_label g.pg_phase in
              let due = match g.pg_due_date with Some d -> "  " ^ d | None -> "" in
              let line =
                Printf.sprintf "%s%s%s[%s]%s P%d  %s%s"
@@ -679,8 +679,8 @@ let render_planning_detail (state : state) (goal : planning_goal) =
   Buffer.add_string buf Ansi.clear;
   Buffer.add_string buf Ansi.hide_cursor;
 
-  let status_color = planning_status_color goal.pg_status in
-  let status_label = planning_status_label goal.pg_status in
+  let status_color = planning_phase_color goal.pg_phase in
+  let status_label = planning_phase_label goal.pg_phase in
   let header = Printf.sprintf " MASC Planning  %s[%s]%s  %s"
     status_color (fit_width status_label 8) Ansi.reset
     (fit_width goal.pg_id 20)
@@ -693,7 +693,7 @@ let render_planning_detail (state : state) (goal : planning_goal) =
   box_line buf cols (Printf.sprintf "  %s%s%s"
     Ansi.bold (fit_width goal.pg_title (cols - 6)) Ansi.reset);
   box_line buf cols (Printf.sprintf "  Phase: %s  Priority: P%d"
-    (fit_width goal.pg_phase 14) goal.pg_priority);
+    (fit_width (planning_phase_label goal.pg_phase) 14) goal.pg_priority);
   (match goal.pg_due_date with
    | Some d -> box_line buf cols (Printf.sprintf "  Due: %s" d)
    | None -> box_empty buf cols);
@@ -748,8 +748,8 @@ let render_keeper_list (state : state) =
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
 
   (* Column headers *)
-  let col_header = Printf.sprintf "  %s  %-16s %-14s %5s  %-20s %s  %s"
-    " " "Name" "Profile" "Gen" "Model" "Pro" "Goal" in
+  let col_header = Printf.sprintf "  %s  %-20s %5s  %-8s %10s  %s"
+    " " "Name" "Gen" "Paused" "Turns" "Current Task" in
   Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n"
     Ansi.gray Ansi.box_v Ansi.reset
     Ansi.dim (fit_width col_header (cols - 4)) Ansi.reset
@@ -760,61 +760,74 @@ let render_keeper_list (state : state) =
     Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
 
   (* Keeper rows *)
-  let content_height = rows - 8 in  (* header + column header + footer *)
-  let visible_count = min content_height (List.length state.keepers) in
+  let content_height = max 0 (rows - 8) in
+  let keeper_rows =
+    match state.keepers_error with
+    | None -> content_height
+    | Some err ->
+        box_line buf cols
+          (Ansi.red ^ "  " ^ fit_width err (cols - 8) ^ Ansi.reset);
+        max 0 (content_height - 1)
+  in
+  let visible_count = min keeper_rows (List.length state.keepers) in
   (* Scroll offset: keep cursor visible *)
   let scroll_offset =
-    if state.keeper_cursor >= content_height then
-      state.keeper_cursor - content_height + 1
+    if keeper_rows > 0 && state.keeper_cursor >= keeper_rows then
+      state.keeper_cursor - keeper_rows + 1
     else 0
   in
 
   if visible_count = 0 then begin
-    Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no keepers found in .masc/keepers/)%s %s%s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
-      Ansi.dim Ansi.reset
-      (String.make (max 0 (cols - 50)) ' ')
-      Ansi.gray Ansi.box_v Ansi.reset);
-    for _ = 1 to max 0 (content_height - 1) do
+    let empty_rows =
+      match state.keepers_error with
+      | Some _ -> keeper_rows
+      | None ->
+          Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no keepers found in .masc/keepers/)%s %s%s%s%s\n"
+            Ansi.gray Ansi.box_v Ansi.reset
+            Ansi.dim Ansi.reset
+            (String.make (max 0 (cols - 50)) ' ')
+            Ansi.gray Ansi.box_v Ansi.reset);
+          max 0 (keeper_rows - 1)
+    in
+    for _ = 1 to empty_rows do
       Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
         Ansi.gray Ansi.box_v Ansi.reset
         (String.make (cols - 4) ' ')
         Ansi.gray Ansi.box_v Ansi.reset)
     done
   end else begin
-    for i = 0 to content_height - 1 do
+    for i = 0 to keeper_rows - 1 do
       let idx = i + scroll_offset in
       if idx < List.length state.keepers then begin
         let k = List.nth state.keepers idx in
         let is_selected = idx = state.keeper_cursor in
-        let model_short = short_model (Option.value ~default:"-" k.k_active_model) in
-        let proactive_str = if k.k_proactive_enabled then
-          Ansi.green ^ "on" ^ Ansi.reset
+        let paused_str = if k.k_paused then
+          Ansi.yellow ^ "yes" ^ Ansi.reset
         else
-          Ansi.gray ^ "--" ^ Ansi.reset
+          Ansi.dim ^ "no" ^ Ansi.reset
         in
-        let goal_ids_width = max 10 (cols - 68) in
-        let goal_ids_trunc =
-          fit_width (String.concat "," k.k_active_goal_ids) goal_ids_width
+        let task_width = max 8 (cols - 58) in
+        let current_task =
+          fit_width (Option.value ~default:"-" k.k_current_task_id) task_width
         in
-        let name_col = Printf.sprintf "%-16s" k.k_name in
+        let name_col = Printf.sprintf "%-20s" k.k_name in
         let gen_col = Printf.sprintf "%5d" k.k_generation in
-        let model_col = Printf.sprintf "%-20s" model_short in
+        let turns_col = Printf.sprintf "%10d" k.k_total_turns in
         let line_content =
           if is_selected then
             Ansi.reverse ^ ">" ^ Ansi.reset
             ^ "  " ^ Ansi.bold ^ name_col ^ Ansi.reset
             ^ " " ^ gen_col
-            ^ "  " ^ model_col
-            ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
+            ^ "  " ^ paused_str
+            ^ " " ^ turns_col
+            ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
           else
             " "
             ^ "  " ^ name_col
             ^ " " ^ gen_col
-            ^ "  " ^ model_col
-            ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
+            ^ "  " ^ paused_str
+            ^ " " ^ turns_col
+            ^ "  " ^ Ansi.dim ^ current_task ^ Ansi.reset
         in
         Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
           Ansi.gray Ansi.box_v Ansi.reset
@@ -872,14 +885,15 @@ let render_keeper_detail (state : state) =
     add_section "Identity";
     add_row "Name:" k.k_name;
     add_row "Generation:" (string_of_int k.k_generation);
-    add_row "Trigger Mode:" k.k_trigger_mode;
-    add_row "Verify:" (bool_indicator k.k_verify);
+    add_row "Paused:"
+      (if k.k_paused then Ansi.yellow ^ "yes" ^ Ansi.reset
+       else Ansi.dim ^ "no" ^ Ansi.reset);
     add_empty ();
 
-    (* Goals section *)
-    add_section "Goals";
-    add_row "Active Goal IDs:"
-      (fit_width (String.concat ", " k.k_active_goal_ids) (inner - 26));
+    (* Current work section *)
+    add_section "Current Work";
+    add_row "Task:" (Option.value ~default:"-" k.k_current_task_id);
+    add_row "Last Blocker:" (Option.value ~default:"-" k.k_last_blocker);
     add_empty ();
 
     (* Live Context section (Phase 2) *)
@@ -897,12 +911,6 @@ let render_keeper_detail (state : state) =
     end;
     add_empty ();
 
-    (* Model section *)
-    add_section "Model";
-    add_row "Active Model:" (Option.value ~default:"-" k.k_active_model);
-    add_row "Available:" (String.concat ", " k.k_models);
-    add_empty ();
-
     (* Runtime section *)
     add_section "Runtime Stats";
     add_row "Total Turns:" (string_of_int k.k_total_turns);
@@ -910,14 +918,20 @@ let render_keeper_detail (state : state) =
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
     add_row "Last Turn:" (short_ts k.k_last_turn_ts);
     add_row "Compactions:" (string_of_int k.k_compaction_count);
-    add_row "Context Budget:" (string_of_int k.k_context_budget);
     add_empty ();
 
-    (* Behavior section *)
-    add_section "Behavior";
-    add_row "Proactive:" (bool_indicator k.k_proactive_enabled);
-    add_row "Initiative:" (bool_indicator (Option.value ~default:false k.k_initiative_enabled));
-    add_row "Drift:" (bool_indicator k.k_drift_enabled);
+    (* Autonomy section *)
+    add_section "Autonomy";
+    add_row "Autonomous Turns:"
+      (string_of_int k.k_autonomous_turn_count);
+    add_row "Text / Tool:"
+      (Printf.sprintf "%d / %d" k.k_autonomous_text_turn_count
+         k.k_autonomous_tool_turn_count);
+    add_row "Board / Mention:"
+      (Printf.sprintf "%d / %d" k.k_board_reactive_turn_count
+         k.k_mention_reactive_turn_count);
+    add_row "No-op Turns:" (string_of_int k.k_noop_turn_count);
+    add_row "Last Outcome:" k.k_last_proactive_outcome;
     add_empty ();
 
     (* Timestamps section *)

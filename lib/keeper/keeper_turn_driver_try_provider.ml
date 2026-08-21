@@ -282,7 +282,7 @@ let observe_checkpoint_stage observed (_ : Agent_core.Agent.checkpoint_stage) =
   Atomic.set observed true
 ;;
 
-let same_run_retry_allowed observed = not (Atomic.get observed)
+let checkpoint_allows_candidate_transition observed = not (Atomic.get observed)
 
 (* #28417: how often the stall watchdog samples the progress signal while a
    provider attempt runs. Small enough that the reported stall time stays
@@ -1045,7 +1045,7 @@ let default_context_overflow_shrink_capacity ~capacity_bytes =
    doc comment for why the byte-axis and token-axis siblings are excluded.
    [same_run_retry_authorized] mirrors the exact same-run authority gate
    [Keeper_turn_driver]'s declared-lane walk applies before rotating
-   candidates ([same_run_retry_allowed] / [checkpoint_stage_observed]): a
+   candidates ([checkpoint_allows_candidate_transition] / [checkpoint_stage_observed]): a
    shrink retry is a same-run retry too, so it must not fire once AGENT_CORE has
    mutated agent state at a durable checkpoint stage. *)
 let context_overflow_shrink_sequence
@@ -1128,7 +1128,7 @@ let run_try_provider_with_context_overflow_shrink
     context_overflow_shrink_sequence
       ~starting_capacity_bytes
       ~same_run_retry_authorized:(fun () ->
-        same_run_retry_allowed ctx.checkpoint_stage_observed)
+        checkpoint_allows_candidate_transition ctx.checkpoint_stage_observed)
       ~record_success:(fun ~capacity_bytes ->
         Keeper_context_overflow_shrink_state.record_success
           ~keeper_name:ctx.keeper_name

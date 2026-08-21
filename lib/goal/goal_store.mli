@@ -7,14 +7,10 @@
 
     - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
       [Completed] / [Paused] / [Dropped]) — the only persisted
-      lifecycle representation.  The retired ["owner"] field is accepted
-      and discarded on read so pre-cut stores remain available, but it is
-      never written and does not re-enter the runtime model.  ["status"] is
-      not an accepted field:
-      a row carrying it fails to decode, and {!read_state} then applies
-      the corrupt-store policy (recovery mirror if usable, otherwise an
-      empty state plus a warning).  A store written before the field was
-      dropped must be reset rather than loaded.
+      lifecycle representation.  The goal schema is closed: a row
+      carrying any other field fails to decode, and {!read_state} then
+      applies the corrupt-store policy (recovery mirror if usable,
+      otherwise an empty state plus a warning).
 
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals],

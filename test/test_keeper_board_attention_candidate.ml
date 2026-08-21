@@ -253,7 +253,7 @@ let load_one ~base_path =
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
-      ~context:(keeper_context ~mention_keeper_ids:[ "sangsu"; "peer" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] ())
       (signal "post-codec")
   in
   let encoded = A.candidate_to_json original in
@@ -280,7 +280,7 @@ let test_codec_and_context_identity_are_strict () =
   let reordered =
     candidate
       ~context:
-        (match keeper_context ~mention_keeper_ids:[ "sangsu"; "peer" ] () with
+        (match keeper_context ~mention_keeper_ids:[ "alpha"; "peer" ] () with
          | `Assoc fields -> `Assoc (List.rev fields)
          | _ -> assert false)
       (signal "post-reordered")
@@ -293,7 +293,7 @@ let test_codec_and_context_identity_are_strict () =
     (A.Context_key.equal left reordered);
   let changed_list =
     candidate
-      ~context:(keeper_context ~mention_keeper_ids:[ "peer"; "sangsu" ] ())
+      ~context:(keeper_context ~mention_keeper_ids:[ "peer"; "alpha" ] ())
       (signal "post-list-order")
     |> A.Context_key.of_candidate
     |> ok "changed list context"
@@ -381,7 +381,7 @@ let ledger_path ~base_path =
     (Filename.concat
        (Common.masc_dir_from_base_path ~base_path)
        "board_attention_candidates")
-    "sangsu.jsonl"
+    "alpha.jsonl"
 ;;
 
 let write_ledger_rows ~base_path rows =

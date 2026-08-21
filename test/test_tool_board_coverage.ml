@@ -1660,7 +1660,7 @@ let test_vote_not_found () =
     result;
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
-let test_vote_rejects_legacy_direction_fallbacks () =
+let test_vote_requires_explicit_direction () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
@@ -1681,23 +1681,37 @@ let test_vote_rejects_legacy_direction_fallbacks () =
     (String_util.contains_substring
        ((Tool_result.message empty_direction))
        "invalid vote direction");
-  let legacy_vote_alias =
+  let missing_direction =
     dispatch_result
       "masc_board_vote"
-      (make_args
-         [
-           ("post_id", `String "missing");
-           ("voter", `String "v");
-           ("vote", `String "down");
-         ])
+      (make_args [ ("post_id", `String "missing"); ("voter", `String "v") ])
   in
-  Alcotest.(check bool) "legacy vote alias rejected" false (Tool_result.is_success legacy_vote_alias);
+  Alcotest.(check bool) "missing direction rejected" false (Tool_result.is_success missing_direction);
+  check_failure_class
+    "missing direction is workflow rejection"
+    (Some "workflow_rejection")
+    missing_direction;
   Alcotest.(check bool)
-    "legacy vote alias error"
+    "missing direction error"
     true
     (String_util.contains_substring
-       ((Tool_result.message legacy_vote_alias))
-       "legacy vote parameter")
+       ((Tool_result.message missing_direction))
+       "vote direction required");
+  let comment_missing_direction =
+    dispatch_result
+      "masc_board_comment_vote"
+      (make_args [ ("comment_id", `String "c-missing"); ("voter", `String "v") ])
+  in
+  Alcotest.(check bool)
+    "comment vote missing direction rejected"
+    false
+    (Tool_result.is_success comment_missing_direction);
+  Alcotest.(check bool)
+    "comment vote missing direction error"
+    true
+    (String_util.contains_substring
+       ((Tool_result.message comment_missing_direction))
+       "vote direction required")
 
 (** {2 Group 5: Comment} *)
 
@@ -2060,9 +2074,9 @@ let () =
         [
           Alcotest.test_case "vote not found" `Quick test_vote_not_found;
           Alcotest.test_case
-            "legacy direction fallbacks rejected"
+            "explicit direction required"
             `Quick
-            test_vote_rejects_legacy_direction_fallbacks;
+            test_vote_requires_explicit_direction;
         ] );
       ( "comments",
         [

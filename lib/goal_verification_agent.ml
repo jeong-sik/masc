@@ -547,15 +547,14 @@ let process_pending_work_inner
                 the same review again, so this stops instead of re-arming the
                 pulse. The row stays durable and the next real wake rescans
                 it. *)
-             let retryable =
-               match result.evaluator_error_retryable with
-               | Some retryable -> retryable
-               | None -> false
-             in
+             (* [evaluator_error_retryable] was the only source for this and
+                went with the implicit retry policy it belonged to. The comment
+                above already says what is left: without a typed evaluator
+                error nothing here justifies running the same review again. *)
              defer
                ~goal_id:work.goal_id
                ~kind:work.kind
-               ~retryable
+               ~retryable:false
                ~reason:detail
            | Some review_verdict ->
              let evidence =

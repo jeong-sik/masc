@@ -138,7 +138,7 @@ P3 가 핵심 — concurrent mint 의 race window 가 진짜 닫힘. P5 는 cap 
 ## §5 Non-goals
 
 - **외부 protocol** (예: MCP `masc_goal_upsert` 의 wire schema 변경) — 본 RFC 는 *내부 mint API* 만. wire schema 는 별도.
-- **Goal-Keeper relation lifecycle** (예: keeper down 시 goal 처리) — RFC-OAS 또는 별도.
+- **Goal-Keeper relation lifecycle** (예: keeper down 시 goal 처리) — RFC-agent_core 또는 별도.
 - **Janitor 의 *idle* sweep 정책 자체** — Cap 의 의미 분리만, 정책 변경 아님.
 
 ## §6 Risk & rollback

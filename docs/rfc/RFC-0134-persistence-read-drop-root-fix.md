@@ -16,7 +16,7 @@ Related: RFC-0044 (typed reason, partial fix), RFC-0088 (counter-as-fix
 umbrella), RFC-0097 (FD pressure / container reuse), RFC-0107
 (`Jsonl_atomic`, atomic-write SSOT)
 Plan SSOT: Error-Warn Reduction Goal §counter-as-fix
-(`memory/masc-oas-log-reduction-goal-2026-05-18.html` progress report)
+(`memory/masc-agent_core-log-reduction-goal-2026-05-18.html` progress report)
 
 ## 1. Problem
 

@@ -10,7 +10,7 @@ status: Implemented
 - Created: 2026-06-23
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) — §9(preset)를 개정. 위상 선택은 "Fusion as a Tool" 슬라이스 계열(refine/conditional)의 연장.
 - Scope: `lib/fusion_core/` (preset/config/types/policy), `lib/fusion/` (judge/orchestrator), `lib/keeper/keeper_tool_descriptor.ml` (스키마), `config/runtime.toml` (`[fusion.presets.*]`)
-- Boundary: OAS 0줄 변경. sink 계약 무변경. 기존 단일 `judge` 필드 **유지**(파괴 변경 없음). `simple`/`refine`/`conditional` 위상 동작 불변.
+- Boundary: agent_core 0줄 변경. sink 계약 무변경. 기존 단일 `judge` 필드 **유지**(파괴 변경 없음). `simple`/`refine`/`conditional` 위상 동작 불변.
 - Concurrency update (2026-07-17): retired `max_concurrent_judges` never
   controlled execution. Configured judge identities are the exact fan-out set;
   MASC-owned durable host draining is tracked separately in #25032.
@@ -142,7 +142,7 @@ val run_meta : (* run/run_refine과 동형, ~priors 추가 *) ...
 | preset에 `judges` 추가, Validated_preset 검증 | 기존 `judge`/`judge_system_prompt` |
 | `[fusion].staged_judge_group_size` config + staged grouping validation | panel preset grammar |
 | fusion_topology에 `Judge_of_judges`, `Staged_judge_of_judges` | simple/refine/conditional 동작 |
-| Fusion_judge: compose_meta_prompt/run_meta | sink 계약, OAS |
+| Fusion_judge: compose_meta_prompt/run_meta | sink 계약, agent_core |
 | orchestrator JOJ 분기 + 1차 병렬 fan-out | panel fan-out |
 
 ## 4. 테스트

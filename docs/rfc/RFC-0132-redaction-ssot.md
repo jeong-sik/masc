@@ -71,7 +71,7 @@ Related RFCs:
 
 ## 1. Problem statement
 
-The literal string `"runtime"` is used today as a **boundary redaction label** for aggregate surfaces (dashboard SSE, OAS bridge, keeper telemetry) where the *real* provider/model identity is intentionally suppressed. Exact per-turn evidence such as execution receipts and turn records is outside this label policy. The label is **scattered as inline literals or local module-level constants** across `lib/runtime/` and `lib/keeper/` with no compiler-enforced SSOT.
+The literal string `"runtime"` is used today as a **boundary redaction label** for aggregate surfaces (dashboard SSE, agent_core bridge, keeper telemetry) where the *real* provider/model identity is intentionally suppressed. Exact per-turn evidence such as execution receipts and turn records is outside this label policy. The label is **scattered as inline literals or local module-level constants** across `lib/runtime/` and `lib/keeper/` with no compiler-enforced SSOT.
 
 Direct measurement on `origin/main` (commit `aceefd562a`, 2026-05-19):
 
@@ -162,7 +162,7 @@ Introduce a private-type SSOT module that owns the redaction label vocabulary an
 ```ocaml
 (** Boundary redaction labels — SSOT for aggregate surface label vocabulary.
 
-    Aggregate surfaces (dashboard SSE, OAS bridge, keeper telemetry exposed to
+    Aggregate surfaces (dashboard SSE, agent_core bridge, keeper telemetry exposed to
     the operator UI) intentionally redact the real provider/model identity
     behind a fixed label. This module is the only place that holds the label
     string. Emit sites governed by that aggregate contract must route through
@@ -279,7 +279,7 @@ Once PR-3 is merged, any future PR that adds an inline `"runtime"` literal at an
 |---|---|
 | PR-1 | Alcotest: `runtime_provider_label \|> to_string = "runtime"` and `runtime_model_label \|> to_string = "runtime"`. Compile-time: attempting `let x : Boundary_redaction.public_label = "foo"` outside the module fails the build. |
 | 2026-07-06 extension | Alcotest: `unknown_model_label \|> to_string = "unknown_model"` and the value is distinct from `runtime_model_label`. Governance dashboard model classification and keeper status model labels route missing model evidence through this typed label instead of a local string. |
-| PR-2 | For each of the 23 sites: dashboard SSE / OAS bridge / keeper telemetry output byte-equality regression test. The boundary-emit byte stream must be identical to pre-codemod main. Regression count target: 0. |
+| PR-2 | For each of the 23 sites: dashboard SSE / agent_core bridge / keeper telemetry output byte-equality regression test. The boundary-emit byte stream must be identical to pre-codemod main. Regression count target: 0. |
 | PR-3 | Adding a test fixture that places `let _ = "runtime"` at `lib/runtime/foo.ml` causes a build failure with the lint rule error message. Removing the fixture restores the build. |
 | Overall | After PR-3 merge, `rg -n '"runtime"' lib/runtime/ lib/keeper/` should return only: (a) `boundary_redaction.ml` source, (b) `keeper_status_runtime.ml:219` allow-listed heuristic, (c) `.mli` doc comments. Total expected hits: ≤ 4. |
 

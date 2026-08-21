@@ -2603,6 +2603,17 @@
  (modules test_tui_context_state)
  (libraries alcotest masc_tui_context_state masc))
 
+(rule
+ (alias runtest-test_tui_keyboard_input)
+ (deps
+  test_tui_keyboard_input.py
+  ../bin/masc_tui.exe)
+ (action
+  (run
+   python3
+   %{dep:test_tui_keyboard_input.py}
+   %{dep:../bin/masc_tui.exe})))
+
 (test
  (name test_tui_metrics_tail)
  (modules test_tui_metrics_tail)

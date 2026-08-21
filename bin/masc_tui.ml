@@ -1531,7 +1531,7 @@ let main () =
   in
   let last_check_ns = ref (Mtime_clock.elapsed_ns ()) in
   let input_reader = create_input_reader () in
-  try
+  let run_loop () =
     while true do
       if Atomic.exchange resize_requested false then begin
         invalidate_terminal_size ();
@@ -1550,12 +1550,13 @@ let main () =
       let key = read_key ~timeout:input_timeout input_reader () in
       if Option.is_some key then
         Render_schedule.request render_schedule Render_schedule.Input;
+      let message_mode = state.view = Keepers Keeper_message in
       (match state.view, key with
        | Approvals, Some ("y" | "Y" | "n" | "N") -> ()
        | Approvals, Some _ -> state.pending_approval_action <- None
        | _ -> ());
       (match key with
-       | Some k when state.view = Keepers Keeper_message ->
+       | Some k when message_mode ->
            let recovery_key =
              String.length k = 1 && Char.code k.[0] = 18
            in
@@ -1575,7 +1576,10 @@ let main () =
                  k
              in
              ()
-       | Some "q" | Some "Q" -> raise Break
+       | Some k when Render_schedule.Input_shortcut.is_quit ~message_mode k ->
+           raise Break
+       | Some k when Render_schedule.Input_shortcut.opens_keepers ~message_mode k ->
+           state.view <- Keepers Keeper_list
        | Some "y" | Some "Y" ->
            (match state.view with
             | Approvals ->
@@ -1869,19 +1873,22 @@ let main () =
        | Render_schedule.Render -> render state
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
-  with Break -> ()
+  in
+  run_loop ()
 
 let run_with_eio_context f =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun sw ->
-  Eio_guard.enable ();
-  Eio.Switch.on_release sw Eio_guard.disable;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio_context.set_env env;
-  Eio_context.set_switch sw;
-  Eio_context.set_net (Eio.Stdenv.net env);
-  Eio_context.set_clock (Eio.Stdenv.clock env);
-  Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-  f ()
+  try
+    Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+            Eio_guard.enable ();
+            Eio.Switch.on_release sw Eio_guard.disable;
+            Fs_compat.set_fs (Eio.Stdenv.fs env);
+            Eio_context.set_env env;
+            Eio_context.set_switch sw;
+            Eio_context.set_net (Eio.Stdenv.net env);
+            Eio_context.set_clock (Eio.Stdenv.clock env);
+            Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
+            f ()))
+  with Break -> ()
 
 let () = run_with_eio_context main

@@ -543,6 +543,24 @@ let success_json ~audit command released =
     ]
 ;;
 
+let reissue_same_command_json ~actor command =
+  `Assoc
+    [ "schema", `String "masc.keeper.blocked-purge.next-action.v1"
+    ; "kind", `String "reissue_same_command"
+    ; "actor", `String actor
+    ; ( "command"
+      , `Assoc
+          [ "schema", `String command_schema
+          ; "keeper_id", `String command.keeper_id
+          ; ( "operation_id"
+            , `String
+                (Keeper_shutdown_types.Operation_id.to_string command.operation_id) )
+          ; "expected_revision", `Int command.expected_revision
+          ; "reason", `String command.reason
+          ] )
+    ]
+;;
+
 module For_testing = struct
   let reset_audit_writer () =
     Atomic.set audit_writer (fun config ~actor command ~outcome ->

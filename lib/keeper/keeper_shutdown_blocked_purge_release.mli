@@ -58,6 +58,12 @@ val audit :
 val success_json :
   audit:Yojson.Safe.t -> command -> released -> Yojson.Safe.t
 
+val reissue_same_command_json : actor:string -> command -> Yojson.Safe.t
+(** Exact operator action returned when the immutable audit append fails after
+    the operation intent is already durable. This is not generic retry
+    authority: callers must resubmit the same actor, operation identity,
+    reason, and expected revision. *)
+
 val error_json : audit:Yojson.Safe.t -> error -> Yojson.Safe.t
 
 module For_testing : sig

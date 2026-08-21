@@ -807,7 +807,11 @@ let add_delete_action_routes router =
                           [ "ok", `Bool false
                           ; "error", `String "blocked_purge_reissue_audit_failed"
                           ; "message", `String detail
-                          ; "retryable", `Bool true
+                          ; ( "next_action"
+                            , Keeper_shutdown_blocked_purge_release
+                              .reissue_same_command_json
+                                ~actor
+                                command )
                           ; "operation_audit_durable", `Bool true
                           ; "audit", Audit_log.write_result_to_json audit_result
                           ])

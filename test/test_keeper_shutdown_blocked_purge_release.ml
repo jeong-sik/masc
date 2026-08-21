@@ -796,7 +796,78 @@ let test_crash_after_reissue_keeps_exact_fence_and_retry_finishes () =
         (Keeper_shutdown_blocked_purge_release.error_to_string error))
 ;;
 
-let test_crash_after_intent_before_meta_is_retryable () =
+let test_process_restart_reloads_reissue_checkpoint_before_retry () =
+  with_workspace (fun ~config ->
+    let operation, command =
+      Eio.Switch.run @@ fun sw ->
+      install_empty_owner_inventory_exn ~config ~sw;
+      let operation, _toml_path = persist_live_fixture ~config in
+      let command = live_release_command operation in
+      Keeper_shutdown_blocked_purge_release.For_testing.fail_next_after_reissue
+        "injected process-boundary crash";
+      (match
+         Keeper_shutdown_blocked_purge_release.execute
+           ~config
+           ~actor:"purge-operator"
+           command
+       with
+       | Error (Injected_after_reissue _) -> ()
+       | Error error ->
+         fail
+           ("process-boundary fixture failed: "
+            ^ Keeper_shutdown_blocked_purge_release.error_to_string error)
+       | Ok _ -> fail "process-boundary crash fixture returned success");
+      operation, command
+    in
+    check int "first process owner inventory is gone" 0
+      (Keeper_owner_registry.For_testing.installed_owner_count
+         ~base_path:config.base_path);
+    Eio.Switch.run @@ fun sw ->
+    (match
+       Keeper_owner_registry.install_from_store
+         ~sw
+         ~operation_runner:None
+         ~on_turn_slot_released:None
+         config
+     with
+     | Ok 1 -> ()
+     | Ok count -> failf "restart loaded %d owners, expected one" count
+     | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
+    restore_live_fence_exn ~config operation;
+    (match
+       Keeper_owner_registry.get
+         ~base_path:config.base_path
+         ~keeper_name
+     with
+     | Ok owner ->
+       (match Keeper_owner.exact_projection owner with
+        | Ok { meta = Some meta; _ } ->
+          check bool "restart reloads paused recovery metadata" true meta.paused;
+          check int "restart reloads exact generation" operation.generation
+            meta.runtime.nonce
+        | Ok { meta = None; _ } -> fail "restart owner lost durable recovery metadata"
+        | Error error -> fail (Keeper_owner.error_to_string error))
+     | Error error -> fail (Keeper_owner_registry.lookup_error_to_string error));
+    match
+      Keeper_shutdown_blocked_purge_release.execute
+        ~config
+        ~actor:"purge-operator"
+        command
+    with
+    | Ok { operation = { phase = Finalized _; _ }; already_reissued = true } ->
+      check (option string) "restart retry opens admission only after finalization" None
+        (Keeper_shutdown_intake_fence.shutdown_operation_id
+           ~base_path:config.base_path
+           ~keeper_name
+         |> Option.map Operation_id.to_string)
+    | Ok _ -> fail "restart retry did not finalize the exact reissue"
+    | Error error ->
+      fail
+        ("restart retry failed: "
+         ^ Keeper_shutdown_blocked_purge_release.error_to_string error))
+;;
+
+let test_crash_after_intent_before_meta_resumes_by_exact_reissue () =
   with_workspace (fun ~config ->
     Eio.Switch.run @@ fun sw ->
     install_empty_owner_inventory_exn ~config ~sw;
@@ -902,6 +973,23 @@ let test_audit_failure_is_http_error_and_identical_retry_repairs () =
            "audit failure response is fail closed"
            true
            (Astring.String.is_infix ~affix:"\"ok\":false" first);
+         check bool "audit failure has no ambiguous retryable bit" false
+           (Astring.String.is_infix ~affix:"\"retryable\"" first);
+         check bool "audit failure requires exact command reissue" true
+           (Astring.String.is_infix
+              ~affix:"\"kind\":\"reissue_same_command\""
+              first);
+         check bool "next action binds the authenticated actor" true
+           (Astring.String.is_infix
+              ~affix:"\"actor\":\"purge-audit-operator\""
+              first);
+         check bool "next action binds the expected revision" true
+           (Astring.String.is_infix ~affix:"\"expected_revision\":2" first);
+         check bool "next action binds the exact reason" true
+           (Astring.String.is_infix
+              ~affix:
+                "\"reason\":\"incident rw-e0: recover failed lane join with exact purge reissue\""
+              first);
          let durable =
            match Keeper_shutdown_store.load ~config ~keeper_name operation.operation_id with
            | Ok operation -> operation
@@ -1174,9 +1262,13 @@ let () =
             `Quick
             test_crash_after_reissue_keeps_exact_fence_and_retry_finishes
         ; test_case
+            "reloads the reissue checkpoint across a process boundary"
+            `Quick
+            test_process_restart_reloads_reissue_checkpoint_before_retry
+        ; test_case
             "recovers the pre-meta crash window"
             `Quick
-            test_crash_after_intent_before_meta_is_retryable
+            test_crash_after_intent_before_meta_resumes_by_exact_reissue
         ; test_case
             "fails closed and repairs an audit write"
             `Quick

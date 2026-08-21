@@ -1189,47 +1189,6 @@ class MissionRun:
             f"completion={completion_state}, last={json.dumps(last, ensure_ascii=False)}"
         )
 
-    def find_task(self, value: Any, task_id: str) -> dict[str, Any] | None:
-        if isinstance(value, dict):
-            if value.get("id") == task_id or value.get("task_id") == task_id:
-                if "task_status" in value or "status" in value:
-                    return value
-            for nested in value.values():
-                found = self.find_task(nested, task_id)
-                if found is not None:
-                    return found
-        elif isinstance(value, list):
-            for nested in value:
-                found = self.find_task(nested, task_id)
-                if found is not None:
-                    return found
-        return None
-
-    def wait_for_verifier_task_status(
-        self, expected_status: str, timeout: float = 300.0
-    ) -> dict[str, Any]:
-        deadline = time.monotonic() + timeout
-        attempt = 0
-        last: dict[str, Any] | None = None
-        while time.monotonic() < deadline:
-            attempt += 1
-            observation = self.call(
-                f"goal-verifier-task-poll-{expected_status}-{attempt}",
-                "masc_tasks",
-                {"include_done": True, "include_cancelled": True},
-            )
-            last = self.find_task(observation.data, self.verifier_task_id)
-            if isinstance(last, dict) and (
-                last.get("task_status") == expected_status
-                or last.get("status") == expected_status
-            ):
-                return last
-            time.sleep(2.0)
-        raise AcceptanceError(
-            f"verifier Task did not reach {expected_status}: "
-            f"last={json.dumps(last, ensure_ascii=False)}"
-        )
-
     def wait_for_verifier_task_verdict(
         self, to_status: str, timeout: float = 300.0
     ) -> dict[str, Any]:
@@ -1347,14 +1306,6 @@ class MissionRun:
                 ),
                 "target_value": self.verifier_success_token,
                 "priority": 1,
-            },
-        )
-        self.call(
-            "goal-verifier-assign",
-            "masc_goal_assign",
-            {
-                "goal_id": self.verifier_goal_id,
-                "owner": self.roles["coordinator"],
             },
         )
         for role, keeper in self.roles.items():
@@ -1903,10 +1854,17 @@ class MissionRun:
             ),
         )
         rejected_task_verdict = self.wait_for_verifier_task_verdict("in_progress")
-        self.wait_for_verifier_task_status("in_progress")
         self.writer.write_json(
             "observations/goal-verifier-task-refuted.json",
             rejected_task_verdict,
+        )
+        self.call(
+            "goal-verifier-assign",
+            "masc_goal_assign",
+            {
+                "goal_id": self.verifier_goal_id,
+                "owner": self.roles["coordinator"],
+            },
         )
         self.call(
             "goal-verifier-request-refute",
@@ -1941,7 +1899,6 @@ class MissionRun:
             ),
         )
         approved_task_verdict = self.wait_for_verifier_task_verdict("done")
-        self.wait_for_verifier_task_status("done")
         self.writer.write_json(
             "observations/goal-verifier-task-proven.json",
             approved_task_verdict,

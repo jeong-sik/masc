@@ -343,21 +343,40 @@ class KeeperMultiCollaborationAcceptanceTest(unittest.TestCase):
             acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
         )
 
-        # The success-token Task used to be created during fleet setup and the
-        # coordinator completed it autonomously before RW23 could write the
-        # failing artifact. Keep the Task creation inside the directed RW23
-        # phase and keep the verifier Goal out of the ordinary fleet scope.
+        # The success-token Task and Goal assignment both used to be visible
+        # during fleet setup. A capable coordinator completed them autonomously
+        # before RW23 could write the failing artifact. Keep both inside the
+        # directed RW23 phase and the verifier Goal out of ordinary fleet scope.
         self.assertNotIn("goal-verifier-task-create", setup_source)
+        self.assertNotIn("goal-verifier-assign", setup_source)
         self.assertIn('"active_goal_ids": [self.goal_id]', setup_source)
         self.assertNotIn(
             '"active_goal_ids": [self.goal_id, self.verifier_goal_id]',
             setup_source,
         )
         self.assertIn("goal-verifier-task-create", rw23_source)
+        self.assertIn("goal-verifier-assign", rw23_source)
         self.assertLess(
             rw23_source.index("goal-verifier-task-create"),
             rw23_source.index("goal-verifier-refute-artifact"),
         )
+        self.assertLess(
+            rw23_source.index('wait_for_verifier_task_verdict("in_progress")'),
+            rw23_source.index("goal-verifier-assign"),
+        )
+
+    def test_rw23_uses_durable_verdict_without_parsing_board_text(self):
+        rw23_source = inspect.getsource(
+            acceptance.MissionRun.run_goal_verifier_refute_reenter_prove
+        )
+
+        # masc_tasks is a human-facing Board rendering in the live server. The
+        # verifier history event is the typed durable authority for both the
+        # rejected and approved transitions.
+        self.assertNotIn("wait_for_verifier_task_status", rw23_source)
+        self.assertEqual(rw23_source.count("wait_for_verifier_task_verdict"), 2)
+        self.assertIn('wait_for_verifier_task_verdict("in_progress")', rw23_source)
+        self.assertIn('wait_for_verifier_task_verdict("done")', rw23_source)
 
     def test_persistence_browser_validator_requires_exact_monotonic_fleet(self):
         expected = {"keeper-a", "keeper-b"}

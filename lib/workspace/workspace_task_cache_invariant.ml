@@ -27,11 +27,6 @@ let string_contains = String_util.contains_substring
 
 let string_starts_with = String.starts_with
 
-let trusted_cache_signal_sender from_agent =
-  String.lowercase_ascii from_agent |> fun value ->
-  string_contains value "taskmaster"
-;;
-
 let extract_task_ids content =
   Re.all (Lazy.force task_ref_re) content
   |> List.map (fun group -> Re.Group.get group 0)
@@ -155,7 +150,6 @@ let record_backlog_unavailable ~config ~module_name task_ids =
 
 let rewrite_broadcast_content ~config ~from_agent ~module_name ~content =
   if string_starts_with ~prefix:"[cache_invalidated]" (String.trim content)
-     || not (trusted_cache_signal_sender from_agent)
   then content
   else
     match check_cache_signal ~config ~content with

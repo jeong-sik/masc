@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { GoalAttainmentProjection } from '../../types'
 
-import { attainmentValueLabel } from './goal-tree'
+import { attainmentValueLabel } from '../../lib/goal-attainment'
 
 // task-1743: a goal.metric is stored but never evaluated (the Task completion
 // evaluator has no caller), so the attainment percentage is derived from

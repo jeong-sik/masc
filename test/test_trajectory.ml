@@ -411,16 +411,16 @@ let test_execution_id_roundtrip () =
     execution_id = Some "exec-1718150400000-0001";
   } in
   (match Trajectory.tool_call_entry_of_json (Trajectory.entry_to_json entry) with
-   | Some (decoded, _) ->
+   | Some decoded ->
        Alcotest.(check (option string)) "round-trip"
          (Some "exec-1718150400000-0001") decoded.Trajectory.execution_id
    | None -> Alcotest.fail "entry did not decode");
-  let legacy = Trajectory.entry_to_json { entry with execution_id = None } in
-  match Trajectory.tool_call_entry_of_json legacy with
-  | Some (decoded, _) ->
-      Alcotest.(check (option string)) "legacy row decodes as None" None
+  let without_execution_id = Trajectory.entry_to_json { entry with execution_id = None } in
+  match Trajectory.tool_call_entry_of_json without_execution_id with
+  | Some decoded ->
+      Alcotest.(check (option string)) "absent execution_id decodes as None" None
         decoded.Trajectory.execution_id
-  | None -> Alcotest.fail "legacy entry did not decode"
+  | None -> Alcotest.fail "entry without execution_id did not decode"
 
 let has_assoc_key key = function
   | `Assoc fields -> List.mem_assoc key fields
